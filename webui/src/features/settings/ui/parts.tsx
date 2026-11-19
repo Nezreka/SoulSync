@@ -14,6 +14,7 @@ import {
   type InputHTMLAttributes,
   type KeyboardEvent,
   type ReactNode,
+  type Ref,
   type SelectHTMLAttributes,
   type TextareaHTMLAttributes,
   useId,
@@ -505,6 +506,8 @@ interface FieldLook {
   icon?: IconName;
   /** after the text (a lock, an eye) */
   trailing?: ReactNode;
+  /** the input itself (a field that saves on the browser's change event) */
+  ref?: Ref<HTMLInputElement>;
 }
 
 export function TextField({
@@ -1132,6 +1135,94 @@ export function DangerRow({
         {action}
       </Btn>
     </Row>
+  );
+}
+
+// ── a list of things in a sheet (HiFi instances, indexers) ──
+
+export function Items({
+  id,
+  children,
+  className,
+  ...rest
+}: React.HTMLAttributes<HTMLDivElement> & { ref?: Ref<HTMLDivElement> }) {
+  return (
+    <div {...rest} id={id} className={clsx(s.items, className)}>
+      {children}
+    </div>
+  );
+}
+
+/** one thing in a list. `off`: dimmed; `over`: a drop lands here; `lift`: the one in the hand */
+export function Item({
+  off,
+  over,
+  lift,
+  className,
+  children,
+  ...rest
+}: { off?: boolean; over?: boolean; lift?: boolean } & React.HTMLAttributes<HTMLDivElement>) {
+  return (
+    <div
+      {...rest}
+      className={clsx(s.item, off && s.itemOff, over && s.itemOver, lift && s.itemLift, className)}
+    >
+      {children}
+    </div>
+  );
+}
+
+/** the parts of an Item: its grip, its main words, a dim word, the cells at its right */
+export const itemClass = {
+  grip: s.itemGrip,
+  main: s.itemMain,
+  mono: s.itemMono,
+  dim: s.itemDim,
+  cells: s.itemCells,
+};
+
+/** a value the server reported (a version); amber when it needs a look */
+export function Value({ id, tone, children }: { id?: string; tone?: Tone; children: ReactNode }) {
+  return (
+    <span id={id} className={s.value} data-tone={tone}>
+      {children}
+    </span>
+  );
+}
+
+/** what an action said, in a box under it (an update's answer) */
+export function Say({
+  id,
+  tone,
+  hidden,
+  children,
+}: {
+  id?: string;
+  tone?: Tone;
+  hidden?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <div id={id} className={s.say} data-tone={tone} hidden={hidden} role="status">
+      {children}
+    </div>
+  );
+}
+
+/** text as the server sent it (a log), scrolling in its own box */
+export function Pre({
+  id,
+  hidden,
+  children,
+}: {
+  id?: string;
+  hidden?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <pre id={id} className={s.pre} hidden={hidden}>
+      {children}
+    </pre>
   );
 }
 

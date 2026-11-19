@@ -122,7 +122,7 @@ LABELS: list[tuple[str, str]] = [
     ("Discogs", "11-settings.js"),
     ("AcoustID", "11-settings.js"),
     ("ListenBrainz", "11-settings.js"),
-    ("YouTube Browser Cookies", "11-settings.js"),
+    ("Browser cookies", "11-settings.js"),
     ("Paste cookies.txt", "11-settings.js"),
     ("Create lossy copy of downloaded FLAC files", "11-settings.js"),
     ("Lookback Period", "11-settings.js"),
@@ -169,7 +169,7 @@ ALLOWLIST: dict[str, str] = {}
 # wording — real drift candidates for a future docs copy pass, but not
 # verbatim labels, so asserting them would be flaky by construction.
 EXCLUDED: dict[str, str] = {
-    "YouTube cookies": "short prose name in docs; the exact UI labels ('YouTube Browser Cookies' / 'Paste cookies.txt') are quoted in the same sentence and asserted in LABELS",
+    "YouTube cookies": "short prose name in docs; the exact UI labels ('Browser cookies' / 'Paste cookies.txt') are quoted in the same sentence and asserted in LABELS",
     "Multi-disc labels": "docs paraphrase kept alongside the exact label; UI label is 'Multi-Disc Folder Label:' (asserted in LABELS)",
     "Auto-Backup Database": "verified real: the system automation name in core/automation_engine.py (music + video variants, every 3 days) — not a UI label, so not asserted against the corpus",
 }

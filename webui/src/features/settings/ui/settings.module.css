@@ -10,7 +10,11 @@
 .sheet[hidden],
 .scrim[hidden],
 .view[hidden],
-.kindbar[hidden] {
+.kindbar[hidden],
+.item[hidden],
+.items[hidden],
+.say[hidden],
+.pre[hidden] {
   display: none;
 }
 
@@ -764,6 +768,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  white-space: nowrap;
   width: 100%;
   padding: 13px 20px;
   border: 0;
@@ -792,6 +797,7 @@
 }
 
 .moreCount {
+  min-width: 0;
   overflow: hidden;
   color: var(--white-a45);
   font-weight: 400;
@@ -1548,6 +1554,172 @@ button.chip:hover:not(:disabled) {
 
 .grp + .row {
   border-top: 0;
+}
+
+.grpLine {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.grpLine .st {
+  font-size: 12px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+/* a field in a sheet: its label over it, full width (a URL, a key) */
+.sfield {
+  padding: 9px 0;
+}
+
+.grp + .sfield {
+  padding-top: 4px;
+}
+
+.sfieldLabel {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 0 0 7px;
+  color: var(--text-bright);
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.sfield > .fieldSelect {
+  width: 100%;
+}
+
+.sfield .fieldLine > .field {
+  flex: 1;
+  width: auto;
+}
+
+/* the field rows, then the tuning rows: a hairline between the two */
+.sfield + .row {
+  margin-top: 6px;
+}
+
+/* ── a list of things (HiFi instances, indexers) ── */
+
+.items {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 4px 0 10px;
+}
+
+.item {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  min-height: 44px;
+  padding: 6px 8px 6px 12px;
+  border: 1px solid var(--white-a06);
+  border-radius: var(--radius-control);
+  background: var(--white-a03);
+  font-size: 13px;
+}
+
+.itemOff {
+  opacity: 0.5;
+}
+
+.itemOver {
+  border-color: rgba(var(--accent-rgb), 0.6);
+}
+
+.itemLift {
+  opacity: 0.4;
+}
+
+.itemGrip {
+  display: inline-flex;
+  flex: none;
+  color: var(--white-a40);
+  cursor: grab;
+}
+
+.itemMain {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--white-a80);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.itemMono {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+
+.itemDim {
+  color: var(--white-a45);
+  font-size: 12px;
+}
+
+.itemCells {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-left: auto;
+}
+
+.itemCells .field {
+  width: 86px;
+}
+
+/* a value the server reported (a version), coloured when it needs a look */
+.value {
+  color: var(--white-a80);
+  font-size: 13px;
+}
+
+.value[data-tone='warn'] {
+  color: var(--warning);
+}
+
+/* what an action said, under it */
+.say {
+  margin: 6px 0 4px;
+  padding: 9px 12px;
+  border-radius: var(--radius-md);
+  background: var(--white-a04);
+  color: var(--white-a70);
+  font-size: 12.5px;
+}
+
+.say[data-tone='ok'] {
+  color: var(--success);
+}
+
+.say[data-tone='warn'] {
+  color: var(--warning);
+}
+
+.say[data-tone='bad'] {
+  color: var(--danger-light);
+}
+
+.pre {
+  max-height: 220px;
+  margin: 6px 0 0;
+  padding: 9px 12px;
+  overflow: auto;
+  border-radius: var(--radius-md);
+  background: var(--black-a20);
+  color: var(--white-a70);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  white-space: pre-wrap;
+}
+
+.sheetBody .note {
+  margin: 12px 0 4px;
 }
 
 .sheetFoot {

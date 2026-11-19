@@ -9,9 +9,10 @@
  * open, and focus goes back to what opened it.
  */
 
-import { type ReactNode, useEffect, useRef } from 'react';
+import { type ReactNode, useEffect, useId, useRef, useState } from 'react';
 
-import { Btn } from './parts';
+import { helpFirstLine } from '../tabs/parts';
+import { Btn, FieldNote } from './parts';
 import s from './settings.module.css';
 
 const FOCUSABLE = [
@@ -154,7 +155,78 @@ export function SheetFootSay({ children }: { children: ReactNode }) {
   return <div className={s.sheetFootSay}>{children}</div>;
 }
 
-/** a labelled group of fields in a sheet */
-export function SheetGroup({ title }: { title: string }) {
-  return <h4 className={s.grp}>{title}</h4>;
+/** a labelled group of fields in a sheet; `children` sit beside the title (a badge) */
+export function SheetGroup({ title, children }: { title: string; children?: ReactNode }) {
+  return (
+    <h4 className={s.grp}>
+      {children ? (
+        <span className={s.grpLine}>
+          {title}
+          {children}
+        </span>
+      ) : (
+        title
+      )}
+    </h4>
+  );
+}
+
+/**
+ * A field in a sheet: its label over it and the field the full width, the way
+ * a URL or a key reads best. One line of help under it; a long string keeps
+ * the rest behind the "i", as a row does.
+ */
+export function SheetField({
+  label,
+  htmlFor,
+  help,
+  more,
+  id,
+  hidden,
+  children,
+}: {
+  label: ReactNode;
+  htmlFor?: string;
+  help?: ReactNode;
+  /** more to read, behind the "i" (when `help` is not a long string) */
+  more?: ReactNode;
+  id?: string;
+  hidden?: boolean;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const moreId = useId();
+  let line: ReactNode = help;
+  let rest: ReactNode = more;
+  if (typeof help === 'string' && !more) {
+    const split = helpFirstLine(help);
+    line = split.line;
+    rest = split.rest ? help : null;
+  }
+  return (
+    <div className={s.sfield} id={id} hidden={hidden} data-field="">
+      <div className={s.sfieldLabel}>
+        {htmlFor ? <label htmlFor={htmlFor}>{label}</label> : <span>{label}</span>}
+        {rest ? (
+          <button
+            type="button"
+            className={s.helpBtn}
+            aria-expanded={open}
+            aria-controls={moreId}
+            aria-label="More about this setting"
+            onClick={() => setOpen((o) => !o)}
+          >
+            i
+          </button>
+        ) : null}
+      </div>
+      {children}
+      {line ? <FieldNote>{line}</FieldNote> : null}
+      {rest ? (
+        <div className={s.rowMore} id={moreId} hidden={!open}>
+          {rest}
+        </div>
+      ) : null}
+    </div>
+  );
 }

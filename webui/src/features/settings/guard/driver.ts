@@ -123,7 +123,7 @@ export function locateAll(root: ParentNode, all: Element[]): Locator[] {
       anc && anc !== root && anchors.length < 3;
       anc = anc.parentElement
     ) {
-      const own = anc.id ? idSelector(anc.id) : dataAttrs(anc);
+      const own = stableId(anc.id) ? idSelector(anc.id) : dataAttrs(anc);
       if (!own) continue;
       anchors.unshift(own);
       const within = anchors.join(' ');
@@ -323,6 +323,10 @@ export function snapshot(root: ParentNode): string[] {
   });
 }
 
+/** an id a person wrote, not one React made up (useId: `_r_1f_`, `:r1f:`, `«r1f»`),
+ *  which moves whenever anything above it renders one more or one fewer */
+export const stableId = (id: string) => !!id && !/^(_r_|:r|«r)/.test(id);
+
 export interface ButtonMark {
   /** the button's id, when it has one */
   id?: string;
@@ -341,7 +345,7 @@ export function markButton(root: Element, el: Element): ButtonMark {
     '';
   let anchor = '';
   for (let anc = el.parentElement; anc && anc !== root; anc = anc.parentElement) {
-    if (anc.id) {
+    if (stableId(anc.id)) {
       anchor = anc.id;
       break;
     }

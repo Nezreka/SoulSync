@@ -213,20 +213,13 @@ const hifi = {
   rows: () => all('#hifi-instances-list [draggable][data-url]'),
   readOrder: () => hifi.rows().map((row) => row.dataset.url ?? ''),
   row: (url: string) => hifi.rows().find((row) => row.dataset.url === url),
-  toggle: (url: string) =>
-    press(
-      all('[title]', hifi.row(url)).find((el) => wordsOf(el).startsWith('Click to ')),
-      `switch ${url}`,
-    ),
-  remove: (url: string) =>
-    press(
-      all('[title]', hifi.row(url)).find((el) => wordsOf(el) === 'Remove instance'),
-      `remove ${url}`,
-    ),
+  // phase 2: toggle and remove are real buttons now, marked by data attributes
+  toggle: (url: string) => press(one('[data-hifi-toggle]', hifi.row(url)), `switch ${url}`),
+  remove: (url: string) => press(one('[data-hifi-remove]', hifi.row(url)), `remove ${url}`),
   add: (url: string) => {
     type(one('#hifi-new-instance'), url, 'the new instance');
     press(
-      button(one('#hifi-new-instance')?.parentElement ?? null, (words) => words === 'Add'),
+      button(one('#hifi-new-instance')?.closest('[data-field]') ?? null, (words) => words === 'Add'),
       'add an instance',
     );
   },

@@ -387,40 +387,6 @@
       "asked": "46",
       "shows": ["soulseek.search_timeout"]
     },
-    "#soulseek-search-timeout-buffer": {
-      "sel": "#soulseek-search-timeout-buffer",
-      "kind": "number",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "15",
-      "to": "16",
-      "saves": {
-        "settings": {
-          "soulseek": {
-            "search_timeout_buffer": 16
-          }
-        }
-      },
-      "asked": "16",
-      "shows": ["soulseek.search_timeout_buffer"]
-    },
-    "#soulseek-search-min-delay-seconds": {
-      "sel": "#soulseek-search-min-delay-seconds",
-      "kind": "number",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "0",
-      "to": "1",
-      "saves": {
-        "settings": {
-          "soulseek": {
-            "search_min_delay_seconds": 1
-          }
-        }
-      },
-      "asked": "1",
-      "shows": ["soulseek.search_min_delay_seconds"]
-    },
     "#soulseek-min-peer-speed": {
       "sel": "#soulseek-min-peer-speed",
       "kind": "select",
@@ -471,6 +437,40 @@
       },
       "asked": true,
       "shows": ["soulseek.observed_speed_fallback_enabled"]
+    },
+    "#soulseek-search-timeout-buffer": {
+      "sel": "#soulseek-search-timeout-buffer",
+      "kind": "number",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "15",
+      "to": "16",
+      "saves": {
+        "settings": {
+          "soulseek": {
+            "search_timeout_buffer": 16
+          }
+        }
+      },
+      "asked": "16",
+      "shows": ["soulseek.search_timeout_buffer"]
+    },
+    "#soulseek-search-min-delay-seconds": {
+      "sel": "#soulseek-search-min-delay-seconds",
+      "kind": "number",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "0",
+      "to": "1",
+      "saves": {
+        "settings": {
+          "soulseek": {
+            "search_min_delay_seconds": 1
+          }
+        }
+      },
+      "asked": "1",
+      "shows": ["soulseek.search_min_delay_seconds"]
     },
     "#soulseek-min-observed-download-speed": {
       "sel": "#soulseek-min-observed-download-speed",
@@ -854,23 +854,6 @@
       "asked": "guard-secret",
       "shows": ["prowlarr.api_key"]
     },
-    "#prowlarr-indexer-ids": {
-      "sel": "#prowlarr-indexer-ids",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "",
-      "to": "guard-probe",
-      "saves": {
-        "settings": {
-          "prowlarr": {
-            "indexer_ids": "guard-probe"
-          }
-        }
-      },
-      "asked": "guard-probe",
-      "shows": ["prowlarr.indexer_ids"]
-    },
     "#prowlarr-search-min-gap": {
       "sel": "#prowlarr-search-min-gap",
       "kind": "number",
@@ -904,6 +887,23 @@
       },
       "asked": "21",
       "shows": ["prowlarr.max_searches_per_minute"]
+    },
+    "#prowlarr-indexer-ids": {
+      "sel": "#prowlarr-indexer-ids",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "guard-probe",
+      "saves": {
+        "settings": {
+          "prowlarr": {
+            "indexer_ids": "guard-probe"
+          }
+        }
+      },
+      "asked": "guard-probe",
+      "shows": ["prowlarr.indexer_ids"]
     },
     "#torrent-client-type": {
       "sel": "#torrent-client-type",
@@ -1024,23 +1024,6 @@
       "asked": true,
       "shows": ["torrent_client.start_torrents"]
     },
-    "#torrent-download-path": {
-      "sel": "#torrent-download-path",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "",
-      "to": "guard-probe",
-      "saves": {
-        "settings": {
-          "download_source": {
-            "torrent_download_path": "guard-probe"
-          }
-        }
-      },
-      "asked": "guard-probe",
-      "shows": ["download_source.torrent_download_path"]
-    },
     "#torrent-min-seeders": {
       "sel": "#torrent-min-seeders",
       "kind": "number",
@@ -1159,6 +1142,23 @@
       },
       "asked": "soulsync",
       "shows": ["torrent_client.seed_mode"]
+    },
+    "#torrent-download-path": {
+      "sel": "#torrent-download-path",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "guard-probe",
+      "saves": {
+        "settings": {
+          "download_source": {
+            "torrent_download_path": "guard-probe"
+          }
+        }
+      },
+      "asked": "guard-probe",
+      "shows": ["download_source.torrent_download_path"]
     },
     "#video-seed-ratio": {
       "sel": "#video-seed-ratio",
@@ -1338,23 +1338,6 @@
       "asked": "soulsync-guard",
       "shows": ["usenet_client.category"]
     },
-    "#usenet-download-path": {
-      "sel": "#usenet-download-path",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "",
-      "to": "guard-probe",
-      "saves": {
-        "settings": {
-          "download_source": {
-            "usenet_download_path": "guard-probe"
-          }
-        }
-      },
-      "asked": "guard-probe",
-      "shows": ["download_source.usenet_download_path"]
-    },
     "#music-usenet-remove-completed": {
       "sel": "#music-usenet-remove-completed",
       "kind": "select",
@@ -1371,6 +1354,23 @@
       },
       "asked": "off",
       "shows": ["usenet_client.remove_completed"]
+    },
+    "#usenet-download-path": {
+      "sel": "#usenet-download-path",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "guard-probe",
+      "saves": {
+        "settings": {
+          "download_source": {
+            "usenet_download_path": "guard-probe"
+          }
+        }
+      },
+      "asked": "guard-probe",
+      "shows": ["download_source.usenet_download_path"]
     },
     "#video-usenet-remove-completed": {
       "sel": "#video-usenet-remove-completed",
@@ -11180,9 +11180,23 @@
       "sides": ["music", "video"],
       "scenario": "music"
     },
-    "#soulseek-settings-container \"Test Soulseek Connection\"": {
-      "label": "Test Soulseek Connection",
+    "#soulseek-settings-container \"More about this setting\"": {
+      "label": "More about this setting",
       "anchor": "soulseek-settings-container",
+      "count": 6,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#soulseek-settings-container \"More options· 6 · timeout buffer, search delay, slow download speed, download ti\"": {
+      "label": "More options· 6 · timeout buffer, search delay, slow download speed, download ti",
+      "anchor": "soulseek-settings-container",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#tidal-download-settings-container \"More about this setting\"": {
+      "label": "More about this setting",
+      "anchor": "tidal-download-settings-container",
       "count": 1,
       "sides": ["music", "video"],
       "scenario": "music"
@@ -11200,8 +11214,29 @@
       "sides": ["music", "video"],
       "scenario": "music"
     },
+    "#qobuz-auth-form \"More about this setting\"": {
+      "label": "More about this setting",
+      "anchor": "qobuz-auth-form",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
     "#qobuz-login-btn": {
       "id": "qobuz-login-btn",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#qobuz-settings-container \"Sign in with a token instead· when email sign-in asks for a CAPTCHA\"": {
+      "label": "Sign in with a token instead· when email sign-in asks for a CAPTCHA",
+      "anchor": "qobuz-settings-container",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#qobuz-settings-container \"More about this setting\"": {
+      "label": "More about this setting",
+      "anchor": "qobuz-settings-container",
       "count": 1,
       "sides": ["music", "video"],
       "scenario": "music"
@@ -11214,6 +11249,48 @@
     },
     "#hifi-test-btn": {
       "id": "hifi-test-btn",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#hifi-instances-list \"Turn off https://a.example\"": {
+      "label": "Turn off https://a.example",
+      "anchor": "hifi-instances-list",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#hifi-instances-list \"Remove https://a.example\"": {
+      "label": "Remove https://a.example",
+      "anchor": "hifi-instances-list",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#hifi-instances-list \"Turn on https://b.example\"": {
+      "label": "Turn on https://b.example",
+      "anchor": "hifi-instances-list",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#hifi-instances-list \"Remove https://b.example\"": {
+      "label": "Remove https://b.example",
+      "anchor": "hifi-instances-list",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#hifi-instances-list \"Turn off https://c.example\"": {
+      "label": "Turn off https://c.example",
+      "anchor": "hifi-instances-list",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#hifi-instances-list \"Remove https://c.example\"": {
+      "label": "Remove https://c.example",
+      "anchor": "hifi-instances-list",
       "count": 1,
       "sides": ["music", "video"],
       "scenario": "music"
@@ -11237,6 +11314,13 @@
       "sides": ["music", "video"],
       "scenario": "music"
     },
+    "#deezer-download-settings-container \"More about this setting\"": {
+      "label": "More about this setting",
+      "anchor": "deezer-download-settings-container",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
     "#deezer-download-test-btn": {
       "id": "deezer-download-test-btn",
       "count": 1,
@@ -11249,8 +11333,23 @@
       "sides": ["music", "video"],
       "scenario": "music"
     },
-    "#lidarr-test-btn": {
-      "id": "lidarr-test-btn",
+    "#soundcloud-download-settings-container \"More about this setting\"": {
+      "label": "More about this setting",
+      "anchor": "soundcloud-download-settings-container",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#youtube-settings-container \"More about this setting\"": {
+      "label": "More about this setting",
+      "anchor": "youtube-settings-container",
+      "count": 6,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#youtube-cookies-paste-group \"More about this setting\"": {
+      "label": "More about this setting",
+      "anchor": "youtube-cookies-paste-group",
       "count": 1,
       "sides": ["music", "video"],
       "scenario": "music"
@@ -11258,6 +11357,13 @@
     "#ytdlp-update-btn": {
       "id": "ytdlp-update-btn",
       "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#prowlarr-settings-container \"More about this setting\"": {
+      "label": "More about this setting",
+      "anchor": "prowlarr-settings-container",
+      "count": 4,
       "sides": ["music", "video"],
       "scenario": "music"
     },
@@ -11273,8 +11379,58 @@
       "sides": ["music", "video"],
       "scenario": "music"
     },
-    "#torrent-client-test-btn": {
-      "id": "torrent-client-test-btn",
+    "#prowlarr-settings-container \"More options· 1 · only search some indexers\"": {
+      "label": "More options· 1 · only search some indexers",
+      "anchor": "prowlarr-settings-container",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#torrent-client-settings-container \"More about this setting\"": {
+      "label": "More about this setting",
+      "anchor": "torrent-client-settings-container",
+      "count": 8,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#torrent-client-username-group \"More about this setting\"": {
+      "label": "More about this setting",
+      "anchor": "torrent-client-username-group",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#torrent-client-settings-container \"More options· 3 · category, save folder, start torrents\"": {
+      "label": "More options· 3 · category, save folder, start torrents",
+      "anchor": "torrent-client-settings-container",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#music-seeding-goals \"More about this setting\"": {
+      "label": "More about this setting",
+      "anchor": "music-seeding-goals",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#torrent-client-settings-container \"More options· 1 · where SoulSync reads finished torrents\"": {
+      "label": "More options· 1 · where SoulSync reads finished torrents",
+      "anchor": "torrent-client-settings-container",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#video-seeding-goals \"More about this setting\"": {
+      "label": "More about this setting",
+      "anchor": "video-seeding-goals",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#video-seed-per-indexer \"More about this setting\"": {
+      "label": "More about this setting",
+      "anchor": "video-seed-per-indexer",
       "count": 1,
       "sides": ["music", "video"],
       "scenario": "music"
@@ -11285,8 +11441,44 @@
       "sides": ["music", "video"],
       "scenario": "music"
     },
-    "#usenet-client-test-btn": {
-      "id": "usenet-client-test-btn",
+    "#usenet-client-settings-container \"More about this setting\"": {
+      "label": "More about this setting",
+      "anchor": "usenet-client-settings-container",
+      "count": 2,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#usenet-apikey-group \"More about this setting\"": {
+      "label": "More about this setting",
+      "anchor": "usenet-apikey-group",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#usenet-client-settings-container \"More options· 1 · category\"": {
+      "label": "More options· 1 · category",
+      "anchor": "usenet-client-settings-container",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#music-usenet-remove-completed-group \"More about this setting\"": {
+      "label": "More about this setting",
+      "anchor": "music-usenet-remove-completed-group",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#usenet-client-settings-container \"More options· 1 · where SoulSync reads finished downloads\"": {
+      "label": "More options· 1 · where SoulSync reads finished downloads",
+      "anchor": "usenet-client-settings-container",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#video-usenet-remove-completed-group \"More about this setting\"": {
+      "label": "More about this setting",
+      "anchor": "video-usenet-remove-completed-group",
       "count": 1,
       "sides": ["music", "video"],
       "scenario": "music"
@@ -13564,12 +13756,12 @@
       "hifi-instances-check-btn": "a button, held in `buttons`",
       "hifi-instances-restore-btn": "a button, held in `buttons`",
       "deezer-download-test-btn": "a button, held in `buttons`",
-      "lidarr-test-btn": "a button, held in `buttons`",
+      "lidarr-test-btn": "the panel's own Test Connection went in settings-bic phase 2: it sent the same POST /api/test-connection as the sheet's foot Test (#src-modal-test), which saves what is typed first and shows the answer; the panel's connection light follows that test",
       "soundcloud-test-btn": "a button, held in `buttons`",
-      "torrent-client-test-btn": "a button, held in `buttons`",
+      "torrent-client-test-btn": "the panel's own Test Connection went in settings-bic phase 2: it sent the same POST /api/test-connection as the sheet's foot Test (#src-modal-test), which saves what is typed first and shows the answer; the panel's connection light follows that test",
       "video-seed-idx-refresh": "a button, held in `buttons`",
       "video-seed-idx-rows": "not a form control: a <div> on the page",
-      "usenet-client-test-btn": "a button, held in `buttons`",
+      "usenet-client-test-btn": "the panel's own Test Connection went in settings-bic phase 2: it sent the same POST /api/test-connection as the sheet's foot Test (#src-modal-test), which saves what is typed first and shows the answer; the panel's connection light follows that test",
       "prowlarr-test-btn": "a button, held in `buttons`",
       "prowlarr-refresh-indexers-btn": "a button, held in `buttons`",
       "prowlarr-indexer-list": "not a form control: a <div> on the page",

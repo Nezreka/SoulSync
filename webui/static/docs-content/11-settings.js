@@ -117,7 +117,7 @@ These live on other tabs, not Downloads:
 
 - **Storefront Country (iTunes)** — on the **Connections** tab, under the iTunes / Apple Music service card: which store region to search, with fallback options if a release isn't available in your region
 - **Lossy copy** — on the **Quality** tab ("Create lossy copy of downloaded FLAC files"): optionally keep a lossy copy of each downloaded FLAC alongside the original
-- **YouTube cookies** — on the **Sources** tab, in the YouTube source panel ("YouTube Browser Cookies" / "Paste cookies.txt"): authenticate with a browser profile or a \`cookies.txt\` file when YouTube rate-limits anonymous downloads
+- **YouTube cookies** — on **Downloads › Sources**, in the YouTube sheet ("Browser cookies" / "Paste cookies.txt"): authenticate with a browser profile or a \`cookies.txt\` file when YouTube rate-limits anonymous downloads
 
 ![Downloads settings: the download chain with Soulseek tried first and YouTube as fallback](settings-downloads.jpg)
 `

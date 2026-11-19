@@ -41,7 +41,7 @@ def _react_textareas():
     for f in sorted(tabs.glob("*.tsx")):
         if f.name.endswith(".test.tsx"):
             continue
-        out += [(f.name, m.group(0)) for m in re.finditer(r"<textarea\s[\s\S]*?/>", f.read_text(encoding="utf-8"))]
+        out += [(f.name, m.group(0)) for m in re.finditer(r"<(?:textarea|TextArea)\s[\s\S]*?/>", f.read_text(encoding="utf-8"))]
     return out
 
 
@@ -66,8 +66,10 @@ def test_the_cookie_paste_is_covered():
     every input, like the 'input' binding, and writes the key to the settings
     store, which autosaves it."""
     panel = _read("webui/src/features/settings/tabs/source-panels-more.tsx")
-    tag = re.search(r'<textarea\s[^>]*?id="youtube-cookies-paste"[\s\S]*?/>', panel)
-    assert tag, "the paste field is not a textarea any more — recheck the binding"
+    # TextArea is the settings parts' textarea (ui/parts.tsx): it renders a
+    # real <textarea> and passes onChange straight to it
+    tag = re.search(r'<(?:textarea|TextArea)\s[^>]*?id="youtube-cookies-paste"[\s\S]*?/>', panel)
+    assert tag, "the paste field is not a textarea any more: recheck the binding"
     assert "set('cookies_paste', event.target.value)" in tag.group(0)
     assert "hydra-payload" not in tag.group(0)
     assert 'id="youtube-cookies-paste"' not in _read("webui/index.html")
@@ -151,4 +153,4 @@ def test_the_panel_shows_the_pending_state(js):
     panel = _read("webui/src/features/settings/tabs/source-panels-more.tsx")
     fn = panel.split("async function loadYtdlp(", 1)[1].split("\n  }\n", 1)[0]
     assert "restart_pending" in fn
-    assert "restart to finish" in fn
+    assert "Restart to finish" in fn

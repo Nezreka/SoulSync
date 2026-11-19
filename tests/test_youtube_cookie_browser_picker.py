@@ -44,7 +44,7 @@ def _youtube(js: str) -> str:
 
 def _picker(js: str) -> str:
     """the cookie <select> as the panel renders it"""
-    return _youtube(js).split('id="youtube-cookies-browser"', 1)[1].split("</select>", 1)[0]
+    return _youtube(js).split('id="youtube-cookies-browser"', 1)[1].split("</Select>", 1)[0]
 
 
 def test_the_server_reports_its_own_os():
@@ -135,7 +135,9 @@ def test_the_help_text_points_at_something_that_works(js):
     work is the difference between a fact and an instruction."""
     panel = _youtube(js)
     # up to the paste field
-    block = panel.split('id="youtube-cookies-browser"', 1)[1].split('id="youtube-cookies-paste-group"', 1)[0]
+    # the help is the field's own (its first line, the rest behind the "i"),
+    # written above the select in the source
+    block = panel.split('label="Browser cookies"', 1)[1].split('id="youtube-cookies-paste-group"', 1)[0]
     low = block.lower()
     assert "firefox" in low
     assert "paste cookies.txt" in low

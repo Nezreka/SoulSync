@@ -296,8 +296,8 @@ def test_nightly_is_the_preselected_channel():
     # React picks an option by the select's value, not a selected attribute
     assert "useState('nightly')" in _youtube()
     tile = _tile()
-    assert 'value="nightly"' in tile
-    assert 'value="stable"' in tile, "stable must remain a choice"
+    assert "value: 'nightly'" in tile
+    assert "value: 'stable'" in tile, "stable must remain a choice"
 
 
 def test_every_element_the_script_touches_exists_in_the_markup():

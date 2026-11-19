@@ -1,14 +1,16 @@
 /**
- * The Deezer, SoundCloud and Lidarr source panels, ported from the vanilla
- * Settings page (SETTINGS_PORT.md, step 7c): the same markup, the same saves,
- * the masked-secret rules, and the same tests with the same words.
+ * The source panels in source-panels.tsx (Soulseek, HiFi, Tidal, Qobuz,
+ * Deezer, SoundCloud, Lidarr), on the settings parts: the same saves, the
+ * masked-secret rules, each panel's own checks, and what the sheet shows of
+ * each (every control id it had, the groups, help behind the "i", the one
+ * Test in the sheet's foot). The frozen vanilla markup comparisons went with
+ * the markup; the key guard (guard/) holds every id, key and button.
  */
 
-import { act, fireEvent, render, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createSettingsStore, type SettingsPayload, type SettingsStore } from '../settings-store';
-import { shape, vanilla } from './__fixtures__/shape';
 import { REDACTED_SECRET_SENTINEL } from './parts';
 import {
   DeezerPanel,
@@ -74,43 +76,7 @@ function saved(): SettingsPayload {
   return merged;
 }
 
-describe('the panels are the markup they replaced', () => {
-  it('Deezer, SoundCloud, Lidarr', () => {
-    const { container } = render(
-      <SourcePanels store={store} part="deezer-soundcloud-lidarr" opened={0} active={false} />,
-    );
-    const got = shape(container);
-    // the React panels carry data-react-panel, which is not in the compared attributes
-    const want = shape(vanilla('panels-deezer-soundcloud-lidarr.vanilla.html'));
-    expect(got.elements).toEqual(want.elements);
-    expect(got.text).toBe(want.text);
-    expect(container.querySelectorAll('[data-react-panel]')).toHaveLength(3);
-  });
-});
-
-describe('the Tidal and Qobuz panels are the markup they replaced', () => {
-  it('Tidal, Qobuz', () => {
-    const { container } = render(
-      <SourcePanels store={store} part="tidal-qobuz" opened={0} active={false} />,
-    );
-    const got = shape(container);
-    const want = shape(vanilla('panels-tidal-qobuz.vanilla.html'));
-    expect(got.elements).toEqual(want.elements);
-    expect(got.text).toBe(want.text);
-  });
-});
-
 describe('Soulseek', () => {
-  it('is the markup it replaced', () => {
-    const { container } = render(
-      <SourcePanels store={store} part="soulseek" opened={0} active={false} />,
-    );
-    const got = shape(container);
-    const want = shape(vanilla('panel-soulseek.vanilla.html'));
-    expect(got.elements).toEqual(want.elements);
-    expect(got.text).toBe(want.text);
-  });
-
   it('reads saved values as loadSettingsData did', () => {
     act(() => store.hydrate({}));
     render(<SoulseekPanel store={store} />);
@@ -172,10 +138,6 @@ describe('Soulseek', () => {
     shell.showLoadingOverlay = vi.fn();
     shell.hideLoadingOverlay = vi.fn();
     const order: string[] = [];
-    shell.testConnection = vi.fn(() => {
-      order.push('test');
-      return Promise.resolve();
-    });
     routes['POST /api/detect-soulseek'] = () => ({ success: true, found_url: 'http://found:5030' });
     const slow = createSettingsStore({
       post: () => {
@@ -186,7 +148,7 @@ describe('Soulseek', () => {
     });
     act(() => slow.hydrate({ soulseek: {} }));
     render(<SoulseekPanel store={slow} />);
-    fireEvent.click(document.querySelector('.detect-button')!);
+    fireEvent.click(screen.getByRole('button', { name: 'Auto-detect' }));
     await waitFor(() => expect(input('soulseek-url').value).toBe('http://found:5030'));
     expect(calls.filter((c) => c.url === '/api/detect-soulseek')).toHaveLength(1);
     expect(shell.showToast).toHaveBeenCalledWith(
@@ -196,8 +158,7 @@ describe('Soulseek', () => {
     expect(shell.hideLoadingOverlay).toHaveBeenCalledOnce();
     // (test-after-save ordering uses the page's own store: checked in the browser)
     expect(order).toEqual([]);
-    for (const k of ['showToast', 'showLoadingOverlay', 'hideLoadingOverlay', 'testConnection'])
-      delete shell[k];
+    for (const k of ['showToast', 'showLoadingOverlay', 'hideLoadingOverlay']) delete shell[k];
   });
 });
 
@@ -207,35 +168,29 @@ describe('HiFi', () => {
     { url: 'https://b.example', enabled: false },
   ];
 
-  it('is the markup it replaced; the list loads with the settings', async () => {
+  const rows = () => [...document.querySelectorAll<HTMLElement>('#hifi-instances-list [data-url]')];
+
+  it('the list loads with the settings; each row says on or off, with real buttons', async () => {
     routes['GET /api/hifi/instances/list'] = () => ({ instances: instances() });
-    const { container } = render(
-      <SourcePanels store={store} part="hifi" opened={0} active={false} />,
-    );
-    const got = shape(container);
-    const want = shape(vanilla('panel-hifi.vanilla.html'));
-    expect(got.elements).toEqual(want.elements);
-    expect(got.text).toBe(want.text);
+    render(<SourcePanels store={store} part="hifi" opened={0} active={false} />);
     expect(calls).toHaveLength(0);
     act(() => store.hydrate({}));
-    await waitFor(() => expect(document.querySelectorAll('.hifi-instance-item')).toHaveLength(2));
-    const rows = [...document.querySelectorAll<HTMLElement>('.hifi-instance-item')];
-    expect(rows.map((r) => r.className)).toEqual([
-      'hifi-instance-item',
-      'hifi-instance-item disabled',
-    ]);
-    expect(rows[0].querySelector('.hifi-instance-toggle')!.className).toBe(
-      'hifi-instance-toggle on',
-    );
-    expect(rows[0].querySelector('.hifi-instance-toggle')!.getAttribute('title')).toBe(
-      'Click to disable',
-    );
-    expect(rows[1].querySelector('.hifi-instance-toggle')!.textContent).toBe('\u2718');
+    await waitFor(() => expect(rows()).toHaveLength(2));
+    expect(rows().map((r) => r.dataset.url)).toEqual(['https://a.example', 'https://b.example']);
+    const on = within(rows()[0]).getByRole('button', { name: 'Turn off https://a.example' });
+    expect(on.getAttribute('aria-pressed')).toBe('true');
+    expect(on.textContent).toBe('On');
+    const off = within(rows()[1]).getByRole('button', { name: 'Turn on https://b.example' });
+    expect(off.getAttribute('aria-pressed')).toBe('false');
+    expect(
+      within(rows()[1]).getByRole('button', { name: 'Remove https://b.example' }),
+    ).toBeTruthy();
   });
 
   it('adds, toggles, removes and restores through the server, then rereads the list', async () => {
-    const alert = vi.spyOn(window, 'alert').mockImplementation(() => undefined);
+    // a refusal is a toast now, not window.alert
     shell.showToast = vi.fn();
+    const alert = shell.showToast as ReturnType<typeof vi.fn>;
     routes['GET /api/hifi/instances/list'] = () => ({ instances: instances() });
     routes['POST /api/hifi/instances'] = () => ({ success: false, error: 'already there' });
     routes['POST /api/hifi/instances/toggle'] = () => ({ success: true });
@@ -243,25 +198,26 @@ describe('HiFi', () => {
     routes['POST /api/hifi/instances/reset'] = () => ({ success: true, restored: 1 });
     render(<HifiPanel store={store} model={model} />);
     act(() => store.hydrate({}));
-    await waitFor(() => expect(document.querySelectorAll('.hifi-instance-item')).toHaveLength(2));
+    await waitFor(() => expect(rows()).toHaveLength(2));
+    const add = screen.getByRole('button', { name: 'Add' });
     fireEvent.change(input('hifi-new-instance'), { target: { value: 'ftp://x' } });
-    fireEvent.click(document.querySelector('#hifi-new-instance + button')!);
-    expect(alert).toHaveBeenCalledWith('URL must start with http:// or https://');
+    fireEvent.click(add);
+    expect(alert).toHaveBeenCalledWith('URL must start with http:// or https://', 'error');
     fireEvent.change(input('hifi-new-instance'), { target: { value: ' https://c.example ' } });
-    fireEvent.click(document.querySelector('#hifi-new-instance + button')!);
-    await waitFor(() => expect(alert).toHaveBeenCalledWith('already there'));
+    fireEvent.click(add);
+    await waitFor(() => expect(alert).toHaveBeenCalledWith('already there', 'error'));
     expect(calls.find((c) => c.url === '/api/hifi/instances' && c.method === 'POST')!.body).toEqual(
       { url: 'https://c.example' },
     );
     const lists = () => calls.filter((c) => c.url === '/api/hifi/instances/list').length;
     const before = lists();
-    fireEvent.click(document.querySelectorAll('.hifi-instance-toggle')[0]);
+    fireEvent.click(screen.getByRole('button', { name: 'Turn off https://a.example' }));
     await waitFor(() => expect(lists()).toBe(before + 1));
     expect(calls.find((c) => c.url === '/api/hifi/instances/toggle')!.body).toEqual({
       url: 'https://a.example',
       enabled: false,
     });
-    fireEvent.click(document.querySelectorAll('.hifi-instance-remove')[1]);
+    fireEvent.click(screen.getByRole('button', { name: 'Remove https://b.example' }));
     await waitFor(() => expect(lists()).toBe(before + 2));
     fireEvent.click(document.getElementById('hifi-instances-restore-btn')!);
     await waitFor(() =>
@@ -270,7 +226,6 @@ describe('HiFi', () => {
     expect(document.getElementById('hifi-instances-restore-btn')!.textContent).toBe(
       'Restore Defaults',
     );
-    alert.mockRestore();
     delete shell.showToast;
   });
 
@@ -286,14 +241,10 @@ describe('HiFi', () => {
     });
     render(<HifiPanel store={store} model={model} />);
     act(() => store.hydrate({}));
-    await waitFor(() => expect(document.querySelectorAll('.hifi-instance-item')).toHaveLength(2));
-    const rows = document.querySelectorAll('.hifi-instance-item');
-    fireEvent.dragStart(rows[1], { dataTransfer: { effectAllowed: '' } });
-    fireEvent.drop(rows[0], { dataTransfer: {} });
-    expect([...document.querySelectorAll('.hifi-instance-url')].map((r) => r.textContent)).toEqual([
-      'https://b.example',
-      'https://a.example',
-    ]);
+    await waitFor(() => expect(rows()).toHaveLength(2));
+    fireEvent.dragStart(rows()[1], { dataTransfer: { effectAllowed: '' } });
+    fireEvent.drop(rows()[0], { dataTransfer: {} });
+    expect(rows().map((r) => r.dataset.url)).toEqual(['https://b.example', 'https://a.example']);
     await waitFor(() =>
       expect(calls.find((c) => c.url === '/api/hifi/instances/reorder')?.body).toEqual({
         urls: ['https://b.example', 'https://a.example'],
@@ -306,10 +257,17 @@ describe('HiFi', () => {
       ),
     );
     const report = document.getElementById('hifi-instances-status-panel')!;
-    expect(report.style.display).toBe('block');
-    expect(report.textContent).toBe(
-      'https://a.example v2.1 (ACTIVE)● Downloadhttps://b.example● SSL error',
-    );
+    expect(report.hidden).toBe(false);
+    const lines = [...report.querySelectorAll<HTMLElement>('[data-hifi-check]')];
+    expect(lines.map((l) => l.textContent)).toEqual([
+      'https://a.example v2.1ActiveDownload',
+      'https://b.exampleSSL error',
+    ]);
+    // the state is words with a tone, never a coloured dot alone
+    expect(lines.map((l) => l.querySelector('[data-tone]')!.getAttribute('data-tone'))).toEqual([
+      'ok',
+      'bad',
+    ]);
   });
 
   it('checks itself when its modal opens', async () => {
@@ -353,7 +311,7 @@ describe('Tidal', () => {
     await waitFor(() =>
       expect(status('tidal-download-auth-status').textContent).toBe('Not authenticated'),
     );
-    expect(status('tidal-download-auth-status').style.color).toBe('rgb(255, 152, 0)');
+    expect(status('tidal-download-auth-status').dataset.tone).toBe('warn');
     fireEvent.click(document.getElementById('tidal-download-auth-btn')!);
     await waitFor(() =>
       expect(document.getElementById('tidal-download-auth-btn')!.textContent).toBe(
@@ -361,17 +319,17 @@ describe('Tidal', () => {
       ),
     );
     const code = document.getElementById('tidal-download-auth-code')!;
-    expect(code.style.display).toBe('block');
+    expect(code.hidden).toBe(false);
     expect(code.textContent).toBe('Go to https://link.tidal.com/ABCDE and enter code: ABCDE');
     expect(code.querySelector('a')!.getAttribute('href')).toBe('https://link.tidal.com/ABCDE');
     await act(() => vi.advanceTimersByTimeAsync(3000));
-    expect(code.style.display).toBe('block');
+    expect(code.hidden).toBe(false);
     state = 'completed';
     await act(() => vi.advanceTimersByTimeAsync(3000));
     await waitFor(() =>
       expect(status('tidal-download-auth-status').textContent).toBe('Authenticated'),
     );
-    expect(code.style.display).toBe('none');
+    expect(code.hidden).toBe(true);
     expect(document.getElementById('tidal-download-auth-btn')!.textContent).toBe(
       'Re-link Tidal Account',
     );
@@ -466,7 +424,7 @@ describe('Qobuz', () => {
     routes['POST /api/qobuz/auth/login'] = () => ({ success: false, error: 'captcha' });
     routes['POST /api/qobuz/auth/token'] = () => ({ success: true });
     render(<QobuzPanel />);
-    expect(document.getElementById('qobuz-auth-logged-in')!.style.display).toBe('none');
+    expect(document.getElementById('qobuz-auth-logged-in')!.hidden).toBe(true);
     // empty fields are refused before anything is sent
     fireEvent.click(document.getElementById('qobuz-login-btn')!);
     expect(shell.showToast).toHaveBeenCalledWith(
@@ -481,7 +439,7 @@ describe('Qobuz', () => {
       email: 'me@x.com',
       password: 'pw',
     });
-    expect(status('qobuz-auth-status').style.color).toBe('rgb(255, 85, 85)');
+    expect(status('qobuz-auth-status').dataset.tone).toBe('bad');
     expect(shell.showToast).toHaveBeenCalledWith('captcha', 'error');
     fireEvent.change(input('qobuz-download-token'), { target: { value: ' tok ' } });
     fireEvent.click(document.getElementById('qobuz-download-token-btn')!);
@@ -502,8 +460,8 @@ describe('Qobuz', () => {
         }),
       );
     });
-    expect(document.getElementById('qobuz-auth-logged-in')!.style.display).toBe('flex');
-    expect(document.getElementById('qobuz-auth-form')!.style.display).toBe('none');
+    expect(document.getElementById('qobuz-auth-logged-in')!.hidden).toBe(false);
+    expect(document.getElementById('qobuz-auth-form')!.hidden).toBe(true);
     expect(status('qobuz-auth-user-info').textContent).toBe('Connected: Boulder (Studio)');
     delete shell.showToast;
   });
@@ -555,7 +513,7 @@ describe('Deezer', () => {
       expect(status('deezer-download-status').textContent).toBe('Connected as Boulder (Premium)'),
     );
     expect(calls[0].body).toEqual({ arl: '' });
-    expect(status('deezer-download-status').style.color).toBe('rgb(76, 175, 80)');
+    expect(status('deezer-download-status').dataset.tone).toBe('ok');
     routes['POST /api/deezer-download/test'] = () => ({ success: false, error: 'bad arl' });
     fireEvent.change(input('deezer-download-arl'), { target: { value: 'abc' } });
     fireEvent.click(document.getElementById('deezer-download-test-btn')!);
@@ -595,7 +553,7 @@ describe('SoundCloud', () => {
     ).not.toBeNull();
     await waitFor(() =>
       expect(status('soundcloud-connection-status').textContent).toBe(
-        'Reachable check failed — try again',
+        'Reachable check failed. Try again.',
       ),
     );
     reply.reachable = true;
@@ -618,16 +576,7 @@ describe('SoundCloud', () => {
 });
 
 describe('Lidarr', () => {
-  it('saves its URL and key, and saves the page before it tests', async () => {
-    const order: string[] = [];
-    shell.saveSettings = vi.fn(() => {
-      order.push('save');
-      return Promise.resolve();
-    });
-    routes['POST /api/test-connection'] = () => {
-      order.push('test');
-      return { success: false, error: 'unauthorised' };
-    };
+  it("saves its URL and key; the sheet's Test is its test (no second button)", async () => {
     act(() =>
       store.hydrate({
         lidarr_download: { url: 'http://l:8686', api_key: REDACTED_SECRET_SENTINEL },
@@ -635,16 +584,15 @@ describe('Lidarr', () => {
     );
     render(<LidarrPanel store={store} />);
     expect(input('lidarr-url').value).toBe('http://l:8686');
-    fireEvent.change(input('lidarr-url'), { target: { value: 'http://lidarr:8686' } });
-    fireEvent.click(document.getElementById('lidarr-test-btn')!);
-    await waitFor(() =>
-      expect(status('lidarr-connection-status').textContent).toBe('unauthorised'),
+    // a saved key shows as dots and says why
+    expect(document.getElementById('lidarr-download-settings-container')!.textContent).toContain(
+      'Saved keys are never sent back to the browser',
     );
-    expect(order).toEqual(['save', 'test']);
-    expect(calls.find((c) => c.url === '/api/test-connection')!.body).toEqual({
-      service: 'lidarr',
-    });
+    fireEvent.change(input('lidarr-url'), { target: { value: 'http://lidarr:8686' } });
     await waitFor(() => expect(store.hasPending()).toBe(false));
     expect(saved()).toEqual({ lidarr_download: { url: 'http://lidarr:8686' } });
+    expect(document.getElementById('lidarr-test-btn')).toBeNull();
+    // the stale "Use Lidarr Only" mode is gone from its words
+    expect(document.body.textContent).not.toContain('Lidarr Only');
   });
 });

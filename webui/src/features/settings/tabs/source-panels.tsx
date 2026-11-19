@@ -1,11 +1,13 @@
 /**
- * The Sources tab's config panels, ported one at a time from index.html and
- * settings.js (SETTINGS_PORT.md, step 7c on). Same markup, classes and ids.
+ * The source panels shown in a source's side sheet (Downloads > Sources),
+ * built on the settings parts (ui/): connection fields first, label over a
+ * full-width field; tuning as rows, the control on the right; the rare ones
+ * behind "More options". The sheet's foot has the one Test; a panel keeps its
+ * own button only where it shows more than pass or fail (an account, a list).
  *
- * A panel is parked, hidden, in #source-config-home until its tile opens it.
- * The old modal moved the panel's node into its body; a React panel portals
- * itself there instead while it is the open one, and is marked
- * data-react-panel so the modal and the page autosave leave it alone.
+ * A panel is parked, hidden, in #source-config-home until its row opens it,
+ * and portals itself into the sheet body while it is the open one. Every
+ * control keeps its id, its key and when it saves.
  */
 
 import type React from 'react';
@@ -15,9 +17,30 @@ import { createPortal } from 'react-dom';
 
 import type { SettingsTabProps } from '../host';
 
-import { type SettingsStore, settingsStore } from '../settings-store';
+import { type SettingsStore } from '../settings-store';
+import {
+  ActionRow,
+  Btn,
+  FieldLine,
+  Item,
+  Items,
+  More,
+  NumberField as NumberBox,
+  Note,
+  Row,
+  SecretField,
+  Select,
+  SheetField,
+  SheetGroup,
+  StatusWords,
+  Switch,
+  TextField,
+  type Tone,
+  itemClass,
+} from '../ui';
+import { Icon } from '../ui/icons';
 import { checkQobuzAuthStatus, onQobuzAuth, type QobuzAuthState } from './connections';
-import { REDACTED_SECRET_SENTINEL, SecretInput, useDraft } from './parts';
+import { REDACTED_SECRET_SENTINEL, useDraft } from './parts';
 import { SOURCE_CONFIG_ID_BY_SRC, type SourcesModel, sourcesModel } from './sources-model';
 
 export function useSettings(store: SettingsStore) {
@@ -27,7 +50,7 @@ export function useSettings(store: SettingsStore) {
 export const text = (value: unknown) =>
   typeof value === 'string' || typeof value === 'number' ? String(value) : '';
 
-/** a panel: in the modal while open, in its hidden home otherwise */
+/** a panel: in the sheet while open, in its hidden home otherwise */
 export function Panel({
   id,
   model = sourcesModel,
@@ -39,7 +62,7 @@ export function Panel({
 }) {
   const open = useSyncExternalStore(model.subscribe, () => model.getState().open);
   const node = (
-    <div id={id} className="src-config-panel" data-react-panel="">
+    <div id={id} className="src-config-panel" data-react-panel="" data-ui="">
       {children}
     </div>
   );
@@ -48,55 +71,54 @@ export function Panel({
   return body ? createPortal(node, body) : node;
 }
 
-/** a status line next to a Test Connection button */
+/** what a panel's own check said, in words and a tone */
 export interface Status {
   text: string;
-  color?: string;
+  tone?: Tone;
 }
 
-export const CHECKING: Status = { text: 'Checking...', color: '#aaa' };
-export const OK = '#4caf50';
-export const BAD = '#f44336';
-export const WARN = '#ff9800';
-
-export function TestRow({
-  label,
-  buttonId,
-  statusId,
-  status,
-  onTest,
-  children,
-}: {
-  label: string;
-  buttonId: string;
-  statusId: string;
-  status: Status;
-  onTest: () => void;
-  children?: ReactNode;
-}) {
-  return (
-    <div className="form-group">
-      <label>{label}</label>
-      <div className="form-actions" style={{ marginTop: '4px' }}>
-        <button className="test-button" id={buttonId} onClick={onTest}>
-          Test Connection
-        </button>
-        <span
-          id={statusId}
-          className="setting-help-text"
-          style={{ marginLeft: '8px', ...(status.color ? { color: status.color } : {}) }}
-        >
-          {status.text}
-        </span>
-      </div>
-      {children}
-    </div>
-  );
-}
+export const CHECKING: Status = { text: 'Checking...', tone: 'busy' };
 
 export async function json(url: string, init?: RequestInit) {
   const response = await fetch(url, init);
   return (await response.json()) as Record<string, unknown>;
+}
+
+/** under a saved key: why it shows as dots */
+export const SAVED_KEY_NOTE =
+  'Saved keys are never sent back to the browser. Type a new one to replace it.';
+
+/** a secret's note: the saved-key words while one is saved, else its own */
+export const secretNote = (value: string, own?: string): ReactNode =>
+  // a node, not a string: the whole sentence shows, it is not split behind an "i"
+  value === REDACTED_SECRET_SENTINEL ? <>{SAVED_KEY_NOTE}</> : own;
+
+/** a number as typed, saved as it parses, shown again by each settings load;
+ *  drawn as the parts' number field, the unit inside it */
+export function DraftNumber({
+  store,
+  id,
+  value,
+  save,
+  ...rest
+}: {
+  store: SettingsStore;
+  id: string;
+  value: string;
+  save: (raw: string) => void;
+  unit?: string;
+} & Omit<React.InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange' | 'type' | 'id'>) {
+  const draft = useDraft(value, save);
+  const loads = useSyncExternalStore(store.subscribe, () => store.getState().loads);
+  useEffect(() => draft.reset(), [loads]); // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <NumberBox
+      {...rest}
+      id={id}
+      value={draft.value}
+      onChange={(event) => draft.onChange(event.target.value)}
+    />
+  );
 }
 
 // ── Deezer ──
@@ -123,64 +145,66 @@ export function DeezerPanel({ store }: { store: SettingsStore }) {
       if (data.success) {
         setStatus({
           text: `Connected as ${text(data.user) || 'Unknown'} (${text(data.tier) || 'Free'})`,
-          color: OK,
+          tone: 'ok',
         });
       } else {
-        setStatus({ text: text(data.error) || 'Authentication failed', color: BAD });
+        setStatus({ text: text(data.error) || 'Authentication failed', tone: 'bad' });
       }
     } catch {
-      setStatus({ text: 'Connection error', color: BAD });
+      setStatus({ text: 'Connection error', tone: 'bad' });
     }
   }
 
   return (
     <Panel id="deezer-download-settings-container">
-      <div className="form-group">
-        <label>Deezer ARL Token:</label>
-        <SecretInput
+      <SheetGroup title="Account" />
+      <SheetField
+        label="ARL token"
+        htmlFor="deezer-download-arl"
+        help={secretNote(arl, 'The token that signs SoulSync in to your Deezer account.')}
+        more={
+          <>
+            To get it: sign in at{' '}
+            <a href="https://www.deezer.com" target="_blank" rel="noreferrer">
+              deezer.com
+            </a>
+            , open the browser's DevTools (F12), then Application, Cookies, and copy the{' '}
+            <code>arl</code> value.
+          </>
+        }
+      >
+        <SecretField
           id="deezer-download-arl"
-          className="form-input"
           placeholder="Paste your ARL cookie token here"
           value={arl}
           onChange={change}
         />
-        <div className="setting-help-text">
-          Your ARL token authenticates with Deezer. To get it: log into{' '}
-          <a
-            href="https://www.deezer.com"
-            target="_blank"
-            style={{ color: 'rgb(var(--accent-rgb))' }}
-          >
-            deezer.com
-          </a>{' '}
-          → open browser DevTools (F12) → Application tab → Cookies → copy the <code>arl</code>{' '}
-          value.
-        </div>
-      </div>
-      <TestRow
-        label="Deezer Status:"
-        buttonId="deezer-download-test-btn"
-        statusId="deezer-download-status"
-        status={status}
-        onTest={() => void test()}
-      />
+      </SheetField>
+      <ActionRow label="Account" help="Signs in with the token and says whose account it is.">
+        <StatusWords id="deezer-download-status" tone={status.tone} live>
+          {status.text}
+        </StatusWords>
+        <Btn id="deezer-download-test-btn" small onClick={() => void test()}>
+          Check account
+        </Btn>
+      </ActionRow>
     </Panel>
   );
 }
 
 // ── SoundCloud ──
 
-/** settings.js testSoundcloudConnection; also the probe when its modal opens */
+/** settings.js testSoundcloudConnection; also the probe when its sheet opens */
 export async function soundcloudStatus(): Promise<Status> {
   try {
     const data = await json('/api/soundcloud/status');
-    if (data.available && data.reachable) return { text: 'Connected (anonymous)', color: OK };
+    if (data.available && data.reachable) return { text: 'Connected (anonymous)', tone: 'ok' };
     // the client is up but the live probe failed: an outage or a passing
     // yt-dlp parse error
-    if (data.available) return { text: 'Reachable check failed — try again', color: WARN };
-    return { text: text(data.error) || 'Unavailable', color: BAD };
+    if (data.available) return { text: 'Reachable check failed. Try again.', tone: 'warn' };
+    return { text: text(data.error) || 'Unavailable', tone: 'bad' };
   } catch {
-    return { text: 'Connection error', color: BAD };
+    return { text: 'Connection error', tone: 'bad' };
   }
 }
 
@@ -194,54 +218,56 @@ export function SoundcloudPanel({
   const settings = useSettings(store);
   const [status, setStatus] = useState<Status>({ text: '' });
   const open = useSyncExternalStore(model.subscribe, () => model.getState().open);
+  const token = text(settings.soundcloud_download?.oauth_token);
 
   async function test() {
     setStatus(CHECKING);
     setStatus(await soundcloudStatus());
   }
 
-  // opening SoundCloud's modal checks it, as probeSourceOnOpen did
+  // opening SoundCloud's sheet checks it, as probeSourceOnOpen did
   useEffect(() => {
     if (open === 'soundcloud') void test();
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <Panel id="soundcloud-download-settings-container" model={model}>
-      <div className="form-group">
-        <div className="setting-help-text">
-          SoundCloud downloads run anonymously — no account required. Use this for DJ mixes,
-          remixes, and tracks that aren't on Spotify/Tidal/Deezer.
-          <br />
-          <br />
-          <strong>Quality:</strong> 128 kbps MP3 / AAC depending on the upload (anonymous tier).
-          SoundCloud doesn't expose lossless audio to anyone.
-        </div>
-      </div>
+      <Note info>
+        SoundCloud downloads run anonymously, no account needed. Use it for DJ mixes, remixes and
+        tracks that are not on Spotify, Tidal or Deezer. <strong>Quality:</strong> 128 kbps MP3 or
+        AAC, depending on the upload. SoundCloud does not offer lossless audio to anyone.
+      </Note>
+      <ActionRow label="SoundCloud" help="Whether SoundCloud answers right now.">
+        <StatusWords id="soundcloud-connection-status" tone={status.tone} live>
+          {status.text}
+        </StatusWords>
+        <Btn id="soundcloud-test-btn" small onClick={() => void test()}>
+          Check status
+        </Btn>
+      </ActionRow>
       {/* #2116: a signed-in free account gets the original file where the
           uploader turned downloads on */}
-      <div className="form-group">
-        <label>SoundCloud OAuth Token (optional):</label>
-        <SecretInput
+      <SheetGroup title="Account (optional)" />
+      <SheetField
+        label="OAuth token"
+        htmlFor="soundcloud-download-oauth-token"
+        help="With a free account signed in, a track whose uploader turned on the free Download button comes as the original file instead of the 128 kbps stream."
+        more={
+          <>
+            With a free SoundCloud account signed in, tracks whose uploader turned on the free
+            Download button come as the original file instead of the 128 kbps stream. Everything
+            else still uses the stream. To get it: sign in at soundcloud.com, open DevTools (F12),
+            Application, Cookies, and copy the <code>oauth_token</code> value.
+          </>
+        }
+      >
+        <SecretField
           id="soundcloud-download-oauth-token"
-          className="form-input"
           placeholder="Paste your oauth_token cookie here"
-          value={text(settings.soundcloud_download?.oauth_token)}
+          value={token}
           onChange={(value) => store.set('soundcloud_download', 'oauth_token', value)}
         />
-        <div className="setting-help-text">
-          With a free SoundCloud account signed in, tracks whose uploader turned on the free
-          Download button come as the original file instead of the 128 kbps stream. Everything else
-          still uses the stream. To get it: log into soundcloud.com, open DevTools (F12),
-          Application, Cookies, and copy the <code>oauth_token</code> value.
-        </div>
-      </div>
-      <TestRow
-        label="SoundCloud Status:"
-        buttonId="soundcloud-test-btn"
-        statusId="soundcloud-connection-status"
-        status={status}
-        onTest={() => void test()}
-      />
+      </SheetField>
     </Panel>
   );
 }
@@ -250,76 +276,50 @@ export function SoundcloudPanel({
 
 export function LidarrPanel({ store }: { store: SettingsStore }) {
   const settings = useSettings(store);
-  const [status, setStatus] = useState<Status>({ text: '' });
-
-  async function test() {
-    setStatus(CHECKING);
-    try {
-      // save first, so the server tests the URL and key on screen
-      await (window as Window & { saveSettings?: () => Promise<void> }).saveSettings?.();
-      const data = await json('/api/test-connection', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ service: 'lidarr' }),
-      });
-      if (data.success) setStatus({ text: 'Connected', color: OK });
-      else setStatus({ text: text(data.error) || 'Connection failed', color: BAD });
-    } catch {
-      setStatus({ text: 'Connection error', color: BAD });
-    }
-  }
+  const key = text(settings.lidarr_download?.api_key);
 
   return (
     <Panel id="lidarr-download-settings-container">
-      <div className="form-group">
-        <label>Lidarr URL:</label>
-        <input
-          type="text"
+      <SheetGroup title="Connection" />
+      <SheetField
+        label="Lidarr URL"
+        htmlFor="lidarr-url"
+        help="The full address of your Lidarr, for example http://192.168.1.100:8686."
+      >
+        <TextField
+          full
           id="lidarr-url"
           placeholder="http://localhost:8686"
           value={text(settings.lidarr_download?.url)}
           onChange={(event) => store.set('lidarr_download', 'url', event.target.value)}
         />
-        <div className="setting-help-text">
-          Full URL to your Lidarr instance (e.g. http://192.168.1.100:8686)
-        </div>
-      </div>
-      <div className="form-group">
-        <label>API Key:</label>
-        <SecretInput
+      </SheetField>
+      <SheetField
+        label="API key"
+        htmlFor="lidarr-api-key"
+        help={secretNote(key, 'In Lidarr: Settings, General, Security, API Key.')}
+      >
+        <SecretField
           id="lidarr-api-key"
           placeholder="Your Lidarr API key"
-          value={text(settings.lidarr_download?.api_key)}
+          value={key}
           onChange={(value) => store.set('lidarr_download', 'api_key', value)}
         />
-        <div className="setting-help-text">
-          Found in Lidarr → Settings → General → Security → API Key
-        </div>
-      </div>
-      <TestRow
-        label="Lidarr Status:"
-        buttonId="lidarr-test-btn"
-        statusId="lidarr-connection-status"
-        status={status}
-        onTest={() => void test()}
-      >
-        <div className="setting-help-text" style={{ marginTop: '6px' }}>
-          Uses Lidarr's indexers and download clients (Usenet/torrent) for album downloads.
-          <br />
-          <br />
-          <strong>Best for full-album grabs.</strong> Lidarr is album-first by design — track-name
-          searches usually return nothing useful, so in hybrid mode Lidarr is mostly a no-op for
-          playlists and falls through to your other sources. Use Lidarr Only when you specifically
-          want to grab whole albums via your indexers.
-        </div>
-      </TestRow>
+      </SheetField>
+      <Note info>
+        Lidarr downloads through its own indexers and download clients (usenet and torrent).{' '}
+        <strong>Best for whole albums.</strong> Lidarr is album-first: a search by track name
+        usually finds nothing, so for playlists it mostly passes the search on to the next source in
+        the order. Put it first in the music order only when you want whole albums through your
+        indexers.
+      </Note>
     </Panel>
   );
 }
 
 export const toast = (message: string, type: string) => window.showToast?.(message, type);
 
-/** opening this source's modal runs its check, as probeSourceOnOpen did */
+/** opening this source's sheet runs its check, as probeSourceOnOpen did */
 export function useOnOpen(model: SourcesModel, id: string, check: () => void) {
   const open = useSyncExternalStore(model.subscribe, () => model.getState().open);
   useEffect(() => {
@@ -344,10 +344,10 @@ export function TidalPanel({ model = sourcesModel }: { model?: SourcesModel }) {
       // the label only: a link still waiting keeps its button off
       // (checkTidalDownloadAuthStatus never touched it)
       if (data.authenticated) {
-        setStatus({ text: 'Authenticated', color: OK });
+        setStatus({ text: 'Authenticated', tone: 'ok' });
         setButton((b) => ({ ...b, text: 'Re-link Tidal Account' }));
       } else {
-        setStatus({ text: 'Not authenticated', color: WARN });
+        setStatus({ text: 'Not authenticated', tone: 'warn' });
         setButton((b) => ({ ...b, text: 'Link Tidal Account' }));
       }
     } catch {
@@ -367,7 +367,7 @@ export function TidalPanel({ model = sourcesModel }: { model?: SourcesModel }) {
       // the link and code to enter there
       setCode({ uri: text(data.verification_uri), code: text(data.user_code) });
       setButton({ text: 'Waiting for approval...', disabled: true });
-      setStatus({ text: 'Waiting...', color: WARN });
+      setStatus({ text: 'Waiting...', tone: 'warn' });
       if (poll.current) clearInterval(poll.current);
       poll.current = setInterval(() => {
         void (async () => {
@@ -377,14 +377,14 @@ export function TidalPanel({ model = sourcesModel }: { model?: SourcesModel }) {
               if (poll.current) clearInterval(poll.current);
               poll.current = null;
               setCode(null);
-              setStatus({ text: 'Authenticated', color: OK });
+              setStatus({ text: 'Authenticated', tone: 'ok' });
               setButton({ text: 'Re-link Tidal Account', disabled: false });
               toast('Tidal download account linked successfully', 'success');
             } else if (done.status === 'error') {
               if (poll.current) clearInterval(poll.current);
               poll.current = null;
               setCode(null);
-              setStatus({ text: 'Auth failed', color: BAD });
+              setStatus({ text: 'Auth failed', tone: 'bad' });
               setButton({ text: 'Link Tidal Account', disabled: false });
               toast('Tidal auth failed: ' + (text(done.message) || 'Unknown error'), 'error');
             }
@@ -407,40 +407,34 @@ export function TidalPanel({ model = sourcesModel }: { model?: SourcesModel }) {
 
   return (
     <Panel id="tidal-download-settings-container" model={model}>
-      <div className="form-group">
-        <label>Tidal Download Auth:</label>
-        <div className="form-actions" style={{ marginTop: '4px' }}>
-          <button
-            className="auth-button"
-            id="tidal-download-auth-btn"
-            disabled={button.disabled}
-            onClick={() => void start()}
-          >
-            {button.text}
-          </button>
-          <span
-            id="tidal-download-auth-status"
-            className="setting-help-text"
-            style={{ marginLeft: '8px', ...(status.color ? { color: status.color } : {}) }}
-          >
-            {status.text}
-          </span>
-        </div>
-        <div
-          id="tidal-download-auth-code"
-          style={{ display: code ? 'block' : 'none', marginTop: '8px' }}
-          className="setting-help-text"
+      <SheetGroup title="Account" />
+      <ActionRow
+        label="Tidal download account"
+        help="Link the account downloads use. You approve it on Tidal's own page with a code."
+      >
+        <StatusWords id="tidal-download-auth-status" tone={status.tone} live>
+          {status.text}
+        </StatusWords>
+        <Btn
+          id="tidal-download-auth-btn"
+          small
+          kind={status.tone === 'ok' ? undefined : 'primary'}
+          disabled={button.disabled}
+          onClick={() => void start()}
         >
-          {code ? (
-            <>
-              Go to{' '}
-              <a href={code.uri} target="_blank" style={{ color: 'rgb(var(--accent-rgb))' }}>
-                {code.uri}
-              </a>{' '}
-              and enter code: <strong>{code.code}</strong>
-            </>
-          ) : null}
-        </div>
+          {button.text}
+        </Btn>
+      </ActionRow>
+      <div id="tidal-download-auth-code" hidden={!code}>
+        {code ? (
+          <Note info>
+            Go to{' '}
+            <a href={code.uri} target="_blank" rel="noreferrer">
+              {code.uri}
+            </a>{' '}
+            and enter code: <strong>{code.code}</strong>
+          </Note>
+        ) : null}
       </div>
     </Panel>
   );
@@ -451,8 +445,6 @@ export function TidalPanel({ model = sourcesModel }: { model?: SourcesModel }) {
 /** what checkQobuzAuthStatus last heard (connections.ts): the Connections
  *  tab's Qobuz card hears it too */
 type QobuzAuth = QobuzAuthState;
-
-const QOBUZ_ERR = '#ff5555';
 
 const refreshQobuz = () => void checkQobuzAuthStatus();
 
@@ -484,12 +476,12 @@ export function QobuzPanel() {
         setPassword('');
         refreshQobuz();
       } else {
-        status = { text: text(data.error) || 'Login failed', color: QOBUZ_ERR };
+        status = { text: text(data.error) || 'Login failed', tone: 'bad' };
         toast(text(data.error) || 'Qobuz login failed', 'error');
       }
     } catch (error) {
       console.error('Qobuz login error:', error);
-      status = { text: 'Connection error', color: QOBUZ_ERR };
+      status = { text: 'Connection error', tone: 'bad' };
       toast('Failed to connect to Qobuz', 'error');
     }
     setLogin({ busy: false, status });
@@ -513,12 +505,12 @@ export function QobuzPanel() {
         setToken('');
         refreshQobuz();
       } else {
-        status = { text: text(data.error) || 'Token login failed', color: QOBUZ_ERR };
+        status = { text: text(data.error) || 'Token login failed', tone: 'bad' };
         toast(text(data.error) || 'Qobuz token login failed', 'error');
       }
     } catch (error) {
       console.error('Qobuz token login error:', error);
-      status = { text: 'Connection error', color: QOBUZ_ERR };
+      status = { text: 'Connection error', tone: 'bad' };
       toast('Failed to connect to Qobuz', 'error');
     }
     setByToken({ busy: false, status });
@@ -536,129 +528,111 @@ export function QobuzPanel() {
 
   const user = auth?.user || {};
   const loggedIn = !!auth?.authenticated;
-  const statusStyle = (status: Status) => ({
-    marginLeft: '8px',
-    ...(status.color ? { color: status.color } : {}),
-  });
 
   return (
     <Panel id="qobuz-settings-container">
-      <div className="form-group">
-        <label>Qobuz Account:</label>
-        <div
-          id="qobuz-auth-logged-in"
-          style={{ display: auth === null ? 'none' : loggedIn ? 'flex' : 'none', marginTop: '4px' }}
-        >
-          <span id="qobuz-auth-user-info" className="setting-help-text" style={{ color: OK }}>
+      <SheetGroup title="Account" />
+      <Row
+        id="qobuz-auth-logged-in"
+        hidden={auth === null || !loggedIn}
+        label="Qobuz account"
+        help={
+          <StatusWords id="qobuz-auth-user-info" tone="ok">
             {loggedIn
               ? `Connected: ${user.display_name || 'Qobuz User'} (${user.subscription || 'Active'})`
               : ''}
-          </span>
-          <button
-            className="auth-button"
-            onClick={() => void disconnect()}
-            style={{ marginLeft: '8px' }}
-          >
-            Disconnect
-          </button>
-        </div>
-        <div
-          id="qobuz-auth-form"
-          style={{ display: loggedIn ? 'none' : 'block', marginTop: '4px' }}
-        >
-          <input
+          </StatusWords>
+        }
+      >
+        <Btn small onClick={() => void disconnect()}>
+          Disconnect
+        </Btn>
+      </Row>
+      <div id="qobuz-auth-form" hidden={loggedIn}>
+        <SheetField label="Email" htmlFor="qobuz-email">
+          <TextField
+            full
             type="email"
             id="qobuz-email"
-            className="form-input"
             placeholder="Qobuz email"
             autoComplete="email"
-            style={{ marginBottom: '8px' }}
             value={email}
             onChange={(event) => setEmail(event.target.value)}
           />
-          {/* the two fields are inline-blocks: the space the old markup had
-              between them counts in the flex row's width (measured, 4px) */}{' '}
-          <input
+        </SheetField>
+        <SheetField
+          label="Password"
+          htmlFor="qobuz-password"
+          help="Needs a paid Qobuz subscription. Streams are DRM-free."
+        >
+          <TextField
+            full
             type="password"
             id="qobuz-password"
-            className="form-input"
             placeholder="Qobuz password"
             autoComplete="current-password"
-            style={{ marginBottom: '8px' }}
             value={password}
             onChange={(event) => setPassword(event.target.value)}
           />
-          <div className="form-actions">
-            <button
-              className="auth-button"
-              id="qobuz-login-btn"
-              disabled={login.busy}
-              onClick={() => void connect()}
-            >
-              {login.busy ? 'Connecting...' : 'Connect Qobuz'}
-            </button>
-            <span
-              id="qobuz-auth-status"
-              className="setting-help-text"
-              style={statusStyle(login.status)}
-            >
-              {login.status.text}
-            </span>
-          </div>
-        </div>
-        <div className="setting-help-text" style={{ marginTop: '6px' }}>
-          Requires a paid Qobuz subscription. Streams are DRM-free.
-        </div>
-        <div
-          className="callback-info"
-          style={{
-            marginTop: '10px',
-            borderTop: '1px solid rgba(255,255,255,0.05)',
-            paddingTop: '10px',
-          }}
+        </SheetField>
+        <ActionRow
+          label="Sign in"
+          help="Signs in once; SoulSync keeps the session, not the password."
         >
-          <div className="callback-help" style={{ marginBottom: '8px' }}>
-            <strong>Alternative: Auth Token</strong> — If email/password login fails (CAPTCHA),
-            paste your token directly:
-          </div>
-        </div>
-        <input
-          type="password"
-          id="qobuz-download-token"
-          className="form-input"
-          placeholder="Paste your Qobuz auth token here"
-          style={{ marginBottom: '8px' }}
-          value={token}
-          onChange={(event) => setToken(event.target.value)}
-        />
-        <div className="form-actions">
-          <button
-            className="auth-button"
+          <StatusWords id="qobuz-auth-status" tone={login.status.tone} live>
+            {login.status.text}
+          </StatusWords>
+          <Btn
+            id="qobuz-login-btn"
+            small
+            kind="primary"
+            disabled={login.busy}
+            onClick={() => void connect()}
+          >
+            {login.busy ? 'Connecting...' : 'Connect Qobuz'}
+          </Btn>
+        </ActionRow>
+      </div>
+      <More label="Sign in with a token instead" names="when email sign-in asks for a CAPTCHA">
+        <SheetField
+          label="Auth token"
+          htmlFor="qobuz-download-token"
+          help="If email and password sign-in fails (a CAPTCHA), paste your token here."
+          more={
+            <>
+              To get your token: sign in at{' '}
+              <a href="https://play.qobuz.com" target="_blank" rel="noreferrer">
+                play.qobuz.com
+              </a>
+              , open DevTools (F12), the Network tab, find any request to{' '}
+              <code>www.qobuz.com/api.json</code>, and copy <code>X-User-Auth-Token</code> from its
+              request headers.
+            </>
+          }
+        >
+          <TextField
+            full
+            type="password"
+            id="qobuz-download-token"
+            placeholder="Paste your Qobuz auth token here"
+            value={token}
+            onChange={(event) => setToken(event.target.value)}
+          />
+        </SheetField>
+        <ActionRow label="Sign in with the token">
+          <StatusWords id="qobuz-download-token-status" tone={byToken.status.tone} live>
+            {byToken.status.text}
+          </StatusWords>
+          <Btn
             id="qobuz-download-token-btn"
+            small
             disabled={byToken.busy}
             onClick={() => void connectToken()}
           >
             {byToken.busy ? 'Connecting...' : 'Connect with Token'}
-          </button>
-          <span
-            id="qobuz-download-token-status"
-            className="setting-help-text"
-            style={statusStyle(byToken.status)}
-          >
-            {byToken.status.text}
-          </span>
-        </div>
-        <div className="callback-info">
-          <div className="callback-help">
-            To get your token: log into{' '}
-            <a href="https://play.qobuz.com" target="_blank" style={{ color: '#4285f4' }}>
-              play.qobuz.com
-            </a>{' '}
-            → DevTools (F12) → Network tab → find any request to <code>www.qobuz.com/api.json</code>{' '}
-            → look for <code>X-User-Auth-Token</code> in the request headers → copy that value.
-          </div>
-        </div>
-      </div>
+          </Btn>
+        </ActionRow>
+      </More>
     </Panel>
   );
 }
@@ -678,21 +652,19 @@ interface HifiCheck {
   status?: string;
 }
 
-const say = (message: string) => window.alert(message);
+const say = (message: string) => window.showToast?.(message, 'error');
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 /** one instance's state in Check All Instances */
-function checkState(inst: HifiCheck): ReactNode {
-  if (inst.can_download) return <span style={{ color: OK }}>● Download</span>;
-  if (inst.can_search) return <span style={{ color: WARN }}>● Search only</span>;
-  if (inst.status === 'online') return <span style={{ color: WARN }}>● Online (limited)</span>;
-  if (inst.status === 'ssl_error') return <span style={{ color: BAD }}>● SSL error</span>;
-  if (inst.status === 'timeout') return <span style={{ color: BAD }}>● Timeout</span>;
-  if (inst.status === 'offline') return <span style={{ color: BAD }}>● Offline</span>;
-  return <span style={{ color: BAD }}>● {text(inst.status)}</span>;
+function checkState(inst: HifiCheck): Status {
+  if (inst.can_download) return { text: 'Download', tone: 'ok' };
+  if (inst.can_search) return { text: 'Search only', tone: 'warn' };
+  if (inst.status === 'online') return { text: 'Online (limited)', tone: 'warn' };
+  if (inst.status === 'ssl_error') return { text: 'SSL error', tone: 'bad' };
+  if (inst.status === 'timeout') return { text: 'Timeout', tone: 'bad' };
+  if (inst.status === 'offline') return { text: 'Offline', tone: 'bad' };
+  return { text: text(inst.status), tone: 'bad' };
 }
-
-const MUTED = { color: 'rgba(255,255,255,0.4)', fontSize: '0.85em' };
 
 export function HifiPanel({
   store,
@@ -721,10 +693,10 @@ export function HifiPanel({
     try {
       const data = await json('/api/hifi/status');
       if (data.available)
-        setStatus({ text: `Connected (v${text(data.version) || '?'})`, color: OK });
-      else setStatus({ text: 'No instances reachable', color: WARN });
+        setStatus({ text: `Connected (v${text(data.version) || '?'})`, tone: 'ok' });
+      else setStatus({ text: 'No instances reachable', tone: 'warn' });
     } catch {
-      setStatus({ text: 'Connection error', color: BAD });
+      setStatus({ text: 'Connection error', tone: 'bad' });
     }
   }
   useOnOpen(model, 'hifi', () => void test());
@@ -825,25 +797,21 @@ export function HifiPanel({
 
   let instances: ReactNode = null;
   if (typeof list === 'string') {
-    instances = (
-      <div style={{ color: BAD, fontSize: '0.85em' }}>Error loading instances: {list}</div>
-    );
+    instances = <StatusWords tone="bad">{`Error loading instances: ${list}`}</StatusWords>;
   } else if (list && !list.length) {
-    instances = <div style={MUTED}>No instances configured.</div>;
+    instances = <span className={itemClass.dim}>No instances configured.</span>;
   } else if (list) {
+    // the browser's own drag for now; the shared order list comes to it in
+    // a later phase (it is the same control as the source order)
     instances = list.map((inst, i) => (
-      <div
+      <Item
         key={inst.url}
-        className={[
-          'hifi-instance-item',
-          inst.enabled ? '' : 'disabled',
-          dragging === i ? 'dragging' : '',
-          over === i ? 'drag-over' : '',
-        ]
-          .filter(Boolean)
-          .join(' ')}
+        off={!inst.enabled}
+        lift={dragging === i}
+        over={over === i}
         draggable
         data-url={inst.url}
+        data-hifi-instance=""
         onDragStart={(event) => {
           setDragging(i);
           if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
@@ -864,171 +832,131 @@ export function HifiPanel({
           if (dragging !== null) void reorder(dragging, i);
         }}
       >
-        <span className="hifi-instance-grip">&#x2630;</span>
-        <span className="hifi-instance-url">{inst.url}</span>
-        <span
-          className={inst.enabled ? 'hifi-instance-toggle on' : 'hifi-instance-toggle off'}
-          data-url={inst.url}
-          title={inst.enabled ? 'Click to disable' : 'Click to enable'}
-          onClick={(event) => {
-            event.preventDefault();
+        <span className={itemClass.grip} aria-hidden="true" title="Drag to reorder">
+          <Icon name="grip" size={14} />
+        </span>
+        <span className={`${itemClass.main} ${itemClass.mono}`}>{inst.url}</span>
+        <Btn
+          small
+          kind="ghost"
+          data-hifi-toggle=""
+          aria-pressed={!!inst.enabled}
+          aria-label={`${inst.enabled ? 'Turn off' : 'Turn on'} ${inst.url}`}
+          title={inst.enabled ? 'In use. Turn it off to skip it' : 'Off. Turn it on to use it'}
+          onClick={() =>
             void post(
               '/api/hifi/instances/toggle',
               jsonPost({ url: inst.url, enabled: !inst.enabled }),
               'Failed to toggle instance',
-            );
-          }}
+            )
+          }
         >
-          {inst.enabled ? '\u2714' : '\u2718'}
-        </span>
-        <span
-          className="hifi-instance-remove"
-          data-url={inst.url}
-          title="Remove instance"
-          onClick={(event) => {
-            event.preventDefault();
+          {inst.enabled ? 'On' : 'Off'}
+        </Btn>
+        <Btn
+          small
+          kind="ghost"
+          iconOnly
+          icon="x"
+          data-hifi-remove=""
+          aria-label={`Remove ${inst.url}`}
+          onClick={() =>
             void post(
               `/api/hifi/instances?url=${encodeURIComponent(inst.url)}`,
               { method: 'DELETE' },
               'Failed to remove instance',
-            );
-          }}
-        >
-          &#x2716;
-        </span>
-      </div>
+            )
+          }
+        />
+      </Item>
     ));
   }
 
   let report: ReactNode = null;
   if (checked?.state === 'busy') {
-    report = <div style={{ ...MUTED, padding: '8px 0' }}>Checking instances...</div>;
+    report = <span className={itemClass.dim}>Checking instances...</span>;
   } else if (checked?.state === 'error') {
-    report = (
-      <div style={{ color: BAD, fontSize: '0.85em' }}>Error checking instances: {checked.text}</div>
-    );
+    report = <StatusWords tone="bad">{`Error checking instances: ${checked.text}`}</StatusWords>;
   } else if (checked?.state === 'done' && !checked.rows.length) {
-    report = <div style={{ color: WARN, fontSize: '0.85em' }}>No instances configured.</div>;
+    report = <StatusWords tone="warn">No instances configured.</StatusWords>;
   } else if (checked?.state === 'done') {
-    report = checked.rows.map((inst) => (
-      <div
-        key={inst.url}
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          padding: '5px 0',
-          borderBottom: '1px solid rgba(255,255,255,0.04)',
-          fontSize: '0.82em',
-        }}
-      >
-        <span
-          style={{
-            color: 'rgba(255,255,255,0.6)',
-            fontFamily: 'monospace',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-          }}
-        >
-          {inst.url}
-          {inst.version ? ` v${inst.version}` : ''}
-          {inst.url === checked.active ? (
-            <>
-              {' '}
-              <span
-                style={{ color: 'rgb(var(--accent-rgb))', fontWeight: 600, fontSize: '0.75em' }}
-              >
-                (ACTIVE)
-              </span>
-            </>
-          ) : null}
-        </span>
-        <span style={{ flexShrink: 0, marginLeft: '12px' }}>{checkState(inst)}</span>
-      </div>
-    ));
+    report = checked.rows.map((inst) => {
+      const state = checkState(inst);
+      return (
+        <Item key={inst.url} data-hifi-check="">
+          <span className={`${itemClass.main} ${itemClass.mono}`}>
+            {inst.url}
+            {inst.version ? ` v${inst.version}` : ''}
+          </span>
+          {inst.url === checked.active ? <span className={itemClass.dim}>Active</span> : null}
+          <StatusWords tone={state.tone}>{state.text}</StatusWords>
+        </Item>
+      );
+    });
   }
 
   return (
     <Panel id="hifi-download-settings-container" model={model}>
-      <div className="form-group">
-        <label>HiFi Status:</label>
-        <div className="form-actions" style={{ marginTop: '4px' }}>
-          <button className="test-button" id="hifi-test-btn" onClick={() => void test()}>
-            Test Connection
-          </button>
-          <span
-            id="hifi-connection-status"
-            className="setting-help-text"
-            style={{ marginLeft: '8px', ...(status.color ? { color: status.color } : {}) }}
-          >
-            {status.text}
-          </span>
-        </div>
-        <div className="setting-help-text" style={{ marginTop: '6px' }}>
-          Free lossless downloads via community-run hifi-api instances. No authentication or
-          subscription needed.
-        </div>
-        <div
-          className="hifi-preview-warning"
-          style={{
-            marginTop: '8px',
-            padding: '9px 11px',
-            borderRadius: '8px',
-            background: 'rgba(241, 196, 15, 0.08)',
-            border: '1px solid rgba(241, 196, 15, 0.28)',
-            color: '#f1c40f',
-            fontSize: '12px',
-            lineHeight: 1.5,
-          }}
-        >
-          <strong>Heads up:</strong> some HiFi instances only have 30-second Tidal previews for
-          certain tracks, with headers faked to look like the full song. SoulSync decodes every HiFi
-          download to catch these and never lets a shorter clip replace a good library file, but if
-          a track just won't come through at full length here, grab it from another source.
-        </div>
-      </div>
-      <div className="form-group">
-        <label>API Instances:</label>
-        <div id="hifi-instances-list" style={{ marginBottom: '8px' }}>
-          {instances}
-        </div>
-        <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
-          <input
+      <Note info>
+        Free lossless downloads through community-run hifi-api instances. No account or subscription
+        needed.
+      </Note>
+      <Note>
+        <strong>Heads up:</strong> some HiFi instances only have 30-second Tidal previews of some
+        tracks, with headers faked to look like the full song. SoulSync decodes every HiFi download
+        to catch these and never lets a shorter clip replace a good library file, but if a track
+        will not come through at full length here, get it from another source.
+      </Note>
+      <ActionRow label="HiFi" help="Whether any instance answers, and its version.">
+        <StatusWords id="hifi-connection-status" tone={status.tone} live>
+          {status.text}
+        </StatusWords>
+        <Btn id="hifi-test-btn" small onClick={() => void test()}>
+          Check status
+        </Btn>
+      </ActionRow>
+      <SheetGroup title="Instances" />
+      <p className={itemClass.dim}>Tried from the top. Drag to change the order.</p>
+      <Items id="hifi-instances-list">{instances}</Items>
+      <SheetField label="Add an instance" htmlFor="hifi-new-instance">
+        <FieldLine>
+          <TextField
+            full
             type="url"
             id="hifi-new-instance"
-            className="form-input"
             placeholder="https://example.com"
-            style={{ flex: 1 }}
             value={adding}
             onChange={(event) => setAdding(event.target.value)}
           />
-          <button className="test-button" onClick={() => void add()}>
+          <Btn icon="plus" onClick={() => void add()}>
             Add
-          </button>
-        </div>
-        <div style={{ display: 'flex', gap: '8px', marginBottom: '8px', flexWrap: 'wrap' }}>
-          <button
-            className="test-button"
-            id="hifi-instances-check-btn"
-            disabled={checking}
-            onClick={() => void check()}
-          >
-            {checking ? 'Checking...' : 'Check All Instances'}
-          </button>
-          <button
-            className="test-button"
-            id="hifi-instances-restore-btn"
-            title="Re-add any of the built-in default instances you've removed (keeps the ones you added)"
-            disabled={restoring}
-            onClick={() => void restore()}
-          >
-            {restoring ? 'Restoring…' : 'Restore Defaults'}
-          </button>
-        </div>
-        <div id="hifi-instances-status-panel" style={{ display: checked ? 'block' : 'none' }}>
-          {report}
-        </div>
-      </div>
+          </Btn>
+        </FieldLine>
+      </SheetField>
+      <ActionRow label="Every instance" help="What each one can do right now, and which is in use.">
+        <Btn
+          id="hifi-instances-check-btn"
+          small
+          busy={checking}
+          disabled={checking}
+          onClick={() => void check()}
+        >
+          {checking ? 'Checking...' : 'Check All Instances'}
+        </Btn>
+        <Btn
+          id="hifi-instances-restore-btn"
+          small
+          kind="ghost"
+          title="Re-add any of the built-in default instances you have removed (keeps the ones you added)"
+          disabled={restoring}
+          onClick={() => void restore()}
+        >
+          {restoring ? 'Restoring…' : 'Restore Defaults'}
+        </Btn>
+      </ActionRow>
+      <Items id="hifi-instances-status-panel" hidden={!checked}>
+        {report}
+      </Items>
     </Panel>
   );
 }
@@ -1036,14 +964,13 @@ export function HifiPanel({
 // ── Soulseek ──
 
 type ShellTools = Window & {
-  testConnection?: (service: string) => Promise<void>;
   showLoadingOverlay?: (message: string) => void;
   hideLoadingOverlay?: () => void;
-  _settingsAutosaveOff?: boolean;
 };
 
 /** a number field that shows what is typed and saves what it parses to,
- *  reset by each settings load */
+ *  reset by each settings load (the old field look: Library > Folders uses
+ *  it until that tab is rebuilt) */
 export function NumberField({
   store,
   id,
@@ -1072,6 +999,25 @@ export function NumberField({
 
 export const int = (raw: string, fallback: number) => parseInt(raw, 10) || fallback;
 
+const PEER_SPEEDS = [
+  { value: '0', label: 'Any speed' },
+  { value: '1', label: '1 Mbps' },
+  { value: '2', label: '2 Mbps' },
+  { value: '3', label: '3 Mbps' },
+  { value: '4', label: '4 Mbps' },
+  { value: '5', label: '5 Mbps' },
+  { value: '10', label: '10 Mbps' },
+];
+
+const PEER_QUEUES = [
+  { value: '0', label: 'No limit' },
+  { value: '5', label: '5' },
+  { value: '10', label: '10' },
+  { value: '20', label: '20' },
+  { value: '50', label: '50' },
+  { value: '100', label: '100' },
+];
+
 export function SoulseekPanel({ store }: { store: SettingsStore }) {
   const settings = useSettings(store);
   const s = (settings.soulseek || {}) as Record<string, unknown>;
@@ -1080,6 +1026,7 @@ export function SoulseekPanel({ store }: { store: SettingsStore }) {
     const n = keepZero ? (value ?? fallback) : value || fallback;
     return text(n);
   };
+  const key = text(s.api_key);
 
   async function detect() {
     const w = window as ShellTools;
@@ -1103,198 +1050,191 @@ export function SoulseekPanel({ store }: { store: SettingsStore }) {
     }
   }
 
-  async function test() {
-    const w = window as ShellTools;
-    // a change still waiting on autosave goes out first, so the server tests
-    // what is on screen (testConnection does the same for the page's own save)
-    if (w._settingsAutosaveOff !== true && settingsStore.hasPending()) await settingsStore.flush();
-    await w.testConnection?.('soulseek');
-  }
-
-  const hint = (children: ReactNode) => <small className="settings-hint">{children}</small>;
-
   return (
     <Panel id="soulseek-settings-container">
-      <div className="form-group">
-        <label>slskd URL:</label>
-        <div className="path-input-group">
-          <input
+      <SheetGroup title="Connection" />
+      <SheetField label="slskd URL" htmlFor="soulseek-url">
+        <FieldLine>
+          <TextField
+            full
             type="url"
             id="soulseek-url"
             placeholder="http://localhost:5030"
             value={text(s.slskd_url)}
             onChange={(event) => set('slskd_url', event.target.value)}
           />
-          <button className="detect-button" onClick={() => void detect()}>
-            Auto-detect
-          </button>
-        </div>
-      </div>
-      <div className="form-group">
-        <label>API Key:</label>
-        <SecretInput
+          <Btn onClick={() => void detect()}>Auto-detect</Btn>
+        </FieldLine>
+      </SheetField>
+      <SheetField label="API key" htmlFor="soulseek-api-key" help={secretNote(key)}>
+        <SecretField
           id="soulseek-api-key"
           placeholder="Slskd API Key"
-          value={text(s.api_key)}
+          value={key}
           onChange={(value) => set('api_key', value)}
         />
-      </div>
-      <div className="form-group">
-        <label>Search Timeout (seconds):</label>
-        <NumberField
+      </SheetField>
+
+      <SheetGroup title="Searching" />
+      <Row
+        field
+        label="Search timeout"
+        htmlFor="soulseek-search-timeout"
+        help="How long to search for tracks (15 to 300 seconds)."
+      >
+        <DraftNumber
           store={store}
           id="soulseek-search-timeout"
+          unit="seconds"
           placeholder="60"
           min="15"
           max="300"
           value={num(s.search_timeout, 60)}
           save={(raw) => set('search_timeout', int(raw, 60))}
         />
-        {hint('How long to search for tracks (15-300 seconds)')}
-      </div>
-      <div className="form-group">
-        <label>Search Timeout Buffer (seconds):</label>
-        <NumberField
-          store={store}
-          id="soulseek-search-timeout-buffer"
-          placeholder="15"
-          min="5"
-          max="60"
-          value={num(s.search_timeout_buffer, 15)}
-          save={(raw) => set('search_timeout_buffer', int(raw, 15))}
-        />
-        {hint('Extra time to wait for late results (5-60 seconds)')}
-      </div>
-      <div className="form-group">
-        <label>Minimum Delay Between Searches (seconds):</label>
-        <NumberField
-          store={store}
-          id="soulseek-search-min-delay-seconds"
-          placeholder="0"
-          min="0"
-          max="60"
-          value={num(s.search_min_delay_seconds, 0, true)}
-          save={(raw) => set('search_min_delay_seconds', int(raw, 0))}
-        />
-        {hint(
-          'Forces a gap between consecutive searches. Smooths burst patterns that trip ISP anti-abuse (e.g. Bell Canada cuts the WAN after rapid peer-connection spikes). 0 disables.',
-        )}
-      </div>
-      <div className="form-group">
-        <label>Minimum Peer Upload Speed:</label>
-        <select
+      </Row>
+      <Row
+        field
+        label="Minimum peer upload speed"
+        htmlFor="soulseek-min-peer-speed"
+        help="Ignore results from peers slower than this."
+      >
+        <Select
           id="soulseek-min-peer-speed"
+          options={PEER_SPEEDS}
           value={num(s.min_peer_upload_speed, 0)}
           onChange={(event) => set('min_peer_upload_speed', int(event.target.value, 0))}
-        >
-          <option value="0">Any speed</option>
-          <option value="1">1 Mbps</option>
-          <option value="2">2 Mbps</option>
-          <option value="3">3 Mbps</option>
-          <option value="4">4 Mbps</option>
-          <option value="5">5 Mbps</option>
-          <option value="10">10 Mbps</option>
-        </select>
-        {hint('Ignore search results from peers with upload speed below this threshold')}
-      </div>
-      <div className="form-group">
-        <label>Max Peer Queue Length:</label>
-        <select
+        />
+      </Row>
+      <Row
+        field
+        label="Max peer queue length"
+        htmlFor="soulseek-max-peer-queue"
+        help="Skip peers with a longer queue. Peers with shorter queues are preferred either way."
+      >
+        <Select
           id="soulseek-max-peer-queue"
+          options={PEER_QUEUES}
           value={num(s.max_peer_queue, 0)}
           onChange={(event) => set('max_peer_queue', int(event.target.value, 0))}
+        />
+      </Row>
+      <Row
+        label="Retry slow Soulseek downloads"
+        htmlFor="soulseek-observed-speed-fallback-enabled"
+        help="Off by default. Tries another peer when one is slow. Applies to automatic tracks and album bundles when another eligible peer is there, never to files you picked by hand."
+      >
+        <Switch
+          id="soulseek-observed-speed-fallback-enabled"
+          checked={s.observed_speed_fallback_enabled === true}
+          onChange={(event) => set('observed_speed_fallback_enabled', event.target.checked)}
+        />
+      </Row>
+      <More
+        count={6}
+        names="timeout buffer, search delay, slow download speed, download timeout, cleanup"
+      >
+        <Row
+          field
+          label="Search timeout buffer"
+          htmlFor="soulseek-search-timeout-buffer"
+          help="Extra time to wait for late results (5 to 60 seconds)."
         >
-          <option value="0">No limit</option>
-          <option value="5">5</option>
-          <option value="10">10</option>
-          <option value="20">20</option>
-          <option value="50">50</option>
-          <option value="100">100</option>
-        </select>
-        {hint(
-          'Skip peers with a queue longer than this (prefers peers with shorter queues regardless)',
-        )}
-      </div>
-      <div className="form-group">
-        <label className="checkbox-label">
-          <input
-            type="checkbox"
-            id="soulseek-observed-speed-fallback-enabled"
-            checked={s.observed_speed_fallback_enabled === true}
-            onChange={(event) => set('observed_speed_fallback_enabled', event.target.checked)}
+          <DraftNumber
+            store={store}
+            id="soulseek-search-timeout-buffer"
+            unit="seconds"
+            placeholder="15"
+            min="5"
+            max="60"
+            value={num(s.search_timeout_buffer, 15)}
+            save={(raw) => set('search_timeout_buffer', int(raw, 15))}
           />
-          Retry slow Soulseek downloads
-        </label>
-        {hint(
-          'Off by default. Applies to automatic tracks and album bundles when another eligible peer is available; not manually chosen files.',
-        )}
-      </div>
-      <div className="form-group">
-        <label>Minimum Observed Download Speed (KB/s):</label>
-        <NumberField
-          store={store}
-          id="soulseek-min-observed-download-speed"
-          placeholder="250"
-          min="0"
-          step="50"
-          value={num(s.min_observed_download_speed_kbps, 250, true)}
-          save={(raw) => {
-            // _cfgInt: blank or junk saves the default, 0 stays 0
-            const n = parseInt(raw, 10);
-            set('min_observed_download_speed_kbps', Number.isFinite(n) ? n : 250);
-          }}
-        />
-        {hint(
-          "When enabled, try the next Soulseek candidate after roughly one minute below this observed speed. Uses actual byte progress rather than the peer's advertised speed. The final available candidate is always allowed to continue. 0 also disables.",
-        )}
-      </div>
-      <div className="form-group">
-        <label>Download Timeout (minutes):</label>
-        <NumberField
-          store={store}
-          id="soulseek-download-timeout"
-          placeholder="10"
-          min="2"
-          max="60"
-          value={text(Math.round((Number(s.download_timeout) || 600) / 60))}
-          // stored in seconds, shown in minutes
-          save={(raw) => set('download_timeout', int(raw, 10) * 60)}
-        />
-        {hint('Abandon stuck downloads after this many minutes')}
-      </div>
-      <div className="form-group">
-        <label className="checkbox-label">
-          <input
-            type="checkbox"
+        </Row>
+        <Row
+          field
+          label="Minimum delay between searches"
+          htmlFor="soulseek-search-min-delay-seconds"
+          help="Forces a gap between searches. Smooths out bursts that trip an ISP's anti-abuse (Bell Canada cuts the line after rapid spikes in peer connections). 0 turns it off."
+        >
+          <DraftNumber
+            store={store}
+            id="soulseek-search-min-delay-seconds"
+            unit="seconds"
+            placeholder="0"
+            min="0"
+            max="60"
+            value={num(s.search_min_delay_seconds, 0, true)}
+            save={(raw) => set('search_min_delay_seconds', int(raw, 0))}
+          />
+        </Row>
+        <Row
+          field
+          label="Minimum observed download speed"
+          htmlFor="soulseek-min-observed-download-speed"
+          help="With Retry slow Soulseek downloads on, the next candidate is tried after about a minute below this speed. It reads the bytes that actually arrive, not the speed a peer advertises. The last candidate is always allowed to finish. 0 also turns it off."
+        >
+          <DraftNumber
+            store={store}
+            id="soulseek-min-observed-download-speed"
+            unit="KB/s"
+            placeholder="250"
+            min="0"
+            step="50"
+            value={num(s.min_observed_download_speed_kbps, 250, true)}
+            save={(raw) => {
+              // _cfgInt: blank or junk saves the default, 0 stays 0
+              const n = parseInt(raw, 10);
+              set('min_observed_download_speed_kbps', Number.isFinite(n) ? n : 250);
+            }}
+          />
+        </Row>
+        <Row
+          field
+          label="Download timeout"
+          htmlFor="soulseek-download-timeout"
+          help="Give up on a stuck download after this long."
+        >
+          <DraftNumber
+            store={store}
+            id="soulseek-download-timeout"
+            unit="minutes"
+            placeholder="10"
+            min="2"
+            max="60"
+            value={text(Math.round((Number(s.download_timeout) || 600) / 60))}
+            // stored in seconds, shown in minutes
+            save={(raw) => set('download_timeout', int(raw, 10) * 60)}
+          />
+        </Row>
+        <Row
+          label="Auto-clear slskd search history"
+          htmlFor="soulseek-auto-clear-searches"
+          help="Cleans old searches out of slskd when there are more than 200. Turn it off to keep searches you ran by hand in slskd's list."
+        >
+          <Switch
             id="soulseek-auto-clear-searches"
             checked={s.auto_clear_searches !== false}
             onChange={(event) => set('auto_clear_searches', event.target.checked)}
           />
-          Auto-clear slskd search history
-        </label>
-        {hint(
-          "Automatically cleans old searches from slskd when over 200 entries. Disable if you want to keep manual searches in slskd's queue.",
-        )}
-      </div>
-      <div className="form-group">
-        <label>slskd Cleanup Scope:</label>
-        <select
-          id="soulseek-cleanup-scope"
-          value={s.cleanup_scope === 'all' ? 'all' : 'own'}
-          onChange={(event) => set('cleanup_scope', event.target.value === 'all' ? 'all' : 'own')}
+        </Row>
+        <Row
+          field
+          label="slskd cleanup scope"
+          htmlFor="soulseek-cleanup-scope"
+          help="Which transfers and searches cleanup removes. Keep it on SoulSync's own if other apps (Lidarr, another SoulSync, slskd's own page) share this slskd. Everything clears every client's finished downloads and is only safe when SoulSync is the only one using it."
         >
-          <option value="own">Only SoulSync's own transfers</option>
-          <option value="all">Everything in slskd</option>
-        </select>
-        {hint(
-          'Which transfers and searches cleanup removes. Leave on "own" if other apps (Lidarr, another SoulSync, slskd\'s own UI) share this slskd. "Everything" clears all clients\' finished downloads and is only safe when SoulSync is the only user.',
-        )}
-      </div>
-      <div className="form-actions" style={{ marginTop: '8px' }}>
-        <button className="test-button" onClick={() => void test()}>
-          Test Soulseek Connection
-        </button>
-      </div>
+          <Select
+            id="soulseek-cleanup-scope"
+            value={s.cleanup_scope === 'all' ? 'all' : 'own'}
+            onChange={(event) => set('cleanup_scope', event.target.value === 'all' ? 'all' : 'own')}
+            options={[
+              { value: 'own', label: "Only SoulSync's own transfers" },
+              { value: 'all', label: 'Everything in slskd' },
+            ]}
+          />
+        </Row>
+      </More>
     </Panel>
   );
 }
