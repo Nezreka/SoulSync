@@ -74,7 +74,6 @@ export function ReassignModal({
   const [album, setAlbum] = useState<ReassignAlbum | null>(null);
 
   const [preview, setPreview] = useState<ReassignPreview | null>(null);
-  const [replace, setReplace] = useState(true);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -148,7 +147,9 @@ export function ReassignModal({
         artist_id: artist.id,
         artist_name: artist.name,
         album_type: album.album_type ?? null,
-        replace,
+        // #2193: a reassign moves the files. it never leaves the originals
+        // behind as a second copy of the album
+        replace: true,
         // Only ever true because the preview above showed the user exactly
         // which tracks would be left behind.
         allow_partial: (preview?.unmapped_count ?? 0) > 0,
@@ -373,15 +374,10 @@ export function ReassignModal({
         </div>
 
         <div className="reid-footer">
-          <label className="reid-replace">
-            <input
-              type="checkbox"
-              checked={replace}
-              onChange={(e) => setReplace(e.target.checked)}
-            />
-            <span className="reid-replace-box" />
-            <span className="reid-replace-text">Replace the originals after the re-import</span>
-          </label>
+          <span className="reid-replace-text">
+            The files move to the new release, nothing is copied. For one song that belongs on an
+            album you already have, use Move a track here on that album&apos;s missing row.
+          </span>
           <div className="reid-footer-actions">
             {step !== 'artist' ? (
               <button

@@ -85,6 +85,10 @@ class QueueItem:
     # request of its own, so the item carries who it is working for; a locked
     # album is only moved for a person.
     by_user: bool = False
+    # #2193: only these tracks of the album move (a track moved into a
+    # missing slot), never the rest of an album nobody asked to rename.
+    # None is the whole album.
+    track_ids: Optional[List[int]] = None
     status: str = 'queued'              # queued | running | done | failed | cancelled
     started_at: Optional[float] = None
     finished_at: Optional[float] = None
@@ -110,6 +114,7 @@ class QueueItem:
             'artist_name': self.artist_name,
             'library': self.library,
             'by_user': self.by_user,
+            'track_ids': self.track_ids,
             'enqueued_at': self.enqueued_at,
             'started_at': self.started_at,
             'finished_at': self.finished_at,
@@ -181,6 +186,7 @@ class ReorganizeQueue:
         album_title: str,
         artist_id: Optional[str],
         artist_name: str,
+        track_ids: Optional[List[int]] = None,
     ) -> dict:
         """Add an album to the queue. Returns a result dict:
 
@@ -198,9 +204,13 @@ class ReorganizeQueue:
         if not by_user and _album_locked(album_id, record=True):
             return {'queued': False, 'reason': 'locked'}
         with self._cond:
+            wanted = sorted({int(t) for t in track_ids}) if track_ids else None
             for existing in self._items:
                 if (existing.album_id == album_id and _covers(existing.library, library)
-                        and existing.status in ('queued', 'running')):
+                        # a run already going planned before a track moved in
+                        and existing.status in (('queued', 'running') if wanted is None
+                                                else ('queued',))
+                        and _covers_tracks(existing.track_ids, wanted)):
                     return {
                         'queued': False,
                         'reason': 'already_queued',
@@ -216,6 +226,7 @@ class ReorganizeQueue:
                 enqueued_at=time.time(),
                 library=library,
                 by_user=by_user,
+                track_ids=wanted,
             )
             self._items.append(item)
             self._persist(item)
@@ -429,6 +440,7 @@ class ReorganizeQueue:
                         enqueued_at=float(snap.get('enqueued_at') or time.time()),
                         library=snap.get('library'),
                         by_user=bool(snap.get('by_user')),
+                        track_ids=snap.get('track_ids') or None,
                     )
                 except (KeyError, TypeError, ValueError):
                     continue
@@ -610,6 +622,14 @@ def _covers(queued_library, library) -> bool:
     """Does a queued item already do this library's run? One queued for every
     library (None) covers each of them."""
     return queued_library is None or queued_library == library
+
+
+def _covers_tracks(queued_tracks, tracks) -> bool:
+    """Does a queued item already move these tracks? A whole-album item
+    (None) moves every one; a track item only its own."""
+    if queued_tracks is None:
+        return True
+    return tracks is not None and set(tracks) <= set(queued_tracks)
 
 
 def _library_for_new_item():

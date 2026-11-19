@@ -2075,6 +2075,12 @@ def finalize_manual_rematch_replace(runtime, staged_path: str, context: Dict[str
                     hint.replace_track_id)
         consume_hint(cursor, hint.id)
         conn.commit()
+        if hint.replace_track_id:
+            try:
+                from core.library2.mirror_outbox import drain_soon
+                drain_soon(get_database())
+            except Exception as exc:  # noqa: BLE001 - the outbox catches up later
+                runtime.logger.debug("outbox drain after re-identify skipped: %s", exc)
     except Exception as exc:
         runtime.logger.warning("Manual re-identify cleanup failed (import still succeeded): %s", exc)
     finally:

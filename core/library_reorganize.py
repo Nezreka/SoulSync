@@ -1117,7 +1117,8 @@ def reorganize_album_rename_only(
     if summary.get('moved', 0) > 0 and preview.get('record_type') == 'compilation':
         _persist_compilation_record_type(db, album_id)
 
-    if (_run_placed_everything(summary, stop_check)
+    # a run limited to some tracks (#2193) says nothing about the rest
+    if (_run_placed_everything(summary, stop_check) and not preview.get('track_subset')
             and tracks and all(t.get('matched') and t.get('file_exists')
                                and not t.get('collision') for t in tracks)):
         mark_album_placed(db, album_id)
