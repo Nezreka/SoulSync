@@ -46,8 +46,8 @@ TRUNCATE_WAIT_MS = 2000
 PRUNE_BATCH = 5000
 
 
-# (table, timestamp column, keep days, how the column stores time, extra where).
-# only tables that are a cache or a log of soulsync's own work. each is
+# (table, timestamp column, keep days, how the column stores time, extra where,
+# the partial index the prune reads). only tables that are a cache or a log of soulsync's own work. each is
 # skipped when the table or column isn't there.
 #   'iso'   : text timestamps ('2026-11-19 08:00:00' or iso-8601)
 #   'epoch' : unix seconds
@@ -58,11 +58,11 @@ RETENTION_RULES = (
     # library was recording/release rows. artist rows stay, the naming facts
     # read them at any age (core/imports/artist_facts)
     ("musicbrainz_cache", "last_updated", 180, "iso",
-     "entity_type IN ('recording', 'release')"),
+     "entity_type IN ('recording', 'release')", "idx_mb_cache_stale"),
     # repair findings someone or something resolved. a resolved row only
     # matters for the 7-day recurrence grace; dismissed rows are decisions
     # and stay. 164k resolved retag rows held 336 MB of details on that library
-    ("repair_findings", "resolved_at", 90, "iso", "status = 'resolved'"),
+    ("repair_findings", "resolved_at", 90, "iso", "status = 'resolved'", "idx_rf_resolved_age"),
 )
 
 
@@ -81,24 +81,38 @@ def _cutoff(kind: str, days: float, now: float):
     return time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(at))
 
 
+def _indexes(conn) -> set:
+    return {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'index'")}
+
+
+def select_sql(rule, indexes=()) -> str:
+    """the rowids a rule deletes, one batch. named index when it exists: the
+    planner otherwise picks an entity_type or status index and reads every
+    matching row's date off the table (json and all)."""
+    table, column, _days, _kind, where = rule[:5]
+    index = rule[5] if len(rule) > 5 else None
+    hint = f' INDEXED BY "{index}"' if index and index in indexes else ""
+    extra = f" AND ({where})" if where else ""
+    return f'SELECT rowid FROM "{table}"{hint} WHERE "{column}" < ?{extra} LIMIT {PRUNE_BATCH}'
+
+
 def prune(conn, *, now: Optional[float] = None, rules=None,
           should_stop=None) -> Dict[str, int]:
     """apply the retention rules. returns {table: rows deleted}."""
     now = time.time() if now is None else now
-    tables = _tables(conn)
+    tables, indexes = _tables(conn), _indexes(conn)
     removed: Dict[str, int] = {}
-    for table, column, days, kind, where in (RETENTION_RULES if rules is None else rules):
+    for rule in (RETENTION_RULES if rules is None else rules):
+        table, column, days, kind = rule[:4]
         if table not in tables or column not in _columns(conn, table):
             continue
         cutoff = _cutoff(kind, days, now)
-        extra = f" AND ({where})" if where else ""
+        batch = select_sql(rule, indexes)
         total = 0
         while True:
             if should_stop and should_stop():
                 break
-            cur = conn.execute(
-                f'DELETE FROM "{table}" WHERE rowid IN (SELECT rowid FROM "{table}" '
-                f'WHERE "{column}" < ?{extra} LIMIT {PRUNE_BATCH})', (cutoff,))
+            cur = conn.execute(f'DELETE FROM "{table}" WHERE rowid IN ({batch})', (cutoff,))
             conn.commit()
             n = max(cur.rowcount or 0, 0)
             total += n

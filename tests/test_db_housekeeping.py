@@ -42,6 +42,14 @@ def test_prune_deletes_only_rows_past_the_cutoff(tmp_path):
     assert sorted(r[0] for r in conn.execute("SELECT kind FROM journal")) == ["keep", "new", "new"]
 
 
+def test_a_missing_index_only_drops_the_hint(tmp_path):
+    _, conn = _db(tmp_path)
+    conn.execute("CREATE TABLE journal (id INTEGER PRIMARY KEY, at TEXT)")
+    conn.execute("INSERT INTO journal (at) VALUES (?)", (_iso(90),))
+    conn.commit()
+    assert hk.prune(conn, rules=(("journal", "at", 30, "iso", "", "idx_not_there"),)) == {"journal": 1}
+
+
 def test_prune_works_in_batches(tmp_path, monkeypatch):
     _, conn = _db(tmp_path)
     conn.execute("CREATE TABLE journal (id INTEGER PRIMARY KEY, at TEXT)")
@@ -63,7 +71,7 @@ _PROTECTED_PREFIXES = ("lib2_artists", "lib2_albums", "lib2_tracks", "lib2_track
 
 def test_no_retention_rule_touches_user_or_library_data():
     assert hk.RETENTION_RULES, "the rules list went empty"
-    for table, column, days, kind, _where in hk.RETENTION_RULES:
+    for table, column, days, kind, *_rest in hk.RETENTION_RULES:
         assert not table.startswith(_PROTECTED_PREFIXES), table
         assert days >= 30, f"{table}: keep at least a month"
         assert kind in ("iso", "epoch")
@@ -226,11 +234,15 @@ def test_the_prune_reads_an_index_not_the_table():
     import web_server
     conn = web_server.get_database()._get_connection()
     try:
-        for table, column, _days, _kind, where in hk.RETENTION_RULES:
+        # the partial index on the age column, not a status index that still
+        # reads every resolved row to look at its date
+        want = {"musicbrainz_cache": "idx_mb_cache_stale", "repair_findings": "idx_rf_resolved_age"}
+        assert set(want) == {r[0] for r in hk.RETENTION_RULES}
+        indexes = hk._indexes(conn)
+        for rule in hk.RETENTION_RULES:
             plan = " ".join(str(r[3]) for r in conn.execute(
-                f'EXPLAIN QUERY PLAN SELECT rowid FROM "{table}" WHERE "{column}" < ? '
-                f'AND ({where}) LIMIT 5', ("2000-01-01",)))
-            assert "USING" in plan and "INDEX" in plan, (table, plan)
+                "EXPLAIN QUERY PLAN " + hk.select_sql(rule, indexes), ("2000-01-01",)))
+            assert f"INDEX {want[rule[0]]}" in plan, (rule[0], plan)
     finally:
         conn.close()
 
