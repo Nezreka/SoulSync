@@ -224,6 +224,18 @@ def test_a_followed_show_still_airing_is_protected(db, worker):
     assert _stored(db, "show", [sid])[sid]["gate"] is None
 
 
+@pytest.mark.parametrize("status,held", [
+    (None, True), ("", True), ("  ", True), ("Returning Series", True), ("In Production", True),
+    ("Ended", False), ("canceled", False), ("Cancelled", False)])
+def test_a_show_with_no_status_yet_is_not_assumed_ended(db, status, held):
+    # the calendar's loose rule (#2211 review S3): an enrichment gap never lets it go
+    sid = _show(db, "Maybe", tmdb=21)
+    _sql(db, "UPDATE shows SET status=? WHERE id=?", (status, sid))
+    assert (21 in db.shelf_life_followed_airing([1])) is held
+    gate = sl.score(_facts(db, "show")[sid], {}, datetime.now())["gate"]
+    assert (gate == "following") is held
+
+
 def test_the_server_add_date_wins_over_soulsync_first_seeing_it(db, worker):
     # a fresh install sees every film "this week"; the server knows better
     mid = _movie(db, "Old", tmdb=1, added=3, imdb=5.0, streaming="ok", count=5)

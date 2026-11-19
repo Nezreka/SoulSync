@@ -9585,7 +9585,9 @@ class VideoDatabase:
     def shelf_life_followed_airing(self, profile_ids) -> set:
         """tmdb ids of shows still airing that someone follows: an explicit
         follow, or the default follow an airing library show has for every
-        profile that hasn't muted it (the watchlist's own rule)."""
+        profile that hasn't muted it (the watchlist's own rule). airing is
+        the calendar's loose rule (_LOOSE_ACTIVE_SHOW_SQL): a show whose
+        status isn't known yet counts as airing, the safe side for a delete."""
         pids = sorted({int(p) for p in (profile_ids or [])}) or [1]
         conn = self._get_connection()
         try:
@@ -9597,8 +9599,11 @@ class VideoDatabase:
                     "(SELECT COUNT(DISTINCT w.profile_id) FROM video_watchlist w WHERE w.kind = 'show' "
                     " AND w.tmdb_id = s.tmdb_id AND w.state = 'mute' AND w.profile_id IN ("
                     + ",".join("?" * len(pids)) + ")) AS mutes "
-                    "FROM shows s WHERE s.tmdb_id IS NOT NULL AND " + self._ACTIVE_SHOW_SQL.replace(
-                        "status", "s.status"), pids):
+                    "FROM shows s WHERE s.tmdb_id IS NOT NULL AND "
+                    # the calendar's loose rule: a show with no status yet is
+                    # not assumed ended, so an enrichment gap never lets it go
+                    "(s.status IS NULL OR TRIM(s.status) = '' "
+                    " OR LOWER(s.status) NOT IN ('ended', 'canceled', 'cancelled'))", pids):
                 if r["follows"] or r["mutes"] < len(pids):
                     out.add(int(r["tmdb_id"]))
             return out
