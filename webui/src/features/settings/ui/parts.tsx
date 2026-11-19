@@ -1322,6 +1322,21 @@ export function KindSay({ children }: { children: ReactNode }) {
  * copy button. `label` says where it goes.
  */
 export function CopyValue({ id, label, value }: { id?: string; label?: ReactNode; value: string }) {
+  return (
+    <div className={s.copy} data-copy="">
+      {label ? <div className={s.copyLabel}>{label}</div> : null}
+      <div className={s.copyLine}>
+        <code id={id} className={s.copyText}>
+          {value}
+        </code>
+        <CopyButton value={value} />
+      </div>
+    </div>
+  );
+}
+
+/** a copy button for inside a field (`trailing`) or beside a value; says Copied for a moment */
+export function CopyButton({ value }: { value: string }) {
   const [copied, setCopied] = useState(false);
   const copy = () => {
     void navigator.clipboard
@@ -1333,22 +1348,15 @@ export function CopyValue({ id, label, value }: { id?: string; label?: ReactNode
       .catch(() => {});
   };
   return (
-    <div className={s.copy} data-copy="">
-      {label ? <div className={s.copyLabel}>{label}</div> : null}
-      <div className={s.copyLine}>
-        <code id={id} className={s.copyText}>
-          {value}
-        </code>
-        <button
-          type="button"
-          className={s.fieldBtn}
-          aria-label={copied ? 'Copied' : 'Copy'}
-          title={copied ? 'Copied' : 'Copy'}
-          onClick={copy}
-        >
-          <Icon name={copied ? 'check' : 'copy'} size={14} />
-        </button>
-      </div>
-    </div>
+    <button
+      type="button"
+      className={s.fieldBtn}
+      aria-label={copied ? 'Copied' : 'Copy'}
+      title={copied ? 'Copied' : 'Copy'}
+      data-copy-btn=""
+      onClick={copy}
+    >
+      <Icon name={copied ? 'check' : 'copy'} size={14} />
+    </button>
   );
 }

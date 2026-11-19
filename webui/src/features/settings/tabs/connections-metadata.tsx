@@ -31,7 +31,7 @@ import {
   ActionRow,
   Btn,
   Card,
-  CopyValue,
+  CopyButton,
   FieldNote,
   More,
   Note,
@@ -363,8 +363,8 @@ export function useText(store: SettingsStore, section: string, key: string) {
   };
 }
 
-/** a redirect uri: the saved one, else the default, once loaded; the
- *  copyable line under it follows what is typed */
+/** a redirect uri: the saved one, else the default, once loaded; its copy
+ *  button copies what is typed (or the default when it is emptied) */
 function useRedirect({
   store,
   section,
@@ -391,9 +391,9 @@ function useRedirect({
         placeholder={fallback}
         value={draft.value}
         onChange={(event) => draft.onChange(event.target.value)}
+        trailing={<CopyButton value={draft.value || fallback} />}
       />
     ),
-    shown: draft.value || fallback,
   };
 }
 
@@ -506,15 +506,10 @@ function SpotifyCard({ store }: { store: SettingsStore }) {
       <SheetField
         label="Redirect URI"
         htmlFor="spotify-redirect-uri"
-        help="Leave it as it is unless SoulSync runs on another machine."
+        help="Add this address to your Spotify app's Redirect URIs in the Spotify Developer Dashboard. Leave it as it is unless SoulSync runs on another machine."
       >
         {redirect.input}
       </SheetField>
-      <CopyValue
-        id="spotify-callback-display"
-        label="Add this address to your Spotify app's Redirect URIs in the Spotify Developer Dashboard."
-        value={redirect.shown}
-      />
       <More label="On a NAS or remote server?" names="Spotify needs HTTPS there">
         <FieldNote>
           Spotify needs HTTPS for any address that is not this machine. On a NAS or remote server,
@@ -688,14 +683,13 @@ function DeezerCard({ store }: { store: SettingsStore }) {
           onChange={appSecret.onChange}
         />
       </SheetField>
-      <SheetField label="Redirect URI" htmlFor="deezer-redirect-uri">
+      <SheetField
+        label="Redirect URI"
+        htmlFor="deezer-redirect-uri"
+        help="Add this address to your Deezer app at developers.deezer.com."
+      >
         {redirect.input}
       </SheetField>
-      <CopyValue
-        id="deezer-callback-display"
-        label="Add this address to your Deezer app at developers.deezer.com."
-        value={redirect.shown}
-      />
       <SheetGroup title="Or an ARL token" />
       <SheetField
         label="ARL token"
@@ -827,14 +821,13 @@ function TidalCard({ store }: { store: SettingsStore }) {
           onChange={secret.onChange}
         />
       </SheetField>
-      <SheetField label="Redirect URI" htmlFor="tidal-redirect-uri">
+      <SheetField
+        label="Redirect URI"
+        htmlFor="tidal-redirect-uri"
+        help="Add this address to your Tidal app's configuration."
+      >
         {redirect.input}
       </SheetField>
-      <CopyValue
-        id="tidal-callback-display"
-        label="Add this address to your Tidal app's configuration."
-        value={redirect.shown}
-      />
       <ActionRow
         label="Start over"
         help="Clears the saved token, for when signing in again does not pick up new permissions. Authenticate afterwards."

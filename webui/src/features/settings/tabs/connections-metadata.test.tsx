@@ -353,7 +353,7 @@ describe('Experimental', () => {
 });
 
 describe('the service cards', () => {
-  it('each field saves its key; the redirect line follows the field', async () => {
+  it('each field saves its key; the redirect uri is shown once', async () => {
     part('api-music');
     loaded({
       spotify: { client_id: 'a', client_secret: '__redacted_unchanged__' },
@@ -364,15 +364,15 @@ describe('the service cards', () => {
       tidal: {},
     });
     expect(el('spotify-redirect-uri').value).toBe('http://127.0.0.1:8888/callback');
-    expect(el('spotify-callback-display').textContent).toBe('http://127.0.0.1:8888/callback');
-    // emptied, it stays empty while the new one is typed; the shown callback
-    // falls back to the default, as #spotify-callback-display did
+    // the address is on screen once: the field, no copy line under it
+    const sheet = el('spotify-redirect-uri').closest<HTMLElement>('[data-field]')!.parentElement!;
+    expect(sheet.textContent!.split('http://127.0.0.1:8888/callback').length).toBe(1);
+    expect(document.querySelector('[data-copy]')).toBeNull();
+    // emptied, it stays empty while the new one is typed
     fireEvent.change(el('spotify-redirect-uri'), { target: { value: '' } });
     expect(el('spotify-redirect-uri').value).toBe('');
-    expect(el('spotify-callback-display').textContent).toBe('http://127.0.0.1:8888/callback');
     fireEvent.change(el('spotify-redirect-uri'), { target: { value: 'https://me.example/cb' } });
     expect(el('spotify-redirect-uri').value).toBe('https://me.example/cb');
-    expect(el('spotify-callback-display').textContent).toBe('https://me.example/cb');
     fireEvent.change(el('spotify-client-id'), { target: { value: 'b' } });
     fireEvent.click(el('metadata-spotify-free-enrichment'));
     fireEvent.change(el('itunes-country'), { target: { value: 'GB' } });
@@ -414,17 +414,25 @@ describe('the service cards', () => {
     open.mockRestore();
   });
 
-  it('a callback address is a quiet line to copy, following the field', async () => {
+  it('the redirect uri field has its own copy button, copying what is typed', async () => {
     part('api-music');
     loaded({ spotify: {}, deezer: {}, tidal: {} });
     const writeText = vi.fn(() => Promise.resolve());
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
-    const line = el('tidal-callback-display').closest<HTMLElement>('[data-copy]')!;
-    fireEvent.click(line.querySelector('button')!);
+    const copyOf = (id: string) =>
+      el(id).parentElement!.querySelector<HTMLButtonElement>('[data-copy-btn]')!;
+    fireEvent.click(copyOf('tidal-redirect-uri'));
     expect(writeText).toHaveBeenCalledWith('http://127.0.0.1:8889/tidal/callback');
     await waitFor(() =>
-      expect(line.querySelector('button')!.getAttribute('aria-label')).toBe('Copied'),
+      expect(copyOf('tidal-redirect-uri').getAttribute('aria-label')).toBe('Copied'),
     );
+    // emptied, it copies the default the server falls back to
+    fireEvent.change(el('deezer-redirect-uri'), { target: { value: 'https://me.example/dz' } });
+    fireEvent.click(copyOf('deezer-redirect-uri'));
+    expect(writeText).toHaveBeenLastCalledWith('https://me.example/dz');
+    fireEvent.change(el('spotify-redirect-uri'), { target: { value: '' } });
+    fireEvent.click(copyOf('spotify-redirect-uri'));
+    expect(writeText).toHaveBeenLastCalledWith('http://127.0.0.1:8888/callback');
   });
 
   it('a test saves what is waiting first', async () => {
