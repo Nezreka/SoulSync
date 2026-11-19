@@ -8,6 +8,7 @@ import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createSettingsHost, mountSettingsHost, type SettingsTabProps } from './host';
+import { nav } from './nav';
 import { pageTabs } from './page-tabs';
 import { SettingsPage } from './settings-page';
 import { createSettingsStore } from './settings-store';
@@ -79,14 +80,13 @@ describe('the settings host', () => {
 
   it("the page's buttons call the shell bundle's functions, one copy of its state", () => {
     const w = window as unknown as Record<string, unknown>;
-    w.switchSettingsTab = vi.fn();
     w.saveSettings = vi.fn(() => Promise.resolve());
     render(<SettingsPage tabs={{}} />);
-    (document.querySelector('[data-tab="logs"]') as HTMLButtonElement).click();
-    expect(w.switchSettingsTab).toHaveBeenCalledWith('logs');
+    // a tab moves the page's one place (nav.ts), which the address follows
+    act(() => (document.querySelector('[data-tab="advanced"]') as HTMLButtonElement).click());
+    expect(nav.get().tab).toBe('advanced');
     (document.getElementById('save-settings') as HTMLButtonElement).click();
     expect(w.saveSettings).toHaveBeenCalledWith(false);
-    delete w.switchSettingsTab;
     delete w.saveSettings;
   });
 

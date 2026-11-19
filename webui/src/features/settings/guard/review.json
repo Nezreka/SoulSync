@@ -221,6 +221,14 @@
     "lvl-debug": "a css class of the log level buttons (.log-filter-btn.lvl-debug), not an id",
     "h3": "a tag name in the audit's hooks table, not an id",
     "ranked-targets": "a name in the audit's backend tests table, not an id on the page",
-    "Filtering": "a heading named in the audit's search anchors, not an id"
+    "Filtering": "a heading named in the audit's search anchors, not an id",
+    "source-tile-grid": "went with the old download chain and source tiles (settings-bic phase 1): the order list in #download-chain-widget replaced it; what the chain sends is pinned by the musicChain, videoChain and audiobookChain composites",
+    "dlchain-help": "went with the old download chain and source tiles (settings-bic phase 1): the order list in #download-chain-widget replaced it; what the chain sends is pinned by the musicChain, videoChain and audiobookChain composites",
+    "dlchain-pool": "went with the old download chain and source tiles (settings-bic phase 1): the order list in #download-chain-widget replaced it; what the chain sends is pinned by the musicChain, videoChain and audiobookChain composites",
+    "dlchain-mode-hint": "went with the old download chain and source tiles (settings-bic phase 1): the order list in #download-chain-widget replaced it; what the chain sends is pinned by the musicChain, videoChain and audiobookChain composites",
+    "dlchain-list": "went with the old download chain and source tiles (settings-bic phase 1): the order list in #download-chain-widget replaced it; what the chain sends is pinned by the musicChain, videoChain and audiobookChain composites",
+    "dlchain-slot": "went with the old download chain and source tiles (settings-bic phase 1): the order list in #download-chain-widget replaced it; what the chain sends is pinned by the musicChain, videoChain and audiobookChain composites",
+    "dlchain-filter": "the old chain's filter box over at most seven tiles, which saved nothing: gone with the pool (settings-bic phase 1). the 'Not used' list shows every source at once",
+    "src-modal-meta": "the source sheet's status words, drawn only while a sheet is open"
   }
 }

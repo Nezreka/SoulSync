@@ -57,6 +57,20 @@ export interface Generated {
 }
 
 /** fold one scenario's run into what has been gathered so far */
+/** where two request bodies part: the keys that differ, not two long lines */
+function bodyDiff(was: unknown, now: unknown): string {
+  const plain = (v: unknown): v is Record<string, unknown> =>
+    !!v && typeof v === 'object' && !Array.isArray(v);
+  if (!plain(was) || !plain(now)) return `was ${show(was)}, now ${show(now)}`;
+  const keys = [...new Set([...Object.keys(was), ...Object.keys(now)])].filter(
+    (key) => !same(was[key], now[key]),
+  );
+  return keys
+    .slice(0, 6)
+    .map((key) => `${key} was ${show(was[key])}, now ${show(now[key])}`)
+    .join('; ');
+}
+
 export function fold(into: Generated, run: ScenarioRun) {
   const { scenario } = run;
   for (const [key, entry] of run.entries) {
@@ -170,7 +184,7 @@ export function compare(key: string, was: ControlEntry, now: ControlEntry): stri
       const body = now.saves?.requests?.[i]?.body;
       if (!same(request.body, body))
         say(
-          `sends a different body to ${request.method} ${request.url}: was ${show(request.body)}, now ${show(body)}`,
+          `sends a different body to ${request.method} ${request.url}: ${bodyDiff(request.body, body)}`,
         );
     });
   } else if (same([...wasCalls].sort(), [...nowCalls].sort())) {

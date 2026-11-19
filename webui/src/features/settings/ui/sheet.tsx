@@ -124,9 +124,8 @@ export function Sheet({
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        data-stg-ui=""
       >
-        <div className={s.sheetHead}>
+        <div className={s.sheetHead} data-ui="">
           {mark}
           <div className={s.sheetTitles}>
             <h3 className={s.sheetTitle} id={titleId}>
@@ -140,7 +139,11 @@ export function Sheet({
         <div className={s.sheetBody} id={bodyId} ref={body}>
           {children}
         </div>
-        {foot ? <div className={s.sheetFoot}>{foot}</div> : null}
+        {foot ? (
+          <div className={s.sheetFoot} data-ui="">
+            {foot}
+          </div>
+        ) : null}
       </aside>
     </>
   );

@@ -276,10 +276,17 @@ async function probe(
   remount: () => Promise<void>,
 ) {
   const base = scenarioState(scenario);
+  // the controls' values, and how much page there is: a probe that leaves a
+  // row behind (a ranked target added) leaves every control as it was, and
+  // the next control's save would carry the row along
+  const size = () => page().querySelectorAll('*').length;
   let rest = snapshot(page());
+  let restSize = size();
   const same = () => {
     const now = snapshot(page());
-    return now.length === rest.length && now.every((line, i) => line === rest[i]);
+    return (
+      size() === restSize && now.length === rest.length && now.every((line, i) => line === rest[i])
+    );
   };
   const others = (also: Record<string, Value> | undefined) =>
     Object.entries(also ?? {}).flatMap(([otherKey, value]) => {
@@ -370,6 +377,7 @@ async function probe(
       await clock('remount', remount);
       timing.remounts += 1;
       rest = snapshot(page());
+      restSize = size();
     }
     backend.take();
   }

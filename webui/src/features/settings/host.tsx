@@ -12,8 +12,9 @@
 
 import type { ComponentType } from 'react';
 
-import { pageTabs } from './page-tabs';
+import { nav, resolveTab } from './nav';
 import { settingsStore, type SettingsPayload, type SettingsStore } from './settings-store';
+import { landHit } from './shell/search';
 import { applyAppearanceOnLoad } from './tabs/appearance';
 import { AppearanceTab } from './tabs/appearance-tab';
 import { checkQobuzAuthStatus } from './tabs/connections';
@@ -29,7 +30,6 @@ import { playlistItemError, templateErrors } from './tabs/organization';
 import { PeopleTab, openPeopleSettings } from './tabs/people/people-tab';
 import { QualityTab } from './tabs/quality-tab';
 import { sourcesModel } from './tabs/sources-model';
-import { SourcesTab } from './tabs/sources-tab';
 import { SystemTab } from './tabs/system-tab';
 
 export type SettingsTabKey =
@@ -72,6 +72,14 @@ export interface SoulSyncSettingsApi {
   /** what is wrong with the MusicBrainz server fields (Connections): the
    *  page save refuses while it is set, and says so */
   musicbrainzError: () => string | null;
+  /** how many changed settings wait to be saved (the save status counts them) */
+  pendingCount: () => number;
+  /** what holds every save back right now, in words */
+  blockers: () => Array<{ message: string }>;
+  /** go to the field the first blocker is about, and light it */
+  showBlocker: () => void;
+  /** what the server said when the last save failed */
+  lastError: () => string | null;
 }
 
 declare global {
@@ -91,7 +99,6 @@ export const SETTINGS_TABS: Partial<Record<SettingsTabKey, ComponentType<Setting
   logs: LogsTab,
   people: PeopleTab,
   quality: QualityTab,
-  sources: SourcesTab,
 };
 
 /** What opening Settings applies whatever tab it opens on. settings.js did
@@ -127,11 +134,33 @@ export function createSettingsHost({
   const mbError = () => (tabs.connections ? musicbrainzError() : null);
   store.block(() => !!mbError());
 
-  /** the tab the shell opened: the page (settings-page.tsx) renders every
-   *  tab and tells each whether it is the open one and how often it was
-   *  opened (step V4c; the host rendered them into the vanilla page's slots) */
+  /** a tab asked for by key, from anywhere (window.switchSettingsTab): where
+   *  the page is lives in nav.ts, and old keys are aliases there */
   function show(tab: string) {
-    pageTabs.show(tab);
+    nav.go(tab);
+  }
+
+  /** where each thing that can hold a save is, so the save status can go there */
+  function blockers() {
+    const found: Array<{ message: string; tab: string; id: string; service?: string }> = [];
+    const mb = mbError();
+    if (mb)
+      found.push({
+        message: mb,
+        tab: 'connections',
+        id: 'musicbrainz-base-url',
+        service: 'musicbrainz',
+      });
+    const templates = errors();
+    if (templates.length)
+      found.push({
+        message: `A naming template would not work: ${templates.join(', ')}.`,
+        tab: 'library',
+        id: 'template-album-path',
+      });
+    const item = itemError();
+    if (item) found.push({ message: item, tab: 'library', id: 'template-playlist-item' });
+    return found;
   }
 
   return {
@@ -154,6 +183,23 @@ export function createSettingsHost({
     templateErrors: errors,
     playlistItemError: itemError,
     musicbrainzError: mbError,
+    pendingCount: () => store.pendingCount(),
+    blockers: () => blockers().map(({ message }) => ({ message })),
+    showBlocker() {
+      const first = blockers()[0];
+      if (!first) return;
+      void landHit({
+        key: `blocker:${first.id}`,
+        label: first.message,
+        path: '',
+        words: '',
+        tab: resolveTab(first.tab).tab,
+        curated: true,
+        open: first.service ? { service: first.service } : undefined,
+        anchor: { id: first.id },
+      });
+    },
+    lastError: () => store.getState().error,
   };
 }
 

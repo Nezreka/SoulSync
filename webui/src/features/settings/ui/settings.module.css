@@ -5,6 +5,8 @@
 
 /* `hidden` must win over the display these set */
 .row[hidden],
+.btn[hidden],
+.saveWrap[hidden],
 .sheet[hidden],
 .scrim[hidden],
 .view[hidden],
@@ -19,7 +21,7 @@
   margin: 0 auto;
   padding: 24px 32px 48px;
   border: 1px solid var(--white-a08);
-  border-radius: 28px;
+  border-radius: var(--radius-sheet);
   background: var(--white-a02);
   color: var(--text-bright);
   font-family: var(--font-sans);
@@ -101,7 +103,7 @@
 
 .results {
   position: absolute;
-  z-index: var(--z-dropdown);
+  z-index: var(--z-menu);
   top: 48px;
   right: 0;
   width: min(520px, 92vw);
@@ -162,7 +164,7 @@
 }
 
 .hit {
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   background: rgba(var(--accent-rgb), 0.28);
   color: inherit;
 }
@@ -172,24 +174,6 @@
   padding: 14px 12px;
   color: var(--white-a60);
   font-size: 13px;
-}
-
-/* a field a search result landed on */
-.landed {
-  animation: landed 2s var(--ease-out);
-}
-
-@keyframes landed {
-  0%,
-  35% {
-    box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.75);
-    background-color: rgba(var(--accent-rgb), 0.1);
-  }
-
-  100% {
-    box-shadow: 0 0 0 2px transparent;
-    background-color: transparent;
-  }
 }
 
 /* ── tabs ── */
@@ -398,7 +382,7 @@
 .pillDot {
   width: 6px;
   height: 6px;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   background: var(--warning);
 }
 
@@ -751,7 +735,7 @@
   flex: none;
   width: 6px;
   height: 6px;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   background: var(--accent);
 }
 
@@ -763,7 +747,7 @@
   height: 18px;
   padding: 0;
   border: 1px solid var(--white-a15);
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   background: none;
   color: var(--white-a55);
   font: 600 11px/1 var(--font-sans);
@@ -841,7 +825,7 @@
   left: 3px;
   width: 18px;
   height: 18px;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   background: var(--white-a90);
   content: '';
   transition: transform var(--dur-fast) var(--ease-standard);
@@ -873,7 +857,7 @@
   height: 30px;
   padding: 0 13px;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   background: none;
   color: var(--white-a60);
   font: inherit;
@@ -941,6 +925,7 @@
 }
 
 .fieldSelect {
+  position: relative;
   width: auto;
   min-width: 150px;
   padding: 0;
@@ -1031,10 +1016,6 @@
   display: inline-flex;
   color: var(--white-a55);
   pointer-events: none;
-}
-
-.fieldSelect {
-  position: relative;
 }
 
 .fieldBtn {
@@ -1180,7 +1161,7 @@ button.chip:hover:not(:disabled) {
   margin-right: -6px;
   padding: 0;
   border: 0;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   background: none;
   color: var(--white-a45);
   cursor: pointer;
@@ -1244,7 +1225,7 @@ button.chip:hover:not(:disabled) {
   flex: none;
   width: 7px;
   height: 7px;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   background: var(--white-a30);
   content: '';
 }
@@ -1305,7 +1286,7 @@ button.chip:hover:not(:disabled) {
   height: 40px;
   overflow: hidden;
   border: 1px solid var(--white-a08);
-  border-radius: 11px;
+  border-radius: var(--radius-control);
   background: var(--white-a06);
   color: var(--white-a80);
 }
@@ -1329,13 +1310,13 @@ button.chip:hover:not(:disabled) {
 .markSm {
   width: 32px;
   height: 32px;
-  border-radius: 9px;
+  border-radius: var(--radius-md);
 }
 
 .markLg {
   width: 48px;
   height: 48px;
-  border-radius: 13px;
+  border-radius: var(--radius-lg);
 }
 
 /* no logo file: one line icon on the source's own colour (--brand, r, g, b) */
@@ -1635,7 +1616,7 @@ button.chip:hover:not(:disabled) {
 
 /* the row in the hand: lifted, above its neighbours */
 .srcLift {
-  z-index: 3;
+  z-index: 2;
   border-style: solid;
   border-color: rgba(var(--accent-rgb), 0.6);
   background: var(--bg-raised);
@@ -1692,7 +1673,7 @@ button.chip:hover:not(:disabled) {
   width: 28px;
   height: 28px;
   border: 1px solid var(--white-a12);
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   background: var(--bg-surface);
   color: var(--white-a75);
   font-size: 12.5px;
@@ -2298,7 +2279,7 @@ button.chip:hover:not(:disabled) {
     width: 38px;
     height: 4px;
     margin: 4px auto 10px;
-    border-radius: 2px;
+    border-radius: var(--radius-xs);
     background: var(--white-a20);
   }
 
@@ -2348,7 +2329,6 @@ button.chip:hover:not(:disabled) {
   .sheet,
   .scrim,
   .menu,
-  .landed,
   .spin {
     animation: none;
   }

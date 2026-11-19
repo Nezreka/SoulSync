@@ -233,25 +233,6 @@ export function VideoUsenetBlocks() {
           every episode in it imported.
         </div>
       </div>
-      <div className="form-group" id="video-redownload-failed-group">
-        <label className="checkbox-label">
-          <input
-            type="checkbox"
-            id="video-redownload-failed"
-            checked={config ? config.redownload_failed !== false : true}
-            onChange={(event) =>
-              void videoDownloads.change({ redownload_failed: event.target.checked })
-            }
-          />{' '}
-          When a video download fails, grab the next best release
-        </label>
-        <div className="setting-help-text">
-          When SABnzbd or the torrent client fails a movie or episode, or a torrent stalls, that
-          release is blocklisted and the next one your quality profile ranks is grabbed right away.
-          It stops after 5 failed releases of the same title in 2 days, and you get the failed
-          notification when nothing else could be taken.
-        </div>
-      </div>
     </>
   );
 }

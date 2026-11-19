@@ -66,22 +66,32 @@ const chain = {
       all('#dlchain-tabs [role="tab"]').find((tab) => wordsOf(tab) === label),
       `the ${label} chain`,
     ),
-  readOrder: () => all('#dlchain-list [data-src]').map((step) => step.dataset.src ?? ''),
-  readPool: () => all('#dlchain-pool [data-src]').map((tile) => tile.dataset.src ?? ''),
-  add: (id: string) => press(one(`#dlchain-pool [data-src="${id}"]`), `add ${id}`),
-  remove: (id: string) =>
+  // repointed for the order list (ui/order-list.tsx, settings-bic phase 1):
+  // rows are li[data-id], the pool's "Use" adds, and the moves and the
+  // removal are entries of the row's menu
+  readOrder: () =>
+    all('#download-chain-widget ul[aria-label] > li[data-id]').map((row) => row.dataset.id ?? ''),
+  readPool: () =>
+    all('#download-chain-widget [data-pool] > li[data-id]').map((row) => row.dataset.id ?? ''),
+  add: (id: string) => press(one(`#download-chain-widget [data-use="${id}"]`), `add ${id}`),
+  remove: (id: string) => {
+    press(one(`#download-chain-widget [data-more="${id}"]`), `the menu of ${id}`);
     press(
-      button(one(`#dlchain-list [data-src="${id}"]`), (words) => words.startsWith('Remove ')),
+      button(one('#download-chain-widget [role="menu"]'), (words) =>
+        words.startsWith('Stop using'),
+      ),
       `remove ${id}`,
-    ),
-  move: (id: string, delta: -1 | 1) =>
+    );
+  },
+  move: (id: string, delta: -1 | 1) => {
+    press(one(`#download-chain-widget [data-more="${id}"]`), `the menu of ${id}`);
     press(
-      button(
-        one(`#dlchain-list [data-src="${id}"]`),
-        (words) => words.startsWith('Move ') && words.endsWith(delta < 0 ? ' up' : ' down'),
+      button(one('#download-chain-widget [role="menu"]'), (words) =>
+        words.startsWith(delta < 0 ? 'Move up' : 'Move down'),
       ),
       `move ${id}`,
-    ),
+    );
+  },
 };
 
 /** add the first one waiting, move the last up, take the first out */

@@ -22,7 +22,8 @@ import { apiClient, readJson } from '@/app/api-client';
 
 export type SettingsSection = Record<string, unknown>;
 export type SettingsPayload = Record<string, SettingsSection | undefined>;
-export type SaveState = 'idle' | 'pending' | 'saving' | 'saved' | 'error';
+// blocked: a rule holds every save back (a naming template that would not work)
+export type SaveState = 'idle' | 'pending' | 'saving' | 'saved' | 'error' | 'blocked';
 
 /** the same wait settings.js gives a change before it saves */
 export const AUTOSAVE_DELAY_MS = 2000;
@@ -85,6 +86,8 @@ export interface SettingsStore {
   /** save what is pending now. true when nothing was pending or the save worked. */
   flush: () => Promise<boolean>;
   hasPending: () => boolean;
+  /** how many changed settings wait to be saved */
+  pendingCount: () => number;
   /** a rule that holds every save back while it says so (a naming template
    *  that would not work: the old page refused the whole save). Returns the
    *  way to take it off. */
@@ -175,7 +178,11 @@ export function createSettingsStore({
     // #879: the page is showing defaults, not the real config
     if (shell()._settingsLoadFailed) return false;
     // nothing goes out, and nothing is lost: the change waits, still pending
-    if ([...blocks].some((holds) => holds())) return false;
+    if ([...blocks].some((holds) => holds())) {
+      // said, not silent: the save status names what holds it
+      show('blocked');
+      return false;
+    }
     const body = store.getState().pending;
     const sending = extras;
     store.setState({ pending: {} });
@@ -283,6 +290,11 @@ export function createSettingsStore({
     },
     flush,
     hasPending,
+    pendingCount: () =>
+      Object.values(store.getState().pending).reduce(
+        (sum, section) => sum + Object.keys(section || {}).length,
+        0,
+      ) + Object.keys(extras).length,
     block(holds) {
       blocks.add(holds);
       return () => blocks.delete(holds);

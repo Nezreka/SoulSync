@@ -1,15 +1,16 @@
 /**
- * The download chain, the Sources tiles and the sources model, ported from the
- * vanilla Settings page (SETTINGS_PORT.md, step 7a): the same markup as what
- * settings.js drew (frozen from its own renderers), and the same saves, tests
- * and toasts.
+ * Downloads > Sources (tabs/downloads/sources-view.tsx) and the sources model:
+ * the order per kind, in words; every way of changing it saving what the old
+ * chain saved; needs setup; the sheet; Test all sources. (The frozen markup
+ * comparisons went with the markup; the key guard, guard/, holds the chain's
+ * requests through its adapters.)
  */
 
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createSettingsStore, type SettingsPayload, type SettingsStore } from '../settings-store';
-import { shape, vanilla } from './__fixtures__/shape';
+import { SourceSheet, SourcesView, useSourcesAttention } from './downloads/sources-view';
 import {
   type SourcesModel,
   chainUses,
@@ -17,8 +18,6 @@ import {
   legacyPair,
   musicFromSettings,
 } from './sources-model';
-import { ChainWidget, SourceModal, SourceTiles } from './sources-tab';
-
 type Shell = Window & Record<string, unknown>;
 const shell = window as unknown as Shell;
 
@@ -75,99 +74,142 @@ afterEach(async () => {
   vi.unstubAllGlobals();
   delete shell.openSourceModal;
   document.body.removeAttribute('data-side');
+  document.body.classList.remove('src-modal-open');
 });
 
-const chain = (props: Partial<{ opened: number; active: boolean; loads: number }> = {}) =>
-  render(<ChainWidget model={model} opened={0} active={false} loads={0} {...props} />);
+const view = (props: Partial<{ opened: number; active: boolean }> = {}) =>
+  render(<SourcesView store={store} model={model} opened={0} active={false} {...props} />);
 const widget = () => document.getElementById('download-chain-widget')!;
-const steps = () =>
-  [...document.querySelectorAll('.dlchain-step')].map((n) => n.getAttribute('data-src'));
+const rows = () =>
+  [...widget().querySelectorAll<HTMLElement>('ul[aria-label] > li[data-id]')].map(
+    (row) => row.dataset.id,
+  );
+const row = (id: string) =>
+  widget().querySelector<HTMLElement>(`ul[aria-label] > li[data-id="${id}"]`)!;
+const pool = () =>
+  [...widget().querySelectorAll<HTMLElement>('[data-pool] > li[data-id]')].map((r) => r.dataset.id);
+const poolRow = (id: string) =>
+  widget().querySelector<HTMLElement>(`[data-pool] > li[data-id="${id}"]`)!;
+const hero = () => document.querySelector('p')!.textContent;
+/** pick an entry of a row's ⋯ menu */
+function menu(name: string, entry: RegExp) {
+  fireEvent.click(screen.getByRole('button', { name: `More for ${name}` }));
+  fireEvent.click(within(screen.getByRole('menu')).getByRole('menuitem', { name: entry }));
+}
 function saved(): SettingsPayload {
   const merged: SettingsPayload = {};
   for (const body of posted)
     for (const [k, v] of Object.entries(body)) merged[k] = { ...merged[k], ...v };
   return merged;
 }
-function wrap(node: Element) {
-  const host = document.createElement('div');
-  host.append(node.cloneNode(true));
-  return host;
-}
 
-/** the music chain of the frozen fixtures: soulseek, youtube, tidal */
+/** the music order of the mockup: soulseek, youtube, tidal */
 function music() {
   model.load({
     download_source: { mode: 'hybrid', hybrid_order: ['soulseek', 'youtube', 'tidal'] },
   });
 }
 
-describe('the chain is the markup settings.js drew', () => {
-  it('Source Settings, with the music chain', async () => {
+describe('the order, read back', () => {
+  it('says the music order in a sentence, with its figures, and lists it', async () => {
     music();
-    const { container } = chain();
+    view();
     await act(() => model.loadChain());
-    // the old block, without its hidden transport (the mode select and the
-    // legacy list with its two selects: the model holds those values now),
-    // and with the widget as renderDownloadChain filled it
-    const want = vanilla('chain.vanilla.html', { afterInit: true });
-    want.querySelector('#download-source-mode')!.closest('.form-group')!.remove();
-    want.querySelector('#hybrid-settings-container')!.remove();
-    want
-      .querySelector('#download-chain-widget')!
-      .replaceWith(vanilla('chain-music.vanilla.html').querySelector('#download-chain-widget')!);
-    expect(shape(container)).toEqual(shape(want));
+    expect(hero()).toBe('Music tries Soulseek first, then YouTube, then Tidal.');
+    expect(rows()).toEqual(['soulseek', 'youtube', 'tidal']);
+    expect(row('soulseek').textContent).toContain('Tried first');
+    expect(row('youtube').textContent).toContain('Tried when Soulseek finds nothing');
+    // not used, grouped by what kind of source each is
+    expect(pool()).toEqual([
+      'qobuz',
+      'deezer_dl',
+      'soundcloud',
+      'hifi',
+      'torrent',
+      'usenet',
+      'lidarr',
+    ]);
+    const stats = [...document.querySelectorAll('b')].map((b) => b.textContent);
+    expect(stats.slice(0, 3)).toEqual(['3', '0', '7']);
+    // no on/off switch per source: a source is on by being in the order
+    expect(widget().querySelector('input[type="checkbox"]')).toBeNull();
   });
 
-  it.each([
-    ['video', 'chain-video.vanilla.html'],
-    ['audiobooks', 'chain-audiobooks.vanilla.html'],
-  ])('the %s chain', async (kind, fixture) => {
-    chain();
-    act(() => model.switchChain(kind));
-    await waitFor(() => expect(steps().length).toBeGreaterThan(0));
-    expect(shape(wrap(widget()))).toEqual(shape(vanilla(fixture)));
-  });
-
-  it('an empty chain', async () => {
-    model.load({ download_source: { hybrid_order: ['soulseek'] } });
-    chain();
-    await act(() => model.loadChain());
-    act(() => model.commit([]));
-    expect(shape(wrap(widget()))).toEqual(shape(vanilla('chain-empty.vanilla.html')));
-  });
-});
-
-describe('the tiles are the markup settings.js drew', () => {
-  it('in use (in any chain), available, indexers; dots, chips and their words', async () => {
-    music();
+  it('a source the server will skip is said so in the order, with the one button that fixes it', async () => {
     model.load({
-      download_source: { mode: 'hybrid', hybrid_order: ['soulseek', 'youtube', 'tidal'] },
-      _source_status: { tidal: false },
+      download_source: { mode: 'hybrid', hybrid_order: ['soulseek', 'qobuz'] },
+      _source_status: { qobuz: false },
     });
-    await act(() => model.loadVideoChain());
-    act(() => {
-      model.setStatus('soulseek', 'ok');
-      model.setStatus('youtube', 'warn');
-      model.setStatus('prowlarr', 'ok');
-      model.setStatus('usenet', 'fail');
-    });
-    // what the server said, through a test. youtube's message is keyed by
-    // its own id; usenet's test is 'usenet_client', so only a thrown error
-    // puts words on its tile (as on the old page)
-    routes['POST /api/test-connection'] = (body) => {
-      if ((body as { service: string }).service === 'youtube')
-        return { success: true, message: '⚠ cookies are stale' };
-      throw new Error('no client');
-    };
-    await act(async () => {
-      await model.testOne('youtube');
-      await model.testOne('usenet');
-    });
-    const { container } = render(<SourceTiles model={model} opened={0} active={false} />);
-    expect(shape(container)).toEqual(shape(vanilla('chain-tiles.vanilla.html')));
-    // a tile opens its source's modal
-    fireEvent.click(container.querySelector('[data-source-id="tidal"]')!);
-    expect(model.getState().open).toBe('tidal');
+    view();
+    await act(() => model.loadChain());
+    expect(hero()).toBe(
+      "Music tries Soulseek first, then Qobuz. Qobuz isn't set up yet, so it is skipped for now.",
+    );
+    expect(row('qobuz').textContent).toContain('Skipped until it is set up');
+    expect(row('qobuz').textContent).toContain('Needs setup');
+    fireEvent.click(screen.getByRole('button', { name: 'Set up Qobuz' }));
+    expect(model.getState().open).toBe('qobuz');
+    // it keeps its place: the server keeps it and skips it
+    expect(rows()).toEqual(['soulseek', 'qobuz']);
+    // and the tab and the pill carry the count
+    const Count = () => <i data-count="">{useSourcesAttention(model)}</i>;
+    render(<Count />);
+    expect(document.querySelector('[data-count]')!.textContent).toBe('1');
+  });
+
+  it('a row shows what its last test said, in words', async () => {
+    model.load({ download_source: { mode: 'hybrid', hybrid_order: ['youtube', 'soulseek'] } });
+    routes['POST /api/test-connection'] = (body) =>
+      (body as { service: string }).service === 'youtube'
+        ? { success: true, message: '⚠ the cookie file is old' }
+        : { success: false, error: 'slskd is not answering' };
+    await act(() => model.testAll({ silent: true }));
+    view();
+    await act(() => model.loadChain());
+    expect(model.getState().status.youtube).toBe('warn');
+    expect(row('youtube').textContent).toContain('the cookie file is old');
+    expect(row('youtube').textContent).not.toContain('⚠');
+    expect(row('soulseek').textContent).toContain('slskd is not answering');
+    // a source in no order says where else it is used, or its own state
+    expect(poolRow('usenet').textContent).toContain('Through your indexers · Video #1');
+    expect(poolRow('tidal').textContent).toContain('Streaming service · Not tested yet');
+  });
+
+  it('video and audiobooks have their own order and their own words', async () => {
+    view();
+    act(() => model.switchChain('video'));
+    await waitFor(() => expect(rows()).toEqual(['usenet']));
+    expect(hero()).toBe('Movies and TV download from Usenet only.');
+    expect(row('usenet').textContent).toContain('The only source for video');
+    expect(pool()).toEqual(['soulseek', 'torrent', 'extto']);
+    // External has no settings and no test here, as before
+    expect(within(poolRow('extto')).queryByRole('button', { name: /settings/i })).toBeNull();
+    act(() => model.switchChain('audiobooks'));
+    await waitFor(() => expect(rows()).toEqual(['usenet', 'torrent']));
+    expect(hero()).toBe('Books ask Usenet first, then Torrent.');
+    expect(row('torrent').textContent).toContain('Asked after Usenet');
+    // the kind switch is a tablist over the order
+    const tabs = within(document.getElementById('dlchain-tabs')!).getAllByRole('tab');
+    expect(tabs.map((tab) => tab.getAttribute('aria-selected'))).toEqual([
+      'false',
+      'false',
+      'true',
+    ]);
+    expect(tabs[0].getAttribute('aria-controls')).toBe('dlchain-panel');
+  });
+
+  it('the video side opens on the video order until a kind is picked', async () => {
+    document.body.setAttribute('data-side', 'video');
+    view();
+    await act(() => model.loadChain());
+    const selected = () =>
+      within(document.getElementById('dlchain-tabs')!)
+        .getAllByRole('tab')
+        .find((tab) => tab.getAttribute('aria-selected') === 'true')?.textContent;
+    expect(selected()).toBe('Video');
+    act(() => model.switchChain('music'));
+    await act(() => model.loadChain());
+    expect(selected()).toBe('Music');
   });
 });
 
@@ -240,17 +282,17 @@ describe('the model', () => {
   });
 });
 
-describe('editing a chain', () => {
-  it('music: add, move, remove save the four download_source keys', async () => {
+describe('changing the order', () => {
+  it('music: add, move, remove save the four download_source keys, with the page', async () => {
     music();
-    chain();
+    view();
     await act(() => model.loadChain());
-    fireEvent.click(screen.getByTitle('Add Qobuz to the chain'));
-    expect(steps()).toEqual(['soulseek', 'youtube', 'tidal', 'qobuz']);
-    fireEvent.click(screen.getByTitle('Move Qobuz up'));
-    expect(steps()).toEqual(['soulseek', 'youtube', 'qobuz', 'tidal']);
-    fireEvent.click(screen.getByTitle('Remove Soulseek from the chain'));
-    expect(steps()).toEqual(['youtube', 'qobuz', 'tidal']);
+    fireEvent.click(screen.getByRole('button', { name: 'Use Qobuz' }));
+    expect(rows()).toEqual(['soulseek', 'youtube', 'tidal', 'qobuz']);
+    menu('Qobuz', /Move up/);
+    expect(rows()).toEqual(['soulseek', 'youtube', 'qobuz', 'tidal']);
+    menu('Soulseek', /Stop using for music/);
+    expect(rows()).toEqual(['youtube', 'qobuz', 'tidal']);
     await waitFor(() => expect(store.hasPending()).toBe(false));
     expect(saved().download_source).toEqual({
       mode: 'hybrid',
@@ -258,55 +300,73 @@ describe('editing a chain', () => {
       hybrid_secondary: 'qobuz',
       hybrid_order: ['youtube', 'qobuz', 'tidal'],
     });
-    expect(document.getElementById('dlchain-mode-hint')!.textContent).toBe('hybrid — 3 sources');
   });
 
-  it('down to one source is single-source mode; the last one cannot go', async () => {
-    model.load({ download_source: { mode: 'hybrid', hybrid_order: ['soulseek', 'tidal'] } });
-    chain();
+  it('the keyboard moves a row too, and saves once, on the drop', async () => {
+    music();
+    view();
     await act(() => model.loadChain());
-    fireEvent.click(screen.getByTitle('Remove Tidal from the chain'));
-    fireEvent.click(screen.getByTitle('Remove Soulseek from the chain'));
-    expect(shell.showToast).toHaveBeenCalledWith(
-      'Keep at least one source — downloads need somewhere to go',
-      'info',
+    const grip = screen.getByRole('button', { name: 'Reorder Tidal, 3 of 3' });
+    grip.focus();
+    fireEvent.keyDown(grip, { key: ' ' });
+    fireEvent.keyDown(grip, { key: 'ArrowUp' });
+    fireEvent.keyDown(grip, { key: 'ArrowUp' });
+    expect(store.hasPending()).toBe(false);
+    fireEvent.keyDown(grip, { key: ' ' });
+    await waitFor(() => expect(posted).toHaveLength(1));
+    expect(posted[0].download_source?.hybrid_order).toEqual(['tidal', 'soulseek', 'youtube']);
+    expect(document.querySelector('[data-live]')!.textContent).toBe(
+      'Dropped. Music tries Tidal first, then Soulseek, then YouTube.',
     );
-    expect(steps()).toEqual(['soulseek']);
+  });
+
+  it('says what changed and how it saves, and Undo puts the order back through the same save', async () => {
+    music();
+    view();
+    await act(() => model.loadChain());
+    menu('YouTube', /Move up/);
+    const [message, type, , opts] = (shell.showToast as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(message).toBe('YouTube is now tried first for music. It saves with your other changes.');
+    expect(type).toBe('success');
+    expect(opts.action.label).toBe('Undo');
+    act(() => opts.action.run());
+    expect(rows()).toEqual(['soulseek', 'youtube', 'tidal']);
+    await waitFor(() => expect(store.hasPending()).toBe(false));
+    expect(saved().download_source?.hybrid_order).toEqual(['soulseek', 'youtube', 'tidal']);
+  });
+
+  it('down to one source is single-source mode; the last one cannot go, and says why', async () => {
+    model.load({ download_source: { mode: 'hybrid', hybrid_order: ['soulseek', 'tidal'] } });
+    view();
+    await act(() => model.loadChain());
+    menu('Tidal', /Stop using for music/);
+    expect(rows()).toEqual(['soulseek']);
+    expect(hero()).toBe('Music downloads from Soulseek only.');
+    fireEvent.click(screen.getByRole('button', { name: 'More for Soulseek' }));
+    const last = screen.getByRole('menuitem', { name: /Stop using for music/ });
+    expect(last).toHaveProperty('disabled', true);
+    expect(last.textContent).toContain('Keep at least one source');
     await waitFor(() => expect(store.hasPending()).toBe(false));
     expect(saved().download_source).toMatchObject({ mode: 'soulseek', hybrid_order: ['soulseek'] });
-    expect(document.getElementById('dlchain-mode-hint')!.textContent).toBe('single source');
   });
 
-  it('drag: onto a step puts it before; onto the pool removes it; onto the slot appends', async () => {
-    music();
-    chain();
-    await act(() => model.loadChain());
-    const data = new Map<string, string>();
-    const dataTransfer = {
-      setData: (k: string, v: string) => data.set(k, v),
-      getData: (k: string) => data.get(k) ?? '',
-      effectAllowed: '',
-      dropEffect: '',
-    };
-    const step = (id: string) => document.querySelector(`.dlchain-step[data-src="${id}"]`)!;
-    fireEvent.dragStart(step('tidal'), { dataTransfer });
-    fireEvent.drop(step('soulseek'), { dataTransfer });
-    expect(steps()).toEqual(['tidal', 'soulseek', 'youtube']);
-    fireEvent.dragStart(document.querySelector('.dlchain-tile[data-src="qobuz"]')!, {
-      dataTransfer,
+  it('a source this page does not know stays in the saved order', async () => {
+    model.load({
+      download_source: { mode: 'hybrid', hybrid_order: ['soulseek', 'mystery', 'youtube'] },
     });
-    fireEvent.drop(document.getElementById('dlchain-slot')!, { dataTransfer });
-    expect(steps()).toEqual(['tidal', 'soulseek', 'youtube', 'qobuz']);
-    fireEvent.dragStart(step('youtube'), { dataTransfer });
-    fireEvent.drop(document.getElementById('dlchain-pool')!, { dataTransfer });
-    expect(steps()).toEqual(['tidal', 'soulseek', 'qobuz']);
+    view();
+    await act(() => model.loadChain());
+    expect(rows()).toEqual(['soulseek', 'youtube']);
+    menu('YouTube', /Move up/);
+    await waitFor(() => expect(store.hasPending()).toBe(false));
+    expect(saved().download_source?.hybrid_order).toEqual(['youtube', 'soulseek', 'mystery']);
   });
 
-  it('video saves itself straight away and shows on the tiles; audiobooks save through the store', async () => {
-    chain();
+  it('video saves itself at once and says so; audiobooks save through the store', async () => {
+    view();
     act(() => model.switchChain('video'));
-    await waitFor(() => expect(steps()).toEqual(['usenet']));
-    fireEvent.click(screen.getByTitle('Add Torrent to the chain'));
+    await waitFor(() => expect(rows()).toEqual(['usenet']));
+    fireEvent.click(screen.getByRole('button', { name: 'Use Torrent' }));
     await waitFor(() =>
       expect(
         calls.find((c) => c.method === 'POST' && c.url === '/api/video/downloads/config')?.body,
@@ -316,11 +376,17 @@ describe('editing a chain', () => {
       }),
     );
     expect(model.getState().video).toEqual(['usenet', 'torrent']);
+    expect(shell.showToast).toHaveBeenCalledWith(
+      'Torrent is now used for video, tried second. The video order saves at once.',
+      'success',
+      null,
+      expect.anything(),
+    );
+    expect(posted).toEqual([]);
     act(() => model.switchChain('audiobooks'));
-    await waitFor(() => expect(steps()).toEqual(['usenet', 'torrent']));
-    fireEvent.click(screen.getByTitle('Move Torrent up'));
-    // through the store, one key each of download_source (setAudiobookChain did
-    // it through the page save)
+    await waitFor(() => expect(rows()).toEqual(['usenet', 'torrent']));
+    menu('Torrent', /Move up/);
+    // through the store, one key each of download_source
     await waitFor(() => expect(posted).toHaveLength(1));
     expect(posted[0]).toEqual({
       audiobooks: {
@@ -334,39 +400,13 @@ describe('editing a chain', () => {
     routes['POST /api/video/downloads/config'] = () => {
       throw new Error('down');
     };
-    chain();
+    view();
     act(() => model.switchChain('video'));
-    await waitFor(() => expect(steps()).toEqual(['usenet']));
-    fireEvent.click(screen.getByTitle('Add Torrent to the chain'));
+    await waitFor(() => expect(rows()).toEqual(['usenet']));
+    fireEvent.click(screen.getByRole('button', { name: 'Use Torrent' }));
     await waitFor(() =>
       expect(shell.showToast).toHaveBeenCalledWith('Could not save the download chain', 'error'),
     );
-  });
-
-  it('the video side opens on the video chain until a tab is picked', async () => {
-    document.body.setAttribute('data-side', 'video');
-    chain();
-    await act(() => model.loadChain());
-    expect(document.querySelector('.dlchain-tab.active')!.textContent).toBe('Video');
-    act(() => model.switchChain('music'));
-    await act(() => model.loadChain());
-    expect(document.querySelector('.dlchain-tab.active')!.textContent).toBe('Music');
-  });
-
-  it('the filter hides tiles and empty groups, and says when nothing matches', async () => {
-    music();
-    chain();
-    await act(() => model.loadChain());
-    fireEvent.change(document.getElementById('dlchain-filter')!, { target: { value: 'qob' } });
-    const visible = [...document.querySelectorAll<HTMLElement>('.dlchain-tile')].filter(
-      (t) => !t.hidden,
-    );
-    expect(visible.map((t) => t.dataset.src)).toEqual(['qobuz']);
-    expect(
-      [...document.querySelectorAll<HTMLElement>('.dlchain-group')].filter((g) => !g.hidden),
-    ).toHaveLength(1);
-    fireEvent.change(document.getElementById('dlchain-filter')!, { target: { value: 'zzz' } });
-    expect(document.getElementById('dlchain-no-match')!.hidden).toBe(false);
   });
 });
 
@@ -408,9 +448,9 @@ describe('Test all sources', () => {
     );
   });
 
-  it('the quiet run when a tab opens: no toast, no connections, once', async () => {
+  it('the quiet run when the pill opens: no toast, no connections, once', async () => {
     model.load({ download_source: { mode: 'soulseek' } });
-    chain({ opened: 1, active: true });
+    view({ opened: 1, active: true });
     await waitFor(() => expect(model.getState().status.soulseek).toBe('ok'));
     expect(shell.showToast).not.toHaveBeenCalled();
     expect(calls.some((c) => c.url === '/api/settings/config-status')).toBe(false);
@@ -420,110 +460,114 @@ describe('Test all sources', () => {
     expect(calls.filter((c) => c.url === '/api/test-connection').length).toBe(
       calls.slice(0, before).filter((c) => c.url === '/api/test-connection').length,
     );
-  });
-
-  it('a pass with a ⚠ message is a warning, with its words on the tile', async () => {
-    model.load({ download_source: { mode: 'youtube' } });
-    routes['POST /api/test-connection'] = () => ({
-      success: true,
-      message: '⚠ the cookie file is old',
-    });
-    await act(() => model.testAll({ silent: true }));
-    expect(model.getState().status.youtube).toBe('warn');
-    render(<SourceTiles model={model} opened={0} active={false} />);
-    const tile = document.querySelector('[data-source-id="youtube"]')!;
-    expect(tile.querySelector('.src-tile-dot')!.getAttribute('title')).toBe(
-      '⚠ the cookie file is old',
-    );
-    expect(tile.querySelector('.src-tile-chip')!.textContent).toBe('needs setup');
+    // and the row now says so
+    expect(row('soulseek').textContent).toContain('Connected');
   });
 });
 
-describe('the source modal', () => {
-  const home = () => {
-    document.body.insertAdjacentHTML(
-      'beforeend',
-      `<div id="source-config-home" hidden>
-        <div id="tidal-download-settings-container" class="src-config-panel"><input id="tidal-field"></div>
-        <div id="prowlarr-settings-container" class="src-config-panel"><select id="prowlarr-field"></select></div>
-      </div>`,
-    );
-  };
-  afterEach(() => {
-    document.getElementById('source-config-home')?.remove();
-    document.body.classList.remove('src-modal-open');
-    delete shell.probeSourceOnOpen;
-    delete shell.landPendingSettingsSave;
-    delete shell.loadYtdlpStatus;
-  });
+describe("a source's sheet", () => {
+  function sheet(ids: string[] = ['soulseek-settings-container']) {
+    const home = document.createElement('div');
+    home.id = 'source-config-home';
+    for (const id of ids) {
+      const panel = document.createElement('div');
+      panel.id = id;
+      panel.className = 'src-config-panel';
+      panel.innerHTML = '<input id="probe-field" />';
+      home.append(panel);
+    }
+    document.body.append(home);
+    const out = render(<SourceSheet store={store} model={model} />);
+    return { home, ...out };
+  }
+  const dialog = () => screen.getByRole('dialog', { hidden: true });
+  afterEach(() => document.getElementById('source-config-home')?.remove());
 
-  it('closed, it is the markup it replaced', () => {
-    const { container } = render(<SourceModal model={model} />);
-    expect(shape(container)).toEqual(shape(vanilla('source-modal.vanilla.html')));
-    expect(document.getElementById('source-config-modal')!.hidden).toBe(true);
-  });
-
-  it('moves the panel in and back out, never a copy, and probes the source', async () => {
-    home();
-    shell.probeSourceOnOpen = vi.fn();
-    render(<SourceModal model={model} />);
-    act(() => model.openModal('tidal'));
-    const body = document.getElementById('src-modal-body')!;
-    expect(body.querySelector('#tidal-download-settings-container')).not.toBeNull();
-    expect(document.querySelectorAll('#tidal-download-settings-container')).toHaveLength(1);
-    expect(document.getElementById('source-config-modal')!.hidden).toBe(false);
+  it('is closed until a source is opened, then names it, where it is used and how it is doing', async () => {
+    music();
+    sheet();
+    expect(dialog().hidden).toBe(true);
+    const probe = vi.fn();
+    shell.probeSourceOnOpen = probe;
+    act(() => model.openModal('soulseek'));
+    expect(dialog().hidden).toBe(false);
+    expect(document.getElementById('src-modal-title')!.textContent).toBe('Soulseek');
+    expect(document.getElementById('src-modal-sub')!.textContent).toBe('Music #1');
+    expect(document.getElementById('src-modal-meta')!.textContent).toBe('Not tested yet');
+    expect(probe).toHaveBeenCalledWith('soulseek');
     expect(document.body.classList.contains('src-modal-open')).toBe(true);
-    expect(document.getElementById('src-modal-title')!.textContent).toBe('Tidal');
-    expect(document.getElementById('src-modal-sub')!.textContent).toBe(
-      'Account and stream quality',
-    );
-    expect(shell.probeSourceOnOpen).toHaveBeenCalledWith('tidal');
-    await waitFor(() => expect(document.activeElement?.id).toBe('tidal-field'));
-    fireEvent.keyDown(document, { key: 'Escape' });
-    expect(model.getState().open).toBeNull();
-    expect(
-      document
-        .getElementById('source-config-home')!
-        .querySelector('#tidal-download-settings-container'),
-    ).not.toBeNull();
-    expect(document.body.classList.contains('src-modal-open')).toBe(false);
+    delete shell.probeSourceOnOpen;
   });
 
-  it('Prowlarr is titled by its id, as before; a click outside closes and lands a pending save', () => {
-    home();
-    shell.landPendingSettingsSave = vi.fn();
-    render(<SourceModal model={model} />);
+  it('Prowlarr is named, not titled by its id', () => {
+    sheet(['prowlarr-settings-container']);
     act(() => model.openModal('prowlarr'));
-    expect(document.getElementById('src-modal-title')!.textContent).toBe('prowlarr');
-    fireEvent.click(document.getElementById('source-config-modal')!);
-    expect(model.getState().open).toBeNull();
-    expect(shell.landPendingSettingsSave).toHaveBeenCalledOnce();
+    expect(document.getElementById('src-modal-title')!.textContent).toBe('Prowlarr');
+    expect(document.getElementById('src-modal-sub')!.textContent).toBe(
+      'Searched by Torrent and Usenet',
+    );
   });
 
-  it('Test shows what the server said and colours the dot', async () => {
-    home();
-    routes['POST /api/test-connection'] = () => ({ success: false, message: 'token expired' });
-    render(<SourceModal model={model} />);
-    act(() => model.openModal('tidal'));
-    fireEvent.click(document.getElementById('src-modal-test')!);
+  it('Test saves what is typed first, then shows what the server said beside it', async () => {
+    music();
+    sheet();
+    act(() => model.openModal('soulseek'));
+    store.set('soulseek', 'slskd_url', 'http://new:5030');
+    routes['POST /api/test-connection'] = () => {
+      // the edit is on the server before the test runs
+      expect(posted).toEqual([{ soulseek: { slskd_url: 'http://new:5030' } }]);
+      return { success: false, error: 'slskd said no' };
+    };
+    await act(async () => fireEvent.click(document.getElementById('src-modal-test')!));
     await waitFor(() =>
-      expect(document.getElementById('src-modal-result')!.textContent).toBe('token expired'),
+      expect(document.getElementById('src-modal-result')!.textContent).toBe('slskd said no'),
     );
-    expect(document.getElementById('src-modal-result')!.className).toBe('src-modal-result is-fail');
-    expect(document.querySelector('#src-modal-meta .src-tile-dot')!.className).toBe(
-      'src-tile-dot hss-fail',
+    expect(document.getElementById('src-modal-result')!.dataset.tone).toBe('bad');
+    expect(model.getState().status.soulseek).toBe('fail');
+    routes['POST /api/test-connection'] = () => ({ success: true });
+    await act(async () => fireEvent.click(document.getElementById('src-modal-test')!));
+    await waitFor(() =>
+      expect(document.getElementById('src-modal-result')!.textContent).toBe('Connected.'),
     );
-    // reopened, the last result is still there
-    act(() => model.closeModal());
-    act(() => model.openModal('tidal'));
-    expect(document.getElementById('src-modal-result')!.textContent).toBe('token expired');
+  });
+
+  it('closing lands an edit still waiting, and asks the server again what is set up', async () => {
+    model.load({
+      download_source: { mode: 'hybrid', hybrid_order: ['soulseek', 'qobuz'] },
+      _source_status: { qobuz: false },
+    });
+    sheet(['qobuz-settings-container']);
+    act(() => model.openModal('qobuz'));
+    expect(model.getState().unready.qobuz).toBe(true);
+    store.set('qobuz', 'anything', 'typed');
+    // signed in while the sheet was open
+    routes['GET /api/settings'] = () => ({ _source_status: { qobuz: true } });
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    expect(model.getState().open).toBeNull();
+    await waitFor(() => expect(posted).toEqual([{ qobuz: { anything: 'typed' } }]));
+    // "Needs setup" goes without a reload
+    await waitFor(() => expect(model.getState().unready.qobuz).toBeUndefined());
+  });
+
+  it('with autosave off, closing leaves the edit for the save button', async () => {
+    shell._settingsAutosaveOff = true;
+    try {
+      sheet();
+      act(() => model.openModal('soulseek'));
+      store.set('soulseek', 'slskd_url', 'http://kept:5030');
+      fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+      await new Promise((r) => setTimeout(r, 10));
+      expect(posted).toEqual([]);
+      expect(store.hasPending()).toBe(true);
+    } finally {
+      delete shell._settingsAutosaveOff;
+    }
   });
 
   it('a source without a panel on the page does not open', () => {
-    render(<SourceModal model={model} />);
-    act(() => model.openModal('tidal'));
+    sheet([]);
+    act(() => model.openModal('soulseek'));
     expect(model.getState().open).toBeNull();
-    act(() => model.openModal('nonsense'));
-    expect(model.getState().open).toBeNull();
+    expect(dialog().hidden).toBe(true);
   });
 });

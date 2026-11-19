@@ -88,7 +88,11 @@ describe('the panels are the markup they replaced', () => {
     const { container } = render(
       <MoreSourcePanels store={store} part="prowlarr-torrent-usenet" opened={0} active={false} />,
     );
-    const want = shape(vanilla('panels-prowlarr-torrent-usenet.vanilla.html', { afterInit: true }));
+    const frozen = vanilla('panels-prowlarr-torrent-usenet.vanilla.html', { afterInit: true });
+    // "grab the next best release" covers torrents too: it moved out of the
+    // usenet panel to Downloads > Behaviour (downloads/behaviour-view.tsx)
+    frozen.querySelector('#video-redownload-failed-group')?.remove();
+    const want = shape(frozen);
     const got = shape(container);
     expect(got.elements).toEqual(want.elements);
     expect(got.text).toBe(want.text);
@@ -131,19 +135,14 @@ describe("the video side's blocks", () => {
     );
     act(() => sourcesModel.closeModal());
     expect(input('video-seed-ratio').value).toBe('2');
-    // usenet's two follow its music settings in the frame
+    // usenet's video rule follows its music one in the frame; the next-best
+    // release rule is on Downloads > Behaviour now (downloads.test.tsx)
     const frame = document.querySelector('#usenet-client-settings-container .api-service-frame')!;
-    expect([...frame.children].slice(-3).map((n) => n.id)).toEqual([
+    expect([...frame.children].slice(-2).map((n) => n.id)).toEqual([
       'music-usenet-remove-completed-group',
       'video-usenet-remove-completed-group',
-      'video-redownload-failed-group',
     ]);
-    fireEvent.click(input('video-redownload-failed'));
-    await waitFor(() =>
-      expect(calls.filter((c) => c.method === 'POST').at(-1)?.body).toMatchObject({
-        redownload_failed: true,
-      }),
-    );
+    expect(document.getElementById('video-redownload-failed')).toBeNull();
   });
 });
 

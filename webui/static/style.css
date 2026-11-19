@@ -5460,7 +5460,11 @@ body.max-performance .nav-button.active:hover {
 body.np-modal-open #gsearch-bar,
 body.np-modal-open #gsearch-aura,
 body.np-modal-open #notif-bell-btn,
-body.np-modal-open #helper-float-btn {
+body.np-modal-open #helper-float-btn,
+/* a settings sheet's foot (Test, Done) sits where the floating buttons do */
+body.src-modal-open #notif-bell-btn,
+body.src-modal-open #helper-float-btn,
+body.src-modal-open #activity-float-btn {
     display: none !important;
 }
 
@@ -49149,7 +49153,7 @@ tr.tag-diff-same {
 }
 
 #settings-page .form-group > select,
-#settings-page select {
+#settings-page select:where(:not([data-ui] *)) {
     -webkit-appearance: none;
     -moz-appearance: none;
     appearance: none;
@@ -49168,16 +49172,16 @@ tr.tag-diff-same {
     margin: 0;
     transition: border-color var(--dur-moderate), background-color var(--dur-moderate), box-shadow var(--dur-moderate);
 }
-#settings-page select:hover {
+#settings-page select:where(:not([data-ui] *)):hover {
     background-color: var(--white-a06);
     border-color: var(--white-a10);
 }
-#settings-page select:focus {
+#settings-page select:where(:not([data-ui] *)):focus {
     border-color: rgba(var(--accent-rgb), 0.4);
     outline: none;
     background-color: var(--white-a06);
 }
-#settings-page select option {
+#settings-page select:where(:not([data-ui] *)) option {
     background: #1a1a1e;
     color: #fff;
     padding: 8px;
@@ -69398,12 +69402,12 @@ body.src-modal-open { overflow: hidden; }
 #settings-page .form-group > input[type="password"],
 #settings-page .form-group > input[type="number"],
 #settings-page .form-group > input[type="url"],
-#settings-page select {
+#settings-page select:where(:not([data-ui] *)) {
     background-color: rgba(255, 255, 255, 0.045);
     box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.28);
 }
 #settings-page .form-group > input:focus,
-#settings-page select:focus {
+#settings-page select:where(:not([data-ui] *)):focus {
     box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.18), inset 0 1px 2px rgba(0, 0, 0, 0.28);
 }
 

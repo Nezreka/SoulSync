@@ -118,8 +118,9 @@ body:not([data-side="video"]) #settings-page .save-button[data-state="rest"] { d
 #settings-page .setting-help-text,
 #settings-page .form-group-help,
 #settings-page .settings-subtext { font-size: 12px; line-height: 1.6; color: var(--stg-text-secondary); margin-top: 7px; }
-#settings-page input[type="text"], #settings-page input[type="password"],
-#settings-page input[type="number"], #settings-page select, #settings-page textarea {
+/* the new parts ([data-ui], src/features/settings/ui) bring their own fields */
+#settings-page input[type="text"]:where(:not([data-ui] *)), #settings-page input[type="password"]:where(:not([data-ui] *)),
+#settings-page input[type="number"]:where(:not([data-ui] *)), #settings-page select:where(:not([data-ui] *)), #settings-page textarea:where(:not([data-ui] *)) {
     box-sizing: border-box; max-width: 100%; border-radius: var(--radius-md);
     border: 1px solid var(--white-a14); background-color: rgba(0,0,0,.18);
     color: var(--text-bright); padding: 10px 12px; font: inherit; font-size: 13px;
@@ -161,8 +162,8 @@ body:not([data-side="video"]) #settings-page .save-button[data-state="rest"] { d
 #settings-page .path-preview-note { font-size: 11px; color: var(--stg-text-secondary); }
 #settings-page .path-preview-error { font-size: 12px; color: #f0a08f; }
 #settings-page input[type="checkbox"] { accent-color: var(--accent); }
-#settings-page button:focus-visible, #settings-page input:focus-visible,
-#settings-page select:focus-visible, #settings-page textarea:focus-visible {
+#settings-page button:focus-visible:where(:not([data-ui] *)), #settings-page input:focus-visible:where(:not([data-ui] *)),
+#settings-page select:focus-visible:where(:not([data-ui] *)), #settings-page textarea:focus-visible:where(:not([data-ui] *)) {
     outline: 2px solid var(--accent) !important; outline-offset: 3px;
 }
 #settings-page .svc-tile-row { display: grid !important; grid-template-columns: repeat(auto-fill,minmax(120px,1fr)); gap: 10px; }
@@ -228,3 +229,155 @@ body:not([data-side="video"]) #settings-page .save-button[data-state="rest"] { d
 #audiobook-routes-list .abr-row > span { flex: 1; }
 #audiobook-routes-list .abr-remove { padding: 8px 12px; color: #ef5350; border-color: rgba(239, 83, 80, 0.3); }
 #audiobook-routes-list .abr-empty { color: rgba(255, 255, 255, 0.45); font-size: 0.85em; padding: 4px 0; }
+
+/* a source's panel not rebuilt on the parts yet (src/features/settings/tabs/source-panels*.tsx), in the side sheet:
+   its own markup, dressed as the parts are. the id outranks the old page's
+   field rules (settings-premier.css) */
+#settings-page #src-modal-body .form-group {
+  display: block;
+  margin: 0;
+  padding: 13px 0;
+  border-top: 1px solid var(--white-a06);
+}
+
+#settings-page #src-modal-body .src-config-panel > .form-group:first-child {
+  border-top: 0;
+}
+
+#settings-page #src-modal-body .form-group > label {
+  display: block;
+  margin: 0 0 7px;
+  color: var(--text-bright);
+  font-size: 13.5px;
+  font-weight: 500;
+}
+
+#settings-page #src-modal-body :is(input:not([type='checkbox'], [type='radio']), select, textarea) {
+  width: 100%;
+  max-width: 100%;
+  min-height: 38px;
+  padding: 8px 12px;
+  border: 1px solid var(--white-a08);
+  border-radius: var(--radius-control);
+  background-color: var(--white-a04);
+  color: var(--text-bright);
+  font: inherit;
+  font-size: 13.5px;
+}
+
+#settings-page #src-modal-body :is(input:not([type='checkbox'], [type='radio']), select, textarea):focus {
+  border-color: rgba(var(--accent-rgb), 0.7);
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.18);
+}
+
+#settings-page #src-modal-body input[type='number'] {
+  width: 128px;
+}
+
+/* a tick box reads as the switch it will be: words left, switch right */
+#settings-page #src-modal-body .checkbox-label {
+  display: flex;
+  flex-direction: row-reverse;
+  gap: 16px;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0;
+  cursor: pointer;
+}
+
+#settings-page #src-modal-body input[type='checkbox'] {
+  position: relative;
+  flex: none;
+  width: 42px;
+  height: 24px;
+  margin: 0;
+  border: 0;
+  border-radius: var(--radius-pill);
+  appearance: none;
+  background: var(--white-a14);
+  cursor: pointer;
+  transition: background var(--dur-fast);
+}
+
+#settings-page #src-modal-body input[type='checkbox']::after {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--white-a90);
+  content: '';
+  transition: transform var(--dur-fast) var(--ease-standard);
+}
+
+#settings-page #src-modal-body input[type='checkbox']:checked {
+  background: var(--accent);
+}
+
+#settings-page #src-modal-body input[type='checkbox']:checked::after {
+  background: var(--text-1);
+  transform: translateX(18px);
+}
+
+#settings-page #src-modal-body :is(small, .setting-help-text, .settings-hint, .stg-help-line) {
+  display: block;
+  margin-top: 6px;
+  color: var(--white-a55);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+#settings-page #src-modal-body .path-input-group {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+#settings-page #src-modal-body .path-input-group > input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* the panel's own frame goes: the sheet is the frame */
+#settings-page #src-modal-body :is(.src-config-panel, .api-service-frame, .settings-group) {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+}
+
+#settings-page #src-modal-body .form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+#settings-page #src-modal-body :is(.test-button, .detect-button, .auth-button) {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  width: auto;
+  height: 34px;
+  min-height: 0;
+  margin: 0;
+  padding: 0 16px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--white-a08);
+  box-shadow: none;
+  color: var(--text-bright);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+#settings-page #src-modal-body :is(.test-button, .detect-button, .auth-button):hover {
+  background: var(--white-a12);
+}
+

@@ -206,7 +206,8 @@ describe('the settings store', () => {
     expect(posted).toEqual([]);
     expect(await store.flush()).toBe(false);
     expect(store.hasPending()).toBe(true);
-    expect(states).toEqual(['pending']);
+    // held, and said so each time: the save status names what holds it
+    expect(states).toEqual(['pending', 'blocked', 'blocked']);
     bad = false;
     expect(await store.flush()).toBe(true);
     expect(posted).toEqual([{ ui_appearance: { sidebar_visualizer: 'wave' } }]);

@@ -34,6 +34,1363 @@
       "asked": "guard-probe",
       "noSave": "the settings search box: it filters the page and saves nothing"
     },
+    "#stream-source": {
+      "sel": "#stream-source",
+      "kind": "select",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "active",
+      "to": "youtube",
+      "saves": {
+        "settings": {
+          "download_source": {
+            "stream_source": "youtube"
+          }
+        }
+      },
+      "asked": "youtube",
+      "shows": ["download_source.stream_source"]
+    },
+    "#max-concurrent-downloads": {
+      "sel": "#max-concurrent-downloads",
+      "kind": "select",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "5",
+      "to": "1",
+      "saves": {
+        "settings": {
+          "download_source": {
+            "max_concurrent": 1
+          }
+        }
+      },
+      "asked": "1",
+      "shows": ["download_source.max_concurrent"]
+    },
+    "#source-search-timeout": {
+      "sel": "#source-search-timeout",
+      "kind": "number",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "25",
+      "to": "26",
+      "saves": {
+        "settings": {
+          "download_source": {
+            "source_search_timeout": 26
+          }
+        }
+      },
+      "asked": "26",
+      "shows": ["download_source.source_search_timeout"]
+    },
+    "#retry-next-candidate": {
+      "sel": "#retry-next-candidate",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": true,
+      "to": false,
+      "saves": {
+        "settings": {
+          "post_processing": {
+            "retry_next_candidate_on_mismatch": false
+          }
+        }
+      },
+      "asked": false,
+      "shows": ["post_processing.retry_next_candidate_on_mismatch"]
+    },
+    "#retry-exhaustive": {
+      "sel": "#retry-exhaustive",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": true,
+      "to": false,
+      "saves": {
+        "settings": {
+          "post_processing": {
+            "retry_exhaustive": false
+          }
+        }
+      },
+      "asked": false,
+      "shows": ["post_processing.retry_exhaustive"]
+    },
+    "#retries-per-query": {
+      "sel": "#retries-per-query",
+      "kind": "number",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "7",
+      "to": "8",
+      "saves": {
+        "settings": {
+          "post_processing": {
+            "retries_per_query": 8
+          }
+        }
+      },
+      "asked": "8",
+      "shows": ["post_processing.retries_per_query"]
+    },
+    "#accept-version-mismatch-fallback": {
+      "sel": "#accept-version-mismatch-fallback",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": false,
+      "to": true,
+      "saves": {
+        "settings": {
+          "post_processing": {
+            "accept_version_mismatch_fallback": true
+          }
+        }
+      },
+      "asked": true,
+      "shows": ["post_processing.accept_version_mismatch_fallback"]
+    },
+    "#version-mismatch-min-count": {
+      "sel": "#version-mismatch-min-count",
+      "kind": "number",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "3",
+      "to": "4",
+      "saves": {
+        "settings": {
+          "post_processing": {
+            "version_mismatch_min_count": 4
+          }
+        }
+      },
+      "asked": "4",
+      "shows": ["post_processing.version_mismatch_min_count"]
+    },
+    "#album-atomic-publish": {
+      "sel": "#album-atomic-publish",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": true,
+      "to": false,
+      "saves": {
+        "settings": {
+          "album_downloads": {
+            "atomic_publish": false
+          }
+        }
+      },
+      "asked": false,
+      "shows": ["album_downloads.atomic_publish"]
+    },
+    "#album-atomic-recover": {
+      "sel": "#album-atomic-recover",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": true,
+      "to": false,
+      "saves": {
+        "settings": {
+          "album_downloads": {
+            "atomic_recover_orphans": false
+          }
+        }
+      },
+      "asked": false,
+      "shows": ["album_downloads.atomic_recover_orphans"]
+    },
+    "#video-redownload-failed": {
+      "sel": "#video-redownload-failed",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": true,
+      "to": false,
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/video/downloads/config",
+            "body": "{\"download_path\":\"/downloads\",\"movies_path\":\"/media/movies\",\"tv_path\":\"/media/tv\",\"anime_path\":\"\",\"movies_additional_paths\":[\"/media/movies2\"],\"tv_additional_paths\":[],\"youtube_path\":\"/media/youtube\",\"movies_4k_enabled\":true,\"movies_4k_path\":\"/media/movies-4k\",\"tv_4k_enabled\":false,\"tv_4k_path\":\"\",\"seed_ratio_goal\":1.5,\"seed_time_goal_hours\":0,\"seed_remove_data\":true,\"seed_mode\":\"client\",\"seed_overrides\":{},\"usenet_remove_completed\":\"history\",\"redownload_failed\":false}"
+          }
+        ]
+      },
+      "asked": false,
+      "showsEndpoint": "/api/video/downloads/config"
+    },
+    "#allow-explicit": {
+      "sel": "#allow-explicit",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": false,
+      "to": true,
+      "saves": {
+        "settings": {
+          "content_filter": {
+            "allow_explicit": true
+          }
+        }
+      },
+      "asked": true,
+      "shows": ["content_filter.allow_explicit"]
+    },
+    "#prefer-explicit": {
+      "sel": "#prefer-explicit",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "jellyfin",
+      "from": true,
+      "to": false,
+      "saves": {
+        "settings": {
+          "content_filter": {
+            "prefer_explicit": false
+          }
+        }
+      },
+      "asked": false,
+      "shows": ["content_filter.prefer_explicit"]
+    },
+    "#exclude-clean": {
+      "sel": "#exclude-clean",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "jellyfin",
+      "from": false,
+      "to": true,
+      "saves": {
+        "settings": {
+          "content_filter": {
+            "exclude_clean": true
+          }
+        }
+      },
+      "asked": true,
+      "shows": ["content_filter.exclude_clean"]
+    },
+    "#music-max-mb-per-minute": {
+      "sel": "#music-max-mb-per-minute",
+      "kind": "number",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "12.5",
+      "to": "12.6",
+      "saves": {
+        "settings": {
+          "download_source": {
+            "max_mb_per_minute": 12.6
+          }
+        }
+      },
+      "asked": "12.6",
+      "shows": ["download_source.max_mb_per_minute"]
+    },
+    "#preferred-version": {
+      "sel": "#preferred-version",
+      "kind": "select",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "live",
+      "to": "",
+      "saves": {
+        "settings": {
+          "soulseek": {
+            "preferred_version": ""
+          }
+        }
+      },
+      "asked": "",
+      "shows": ["soulseek.preferred_version"]
+    },
+    "#genre-whitelist-enabled": {
+      "sel": "#genre-whitelist-enabled",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": true,
+      "to": false,
+      "saves": {
+        "settings": {
+          "genre_whitelist": {
+            "enabled": false
+          }
+        }
+      },
+      "asked": false,
+      "shows": ["genre_whitelist.enabled"]
+    },
+    "#genre-whitelist-search": {
+      "sel": "#genre-whitelist-search",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "guard-probe",
+      "saves": null,
+      "asked": "guard-probe",
+      "noSave": "a filter box over a list on the page: saves nothing (Enter in the genre box adds a genre, pinned by the genreWhitelist composite)"
+    },
+    "#soulseek-url": {
+      "sel": "#soulseek-url",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "http://slskd:5030",
+      "to": "http://guard.example:4321",
+      "saves": {
+        "settings": {
+          "soulseek": {
+            "slskd_url": "http://guard.example:4321"
+          }
+        }
+      },
+      "asked": "http://guard.example:4321",
+      "shows": ["soulseek.slskd_url"]
+    },
+    "#soulseek-api-key": {
+      "sel": "#soulseek-api-key",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "__redacted_unchanged__",
+      "to": "guard-secret",
+      "saves": {
+        "settings": {
+          "soulseek": {
+            "api_key": "guard-secret"
+          }
+        }
+      },
+      "asked": "guard-secret",
+      "shows": ["soulseek.api_key"]
+    },
+    "#soulseek-search-timeout": {
+      "sel": "#soulseek-search-timeout",
+      "kind": "number",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "45",
+      "to": "46",
+      "saves": {
+        "settings": {
+          "soulseek": {
+            "search_timeout": 46
+          }
+        }
+      },
+      "asked": "46",
+      "shows": ["soulseek.search_timeout"]
+    },
+    "#soulseek-search-timeout-buffer": {
+      "sel": "#soulseek-search-timeout-buffer",
+      "kind": "number",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "15",
+      "to": "16",
+      "saves": {
+        "settings": {
+          "soulseek": {
+            "search_timeout_buffer": 16
+          }
+        }
+      },
+      "asked": "16",
+      "shows": ["soulseek.search_timeout_buffer"]
+    },
+    "#soulseek-search-min-delay-seconds": {
+      "sel": "#soulseek-search-min-delay-seconds",
+      "kind": "number",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "0",
+      "to": "1",
+      "saves": {
+        "settings": {
+          "soulseek": {
+            "search_min_delay_seconds": 1
+          }
+        }
+      },
+      "asked": "1",
+      "shows": ["soulseek.search_min_delay_seconds"]
+    },
+    "#soulseek-min-peer-speed": {
+      "sel": "#soulseek-min-peer-speed",
+      "kind": "select",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "0",
+      "to": "1",
+      "saves": {
+        "settings": {
+          "soulseek": {
+            "min_peer_upload_speed": 1
+          }
+        }
+      },
+      "asked": "1",
+      "shows": ["soulseek.min_peer_upload_speed"]
+    },
+    "#soulseek-max-peer-queue": {
+      "sel": "#soulseek-max-peer-queue",
+      "kind": "select",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "20",
+      "to": "0",
+      "saves": {
+        "settings": {
+          "soulseek": {
+            "max_peer_queue": 0
+          }
+        }
+      },
+      "asked": "0",
+      "shows": ["soulseek.max_peer_queue"]
+    },
+    "#soulseek-observed-speed-fallback-enabled": {
+      "sel": "#soulseek-observed-speed-fallback-enabled",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": false,
+      "to": true,
+      "saves": {
+        "settings": {
+          "soulseek": {
+            "observed_speed_fallback_enabled": true
+          }
+        }
+      },
+      "asked": true,
+      "shows": ["soulseek.observed_speed_fallback_enabled"]
+    },
+    "#soulseek-min-observed-download-speed": {
+      "sel": "#soulseek-min-observed-download-speed",
+      "kind": "number",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "0",
+      "to": "50",
+      "saves": {
+        "settings": {
+          "soulseek": {
+            "min_observed_download_speed_kbps": 50
+          }
+        }
+      },
+      "asked": "50",
+      "shows": ["soulseek.min_observed_download_speed_kbps"]
+    },
+    "#soulseek-download-timeout": {
+      "sel": "#soulseek-download-timeout",
+      "kind": "number",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "15",
+      "to": "16",
+      "saves": {
+        "settings": {
+          "soulseek": {
+            "download_timeout": 960
+          }
+        }
+      },
+      "asked": "16",
+      "shows": ["soulseek.download_timeout"]
+    },
+    "#soulseek-auto-clear-searches": {
+      "sel": "#soulseek-auto-clear-searches",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": true,
+      "to": false,
+      "saves": {
+        "settings": {
+          "soulseek": {
+            "auto_clear_searches": false
+          }
+        }
+      },
+      "asked": false,
+      "shows": ["soulseek.auto_clear_searches"]
+    },
+    "#soulseek-cleanup-scope": {
+      "sel": "#soulseek-cleanup-scope",
+      "kind": "select",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "all",
+      "to": "own",
+      "saves": {
+        "settings": {
+          "soulseek": {
+            "cleanup_scope": "own"
+          }
+        }
+      },
+      "asked": "own",
+      "shows": ["soulseek.cleanup_scope"]
+    },
+    "#qobuz-email": {
+      "sel": "#qobuz-email",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "guard@guard.example",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/qobuz/auth/login",
+            "body": "{\"email\":\"guard@guard.example\",\"password\":\"guard-secret\"}"
+          }
+        ]
+      },
+      "asked": "guard@guard.example",
+      "also": {
+        "#qobuz-password": "guard-secret"
+      },
+      "click": ["#qobuz-login-btn"]
+    },
+    "#qobuz-password": {
+      "sel": "#qobuz-password",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/qobuz/auth/login",
+            "body": "{\"email\":\"guard@guard.example\",\"password\":\"guard-secret\"}"
+          }
+        ]
+      },
+      "asked": "guard-secret",
+      "also": {
+        "#qobuz-email": "guard@guard.example"
+      },
+      "click": ["#qobuz-login-btn"]
+    },
+    "#qobuz-download-token": {
+      "sel": "#qobuz-download-token",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/qobuz/auth/token",
+            "body": "{\"token\":\"guard-secret\"}"
+          }
+        ]
+      },
+      "asked": "guard-secret",
+      "click": ["#qobuz-download-token-btn"]
+    },
+    "#hifi-new-instance": {
+      "sel": "#hifi-new-instance",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/hifi/instances",
+            "body": "{\"url\":\"http://guard.example:4321\"}"
+          }
+        ]
+      },
+      "asked": "http://guard.example:4321",
+      "click": ["Add"]
+    },
+    "#deezer-download-arl": {
+      "sel": "#deezer-download-arl",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "__redacted_unchanged__",
+      "to": "guard-secret",
+      "saves": {
+        "settings": {
+          "deezer_download": {
+            "arl": "guard-secret"
+          }
+        }
+      },
+      "asked": "guard-secret",
+      "shows": ["deezer_download.arl"]
+    },
+    "#soundcloud-download-oauth-token": {
+      "sel": "#soundcloud-download-oauth-token",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "guard-secret",
+      "saves": {
+        "settings": {
+          "soundcloud_download": {
+            "oauth_token": "guard-secret"
+          }
+        }
+      },
+      "asked": "guard-secret",
+      "shows": ["soundcloud_download.oauth_token"]
+    },
+    "#lidarr-url": {
+      "sel": "#lidarr-url",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "http://lidarr:8686",
+      "to": "http://guard.example:4321",
+      "saves": {
+        "settings": {
+          "lidarr_download": {
+            "url": "http://guard.example:4321"
+          }
+        }
+      },
+      "asked": "http://guard.example:4321",
+      "shows": ["lidarr_download.url"]
+    },
+    "#lidarr-api-key": {
+      "sel": "#lidarr-api-key",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "__redacted_unchanged__",
+      "to": "guard-secret",
+      "saves": {
+        "settings": {
+          "lidarr_download": {
+            "api_key": "guard-secret"
+          }
+        }
+      },
+      "asked": "guard-secret",
+      "shows": ["lidarr_download.api_key"]
+    },
+    "#youtube-cookies-browser": {
+      "sel": "#youtube-cookies-browser",
+      "kind": "select",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "custom",
+      "to": "",
+      "saves": {
+        "settings": {
+          "youtube": {
+            "cookies_browser": ""
+          }
+        }
+      },
+      "asked": "",
+      "shows": ["youtube.cookies_browser"]
+    },
+    "#youtube-cookies-paste": {
+      "sel": "#youtube-cookies-paste",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "guard-probe",
+      "saves": {
+        "settings": {
+          "youtube": {
+            "cookies_paste": "guard-probe"
+          }
+        }
+      },
+      "asked": "guard-probe"
+    },
+    "#youtube-download-delay": {
+      "sel": "#youtube-download-delay",
+      "kind": "number",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "5",
+      "to": "6",
+      "saves": {
+        "settings": {
+          "youtube": {
+            "download_delay": 6
+          }
+        }
+      },
+      "asked": "6",
+      "shows": ["youtube.download_delay"]
+    },
+    "#youtube-album-bundle": {
+      "sel": "#youtube-album-bundle",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": true,
+      "to": false,
+      "saves": {
+        "settings": {
+          "download_source": {
+            "youtube_album_bundle": false
+          }
+        }
+      },
+      "asked": false,
+      "shows": ["download_source.youtube_album_bundle"]
+    },
+    "#youtube-transcode": {
+      "sel": "#youtube-transcode",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": true,
+      "to": false,
+      "saves": {
+        "settings": {
+          "youtube": {
+            "transcode": false
+          }
+        }
+      },
+      "asked": false,
+      "shows": ["youtube.transcode"]
+    },
+    "#youtube-transcode-codec": {
+      "sel": "#youtube-transcode-codec",
+      "kind": "select",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "opus",
+      "to": "mp3",
+      "saves": {
+        "settings": {
+          "youtube": {
+            "transcode_codec": "mp3",
+            "transcode_bitrate": "256"
+          }
+        }
+      },
+      "asked": "mp3",
+      "shows": ["youtube.transcode_bitrate", "youtube.transcode_codec"]
+    },
+    "#youtube-transcode-bitrate": {
+      "sel": "#youtube-transcode-bitrate",
+      "kind": "select",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "256",
+      "to": "192",
+      "saves": {
+        "settings": {
+          "youtube": {
+            "transcode_bitrate": "192"
+          }
+        }
+      },
+      "asked": "192",
+      "shows": ["youtube.transcode_bitrate"]
+    },
+    "#ytdlp-channel": {
+      "sel": "#ytdlp-channel",
+      "kind": "select",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "nightly",
+      "to": "stable",
+      "saves": null,
+      "asked": "stable",
+      "noSave": "local state: which yt-dlp channel the status line and the Update button are for"
+    },
+    "#prowlarr-url": {
+      "sel": "#prowlarr-url",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "http://prowlarr:9696",
+      "to": "http://guard.example:4321",
+      "saves": {
+        "settings": {
+          "prowlarr": {
+            "url": "http://guard.example:4321"
+          }
+        }
+      },
+      "asked": "http://guard.example:4321",
+      "shows": ["prowlarr.url"]
+    },
+    "#prowlarr-api-key": {
+      "sel": "#prowlarr-api-key",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "__redacted_unchanged__",
+      "to": "guard-secret",
+      "saves": {
+        "settings": {
+          "prowlarr": {
+            "api_key": "guard-secret"
+          }
+        }
+      },
+      "asked": "guard-secret",
+      "shows": ["prowlarr.api_key"]
+    },
+    "#prowlarr-indexer-ids": {
+      "sel": "#prowlarr-indexer-ids",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "guard-probe",
+      "saves": {
+        "settings": {
+          "prowlarr": {
+            "indexer_ids": "guard-probe"
+          }
+        }
+      },
+      "asked": "guard-probe",
+      "shows": ["prowlarr.indexer_ids"]
+    },
+    "#prowlarr-search-min-gap": {
+      "sel": "#prowlarr-search-min-gap",
+      "kind": "number",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "0",
+      "to": "0.5",
+      "saves": {
+        "settings": {
+          "prowlarr": {
+            "search_min_gap_seconds": 0.5
+          }
+        }
+      },
+      "asked": "0.5",
+      "shows": ["prowlarr.search_min_gap_seconds"]
+    },
+    "#prowlarr-max-searches-per-minute": {
+      "sel": "#prowlarr-max-searches-per-minute",
+      "kind": "number",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "20",
+      "to": "21",
+      "saves": {
+        "settings": {
+          "prowlarr": {
+            "max_searches_per_minute": 21
+          }
+        }
+      },
+      "asked": "21",
+      "shows": ["prowlarr.max_searches_per_minute"]
+    },
+    "#torrent-client-type": {
+      "sel": "#torrent-client-type",
+      "kind": "select",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "deluge",
+      "to": "qbittorrent",
+      "saves": {
+        "settings": {
+          "torrent_client": {
+            "type": "qbittorrent"
+          }
+        }
+      },
+      "asked": "qbittorrent",
+      "shows": ["torrent_client.type"]
+    },
+    "#torrent-client-url": {
+      "sel": "#torrent-client-url",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "http://deluge:8112",
+      "to": "http://guard.example:4321",
+      "saves": {
+        "settings": {
+          "torrent_client": {
+            "url": "http://guard.example:4321"
+          }
+        }
+      },
+      "asked": "http://guard.example:4321",
+      "shows": ["torrent_client.url"]
+    },
+    "#torrent-client-username": {
+      "sel": "#torrent-client-username",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "guard-probe",
+      "saves": {
+        "settings": {
+          "torrent_client": {
+            "username": "guard-probe"
+          }
+        }
+      },
+      "asked": "guard-probe",
+      "shows": ["torrent_client.username"]
+    },
+    "#torrent-client-password": {
+      "sel": "#torrent-client-password",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "__redacted_unchanged__",
+      "to": "guard-secret",
+      "saves": {
+        "settings": {
+          "torrent_client": {
+            "password": "guard-secret"
+          }
+        }
+      },
+      "asked": "guard-secret",
+      "shows": ["torrent_client.password"]
+    },
+    "#torrent-client-category": {
+      "sel": "#torrent-client-category",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "soulsync",
+      "to": "soulsync-guard",
+      "saves": {
+        "settings": {
+          "torrent_client": {
+            "category": "soulsync-guard"
+          }
+        }
+      },
+      "asked": "soulsync-guard",
+      "shows": ["torrent_client.category"]
+    },
+    "#torrent-client-save-path": {
+      "sel": "#torrent-client-save-path",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "guard-probe",
+      "saves": {
+        "settings": {
+          "torrent_client": {
+            "save_path": "guard-probe"
+          }
+        }
+      },
+      "asked": "guard-probe",
+      "shows": ["torrent_client.save_path"]
+    },
+    "#torrent-client-start-torrents": {
+      "sel": "#torrent-client-start-torrents",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": false,
+      "to": true,
+      "saves": {
+        "settings": {
+          "torrent_client": {
+            "start_torrents": true
+          }
+        }
+      },
+      "asked": true,
+      "shows": ["torrent_client.start_torrents"]
+    },
+    "#torrent-download-path": {
+      "sel": "#torrent-download-path",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "guard-probe",
+      "saves": {
+        "settings": {
+          "download_source": {
+            "torrent_download_path": "guard-probe"
+          }
+        }
+      },
+      "asked": "guard-probe",
+      "shows": ["download_source.torrent_download_path"]
+    },
+    "#torrent-min-seeders": {
+      "sel": "#torrent-min-seeders",
+      "kind": "number",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "0",
+      "to": "1",
+      "saves": {
+        "settings": {
+          "download_source": {
+            "torrent_min_seeders": 1
+          }
+        }
+      },
+      "asked": "1",
+      "shows": ["download_source.torrent_min_seeders"]
+    },
+    "#torrent-stall-timeout": {
+      "sel": "#torrent-stall-timeout",
+      "kind": "number",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "20",
+      "to": "21",
+      "saves": {
+        "settings": {
+          "download_source": {
+            "torrent_stall_timeout_seconds": 1260
+          }
+        }
+      },
+      "asked": "21",
+      "shows": ["download_source.torrent_stall_timeout_seconds"]
+    },
+    "#torrent-stall-action": {
+      "sel": "#torrent-stall-action",
+      "kind": "select",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "abandon",
+      "to": "pause",
+      "saves": {
+        "settings": {
+          "download_source": {
+            "torrent_stall_action": "pause"
+          }
+        }
+      },
+      "asked": "pause",
+      "shows": ["download_source.torrent_stall_action"]
+    },
+    "#music-seed-ratio": {
+      "sel": "#music-seed-ratio",
+      "kind": "number",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "1.5",
+      "to": "1.6",
+      "saves": {
+        "settings": {
+          "torrent_client": {
+            "seed_ratio_goal": 1.6
+          }
+        }
+      },
+      "asked": "1.6",
+      "shows": ["torrent_client.seed_ratio_goal"]
+    },
+    "#music-seed-hours": {
+      "sel": "#music-seed-hours",
+      "kind": "number",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "0",
+      "to": "1",
+      "saves": {
+        "settings": {
+          "torrent_client": {
+            "seed_time_goal_hours": 1
+          }
+        }
+      },
+      "asked": "1",
+      "shows": ["torrent_client.seed_time_goal_hours"]
+    },
+    "#music-seed-remove-data": {
+      "sel": "#music-seed-remove-data",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": true,
+      "to": false,
+      "saves": {
+        "settings": {
+          "torrent_client": {
+            "seed_remove_data": false
+          }
+        }
+      },
+      "asked": false,
+      "shows": ["torrent_client.seed_remove_data"]
+    },
+    "#music-seed-mode": {
+      "sel": "#music-seed-mode",
+      "kind": "select",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "client",
+      "to": "soulsync",
+      "saves": {
+        "settings": {
+          "torrent_client": {
+            "seed_mode": "soulsync"
+          }
+        }
+      },
+      "asked": "soulsync",
+      "shows": ["torrent_client.seed_mode"]
+    },
+    "#video-seed-ratio": {
+      "sel": "#video-seed-ratio",
+      "kind": "number",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "1.5",
+      "to": "1.6",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/video/downloads/config",
+            "body": "{\"download_path\":\"/downloads\",\"movies_path\":\"/media/movies\",\"tv_path\":\"/media/tv\",\"anime_path\":\"\",\"movies_additional_paths\":[\"/media/movies2\"],\"tv_additional_paths\":[],\"youtube_path\":\"/media/youtube\",\"movies_4k_enabled\":true,\"movies_4k_path\":\"/media/movies-4k\",\"tv_4k_enabled\":false,\"tv_4k_path\":\"\",\"seed_ratio_goal\":1.6,\"seed_time_goal_hours\":0,\"seed_remove_data\":true,\"seed_mode\":\"client\",\"seed_overrides\":{},\"usenet_remove_completed\":\"history\",\"redownload_failed\":true}"
+          }
+        ]
+      },
+      "asked": "1.6",
+      "showsEndpoint": "/api/video/downloads/config"
+    },
+    "#video-seed-hours": {
+      "sel": "#video-seed-hours",
+      "kind": "number",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "0",
+      "to": "1",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/video/downloads/config",
+            "body": "{\"download_path\":\"/downloads\",\"movies_path\":\"/media/movies\",\"tv_path\":\"/media/tv\",\"anime_path\":\"\",\"movies_additional_paths\":[\"/media/movies2\"],\"tv_additional_paths\":[],\"youtube_path\":\"/media/youtube\",\"movies_4k_enabled\":true,\"movies_4k_path\":\"/media/movies-4k\",\"tv_4k_enabled\":false,\"tv_4k_path\":\"\",\"seed_ratio_goal\":1.5,\"seed_time_goal_hours\":1,\"seed_remove_data\":true,\"seed_mode\":\"client\",\"seed_overrides\":{},\"usenet_remove_completed\":\"history\",\"redownload_failed\":true}"
+          }
+        ]
+      },
+      "asked": "1",
+      "showsEndpoint": "/api/video/downloads/config"
+    },
+    "#video-seed-remove-data": {
+      "sel": "#video-seed-remove-data",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": true,
+      "to": false,
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/video/downloads/config",
+            "body": "{\"download_path\":\"/downloads\",\"movies_path\":\"/media/movies\",\"tv_path\":\"/media/tv\",\"anime_path\":\"\",\"movies_additional_paths\":[\"/media/movies2\"],\"tv_additional_paths\":[],\"youtube_path\":\"/media/youtube\",\"movies_4k_enabled\":true,\"movies_4k_path\":\"/media/movies-4k\",\"tv_4k_enabled\":false,\"tv_4k_path\":\"\",\"seed_ratio_goal\":1.5,\"seed_time_goal_hours\":0,\"seed_remove_data\":false,\"seed_mode\":\"client\",\"seed_overrides\":{},\"usenet_remove_completed\":\"history\",\"redownload_failed\":true}"
+          }
+        ]
+      },
+      "asked": false,
+      "showsEndpoint": "/api/video/downloads/config"
+    },
+    "#video-seed-mode": {
+      "sel": "#video-seed-mode",
+      "kind": "select",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "client",
+      "to": "soulsync",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/video/downloads/config",
+            "body": "{\"download_path\":\"/downloads\",\"movies_path\":\"/media/movies\",\"tv_path\":\"/media/tv\",\"anime_path\":\"\",\"movies_additional_paths\":[\"/media/movies2\"],\"tv_additional_paths\":[],\"youtube_path\":\"/media/youtube\",\"movies_4k_enabled\":true,\"movies_4k_path\":\"/media/movies-4k\",\"tv_4k_enabled\":false,\"tv_4k_path\":\"\",\"seed_ratio_goal\":1.5,\"seed_time_goal_hours\":0,\"seed_remove_data\":true,\"seed_mode\":\"soulsync\",\"seed_overrides\":{},\"usenet_remove_completed\":\"history\",\"redownload_failed\":true}"
+          }
+        ]
+      },
+      "asked": "soulsync",
+      "showsEndpoint": "/api/video/downloads/config"
+    },
+    "#usenet-client-type": {
+      "sel": "#usenet-client-type",
+      "kind": "select",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "nzbget",
+      "to": "sabnzbd",
+      "saves": {
+        "settings": {
+          "usenet_client": {
+            "type": "sabnzbd"
+          }
+        }
+      },
+      "asked": "sabnzbd",
+      "shows": ["usenet_client.type"]
+    },
+    "#usenet-client-url": {
+      "sel": "#usenet-client-url",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "http://nzbget:6789",
+      "to": "http://guard.example:4321",
+      "saves": {
+        "settings": {
+          "usenet_client": {
+            "url": "http://guard.example:4321"
+          }
+        }
+      },
+      "asked": "http://guard.example:4321",
+      "shows": ["usenet_client.url"]
+    },
+    "#usenet-client-api-key": {
+      "sel": "#usenet-client-api-key",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "guard-secret",
+      "saves": {
+        "settings": {
+          "usenet_client": {
+            "api_key": "guard-secret"
+          }
+        }
+      },
+      "asked": "guard-secret",
+      "shows": ["usenet_client.api_key"]
+    },
+    "#usenet-client-username": {
+      "sel": "#usenet-client-username",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "boulder",
+      "to": "boulder-guard",
+      "saves": {
+        "settings": {
+          "usenet_client": {
+            "username": "boulder-guard"
+          }
+        }
+      },
+      "asked": "boulder-guard",
+      "shows": ["usenet_client.username"]
+    },
+    "#usenet-client-password": {
+      "sel": "#usenet-client-password",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "guard-secret",
+      "saves": {
+        "settings": {
+          "usenet_client": {
+            "password": "guard-secret"
+          }
+        }
+      },
+      "asked": "guard-secret",
+      "shows": ["usenet_client.password"]
+    },
+    "#usenet-client-category": {
+      "sel": "#usenet-client-category",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "soulsync",
+      "to": "soulsync-guard",
+      "saves": {
+        "settings": {
+          "usenet_client": {
+            "category": "soulsync-guard"
+          }
+        }
+      },
+      "asked": "soulsync-guard",
+      "shows": ["usenet_client.category"]
+    },
+    "#usenet-download-path": {
+      "sel": "#usenet-download-path",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "guard-probe",
+      "saves": {
+        "settings": {
+          "download_source": {
+            "usenet_download_path": "guard-probe"
+          }
+        }
+      },
+      "asked": "guard-probe",
+      "shows": ["download_source.usenet_download_path"]
+    },
+    "#music-usenet-remove-completed": {
+      "sel": "#music-usenet-remove-completed",
+      "kind": "select",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "files",
+      "to": "off",
+      "saves": {
+        "settings": {
+          "usenet_client": {
+            "remove_completed": "off"
+          }
+        }
+      },
+      "asked": "off",
+      "shows": ["usenet_client.remove_completed"]
+    },
+    "#video-usenet-remove-completed": {
+      "sel": "#video-usenet-remove-completed",
+      "kind": "select",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "history",
+      "to": "off",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/video/downloads/config",
+            "body": "{\"download_path\":\"/downloads\",\"movies_path\":\"/media/movies\",\"tv_path\":\"/media/tv\",\"anime_path\":\"\",\"movies_additional_paths\":[\"/media/movies2\"],\"tv_additional_paths\":[],\"youtube_path\":\"/media/youtube\",\"movies_4k_enabled\":true,\"movies_4k_path\":\"/media/movies-4k\",\"tv_4k_enabled\":false,\"tv_4k_path\":\"\",\"seed_ratio_goal\":1.5,\"seed_time_goal_hours\":0,\"seed_remove_data\":true,\"seed_mode\":\"client\",\"seed_overrides\":{},\"usenet_remove_completed\":\"off\",\"redownload_failed\":true}"
+          }
+        ]
+      },
+      "asked": "off",
+      "showsEndpoint": "/api/video/downloads/config"
+    },
     "#metadata-fallback-source": {
       "sel": "#metadata-fallback-source",
       "kind": "select",
@@ -1460,1091 +2817,6 @@
       "asked": true,
       "showsEndpoint": "/api/video/downloads/youtube-quality"
     },
-    "#dlchain-filter": {
-      "sel": "#dlchain-filter",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "",
-      "to": "guard-probe",
-      "saves": null,
-      "asked": "guard-probe",
-      "noSave": "a filter box over a list on the page: saves nothing (Enter in the genre box adds a genre, pinned by the genreWhitelist composite)"
-    },
-    "#soulseek-url": {
-      "sel": "#soulseek-url",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "http://slskd:5030",
-      "to": "http://guard.example:4321",
-      "saves": {
-        "settings": {
-          "soulseek": {
-            "slskd_url": "http://guard.example:4321"
-          }
-        }
-      },
-      "asked": "http://guard.example:4321",
-      "shows": ["soulseek.slskd_url"]
-    },
-    "#soulseek-api-key": {
-      "sel": "#soulseek-api-key",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "__redacted_unchanged__",
-      "to": "guard-secret",
-      "saves": {
-        "settings": {
-          "soulseek": {
-            "api_key": "guard-secret"
-          }
-        }
-      },
-      "asked": "guard-secret",
-      "shows": ["soulseek.api_key"]
-    },
-    "#soulseek-search-timeout": {
-      "sel": "#soulseek-search-timeout",
-      "kind": "number",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "45",
-      "to": "46",
-      "saves": {
-        "settings": {
-          "soulseek": {
-            "search_timeout": 46
-          }
-        }
-      },
-      "asked": "46",
-      "shows": ["soulseek.search_timeout"]
-    },
-    "#soulseek-search-timeout-buffer": {
-      "sel": "#soulseek-search-timeout-buffer",
-      "kind": "number",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "15",
-      "to": "16",
-      "saves": {
-        "settings": {
-          "soulseek": {
-            "search_timeout_buffer": 16
-          }
-        }
-      },
-      "asked": "16",
-      "shows": ["soulseek.search_timeout_buffer"]
-    },
-    "#soulseek-search-min-delay-seconds": {
-      "sel": "#soulseek-search-min-delay-seconds",
-      "kind": "number",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "0",
-      "to": "1",
-      "saves": {
-        "settings": {
-          "soulseek": {
-            "search_min_delay_seconds": 1
-          }
-        }
-      },
-      "asked": "1",
-      "shows": ["soulseek.search_min_delay_seconds"]
-    },
-    "#soulseek-min-peer-speed": {
-      "sel": "#soulseek-min-peer-speed",
-      "kind": "select",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "0",
-      "to": "1",
-      "saves": {
-        "settings": {
-          "soulseek": {
-            "min_peer_upload_speed": 1
-          }
-        }
-      },
-      "asked": "1",
-      "shows": ["soulseek.min_peer_upload_speed"]
-    },
-    "#soulseek-max-peer-queue": {
-      "sel": "#soulseek-max-peer-queue",
-      "kind": "select",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "20",
-      "to": "0",
-      "saves": {
-        "settings": {
-          "soulseek": {
-            "max_peer_queue": 0
-          }
-        }
-      },
-      "asked": "0",
-      "shows": ["soulseek.max_peer_queue"]
-    },
-    "#soulseek-observed-speed-fallback-enabled": {
-      "sel": "#soulseek-observed-speed-fallback-enabled",
-      "kind": "checkbox",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": false,
-      "to": true,
-      "saves": {
-        "settings": {
-          "soulseek": {
-            "observed_speed_fallback_enabled": true
-          }
-        }
-      },
-      "asked": true,
-      "shows": ["soulseek.observed_speed_fallback_enabled"]
-    },
-    "#soulseek-min-observed-download-speed": {
-      "sel": "#soulseek-min-observed-download-speed",
-      "kind": "number",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "0",
-      "to": "50",
-      "saves": {
-        "settings": {
-          "soulseek": {
-            "min_observed_download_speed_kbps": 50
-          }
-        }
-      },
-      "asked": "50",
-      "shows": ["soulseek.min_observed_download_speed_kbps"]
-    },
-    "#soulseek-download-timeout": {
-      "sel": "#soulseek-download-timeout",
-      "kind": "number",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "15",
-      "to": "16",
-      "saves": {
-        "settings": {
-          "soulseek": {
-            "download_timeout": 960
-          }
-        }
-      },
-      "asked": "16",
-      "shows": ["soulseek.download_timeout"]
-    },
-    "#soulseek-auto-clear-searches": {
-      "sel": "#soulseek-auto-clear-searches",
-      "kind": "checkbox",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": true,
-      "to": false,
-      "saves": {
-        "settings": {
-          "soulseek": {
-            "auto_clear_searches": false
-          }
-        }
-      },
-      "asked": false,
-      "shows": ["soulseek.auto_clear_searches"]
-    },
-    "#soulseek-cleanup-scope": {
-      "sel": "#soulseek-cleanup-scope",
-      "kind": "select",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "all",
-      "to": "own",
-      "saves": {
-        "settings": {
-          "soulseek": {
-            "cleanup_scope": "own"
-          }
-        }
-      },
-      "asked": "own",
-      "shows": ["soulseek.cleanup_scope"]
-    },
-    "#qobuz-email": {
-      "sel": "#qobuz-email",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "",
-      "to": "guard@guard.example",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/qobuz/auth/login",
-            "body": "{\"email\":\"guard@guard.example\",\"password\":\"guard-secret\"}"
-          }
-        ]
-      },
-      "asked": "guard@guard.example",
-      "also": {
-        "#qobuz-password": "guard-secret"
-      },
-      "click": ["#qobuz-login-btn"]
-    },
-    "#qobuz-password": {
-      "sel": "#qobuz-password",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "",
-      "to": "",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/qobuz/auth/login",
-            "body": "{\"email\":\"guard@guard.example\",\"password\":\"guard-secret\"}"
-          }
-        ]
-      },
-      "asked": "guard-secret",
-      "also": {
-        "#qobuz-email": "guard@guard.example"
-      },
-      "click": ["#qobuz-login-btn"]
-    },
-    "#qobuz-download-token": {
-      "sel": "#qobuz-download-token",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "",
-      "to": "",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/qobuz/auth/token",
-            "body": "{\"token\":\"guard-secret\"}"
-          }
-        ]
-      },
-      "asked": "guard-secret",
-      "click": ["#qobuz-download-token-btn"]
-    },
-    "#hifi-new-instance": {
-      "sel": "#hifi-new-instance",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "",
-      "to": "",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/hifi/instances",
-            "body": "{\"url\":\"http://guard.example:4321\"}"
-          }
-        ]
-      },
-      "asked": "http://guard.example:4321",
-      "click": ["Add"]
-    },
-    "#deezer-download-arl": {
-      "sel": "#deezer-download-arl",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "__redacted_unchanged__",
-      "to": "guard-secret",
-      "saves": {
-        "settings": {
-          "deezer_download": {
-            "arl": "guard-secret"
-          }
-        }
-      },
-      "asked": "guard-secret",
-      "shows": ["deezer_download.arl"]
-    },
-    "#soundcloud-download-oauth-token": {
-      "sel": "#soundcloud-download-oauth-token",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "",
-      "to": "guard-secret",
-      "saves": {
-        "settings": {
-          "soundcloud_download": {
-            "oauth_token": "guard-secret"
-          }
-        }
-      },
-      "asked": "guard-secret",
-      "shows": ["soundcloud_download.oauth_token"]
-    },
-    "#lidarr-url": {
-      "sel": "#lidarr-url",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "http://lidarr:8686",
-      "to": "http://guard.example:4321",
-      "saves": {
-        "settings": {
-          "lidarr_download": {
-            "url": "http://guard.example:4321"
-          }
-        }
-      },
-      "asked": "http://guard.example:4321",
-      "shows": ["lidarr_download.url"]
-    },
-    "#lidarr-api-key": {
-      "sel": "#lidarr-api-key",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "__redacted_unchanged__",
-      "to": "guard-secret",
-      "saves": {
-        "settings": {
-          "lidarr_download": {
-            "api_key": "guard-secret"
-          }
-        }
-      },
-      "asked": "guard-secret",
-      "shows": ["lidarr_download.api_key"]
-    },
-    "#youtube-cookies-browser": {
-      "sel": "#youtube-cookies-browser",
-      "kind": "select",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "custom",
-      "to": "",
-      "saves": {
-        "settings": {
-          "youtube": {
-            "cookies_browser": ""
-          }
-        }
-      },
-      "asked": "",
-      "shows": ["youtube.cookies_browser"]
-    },
-    "#youtube-cookies-paste": {
-      "sel": "#youtube-cookies-paste",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "",
-      "to": "guard-probe",
-      "saves": {
-        "settings": {
-          "youtube": {
-            "cookies_paste": "guard-probe"
-          }
-        }
-      },
-      "asked": "guard-probe"
-    },
-    "#youtube-download-delay": {
-      "sel": "#youtube-download-delay",
-      "kind": "number",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "5",
-      "to": "6",
-      "saves": {
-        "settings": {
-          "youtube": {
-            "download_delay": 6
-          }
-        }
-      },
-      "asked": "6",
-      "shows": ["youtube.download_delay"]
-    },
-    "#youtube-album-bundle": {
-      "sel": "#youtube-album-bundle",
-      "kind": "checkbox",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": true,
-      "to": false,
-      "saves": {
-        "settings": {
-          "download_source": {
-            "youtube_album_bundle": false
-          }
-        }
-      },
-      "asked": false,
-      "shows": ["download_source.youtube_album_bundle"]
-    },
-    "#youtube-transcode": {
-      "sel": "#youtube-transcode",
-      "kind": "checkbox",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": true,
-      "to": false,
-      "saves": {
-        "settings": {
-          "youtube": {
-            "transcode": false
-          }
-        }
-      },
-      "asked": false,
-      "shows": ["youtube.transcode"]
-    },
-    "#youtube-transcode-codec": {
-      "sel": "#youtube-transcode-codec",
-      "kind": "select",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "opus",
-      "to": "mp3",
-      "saves": {
-        "settings": {
-          "youtube": {
-            "transcode_codec": "mp3",
-            "transcode_bitrate": "256"
-          }
-        }
-      },
-      "asked": "mp3",
-      "shows": ["youtube.transcode_bitrate", "youtube.transcode_codec"]
-    },
-    "#youtube-transcode-bitrate": {
-      "sel": "#youtube-transcode-bitrate",
-      "kind": "select",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "256",
-      "to": "192",
-      "saves": {
-        "settings": {
-          "youtube": {
-            "transcode_bitrate": "192"
-          }
-        }
-      },
-      "asked": "192",
-      "shows": ["youtube.transcode_bitrate"]
-    },
-    "#ytdlp-channel": {
-      "sel": "#ytdlp-channel",
-      "kind": "select",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "nightly",
-      "to": "stable",
-      "saves": null,
-      "asked": "stable",
-      "noSave": "local state: which yt-dlp channel the status line and the Update button are for"
-    },
-    "#prowlarr-url": {
-      "sel": "#prowlarr-url",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "http://prowlarr:9696",
-      "to": "http://guard.example:4321",
-      "saves": {
-        "settings": {
-          "prowlarr": {
-            "url": "http://guard.example:4321"
-          }
-        }
-      },
-      "asked": "http://guard.example:4321",
-      "shows": ["prowlarr.url"]
-    },
-    "#prowlarr-api-key": {
-      "sel": "#prowlarr-api-key",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "__redacted_unchanged__",
-      "to": "guard-secret",
-      "saves": {
-        "settings": {
-          "prowlarr": {
-            "api_key": "guard-secret"
-          }
-        }
-      },
-      "asked": "guard-secret",
-      "shows": ["prowlarr.api_key"]
-    },
-    "#prowlarr-indexer-ids": {
-      "sel": "#prowlarr-indexer-ids",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "",
-      "to": "guard-probe",
-      "saves": {
-        "settings": {
-          "prowlarr": {
-            "indexer_ids": "guard-probe"
-          }
-        }
-      },
-      "asked": "guard-probe",
-      "shows": ["prowlarr.indexer_ids"]
-    },
-    "#prowlarr-search-min-gap": {
-      "sel": "#prowlarr-search-min-gap",
-      "kind": "number",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "0",
-      "to": "0.5",
-      "saves": {
-        "settings": {
-          "prowlarr": {
-            "search_min_gap_seconds": 0.5
-          }
-        }
-      },
-      "asked": "0.5",
-      "shows": ["prowlarr.search_min_gap_seconds"]
-    },
-    "#prowlarr-max-searches-per-minute": {
-      "sel": "#prowlarr-max-searches-per-minute",
-      "kind": "number",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "20",
-      "to": "21",
-      "saves": {
-        "settings": {
-          "prowlarr": {
-            "max_searches_per_minute": 21
-          }
-        }
-      },
-      "asked": "21",
-      "shows": ["prowlarr.max_searches_per_minute"]
-    },
-    "#torrent-client-type": {
-      "sel": "#torrent-client-type",
-      "kind": "select",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "deluge",
-      "to": "qbittorrent",
-      "saves": {
-        "settings": {
-          "torrent_client": {
-            "type": "qbittorrent"
-          }
-        }
-      },
-      "asked": "qbittorrent",
-      "shows": ["torrent_client.type"]
-    },
-    "#torrent-client-url": {
-      "sel": "#torrent-client-url",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "http://deluge:8112",
-      "to": "http://guard.example:4321",
-      "saves": {
-        "settings": {
-          "torrent_client": {
-            "url": "http://guard.example:4321"
-          }
-        }
-      },
-      "asked": "http://guard.example:4321",
-      "shows": ["torrent_client.url"]
-    },
-    "#torrent-client-username": {
-      "sel": "#torrent-client-username",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "",
-      "to": "guard-probe",
-      "saves": {
-        "settings": {
-          "torrent_client": {
-            "username": "guard-probe"
-          }
-        }
-      },
-      "asked": "guard-probe",
-      "shows": ["torrent_client.username"]
-    },
-    "#torrent-client-password": {
-      "sel": "#torrent-client-password",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "__redacted_unchanged__",
-      "to": "guard-secret",
-      "saves": {
-        "settings": {
-          "torrent_client": {
-            "password": "guard-secret"
-          }
-        }
-      },
-      "asked": "guard-secret",
-      "shows": ["torrent_client.password"]
-    },
-    "#torrent-client-category": {
-      "sel": "#torrent-client-category",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "soulsync",
-      "to": "soulsync-guard",
-      "saves": {
-        "settings": {
-          "torrent_client": {
-            "category": "soulsync-guard"
-          }
-        }
-      },
-      "asked": "soulsync-guard",
-      "shows": ["torrent_client.category"]
-    },
-    "#torrent-client-save-path": {
-      "sel": "#torrent-client-save-path",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "",
-      "to": "guard-probe",
-      "saves": {
-        "settings": {
-          "torrent_client": {
-            "save_path": "guard-probe"
-          }
-        }
-      },
-      "asked": "guard-probe",
-      "shows": ["torrent_client.save_path"]
-    },
-    "#torrent-client-start-torrents": {
-      "sel": "#torrent-client-start-torrents",
-      "kind": "checkbox",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": false,
-      "to": true,
-      "saves": {
-        "settings": {
-          "torrent_client": {
-            "start_torrents": true
-          }
-        }
-      },
-      "asked": true,
-      "shows": ["torrent_client.start_torrents"]
-    },
-    "#torrent-download-path": {
-      "sel": "#torrent-download-path",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "",
-      "to": "guard-probe",
-      "saves": {
-        "settings": {
-          "download_source": {
-            "torrent_download_path": "guard-probe"
-          }
-        }
-      },
-      "asked": "guard-probe",
-      "shows": ["download_source.torrent_download_path"]
-    },
-    "#torrent-min-seeders": {
-      "sel": "#torrent-min-seeders",
-      "kind": "number",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "0",
-      "to": "1",
-      "saves": {
-        "settings": {
-          "download_source": {
-            "torrent_min_seeders": 1
-          }
-        }
-      },
-      "asked": "1",
-      "shows": ["download_source.torrent_min_seeders"]
-    },
-    "#torrent-stall-timeout": {
-      "sel": "#torrent-stall-timeout",
-      "kind": "number",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "20",
-      "to": "21",
-      "saves": {
-        "settings": {
-          "download_source": {
-            "torrent_stall_timeout_seconds": 1260
-          }
-        }
-      },
-      "asked": "21",
-      "shows": ["download_source.torrent_stall_timeout_seconds"]
-    },
-    "#torrent-stall-action": {
-      "sel": "#torrent-stall-action",
-      "kind": "select",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "abandon",
-      "to": "pause",
-      "saves": {
-        "settings": {
-          "download_source": {
-            "torrent_stall_action": "pause"
-          }
-        }
-      },
-      "asked": "pause",
-      "shows": ["download_source.torrent_stall_action"]
-    },
-    "#music-seed-ratio": {
-      "sel": "#music-seed-ratio",
-      "kind": "number",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "1.5",
-      "to": "1.6",
-      "saves": {
-        "settings": {
-          "torrent_client": {
-            "seed_ratio_goal": 1.6
-          }
-        }
-      },
-      "asked": "1.6",
-      "shows": ["torrent_client.seed_ratio_goal"]
-    },
-    "#music-seed-hours": {
-      "sel": "#music-seed-hours",
-      "kind": "number",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "0",
-      "to": "1",
-      "saves": {
-        "settings": {
-          "torrent_client": {
-            "seed_time_goal_hours": 1
-          }
-        }
-      },
-      "asked": "1",
-      "shows": ["torrent_client.seed_time_goal_hours"]
-    },
-    "#music-seed-remove-data": {
-      "sel": "#music-seed-remove-data",
-      "kind": "checkbox",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": true,
-      "to": false,
-      "saves": {
-        "settings": {
-          "torrent_client": {
-            "seed_remove_data": false
-          }
-        }
-      },
-      "asked": false,
-      "shows": ["torrent_client.seed_remove_data"]
-    },
-    "#music-seed-mode": {
-      "sel": "#music-seed-mode",
-      "kind": "select",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "client",
-      "to": "soulsync",
-      "saves": {
-        "settings": {
-          "torrent_client": {
-            "seed_mode": "soulsync"
-          }
-        }
-      },
-      "asked": "soulsync",
-      "shows": ["torrent_client.seed_mode"]
-    },
-    "#video-seed-ratio": {
-      "sel": "#video-seed-ratio",
-      "kind": "number",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "1.5",
-      "to": "1.6",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/video/downloads/config",
-            "body": "{\"download_path\":\"/downloads\",\"movies_path\":\"/media/movies\",\"tv_path\":\"/media/tv\",\"anime_path\":\"\",\"movies_additional_paths\":[\"/media/movies2\"],\"tv_additional_paths\":[],\"youtube_path\":\"/media/youtube\",\"movies_4k_enabled\":true,\"movies_4k_path\":\"/media/movies-4k\",\"tv_4k_enabled\":false,\"tv_4k_path\":\"\",\"seed_ratio_goal\":1.6,\"seed_time_goal_hours\":0,\"seed_remove_data\":true,\"seed_mode\":\"client\",\"seed_overrides\":{},\"usenet_remove_completed\":\"history\",\"redownload_failed\":true}"
-          }
-        ]
-      },
-      "asked": "1.6",
-      "showsEndpoint": "/api/video/downloads/config"
-    },
-    "#video-seed-hours": {
-      "sel": "#video-seed-hours",
-      "kind": "number",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "0",
-      "to": "1",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/video/downloads/config",
-            "body": "{\"download_path\":\"/downloads\",\"movies_path\":\"/media/movies\",\"tv_path\":\"/media/tv\",\"anime_path\":\"\",\"movies_additional_paths\":[\"/media/movies2\"],\"tv_additional_paths\":[],\"youtube_path\":\"/media/youtube\",\"movies_4k_enabled\":true,\"movies_4k_path\":\"/media/movies-4k\",\"tv_4k_enabled\":false,\"tv_4k_path\":\"\",\"seed_ratio_goal\":1.5,\"seed_time_goal_hours\":1,\"seed_remove_data\":true,\"seed_mode\":\"client\",\"seed_overrides\":{},\"usenet_remove_completed\":\"history\",\"redownload_failed\":true}"
-          }
-        ]
-      },
-      "asked": "1",
-      "showsEndpoint": "/api/video/downloads/config"
-    },
-    "#video-seed-remove-data": {
-      "sel": "#video-seed-remove-data",
-      "kind": "checkbox",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": true,
-      "to": false,
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/video/downloads/config",
-            "body": "{\"download_path\":\"/downloads\",\"movies_path\":\"/media/movies\",\"tv_path\":\"/media/tv\",\"anime_path\":\"\",\"movies_additional_paths\":[\"/media/movies2\"],\"tv_additional_paths\":[],\"youtube_path\":\"/media/youtube\",\"movies_4k_enabled\":true,\"movies_4k_path\":\"/media/movies-4k\",\"tv_4k_enabled\":false,\"tv_4k_path\":\"\",\"seed_ratio_goal\":1.5,\"seed_time_goal_hours\":0,\"seed_remove_data\":false,\"seed_mode\":\"client\",\"seed_overrides\":{},\"usenet_remove_completed\":\"history\",\"redownload_failed\":true}"
-          }
-        ]
-      },
-      "asked": false,
-      "showsEndpoint": "/api/video/downloads/config"
-    },
-    "#video-seed-mode": {
-      "sel": "#video-seed-mode",
-      "kind": "select",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "client",
-      "to": "soulsync",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/video/downloads/config",
-            "body": "{\"download_path\":\"/downloads\",\"movies_path\":\"/media/movies\",\"tv_path\":\"/media/tv\",\"anime_path\":\"\",\"movies_additional_paths\":[\"/media/movies2\"],\"tv_additional_paths\":[],\"youtube_path\":\"/media/youtube\",\"movies_4k_enabled\":true,\"movies_4k_path\":\"/media/movies-4k\",\"tv_4k_enabled\":false,\"tv_4k_path\":\"\",\"seed_ratio_goal\":1.5,\"seed_time_goal_hours\":0,\"seed_remove_data\":true,\"seed_mode\":\"soulsync\",\"seed_overrides\":{},\"usenet_remove_completed\":\"history\",\"redownload_failed\":true}"
-          }
-        ]
-      },
-      "asked": "soulsync",
-      "showsEndpoint": "/api/video/downloads/config"
-    },
-    "#usenet-client-type": {
-      "sel": "#usenet-client-type",
-      "kind": "select",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "nzbget",
-      "to": "sabnzbd",
-      "saves": {
-        "settings": {
-          "usenet_client": {
-            "type": "sabnzbd"
-          }
-        }
-      },
-      "asked": "sabnzbd",
-      "shows": ["usenet_client.type"]
-    },
-    "#usenet-client-url": {
-      "sel": "#usenet-client-url",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "http://nzbget:6789",
-      "to": "http://guard.example:4321",
-      "saves": {
-        "settings": {
-          "usenet_client": {
-            "url": "http://guard.example:4321"
-          }
-        }
-      },
-      "asked": "http://guard.example:4321",
-      "shows": ["usenet_client.url"]
-    },
-    "#usenet-client-api-key": {
-      "sel": "#usenet-client-api-key",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "",
-      "to": "guard-secret",
-      "saves": {
-        "settings": {
-          "usenet_client": {
-            "api_key": "guard-secret"
-          }
-        }
-      },
-      "asked": "guard-secret",
-      "shows": ["usenet_client.api_key"]
-    },
-    "#usenet-client-username": {
-      "sel": "#usenet-client-username",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "boulder",
-      "to": "boulder-guard",
-      "saves": {
-        "settings": {
-          "usenet_client": {
-            "username": "boulder-guard"
-          }
-        }
-      },
-      "asked": "boulder-guard",
-      "shows": ["usenet_client.username"]
-    },
-    "#usenet-client-password": {
-      "sel": "#usenet-client-password",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "",
-      "to": "guard-secret",
-      "saves": {
-        "settings": {
-          "usenet_client": {
-            "password": "guard-secret"
-          }
-        }
-      },
-      "asked": "guard-secret",
-      "shows": ["usenet_client.password"]
-    },
-    "#usenet-client-category": {
-      "sel": "#usenet-client-category",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "soulsync",
-      "to": "soulsync-guard",
-      "saves": {
-        "settings": {
-          "usenet_client": {
-            "category": "soulsync-guard"
-          }
-        }
-      },
-      "asked": "soulsync-guard",
-      "shows": ["usenet_client.category"]
-    },
-    "#usenet-download-path": {
-      "sel": "#usenet-download-path",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "",
-      "to": "guard-probe",
-      "saves": {
-        "settings": {
-          "download_source": {
-            "usenet_download_path": "guard-probe"
-          }
-        }
-      },
-      "asked": "guard-probe",
-      "shows": ["download_source.usenet_download_path"]
-    },
-    "#music-usenet-remove-completed": {
-      "sel": "#music-usenet-remove-completed",
-      "kind": "select",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "files",
-      "to": "off",
-      "saves": {
-        "settings": {
-          "usenet_client": {
-            "remove_completed": "off"
-          }
-        }
-      },
-      "asked": "off",
-      "shows": ["usenet_client.remove_completed"]
-    },
-    "#video-usenet-remove-completed": {
-      "sel": "#video-usenet-remove-completed",
-      "kind": "select",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "history",
-      "to": "off",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/video/downloads/config",
-            "body": "{\"download_path\":\"/downloads\",\"movies_path\":\"/media/movies\",\"tv_path\":\"/media/tv\",\"anime_path\":\"\",\"movies_additional_paths\":[\"/media/movies2\"],\"tv_additional_paths\":[],\"youtube_path\":\"/media/youtube\",\"movies_4k_enabled\":true,\"movies_4k_path\":\"/media/movies-4k\",\"tv_4k_enabled\":false,\"tv_4k_path\":\"\",\"seed_ratio_goal\":1.5,\"seed_time_goal_hours\":0,\"seed_remove_data\":true,\"seed_mode\":\"client\",\"seed_overrides\":{},\"usenet_remove_completed\":\"off\",\"redownload_failed\":true}"
-          }
-        ]
-      },
-      "asked": "off",
-      "showsEndpoint": "/api/video/downloads/config"
-    },
-    "#video-redownload-failed": {
-      "sel": "#video-redownload-failed",
-      "kind": "checkbox",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": true,
-      "to": false,
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/video/downloads/config",
-            "body": "{\"download_path\":\"/downloads\",\"movies_path\":\"/media/movies\",\"tv_path\":\"/media/tv\",\"anime_path\":\"\",\"movies_additional_paths\":[\"/media/movies2\"],\"tv_additional_paths\":[],\"youtube_path\":\"/media/youtube\",\"movies_4k_enabled\":true,\"movies_4k_path\":\"/media/movies-4k\",\"tv_4k_enabled\":false,\"tv_4k_path\":\"\",\"seed_ratio_goal\":1.5,\"seed_time_goal_hours\":0,\"seed_remove_data\":true,\"seed_mode\":\"client\",\"seed_overrides\":{},\"usenet_remove_completed\":\"history\",\"redownload_failed\":false}"
-          }
-        ]
-      },
-      "asked": false,
-      "showsEndpoint": "/api/video/downloads/config"
-    },
     "#rt-add-format": {
       "sel": "#rt-add-format",
       "kind": "select",
@@ -2595,7 +2867,7 @@
           {
             "method": "POST",
             "url": "/api/quality-profile/custom/1/update",
-            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320},{\"format\":\"flac\",\"label\":\"FLAC 16-bit\",\"bit_depth\":16},{\"format\":\"alac\",\"label\":\"ALAC 16-bit\",\"bit_depth\":16},{\"format\":\"wav\",\"label\":\"WAV 16-bit\",\"bit_depth\":16},{\"format\":\"dsf\",\"label\":\"DSF 16-bit\",\"bit_depth\":16},{\"format\":\"flac\",\"label\":\"FLAC ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"alac\",\"label\":\"ALAC ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"wav\",\"label\":\"WAV ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"dsf\",\"label\":\"DSF ≥44.1kHz\",\"min_sample_rate\":44100}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
+            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320},{\"format\":\"flac\",\"label\":\"FLAC ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"alac\",\"label\":\"ALAC ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"wav\",\"label\":\"WAV ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"dsf\",\"label\":\"DSF ≥44.1kHz\",\"min_sample_rate\":44100}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
           }
         ]
       },
@@ -2614,7 +2886,7 @@
           {
             "method": "POST",
             "url": "/api/quality-profile/custom/1/update",
-            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320},{\"format\":\"flac\",\"label\":\"FLAC 16-bit\",\"bit_depth\":16},{\"format\":\"alac\",\"label\":\"ALAC 16-bit\",\"bit_depth\":16},{\"format\":\"wav\",\"label\":\"WAV 16-bit\",\"bit_depth\":16},{\"format\":\"dsf\",\"label\":\"DSF 16-bit\",\"bit_depth\":16},{\"format\":\"flac\",\"label\":\"FLAC ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"alac\",\"label\":\"ALAC ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"wav\",\"label\":\"WAV ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"dsf\",\"label\":\"DSF ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"alac\",\"label\":\"ALAC\"},{\"format\":\"wav\",\"label\":\"WAV\"},{\"format\":\"dsf\",\"label\":\"DSF\"}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
+            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320},{\"format\":\"alac\",\"label\":\"ALAC\"},{\"format\":\"wav\",\"label\":\"WAV\"},{\"format\":\"dsf\",\"label\":\"DSF\"}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
           }
         ]
       },
@@ -2633,7 +2905,7 @@
           {
             "method": "POST",
             "url": "/api/quality-profile/custom/1/update",
-            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320},{\"format\":\"flac\",\"label\":\"FLAC 16-bit\",\"bit_depth\":16},{\"format\":\"alac\",\"label\":\"ALAC 16-bit\",\"bit_depth\":16},{\"format\":\"wav\",\"label\":\"WAV 16-bit\",\"bit_depth\":16},{\"format\":\"dsf\",\"label\":\"DSF 16-bit\",\"bit_depth\":16},{\"format\":\"flac\",\"label\":\"FLAC ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"alac\",\"label\":\"ALAC ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"wav\",\"label\":\"WAV ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"dsf\",\"label\":\"DSF ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"alac\",\"label\":\"ALAC\"},{\"format\":\"wav\",\"label\":\"WAV\"},{\"format\":\"dsf\",\"label\":\"DSF\"}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
+            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320},{\"format\":\"alac\",\"label\":\"ALAC\"},{\"format\":\"wav\",\"label\":\"WAV\"},{\"format\":\"dsf\",\"label\":\"DSF\"}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
           }
         ]
       },
@@ -2652,7 +2924,7 @@
           {
             "method": "POST",
             "url": "/api/quality-profile/custom/1/update",
-            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"none\",\"upgrade_cutoff_index\":1,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320},{\"format\":\"flac\",\"label\":\"FLAC 16-bit\",\"bit_depth\":16},{\"format\":\"alac\",\"label\":\"ALAC 16-bit\",\"bit_depth\":16},{\"format\":\"wav\",\"label\":\"WAV 16-bit\",\"bit_depth\":16},{\"format\":\"dsf\",\"label\":\"DSF 16-bit\",\"bit_depth\":16},{\"format\":\"flac\",\"label\":\"FLAC ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"alac\",\"label\":\"ALAC ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"wav\",\"label\":\"WAV ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"dsf\",\"label\":\"DSF ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"alac\",\"label\":\"ALAC\"},{\"format\":\"wav\",\"label\":\"WAV\"},{\"format\":\"dsf\",\"label\":\"DSF\"}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
+            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"none\",\"upgrade_cutoff_index\":1,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
           }
         ]
       },
@@ -2671,7 +2943,7 @@
           {
             "method": "POST",
             "url": "/api/quality-profile/custom/1/update",
-            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":0,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320},{\"format\":\"flac\",\"label\":\"FLAC 16-bit\",\"bit_depth\":16},{\"format\":\"alac\",\"label\":\"ALAC 16-bit\",\"bit_depth\":16},{\"format\":\"wav\",\"label\":\"WAV 16-bit\",\"bit_depth\":16},{\"format\":\"dsf\",\"label\":\"DSF 16-bit\",\"bit_depth\":16},{\"format\":\"flac\",\"label\":\"FLAC ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"alac\",\"label\":\"ALAC ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"wav\",\"label\":\"WAV ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"dsf\",\"label\":\"DSF ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"alac\",\"label\":\"ALAC\"},{\"format\":\"wav\",\"label\":\"WAV\"},{\"format\":\"dsf\",\"label\":\"DSF\"}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
+            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":0,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
           }
         ]
       },
@@ -2690,7 +2962,7 @@
           {
             "method": "POST",
             "url": "/api/quality-profile/custom/1/update",
-            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"best_quality\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320},{\"format\":\"flac\",\"label\":\"FLAC 16-bit\",\"bit_depth\":16},{\"format\":\"alac\",\"label\":\"ALAC 16-bit\",\"bit_depth\":16},{\"format\":\"wav\",\"label\":\"WAV 16-bit\",\"bit_depth\":16},{\"format\":\"dsf\",\"label\":\"DSF 16-bit\",\"bit_depth\":16},{\"format\":\"flac\",\"label\":\"FLAC ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"alac\",\"label\":\"ALAC ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"wav\",\"label\":\"WAV ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"dsf\",\"label\":\"DSF ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"alac\",\"label\":\"ALAC\"},{\"format\":\"wav\",\"label\":\"WAV\"},{\"format\":\"dsf\",\"label\":\"DSF\"}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
+            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"best_quality\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
           }
         ]
       },
@@ -2709,7 +2981,7 @@
           {
             "method": "POST",
             "url": "/api/quality-profile/custom/1/update",
-            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":false,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320},{\"format\":\"flac\",\"label\":\"FLAC 16-bit\",\"bit_depth\":16},{\"format\":\"alac\",\"label\":\"ALAC 16-bit\",\"bit_depth\":16},{\"format\":\"wav\",\"label\":\"WAV 16-bit\",\"bit_depth\":16},{\"format\":\"dsf\",\"label\":\"DSF 16-bit\",\"bit_depth\":16},{\"format\":\"flac\",\"label\":\"FLAC ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"alac\",\"label\":\"ALAC ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"wav\",\"label\":\"WAV ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"dsf\",\"label\":\"DSF ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"alac\",\"label\":\"ALAC\"},{\"format\":\"wav\",\"label\":\"WAV\"},{\"format\":\"dsf\",\"label\":\"DSF\"}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
+            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":false,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
           }
         ]
       },
@@ -2728,7 +3000,7 @@
           {
             "method": "POST",
             "url": "/api/quality-profile/custom/1/update",
-            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":false,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320},{\"format\":\"flac\",\"label\":\"FLAC 16-bit\",\"bit_depth\":16},{\"format\":\"alac\",\"label\":\"ALAC 16-bit\",\"bit_depth\":16},{\"format\":\"wav\",\"label\":\"WAV 16-bit\",\"bit_depth\":16},{\"format\":\"dsf\",\"label\":\"DSF 16-bit\",\"bit_depth\":16},{\"format\":\"flac\",\"label\":\"FLAC ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"alac\",\"label\":\"ALAC ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"wav\",\"label\":\"WAV ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"dsf\",\"label\":\"DSF ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"alac\",\"label\":\"ALAC\"},{\"format\":\"wav\",\"label\":\"WAV\"},{\"format\":\"dsf\",\"label\":\"DSF\"}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
+            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":false,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
           }
         ]
       },
@@ -2747,7 +3019,7 @@
           {
             "method": "POST",
             "url": "/api/quality-profile/custom/1/update",
-            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320},{\"format\":\"flac\",\"label\":\"FLAC 16-bit\",\"bit_depth\":16},{\"format\":\"alac\",\"label\":\"ALAC 16-bit\",\"bit_depth\":16},{\"format\":\"wav\",\"label\":\"WAV 16-bit\",\"bit_depth\":16},{\"format\":\"dsf\",\"label\":\"DSF 16-bit\",\"bit_depth\":16},{\"format\":\"flac\",\"label\":\"FLAC ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"alac\",\"label\":\"ALAC ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"wav\",\"label\":\"WAV ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"dsf\",\"label\":\"DSF ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"alac\",\"label\":\"ALAC\"},{\"format\":\"wav\",\"label\":\"WAV\"},{\"format\":\"dsf\",\"label\":\"DSF\"}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":false,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
+            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":false,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
           }
         ]
       },
@@ -2766,7 +3038,7 @@
           {
             "method": "POST",
             "url": "/api/quality-profile/custom/1/update",
-            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"album_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320},{\"format\":\"flac\",\"label\":\"FLAC 16-bit\",\"bit_depth\":16},{\"format\":\"alac\",\"label\":\"ALAC 16-bit\",\"bit_depth\":16},{\"format\":\"wav\",\"label\":\"WAV 16-bit\",\"bit_depth\":16},{\"format\":\"dsf\",\"label\":\"DSF 16-bit\",\"bit_depth\":16},{\"format\":\"flac\",\"label\":\"FLAC ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"alac\",\"label\":\"ALAC ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"wav\",\"label\":\"WAV ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"dsf\",\"label\":\"DSF ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"alac\",\"label\":\"ALAC\"},{\"format\":\"wav\",\"label\":\"WAV\"},{\"format\":\"dsf\",\"label\":\"DSF\"}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
+            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"album_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
           }
         ]
       },
@@ -2785,7 +3057,7 @@
           {
             "method": "POST",
             "url": "/api/quality-profile/custom/1/update",
-            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320},{\"format\":\"flac\",\"label\":\"FLAC 16-bit\",\"bit_depth\":16},{\"format\":\"alac\",\"label\":\"ALAC 16-bit\",\"bit_depth\":16},{\"format\":\"wav\",\"label\":\"WAV 16-bit\",\"bit_depth\":16},{\"format\":\"dsf\",\"label\":\"DSF 16-bit\",\"bit_depth\":16},{\"format\":\"flac\",\"label\":\"FLAC ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"alac\",\"label\":\"ALAC ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"wav\",\"label\":\"WAV ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"dsf\",\"label\":\"DSF ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"alac\",\"label\":\"ALAC\"},{\"format\":\"wav\",\"label\":\"WAV\"},{\"format\":\"dsf\",\"label\":\"DSF\"}],\"acoustid_required\":false,\"downsample_enabled\":true,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
+            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320}],\"acoustid_required\":false,\"downsample_enabled\":true,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
           }
         ]
       },
@@ -2804,7 +3076,7 @@
           {
             "method": "POST",
             "url": "/api/quality-profile/custom/1/update",
-            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320},{\"format\":\"flac\",\"label\":\"FLAC 16-bit\",\"bit_depth\":16},{\"format\":\"alac\",\"label\":\"ALAC 16-bit\",\"bit_depth\":16},{\"format\":\"wav\",\"label\":\"WAV 16-bit\",\"bit_depth\":16},{\"format\":\"dsf\",\"label\":\"DSF 16-bit\",\"bit_depth\":16},{\"format\":\"flac\",\"label\":\"FLAC ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"alac\",\"label\":\"ALAC ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"wav\",\"label\":\"WAV ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"dsf\",\"label\":\"DSF ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"alac\",\"label\":\"ALAC\"},{\"format\":\"wav\",\"label\":\"WAV\"},{\"format\":\"dsf\",\"label\":\"DSF\"}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":false,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
+            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":false,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
           }
         ]
       },
@@ -2823,7 +3095,7 @@
           {
             "method": "POST",
             "url": "/api/quality-profile/custom/1/update",
-            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320},{\"format\":\"flac\",\"label\":\"FLAC 16-bit\",\"bit_depth\":16},{\"format\":\"alac\",\"label\":\"ALAC 16-bit\",\"bit_depth\":16},{\"format\":\"wav\",\"label\":\"WAV 16-bit\",\"bit_depth\":16},{\"format\":\"dsf\",\"label\":\"DSF 16-bit\",\"bit_depth\":16},{\"format\":\"flac\",\"label\":\"FLAC ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"alac\",\"label\":\"ALAC ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"wav\",\"label\":\"WAV ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"dsf\",\"label\":\"DSF ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"alac\",\"label\":\"ALAC\"},{\"format\":\"wav\",\"label\":\"WAV\"},{\"format\":\"dsf\",\"label\":\"DSF\"}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"opus\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
+            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"opus\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
           }
         ]
       },
@@ -2842,7 +3114,7 @@
           {
             "method": "POST",
             "url": "/api/quality-profile/custom/1/update",
-            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320},{\"format\":\"flac\",\"label\":\"FLAC 16-bit\",\"bit_depth\":16},{\"format\":\"alac\",\"label\":\"ALAC 16-bit\",\"bit_depth\":16},{\"format\":\"wav\",\"label\":\"WAV 16-bit\",\"bit_depth\":16},{\"format\":\"dsf\",\"label\":\"DSF 16-bit\",\"bit_depth\":16},{\"format\":\"flac\",\"label\":\"FLAC ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"alac\",\"label\":\"ALAC ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"wav\",\"label\":\"WAV ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"dsf\",\"label\":\"DSF ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"alac\",\"label\":\"ALAC\"},{\"format\":\"wav\",\"label\":\"WAV\"},{\"format\":\"dsf\",\"label\":\"DSF\"}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"320\",\"lossy_copy_delete_original\":false}"
+            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"320\",\"lossy_copy_delete_original\":false}"
           }
         ]
       },
@@ -2861,7 +3133,7 @@
           {
             "method": "POST",
             "url": "/api/quality-profile/custom/1/update",
-            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320},{\"format\":\"flac\",\"label\":\"FLAC 16-bit\",\"bit_depth\":16},{\"format\":\"alac\",\"label\":\"ALAC 16-bit\",\"bit_depth\":16},{\"format\":\"wav\",\"label\":\"WAV 16-bit\",\"bit_depth\":16},{\"format\":\"dsf\",\"label\":\"DSF 16-bit\",\"bit_depth\":16},{\"format\":\"flac\",\"label\":\"FLAC ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"alac\",\"label\":\"ALAC ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"wav\",\"label\":\"WAV ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"dsf\",\"label\":\"DSF ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"alac\",\"label\":\"ALAC\"},{\"format\":\"wav\",\"label\":\"WAV\"},{\"format\":\"dsf\",\"label\":\"DSF\"}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":true}"
+            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":true}"
           }
         ]
       },
@@ -2880,7 +3152,7 @@
           {
             "method": "POST",
             "url": "/api/quality-profile/custom/1/update",
-            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320},{\"format\":\"flac\",\"label\":\"FLAC 16-bit\",\"bit_depth\":16},{\"format\":\"alac\",\"label\":\"ALAC 16-bit\",\"bit_depth\":16},{\"format\":\"wav\",\"label\":\"WAV 16-bit\",\"bit_depth\":16},{\"format\":\"dsf\",\"label\":\"DSF 16-bit\",\"bit_depth\":16},{\"format\":\"flac\",\"label\":\"FLAC ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"alac\",\"label\":\"ALAC ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"wav\",\"label\":\"WAV ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"dsf\",\"label\":\"DSF ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"alac\",\"label\":\"ALAC\"},{\"format\":\"wav\",\"label\":\"WAV\"},{\"format\":\"dsf\",\"label\":\"DSF\"}],\"acoustid_required\":true,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
+            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320}],\"acoustid_required\":true,\"downsample_enabled\":false,\"deep_audio_verify\":true,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
           }
         ]
       },
@@ -2899,7 +3171,7 @@
           {
             "method": "POST",
             "url": "/api/quality-profile/custom/1/update",
-            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320},{\"format\":\"flac\",\"label\":\"FLAC 16-bit\",\"bit_depth\":16},{\"format\":\"alac\",\"label\":\"ALAC 16-bit\",\"bit_depth\":16},{\"format\":\"wav\",\"label\":\"WAV 16-bit\",\"bit_depth\":16},{\"format\":\"dsf\",\"label\":\"DSF 16-bit\",\"bit_depth\":16},{\"format\":\"flac\",\"label\":\"FLAC ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"alac\",\"label\":\"ALAC ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"wav\",\"label\":\"WAV ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"dsf\",\"label\":\"DSF ≥44.1kHz\",\"min_sample_rate\":44100},{\"format\":\"alac\",\"label\":\"ALAC\"},{\"format\":\"wav\",\"label\":\"WAV\"},{\"format\":\"dsf\",\"label\":\"DSF\"}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":false,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
+            "body": "{\"version\":3,\"preset\":\"balanced\",\"fallback_enabled\":true,\"search_mode\":\"priority\",\"rank_candidates_by_quality\":true,\"release_import_mode\":\"requested_tracks\",\"upgrade_policy\":\"until_cutoff\",\"upgrade_cutoff_index\":1,\"ranked_targets\":[{\"format\":\"flac\",\"label\":\"FLAC 24-bit\",\"bit_depth\":24},{\"format\":\"flac\",\"label\":\"FLAC\"},{\"format\":\"mp3\",\"label\":\"MP3 ≥320kbps\",\"min_bitrate\":320}],\"acoustid_required\":false,\"downsample_enabled\":false,\"deep_audio_verify\":false,\"replace_lower_quality\":true,\"lossy_copy_enabled\":true,\"lossy_copy_codec\":\"mp3\",\"lossy_copy_bitrate\":\"256\",\"lossy_copy_delete_original\":false}"
           }
         ]
       },
@@ -2922,176 +3194,6 @@
       },
       "asked": false,
       "shows": ["post_processing.verify_flac_decode"]
-    },
-    "#stream-source": {
-      "sel": "#stream-source",
-      "kind": "select",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "active",
-      "to": "youtube",
-      "saves": {
-        "settings": {
-          "download_source": {
-            "stream_source": "youtube"
-          }
-        }
-      },
-      "asked": "youtube",
-      "shows": ["download_source.stream_source"]
-    },
-    "#max-concurrent-downloads": {
-      "sel": "#max-concurrent-downloads",
-      "kind": "select",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "5",
-      "to": "1",
-      "saves": {
-        "settings": {
-          "download_source": {
-            "max_concurrent": 1
-          }
-        }
-      },
-      "asked": "1",
-      "shows": ["download_source.max_concurrent"]
-    },
-    "#source-search-timeout": {
-      "sel": "#source-search-timeout",
-      "kind": "number",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "25",
-      "to": "26",
-      "saves": {
-        "settings": {
-          "download_source": {
-            "source_search_timeout": 26
-          }
-        }
-      },
-      "asked": "26",
-      "shows": ["download_source.source_search_timeout"]
-    },
-    "#retry-next-candidate": {
-      "sel": "#retry-next-candidate",
-      "kind": "checkbox",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": true,
-      "to": false,
-      "saves": {
-        "settings": {
-          "post_processing": {
-            "retry_next_candidate_on_mismatch": false
-          }
-        }
-      },
-      "asked": false,
-      "shows": ["post_processing.retry_next_candidate_on_mismatch"]
-    },
-    "#retry-exhaustive": {
-      "sel": "#retry-exhaustive",
-      "kind": "checkbox",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": true,
-      "to": false,
-      "saves": {
-        "settings": {
-          "post_processing": {
-            "retry_exhaustive": false
-          }
-        }
-      },
-      "asked": false,
-      "shows": ["post_processing.retry_exhaustive"]
-    },
-    "#retries-per-query": {
-      "sel": "#retries-per-query",
-      "kind": "number",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "7",
-      "to": "8",
-      "saves": {
-        "settings": {
-          "post_processing": {
-            "retries_per_query": 8
-          }
-        }
-      },
-      "asked": "8",
-      "shows": ["post_processing.retries_per_query"]
-    },
-    "#accept-version-mismatch-fallback": {
-      "sel": "#accept-version-mismatch-fallback",
-      "kind": "checkbox",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": false,
-      "to": true,
-      "saves": {
-        "settings": {
-          "post_processing": {
-            "accept_version_mismatch_fallback": true
-          }
-        }
-      },
-      "asked": true,
-      "shows": ["post_processing.accept_version_mismatch_fallback"]
-    },
-    "#version-mismatch-min-count": {
-      "sel": "#version-mismatch-min-count",
-      "kind": "number",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "3",
-      "to": "4",
-      "saves": {
-        "settings": {
-          "post_processing": {
-            "version_mismatch_min_count": 4
-          }
-        }
-      },
-      "asked": "4",
-      "shows": ["post_processing.version_mismatch_min_count"]
-    },
-    "#album-atomic-publish": {
-      "sel": "#album-atomic-publish",
-      "kind": "checkbox",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": true,
-      "to": false,
-      "saves": {
-        "settings": {
-          "album_downloads": {
-            "atomic_publish": false
-          }
-        }
-      },
-      "asked": false,
-      "shows": ["album_downloads.atomic_publish"]
-    },
-    "#album-atomic-recover": {
-      "sel": "#album-atomic-recover",
-      "kind": "checkbox",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": true,
-      "to": false,
-      "saves": {
-        "settings": {
-          "album_downloads": {
-            "atomic_recover_orphans": false
-          }
-        }
-      },
-      "asked": false,
-      "shows": ["album_downloads.atomic_recover_orphans"]
     },
     "#download-path": {
       "sel": "#download-path",
@@ -7420,119 +7522,6 @@
       "asked": false,
       "shows": ["import.transfer_is_permanent"]
     },
-    "#allow-explicit": {
-      "sel": "#allow-explicit",
-      "kind": "checkbox",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": false,
-      "to": true,
-      "saves": {
-        "settings": {
-          "content_filter": {
-            "allow_explicit": true
-          }
-        }
-      },
-      "asked": true,
-      "shows": ["content_filter.allow_explicit"]
-    },
-    "#prefer-explicit": {
-      "sel": "#prefer-explicit",
-      "kind": "checkbox",
-      "sides": ["music", "video"],
-      "scenario": "jellyfin",
-      "from": true,
-      "to": false,
-      "saves": {
-        "settings": {
-          "content_filter": {
-            "prefer_explicit": false
-          }
-        }
-      },
-      "asked": false,
-      "shows": ["content_filter.prefer_explicit"]
-    },
-    "#exclude-clean": {
-      "sel": "#exclude-clean",
-      "kind": "checkbox",
-      "sides": ["music", "video"],
-      "scenario": "jellyfin",
-      "from": false,
-      "to": true,
-      "saves": {
-        "settings": {
-          "content_filter": {
-            "exclude_clean": true
-          }
-        }
-      },
-      "asked": true,
-      "shows": ["content_filter.exclude_clean"]
-    },
-    "#music-max-mb-per-minute": {
-      "sel": "#music-max-mb-per-minute",
-      "kind": "number",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "12.5",
-      "to": "12.6",
-      "saves": {
-        "settings": {
-          "download_source": {
-            "max_mb_per_minute": 12.6
-          }
-        }
-      },
-      "asked": "12.6",
-      "shows": ["download_source.max_mb_per_minute"]
-    },
-    "#preferred-version": {
-      "sel": "#preferred-version",
-      "kind": "select",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "live",
-      "to": "",
-      "saves": {
-        "settings": {
-          "soulseek": {
-            "preferred_version": ""
-          }
-        }
-      },
-      "asked": "",
-      "shows": ["soulseek.preferred_version"]
-    },
-    "#genre-whitelist-enabled": {
-      "sel": "#genre-whitelist-enabled",
-      "kind": "checkbox",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": true,
-      "to": false,
-      "saves": {
-        "settings": {
-          "genre_whitelist": {
-            "enabled": false
-          }
-        }
-      },
-      "asked": false,
-      "shows": ["genre_whitelist.enabled"]
-    },
-    "#genre-whitelist-search": {
-      "sel": "#genre-whitelist-search",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "",
-      "to": "guard-probe",
-      "saves": null,
-      "asked": "guard-probe",
-      "noSave": "a filter box over a list on the page: saves nothing (Enter in the genre box adds a genre, pinned by the genreWhitelist composite)"
-    },
     "#m3u-export-enabled": {
       "sel": "#m3u-export-enabled",
       "kind": "checkbox",
@@ -10823,15 +10812,8 @@
       "sides": ["music", "video"],
       "scenario": "music"
     },
-    "\"Sources\"": {
-      "label": "Sources",
-      "anchor": "",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "\"Downloads\"": {
-      "label": "Downloads",
+    "\"Downloads1\"": {
+      "label": "Downloads1",
       "anchor": "",
       "count": 1,
       "sides": ["music", "video"],
@@ -10879,15 +10861,432 @@
       "sides": ["music", "video"],
       "scenario": "music"
     },
-    "\"Logs\"": {
-      "label": "Logs",
-      "anchor": "",
+    "#save-settings": {
+      "id": "save-settings",
       "count": 1,
       "sides": ["music", "video"],
       "scenario": "music"
     },
-    "#save-settings": {
-      "id": "save-settings",
+    "#dlchain-tabs \"Music\"": {
+      "label": "Music",
+      "anchor": "dlchain-tabs",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#dlchain-tabs \"Video\"": {
+      "label": "Video",
+      "anchor": "dlchain-tabs",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#dlchain-tabs \"Audiobooks\"": {
+      "label": "Audiobooks",
+      "anchor": "dlchain-tabs",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#test-all-sources-btn": {
+      "id": "test-all-sources-btn",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#dlchain-panel \"Reorder Soulseek, 1 of 3\"": {
+      "label": "Reorder Soulseek, 1 of 3",
+      "anchor": "dlchain-panel",
+      "count": 1,
+      "sides": ["music"],
+      "scenario": "music"
+    },
+    "#dlchain-panel \"Soulseek settings\"": {
+      "label": "Soulseek settings",
+      "anchor": "dlchain-panel",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#dlchain-panel \"More for Soulseek\"": {
+      "label": "More for Soulseek",
+      "anchor": "dlchain-panel",
+      "count": 1,
+      "sides": ["music"],
+      "scenario": "music"
+    },
+    "#dlchain-panel \"Reorder YouTube, 2 of 3\"": {
+      "label": "Reorder YouTube, 2 of 3",
+      "anchor": "dlchain-panel",
+      "count": 1,
+      "sides": ["music"],
+      "scenario": "music"
+    },
+    "#dlchain-panel \"YouTube settings\"": {
+      "label": "YouTube settings",
+      "anchor": "dlchain-panel",
+      "count": 1,
+      "sides": ["music"],
+      "scenario": "music"
+    },
+    "#dlchain-panel \"More for YouTube\"": {
+      "label": "More for YouTube",
+      "anchor": "dlchain-panel",
+      "count": 1,
+      "sides": ["music"],
+      "scenario": "music"
+    },
+    "#dlchain-panel \"Reorder Qobuz, 3 of 3\"": {
+      "label": "Reorder Qobuz, 3 of 3",
+      "anchor": "dlchain-panel",
+      "count": 1,
+      "sides": ["music"],
+      "scenario": "music"
+    },
+    "#dlchain-panel \"Set up Qobuz\"": {
+      "label": "Set up Qobuz",
+      "anchor": "dlchain-panel",
+      "count": 1,
+      "sides": ["music"],
+      "scenario": "music"
+    },
+    "#dlchain-panel \"More for Qobuz\"": {
+      "label": "More for Qobuz",
+      "anchor": "dlchain-panel",
+      "count": 1,
+      "sides": ["music"],
+      "scenario": "music"
+    },
+    "#dlchain-panel \"Tidal settings\"": {
+      "label": "Tidal settings",
+      "anchor": "dlchain-panel",
+      "count": 1,
+      "sides": ["music"],
+      "scenario": "music"
+    },
+    "#dlchain-panel \"Use Tidal\"": {
+      "label": "Use Tidal",
+      "anchor": "dlchain-panel",
+      "count": 1,
+      "sides": ["music"],
+      "scenario": "music"
+    },
+    "#dlchain-panel \"Deezer settings\"": {
+      "label": "Deezer settings",
+      "anchor": "dlchain-panel",
+      "count": 1,
+      "sides": ["music"],
+      "scenario": "music"
+    },
+    "#dlchain-panel \"Use Deezer\"": {
+      "label": "Use Deezer",
+      "anchor": "dlchain-panel",
+      "count": 1,
+      "sides": ["music"],
+      "scenario": "music"
+    },
+    "#dlchain-panel \"SoundCloud settings\"": {
+      "label": "SoundCloud settings",
+      "anchor": "dlchain-panel",
+      "count": 1,
+      "sides": ["music"],
+      "scenario": "music"
+    },
+    "#dlchain-panel \"Use SoundCloud\"": {
+      "label": "Use SoundCloud",
+      "anchor": "dlchain-panel",
+      "count": 1,
+      "sides": ["music"],
+      "scenario": "music"
+    },
+    "#dlchain-panel \"HiFi settings\"": {
+      "label": "HiFi settings",
+      "anchor": "dlchain-panel",
+      "count": 1,
+      "sides": ["music"],
+      "scenario": "music"
+    },
+    "#dlchain-panel \"Use HiFi\"": {
+      "label": "Use HiFi",
+      "anchor": "dlchain-panel",
+      "count": 1,
+      "sides": ["music"],
+      "scenario": "music"
+    },
+    "#dlchain-panel \"Torrent settings\"": {
+      "label": "Torrent settings",
+      "anchor": "dlchain-panel",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#dlchain-panel \"Use Torrent\"": {
+      "label": "Use Torrent",
+      "anchor": "dlchain-panel",
+      "count": 1,
+      "sides": ["music"],
+      "scenario": "music"
+    },
+    "#dlchain-panel \"Usenet settings\"": {
+      "label": "Usenet settings",
+      "anchor": "dlchain-panel",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#dlchain-panel \"Use Usenet\"": {
+      "label": "Use Usenet",
+      "anchor": "dlchain-panel",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#dlchain-panel \"Lidarr settings\"": {
+      "label": "Lidarr settings",
+      "anchor": "dlchain-panel",
+      "count": 1,
+      "sides": ["music"],
+      "scenario": "music"
+    },
+    "#dlchain-panel \"Use Lidarr\"": {
+      "label": "Use Lidarr",
+      "anchor": "dlchain-panel",
+      "count": 1,
+      "sides": ["music"],
+      "scenario": "music"
+    },
+    "#stg-view-downloads-sources \"Prowlarr settings\"": {
+      "label": "Prowlarr settings",
+      "anchor": "stg-view-downloads-sources",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#stg-view-downloads-sources \"Filesystem access: the easiest setup· read once when you install\"": {
+      "label": "Filesystem access: the easiest setup· read once when you install",
+      "anchor": "stg-view-downloads-sources",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#stg-behaviour-kind \"Music\"": {
+      "label": "Music",
+      "anchor": "stg-behaviour-kind",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#stg-behaviour-kind \"Video\"": {
+      "label": "Video",
+      "anchor": "stg-behaviour-kind",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#stg-behaviour-music \"More about this setting\"": {
+      "label": "More about this setting",
+      "anchor": "stg-behaviour-music",
+      "count": 8,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#retries-per-query-row \"More about this setting\"": {
+      "label": "More about this setting",
+      "anchor": "retries-per-query-row",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#version-mismatch-min-count-row \"More about this setting\"": {
+      "label": "More about this setting",
+      "anchor": "version-mismatch-min-count-row",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#video-redownload-failed-group \"More about this setting\"": {
+      "label": "More about this setting",
+      "anchor": "video-redownload-failed-group",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#stg-view-downloads-filtering \"More about this setting\"": {
+      "label": "More about this setting",
+      "anchor": "stg-view-downloads-filtering",
+      "count": 6,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#genre-whitelist-container \"More about this setting\"": {
+      "label": "More about this setting",
+      "anchor": "genre-whitelist-container",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#genre-whitelist-container \"Reset to defaults\"": {
+      "label": "Reset to defaults",
+      "anchor": "genre-whitelist-container",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#genre-whitelist-chips \"Remove ambient\"": {
+      "label": "Remove ambient",
+      "anchor": "genre-whitelist-chips",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#genre-whitelist-chips \"Remove jazz\"": {
+      "label": "Remove jazz",
+      "anchor": "genre-whitelist-chips",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#genre-whitelist-chips \"Remove shoegaze\"": {
+      "label": "Remove shoegaze",
+      "anchor": "genre-whitelist-chips",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#source-config-modal \"Close\"": {
+      "label": "Close",
+      "anchor": "source-config-modal",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#src-modal-test": {
+      "id": "src-modal-test",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#source-config-modal \"Done\"": {
+      "label": "Done",
+      "anchor": "source-config-modal",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#soulseek-settings-container \"Auto-detect\"": {
+      "label": "Auto-detect",
+      "anchor": "soulseek-settings-container",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#soulseek-settings-container \"Test Soulseek Connection\"": {
+      "label": "Test Soulseek Connection",
+      "anchor": "soulseek-settings-container",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#tidal-download-auth-btn": {
+      "id": "tidal-download-auth-btn",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#qobuz-auth-logged-in \"Disconnect\"": {
+      "label": "Disconnect",
+      "anchor": "qobuz-auth-logged-in",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#qobuz-login-btn": {
+      "id": "qobuz-login-btn",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#qobuz-download-token-btn": {
+      "id": "qobuz-download-token-btn",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#hifi-test-btn": {
+      "id": "hifi-test-btn",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#hifi-download-settings-container \"Add\"": {
+      "label": "Add",
+      "anchor": "hifi-download-settings-container",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#hifi-instances-check-btn": {
+      "id": "hifi-instances-check-btn",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#hifi-instances-restore-btn": {
+      "id": "hifi-instances-restore-btn",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#deezer-download-test-btn": {
+      "id": "deezer-download-test-btn",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#soundcloud-test-btn": {
+      "id": "soundcloud-test-btn",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#lidarr-test-btn": {
+      "id": "lidarr-test-btn",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#ytdlp-update-btn": {
+      "id": "ytdlp-update-btn",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#prowlarr-test-btn": {
+      "id": "prowlarr-test-btn",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#prowlarr-refresh-indexers-btn": {
+      "id": "prowlarr-refresh-indexers-btn",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#torrent-client-test-btn": {
+      "id": "torrent-client-test-btn",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#video-seed-idx-refresh": {
+      "id": "video-seed-idx-refresh",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#usenet-client-test-btn": {
+      "id": "usenet-client-test-btn",
       "count": 1,
       "sides": ["music", "video"],
       "scenario": "music"
@@ -11567,347 +11966,6 @@
       "sides": ["music", "video"],
       "scenario": "music"
     },
-    "#dlchain-tabs \"Music\"": {
-      "label": "Music",
-      "anchor": "dlchain-tabs",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#dlchain-tabs \"Video\"": {
-      "label": "Video",
-      "anchor": "dlchain-tabs",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#dlchain-tabs \"Audiobooks\"": {
-      "label": "Audiobooks",
-      "anchor": "dlchain-tabs",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#dlchain-pool \"Tidal\"": {
-      "label": "Tidal",
-      "anchor": "dlchain-pool",
-      "count": 1,
-      "sides": ["music"],
-      "scenario": "music"
-    },
-    "#dlchain-pool \"Deezer\"": {
-      "label": "Deezer",
-      "anchor": "dlchain-pool",
-      "count": 1,
-      "sides": ["music"],
-      "scenario": "music"
-    },
-    "#dlchain-pool \"SoundCloud\"": {
-      "label": "SoundCloud",
-      "anchor": "dlchain-pool",
-      "count": 1,
-      "sides": ["music"],
-      "scenario": "music"
-    },
-    "#dlchain-pool \"🎶HiFi\"": {
-      "label": "🎶HiFi",
-      "anchor": "dlchain-pool",
-      "count": 1,
-      "sides": ["music"],
-      "scenario": "music"
-    },
-    "#dlchain-pool \"🧲Torrent\"": {
-      "label": "🧲Torrent",
-      "anchor": "dlchain-pool",
-      "count": 1,
-      "sides": ["music"],
-      "scenario": "music"
-    },
-    "#dlchain-pool \"📰Usenet\"": {
-      "label": "📰Usenet",
-      "anchor": "dlchain-pool",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#dlchain-pool \"📦Lidarr\"": {
-      "label": "📦Lidarr",
-      "anchor": "dlchain-pool",
-      "count": 1,
-      "sides": ["music"],
-      "scenario": "music"
-    },
-    "#dlchain-list \"Move Soulseek up\"": {
-      "label": "Move Soulseek up",
-      "anchor": "dlchain-list",
-      "count": 1,
-      "sides": ["music"],
-      "scenario": "music"
-    },
-    "#dlchain-list \"Move Soulseek down\"": {
-      "label": "Move Soulseek down",
-      "anchor": "dlchain-list",
-      "count": 1,
-      "sides": ["music"],
-      "scenario": "music"
-    },
-    "#dlchain-list \"Remove Soulseek from the chain\"": {
-      "label": "Remove Soulseek from the chain",
-      "anchor": "dlchain-list",
-      "count": 1,
-      "sides": ["music"],
-      "scenario": "music"
-    },
-    "#dlchain-list \"Move YouTube up\"": {
-      "label": "Move YouTube up",
-      "anchor": "dlchain-list",
-      "count": 1,
-      "sides": ["music"],
-      "scenario": "music"
-    },
-    "#dlchain-list \"Move YouTube down\"": {
-      "label": "Move YouTube down",
-      "anchor": "dlchain-list",
-      "count": 1,
-      "sides": ["music"],
-      "scenario": "music"
-    },
-    "#dlchain-list \"Remove YouTube from the chain\"": {
-      "label": "Remove YouTube from the chain",
-      "anchor": "dlchain-list",
-      "count": 1,
-      "sides": ["music"],
-      "scenario": "music"
-    },
-    "#dlchain-list \"Move Qobuz up\"": {
-      "label": "Move Qobuz up",
-      "anchor": "dlchain-list",
-      "count": 1,
-      "sides": ["music"],
-      "scenario": "music"
-    },
-    "#dlchain-list \"Move Qobuz down\"": {
-      "label": "Move Qobuz down",
-      "anchor": "dlchain-list",
-      "count": 1,
-      "sides": ["music"],
-      "scenario": "music"
-    },
-    "#dlchain-list \"Remove Qobuz from the chain\"": {
-      "label": "Remove Qobuz from the chain",
-      "anchor": "dlchain-list",
-      "count": 1,
-      "sides": ["music"],
-      "scenario": "music"
-    },
-    "#source-tile-grid \"SoulseekMusic #1\"": {
-      "label": "SoulseekMusic #1",
-      "anchor": "source-tile-grid",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#source-tile-grid \"YouTubeMusic #2\"": {
-      "label": "YouTubeMusic #2",
-      "anchor": "source-tile-grid",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#source-tile-grid \"Qobuzneeds setup\"": {
-      "label": "Qobuzneeds setup",
-      "anchor": "source-tile-grid",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#source-tile-grid \"🧲TorrentVideo #1Audiobooks #2\"": {
-      "label": "🧲TorrentVideo #1Audiobooks #2",
-      "anchor": "source-tile-grid",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#source-tile-grid \"📰UsenetAudiobooks #1\"": {
-      "label": "📰UsenetAudiobooks #1",
-      "anchor": "source-tile-grid",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#source-tile-grid \"Tidalnot in a chain\"": {
-      "label": "Tidalnot in a chain",
-      "anchor": "source-tile-grid",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#source-tile-grid \"🎶HiFinot in a chain\"": {
-      "label": "🎶HiFinot in a chain",
-      "anchor": "source-tile-grid",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#source-tile-grid \"Deezernot in a chain\"": {
-      "label": "Deezernot in a chain",
-      "anchor": "source-tile-grid",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#source-tile-grid \"📦Lidarrnot in a chain\"": {
-      "label": "📦Lidarrnot in a chain",
-      "anchor": "source-tile-grid",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#source-tile-grid \"SoundCloudnot in a chain\"": {
-      "label": "SoundCloudnot in a chain",
-      "anchor": "source-tile-grid",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#source-tile-grid \"🔎Indexerstorrent & usenet\"": {
-      "label": "🔎Indexerstorrent & usenet",
-      "anchor": "source-tile-grid",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#soulseek-settings-container \"Auto-detect\"": {
-      "label": "Auto-detect",
-      "anchor": "soulseek-settings-container",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#soulseek-settings-container \"Test Soulseek Connection\"": {
-      "label": "Test Soulseek Connection",
-      "anchor": "soulseek-settings-container",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#tidal-download-auth-btn": {
-      "id": "tidal-download-auth-btn",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#qobuz-auth-logged-in \"Disconnect\"": {
-      "label": "Disconnect",
-      "anchor": "qobuz-auth-logged-in",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#qobuz-login-btn": {
-      "id": "qobuz-login-btn",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#qobuz-download-token-btn": {
-      "id": "qobuz-download-token-btn",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#hifi-test-btn": {
-      "id": "hifi-test-btn",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#hifi-download-settings-container \"Add\"": {
-      "label": "Add",
-      "anchor": "hifi-download-settings-container",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#hifi-instances-check-btn": {
-      "id": "hifi-instances-check-btn",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#hifi-instances-restore-btn": {
-      "id": "hifi-instances-restore-btn",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#deezer-download-test-btn": {
-      "id": "deezer-download-test-btn",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#soundcloud-test-btn": {
-      "id": "soundcloud-test-btn",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#lidarr-test-btn": {
-      "id": "lidarr-test-btn",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#ytdlp-update-btn": {
-      "id": "ytdlp-update-btn",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#prowlarr-test-btn": {
-      "id": "prowlarr-test-btn",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#prowlarr-refresh-indexers-btn": {
-      "id": "prowlarr-refresh-indexers-btn",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#torrent-client-test-btn": {
-      "id": "torrent-client-test-btn",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#video-seed-idx-refresh": {
-      "id": "video-seed-idx-refresh",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#usenet-client-test-btn": {
-      "id": "usenet-client-test-btn",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#src-modal-test": {
-      "id": "src-modal-test",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#source-config-modal \"Close\"": {
-      "label": "Close",
-      "anchor": "source-config-modal",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
     "#quality-profile-section \"🎧 Audiophile\"": {
       "label": "🎧 Audiophile",
       "anchor": "quality-profile-section",
@@ -12001,12 +12059,6 @@
     },
     "#qp-profile-new-btn": {
       "id": "qp-profile-new-btn",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#test-all-sources-btn": {
-      "id": "test-all-sources-btn",
       "count": 1,
       "sides": ["music", "video"],
       "scenario": "music"
@@ -12346,20 +12398,6 @@
       "sides": ["music", "video"],
       "scenario": "music"
     },
-    "#genre-whitelist-chips \"×\"": {
-      "label": "×",
-      "anchor": "genre-whitelist-chips",
-      "count": 3,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#genre-whitelist-container \"Reset to Defaults\"": {
-      "label": "Reset to Defaults",
-      "anchor": "genre-whitelist-container",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
     "#security-save-pin-btn": {
       "id": "security-save-pin-btn",
       "count": 1,
@@ -12654,6 +12692,34 @@
       "sides": ["music", "video"],
       "scenario": "music"
     },
+    "#dlchain-panel \"Reorder Torrent, 1 of 1\"": {
+      "label": "Reorder Torrent, 1 of 1",
+      "anchor": "dlchain-panel",
+      "count": 1,
+      "sides": ["video"],
+      "scenario": "video"
+    },
+    "#dlchain-panel \"More for Torrent\"": {
+      "label": "More for Torrent",
+      "anchor": "dlchain-panel",
+      "count": 1,
+      "sides": ["video"],
+      "scenario": "video"
+    },
+    "#dlchain-panel \"Use Soulseek\"": {
+      "label": "Use Soulseek",
+      "anchor": "dlchain-panel",
+      "count": 1,
+      "sides": ["video"],
+      "scenario": "video"
+    },
+    "#dlchain-panel \"Use External\"": {
+      "label": "Use External",
+      "anchor": "dlchain-panel",
+      "count": 1,
+      "sides": ["video"],
+      "scenario": "video"
+    },
     "#service-tile-grid \"TMDBconfigured\"": {
       "label": "TMDBconfigured",
       "anchor": "service-tile-grid",
@@ -12937,41 +13003,6 @@
     "#vq-format-rows \"✕\"": {
       "label": "✕",
       "anchor": "vq-format-rows",
-      "count": 1,
-      "sides": ["video"],
-      "scenario": "video"
-    },
-    "#dlchain-pool \"Soulseek\"": {
-      "label": "Soulseek",
-      "anchor": "dlchain-pool",
-      "count": 1,
-      "sides": ["video"],
-      "scenario": "video"
-    },
-    "#dlchain-pool \"🔗External\"": {
-      "label": "🔗External",
-      "anchor": "dlchain-pool",
-      "count": 1,
-      "sides": ["video"],
-      "scenario": "video"
-    },
-    "#dlchain-list \"Move Torrent up\"": {
-      "label": "Move Torrent up",
-      "anchor": "dlchain-list",
-      "count": 1,
-      "sides": ["video"],
-      "scenario": "video"
-    },
-    "#dlchain-list \"Move Torrent down\"": {
-      "label": "Move Torrent down",
-      "anchor": "dlchain-list",
-      "count": 1,
-      "sides": ["video"],
-      "scenario": "video"
-    },
-    "#dlchain-list \"Remove Torrent from the chain\"": {
-      "label": "Remove Torrent from the chain",
-      "anchor": "dlchain-list",
       "count": 1,
       "sides": ["video"],
       "scenario": "video"
@@ -13341,7 +13372,6 @@
       "prowlarr-indexer-ids",
       "prowlarr-search-min-gap",
       "prowlarr-max-searches-per-minute",
-      "dlchain-filter",
       "stream-source",
       "max-concurrent-downloads",
       "source-search-timeout",
@@ -13502,8 +13532,8 @@
       "accent-preview-swatch": "not a form control: a <div> on the page",
       "save-settings": "a button, held in `buttons`",
       "stg-search-results": "not a form control: a <div> on the page",
-      "stg-active-title": "not a form control: a <span> on the page",
-      "stg-active-sub": "not a form control: a <span> on the page",
+      "stg-active-title": "not a form control: a <h2> on the page",
+      "stg-active-sub": "not a form control: a <p> on the page",
       "h3": "a tag name in the audit's hooks table, not an id",
       "qp-editing-banner": "not a form control: a <div> on the page",
       "vq-format-rows": "not a form control: a <div> on the page",
@@ -13513,13 +13543,13 @@
       "vq-notify-rows": "not a form control: a <div> on the page",
       "ranked-targets": "a name in the audit's backend tests table, not an id on the page",
       "qp-governed-badge": "a badge, not a control: shown only while a custom music profile is being edited",
-      "source-tile-grid": "not a form control: a <div> on the page",
+      "source-tile-grid": "went with the old download chain and source tiles (settings-bic phase 1): the order list in #download-chain-widget replaced it; what the chain sends is pinned by the musicChain, videoChain and audiobookChain composites",
       "src-modal-title": "not a form control: a <h3> on the page",
       "src-modal-sub": "not a form control: a <span> on the page",
       "src-modal-icon": "not a form control: a <span> on the page",
-      "src-modal-meta": "not a form control: a <span> on the page",
+      "src-modal-meta": "the source sheet's status words, drawn only while a sheet is open",
       "src-modal-test": "a button, held in `buttons`",
-      "src-modal-result": "not a form control: a <div> on the page",
+      "src-modal-result": "not a form control: a <span> on the page",
       "ytdlp-hint-badge": "not a form control: a <span> on the page",
       "ytdlp-installed": "not a form control: a <span> on the page",
       "ytdlp-latest": "not a form control: a <span> on the page",
@@ -13544,11 +13574,12 @@
       "prowlarr-refresh-indexers-btn": "a button, held in `buttons`",
       "prowlarr-indexer-list": "not a form control: a <div> on the page",
       "dlchain-tabs": "not a form control: a <div> on the page",
-      "dlchain-help": "not a form control: a <div> on the page",
-      "dlchain-pool": "not a form control: a <div> on the page",
-      "dlchain-mode-hint": "not a form control: a <span> on the page",
-      "dlchain-list": "not a form control: a <div> on the page",
-      "dlchain-slot": "not a form control: a <div> on the page",
+      "dlchain-help": "went with the old download chain and source tiles (settings-bic phase 1): the order list in #download-chain-widget replaced it; what the chain sends is pinned by the musicChain, videoChain and audiobookChain composites",
+      "dlchain-filter": "the old chain's filter box over at most seven tiles, which saved nothing: gone with the pool (settings-bic phase 1). the 'Not used' list shows every source at once",
+      "dlchain-pool": "went with the old download chain and source tiles (settings-bic phase 1): the order list in #download-chain-widget replaced it; what the chain sends is pinned by the musicChain, videoChain and audiobookChain composites",
+      "dlchain-mode-hint": "went with the old download chain and source tiles (settings-bic phase 1): the order list in #download-chain-widget replaced it; what the chain sends is pinned by the musicChain, videoChain and audiobookChain composites",
+      "dlchain-list": "went with the old download chain and source tiles (settings-bic phase 1): the order list in #download-chain-widget replaced it; what the chain sends is pinned by the musicChain, videoChain and audiobookChain composites",
+      "dlchain-slot": "went with the old download chain and source tiles (settings-bic phase 1): the order list in #download-chain-widget replaced it; what the chain sends is pinned by the musicChain, videoChain and audiobookChain composites",
       "test-all-sources-btn": "a button, held in `buttons`",
       "genre-whitelist-chips": "not a form control: a <div> on the page",
       "audiobook-hybrid-container": "not a form control: a <div> on the page",

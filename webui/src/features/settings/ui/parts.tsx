@@ -110,7 +110,7 @@ export function Pills({
     buttons[items.indexOf(next)]?.focus();
   };
   return (
-    <div className={s.pills} role="tablist" aria-label={label} onKeyDown={onKeyDown}>
+    <div className={s.pills} role="tablist" aria-label={label} data-ui="" onKeyDown={onKeyDown}>
       {items.map((item) => (
         <button
           key={item.key}

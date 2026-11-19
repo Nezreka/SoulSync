@@ -52,7 +52,7 @@ function respond(body: unknown, ok = true) {
 }
 
 describe('the shell hands over to the React tabs', () => {
-  it('opening a tab shows its React slot, and a failing mount does not break the switch', () => {
+  it('opening a tab is handed to the page, and a failing page does not break the caller', () => {
     document.body.innerHTML = `<div id="settings-page">
       <button class="stg-tab" data-tab="appearance"></button>
       <button class="stg-tab" data-tab="logs"></button>
@@ -67,15 +67,12 @@ describe('the shell hands over to the React tabs', () => {
     };
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     switchSettingsTab('appearance');
+    // the page owns where it is (nav.ts) and shows the tab's blocks itself
+    // (settings-page.tsx showLegacyBlocks); old keys such as 'logs' are its
+    // aliases, so they are handed over as they came
     expect(shown).toEqual(['appearance']);
-    expect(
-      (document.querySelector('[data-stg-react="appearance"]') as HTMLElement).style.display,
-    ).toBe('');
-    expect((document.querySelector('[data-stg="logs"]') as HTMLElement).style.display).toBe('none');
     expect(() => switchSettingsTab('logs')).not.toThrow();
-    expect(document.querySelector('.stg-tab[data-tab="logs"]')!.classList.contains('active')).toBe(
-      true,
-    );
+    expect(shown).toEqual(['appearance', 'logs']);
     error.mockRestore();
   });
 

@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { resolveTab } from '@/features/settings/nav';
 import { SettingsPage } from '@/features/settings/settings-page';
 import { switchSettingsTab } from '@/features/settings/shell';
 import { withHelpLines } from '@/features/settings/tabs/__fixtures__/shape';
@@ -84,7 +85,8 @@ describe('where sections live', () => {
         (el) => el.getAttribute('data-stg') ?? el.getAttribute('data-stg-react'),
       ),
     );
-    expect([...used].every((tag) => tabs.includes(tag))).toBe(true);
+    // the Logs slot is System's now (a pill of it): old keys resolve to their tab
+    expect([...used].every((tag) => tabs.includes(resolveTab(tag).tab))).toBe(true);
     expect(tabs.every((tab) => used.has(tab))).toBe(true);
     expect(doc.querySelector('.stg-tab[data-tab="advanced"] .stg-tab-label')?.textContent).toBe(
       'System',
