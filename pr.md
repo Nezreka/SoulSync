@@ -23,6 +23,7 @@ last.fm api keys need a paid pro subscription from 1 december 2026, so everythin
 - **get show draws its arrow (thanks Thibs, #2184).** it was a character android's fonts don't have. every download arrow is drawn now.
 - **import cards fit (thanks Thibs, #2185)** and **long confirm boxes keep their buttons (thanks c5pie, #2186).** the confirm box is shared, so every long one is fixed, keep best's too.
 - **settings says saved only after a save (thanks c5pie, #2187)**, and the status no longer sits on the section title.
+- **re-identify works on a phone (thanks wolf39us, #2197).** it had no phone layout, so the titles shrank to "l…" and the buttons fell out of the box, and on the album page it opened inside a table cell. it's a full-screen sheet now with the search and results first, results as readable cards and cancel and re-identify pinned at the bottom. reassign gets the same sheet.
 
 ## people and permissions
 
@@ -30,6 +31,7 @@ last.fm api keys need a paid pro subscription from 1 december 2026, so everythin
 - **controls show the value in force (thanks SeadogsBooty, #2189).** a template held by the global policy showed its own saved value. it shows what the policy allows now, and says separately what the template has.
 - **back to template only shows with personal changes to drop (thanks SeadogsBooty, #2190).**
 - **a member's notifications (thanks SeadogsBooty, #2191).** live chat messages went to every browser, including members without chat, which is what kept showing "chat & arcade isn't part of your profile". chat now only reaches people allowed to chat. refusals and progress notes don't pile up in a member's notifications, and switching profile clears the panel.
+- **the enrichment workers are the admin's (thanks SeadogsBooty, #2196).** a member could see the worker icons, open manage workers and read every worker's status on both dashboards, and worker status was pushed to every browser. the worker routes are admin only now, status goes to admins only, and a member's dashboard shows none of it.
 - **one set of words (thanks SeadogsBooty, #2192).** movie requests, tv show requests, music requests, audiobook requests, podcast episode requests, with auto-approve, require approval and requests off everywhere. maximum content rating, maximum request limit, allowed quality profiles, default quality profile. nothing behaves differently.
 - **the admin menu no longer flashes after signing back in (thanks SeadogsBooty, #2156).** the page knew who you were, so it skipped the wait, and the script that trims the menu loads after it. a member's menu starts hidden now until their own profile trims it.
 
