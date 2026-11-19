@@ -220,20 +220,23 @@ def _moderation_refusal(db, req):
     return None
 
 
-def _land(db, req, claim_pids, body):
+def _land(db, req, claim_pids, body, held=False):
     """put an approved (or straight-got) title into acquisition for every
     claimant: movie → wishlist, episode → that episode wished, youtube → the
     youtube wishlist, show → watchlist + the monitor policy expanded.
-    returns (ok, wished). raises on a db failure."""
+    ``held`` (#2199): the wishlist rows wait for a release pick, and a show
+    doesn't join the watchlist (its later episodes would download on their
+    own). returns (ok, wished). raises on a db failure."""
     from core.requests.video import monitor_for_new_request
     wished = 0
+    hold = {"awaiting_selection": True} if held else {}
     if req["kind"] == "movie":
         ok = True
         for pid in claim_pids:
             ok = db.add_movie_to_wishlist(req["tmdb_id"], req["title"],
                                           year=req.get("year"),
                                           poster_url=req.get("poster_url"),
-                                          profile_id=pid) and ok
+                                          profile_id=pid, **hold) and ok
     elif req["kind"] == "episode":
         # the row title is "Show S02E07" (built by episode_request_title);
         # the wishlist wants the bare show title
@@ -246,7 +249,7 @@ def _land(db, req, claim_pids, body):
             w = db.add_episodes_to_wishlist(
                 int(req["tmdb_id"]), show_title or req["title"], [ep],
                 poster_url=req.get("poster_url"),
-                profile_id=pid)
+                profile_id=pid, **hold)
             wished += w
             # idempotent: 0 new rows means already wished — the wish exists,
             # so the approval still lands (a DB failure leaves no row).
@@ -275,10 +278,11 @@ def _land(db, req, claim_pids, body):
                     profile_id=pid) > 0 and ok
     else:
         ok = True
-        for pid in claim_pids:
-            ok = db.add_to_watchlist("show", req["tmdb_id"], req["title"],
-                                     poster_url=req.get("poster_url"),
-                                     profile_id=pid) and ok
+        if not held:
+            for pid in claim_pids:
+                ok = db.add_to_watchlist("show", req["tmdb_id"], req["title"],
+                                         poster_url=req.get("poster_url"),
+                                         profile_id=pid) and ok
         monitor = (monitor_for_new_request("show", body.get("monitor")) if body.get("monitor")
                    else str(req.get("monitor") or "all").lower())
         if ok and monitor != "future":
@@ -295,7 +299,7 @@ def _land(db, req, claim_pids, body):
                         wished += db.add_episodes_to_wishlist(
                             int(req["tmdb_id"]), req["title"], eps,
                             poster_url=req.get("poster_url"),
-                            profile_id=pid)
+                            profile_id=pid, **hold)
             except Exception:   # noqa: BLE001 - expansion is best-effort, approval still lands
                 logger.exception("request approve: policy expansion failed for %s", req["tmdb_id"])
     return ok, wished
@@ -530,6 +534,119 @@ def file_request(body):
                     "asked": True})
 
 
+# ── approved requests held for a release pick (#2199) ─────────────────
+
+def _active_titles(db) -> set:
+    """{(movie|show, tmdb id)} with a download in flight."""
+    import json as _json
+    out = set()
+    try:
+        active = db.get_active_video_downloads() or []
+    except Exception:  # noqa: BLE001 - nothing known in flight
+        return out
+    for d in active:
+        ctx = d.get("search_ctx")
+        if isinstance(ctx, str):
+            try:
+                ctx = _json.loads(ctx)
+            except (ValueError, TypeError):
+                ctx = {}
+        ctx = ctx if isinstance(ctx, dict) else {}
+        tmdb = ctx.get("tmdb_id")
+        if not tmdb and str(d.get("media_source") or "").lower() == "tmdb":
+            tmdb = d.get("media_id")
+        try:
+            tmdb = int(tmdb)
+        except (TypeError, ValueError):
+            continue
+        out.add(("movie" if str(d.get("kind") or "") == "movie" else "show", tmdb))
+    return out
+
+
+def _title_of(req) -> tuple:
+    return ("movie" if req.get("kind") == "movie" else "show", int(req.get("tmdb_id") or 0))
+
+
+def _held_rows_for(db, req):
+    """this request's own held wishlist rows (an episode request: just it)."""
+    scope = {}
+    if req.get("kind") == "episode":
+        scope = {"season_number": req.get("season_number"), "episode_number": req.get("episode_number")}
+    return db.held_wishlist_rows(req.get("kind"), req.get("tmdb_id"),
+                                 profile_ids=[int(req.get("profile_id") or 1)], **scope)
+
+
+def _annotate_held(db, rows) -> None:
+    """an approved request held for a pick says where the pick stands:
+    ``awaiting_selection`` (nothing picked yet) or ``picking`` (a picked
+    release is downloading). the requester's row reads from these."""
+    held = [r for r in rows if r.get("status") == "approved" and r.get("acquisition") == "manual"
+            and not r.get("available_at")]
+    if not held:
+        return
+    active = _active_titles(db)
+    for r in held:
+        try:
+            waiting = bool(_held_rows_for(db, r))
+        except Exception:  # noqa: BLE001 - annotation is best-effort
+            waiting = False
+        busy = _title_of(r) in active
+        r["picking"] = bool(waiting and busy)
+        r["awaiting_selection"] = bool(waiting and not busy)
+
+
+def _may_pick(req) -> bool:
+    """admins any; a moderator anyone's but their own, in a kind they see."""
+    from . import access
+    if _is_admin():
+        return True
+    if not access.is_moderator() or not _kind_ok(req.get("kind")):
+        return False
+    return int(req.get("profile_id") or 0) != _me()
+
+
+def awaiting_queue(db) -> list:
+    """the pick queue: one entry per title, everyone who asked for it, its
+    held rows (a show's grouped by season)."""
+    active = _active_titles(db)
+    titles: dict = {}
+    for r in db.manual_video_requests():
+        if not _may_pick(r):
+            continue
+        key = _claim_key(r)
+        t = titles.get(key)
+        if t is None:
+            t = titles[key] = {"id": r["id"], "kind": r.get("kind"), "tmdb_id": r.get("tmdb_id"),
+                               "title": r.get("title"), "year": r.get("year"),
+                               "poster_url": r.get("poster_url"),
+                               "season_number": r.get("season_number"),
+                               "episode_number": r.get("episode_number"),
+                               "approved_at": r.get("resolved_at"), "requesters": [],
+                               "request_ids": [], "held": []}
+        t["request_ids"].append(r["id"])
+        if r.get("requester_name") and r["requester_name"] not in t["requesters"]:
+            t["requesters"].append(r["requester_name"])
+        for h in _held_rows_for(db, r):
+            k = (h.get("season_number"), h.get("episode_number"))
+            if k not in {(x.get("season_number"), x.get("episode_number")) for x in t["held"]}:
+                t["held"].append({"season_number": h.get("season_number"),
+                                  "episode_number": h.get("episode_number"),
+                                  "episode_title": h.get("episode_title")})
+    out = []
+    for t in titles.values():
+        if not t["held"]:
+            continue      # every held row landed or was taken off: nothing left to pick
+        seasons: dict = {}
+        for h in t["held"]:
+            if h.get("season_number") is not None:
+                seasons.setdefault(int(h["season_number"]), []).append(h.get("episode_number"))
+        t["seasons"] = [{"season_number": sn, "episodes": sorted(e for e in eps if e is not None)}
+                        for sn, eps in sorted(seasons.items())]
+        t["downloading"] = (("movie" if t["kind"] == "movie" else "show"), int(t["tmdb_id"] or 0)) in active
+        out.append(t)
+    return out
+
+
 def register_routes(bp):
     @bp.route("/requests", methods=["POST"])
     def video_request_create():
@@ -596,6 +713,7 @@ def register_routes(bp):
                       for k in ("pending", "approved", "denied")}
         db.annotate_requests_in_library(rows)
         db.annotate_request_progress(rows)
+        _annotate_held(db, rows)
         moderator = access.is_moderator()
         me = _me()
         for r in rows:
@@ -608,7 +726,9 @@ def register_routes(bp):
         except Exception:  # noqa: BLE001 - the list still loads without the quota line
             logger.warning("request limit lookup failed for profile %s", _me(), exc_info=True)
             quotas = {}
+        from core.requests import acquisition
         return jsonify({"success": True, "requests": rows,
+                        "acquisition": acquisition.modes(),
                         "counts": counts, "pending": counts.get("pending", 0),
                         "moderator": moderator, "see_all": scope is None,
                         "quotas": quotas, "quota": _tightest(quotas)})
@@ -620,6 +740,45 @@ def register_routes(bp):
         sweep_arrivals()
         return jsonify({"success": True, "pending": get_video_db().video_requests_pending_count(
             None if access.may_see_all_requests() else _me())})
+
+    @bp.route("/requests/awaiting", methods=["GET"])
+    def video_request_awaiting():
+        """The pick queue (#2199): approved movies, shows and episodes held
+        for a release pick, the ones this caller may pick. Each title lists
+        who asked, when it was approved, and what is still waiting (a show
+        by season)."""
+        from . import access, get_video_db
+        if not _is_admin() and not access.is_moderator():
+            return jsonify({"success": False, "error": "Admin only."}), 403
+        sweep_arrivals()
+        return jsonify({"success": True, "titles": awaiting_queue(get_video_db())})
+
+    @bp.route("/requests/<int:request_id>/auto", methods=["POST"])
+    def video_request_release_auto(request_id):
+        """Stop waiting for a pick (#2199): the title's held rows go back to
+        the wishlist drain for everyone who asked, and a show joins their
+        watchlist, as an automatic approval would have done."""
+        from . import get_video_db
+        db = get_video_db()
+        req = db.get_video_request(request_id)
+        if not req or req.get("status") != "approved" or req.get("acquisition") != "manual":
+            return jsonify({"success": False, "error": "That request isn't waiting for a pick."}), 404
+        if not _may_pick(req):
+            return jsonify({"success": False, "error": "Admin only."}), 403
+        same = [r for r in db.manual_video_requests() if _claim_key(r) == _claim_key(req)]
+        pids = sorted({int(r.get("profile_id") or 1) for r in same})
+        scope = {}
+        if req.get("kind") == "episode":
+            scope = {"season_number": req.get("season_number"), "episode_number": req.get("episode_number")}
+        released = db.release_held_wishlist(req["kind"], req["tmdb_id"], profile_ids=pids, **scope)
+        if req.get("kind") == "show":
+            for pid in pids:
+                db.add_to_watchlist("show", req["tmdb_id"], req["title"],
+                                    poster_url=req.get("poster_url"), profile_id=pid)
+        db.set_video_requests_acquisition([r["id"] for r in same], "auto")
+        for r in same:
+            _notify(r["profile_id"], f"{req['title']} is on the way", "success")
+        return jsonify({"success": True, "released": released})
 
     @bp.route("/requests/<int:request_id>/approve", methods=["POST"])
     def video_request_approve(request_id):
@@ -672,8 +831,14 @@ def register_routes(bp):
         # list. duplicates across profiles are fine — the download drain
         # dedupes to a single download.
         claim_pids = sorted({int(r.get("profile_id") or 1) for r in claimed})
+        # automatic, or held for a release pick (#2199): the approver's
+        # choice, else the kind's setting. youtube has nothing to pick
+        from core.requests import acquisition
+        vkind = acquisition.video_kind(req["kind"])
+        held = vkind is not None and acquisition.resolve(
+            vkind, acquisition.override_from(body)) == acquisition.MANUAL
         try:
-            ok, wished = _land(db, req, claim_pids, body)
+            ok, wished = _land(db, req, claim_pids, body, held=held)
         except Exception:  # noqa: BLE001 - the claim already landed; put it back
             logger.exception("request approve: acquisition failed for request %s", request_id)
             try:
@@ -690,8 +855,11 @@ def register_routes(bp):
         picked = body.get("quality_profile_id") not in (None, "", 0, "0")
         qp, _bad = _approve_quality(db, req, claim_pids, body.get("quality_profile_id"))
         _stamp_quality(db, req, claim_pids, qp, series=picked)
+        if held:
+            db.set_video_requests_acquisition([r["id"] for r in claimed], "manual")
         for r in claimed:
-            _notify(r["profile_id"], f"{req['title']} was approved, it's on the way", "success")
+            _notify(r["profile_id"], f"{req['title']} was approved, " +
+                    ("a release gets picked for it next" if held else "it's on the way"), "success")
         try:      # 'Request Approved' automation trigger
             from core.video.download_events import owned, publish
             # everyone who asked, not the one who approved
@@ -702,7 +870,7 @@ def register_routes(bp):
         except Exception:   # noqa: BLE001 - events never disturb the approval
             logger.exception("request-approved event publish failed")
         return jsonify({"success": True, "wished": wished, "kind": req["kind"],
-                        "approved": len(claimed)})
+                        "approved": len(claimed), "acquisition": "manual" if held else "auto"})
 
     @bp.route("/requests/approve-all", methods=["POST"])
     def video_request_approve_all():

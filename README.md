@@ -315,7 +315,7 @@ A personal front page shaped by your library, your listening and your watchlist.
   - Browse it as a **Nebula** (an orb per artist, grouped by what's stuck: no match found, or downloaded then rejected) or a dense list.
   - Open an artist to see why each track failed in plain words, retry it, or pick a source by hand.
   - Export it as CSV or JSON (the video wishlist too: everything, movies or TV shows).
-- **Requests**: Overseerr-style, for music too. Profiles without download rights add to their wishlist like anyone else, and the scheduled run only downloads what an admin or a moderator approved.
+- **Requests**: Overseerr-style, for music too. Profiles without download rights add to their wishlist like anyone else, and the scheduled run only downloads what an admin or a moderator approved. Per kind (music, movies, TV, audiobooks), approved requests can wait for you to pick the exact release instead of grabbing the best match.
 
 ## Import
 
@@ -448,7 +448,7 @@ Plus a background YouTube upload-date enricher.
 
 - **Watchlist → wishlist → download**: follow shows, people, studios and YouTube channels, with back-catalog policies.
 - **Wishlist**: Movies, TV and YouTube tabs, the same design as the music one. It retries with backoff and groups what's stuck by cause: found but refused by your rules, nothing found, couldn't search, or not posted yet. Open a title to see every release the last search judged and why each was refused.
-- **Requests**: Overseerr-style. Members ask, admins and moderators approve, with the quality each person may pick. Every poster and detail page shows where a title stands (in library, partial, requested, on the way, downloading, failed), and asking twice for the same thing is refused.
+- **Requests**: Overseerr-style. Members ask, admins and moderators approve, with the quality each person may pick, and can pick the release themselves for movies and TV (Approval settings on the Requests page). Every poster and detail page shows where a title stands (in library, partial, requested, on the way, downloading, failed), and asking twice for the same thing is refused.
 - **Import lists**: TMDB, IMDb and Plex Watchlist.
 - **Indexers**: Prowlarr (structured and text queries, a TV query ladder including anime and daily shows) and **RSS sync**.
 - **Clients**: qBittorrent, Transmission, Deluge, SABnzbd, NZBGet and slskd, with seeding goals, **season packs** and stall detection.

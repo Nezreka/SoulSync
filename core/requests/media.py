@@ -106,7 +106,10 @@ def requested_books(profile_id, db=None) -> list:
     """the asins this profile asked for and is still waiting on. the audiobook
     side reads its asks through here: it never opens the music database
     itself (tests/test_audiobooks_isolation.py)."""
-    rows = _music_db(db).list_media_requests(profile_id=int(profile_id), status="pending", kind=AUDIOBOOK)
+    db = _music_db(db)
+    rows = (db.list_media_requests(profile_id=int(profile_id), status="pending", kind=AUDIOBOOK)
+            # approved, still waiting for a release to be picked (#2199)
+            + db.list_media_requests(profile_id=int(profile_id), status="awaiting_selection", kind=AUDIOBOOK))
     return [str(r.get("item_key") or "") for r in rows]
 
 

@@ -11,6 +11,8 @@ import type {
 
 export const REQUEST_TABS: ReadonlyArray<{ id: RequestTab; label: string }> = [
   { id: 'waiting', label: 'Waiting' },
+  // approved, waiting for a release pick (#2199): deciders only, see showPickTab
+  { id: 'pick', label: 'Pick a release' },
   { id: 'on-the-way', label: 'On the way' },
   { id: 'available', label: 'Available' },
   { id: 'declined', label: 'Declined' },
@@ -84,18 +86,27 @@ export function buildRequestItems(list: MusicRequestList): RequestItem[] {
   return [...pending, ...pendingVideos, ...pendingMedia, ...history];
 }
 
-const TAB_STATUSES: Record<Exclude<RequestTab, 'all'>, MusicRequestStatus> = {
-  waiting: 'pending',
-  'on-the-way': 'approved',
-  available: 'available',
-  declined: 'declined',
+const TAB_STATUSES: Record<Exclude<RequestTab, 'all' | 'pick'>, MusicRequestStatus[]> = {
+  waiting: ['pending'],
+  // approved, and approved but waiting for a release to be picked (#2199)
+  'on-the-way': ['approved', 'awaiting_selection'],
+  available: ['available'],
+  declined: ['declined'],
 };
 
-// videos share the same status strings, so they land in the right tabs as-is
+// videos share the same status strings, so they land in the right tabs as-is.
+// the pick tab is its own queue (pick-queue.tsx), never these rows
 export function filterRequestItems(items: RequestItem[], tab: RequestTab): RequestItem[] {
   if (tab === 'all') return items;
-  const status = TAB_STATUSES[tab];
-  return items.filter((item) => item.status === status);
+  if (tab === 'pick') return [];
+  const statuses = TAB_STATUSES[tab];
+  return items.filter((item) => statuses.includes(item.status));
+}
+
+/** the pick tab is for the people who may pick, and only once there is
+ *  something to pick or a kind is set to be picked by hand */
+export function showPickTab(decider: boolean, waitingForPick: number, anyManual: boolean): boolean {
+  return decider && (waitingForPick > 0 || anyManual);
 }
 
 export function countForTab(items: RequestItem[], tab: RequestTab): number {
@@ -104,7 +115,7 @@ export function countForTab(items: RequestItem[], tab: RequestTab): number {
 
 /** "Waiting · 3" for the tabs that are worth a number, plain label otherwise. */
 export function tabLabel(tab: { id: RequestTab; label: string }, count: number): string {
-  if ((tab.id === 'waiting' || tab.id === 'on-the-way') && count > 0) {
+  if ((tab.id === 'waiting' || tab.id === 'on-the-way' || tab.id === 'pick') && count > 0) {
     return `${tab.label} · ${count}`;
   }
   return tab.label;
@@ -116,6 +127,8 @@ export function statusText(item: RequestItem): string {
       return 'Waiting';
     case 'approved':
       return 'On the way';
+    case 'awaiting_selection':
+      return 'Approved, waiting for a release to be picked';
     case 'available':
       return 'In your library';
     case 'declined':
@@ -299,6 +312,7 @@ export function emptyText(tab: RequestTab, isAdmin: boolean, asksFirst: boolean)
       : 'Nothing waiting.';
   }
   if (tab === 'on-the-way') return 'Nothing on the way right now.';
+  if (tab === 'pick') return 'Nothing waiting for a release pick.';
   if (tab === 'available') return 'Nothing has arrived yet.';
   if (tab === 'declined') return 'Nothing declined.';
   return isAdmin ? 'No requests yet.' : 'You haven’t asked for anything yet.';

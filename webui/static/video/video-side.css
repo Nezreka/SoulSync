@@ -2351,6 +2351,8 @@ body[data-side="video"] .settings-group[data-svc-side="music"].svc-side-active #
 .vreq-status--available { color: rgb(var(--accent-light-rgb)); }
 .vreq-status--denied { color: rgba(252, 165, 165, 0.8); }
 .vreq-status--partial { color: rgba(147, 197, 253, 0.85); }
+/* approved, held until an admin picks the release (#2199): a sentence, so it wraps */
+.vreq-status--held { color: rgb(var(--gold-rgb)); white-space: normal; max-width: 200px; text-align: right; line-height: 1.35; }
 .vreq-status--failed { color: rgba(253, 186, 116, 0.85); }
 /* a show still arriving: episodes here out of everything asked for */
 .vreq-progress { height: 3px; max-width: 220px; margin-top: 8px; border-radius: var(--radius-pill); overflow: hidden;

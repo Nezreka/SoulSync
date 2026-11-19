@@ -435,6 +435,16 @@ Music requests are grouped the way a person thinks of them: an **album** or a si
 
 Admins **approve** (or approve all), optionally with a reply, or **decline** with a reason. Approving lets the download start, still on the requester's own list so they watch it arrive. An approved book goes on the requester's audiobook wishlist and the wishlist search picks it up; an approved episode starts downloading. Declining takes it off and keeps a watchlist scan from filing it again. Members can **withdraw** their own waiting requests.
 
+## Picking the release yourself
+
+By default an approval downloads the best match on its own. **Approval settings**, at the top of the Requests page (admins), sets it for **Music**, **Movies**, **TV** and **Audiobooks** separately: **Download automatically** or **I pick the release**. Nothing changes until you switch one.
+
+With **I pick the release**, an approved request waits on the **Pick a release** tab. Nothing automatic touches it: not the wishlist runs, not retries, not scheduled searches. The tab lists who asked, what kind it is and when you approved it, and **Pick release** opens the same picker you'd use anywhere else: Interactive Search for a track (one per track of an album), the release list for a book, manual search for a movie, an episode or a season of a show. Pick one and it downloads, imports and lands for whoever asked like any other request. If a pick fails, the request stays on the tab to pick again. **Download automatically instead**, in its menu, hands it back.
+
+The **Approve** button follows the setting. Its menu has the other way for that one request: **Approve & pick release** or **Approve & auto-download**. Approve all always follows the settings. A held show doesn't follow new episodes on its own; hand it back, or follow it yourself, if you want that.
+
+Moderators pick the same way, for anyone's request but their own. Music videos, YouTube videos and podcast episodes have one file each, so they always download right away.
+
 ## Moderators
 
 A **Moderator** (Requests & moderation in the editor) approves, declines and tidies other people's requests and manages their issues, the same way an admin does. They can't answer their own asks, and they never get settings, people or tools. Approve all, for a moderator, means everyone's but their own.
@@ -446,6 +456,7 @@ A **Moderator** (Requests & moderation in the editor) approves, declines and tid
 Each request shows where it stands:
 
 - **Waiting**: with an admin or a moderator
+- **Approved, waiting for a release to be picked**: approved, an admin chooses the exact release next
 - **On the way**: approved, downloading
 - **In your library**: arrived and matched
 - **Declined**: someone said no (the reason shows)

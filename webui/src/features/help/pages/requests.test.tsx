@@ -130,7 +130,9 @@ describe('requests answers (music)', () => {
     expect(first.textContent).toContain(
       "It's waiting for your admin to say yes. Once they do, it goes on your wishlist and downloads from there, like Low, which is on its way now.",
     );
-    expect(first.textContent).toContain("You've used 2 of your 5 music requests in the last 7 days.");
+    expect(first.textContent).toContain(
+      "You've used 2 of your 5 music requests in the last 7 days.",
+    );
     expect(answer(container, 'onway:Low').textContent).toContain(
       'Your admin said yes 3 hours ago.',
     );
@@ -183,6 +185,41 @@ describe('requests answers (music)', () => {
     fireEvent.click(within(a).getByRole('button', { name: 'Show waiting' }));
     expect(nav).toHaveBeenCalledWith('/requests?tab=waiting');
     expect(titles(container)).toContain('What happens when I approve?');
+    delete window.SoulSyncWebRouter;
+  });
+});
+
+describe('requests answers: picking the release (#2199)', () => {
+  it('a member hears an approved ask waits for the release to be picked', async () => {
+    asProfile(4, false);
+    music = { ...MUSIC_EMPTY, history: [{ ...LOW, status: 'awaiting_selection' }] };
+    const { container } = renderAnswers(useMusicRequestAnswers, { isAdmin: false });
+    await waitFor(() => expect(titles(container)[0]).toBe('When will Low arrive?'));
+    expect(answer(container, 'picking:Low').textContent).toContain(
+      'Your admin said yes, and picks the exact release themselves.',
+    );
+  });
+
+  it('an admin is sent to the pick tab, and told what approving does now', async () => {
+    asProfile(1, true);
+    music = {
+      ...MUSIC_EMPTY,
+      awaiting: 2,
+      acquisition: { music: 'manual', movie: 'auto', tv: 'auto', audiobook: 'auto' },
+    };
+    const nav = vi.fn(() => Promise.resolve(true));
+    window.SoulSyncWebRouter = { navigateToHref: nav } as never;
+    const { container } = renderAnswers(useMusicRequestAnswers);
+    await waitFor(() =>
+      expect(titles(container)[0]).toBe('2 requests wait for you to pick their release'),
+    );
+    fireEvent.click(
+      within(answer(container, 'admin-pick')).getByRole('button', { name: 'Pick a release' }),
+    );
+    expect(nav).toHaveBeenCalledWith('/requests?tab=pick');
+    expect(answer(container, 'admin-approve').textContent).toContain(
+      'an approved request waits on the Pick a release tab',
+    );
     delete window.SoulSyncWebRouter;
   });
 });

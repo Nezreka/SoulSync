@@ -157,7 +157,9 @@ describe('requests helpers', () => {
   });
 
   it('only numbers the tabs that need attention', () => {
-    const [waiting, onTheWay, available] = REQUEST_TABS;
+    const [waiting, onTheWay, available] = ['waiting', 'on-the-way', 'available'].map((id) =>
+      REQUEST_TABS.find((t) => t.id === id),
+    );
     expect(tabLabel(waiting!, 3)).toBe('Waiting · 3');
     expect(tabLabel(waiting!, 0)).toBe('Waiting');
     expect(tabLabel(onTheWay!, 2)).toBe('On the way · 2');

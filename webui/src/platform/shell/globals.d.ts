@@ -711,6 +711,10 @@ declare global {
         episode?: number | null;
         year?: number | string | null;
         poster?: string | null;
+        /** the title's id for the grab: a tmdb id with mediaSource 'tmdb' */
+        mediaId?: number | string | null;
+        mediaSource?: string | null;
+        tmdbId?: number | string | null;
       }) => void;
     };
     /** video-poster-modal.js: the poster manager (search, then pick art). */

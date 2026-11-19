@@ -406,7 +406,7 @@ def route_access(path: str, method: str) -> Tuple[str, Any]:
             return ("perm", ("video.youtube",))
         return ("perm", ("movies.get", "tv.get"))
     if path.startswith("/api/video/requests") and writing and (
-            "/approve" in path or path.endswith("/deny")):
+            "/approve" in path or path.endswith("/deny") or path.endswith("/auto")):
         return ("perm", ("requests.moderate",))
     return ("perm", VIDEO_SIDE)
 

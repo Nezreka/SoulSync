@@ -73,6 +73,7 @@ def cleanup_wishlist_after_db_update(config_manager) -> None:
     """Walk all profiles' wishlists and remove tracks now present in the library."""
     try:
         from core.wishlist_service import get_wishlist_service
+        from core.wishlist.service import wishlist_rows_for_sweep as _rows_for_sweep
         from database.music_database import MusicDatabase, get_database
 
         wishlist_service = get_wishlist_service()
@@ -86,7 +87,7 @@ def cleanup_wishlist_after_db_update(config_manager) -> None:
         all_profiles = database.get_all_profiles()
         wishlist_tracks = []
         for p in all_profiles:
-            wishlist_tracks.extend(wishlist_service.get_wishlist_tracks_for_download(profile_id=p['id']))
+            wishlist_tracks.extend(_rows_for_sweep(wishlist_service, p['id']))
         if not wishlist_tracks:
             logger.warning("[Auto Cleanup] No tracks in wishlist to clean up")
             return
