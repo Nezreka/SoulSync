@@ -691,6 +691,22 @@ def test_a_kept_title_is_never_deleted_even_from_an_old_finding(db, worker, monk
     assert mid
 
 
+def test_a_title_matched_and_kept_since_its_finding_is_never_deleted(db, worker, monkeypatch):
+    # filed with no TMDB match; matched and kept afterwards (#2211 review S5).
+    # a batch's own check ran before the Keep, so only the fix's Keep check stands
+    calls = _capture_delete(monkeypatch)
+    mid = _movie(db, "Low", tmdb=None, imdb=5.0, streaming="ok", count=5)
+    _run(worker)
+    fid = _pending(db)[0]["id"]
+    assert db.repair_get_finding(fid)["details"]["tmdb_id"] is None
+    actions, err = job_module.batch_delete_actions(db, [fid], "delete 1 title")
+    assert err is None
+    _sql(db, "UPDATE movies SET tmdb_id=7 WHERE id=?", (mid,))
+    db.shelf_life_set_keep("movie", 7, True)
+    res = worker.fix_finding(fid, actions[fid])
+    assert res["success"] is False and "Keep" in res["error"] and calls == []
+
+
 def test_a_locked_show_is_stored_with_the_padlock_and_never_flagged(db, worker):
     sid = _show(db, "Locked Show", tmdb=55, streaming="ok", count=5)
     _run(worker)

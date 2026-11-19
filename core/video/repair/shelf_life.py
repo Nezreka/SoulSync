@@ -890,8 +890,11 @@ class ShelfLifeJob(VideoRepairJob):
         if any(context.db.is_hands_off(kind, i) for i in copies):
             return {"success": False,
                     "error": "This title is locked, so maintenance leaves it alone. Nothing was deleted."}
-        tmdb = d.get("tmdb_id")
-        if tmdb and (kind, int(tmdb)) in context.db.shelf_life_keeps():
+        # Keep is held by TMDB id: the rows' ids now (matched since the scan,
+        # perhaps) as well as the one the finding was filed with
+        tmdbs = {d.get("tmdb_id")} | {(context.db.shelf_life_title(kind, i) or {}).get("tmdb_id") for i in copies}
+        keeps = context.db.shelf_life_keeps()
+        if any(t and (kind, int(t)) in keeps for t in tmdbs):
             return {"success": False, "error": "This title is marked Keep. Nothing was deleted."}
         typed = fix_action if isinstance(fix_action, str) else ""
         if not typed.strip():
