@@ -912,6 +912,9 @@ def _post_scan_hook_with_own_libraries(server_type, deep):
             _db_update_phase_callback("Finishing up: folding leftover track rows...")
             from core.library2.dedup_repair import fold_leftovers_after_scan
             fold_leftovers_after_scan(worker.database)
+            # albums of one name a scan merged into one row (#2110)
+            from core.library2.release_split import split_same_named_after_scan
+            split_same_named_after_scan(worker.database)
     return hook
 
 

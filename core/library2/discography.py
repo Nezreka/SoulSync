@@ -432,13 +432,44 @@ def _expected_count(row: Dict[str, Any]) -> Optional[int]:
         return None
 
 
+def _row_year(row: Dict[str, Any]) -> Optional[str]:
+    value = str(row.get("release_date") or row.get("year") or "")[:4]
+    return value if value.isdigit() and value != "0000" else None
+
+
+def _rows_are_several_releases(rows: List[Dict[str, Any]], bucket: str) -> bool:
+    """the library already holds this name under more than one year"""
+    years = {_row_year(row) for row in rows
+             if row.get("origin") == "library" and _bucket(row["album_type"]) == bucket}
+    return len(years - {None}) > 1
+
+
+def _names_listed_several_times(releases: Any) -> set:
+    """(title key, bucket) of every name the provider lists under more than
+    one year: weezer's six "weezer"s."""
+    years: Dict[tuple, set] = {}
+    for release in releases:
+        year = _row_year({"release_date": release.release_date, "year": release.year})
+        if year:
+            years.setdefault((release_title_key(release.title),
+                              _bucket(_normalize_type(release.album_type))), set()).add(year)
+    return {key for key, found in years.items() if len(found) > 1}
+
+
 def _match_existing(index: Dict[str, List[Dict[str, Any]]], *, title: str,
                     album_type: str, provider_id: str, source: Optional[str],
                     release_date: Any = None,
                     track_count: Any = None,
-                    release_group_id: Optional[str] = None
+                    release_group_id: Optional[str] = None,
+                    year: Any = None,
+                    several: bool = False,
                     ) -> Optional[Dict[str, Any]]:
-    """Find the library row a provider release corresponds to, if any."""
+    """Find the library row a provider release corresponds to, if any.
+
+    ``several``: this name is several releases of the artist (weezer's
+    "weezer" of 1994, 2001, 2008, 2016; #2110). The name alone then says
+    nothing: the row of the same year takes it, one with no year yet may, and
+    a release of a year nobody holds gets its own row."""
     # 1) Provider-id match beats everything (exact release identity).
     #    A MusicBrainz release GROUP is matched against the column that holds
     #    group ids — not against external_ids, which is the release namespace.
@@ -464,6 +495,16 @@ def _match_existing(index: Dict[str, List[Dict[str, Any]]], *, title: str,
     #    spellings of the same title still land on the library row.
     candidates = index.get(release_title_key(title)) or []
     want = _bucket(album_type)
+    if several or _rows_are_several_releases(candidates, want):
+        wanted_year = _row_year({"release_date": release_date, "year": year})
+        pool = [row for row in candidates if _bucket(row["album_type"]) == want]
+        for row in pool:
+            if wanted_year and _row_year(row) == wanted_year:
+                return row
+        for row in pool:
+            if _row_year(row) is None:
+                return row
+        return None
     for row in candidates:
         if _bucket(row["album_type"]) == want:
             return row
@@ -691,6 +732,7 @@ def _expand_artist_discography(
         seen_ids: set = set()
         cursor = conn.cursor()
 
+        several_names = _names_listed_several_times(provider_result.releases)
         for release in provider_result.releases:
             title = release.title
             provider_id = release.provider_id
@@ -747,9 +789,14 @@ def _expand_artist_discography(
                                        provider_id=provider_id, source=source,
                                        release_group_id=release_group_id,
                                        release_date=release_date,
-                                       track_count=track_count)
+                                       track_count=track_count, year=year,
+                                       several=(release_title_key(title),
+                                                _bucket(album_type)) in several_names)
             if existing:
                 seen_ids.add(existing["id"])
+                # the next release of this name must see whose year this row is
+                existing["release_date"] = existing.get("release_date") or release_date
+                existing["year"] = existing.get("year") or year
                 merged_external_ids, id_conflict = _merge_external_id_details(
                     existing["external_ids"], source,
                     "" if id_is_group else provider_id)

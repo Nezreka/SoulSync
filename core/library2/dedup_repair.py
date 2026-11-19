@@ -376,7 +376,7 @@ def _merge_artist(cursor: Any, survivor: Any, duplicate: Any, reason: str = "") 
 def _album_rows_for_artist(conn: Any, artist_id: int) -> List[Dict[str, Any]]:
     rows = conn.execute(
         """SELECT al.id, al.title, al.album_type, al.origin, al.monitored,
-                  al.release_date, al.expected_track_count, al.track_count,
+                  al.release_date, al.year, al.expected_track_count, al.track_count,
                   al.spotify_id, al.musicbrainz_id, al.external_ids, al.soul_id,
                   (SELECT COUNT(*) FROM lib2_tracks t WHERE t.album_id = al.id) AS track_rows,
                   (SELECT COUNT(*) FROM lib2_track_files tf
@@ -743,6 +743,24 @@ def _years_disagree(a: Any, b: Any) -> bool:
         return value if value.isdigit() and value != "0000" else None
     first, second = year(a), year(b)
     return bool(first and second and first != second)
+
+
+def _row_year(row: Any) -> Optional[str]:
+    value = str(row.get("release_date") or row.get("year") or "")[:4]
+    return value if value.isdigit() and value != "0000" else None
+
+
+def _name_is_several_releases(members: List[Dict[str, Any]]) -> bool:
+    """#2110: the artist really has several releases of this name (weezer's
+    "weezer" of 1994, 2001, 2008, 2016): the albums with files carry more than
+    one year, or the provider's own listings do. Then the year decides which
+    row a same-named listing is, and a listing of a year nobody owns stays a
+    listing. One owned album whose tags say 2004 beside one listing that says
+    1994 is still the same album, as before."""
+    owned = {_row_year(m) for m in members if int(m.get("file_rows") or 0) > 0}
+    listed = {_row_year(m) for m in members
+              if m.get("origin") == "discography" and not int(m.get("file_rows") or 0)}
+    return len(owned - {None}) > 1 or len(listed - {None}) > 1
 
 
 def _release_ids_disagree(a: Any, b: Any) -> bool:
@@ -1240,11 +1258,24 @@ def _fold_albums_within_artist(conn: Any, cursor: Any, artist_id: int,
             continue
         members.sort(key=_survivor_sort_key)
         survivor = members[0]
+        by_title: Dict[tuple, List[Dict[str, Any]]] = {}
+        for member in members:
+            by_title.setdefault((release_title_key(member["title"]),
+                                 _bucket(member["album_type"])), []).append(member)
+        several = {key for key, rows in by_title.items() if _name_is_several_releases(rows)}
 
-        def _takes(home: Dict[str, Any], duplicate: Dict[str, Any]) -> bool:
+        def _takes(home: Dict[str, Any], duplicate: Dict[str, Any],
+                   several=several) -> bool:
             # A title twin keeps the rule it always had. A pair that only ever
             # met through provider ids has to clear the id evidence first.
-            evidence = (_shares_title_key(home, duplicate)
+            title_twin = _shares_title_key(home, duplicate)
+            if (title_twin and _years_disagree(home, duplicate)
+                    and (release_title_key(home["title"]),
+                         _bucket(home["album_type"])) in several):
+                # same name, another year, and the name is several releases:
+                # the 2016 listing is not the 1994 album (#2110)
+                title_twin = False
+            evidence = (title_twin
                         or _identity_supports_fold(home, duplicate))
             return bool(evidence
                         and _counts_compatible(home, duplicate)
