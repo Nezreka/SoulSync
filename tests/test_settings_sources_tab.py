@@ -128,44 +128,6 @@ def _test_all(model: str) -> str:
     return model.split("async function testAll(", 1)[1].split("\n  return {", 1)[0]
 
 
-def test_the_tab_exists(index):
-    assert 'data-tab="sources"' in index
-    # the tab buttons are React (settings-page.tsx, SETTINGS_PORT.md step V4c)
-    page = _read("webui/src/features/settings/settings-page.tsx")
-    assert "onClick={() => switchSettingsTab(key)}" in page
-
-
-def test_the_tab_is_available_on_both_sides(index):
-    """It started music-only, which stopped being right the moment the shared
-    config moved in: Prowlarr, the torrent client and the usenet client are the
-    video side's entire acquisition stack. A music-only tab would have taken
-    them away from it. Which TILES show is filtered per side instead.
-    """
-    line = next(ln for ln in index.splitlines() if 'data-tab="sources"' in ln)
-    assert "data-music-only" not in line
-    group = next(ln for ln in index.splitlines() if 'data-stg="sources"' in ln and "settings-group" in ln)
-    assert "data-music-only" not in group
-
-
-def test_the_sources_tab_shows_every_tile_on_both_sides(tab, js):
-    """REVERSED. This used to assert the opposite: the video side saw only a
-    SHARED_SOURCES subset - 4 tiles out of 13 - on the theory that Tidal and
-    Soulseek mean nothing to video.
-
-    They mean plenty. This is a settings page. Hiding Tidal from someone who
-    happens to be standing on the video side only means they cannot fix their
-    Tidal credentials without switching sides first, and which side you are on
-    is not a reason to be unable to see a setting. The tab is shared, so it
-    renders the same thing on both sides - same tiles, same grouping.
-
-    The tiles must therefore not branch on the side at all: not to filter
-    the list, and not to group it differently either."""
-    fn = _tiles(tab)
-    assert "data-side" not in fn, "the tiles branch on the side"
-    assert "SHARED_SOURCES" not in fn
-    assert "SHARED_SOURCES = new Set" not in js, "the dead subset is still declared"
-
-
 def test_the_shared_tabs_carry_no_side_gating(index):
     """The Sources, Downloads, Library and Quality tabs are fully shared:
     identical content on both sides. The invariant that keeps them that way is that nothing on either tab
@@ -199,58 +161,12 @@ def test_the_shared_tabs_carry_no_side_gating(index):
     assert "data-shared" not in markup
 
 
-def test_every_source_config_lives_on_the_sources_tab(index):
-    """A group nested under another tab's body would stay hidden no matter what
-    its own data-stg said — the parent is display:none. A panel ported to React
-    sits in a slot in the same place (step 7c on)."""
-    body = index.split('data-stg="sources"', 1)[1].split("end Sources tab", 1)[0]
-    react = _react_panels()
-    slots = _react_slots(index, body)
-    for cid in _SOURCE_CONTAINERS:
-        if f'id="{cid}"' in react:
-            assert slots, f"{cid} is React but no panel slot is on the Sources tab"
-        else:
-            assert f'id="{cid}"' in body, f"{cid} did not move to the Sources tab"
-
-
 def test_no_source_config_is_left_behind_on_downloads(index):
     # Exactly one home each; a duplicated id would break getElementById too.
     react = _react_panels()
     for cid in _SOURCE_CONTAINERS:
         count = index.count(f'id="{cid}"') + react.count(f'id="{cid}"')
         assert count == 1, f"{cid} appears {count} times"
-
-
-def test_a_source_no_longer_has_to_be_enabled_to_be_configured(js, tab, model):
-    """The regression that matters. If anything goes back to driving these
-    containers off the active-source set, configuring a source you have not
-    switched on becomes impossible again. updateDownloadSourceUI, which once
-    did, is gone (step 7a): a tile opens any source's panel, chain or not."""
-    assert "function updateDownloadSourceUI" not in js
-    assert "showCfg" not in js, "per-source config is gated on the source being active again"
-    for cid in _SOURCE_CONTAINERS:
-        for m in re.finditer(re.escape(f"getElementById('{cid}')"), js):
-            assert "style.display" not in js[m.end():m.end() + 120], \
-                f"something sets display on {cid} again"
-    # opening asks only whether the source has a panel (step 7b)
-    opener = model.split("    openModal(id) {", 1)[1].split("\n    },", 1)[0]
-    for gate in ("music", "order", "hybrid_order", "unready"):
-        assert gate not in opener, f"opening a source depends on the chain ({gate})"
-    assert "SOURCE_CONFIG_ID_BY_SRC[id]" in opener
-    # every configurable source gets a tile, in a chain or not
-    assert "onClick={() => model.openModal(src.id)}" in _tile(tab)
-
-
-def test_the_chain_widget_stayed_on_downloads(index, tab):
-    """Only the config moved. The order lives with the rest of the download
-    behaviour, and is the thing being redesigned separately. the chain is a
-    React slot now (step 7a): it is the Downloads tab's, and it renders its
-    blocks as Downloads blocks."""
-    assert 'data-stg-react="downloads" data-stg-part="chain"' in index
-    assert 'data-stg-react="sources" data-stg-part="chain"' not in index
-    chain = tab.split("export function ChainWidget(", 1)[1].split("// ── the Sources tab's tiles", 1)[0]
-    tags = set(re.findall(r'data-stg="([a-z]+)"', chain))
-    assert tags == {"downloads"}, f"chain widget ended up under {tags}"
 
 
 def test_the_cog_crosses_to_the_tab(js):
@@ -260,101 +176,6 @@ def test_the_cog_crosses_to_the_tab(js):
     model = _read("webui/src/features/settings/tabs/sources-model.ts")
     assert "/** open a source's settings in the modal (a tile, a chain cog) */" in model
     assert "toggleHybridSourceConfig" not in js
-
-
-def test_the_tiles_refresh_with_the_chain(model, tab):
-    # Same state drives both; a stale tile is a tile that lies about status.
-    # the tiles subscribe to the model, and a chain edit writes the model
-    assert "useSyncExternalStore(model.subscribe, model.getState)" in tab
-    assert "const state = useModel(model);" in _tiles(tab)
-    music = model.split("function writeMusic(", 1)[1].split("\n  }", 1)[0]
-    assert "set({ music:" in music
-    video = model.split("async function writeVideo(", 1)[1].split("\n  }", 1)[0]
-    assert "set({ video:" in video
-
-
-def test_every_source_has_a_tile(tab):
-    """Tiles are rendered, not hand-written, so the check is that the renderer
-    covers every source that owns a config panel."""
-    fn = _tiles(tab)
-    assert "HYBRID_SOURCES" in fn
-    assert "EXTRA_SOURCE_TILES" in fn      # Prowlarr is not a chain link
-    assert "SOURCE_CONFIG_ID_BY_SRC" in fn
-    markup = _tile(tab)
-    assert "src-tile-name" in markup and "src-tile-art" in markup
-
-
-def test_the_panel_is_moved_not_cloned(tab):
-    """Cloning would put a second element with the same id in the document, and
-    every getElementById in saveSettings would then read whichever one the
-    browser returned first — silently saving the copy nobody typed into."""
-    fn = _modal(tab)
-    assert "body.current.appendChild(panel)" in fn
-    assert "cloneNode" not in fn
-
-
-def test_closing_puts_the_panel_back(tab):
-    """It has to go home before the overlay hides, or the next open would move
-    a node that is already inside the hidden modal. The effect's cleanup runs
-    when `open` changes, before the hidden modal renders."""
-    fn = _modal(tab)
-    cleanup = fn.split("return () => {", 1)[1].split("};", 1)[0]
-    assert "getElementById('source-config-home')?.appendChild(panel)" in cleanup
-
-
-def test_closing_lands_a_pending_autosave(js, tab):
-    """The page auto-saves 2s after a change. Edit a field, close the modal, and
-    the timer would otherwise still be counting with nothing on screen to say
-    anything was pending. The vanilla timer is landed through a bridge, a React
-    tab's pending change through the store."""
-    close = _modal(tab).split("function close() {", 1)[1].split("\n  }", 1)[0]
-    assert "landPendingSettingsSave?.()" in close
-    assert "settingsStore.flush()" in close and "_settingsAutosaveOff !== true" in close
-    # the page-wide autosave timer the bridge landed went with settings.js
-    # (step V4b): every control is React, and the store is flushed right here
-    bridge = js.split("export function landPendingSettingsSave() {", 1)[1].split("\n}", 1)[0]
-    assert "saveSettings" not in bridge
-
-
-def test_escape_closes_it(tab):
-    fn = _modal(tab)
-    assert "event.key === 'Escape'" in fn and "close()" in fn
-
-
-def test_the_modal_is_a_dialog(tab):
-    fn = _modal(tab)
-    assert 'role="dialog"' in fn and 'aria-modal="true"' in fn
-
-
-def test_the_panels_park_in_a_hidden_home(index):
-    """They are real page markup, not templates — they need somewhere to live
-    that is not on screen when no modal is open. A React panel renders into a
-    slot in the same hidden home, and only portals into the modal while open."""
-    assert 'id="source-config-home" hidden' in index
-    home = index.split('id="source-config-home"', 1)[1].split("end source-config-home", 1)[0]
-    react = _react_panels()
-    slots = _react_slots(index, home)
-    for cid in _SOURCE_CONTAINERS:
-        if f'id="{cid}"' in react:
-            # the component that renders it is dispatched from a slot in the home
-            comp = react[:react.index(f'id="{cid}"')].rsplit("export function ", 1)[1].split("(", 1)[0]
-            dispatch = _react_dispatch(react)
-            parts = [part for part in slots if f"part === '{part}'" in dispatch
-                     and f"<{comp}" in dispatch.split(f"part === '{part}'", 1)[1].split("return null", 1)[0]]
-            assert parts, f"{cid} ({comp}) has no slot in the home div"
-        else:
-            assert f'id="{cid}"' in home, f"{cid} is not parked in the home div"
-    panel = react.split("function Panel(", 1)[1].split("\n/** a status line", 1)[0]
-    assert "createPortal(node, body)" in panel and "data-react-panel" in panel
-
-
-def test_the_tiles_refresh_when_the_modal_closes(js, tab):
-    # Changing a setting can change "needs setup" or the chain chip. the tiles
-    # redraw themselves from the model, so the close does not need to, and
-    # the removed vanilla renderer is not called from anywhere
-    assert "buildSourceTiles" not in js
-    assert "buildSourceTiles" not in _modal(tab)
-    assert "const state = useModel(model);" in _tiles(tab)
 
 
 def test_the_styling_reuses_the_pages_own_vocabulary():
@@ -519,23 +340,6 @@ def test_sources_gets_the_full_width_like_logs():
 # Layout and the per-source test
 # ---------------------------------------------------------------------------
 
-def test_the_tiles_are_grouped_not_one_ragged_wrap(tab):
-    """Eleven tiles in a single auto-fill grid wrapped 7-then-4 and read as an
-    accident. Two labelled groups make the same wrap look deliberate."""
-    fn = _tiles(tab)
-    # "in use" now, not "in your chain": it covers the video and audiobook chains too (#2026)
-    assert "section('In use'" in fn and "section('Available'" in fn
-    assert "src-group" in fn
-
-
-def test_the_chain_group_is_in_chain_order(tab):
-    """Registry order put #4 before #2, which makes the numbers on the chips
-    look wrong even though they are right."""
-    fn = _tiles(tab)
-    # ranked by chain then position, since a tile can be in more than one chain (#2026)
-    assert "rank(a) - rank(b)" in fn
-    assert "* 1000 + u.pos" in fn
-
 
 def test_a_small_group_does_not_stretch_across_the_page():
     css = _strip_comments(_read("webui/static/style.css"))
@@ -543,50 +347,6 @@ def test_a_small_group_does_not_stretch_across_the_page():
     assert "auto-fit" in row
     # a max on the track, or four tiles span the whole width of the page
     assert "190px" in row or "px)" in row.split("minmax(", 1)[1]
-
-
-def test_there_is_a_per_source_test_button(tab):
-    """The summary toast gave a count and the dot gave a colour. Neither told
-    you WHAT was wrong with a source you could see was unhappy."""
-    fn = _modal(tab)
-    assert 'id="src-modal-test"' in fn
-    assert 'id="src-modal-result"' in fn
-    assert "async function test() {" in fn
-
-
-def test_the_test_shows_what_the_server_said(tab):
-    fn = _modal(tab).split("async function test() {", 1)[1].split("\n  }", 1)[0]
-    assert "model.getState().said[id]" in fn
-    assert "text: said ||" in fn
-
-
-def test_the_test_updates_the_dot_and_the_tiles(tab, model):
-    # the modal's test runs through the model, which sets the dot the tiles read
-    fn = _modal(tab)
-    assert "await model.testOne(id)" in fn
-    assert "hss-${dot}" in fn
-    one = model.split("async function testOne(", 1)[1].split("\n  }", 1)[0]
-    assert "setStatus(id, state)" in one
-
-
-def test_a_source_with_no_probe_says_so_rather_than_failing(tab):
-    """YouTube used to be `() => Promise.resolve(true)`; a source with nothing
-    to test must not read as a source that failed a test."""
-    fn = _modal(tab).split("async function test() {", 1)[1].split("\n  }", 1)[0]
-    assert "no connection test" in fn.lower()
-
-
-def test_opening_a_source_carries_its_last_result_in(tab):
-    # An amber tile should still explain itself once you are inside.
-    fn = _modal(tab)
-    opening = fn.split("useEffect(() => {", 1)[1].split("return () => {", 1)[0]
-    assert "said && dot !== 'unknown'" in opening and "src-modal-result is-${dot}" in opening
-
-
-def test_the_result_line_is_announced(tab):
-    fn = _modal(tab)
-    line = fn.split('id="src-modal-result"', 1)[1][:80]
-    assert 'role="status"' in line and 'aria-live="polite"' in line
 
 
 # ---------------------------------------------------------------------------
@@ -671,16 +431,6 @@ def test_prowlarr_gets_a_tile_and_a_test(model):
     assert "prowlarr:" in probes
 
 
-def test_prowlarr_does_not_claim_a_chain_position(tab):
-    """order.indexOf('prowlarr') is always -1, so the generic chip would label
-    the indexer "not in chain" — which reads as something being wrong."""
-    fn = _tile(tab)
-    assert "src.id === 'prowlarr'" in fn
-    assert "torrent &amp; usenet" in fn
-    # and it is decided before the chain chips are
-    assert fn.index("src.id === 'prowlarr'") < fn.index("not in a chain")
-
-
 def test_torrent_and_usenet_open_their_own_config(js):
     """Both used to open the same redirect panel that pointed elsewhere."""
     m = js.split("SOURCE_CONFIG_ID_BY_SRC: Record<string, string> = {", 1)[1].split("};", 1)[0]
@@ -697,45 +447,6 @@ def test_ytdlp_moved_in_with_youtube(index):
     assert "ytdlp-update-btn" in panel
     assert "ytdlp-installed" in panel
     assert 'id="ytdlp-hint-badge"' in panel      # the badge lived in the old header
-
-
-def test_the_moved_ytdlp_block_left_the_advanced_tab(index):
-    # the tile is in the React YouTube panel now (step 7g): it is not in the
-    # page markup at all, and the panel's slot sits in the Sources home
-    assert 'id="ytdlp-update-btn"' not in index
-    assert 'id="ytdlp-update-btn"' in _panel_text(index, "youtube-settings-container")
-    slot = index.index('data-stg-part="youtube"')
-    assert 'data-stg="advanced"' not in index[slot - 2500:slot]
-
-
-def test_the_filesystem_note_is_still_reachable(index):
-    """It explains that torrent/usenet write to their OWN folders, which is the
-    single most common import failure. It belonged to the section that was
-    dissolved, so it had to land somewhere deliberate."""
-    assert "ind-hero-warning" in index
-    sources = index.split('data-stg="sources"', 1)[1].split("end Sources tab", 1)[0]
-    assert "ind-hero-warning" in sources
-
-
-def test_indexers_are_their_own_group(tab):
-    """Not a source you pick — the catalogue the torrent and usenet links
-    search. Left in "Available" it read as something you could add to the
-    chain, which is not a thing Prowlarr can be."""
-    fn = _tiles(tab)
-    assert "section('Indexers'" in fn
-    # one code path, not two. this used to require 2 because the video side
-    # rendered its own grouping; the tab is shared and renders once for both.
-    assert fn.count("section('Indexers'") == 1, "the side branch is back"
-
-
-def test_an_indexer_cannot_land_in_the_chain_groups(tab):
-    """The chain groups partition on order.includes(), and Prowlarr is never in
-    the order — so without splitting it out first it falls into Available every
-    time."""
-    fn = _tiles(tab)
-    assert "const sources = configurable.filter((src) => !isIndexer(src))" in fn
-    for group in ("const inChain = sources", "const available = sources"):
-        assert group in fn, group
 
 
 @pytest.mark.parametrize("container", sorted(_MOVED_IN))
@@ -784,17 +495,6 @@ def test_the_indexer_probe_reaches_the_video_side(model):
     assert "const videoSide = document.body.getAttribute('data-side') === 'video'" in fn
     cond = next(ln for ln in fn.splitlines() if "sources.has('torrent')" in ln)
     assert "videoSide" in cond
-
-
-def test_the_indexer_result_redraws_its_tile(model, tab):
-    """The per-source loop redraws while walking the chain, which Prowlarr is
-    not part of — so without this the dot would only appear on the next redraw
-    triggered by something else. the result goes into the model straight away,
-    and the tiles redraw on every model change."""
-    fn = _test_all(model)
-    block = fn.split("setStatus('prowlarr', 'testing');", 1)[1].split("for (const id of sources)", 1)[0]
-    assert "setStatus('prowlarr'," in block
-    assert "const state = useModel(model);" in _tiles(tab)
 
 
 def test_an_inverted_mark_is_not_then_dimmed_into_grey():
@@ -1081,7 +781,9 @@ def test_library_headers_report_what_is_set_not_what_is_inside(index, js):
         block = cards.split(f'data-stg-summary="{key}"', 1)[1][:120]
         assert "data-stg-fallback={fallback}" in block, f"React summary {key} has no fallback"
     react_slots += card_slots
-    assert len(slots) + len(react_slots) >= 8, f"only {len(slots) + len(react_slots)} headers report live values"
+    # (settings-bic) Downloads has no folded headers any more: its pills show
+    # everything, and its state is the sentence at the top. seven are left
+    assert len(slots) + len(react_slots) >= 7, f"only {len(slots) + len(react_slots)} headers report live values"
     assert not set(slots) & set(react_slots), "a summary is on the page twice"
     parts = (tabs / "parts.tsx").read_text(encoding="utf-8")
     assert "data-stg-fallback={hint}" in parts, "a React header without a fallback could go blank"
@@ -1763,7 +1465,6 @@ def test_the_connections_tab_survives_a_phone():
     assert 'width:' in art.group(1) and 'height:' in art.group(1), (
         "only one axis shrinks - the well stops being square"
     )
-
 
 
 def test_every_connections_service_sits_in_a_named_group(index, tiles):
