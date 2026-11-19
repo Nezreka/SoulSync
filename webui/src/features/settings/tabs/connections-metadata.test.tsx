@@ -8,7 +8,7 @@ import { act, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createSettingsStore, type SettingsPayload, type SettingsStore } from '../settings-store';
-import { shape, vanilla, withHelpLines } from './__fixtures__/shape';
+import { shape, vanilla } from './__fixtures__/shape';
 import { hydrabaseLink, musicbrainzKeys, musicbrainzRate } from './connections';
 import {
   ExperimentalSection,
@@ -95,25 +95,95 @@ function status(frame: unknown) {
 const loaded = (settings: SettingsPayload) => act(() => store.hydrate(settings));
 
 describe('each part is the markup it replaced', () => {
-  it('the metadata source group, with the discography source under the picker', () => {
+  it('the metadata source: two rows, named without a colon, the long help behind the "i"', () => {
     const { container } = part('metadata');
-    const old = vanilla('connections-metadata.vanilla.html', { afterInit: true });
-    // library-discography-source.ts slipped this in after the picker's row
-    old
-      .querySelector('#metadata-fallback-source')!
-      .closest('.form-group')!
-      .insertAdjacentHTML(
-        'afterend',
-        '<div id="library-discography-source-group" class="form-group"><label for="library-discography-source">Library discography source:</label><select id="library-discography-source" class="form-select"><option value="primary">Use primary metadata source</option><option value="automatic">Automatic commercial catalogue</option><option value="itunes">iTunes</option><option value="deezer">Deezer</option><option value="musicbrainz">MusicBrainz</option><option value="spotify">Spotify</option></select><small class="settings-hint">Controls album, EP and single catalogues shown in Library artist views. Automatic tries iTunes, then Deezer.</small></div>',
-      );
-    expect(shape(container)).toEqual(shape(old));
+    const rows = [...container.querySelectorAll<HTMLElement>('[data-row]')];
+    expect(rows.map((r) => r.querySelector('label')!.textContent)).toEqual([
+      'Primary metadata source',
+      'Library discography source',
+    ]);
+    expect(rows[0].querySelector('#metadata-fallback-source')).not.toBeNull();
+    expect(rows[1].id).toBe('library-discography-source-group');
+    expect(rows[1].querySelector('#library-discography-source')).not.toBeNull();
+    // one line of help; the source list is behind the "i", closed
+    expect(rows[0].textContent).toContain('Spotify and Discogs need their account connected');
+    const info = rows[0].querySelector<HTMLButtonElement>(
+      '[aria-label="More about this setting"]',
+    )!;
+    const rest = document.getElementById(info.getAttribute('aria-controls')!)!;
+    expect(rest.hidden).toBe(true);
+    expect(rest.textContent).toContain('Spotify (no auth)');
+    expect(rest.textContent).not.toContain('—');
+    // music only, as it was
+    expect(container.querySelector('[data-music-only]')).not.toBeNull();
+    expect(
+      [...container.querySelectorAll<HTMLOptionElement>('#library-discography-source option')].map(
+        (o) => o.value,
+      ),
+    ).toEqual(['primary', 'automatic', 'itunes', 'deezer', 'musicbrainz', 'spotify']);
   });
 
-  it('the music API Configuration group, every card in it', () => {
+  it('the music API Configuration group: every card, its Test kept for the sheet, no emoji, no colon', () => {
     const { container } = part('api-music');
-    expect(shape(unwrapped(container))).toEqual(
-      shape(withHelpLines(vanilla('connections-api-music.vanilla.html'))),
-    );
+    const cards = [...unwrapped(container).querySelectorAll<HTMLElement>('[data-service]')];
+    expect(cards.map((c) => c.getAttribute('data-service'))).toEqual([
+      'spotify',
+      'itunes',
+      'deezer',
+      'discogs',
+      'tidal',
+      'qobuz',
+      'concerts',
+      'lastfm',
+      'genius',
+      'pollinations',
+      'artist-fanart',
+      'musicbrainz',
+      'acoustid',
+      'listenbrainz',
+      'hydrabase',
+    ]);
+    for (const id of [
+      'spotify-client-id',
+      'spotify-client-secret',
+      'spotify-redirect-uri',
+      'spotify-disconnect-btn',
+      'metadata-spotify-free-enrichment',
+      'itunes-country',
+      'deezer-app-id',
+      'deezer-app-secret',
+      'deezer-redirect-uri',
+      'deezer-connection-arl',
+      'discogs-token',
+      'tidal-client-id',
+      'tidal-client-secret',
+      'tidal-redirect-uri',
+      'lastfm-api-key',
+      'lastfm-username',
+      'genius-access-token',
+      'listenbrainz-token',
+      'listenbrainz-username',
+    ])
+      expect(document.getElementById(id), id).not.toBeNull();
+    // the cards that had a Test keep it, out of sight: the sheet's foot presses it
+    const tests = [...container.querySelectorAll<HTMLButtonElement>('[data-svc-test]')];
+    expect(tests.length).toBeGreaterThanOrEqual(13);
+    expect(tests.every((t) => t.hidden)).toBe(true);
+    for (const b of container.querySelectorAll('button'))
+      expect(b.textContent, b.textContent ?? '').not.toMatch(/[\u{1F300}-\u{1FAFF}]/u);
+    for (const l of container.querySelectorAll('.form-group > label'))
+      expect(l.textContent).not.toMatch(/:\s*$/);
+  });
+
+  it("Spotify's Disconnect shows while /status says it is signed in (it never could before)", () => {
+    part('api-music');
+    const button = () => document.getElementById('spotify-disconnect-btn') as HTMLButtonElement;
+    expect(button().hidden).toBe(true);
+    status({ spotify: { authenticated: true } });
+    expect(button().hidden).toBe(false);
+    expect(button().textContent).toBe('Disconnect');
+    status({ spotify: { authenticated: false } });
+    expect(button().hidden).toBe(true);
   });
 
   it('Experimental, and its confirm in the page body', () => {

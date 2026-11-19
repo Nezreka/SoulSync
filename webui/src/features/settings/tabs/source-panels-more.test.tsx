@@ -7,18 +7,12 @@
  * key guard (guard/) holds every id, key and button.
  */
 
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createSettingsStore, type SettingsPayload, type SettingsStore } from '../settings-store';
 import { REDACTED_SECRET_SENTINEL } from './parts';
-import {
-  MoreSourcePanels,
-  ProwlarrPanel,
-  TorrentPanel,
-  UsenetPanel,
-  YoutubePanel,
-} from './source-panels-more';
+import { ProwlarrPanel, TorrentPanel, UsenetPanel, YoutubePanel } from './source-panels-more';
 import { createSourcesModel, sourcesModel } from './sources-model';
 import { SourceModal } from './sources-tab';
 import { videoDownloads } from './video-downloads';

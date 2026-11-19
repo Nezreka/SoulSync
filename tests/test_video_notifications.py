@@ -141,4 +141,8 @@ def test_wiring_and_ui():
     assert "createRows('/api/video/notifications')" in ui
     assert "void notifications.load('connections');" in ui
     assert "`${notifications.url}/test`" in ui
-    assert 'data-stg-part="notifications"' in _INDEX
+    # settings-bic: Notifications is a pill of the Connections page (one slot)
+    assert 'data-stg-part="page"' in _INDEX and 'data-stg-react="connections"' in _INDEX
+    page = (Path(__file__).resolve().parents[1] / "webui" / "src" / "features" / "settings" /
+            "tabs" / "connections" / "connections-page.tsx").read_text(encoding="utf-8")
+    assert "<NotificationsSection />" in page

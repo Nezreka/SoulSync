@@ -1071,18 +1071,21 @@ def test_the_old_accordion_list_is_not_shown_alongside_the_tiles(index):
 
 def test_the_required_keys_note_survived_hiding_its_group(index, tiles):
     """TMDB and TVDB are required, and the note saying so - crucially including
-    "both are free" - lived inside the group that is now hidden. The tiles show a
-    "required" chip, but a chip cannot say why, and someone who assumes it is a
-    paid feature just skips it and wonders why matching never works."""
-    # the note is the Services part's (React), drawn into its slot
+    "both are free" - lived inside the group that is now hidden. The tiles say
+    "Required: no key yet", but words on a tile cannot say why, and someone who
+    assumes it is a paid feature just skips it and wonders why matching never
+    works."""
+    # the note is the Services part's (React), drawn on the Connections page
     assert 'className="svc-required-note"' in tiles and 'both keys are set. Both are free.' in tiles
-    at = index.index('data-stg-react="connections" data-stg-part="services"')
+    at = index.index('data-stg-react="connections" data-stg-part="page"')
     enclosing = index.rfind('data-svc-legacy', 0, at)
     # if the slot were inside the hidden group there would be no closing
     # </div> between that group's tag and the slot
     assert enclosing == -1 or index.count('</div>', enclosing, at) > 0, (
         "the required-keys note is inside the hidden group and will never be seen"
     )
+    page = _read(_TABS + "connections/connections-page.tsx")
+    assert "<ServicesPart " in page
 
 
 def test_the_service_tabs_open_on_the_side_you_are_on(tiles):
@@ -1112,32 +1115,25 @@ def test_every_mapped_service_logo_actually_exists(tiles):
 def test_a_service_without_artwork_still_looks_deliberate(tiles):
     """Nine services have no brand art in the repo. A grey blob for each would
     make the grid a list you have to read anyway, which defeats the point of a
-    grid. They get a monogram on their own brand colour instead.
+    grid. (settings-bic) They get the parts' Mark: one line icon on their own
+    brand colour, as DESIGN 4.2 says.
 
-    The colour comes off the element as --svc-brand rather than out of a
-    stylesheet map, so a service added later picks its hue up with no CSS change.
-    """
+    The colour comes off the card (its dot) rather than out of a stylesheet map,
+    so a service added later picks its hue up with no CSS change."""
     meta = _fn(tiles, "serviceMeta")
-    assert 'monogram' in meta, "no monogram fallback"
-    assert "replace(/[^A-Za-z0-9]/g, '')" in meta, (
-        "a name starting with punctuation would yield an empty monogram"
+    assert "querySelector<HTMLElement>('.stg-service-dot')?.style.color" in meta
+    mark = _fn(tiles, "ServiceMark")
+    assert "brand={meta.colour ? brandRgb(meta.colour) : undefined}" in mark, (
+        "the brand colour never reaches the mark"
     )
-    build = _fn(tiles, "ServicesPart")
-    assert "'--svc-brand'" in build, "the brand colour never reaches the card"
-    assert 'svc-monogram' in _fn(tiles, "Fallback")
-
-    css = _read("webui/static/style.css")
-    # the tinted well lives on the shared container, not on the fallback: a card
-    # with artwork and a card with a monogram must be the same object with
-    # different contents, or the grid reads as two kinds of card
-    well = re.search(r'(?m)^\.svc-tile-art\s*\{([^}]*)\}', css)
-    assert well and 'var(--svc-brand)' in well.group(1), (
-        "the icon well is not brand-tinted on the shared container"
-    )
-    mono = re.search(r'(?m)^\.svc-monogram\s*\{([^}]*)\}', css)
-    assert mono and 'border-radius' not in mono.group(1), (
-        "the monogram has a well of its own again - that nests two squares"
-    )
+    assert "src={meta.logo}" in mark
+    # the parts' Mark draws the line icon on --brand when there is no image
+    parts = _read("webui/src/features/settings/ui/parts.tsx")
+    fn = parts.split("export function Mark(", 1)[1].split("\n}\n", 1)[0]
+    assert "!image && s.markBrand" in fn and "'--brand': brand" in fn
+    css = _read("webui/src/features/settings/ui/settings.module.css")
+    brand = re.search(r'(?m)^\.markBrand\s*\{([^}]*)\}', css)
+    assert brand and 'var(--brand' in brand.group(1), "the fallback is not brand-tinted"
 
 
 def test_the_service_grid_only_shows_actual_services(tiles):
@@ -1161,24 +1157,20 @@ def test_the_media_tab_owns_the_whole_connections_tab(index, tiles):
     tiles sitting directly above their own MUSIC server settings - the tab said
     one thing and the panel under it said another.
 
-    Both server sections are marked with the side they belong to, and the tab
-    decides which is on screen. The data-video-only marker stays: it still
-    describes whose settings these ARE, which is a different question from which
-    one is currently shown.
-    """
-    # the music section is React (connections-servers.tsx, step 10c)
-    # and the video section too (connections-video-server.tsx, video pass V3b)
+    (settings-bic) The media server is its own section above the services and
+    follows the side the page is on; the Music/Video switch is the services'
+    own, and the services heading says which side's they are. Both server
+    sections stay marked with the side they belong to."""
     servers = _read(_TABS + "connections-servers.tsx")
     video = _read(_TABS + "connections-video-server.tsx")
-    assert index.count('data-svc-side=') + servers.count('data-svc-side=') + video.count('data-svc-side=') == 2, (
-        "the two server sections are not both marked"
-    )
     assert 'data-svc-side="music"' in servers and 'data-svc-side="video"' in video
-
+    page = _read(_TABS + "connections/connections-page.tsx")
+    assert '<div hidden={side === \'video\'} data-media-server="music">' in page
+    assert '<div hidden={side !== \'video\'} data-media-server="video">' in page
+    # the video section keeps the class its own stylesheet shows it by
+    assert "g.classList.toggle('svc-side-active', side === 'video')" in page
     build = _fn(tiles, "ServicesPart")
-    assert 'data-svc-side' in build and 'svc-side-active' in build, (
-        "switching tab does not move the server section with it"
-    )
+    assert "title={state.kind === 'video' ? 'Video services' : 'Services'}" in build
 
 
 def test_the_server_override_can_actually_win():
@@ -1294,48 +1286,17 @@ def test_services_without_art_reuse_the_app_s_own_glyphs(tiles):
     fanart.tv, OpenSubtitles, Trakt, MDBList, Community Data - and a grid of
     letter monograms among real logos reads as placeholders, not as icons.
 
-    The video dashboard ALREADY shows a glyph for most of these sources. Reusing
-    them keeps one vocabulary across the app: OMDb is the same star in both
-    places. Inventing icons here would have started a second, competing set.
-
-    The ones with no established glyph keep a monogram on their brand colour -
-    that is a deliberate floor, not an oversight.
-    """
-    # the video dashboard is React now; its worker table holds the glyphs
-    hero = _read("webui/src/routes/dashboard/-video/video-hero.tsx")
-    dash = set(re.findall(r"logo: \{ glyph: '([^']+)' \}", hero))
-    assert dash, "the dashboard glyphs this borrows from are gone"
-
+    (settings-bic) DESIGN 4.2 Mark: where there is no logo file, one line icon
+    on that service's own brand colour, never an emoji or a letter. The glyph
+    map still says which services have an established mark elsewhere."""
     block = tiles.split('const SERVICE_GLYPHS: Record<string, string> = {', 1)[1].split('};', 1)[0]
     mapped = re.findall(r"^\s*'?([\w-]+)'?:", block, re.M)
-    assert len(mapped) >= 5, f"only {len(mapped)} services reuse a dashboard glyph"
     for svc in ('omdb', 'fanart', 'opensubtitles', 'trakt'):
-        assert svc in mapped, f"{svc} still falls back to a letter"
-
-    # order of preference: artwork, then the app's glyph, then a monogram
-    fallback = _fn(tiles, "Fallback")
-    assert 'meta.glyph' in fallback and 'svc-monogram' in fallback
-    art = _fn(tiles, "Art")
-    assert '<Fallback meta={meta} />' in art and 'onError' in art, (
-        "a logo that does not load is not replaced by the glyph or monogram"
-    )
-
-    css = _read("webui/static/style.css")
-    glyph = re.search(r'(?m)^\.svc-glyph\s*\{([^}]*)\}', css)
-    assert glyph, "no styling for the glyph"
-
-    # artwork, glyph and monogram all sit in ONE well on .svc-tile-art, so they
-    # cannot disagree about their box any more - which is what this used to have
-    # to check pair by pair. What matters now is that none of them re-grows a
-    # box of its own.
-    for sel in ('.svc-glyph', '.svc-monogram'):
-        body = re.search(r'(?m)^' + re.escape(sel) + r'\s*\{([^}]*)\}', css).group(1)
-        for prop in ('width', 'height', 'border-radius', 'background'):
-            # anchored to the start of a declaration: a bare substring check for
-            # "height" also matches "line-height", which the glyph legitimately sets
-            assert not re.search(r'(?m)^\s*' + re.escape(prop) + r'\s*:', body), (
-                f"{sel} sets {prop} - it is content inside the shared well, not a well"
-            )
+        assert svc in mapped, f"{svc} lost its place in the glyph map"
+    mark = _fn(tiles, "ServiceMark")
+    # a line icon, never the emoji glyph itself, and never a monogram
+    assert "icon={meta.glyph ? 'box' : 'link'}" in mark
+    assert "meta.glyph}" not in mark and "monogram" not in mark
 
 
 def test_a_caption_is_not_styled_as_a_heading():
@@ -1435,35 +1396,20 @@ def test_the_connections_tab_survives_a_phone():
     Four buttons capped at 176px in a flex row do not fit a 360px screen - the
     row either scrolled sideways or squeezed each logo into a sliver.
 
-    Also pins that the icon well shrinks on BOTH axes. It is a square, and an
-    earlier version set only height, which left a 48x40 box and icons that had
-    quietly stopped being square.
-    """
-    css = _read("webui/static/style.css")
-    blocks = re.findall(r'@media \(max-width: 560px\)\s*\{(.*?)\n\}', css, re.S)
-    assert blocks, "the phone breakpoint is gone"
-    narrow = "\n".join(blocks)
-
-    assert 'server-toggle-btn' in narrow, "the server toggles have no phone rules"
-    assert 'flex: 1 1 calc(50% - 4px)' in narrow, "the toggles do not wrap two per line"
-
-    # the phone rules share the base rules' specificity, so they only win if
-    # they come after them - an earlier version sat above the base and never applied
-    base = re.search(
-        r'(?m)^#settings-page \.settings-group\[data-svc-side\] \.server-toggle-btn\s*\{', css)
-    phone = [m for m in re.finditer(r'@media \(max-width: 560px\)\s*\{(.*?)\n\}', css, re.S)
-             if 'flex: 1 1 calc(50% - 4px)' in m.group(1)]
-    assert base and phone and phone[0].start() > base.start(), (
-        "the phone toggle rules come before the base rules, so the base wins"
+    (settings-bic) The pick-one server row and the tiles are the parts'
+    (ui/settings.module.css): on a phone the servers go two to a row and the
+    tiles one column, and a mark stays square on both axes."""
+    css = _read("webui/src/features/settings/ui/settings.module.css")
+    phone = css.split("@media (max-width: 768px)", 1)[1]
+    servers = re.search(r'\.servers\s*\{([^}]*)\}', phone)
+    assert servers and 'repeat(2, minmax(0, 1fr))' in servers.group(1), (
+        "the server row does not go two to a line on a phone"
     )
-    assert '--svc-server-logo-max: 30px' in phone[0].group(1), (
-        "the phone logo cap does not go through the token video-side.css reads"
-    )
-
-    art = re.search(r'\.svc-tile-art\s*\{([^}]*)\}', narrow)
-    assert art, "the icon well has no phone rule"
-    assert 'width:' in art.group(1) and 'height:' in art.group(1), (
-        "only one axis shrinks - the well stops being square"
+    tiles = re.search(r'\.tiles\s*\{([^}]*)\}', phone)
+    assert tiles, "the tiles have no phone rule"
+    mark = re.search(r'(?m)^\.mark\s*\{([^}]*)\}', css)
+    assert mark and 'width: 40px' in mark.group(1) and 'height: 40px' in mark.group(1), (
+        "only one axis is set - the mark stops being square"
     )
 
 
@@ -1474,7 +1420,8 @@ def test_every_connections_service_sits_in_a_named_group(index, tiles):
     block = tiles.split('const SERVICE_GROUPS', 1)[1].split('\n};', 1)[0]
     lists = ' '.join(re.findall(r'ids:\s*\[([^\]]*)\]', block))
     grouped = set(re.findall(r"'([a-z]+)'", lists))
-    connections = index.split('data-stg="connections"', 1)[1].split('data-stg="library"', 1)[0]
+    # (settings-bic) every card is React: the page markup holds none of its own
+    connections = index.split('data-stg="connections"', 1)[-1].split('data-stg="library"', 1)[0]
     ids = set(re.findall(r'data-(?:video-)?service="([a-z]+)"', connections)) | {
         i for i in _react_cards() + _video_cards() if re.fullmatch(r'[a-z]+', i)
     }

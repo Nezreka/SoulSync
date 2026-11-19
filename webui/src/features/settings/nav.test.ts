@@ -26,7 +26,9 @@ describe('the tabs', () => {
     expect(resolveTab('system')).toEqual({ tab: 'advanced', view: 'system' });
     expect(resolveTab('downloads')).toEqual({ tab: 'downloads', view: 'sources' });
     // nonsense is the first tab, never a blank page
-    expect(resolveTab('nope')).toEqual({ tab: 'connections', view: 'all' });
+    expect(resolveTab('nope')).toEqual({ tab: 'connections', view: 'services' });
+    // Connections has its pills now (settings-bic phase 2)
+    expect(resolveTab('connections', 'metasync')).toEqual({ tab: 'connections', view: 'metasync' });
     expect(resolveTab('downloads', 'nope')).toEqual({ tab: 'downloads', view: 'sources' });
   });
   it('the tabs not rebuilt yet still answer to their old key', () => {
@@ -47,15 +49,18 @@ describe('the address', () => {
     });
     expect(navFromSearch({ open: '<script>', kind: 7 })).toEqual({
       tab: 'connections',
-      view: 'all',
+      view: 'services',
       kind: null,
       open: null,
     });
   });
   it('writes only what is needed', () => {
-    expect(navToSearch({ tab: 'connections', view: 'all', kind: null, open: null })).toEqual({
-      tab: 'connections',
+    expect(navToSearch({ tab: 'library', view: 'all', kind: null, open: null })).toEqual({
+      tab: 'library',
     });
+    expect(
+      navToSearch({ tab: 'connections', view: 'notifications', kind: null, open: null }),
+    ).toEqual({ tab: 'connections', view: 'notifications' });
     expect(navToSearch({ tab: 'advanced', view: 'logs', kind: null, open: null })).toEqual({
       tab: 'system',
       view: 'logs',

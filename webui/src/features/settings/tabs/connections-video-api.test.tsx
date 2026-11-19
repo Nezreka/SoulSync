@@ -9,7 +9,6 @@
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { shape, vanilla } from './__fixtures__/shape';
 import { servicesModel, ServicesPart } from './connections-services';
 import { VideoApiGroup } from './connections-video-api';
 import { testVideoServices, videoKeys } from './video-keys';
@@ -71,13 +70,44 @@ function shown() {
 }
 
 describe('the video API Configuration', () => {
-  it('is the markup it replaced', () => {
+  it('every card and its key or switches; its Test kept for the sheet, out of sight', () => {
     const { container } = render(<VideoApiGroup />);
-    // each card sits in its wrapper (display: contents), the one thing added
-    const copy = container.cloneNode(true) as HTMLElement;
-    for (const wrap of copy.querySelectorAll('[data-svc-wrap]'))
-      wrap.replaceWith(...wrap.childNodes);
-    expect(shape(copy)).toEqual(shape(vanilla('video-api.vanilla.html')));
+    expect(
+      [...container.querySelectorAll('[data-video-service]')].map((f) =>
+        f.getAttribute('data-video-service'),
+      ),
+    ).toEqual([
+      'tmdb',
+      'tvdb',
+      'omdb',
+      'fanart',
+      'opensubtitles',
+      'subdl',
+      'subsource',
+      'trakt',
+      'mdblist',
+      'nokey',
+      'ytextras',
+    ]);
+    for (const k of [
+      'tmdb',
+      'tvdb',
+      'omdb',
+      'fanart',
+      'opensubtitles',
+      'subdl',
+      'subsource',
+      'trakt',
+      'mdblist',
+    ])
+      expect(el(`${k}-api-key`), k).not.toBeNull();
+    for (const k of ['tvmaze', 'anilist', 'wikidata', 'ryd', 'sponsorblock', 'dearrow'])
+      expect(el(`video-${k}-enabled`), k).not.toBeNull();
+    const tests = [...container.querySelectorAll<HTMLButtonElement>('[data-video-test-service]')];
+    expect(tests).toHaveLength(11);
+    expect(tests.every((t) => t.hidden && t.hasAttribute('data-svc-test'))).toBe(true);
+    for (const l of container.querySelectorAll('.form-group > label'))
+      expect(l.textContent).not.toMatch(/:\s*$/);
   });
 
   it('loads each time the video settings page is shown', async () => {
@@ -174,8 +204,9 @@ describe('the video API Configuration', () => {
       container: root.querySelector<HTMLElement>('[data-stg-part="api-video"]')!,
     });
     act(() => servicesModel.switchKind('video'));
-    expect(document.querySelector('[data-service-tile="tmdb"] .src-tile-chip')!.textContent).toBe(
-      'required',
+    // no key loaded yet: TMDB is required, and says so in words
+    expect(document.querySelector('[data-service-tile="tmdb"] [data-tone]')!.textContent).toBe(
+      'Required: no key yet',
     );
     fireEvent.click(document.querySelector('[data-service-tile="trakt"]')!);
     const frame = document.querySelector<HTMLElement>('[data-video-service="trakt"]')!;
@@ -184,7 +215,7 @@ describe('the video API Configuration', () => {
     fireEvent.input(el('trakt-api-key'), { target: { value: 'tr' } });
     el('trakt-api-key').dispatchEvent(new Event('change', { bubbles: true }));
     await waitFor(() => expect(posts().at(-1)?.trakt_api_key).toBe('tr'));
-    fireEvent.click(document.querySelector('#service-config-modal .src-modal-close')!);
+    fireEvent.click(document.querySelector('#service-config-modal button[aria-label="Close"]')!);
     const group = root.querySelector('[data-svc-legacy]')!;
     expect(frame.closest('[data-svc-legacy]')).toBe(group);
     // back in page order

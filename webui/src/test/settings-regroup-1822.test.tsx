@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { resolveTab } from '@/features/settings/nav';
+import { resolveTab, tabDef } from '@/features/settings/nav';
 import { SettingsPage } from '@/features/settings/settings-page';
 import { switchSettingsTab } from '@/features/settings/shell';
 import { withHelpLines } from '@/features/settings/tabs/__fixtures__/shape';
@@ -26,7 +26,9 @@ describe('where sections live', () => {
       'utf8',
     );
     expect(section).toMatch(/tab="connections"\s+title="MetaSync"/);
-    expect(html).toContain('<div data-stg-react="connections" data-stg-part="metasync"');
+    // settings-bic: a pill of the Connections page, which the page draws as one slot
+    expect(html).toContain('<div data-stg-react="connections" data-stg-part="page"');
+    expect(tabDef('connections').views.map((v) => v.key)).toContain('metasync');
   });
 
   it('Video Quality is on quality (React, SETTINGS_PORT.md video pass V1)', () => {
@@ -60,7 +62,11 @@ describe('where sections live', () => {
     const body = lists.split(`export function ${fn}(`)[1].split('</Section>')[0];
     expect(body).toContain(`tab="${tab}"`);
     expect(body).toContain(`title="${heading}"`);
-    expect(html).toContain(`<div data-stg-react="${tab}" data-stg-part="${part}"`);
+    // settings-bic: Notifications is a pill of the Connections page (one slot)
+    if (part === 'notifications') {
+      expect(html).toContain('<div data-stg-react="connections" data-stg-part="page"');
+      expect(tabDef('connections').views.map((v) => v.key)).toContain('notifications');
+    } else expect(html).toContain(`<div data-stg-react="${tab}" data-stg-part="${part}"`);
   });
 
   it('Database Maintenance is on advanced (React, SETTINGS_PORT.md step 9a)', () => {

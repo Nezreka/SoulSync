@@ -1,6 +1,6 @@
 /**
- * Connections > Server Connections (SETTINGS_PORT.md, step 10c): the markup
- * it replaced, the toggles and the active server, Plex's setup and PIN link,
+ * Connections > Server Connections: the pick-one row and the active server
+ * (state in words, View Configuration, Test Server), Plex's setup and PIN link,
  * the library pickers and their endpoints, the playlist account, Music
  * Assistant's source, and testConnection.
  */
@@ -9,8 +9,7 @@ import { act, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createSettingsStore, type SettingsPayload, type SettingsStore } from '../settings-store';
-import { shape, vanilla } from './__fixtures__/shape';
-import { ServerConnections, testConnection } from './connections-servers';
+import { ServerConnections, serverState, testConnection, testResults } from './connections-servers';
 
 type Shell = Window & Record<string, unknown>;
 const shell = window as unknown as Shell;
@@ -79,10 +78,66 @@ function saved(): SettingsPayload {
 }
 const loaded = (settings: Record<string, unknown>) => act(() => store.hydrate(settings));
 
-describe('the section is the markup it replaced', () => {
-  it('before the settings load', () => {
-    const { container } = section();
-    expect(shape(container)).toEqual(shape(vanilla('connections-servers.vanilla.html')));
+describe('the pick-one row', () => {
+  it('before the settings load: five servers with their logos, Plex picked, nothing tested', () => {
+    testResults.reset();
+    section();
+    const row = document.querySelector('[role="radiogroup"][aria-label="Media server"]')!;
+    const servers = [...row.querySelectorAll<HTMLElement>('[role="radio"]')];
+    expect(servers.map((b) => b.id)).toEqual([
+      'plex-toggle',
+      'jellyfin-toggle',
+      'navidrome-toggle',
+      'music_assistant-toggle',
+      'soulsync-toggle',
+    ]);
+    expect(servers.map((b) => b.textContent)).toEqual([
+      'Plex',
+      'Jellyfin',
+      'Navidrome',
+      'Music Assistant',
+      'Standalone',
+    ]);
+    expect(servers.every((b) => b.querySelector('img'))).toBe(true);
+    expect(el('plex-toggle').getAttribute('aria-checked')).toBe('true');
+    // its state is words: nothing is known yet
+    expect(document.querySelector('[data-card="Server Connections"]')!.textContent).toContain(
+      'Plex: Not tested yet',
+    );
+    // every panel is in the page (in the sheet's body, or a hidden home)
+    for (const id of ['plex-container', 'jellyfin-container', 'navidrome-container'])
+      expect(el(id)).not.toBeNull();
+  });
+
+  it('says what the server poll and the last Test said', () => {
+    const frame = { media_server: { connected: true, type: 'plex' } };
+    expect(serverState('plex', frame, undefined)).toEqual({ tone: 'ok', text: 'Connected' });
+    expect(serverState('jellyfin', frame, undefined).text).toBe('Not tested yet');
+    expect(
+      serverState('plex', { media_server: { connected: false, type: 'plex' } }, undefined),
+    ).toEqual({ tone: 'bad', text: 'Not connected' });
+    expect(serverState('plex', frame, { tone: 'bad', text: 'timed out', at: 1 }).text).toBe(
+      'timed out',
+    );
+    expect(serverState('soulsync', null, undefined).text).toBe('Standalone: no media server');
+  });
+
+  it('View Configuration opens the server being looked at; Test Server is in the card', async () => {
+    const onView = vi.fn();
+    render(<ServerConnections store={store} onView={onView} />);
+    loaded({ active_media_server: 'navidrome' });
+    const view = [...document.querySelectorAll('button')].find(
+      (b) => b.textContent === 'View Configuration',
+    )!;
+    fireEvent.click(view);
+    expect(onView).toHaveBeenCalledWith('navidrome');
+    const test = [...document.querySelectorAll('button')].find(
+      (b) => b.textContent === 'Test Server',
+    )!;
+    fireEvent.click(test);
+    await waitFor(() =>
+      expect(sent('/api/test-connection')[0]?.body).toEqual({ service: 'server' }),
+    );
   });
 });
 
@@ -103,7 +158,7 @@ describe('the servers', () => {
       active_media_server: 'jellyfin',
       jellyfin: { base_url: 'http://jf', api_timeout: 90 },
     });
-    expect(el('jellyfin-toggle').className).toBe('server-toggle-btn active');
+    expect(el('jellyfin-toggle').getAttribute('aria-checked')).toBe('true');
     expect(el('plex-container').className).toBe('server-config-container hidden');
     expect(el('jellyfin-container').className).toBe('server-config-container');
     expect(el('jellyfin-url').value).toBe('http://jf');
