@@ -132,8 +132,27 @@ def _store_snapshot(conn: Any, entity_type: str, entity_id: int, service: str,
          for position, (pid, name) in enumerate(credited)])
 
 
+def _credited_already(conn: Any, entity_type: str, entity_id: int, artist_id: int) -> bool:
+    """another artist row with this artist's name, spelling aside, is
+    already credited here: "The Chamber Orchestra Of London" from the source
+    beside the "Chamber Orchestra of London" the files named. a second credit
+    is the same orchestra twice in ARTIST (#2217)"""
+    from core.text.normalize import credit_name_key
+    junction, column = (("lib2_track_artists", "track_id") if entity_type == "track"
+                        else ("lib2_album_artists", "album_id"))
+    row = conn.execute("SELECT name FROM lib2_artists WHERE id=?", (int(artist_id),)).fetchone()
+    key = credit_name_key(row[0] if row else "")
+    if not key:
+        return False
+    return any(credit_name_key(name) == key for (name,) in conn.execute(
+        f"SELECT a.name FROM {junction} j JOIN lib2_artists a ON a.id = j.artist_id"
+        f" WHERE j.{column} = ? AND j.artist_id <> ?", (int(entity_id), int(artist_id))))
+
+
 def _insert_credit(conn: Any, entity_type: str, entity_id: int, artist_id: int,
                    position: int) -> int:
+    if _credited_already(conn, entity_type, entity_id, artist_id):
+        return 0
     if entity_type == "track":
         cur = conn.execute(
             "INSERT OR IGNORE INTO lib2_track_artists(track_id, artist_id, role, position)"

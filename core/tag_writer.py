@@ -1309,12 +1309,13 @@ def _artist_name_set(value) -> set:
     """the artists a tag names, spelling aside"""
     import re as _re
     from core.library2.importer import split_artist_credits
-    from core.text.normalize import normalize_for_comparison
+    from core.text.normalize import credit_name_key
     if isinstance(value, (list, tuple)):
         value = '; '.join(str(v) for v in value if v)
     # a <Vocal: Eliana> note is a credit role, never part of a name
     text = _re.sub(r'<[^<>]*>', '', str(value or ''))
-    return {n for n in (normalize_for_comparison(p) for p in split_artist_credits(text)) if n}
+    # a leading "The" and case are spelling too (#2217)
+    return {n for n in (credit_name_key(p) for p in split_artist_credits(text)) if n}
 
 
 def _same_artist_names(file_val, db_val) -> bool:
