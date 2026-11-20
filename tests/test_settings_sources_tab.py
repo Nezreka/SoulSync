@@ -755,9 +755,14 @@ def test_library_headers_report_what_is_set_not_what_is_inside(index, js):
     # from the same store its fields show (tabs/library/words.ts)
     words = _read("webui/src/features/settings/tabs/library/words.ts")
     assert words.count("export function ") >= 15
-    # (settings-bic) Downloads and Library have no folded headers any more:
-    # their pills show everything, and their state is the sentence at the top
-    assert len(slots) + len(react_slots) >= 3, f"only {len(slots) + len(react_slots)} headers report live values"
+    # (settings-bic phase 5) Discovery's three summaries were the last: its
+    # pills read themselves back the same way (tabs/discovery/words.ts), and
+    # Appearance has its own sentence (tabs/appearance/words.ts)
+    discovery = _read("webui/src/features/settings/tabs/discovery/words.ts")
+    for fn in ("recommendationsSentence", "playlistsSentence", "importListsSentence"):
+        assert f"export function {fn}(" in discovery, fn
+    assert "export function appearanceSentence(" in _read(
+        "webui/src/features/settings/tabs/appearance/words.ts")
     assert not set(slots) & set(react_slots), "a summary is on the page twice"
     parts = (tabs / "parts.tsx").read_text(encoding="utf-8")
     assert "data-stg-fallback={hint}" in parts, "a React header without a fallback could go blank"
