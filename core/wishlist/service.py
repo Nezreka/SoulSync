@@ -313,6 +313,9 @@ class WishlistService:
             "last_attempted": wishlist_track["last_attempted"],
             "source_type": wishlist_track["source_type"],
             "source_info": wishlist_track["source_info"],
+            # the album's MusicBrainz release group, matched in the background:
+            # lets Lidarr fetch the album by id instead of by name
+            "musicbrainz_release_group_id": wishlist_track.get("musicbrainz_release_group_id"),
             # Per-item quality-profile pointer, resolved once at
             # wishlist-insert time (see core/quality/migrate_to_profiles.py).
             # The download/import pipeline resolves the profile's actual

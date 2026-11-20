@@ -574,6 +574,9 @@ class LidarrDownloadClient(DownloadSourcePlugin):
 
         if not album_name or not artist_name:
             return None
+        in_library = self._library_album(album_name, artist_name)
+        if in_library:
+            return in_library
         for term in (f"{artist_name} {album_name}", album_name):
             best, best_score = None, 0.0
             for candidate in (self._api_get('album/lookup', params={'term': term}) or [])[:20]:
@@ -607,6 +610,23 @@ class LidarrDownloadClient(DownloadSourcePlugin):
         if (bare_wanted, bare_candidate) != (wanted, candidate):
             score = max(score, cls._name_score(bare_wanted, bare_candidate))
         return score
+
+    def _library_album(self, album_name: str, artist_name: str) -> Optional[Dict[str, Any]]:
+        """The album when Lidarr already has it, matched by artist and title.
+
+        Lidarr's metadata search ranks by text relevance, so a short or common
+        artist name ("PISS") buries the album under other artists' records;
+        Lidarr's own library has no such noise.
+        """
+        artists = [a for a in (self._api_get('artist') or [])
+                   if self._name_score(artist_name, a.get('artistName', '')) >= 0.8]
+        best, best_score = None, 0.0
+        for artist in artists:
+            for album in self._api_get('album', params={'artistId': artist.get('id')}) or []:
+                score = self._name_score(album_name, album.get('title', ''))
+                if score >= 0.8 and score > best_score:
+                    best, best_score = album, score
+        return best
 
     @classmethod
     def _name_score(cls, wanted: str, candidate: str) -> float:

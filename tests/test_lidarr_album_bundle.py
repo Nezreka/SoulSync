@@ -48,6 +48,7 @@ class FakeLidarr:
         self.posts = []
         self.deleted = []
         self.lock = threading.Lock()
+        self.library = []               # albums already in Lidarr, with artist ids
 
     def get(self, endpoint, params=None):
         params = params or {}
@@ -55,9 +56,13 @@ class FakeLidarr:
             return self.lookup.get(params['term'], [])
         if endpoint == 'artist':
             mbid = params.get('mbId')
+            if mbid is None:
+                return [dict(a['artist']) for a in self.library]
             if mbid in self.artists:
                 return [{'id': self.artists[mbid], 'foreignArtistId': mbid}]
             return []
+        if endpoint == 'album' and 'artistId' in params:
+            return [a for a in self.library if a['artist']['id'] == params['artistId']]
         if endpoint == 'album':
             rec = self.albums.get(params.get('foreignAlbumId'))
             return [rec] if rec else []
@@ -151,6 +156,29 @@ def test_find_album_by_release_group_id_first(client):
     fake = FakeLidarr({'lidarr:rg-piss': [PISS]})
     with patch.object(client, '_api_get', side_effect=fake.get):
         assert client._find_album('anything', 'anyone', 'rg-piss') is PISS
+
+
+def test_find_album_prefers_lidarrs_own_library(client):
+    # Lidarr's metadata search buries a short artist name under other
+    # artists' records; the album Lidarr already has is found by name.
+    in_library = dict(PISS, id=2412, artist=dict(PISS['artist'], id=7))
+    fake = FakeLidarr({'PISS you made me / skin on linen': [DEMOS, OTHER_ARTIST]})
+    fake.library = [in_library]
+    with patch.object(client, '_api_get', side_effect=fake.get):
+        assert client._find_album('you made me / skin on linen', 'PISS') is in_library
+        assert client._find_album('a fourth demo', 'PISS') is None
+
+
+def test_wishlist_tracks_carry_the_release_group_id():
+    from core.downloads.master import release_group_id_of
+    from core.wishlist.service import WishlistService
+    row = {'id': 91, 'spotify_track_id': 't1', 'failure_reason': None, 'retry_count': 0,
+           'date_added': None, 'last_attempted': None, 'source_type': 'album',
+           'source_info': {}, 'musicbrainz_release_group_id': 'rg-piss',
+           'spotify_data': {'name': 'toni', 'artists': [{'name': 'PISS'}],
+                            'album': {'name': 'you made me / skin on linen'}}}
+    track = WishlistService.format_track_for_download(row)
+    assert release_group_id_of([track]) == 'rg-piss'
 
 
 def test_find_album_keeps_non_latin_titles(client):
