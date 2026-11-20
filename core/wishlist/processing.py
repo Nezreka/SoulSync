@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
@@ -226,6 +227,9 @@ def _run_wishlist_cycle(
             'auto_initiated': True,
             'auto_processing_timestamp': runtime.current_time_fn(),
             'current_cycle': cycle,
+            # the cycle-start sweep stops at its time budget (#2221): the
+            # batch checks the tracks it did not reach before downloading
+            'check_owned_before_download': True,
         })
 
     # Reuse the caller-provided placeholder id for the FIRST batch created; every
@@ -1072,10 +1076,25 @@ def remove_tracks_already_in_library(
     logger=logger,
     skip_track_fn: Callable[[dict[str, Any]], bool] | None = None,
     log_prefix: str = "[Auto-Wishlist]",
+    incremental: bool = False,
+    time_budget_s: float | None = None,
+    max_rows: int | None = None,
+    recheck_after_s: float | None = None,
+    clock: Callable[[], float] = time.monotonic,
 ) -> int:
-    """Remove wishlist entries that are already present in the library."""
+    """Remove wishlist entries that are already present in the library.
+
+    Every row it checks and keeps is stamped ``owned_checked_at`` (#2221).
+    ``incremental`` checks only rows never checked or last checked more than
+    ``recheck_after_s`` ago, never-checked first, then oldest. ``max_rows`` and
+    ``time_budget_s`` stop it early; what it did not reach is next cycle's,
+    and a wishlist batch checks its own unchecked tracks before downloading
+    them (``check_batch_tracks_owned``), so stopping early never sends an
+    owned track to download. Without them it checks every row, as before.
+    """
     from core.library import manual_library_match as _mlm
 
+    started = clock()
     all_profiles = profiles_database.get_all_profiles()
     # Carry (profile_id, track) so the match check can be profile-scoped.
     cleanup_tracks: list[tuple[int, dict]] = []
@@ -1083,6 +1102,12 @@ def remove_tracks_already_in_library(
         pid = profile["id"]
         for t in _rows_for_sweep(wishlist_service, pid):
             cleanup_tracks.append((pid, t))
+    total_rows = len(cleanup_tracks)
+
+    if incremental:
+        cleanup_tracks = _rows_due_for_owned_check(
+            music_database, cleanup_tracks,
+            recheck_after_s if recheck_after_s is not None else owned_sweep_limits()[2])
 
     from core.library_scope import library_scope_for_profile, reset_library_scope, set_library_scope
 
@@ -1091,25 +1116,214 @@ def remove_tracks_already_in_library(
     # every upgrade out again before it was tried, so none ever happened.
     upgrade_wishes = _live_upgrade_wishes(music_database, cleanup_tracks, logger)
 
+    # one read of each profile's manual matches for the whole sweep, instead
+    # of up to ~45 lookups per row that nearly always find nothing (#2221)
+    match_indexes: dict = {}
+
     cleanup_removed = 0
+    checked = 0
+    kept_ids: list = []
+    stopped_early = False
     for profile_id, track in cleanup_tracks:
+        if max_rows is not None and checked >= max_rows:
+            stopped_early = True
+            break
+        if time_budget_s is not None and clock() - started >= time_budget_s:
+            stopped_early = True
+            break
         if skip_track_fn and skip_track_fn(track):
             continue
         if id(track) in upgrade_wishes:
             continue
+        if profile_id not in match_indexes:
+            match_indexes[profile_id] = _mlm.ManualMatchIndex.load(music_database, profile_id)
         # this runs as a background job, so "already in the library" has to be
         # asked through the wishlist owner's library, not the job's (#1199): an
         # own-library profile's wishlist entry is not cleared by the admin
         # owning the track
         _scope_token = set_library_scope(library_scope_for_profile(profile_id))
         try:
-            removed_here = _cleanup_one(
+            outcome = _check_one_owned(
                 wishlist_service, music_database, _mlm, profile_id, track, active_server,
-                logger=logger, log_prefix=log_prefix)
+                logger=logger, log_prefix=log_prefix, match_index=match_indexes[profile_id])
         finally:
             reset_library_scope(_scope_token)
-        cleanup_removed += removed_here
+        checked += 1
+        if outcome == 'removed':
+            cleanup_removed += 1
+        elif outcome == 'kept' and track.get('wishlist_id') is not None:
+            kept_ids.append(track['wishlist_id'])
+
+    _stamp_owned_checked(music_database, kept_ids, logger)
+    if incremental or stopped_early:
+        left = len(cleanup_tracks) - checked
+        logger.info(
+            f"{log_prefix} Library sweep checked {checked} of {total_rows} wishlist row(s) "
+            f"in {clock() - started:.1f}s"
+            + (f", {left} left for later cycles (each batch checks its own tracks before downloading)"
+               if stopped_early and left > 0 else ""))
     return cleanup_removed
+
+
+_DEFAULT_OWNED_SWEEP_SECONDS = 60.0
+_DEFAULT_OWNED_SWEEP_MAX_ROWS = 5000
+_DEFAULT_OWNED_RECHECK_HOURS = 24.0
+
+
+def owned_sweep_limits() -> tuple[float, int, float]:
+    """``(time budget s, max rows, recheck after s)`` for the cycle-start
+    library sweep (#2221). config: ``wishlist.owned_sweep_seconds``,
+    ``wishlist.owned_sweep_max_rows``, ``wishlist.owned_recheck_hours``."""
+    def _num(key, default, cast):
+        try:
+            from core.settings import config_manager
+            value = cast(config_manager.get(key, default))
+            return value if value > 0 else default
+        except Exception:  # noqa: BLE001 - garbage config falls back to the default
+            return default
+    return (_num('wishlist.owned_sweep_seconds', _DEFAULT_OWNED_SWEEP_SECONDS, float),
+            _num('wishlist.owned_sweep_max_rows', _DEFAULT_OWNED_SWEEP_MAX_ROWS, int),
+            _num('wishlist.owned_recheck_hours', _DEFAULT_OWNED_RECHECK_HOURS, float) * 3600.0)
+
+
+def _owned_check_cutoff(recheck_after_s: float) -> str:
+    """the naive-utc CURRENT_TIMESTAMP text a stamp has to be newer than to
+    count as fresh"""
+    from datetime import timedelta, timezone
+    return (datetime.now(timezone.utc).replace(tzinfo=None)
+            - timedelta(seconds=recheck_after_s)).strftime('%Y-%m-%d %H:%M:%S')
+
+
+def _owned_stamps(music_database, profile_ids=None, row_ids=None) -> dict:
+    reader = getattr(music_database, 'get_wishlist_owned_checked', None)
+    if not callable(reader):
+        return {}
+    stamps: dict = {}
+    try:
+        if row_ids is not None:
+            got = reader(row_ids=row_ids)
+            if isinstance(got, dict):
+                stamps.update(got)
+        for pid in profile_ids or ():
+            got = reader(profile_id=pid)
+            if isinstance(got, dict):
+                stamps.update(got)
+    except Exception as exc:  # noqa: BLE001 - no stamps reads as "never checked"
+        module_logger.debug("owned_checked_at read failed: %s", exc)
+        return {}
+    return stamps
+
+
+def _rows_due_for_owned_check(music_database, cleanup_tracks, recheck_after_s):
+    """the rows an incremental sweep looks at: never checked first, then the
+    ones checked longest ago; a row checked within ``recheck_after_s`` is left
+    out. one read of the stamps per profile."""
+    stamps = _owned_stamps(music_database, profile_ids=sorted({pid for pid, _t in cleanup_tracks}))
+    cutoff = _owned_check_cutoff(recheck_after_s)
+    due = []
+    for order, (pid, track) in enumerate(cleanup_tracks):
+        stamp = stamps.get(track.get('wishlist_id'))
+        if stamp and str(stamp) >= cutoff:
+            continue
+        due.append((stamp is not None, str(stamp or ''), order, pid, track))
+    due.sort(key=lambda d: d[:3])
+    return [(pid, track) for _seen, _stamp, _order, pid, track in due]
+
+
+def _stamp_owned_checked(music_database, row_ids, logger) -> None:
+    stamp = getattr(music_database, 'stamp_wishlist_owned_checked', None)
+    if not row_ids or not callable(stamp):
+        return
+    try:
+        stamp(row_ids)
+    except Exception as exc:  # noqa: BLE001 - an unstamped row is only checked again
+        logger.debug("owned_checked_at stamp failed: %s", exc)
+
+
+class BatchOwnedChecker:
+    """The owned check for a wishlist batch's own tracks, just before they
+    download (#2221). The cycle-start sweep stops at its time budget, and a
+    wishlist batch is force_download_all (it skips the master's own library
+    check), so a track the sweep did not reach is checked here. A track whose
+    row was checked within ``recheck_after_s`` is not checked again; an
+    upgrade wish (#2060) is never checked (owning it is the premise).
+
+    Stamps and manual matches are read once for the batch; ``check`` is the
+    per-track step, ``finish`` stamps the rows it kept.
+    """
+
+    def __init__(self, music_database, profile_id: int, tracks: list, active_server: str, *,
+                 recheck_after_s: float | None = None, logger=logger,
+                 log_prefix: str = "[Wishlist Batch]"):
+        from core.library import manual_library_match as _mlm
+        self._mlm = _mlm
+        self.db = music_database
+        self.profile_id = profile_id
+        self.active_server = active_server
+        self.logger = logger
+        self.log_prefix = log_prefix
+        if recheck_after_s is None:
+            recheck_after_s = owned_sweep_limits()[2]
+        row_ids = [t.get('wishlist_id') for t in (tracks or [])
+                   if isinstance(t, dict) and t.get('wishlist_id') is not None]
+        self._stamps = _owned_stamps(music_database, row_ids=row_ids) if row_ids else {}
+        self._cutoff = _owned_check_cutoff(recheck_after_s)
+        self._service = get_wishlist_service()
+        self._index = _mlm.ManualMatchIndex.load(music_database, profile_id)
+        self._kept: list = []
+        self.checked = 0
+        self.owned = 0
+
+    def check(self, track) -> tuple[bool, Any]:
+        """``(owned, library track or None)``. owned tracks lose their
+        wishlist row like the sweep removes it."""
+        from core.library2.upgrade_attempts import is_upgrade_wish
+        from core.library_scope import library_scope_for_profile, reset_library_scope, set_library_scope
+        if not isinstance(track, dict):
+            return False, None
+        stamp = self._stamps.get(track.get('wishlist_id'))
+        if stamp and str(stamp) >= self._cutoff:
+            return False, None
+        if is_upgrade_wish(track.get('source_info')):
+            return False, None
+        self.checked += 1
+        found: list = []
+        token = set_library_scope(library_scope_for_profile(self.profile_id))
+        try:
+            outcome = _check_one_owned(
+                self._service, self.db, self._mlm, self.profile_id, track, self.active_server,
+                logger=self.logger, log_prefix=self.log_prefix, match_index=self._index, found=found)
+        finally:
+            reset_library_scope(token)
+        if outcome in ('removed', 'owned'):
+            self.owned += 1
+            return True, (found[0] if found else None)
+        if outcome == 'kept' and track.get('wishlist_id') is not None:
+            self._kept.append(track['wishlist_id'])
+        return False, None
+
+    def finish(self) -> None:
+        _stamp_owned_checked(self.db, self._kept, self.logger)
+        self._kept = []
+        if self.checked:
+            self.logger.info(f"{self.log_prefix} Checked {self.checked} track(s) against the library "
+                             f"before download, {self.owned} already owned")
+
+
+def check_batch_tracks_owned(music_database, profile_id: int, tracks: list, active_server: str,
+                             **kwargs) -> dict:
+    """``{id(track): library track}`` for the tracks of ``tracks`` the library
+    already owns, via :class:`BatchOwnedChecker`."""
+    checker = BatchOwnedChecker(music_database, profile_id, tracks, active_server, **kwargs)
+    owned: dict = {}
+    try:
+        for track in tracks or []:
+            is_owned, db_track = checker.check(track)
+            if is_owned:
+                owned[id(track)] = db_track
+    finally:
+        checker.finish()
+    return owned
 
 
 def _live_upgrade_wishes(music_database, cleanup_tracks, logger) -> set:
@@ -1149,24 +1363,29 @@ def _live_upgrade_wishes(music_database, cleanup_tracks, logger) -> set:
         return set()
 
 
-def _cleanup_one(wishlist_service, music_database, _mlm, profile_id, track, active_server, *, logger, log_prefix) -> int:
-    """one wishlist entry: 1 when it was removed as already owned, else 0.
-    the loop body of remove_tracks_already_in_library, lifted so it runs
-    inside that profile's library scope."""
-    cleanup_removed = 0
-    if True:
+def _check_one_owned(wishlist_service, music_database, _mlm, profile_id, track, active_server, *,
+                     logger, log_prefix, match_index=None, found: list | None = None) -> str:
+    """one wishlist entry against the library, inside that profile's library
+    scope (the caller sets it). ``'removed'`` when owned and its row removed,
+    ``'owned'`` when owned but the row was not removed, ``'kept'`` when not
+    owned (or not checkable: no title, artist or id), ``'error'`` when the
+    check itself failed. ``match_index`` answers the manual-match lookups
+    from memory (#2221); ``found`` gets the owned library track appended."""
+    track_name = track.get('name', '')
+    artists = track.get('artists', [])
+    spotify_track_id = track.get('spotify_track_id') or track.get('id')
+    track_album = track.get('album', {}).get('name') if isinstance(track.get('album'), dict) else track.get('album')
 
-        track_name = track.get('name', '')
-        artists = track.get('artists', [])
-        spotify_track_id = track.get('spotify_track_id') or track.get('id')
-        track_album = track.get('album', {}).get('name') if isinstance(track.get('album'), dict) else track.get('album')
+    if not track_name or not artists or not spotify_track_id:
+        return 'kept'
 
-        if not track_name or not artists or not spotify_track_id:
-            return 0
-
+    try:
         # Manual match check — skip fuzzy search if user already linked this track.
-        manual_match = _mlm.get_match_for_track(music_database, profile_id, track, default_source='wishlist')
+        manual_match = _mlm.get_match_for_track(match_index or music_database, profile_id, track,
+                                                default_source='wishlist')
         if manual_match and _mlm.match_is_live(music_database, manual_match):
+            if found is not None:
+                found.append(None)
             try:
                 from core.wishlist.removal_guard import REASON_MANUAL_MATCH
                 removed = wishlist_service.mark_track_download_result(
@@ -1174,11 +1393,11 @@ def _cleanup_one(wishlist_service, music_database, _mlm, profile_id, track, acti
                     profile_ids=[profile_id],
                     audit={'reason': REASON_MANUAL_MATCH})
                 if removed:
-                    cleanup_removed += 1
                     logger.info(f"{log_prefix} [Manual Match] Skipped already-matched track: '{track_name}'")
+                    return 'removed'
             except Exception as _mlm_err:
                 logger.error(f"{log_prefix} [Manual Match] Error removing track: {_mlm_err}")
-            return cleanup_removed
+            return 'owned'
 
         from core.wishlist.library_match import find_owned_match, wishlist_row_requires_album
         from core.wishlist.removal_guard import REASON_ALREADY_OWNED
@@ -1187,22 +1406,27 @@ def _cleanup_one(wishlist_service, music_database, _mlm, profile_id, track, acti
             music_database, track_name, artists, track_album, active_server,
             strict_identity=True, require_album=wishlist_row_requires_album(track),
             log=logger, log_prefix=log_prefix)
+    except Exception as check_error:  # noqa: BLE001 - one row must not stop the sweep
+        logger.warning(f"{log_prefix} Library check failed for '{track_name}': {check_error}")
+        return 'error'
 
-        if match:
-            db_track, confidence, matched_artist_name = match
-            try:
-                removed = wishlist_service.mark_track_download_result(
-                    spotify_track_id, success=True, profile_id=profile_id,
-                    profile_ids=[profile_id],
-                    audit={'reason': REASON_ALREADY_OWNED,
-                           'final_path': getattr(db_track, 'file_path', '') or ''})
-                if removed:
-                    cleanup_removed += 1
-                    logger.info(f"{log_prefix} Removed already-owned track: '{track_name}' by {matched_artist_name}")
-            except Exception as remove_error:
-                logger.error(f"{log_prefix} Error removing track from wishlist: {remove_error}")
-
-    return cleanup_removed
+    if not match:
+        return 'kept'
+    db_track, confidence, matched_artist_name = match
+    if found is not None:
+        found.append(db_track)
+    try:
+        removed = wishlist_service.mark_track_download_result(
+            spotify_track_id, success=True, profile_id=profile_id,
+            profile_ids=[profile_id],
+            audit={'reason': REASON_ALREADY_OWNED,
+                   'final_path': getattr(db_track, 'file_path', '') or ''})
+        if removed:
+            logger.info(f"{log_prefix} Removed already-owned track: '{track_name}' by {matched_artist_name}")
+            return 'removed'
+    except Exception as remove_error:
+        logger.error(f"{log_prefix} Error removing track from wishlist: {remove_error}")
+    return 'owned'
 
 
 @dataclass
@@ -1665,14 +1889,19 @@ def process_wishlist_automatically(
                 # Cycle-start library sweep (H9): drop wishlist rows for tracks
                 # the library already owns BEFORE the batch is built. Every
                 # wishlist batch sets force_download_all=True, so the master
-                # worker skips its per-track ownership check — without this
-                # sweep an owned track (hand-imported, row survived a
-                # completion-hook miss) re-downloads every cycle. Measured
-                # ~40ms/track on the indexed exact-norm path (the old
-                # "~1s/track" claim predates it), so this is a cheap pre-pass.
-                # A sweep failure must not abort the cycle — it degrades to
-                # the old behavior and the standalone cleanup endpoint.
+                # worker skips its general ownership check; without this an
+                # owned track (hand-imported, row survived a completion-hook
+                # miss) re-downloads every cycle.
+                # #2221: it used to check EVERY row, every cycle, before any
+                # batch: hours on a 13.5k wishlist against a 1.13M track
+                # library, so nothing downloaded and the processing flag sat
+                # set. now it checks rows never checked (or not for a day)
+                # first, inside a time budget, and stamps them; each batch
+                # checks whatever of its own tracks the sweep did not reach
+                # before it downloads them (check_owned_before_download).
+                # A sweep failure must not abort the cycle.
                 try:
+                    _budget_s, _max_rows, _recheck_s = owned_sweep_limits()
                     _owned_removed = remove_tracks_already_in_library(
                         wishlist_service,
                         database,
@@ -1680,6 +1909,10 @@ def process_wishlist_automatically(
                         runtime.get_active_server(),
                         logger=logger,
                         log_prefix="[Auto-Wishlist]",
+                        incremental=True,
+                        time_budget_s=_budget_s,
+                        max_rows=_max_rows,
+                        recheck_after_s=_recheck_s,
                     )
                     if _owned_removed:
                         logger.warning(
