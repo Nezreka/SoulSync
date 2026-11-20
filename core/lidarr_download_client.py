@@ -46,7 +46,8 @@ class LidarrDownloadClient(DownloadSourcePlugin):
 
     def __init__(self, download_path: str = None):
         if download_path is None:
-            download_path = config_manager.get('soulseek.download_path', './downloads')
+            download_path = (config_manager.get('lidarr_download.download_path', '')
+                             or config_manager.get('soulseek.download_path', './downloads'))
         self.download_path = Path(download_path)
         try:
             self.download_path.mkdir(parents=True, exist_ok=True)
@@ -71,10 +72,6 @@ class LidarrDownloadClient(DownloadSourcePlugin):
         self._root_folder = config_manager.get('lidarr_download.root_folder', '') or ''
         self._quality_profile = config_manager.get('lidarr_download.quality_profile', 'Any') or 'Any'
         self._cleanup = config_manager.get('lidarr_download.cleanup_after_import', True)
-        # Whole albums only: Lidarr serves album downloads (the album-bundle
-        # flow) and answers no per-track search, so single tracks go to the
-        # next source in hybrid mode.
-        self._albums_only = bool(config_manager.get('lidarr_download.albums_only', False))
         try:
             self._download_timeout = int(config_manager.get('lidarr_download.download_timeout', 21600) or 21600)
         except (TypeError, ValueError):
@@ -119,9 +116,6 @@ class LidarrDownloadClient(DownloadSourcePlugin):
         plus AlbumResult objects for album-level matching.
         """
         if not self.is_configured():
-            return ([], [])
-        if self._albums_only:
-            # Whole albums only: per-track searches are left to other sources.
             return ([], [])
 
         try:

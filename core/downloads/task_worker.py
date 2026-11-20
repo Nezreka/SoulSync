@@ -873,6 +873,7 @@ def _download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWork
                 _exclude_for_hybrid_album = None
                 try:
                     _batch_is_album = False
+                    _b = None
                     if batch_id:
                         from core.runtime_state import download_batches as _db
                         _b = _db.get(batch_id)
@@ -880,6 +881,11 @@ def _download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWork
                             _batch_is_album = bool(_b.get('is_album_download'))
                     if _batch_is_album and getattr(deps.download_orchestrator, 'mode', '') == 'hybrid':
                         _exclude_for_hybrid_album = ['torrent', 'usenet', 'lidarr']
+                    # "Whole album via Lidarr" off: the track goes to the next source
+                    from core.downloads.album_bundle_dispatch import lidarr_whole_album
+                    from core.settings import config_manager as _cfg
+                    if not lidarr_whole_album(_b, _cfg.get):
+                        _exclude_for_hybrid_album = sorted(set(_exclude_for_hybrid_album or []) | {'lidarr'})
                 except Exception as _exc_filter_err:
                     logger.debug("[Modal Worker] album-source-exclusion check failed: %s", _exc_filter_err)
                 # Fold in budget-exhausted sources (per-source quarantine retry).

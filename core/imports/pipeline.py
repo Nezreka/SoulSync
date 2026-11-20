@@ -914,8 +914,10 @@ def _maybe_stage_album_track(context, final_path):
                 else:
                     # an own-library profile's batch stages under its folder (#1199)
                     from core.audiobook_routing import routed_root_for_context
-                    from core.imports.paths import import_owner_id, library_root_for_profile
+                    from core.imports.paths import (
+                        import_owner_id, library_root_for_profile, lidarr_root_for_context)
                     transfer_dir = (routed_root_for_context(context)
+                                    or lidarr_root_for_context(context)
                                     or library_root_for_profile(import_owner_id(batch))
                                     or docker_resolve_path(
                                         config_manager.get('soulseek.transfer_path', './Transfer')))

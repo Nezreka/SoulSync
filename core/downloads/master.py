@@ -1159,6 +1159,8 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
             batch_artist_context = batch.get('artist_context')
             batch_is_album = batch.get('is_album_download', False)
             batch_private_album_bundle = bool(batch.get('album_bundle_private_staging'))
+            batch_lidarr_whole_album = _album_bundle_dispatch.lidarr_whole_album(
+                batch, deps.config_manager.get)
             batch_playlist_folder_mode = batch.get('playlist_folder_mode', False)
             batch_playlist_name = batch.get('playlist_name', 'Unknown Playlist')
 
@@ -1168,6 +1170,9 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
         # owned album would still trigger a release download.
         _bundle_state = _BatchStateAccessImpl()
         _album_bundle_sources = _resolve_album_bundle_sources(deps.config_manager)
+        if not batch_lidarr_whole_album:
+            # "Whole album via Lidarr" off: the next source gets the album
+            _album_bundle_sources = [s for s in _album_bundle_sources if s != 'lidarr']
         _album_bundle_staged = batch_private_album_bundle
 
         def _configured_bundle_plugin(source):

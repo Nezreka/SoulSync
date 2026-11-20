@@ -236,13 +236,6 @@ def test_per_track_search_looks_up_the_hinted_album(client):
     assert [t.album for t in tracks] == ['you made me / skin on linen', 'three demos']
 
 
-def test_albums_only_skips_per_track_search(client):
-    import asyncio
-    client._albums_only = True
-    with patch.object(client, '_search_sync', side_effect=AssertionError('searched')):
-        assert asyncio.run(client.search('PISS skin on linen')) == ([], [])
-
-
 def test_album_bundle_uses_the_release_group_id(client, tmp_path):
     """Text lookups for PISS return other bands' albums; the wishlist's
     MusicBrainz release group finds the right one."""
@@ -262,3 +255,44 @@ def test_release_group_id_of_requires_agreement():
     assert release_group_id_of([{'musicbrainz_release_group_id': 'a'},
                                 {'musicbrainz_release_group_id': 'b'}]) is None
     assert release_group_id_of([{}]) is None
+
+
+# ---------------------------------------------------------------------------
+# "Whole album via Lidarr" and where Lidarr-sourced tracks land
+# ---------------------------------------------------------------------------
+
+
+def _cfg(values):
+    return lambda key, default=None: values.get(key, default)
+
+
+def test_whole_album_choice_only_matters_in_hybrid():
+    from core.downloads.album_bundle_dispatch import lidarr_whole_album
+    assert lidarr_whole_album({'lidarr_whole_album': False}, _cfg({'download_source.mode': 'lidarr'}))
+    hybrid = {'download_source.mode': 'hybrid'}
+    assert not lidarr_whole_album({'lidarr_whole_album': False}, _cfg(hybrid))
+    assert lidarr_whole_album({'lidarr_whole_album': True}, _cfg(hybrid))
+
+
+def test_whole_album_default_applies_without_a_choice():
+    from core.downloads.album_bundle_dispatch import lidarr_whole_album
+    cfg = {'download_source.mode': 'hybrid'}
+    assert lidarr_whole_album({}, _cfg(cfg))  # default on
+    cfg['lidarr_download.whole_album_default'] = False
+    assert not lidarr_whole_album({}, _cfg(cfg))
+    assert not lidarr_whole_album({'lidarr_whole_album': None}, _cfg(cfg))
+    assert lidarr_whole_album({'lidarr_whole_album': True}, _cfg(cfg))
+
+
+def test_lidarr_tracks_land_in_the_lidarr_folder(tmp_path):
+    from core.imports import paths
+    values = {'lidarr_download.transfer_path': str(tmp_path / 'lidarr-imports'),
+              'soulseek.transfer_path': str(tmp_path / 'library')}
+    fake = type('C', (), {'get': staticmethod(_cfg(values))})
+    with patch.object(paths, '_get_config_manager', return_value=fake):
+        lidarr_ctx = {'original_search_result': {'username': 'lidarr'}}
+        peer_ctx = {'original_search_result': {'username': 'some-soulseek-peer'}}
+        assert paths.lidarr_root_for_context(lidarr_ctx) == str(tmp_path / 'lidarr-imports')
+        assert paths.lidarr_root_for_context(peer_ctx) is None
+        values['lidarr_download.transfer_path'] = ''
+        assert paths.lidarr_root_for_context(lidarr_ctx) is None

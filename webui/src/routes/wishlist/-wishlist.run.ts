@@ -15,14 +15,19 @@ export interface StartResult {
   alreadyRunning: boolean;
 }
 
-export async function startWishlistDownload(scope: WishlistRunScope): Promise<StartResult> {
+export async function startWishlistDownload(
+  scope: WishlistRunScope,
+  lidarrWholeAlbum?: boolean,
+): Promise<StartResult> {
+  // no category and no track ids = every wanted track. the manual run always
+  // downloads even if the library check thinks a track is owned, so there is
+  // no force option to send. lidarrWholeAlbum undefined = the server's default.
+  const body: Record<string, unknown> = scope === 'all' ? {} : { category: scope };
+  if (lidarrWholeAlbum !== undefined) body.lidarr_whole_album = lidarrWholeAlbum;
   const response = await fetch('/api/wishlist/download_missing', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    // no category and no track ids = every wanted track. the manual run always
-    // downloads even if the library check thinks a track is owned, so there is
-    // no force option to send.
-    body: JSON.stringify(scope === 'all' ? {} : { category: scope }),
+    body: JSON.stringify(body),
   });
   if (response.status === 409) return { batchId: null, alreadyRunning: true };
   const data = (await response.json().catch(() => ({}))) as {

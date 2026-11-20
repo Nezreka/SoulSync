@@ -300,16 +300,19 @@ export function LidarrPanel({ store }: { store: SettingsStore }) {
         <label className="checkbox-label">
           <input
             type="checkbox"
-            id="lidarr-albums-only"
-            checked={settings.lidarr_download?.albums_only === true}
-            onChange={(event) => store.set('lidarr_download', 'albums_only', event.target.checked)}
+            id="lidarr-whole-album-default"
+            checked={settings.lidarr_download?.whole_album_default !== false}
+            onChange={(event) =>
+              store.set('lidarr_download', 'whole_album_default', event.target.checked)
+            }
           />
-          Whole albums only
+          "Whole album via Lidarr" on by default
         </label>
         <div className="setting-help-text">
-          Lidarr downloads only full-album requests. Single tracks and playlists go to the next
-          source in hybrid mode (e.g. Soulseek). Off: Lidarr also tries single tracks, grabbing the
-          whole album to keep one track.
+          The download dialogs and the wishlist have a "Whole album via Lidarr" toggle (hybrid mode
+          with Lidarr and another source). On, Lidarr downloads the whole album; off, the next
+          source (e.g. Soulseek) gets the tracks. This sets where the toggle starts, and what
+          automatic wishlist runs do.
         </div>
       </div>
       <TestRow

@@ -77,6 +77,22 @@ _MIRRORED_KEYS = ('progress', 'release', 'speed', 'downloaded',
 _ALBUM_BUNDLE_SOURCES = frozenset(('torrent', 'usenet', 'soulseek', 'lidarr'))
 
 
+def lidarr_whole_album(batch: Optional[dict], config_get: Callable[..., Any]) -> bool:
+    """Whether this batch may use Lidarr ("Whole album via Lidarr").
+
+    The download dialogs send the user's choice, stored on the batch as
+    ``lidarr_whole_album``; batches without one (wishlist runs, older
+    clients) use ``lidarr_download.whole_album_default``. Only hybrid mode
+    has another source to send a batch to, so outside it this is always True.
+    """
+    if (config_get('download_source.mode', 'soulseek') or '').lower() != 'hybrid':
+        return True
+    choice = batch.get('lidarr_whole_album') if isinstance(batch, dict) else None
+    if choice is None:
+        choice = config_get('lidarr_download.whole_album_default', True)
+    return bool(choice)
+
+
 def album_bundle_sources(config_get: Callable[..., Any]) -> frozenset:
     """The sources that may run the album-bundle flow right now."""
     if config_get('download_source.youtube_album_bundle', False):
