@@ -346,3 +346,44 @@ def test_the_repair_leaves_a_locked_album_and_disagreeing_files(imported_conn):
     stats = rehome_track_lead_releases(imported_conn, read_album_artist=lambda p: "")
 
     assert stats["albums_moved"] == stats["albums_merged"] == 0
+
+
+def test_the_repair_leaves_an_album_whose_artist_is_no_performer_there(imported_conn):
+    """the old filing put the release under one of its performers. an album
+    under an artist credited on none of its tracks was put there on purpose
+    (a reassign the files don't know about yet)"""
+    from core.library2.release_artist_repair import rehome_track_lead_releases
+    owner = _artist(imported_conn, "Chosen Owner")
+    singer = _artist(imported_conn, "Some Singer")
+    album = _album(imported_conn, owner, "Moved By Hand")
+    _track(imported_conn, album, "Song", [(singer, "primary")], album_artist_tag="Old Owner")
+    imported_conn.commit()
+
+    stats = rehome_track_lead_releases(imported_conn, read_album_artist=lambda p: "")
+
+    assert stats["albums_moved"] == stats["albums_merged"] == 0
+
+
+def test_the_start_runs_the_repair_once_after_the_import(legacy_db, imported_conn, monkeypatch):
+    from core.library2 import bootstrap
+    from core.library2.bootstrap import _rehome_track_lead_releases_once
+    host = _artist(imported_conn, "16BL")
+    rampa = _artist(imported_conn, "Rampa")
+    split = _album(imported_conn, rampa, "Anjunadeep Open Air Prague")
+    _track(imported_conn, split, "Tell Me Are We", [(rampa, "primary")], album_artist_tag="16BL")
+    imported_conn.commit()
+    # not before the upgrade import is done: it would spend its once on nothing
+    monkeypatch.setattr(bootstrap, "get_state", lambda db: {"status": "running"})
+    assert _rehome_track_lead_releases_once(legacy_db, imported_conn) == {}
+    monkeypatch.setattr(bootstrap, "get_state", lambda db: {"status": "done"})
+
+    assert _rehome_track_lead_releases_once(legacy_db, imported_conn)["albums_moved"] == 1
+    assert imported_conn.execute("SELECT primary_artist_id FROM lib2_albums WHERE id=?",
+                                 (split,)).fetchone()[0] == host
+    # once: a later start doesn't read every file again
+    later = _album(imported_conn, rampa, "Another Mix")
+    _track(imported_conn, later, "Cut", [(rampa, "primary")], album_artist_tag="16BL")
+    imported_conn.commit()
+    assert _rehome_track_lead_releases_once(legacy_db, imported_conn) == {}
+    assert imported_conn.execute("SELECT primary_artist_id FROM lib2_albums WHERE id=?",
+                                 (later,)).fetchone()[0] == rampa
