@@ -187,6 +187,24 @@ class TestCacheUnderAnotherProviderId:
         assert found is None
 
 
+    def test_a_poisoned_pairing_under_the_same_name_is_still_revalidated(self, tmp_path, match):
+        """a row keyed by this title + artist, pointing at another artist's
+        same-titled song (the #1721 poison shape), is not honored just
+        because the title and artist key agree."""
+        db = _vandi_db(tmp_path, server='navidrome')
+        with db._get_connection() as conn:
+            conn.execute("UPDATE lib2_tracks SET title = 'Anaveis Foties' "
+                         "WHERE title = 'Shake It (Eurovision Version)'")
+            conn.commit()
+        from core.matching_engine import MusicMatchingEngine
+        me = MusicMatchingEngine()
+        db.save_sync_match_cache('dz-poison', me.clean_title('Anaveis Foties'),
+                                 me.clean_artist('Despina Vandi'), 'navidrome', '26054',
+                                 'Anaveis Foties', 0.9)
+        found, _ = match(db, _itunes_track(source_track_id=None))
+        assert found is not None and str(found.id) == '25054'
+
+
 @pytest.mark.parametrize('match', MATCHERS)
 class TestIsrc:
     def test_isrc_finds_the_track_when_no_name_bridges(self, tmp_path, match):
