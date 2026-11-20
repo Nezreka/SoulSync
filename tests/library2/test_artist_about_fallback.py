@@ -456,6 +456,12 @@ def _add_track(db, title, enrichment=None, mbid=None):
 
 
 class TestTrackPopularity:
+    @pytest.fixture(autouse=True)
+    def _listenbrainz_connected(self, monkeypatch):
+        """the top recordings need a listenbrainz token"""
+        from core import listenbrainz_auth
+        monkeypatch.setattr(listenbrainz_auth, "_candidates", lambda: ["lb-token"])
+
     def _fetcher(self, recordings=TOP_RECORDINGS):
         return fb.ArtistAboutFallback(
             mb_client=_MB(MB_ARTIST), audiodb_client=_AudioDB(), deezer_client=_Deezer(),
@@ -521,3 +527,82 @@ class TestTrackPopularity:
             tracks = Q.get_album(conn, 1)["tracks"]
         flamed = [(t["title"], t["popular_source"]) for t in tracks if t.get("popular")]
         assert flamed == [("Song 0", "listenbrainz")]
+
+
+class TestTrackPopularityWithoutAToken:
+    """listenbrainz answers 401 for top recordings without a token (nov 2026)."""
+
+    def _fetcher(self, http):
+        return fb.ArtistAboutFallback(mb_client=_MB(MB_ARTIST), audiodb_client=_AudioDB(),
+                                      deezer_client=_Deezer(), http=http)
+
+    def test_no_token_asks_nothing_and_stamps_nothing(self, db):
+        _set_enrichment(db, {"lastfm": FULL_LASTFM})
+        http = _http(**{fb.LISTENBRAINZ_TOP_RECORDINGS: TOP_RECORDINGS})
+        fb.fill_artist(db._get_connection, 1, self._fetcher(http))
+        assert not [u for u in http.calls if u.startswith(fb.LISTENBRAINZ_TOP_RECORDINGS)]
+        assert fb.TRACKS_CHECK_KEY not in _enrichment(db)
+        # due only for its tracks: the sweep doesn't loop on it
+        with closing(db._get_connection()) as conn:
+            assert fb.next_due_artist(conn, 0) == (None, None)
+
+    def test_connecting_listenbrainz_makes_the_tracks_due_again(self, db, monkeypatch):
+        _set_enrichment(db, {"lastfm": FULL_LASTFM})
+        fb.fill_artist(db._get_connection, 1, self._fetcher(_http()))
+        from core import listenbrainz_auth
+        monkeypatch.setattr(listenbrainz_auth, "_candidates", lambda: ["lb-token"])
+        listenbrainz_auth.reset()
+        with closing(db._get_connection()) as conn:
+            row, _cursor = fb.next_due_artist(conn, 0)
+            assert row is not None and row["id"] == 1
+        http = _http(**{fb.LISTENBRAINZ_TOP_RECORDINGS: TOP_RECORDINGS})
+        assert fb.fill_artist(db._get_connection, 1, self._fetcher(http))
+        assert _tracks(db)["Angel"]["listenbrainz"]["listen_count"] == 5400
+
+    def test_top_recordings_raise_without_a_token(self):
+        http = _http()
+        with pytest.raises(fb.SourceError):
+            self._fetcher(http).top_recordings(MBID)
+        assert http.calls == []
+
+
+class _Response:
+    def __init__(self, status, payload=None):
+        self.status_code, self._payload = status, payload
+
+    def json(self):
+        return self._payload
+
+
+class TestHttpToken:
+    @pytest.fixture
+    def sent(self, monkeypatch):
+        import requests
+        calls, answer = [], {"status": 200}
+
+        def request(method, url, **kw):
+            calls.append((url, kw.get("headers") or {}))
+            return _Response(answer["status"], [])
+        monkeypatch.setattr(requests, "request", request)
+        monkeypatch.setattr(fb, "_throttle", lambda host: None)
+        return calls, answer
+
+    def test_listenbrainz_gets_the_token_and_wikipedia_does_not(self, sent, monkeypatch):
+        from core import listenbrainz_auth
+        monkeypatch.setattr(listenbrainz_auth, "_candidates", lambda: ["lb-token"])
+        listenbrainz_auth.reset()
+        calls, _answer = sent
+        fb._http_json("GET", fb.LISTENBRAINZ_TOP_RECORDINGS + MBID, host="api.listenbrainz.org")
+        fb._http_json("GET", fb.WIKIPEDIA_SUMMARY + "X", host="en.wikipedia.org")
+        assert calls[0][1]["Authorization"] == "Token lb-token"
+        assert "Authorization" not in calls[1][1]
+
+    def test_a_401_sets_the_token_aside_and_is_a_source_error(self, sent, monkeypatch):
+        from core import listenbrainz_auth
+        monkeypatch.setattr(listenbrainz_auth, "_candidates", lambda: ["lb-token"])
+        listenbrainz_auth.reset()
+        _calls, answer = sent
+        answer["status"] = 401
+        with pytest.raises(fb.SourceError):
+            fb._http_json("GET", fb.LISTENBRAINZ_TOP_RECORDINGS + MBID, host="api.listenbrainz.org")
+        assert listenbrainz_auth.token() is None

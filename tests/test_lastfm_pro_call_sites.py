@@ -314,4 +314,20 @@ def test_lastfm_configured_reports_a_refused_key(monkeypatch):
     assert body['configured'] is True
     assert body['usable'] is False
     assert body['key_rejected'] is True
+    # no listenbrainz account either: the card says top tracks need one
+    assert body['message'].startswith(lfc.LASTFM_PRO_MESSAGE)
+    assert 'connected ListenBrainz account' in body['message']
+    assert body['listenbrainz_top_tracks'] is False
+
+
+def test_lastfm_configured_with_listenbrainz_connected_says_only_the_pro_note(monkeypatch):
+    web_server = pytest.importorskip('web_server')
+    from core import listenbrainz_auth
+    monkeypatch.setattr(listenbrainz_auth, '_candidates', lambda: ['lb-token'])
+    listenbrainz_auth.reset()
+    monkeypatch.setattr(web_server, 'lastfm_worker', SimpleNamespace(client=SimpleNamespace(api_key='k')))
+    _refuse('k')
+    body = web_server.app.test_client().get('/api/lastfm/configured').get_json()
     assert body['message'] == lfc.LASTFM_PRO_MESSAGE
+    assert body['listenbrainz_top_tracks'] is True
+    assert 'lb-token' not in str(body)
