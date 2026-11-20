@@ -60,6 +60,8 @@ With the switch on, a watcher checks the folder on a timer, identifies each item
 - Between 70% and the confidence line, it **waits for review**
 - Below 70%, it **needs identifying**
 
+A folder imports as one album. When the release it picked is missing some of the folder's songs, the same album's other editions are tried first, and the one that holds the most of the folder wins. Files no edition holds stay in the import folder, and **What happened** on the row lists each one with the reason. **Retry** and **Fix match** keep what's left on the release the rest of the folder went to, so the album never ends up split over two releases in your library.
+
 The gear opens the settings: the confidence line, how often the folder is checked, whether matches import without asking, and which quality profile they are checked against.
 `
         },

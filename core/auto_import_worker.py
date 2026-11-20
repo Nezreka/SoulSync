@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from core.imports.album_unit import edition_alternates, sibling_release, tags_agree_with_album
 from core.imports.folder_artist import resolve_folder_artist
 from core.imports.paths import artist_folder_names
 from core.imports.paths import config_root_path, docker_resolve_path
@@ -723,6 +724,11 @@ class AutoImportWorker:
             # the Re-identify modal, a hint short-circuits the guessing — we match
             # straight against the chosen album. No hint → byte-identical to before.
             rematch_hint, identification = self._resolve_rematch_hint(candidate)
+            # #2220: what's left of a folder whose other tracks already went
+            # to a release goes to that release, not to whatever a search on
+            # the leftovers alone turns up.
+            if identification is None:
+                identification = self._sibling_identification(candidate)
             if identification is None:
                 identification = self._identify_folder(candidate)
             if not identification:
@@ -737,15 +743,21 @@ class AutoImportWorker:
             self._update_active(candidate.folder_hash, status='matching')
             match_result = self._match_tracks(candidate, identification)
             if not match_result:
+                reason = 'Could not match tracks to album tracklist'
+                if identification.get('method') == 'sibling_release':
+                    reason = (f"Not on {identification.get('album_name') or 'the release'}, "
+                              "where the rest of this folder went. Use Fix match to pick a release")
                 self._record_result(candidate, 'needs_identification', 0.0,
                                     album_id=identification.get('album_id'),
                                     album_name=identification.get('album_name'),
                                     artist_name=identification.get('artist_name'),
                                     image_url=identification.get('image_url'),
-                                    error_message='Could not match tracks to album tracklist')
+                                    identification_method=identification.get('method'),
+                                    match_data={'source': identification.get('source'),
+                                                'matches': [], 'unmatched_files': []},
+                                    error_message=reason)
                 self._bump_stat('failed')
-                self._emit_needs_attention(candidate, 'needs_identification', identification,
-                                           'Could not match tracks to album tracklist')
+                self._emit_needs_attention(candidate, 'needs_identification', identification, reason)
                 return
 
             # which source the tracklist came from rides along into history,
@@ -1468,6 +1480,64 @@ class AutoImportWorker:
 
     # ── Identification ──
 
+    def _sibling_identification(self, candidate: FolderCandidate) -> Optional[Dict]:
+        """#2220: the identification of the release this folder's other
+        tracks were imported to, when every file left in it was part of that
+        run and its album tags still say it's that album. None otherwise, and
+        the folder is identified the usual way.
+
+        a few leftovers searched on their own score the release search
+        differently (the track count is part of the score), so they landed on
+        another edition and the library listed the album twice."""
+        try:
+            conn = self.database._get_connection()
+            try:
+                cursor = conn.cursor()
+                paths = list(dict.fromkeys([candidate.path, os.path.normpath(candidate.path)]))
+                statuses = _TERMINAL_IMPORT_STATUSES + ('retried',)
+                cursor.execute(
+                    f"SELECT * FROM auto_import_history WHERE folder_path IN ({','.join('?' * len(paths))})"
+                    f" AND status IN ({','.join('?' * len(statuses))})"
+                    " ORDER BY created_at DESC, id DESC LIMIT 20",
+                    (*paths, *statuses),
+                )
+                rows = [dict(r) for r in cursor.fetchall()]
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.debug("[Auto-Import] sibling release lookup skipped: %s", e)
+            return None
+        sibling = sibling_release(rows, candidate.audio_files or [])
+        if not sibling:
+            return None
+        try:
+            from core.imports.text_matching import album_similarity
+        except Exception:
+            album_similarity = None
+        album_tags = [(_read_file_tags(f) or {}).get('album') for f in candidate.audio_files]
+        if not tags_agree_with_album(album_tags, sibling['album_name'], album_similarity):
+            logger.info("[Auto-Import] '%s': the files' album tags don't say %r, "
+                        "identifying them on their own", candidate.name, sibling['album_name'])
+            return None
+        logger.info("[Auto-Import] '%s': the rest of this folder went to %r (%s %s), "
+                    "matching what's left against it", candidate.name,
+                    sibling['album_name'], sibling['source'], sibling['album_id'])
+        return {
+            'album_id': sibling['album_id'],
+            'album_name': sibling['album_name'],
+            'artist_name': sibling['artist_name'],
+            'artist_id': '',
+            'image_url': sibling['image_url'],
+            'release_date': '',
+            'total_tracks': sibling['total_tracks'],
+            'source': sibling['source'],
+            'method': 'sibling_release',
+            # the user's earlier import already settled which release this is
+            'identification_confidence': 1.0,
+            # one leftover is still a track of the album, not a single
+            'force_album_match': True,
+        }
+
     def _identify_folder(self, candidate: FolderCandidate) -> Optional[Dict]:
         """Identify what album/track a folder or single file contains."""
 
@@ -2002,6 +2072,10 @@ class AutoImportWorker:
                     'source': source,
                     'method': method,
                     'identification_confidence': best_score,
+                    # the same album's other editions on this source: the
+                    # matcher tries them when this one leaves files behind (#2220)
+                    'edition_candidates': edition_alternates(
+                        best_result, [r for _s, r in scored_results]),
                 }
 
             return None
@@ -2039,65 +2113,11 @@ class AutoImportWorker:
             }
 
         try:
-            from core.metadata_service import get_client_for_source, get_album_tracks_for_source
-
             source = identification['source']
             album_id = identification['album_id']
-
-            # Fetch album with tracks
-            client = get_client_for_source(source)
-            if not client:
-                logger.warning(
-                    "[Auto-Import] Match aborted for '%s' — no client available "
-                    "for source '%s'. Identification probably came from a source "
-                    "that's no longer configured.",
-                    candidate.name, source,
-                )
-                return None
-
-            album_data = None
-            if hasattr(client, 'get_album'):
-                album_data = client.get_album(album_id)
-
-            # Fallback: try get_album_metadata (Deezer) or get_album_tracks
-            if not album_data and hasattr(client, 'get_album_metadata'):
-                album_data = client.get_album_metadata(str(album_id), include_tracks=True)
-            if not album_data and hasattr(client, 'get_album_tracks'):
-                tracks_data = client.get_album_tracks(str(album_id))
-                if tracks_data:
-                    album_data = {'id': album_id, 'name': identification.get('album_name', ''), 'tracks': tracks_data}
-
-            if not album_data:
-                logger.warning(
-                    "[Auto-Import] Match aborted for '%s' — source '%s' returned "
-                    "no album data for id %r. Album probably exists in the "
-                    "search index but get_album endpoint can't fetch it (rate "
-                    "limit / region restriction / id-format mismatch).",
-                    candidate.name, source, album_id,
-                )
-                return None
-
-            # Extract tracks — handle various response formats
-            tracks = []
-            if isinstance(album_data, dict):
-                if 'tracks' in album_data:
-                    raw = album_data['tracks']
-                    if isinstance(raw, dict) and 'items' in raw:
-                        tracks = raw['items']
-                    elif isinstance(raw, dict) and 'data' in raw:
-                        tracks = raw['data']  # Deezer format
-                    elif isinstance(raw, list):
-                        tracks = raw
-                elif 'items' in album_data:
-                    tracks = album_data['items']
-
+            album_data, tracks = self._fetch_release_tracks(
+                candidate, source, album_id, identification.get('album_name', ''))
             if not tracks:
-                logger.warning(
-                    "[Auto-Import] Match aborted for '%s' — source '%s' returned "
-                    "album data but no tracks. album_data keys: %s",
-                    candidate.name, source,
-                    list(album_data.keys()) if isinstance(album_data, dict) else type(album_data).__name__,
-                )
                 return None
 
             # Read tags for all files
@@ -2105,32 +2125,19 @@ class AutoImportWorker:
             for f in candidate.audio_files:
                 file_tags[f] = _read_file_tags(f)
 
-            # Dedupe + match — both lifted into core.imports.album_matching
-            # so the matching algorithm is unit-testable in isolation
-            # (no worker instantiation, no metadata-client mocking, no
-            # _read_file_tags monkeypatch). Worker still owns I/O +
-            # metadata fetch; the helper is a pure function over dicts.
-            from core.imports.album_matching import default_quality_rank, match_files_to_tracks
-            target_album = identification.get('album_name', '')
-            # a re-identify's pick goes first: the user already said which
-            # track this is, the fuzzy matcher only guesses (#2206)
-            matches = _hinted_track_match(candidate, identification, tracks, file_tags)
-            unmatched_files = []
-            if not matches:
-                match_result = match_files_to_tracks(
-                    candidate.audio_files,
-                    file_tags,
-                    tracks,
-                    target_album=target_album,
-                    quality_rank=default_quality_rank,
-                )
-                matches = []
-                unmatched_files = list(match_result['unmatched_files'])
-                for m in match_result['matches']:
-                    if _hint_title_conflicts(identification, m['track']):
-                        unmatched_files.append(m['file'])
-                    else:
-                        matches.append(m)
+            matches, unmatched_files, duplicate_files = self._pair_files(
+                candidate, identification, tracks, file_tags)
+
+            # #2220: the release the search picked can lack some of the
+            # folder's songs (a standard edition for a deluxe rip, one of a
+            # mixtape's several uploads). the folder imports as one unit, so
+            # an edition of the same album that takes more of its files wins
+            # here, before anything moves: the leftovers used to be imported
+            # on their own later, onto another release of the same album.
+            album_data, tracks, matches, unmatched_files, duplicate_files = (
+                self._prefer_covering_edition(
+                    candidate, identification, file_tags,
+                    (album_data, tracks, matches, unmatched_files, duplicate_files)))
             if not matches:
                 return None
 
@@ -2143,6 +2150,12 @@ class AutoImportWorker:
             return {
                 'matches': matches,
                 'unmatched_files': unmatched_files,
+                # quality-dedup losers among the leftovers. dropped here before,
+                # so every lower-quality copy counted as an unclaimed song and a
+                # healthy album came out 'partial' (#2220)
+                'duplicate_files': duplicate_files,
+                'left_behind': self._left_behind_reasons(
+                    identification, tracks, unmatched_files, duplicate_files),
                 'total_tracks': len(tracks),
                 'matched_count': len(matches),
                 'coverage': round(coverage, 3),
@@ -2153,6 +2166,159 @@ class AutoImportWorker:
         except Exception as e:
             logger.error(f"Track matching error: {e}")
             return None
+
+    def _fetch_release_tracks(self, candidate: FolderCandidate, source: str,
+                              album_id: Any, album_name: str) -> Tuple[Optional[Dict], List]:
+        """the release and its tracklist from ``source``. (None, []) when the
+        source can't give one; the reason is logged."""
+        from core.metadata_service import get_client_for_source
+
+        client = get_client_for_source(source)
+        if not client:
+            logger.warning(
+                "[Auto-Import] Match aborted for '%s' — no client available "
+                "for source '%s'. Identification probably came from a source "
+                "that's no longer configured.",
+                candidate.name, source,
+            )
+            return None, []
+
+        album_data = None
+        if hasattr(client, 'get_album'):
+            album_data = client.get_album(album_id)
+
+        # Fallback: try get_album_metadata (Deezer) or get_album_tracks
+        if not album_data and hasattr(client, 'get_album_metadata'):
+            album_data = client.get_album_metadata(str(album_id), include_tracks=True)
+        if not album_data and hasattr(client, 'get_album_tracks'):
+            tracks_data = client.get_album_tracks(str(album_id))
+            if tracks_data:
+                album_data = {'id': album_id, 'name': album_name, 'tracks': tracks_data}
+
+        if not album_data:
+            logger.warning(
+                "[Auto-Import] Match aborted for '%s' — source '%s' returned "
+                "no album data for id %r. Album probably exists in the "
+                "search index but get_album endpoint can't fetch it (rate "
+                "limit / region restriction / id-format mismatch).",
+                candidate.name, source, album_id,
+            )
+            return None, []
+
+        # Extract tracks — handle various response formats
+        tracks = []
+        if isinstance(album_data, dict):
+            if 'tracks' in album_data:
+                raw = album_data['tracks']
+                if isinstance(raw, dict) and 'items' in raw:
+                    tracks = raw['items']
+                elif isinstance(raw, dict) and 'data' in raw:
+                    tracks = raw['data']  # Deezer format
+                elif isinstance(raw, list):
+                    tracks = raw
+            elif 'items' in album_data:
+                tracks = album_data['items']
+
+        if not tracks:
+            logger.warning(
+                "[Auto-Import] Match aborted for '%s' — source '%s' returned "
+                "album data but no tracks. album_data keys: %s",
+                candidate.name, source,
+                list(album_data.keys()) if isinstance(album_data, dict) else type(album_data).__name__,
+            )
+            return album_data, []
+        return album_data, tracks
+
+    def _pair_files(self, candidate: FolderCandidate, identification: Dict,
+                    tracks: List, file_tags: Dict) -> Tuple[List, List, List]:
+        """the folder's files paired to ``tracks``: (matches, unmatched,
+        quality duplicates among the unmatched)."""
+        # Dedup + match — both lifted into core.imports.album_matching
+        # so the matching algorithm is unit-testable in isolation
+        # (no worker instantiation, no metadata-client mocking, no
+        # _read_file_tags monkeypatch). Worker still owns I/O +
+        # metadata fetch; the helper is a pure function over dicts.
+        from core.imports.album_matching import default_quality_rank, match_files_to_tracks
+        # a re-identify's pick goes first: the user already said which
+        # track this is, the fuzzy matcher only guesses (#2206)
+        matches = _hinted_track_match(candidate, identification, tracks, file_tags)
+        if matches:
+            return matches, [], []
+        result = match_files_to_tracks(
+            candidate.audio_files,
+            file_tags,
+            tracks,
+            target_album=identification.get('album_name', ''),
+            quality_rank=default_quality_rank,
+        )
+        matches = []
+        unmatched_files = list(result['unmatched_files'])
+        for m in result['matches']:
+            if _hint_title_conflicts(identification, m['track']):
+                unmatched_files.append(m['file'])
+            else:
+                matches.append(m)
+        duplicates = [f for f in result.get('duplicate_files') or [] if f in unmatched_files]
+        return matches, unmatched_files, duplicates
+
+    def _prefer_covering_edition(self, candidate: FolderCandidate, identification: Dict,
+                                 file_tags: Dict, picked: Tuple) -> Tuple:
+        """#2220: when the picked release leaves real songs behind, the same
+        album's other editions on the same source (from the identification
+        search) get a try, and the one that takes the most files wins. a tie
+        keeps the pick. the identification is updated in place so everything
+        downstream files the folder under the edition it went to."""
+        album_data, tracks, matches, unmatched, duplicates = picked
+        alternates = identification.get('edition_candidates') or []
+        if not alternates or not [f for f in unmatched if f not in set(duplicates)]:
+            return picked
+        best = picked
+        best_alt = None
+        for alt in alternates:
+            try:
+                alt_data, alt_tracks = self._fetch_release_tracks(
+                    candidate, identification['source'], alt['album_id'], alt.get('album_name', ''))
+                if not alt_tracks:
+                    continue
+                alt_ident = {**identification, 'album_name': alt.get('album_name', '')}
+                alt_matches, alt_unmatched, alt_dupes = self._pair_files(
+                    candidate, alt_ident, alt_tracks, file_tags)
+            except Exception as e:
+                logger.debug("edition %s could not be tried: %s", alt.get('album_id'), e)
+                continue
+            if len(alt_matches) > len(best[2]):
+                best = (alt_data, alt_tracks, alt_matches, alt_unmatched, alt_dupes)
+                best_alt = alt
+        if best_alt is None:
+            return picked
+        logger.info(
+            "[Auto-Import] '%s': %r takes %d of the folder's files, %r took %d; "
+            "importing the folder to %r (id %s)",
+            candidate.name, best_alt.get('album_name'), len(best[2]),
+            identification.get('album_name'), len(matches),
+            best_alt.get('album_name'), best_alt.get('album_id'))
+        for key in ('album_id', 'album_name', 'image_url', 'release_date', 'total_tracks'):
+            if best_alt.get(key):
+                identification[key] = best_alt[key]
+        return best
+
+    @staticmethod
+    def _left_behind_reasons(identification: Dict, tracks: List,
+                             unmatched: List[str], duplicates: List[str]) -> List[Dict[str, str]]:
+        """why each file the match didn't take stays in Import, in words the
+        Import page can show next to the file."""
+        dupes = set(duplicates)
+        album = identification.get('album_name') or 'the release'
+        out = []
+        for f in unmatched:
+            if f in dupes:
+                why = 'a lower quality copy of a track that is imported'
+            elif identification.get('method') == 'rematch_hint':
+                why = 'not the track the re-identify picked'
+            else:
+                why = f"not on {album} ({len(tracks)} tracks)"
+            out.append({'file': f, 'why': why})
+        return out
 
     # ── Processing ──
 
@@ -2517,8 +2683,12 @@ class AutoImportWorker:
         # reading: unexplained leftovers block 'completed'.
         leftovers = list(match_result.get('unmatched_files') or [])
         dedup_losers = set(match_result.get('duplicate_files') or [])
+        why_left = {e.get('file'): e.get('why') for e in match_result.get('left_behind') or []
+                    if isinstance(e, dict)}
         for unmatched in (f for f in leftovers if f not in dedup_losers):
-            errors.append(f"Unmatched file: {os.path.basename(unmatched)}")
+            why = why_left.get(unmatched)
+            errors.append(f"Unmatched file: {os.path.basename(unmatched)}"
+                          + (f" ({why})" if why else ''))
         dropped = [os.path.basename(f) for f in leftovers if f in dedup_losers]
         if dropped:
             logger.info(
@@ -2666,6 +2836,10 @@ class AutoImportWorker:
                              'import_error': m.get('import_error')} for m in match_data.get('matches', [])],
                 'summary': match_data.get('summary'),
                 'unmatched_files': [os.path.basename(f) for f in match_data.get('unmatched_files', [])],
+                # why each of those stays in Import, for the Import page (#2220)
+                'left_behind': [{'file': os.path.basename(str(e.get('file') or '')),
+                                 'why': e.get('why') or ''}
+                                for e in match_data.get('left_behind') or [] if isinstance(e, dict)],
                 'total_tracks': match_data.get('total_tracks', 0),
                 'matched_count': match_data.get('matched_count', 0),
                 'coverage': match_data.get('coverage', 0),
@@ -2768,16 +2942,27 @@ class AutoImportWorker:
 
         The dedup guard treats failed / needs-identification / rejected as
         terminal, so without this a folder that failed once was never
-        looked at again unless the user changed its files."""
+        looked at again unless the user changed its files.
+
+        A partial run is kept as 'retried' instead of deleted: it names the
+        release the folder's other tracks went to, and the retry matches
+        what's left against that release (#2220). Deleted, the leftovers were
+        identified on their own and could land on another edition."""
         try:
             conn = self.database._get_connection()
             cursor = conn.cursor()
             cursor.execute(
-                "DELETE FROM auto_import_history WHERE id = ? AND status IN "
-                "('failed', 'needs_identification', 'rejected', 'partial')",
+                "UPDATE auto_import_history SET status = 'retried' WHERE id = ? AND status = 'partial'",
                 (item_id,),
             )
             deleted = cursor.rowcount
+            if deleted == 0:
+                cursor.execute(
+                    "DELETE FROM auto_import_history WHERE id = ? AND status IN "
+                    "('failed', 'needs_identification', 'rejected')",
+                    (item_id,),
+                )
+                deleted = cursor.rowcount
             conn.commit()
             conn.close()
             if deleted != 1:
