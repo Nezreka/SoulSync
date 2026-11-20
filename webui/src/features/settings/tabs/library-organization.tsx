@@ -12,9 +12,9 @@
  * are the tag options (metadata_enhancement.tags): each key is saved alone as
  * a dotted key, the rest of the dict kept (settings-store.ts).
  *
- * A template that would not work holds every save back, as the old page
- * refused its whole save (templateErrors in organization.ts, registered on
- * the store by the host). Now it says so on its own field too, and the save
+ * A template that would not work is not saved: the host holds only that key
+ * back (templateFieldErrors in organization.ts), every other setting saves
+ * as usual. Its field says why and that it is not saved, and the save
  * status names it and goes to it.
  */
 
@@ -49,6 +49,7 @@ import {
   previewBody,
   savedScenario,
   templateFieldErrors,
+  templateWaits,
   templatesOf,
 } from './organization';
 import { text } from './source-panels';
@@ -101,12 +102,22 @@ export function useTemplateField(
   };
 }
 
-/** a template's problems, read off the settings as they are now */
+/** a template's problems, read off the settings as they are now. A new
+ *  value that would not work is not saved (the host holds that key back),
+ *  and the field says so */
 function useTemplateError(store: SettingsStore, key: TemplateKey): string | null {
   const settings = useSettings(store);
   const errors = templateFieldErrors(settings)[key];
-  if (key === 'playlist_item') return playlistItemError(settings);
-  return errors?.length ? errors.join('. ') : null;
+  const problem =
+    key === 'playlist_item'
+      ? playlistItemError(settings)
+      : errors?.length
+        ? errors.join('. ')
+        : null;
+  if (!problem) return null;
+  return templateWaits(store, key)
+    ? `${problem.replace(/\.$/, '')}. Not saved until it is fixed.`
+    : problem;
 }
 
 // ── the path preview ──
@@ -253,7 +264,7 @@ export function MusicNamingHero({ store }: { store: SettingsStore }) {
             ? [
                 { text: 'The album path template ' },
                 { text: 'would not work', kind: 'warn' },
-                { text: ', so nothing on this page saves until it is fixed below.' },
+                { text: ', so it is not saved until it is fixed below.' },
               ]
             : musicNamingSentence({ on, album, template: templates.album_path })
       }

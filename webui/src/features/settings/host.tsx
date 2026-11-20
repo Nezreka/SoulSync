@@ -30,6 +30,7 @@ import {
   playlistItemError,
   templateErrors,
   templateFieldErrors,
+  templateWaits,
 } from './tabs/organization';
 
 /** a template's name, as its field says it */
@@ -77,17 +78,18 @@ export interface SoulSyncSettingsApi {
   /** a vanilla field that writes a React tab's key (the Connections tab's
    *  Deezer ARL mirrors the Deezer source panel's) */
   set: (section: string, key: string, value: unknown) => void;
-  /** what is wrong with the naming templates (the Library tab's
-   *  Organization card): the page save refuses while any is set, and says so */
+  /** what is wrong with the naming templates (Library > Naming): a
+   *  template that would not work is not saved, everything else is */
   templateErrors: () => string[];
-  /** the Playlist File Naming rule, which the page save toasts on its own */
+  /** the Playlist File Naming rule: held back the same way */
   playlistItemError: () => string | null;
   /** what is wrong with the MusicBrainz server fields (Connections): the
    *  page save refuses while it is set, and says so */
   musicbrainzError: () => string | null;
   /** how many changed settings wait to be saved (the save status counts them) */
   pendingCount: () => number;
-  /** what holds every save back right now, in words */
+  /** what is held back right now, in words: a template not saved, or a
+   *  MusicBrainz address holding every save */
   blockers: () => Array<{ message: string }>;
   /** go to the field the first blocker is about, and light it */
   showBlocker: () => void;
@@ -130,18 +132,30 @@ export function createSettingsHost({
   effects?: Array<(settings: SettingsPayload) => void>;
   store?: SettingsStore;
 } = {}): SoulSyncSettingsApi {
-  // a naming template that would not work holds every save back, as the old
-  // page refused its whole save (validateFileOrganizationTemplates)
+  // a naming template that would not work is not saved: only that key is
+  // held back, every other setting saves as usual (the old page refused the
+  // whole save). its field says why and the save status goes to it
   const errors = () => (tabs.library ? templateErrors(store.getState().settings) : []);
   const itemError = () => (tabs.library ? playlistItemError(store.getState().settings) : null);
-  store.block(() => {
-    if (errors().length > 0) return true;
-    // the Playlist File Naming rule says why on every save it holds, the
-    // autosave's too, as saveSettings did even when quiet
-    const item = itemError();
-    if (item) window.showToast?.(item, 'error');
-    return !!item;
+  const badTemplates = (): TemplateKey[] => {
+    if (!tabs.library) return [];
+    const settings = store.getState().settings;
+    const keys = Object.keys(templateFieldErrors(settings)) as TemplateKey[];
+    if (playlistItemError(settings)) keys.push('playlist_item');
+    return keys;
+  };
+  store.hold(() => {
+    const bad = badTemplates();
+    if (!bad.length) return [];
+    // the whole dict, when something set it in one go, is held with them
+    return [
+      { section: 'file_organization', key: 'templates' },
+      ...bad.map((key) => ({ section: 'file_organization', key: `templates.${key}` })),
+    ];
   });
+  /** said after a template's problem when its new value waits, unsaved */
+  const unsaved = (key: TemplateKey) =>
+    templateWaits(store, key) ? ' It is not saved until it is fixed.' : '';
   // nor would a MusicBrainz server address that does not work
   const mbError = () => (tabs.connections ? musicbrainzError() : null);
   store.block(() => !!mbError());
@@ -178,7 +192,7 @@ export function createSettingsHost({
       )) {
         const name = TEMPLATE_NAMES[key as TemplateKey] ?? 'A naming template';
         found.push({
-          message: `${name} would not work: ${(problems ?? []).join('. ')}.`,
+          message: `${name} would not work: ${(problems ?? []).join('. ')}.${unsaved(key as TemplateKey)}`,
           tab: 'library',
           view: 'naming',
           kind: key === 'podcast_path' ? 'podcasts' : 'music',
@@ -188,7 +202,7 @@ export function createSettingsHost({
     const item = itemError();
     if (item)
       found.push({
-        message: item,
+        message: `${item}${unsaved('playlist_item')}`,
         tab: 'library',
         view: 'naming',
         kind: 'music',

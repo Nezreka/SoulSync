@@ -250,34 +250,43 @@ describe('the page', () => {
     expect(saved().wishlist?.ignore_ttl_days).toBe(30);
   });
 
-  it('a template that would not work is marked on its own field and named in the save status', async () => {
+  it('a template that would not work holds back only itself: every other setting saves', async () => {
     const host = createSettingsHost({ store, tabs: { library: LibraryTab }, effects: [] });
-    act(() => store.hydrate({ file_organization: {} }));
+    act(() =>
+      store.hydrate({
+        file_organization: { templates: { album_path: '$albumartist/$album/$title' } },
+      }),
+    );
     card();
     const row = (id: string) => input(id).closest<HTMLElement>('[data-row]')!;
     fireEvent.change(input('template-album-path'), { target: { value: '$album' } });
     store.set('ui_appearance', 'sidebar_visualizer', 'wave');
-    // it still holds every save back, as the old page refused its whole save
-    expect(await store.flush()).toBe(false);
-    expect(posted).toEqual([]);
+    // the unrelated setting saves; the bad template is not sent
+    expect(await store.flush()).toBe(true);
+    expect(saved()).toEqual({ ui_appearance: { sidebar_visualizer: 'wave' } });
+    expect(store.getState().pending).toEqual({
+      file_organization: { 'templates.album_path': '$album' },
+    });
     expect(host.templateErrors()).toEqual([
       'Album template must include at least one folder (use / separator)',
     ]);
-    // ...but now says so on the field, and the save status names the template
+    // the field is marked, says why, and that it is not saved
     expect(input('template-album-path').getAttribute('aria-invalid')).toBe('true');
     expect(row('template-album-path').querySelector('[role="alert"]')!.textContent).toBe(
-      'Album template must include at least one folder (use / separator)',
+      'Album template must include at least one folder (use / separator). Not saved until it is fixed.',
     );
-    // the hero says so instead of reading a broken path back
-    expect(document.body.textContent).toContain(
-      'The album path template would not work, so nothing on this page saves until it is fixed below.',
-    );
+    // the save status names it and goes to it
     expect(host.blockers()).toEqual([
       {
         message:
-          'The album path template would not work: Album template must include at least one folder (use / separator).',
+          'The album path template would not work: Album template must include at least one folder (use / separator). It is not saved until it is fixed.',
       },
     ]);
+    // another change still saves while the template waits
+    store.set('ui_appearance', 'sidebar_visualizer', 'bars');
+    expect(await store.flush()).toBe(true);
+    expect(saved().ui_appearance).toEqual({ sidebar_visualizer: 'bars' });
+    expect(saved().file_organization).toBeUndefined();
     // two bad templates are two things to fix, each on its own field
     fireEvent.change(input('template-podcast-path'), { target: { value: '$Show' } });
     expect(host.blockers()).toHaveLength(2);
@@ -285,24 +294,28 @@ describe('the page', () => {
       /should be lowercase/,
     );
     fireEvent.change(input('template-podcast-path'), { target: { value: '$show' } });
-    // the playlist file naming rule holds the saves back too
+    // fixed: it saves, and its mark goes
     fireEvent.change(input('template-album-path'), { target: { value: '$albumartist/$album' } });
     expect(row('template-album-path').querySelector('[role="alert"]')).toBeNull();
+    // the playlist file naming rule is held back the same way
     fireEvent.change(input('template-playlist-item'), { target: { value: '$artist' } });
-    expect(await store.flush()).toBe(false);
+    expect(await store.flush()).toBe(true);
     expect(host.playlistItemError()).toMatch(/must include \$title/);
     expect(row('template-playlist-item').querySelector('[role="alert"]')!.textContent).toMatch(
-      /must include \$title/,
+      /must include \$title so every file has a name\. Not saved until it is fixed\.$/,
     );
+    expect(saved().file_organization).toEqual({
+      'templates.album_path': '$albumartist/$album',
+      'templates.podcast_path': '$show',
+    });
+    expect(store.getState().pending).toEqual({
+      file_organization: { 'templates.playlist_item': '$artist' },
+    });
     fireEvent.change(input('template-playlist-item'), { target: { value: '' } });
     expect(await store.flush()).toBe(true);
-    expect(saved()).toMatchObject({
-      file_organization: {
-        'templates.album_path': '$albumartist/$album',
-        'templates.playlist_item': '',
-      },
-      ui_appearance: { sidebar_visualizer: 'wave' },
-    });
+    expect(saved().file_organization).toMatchObject({ 'templates.playlist_item': '' });
+    expect(store.hasPending()).toBe(false);
+    expect(host.blockers()).toEqual([]);
   });
 
   it('the old playlist path template shows only when it is what holds the save back', () => {

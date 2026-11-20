@@ -190,9 +190,19 @@ export function templateFieldErrors(
   return out;
 }
 
-/** validateFileOrganizationTemplates: the save is refused while any is set */
+/** every template's problems in one list (validateFileOrganizationTemplates) */
 export function templateErrors(settings: SettingsPayload): string[] {
   return Object.values(templateFieldErrors(settings)).flat();
+}
+
+/** true while a template's new value waits to be saved: a template that
+ *  would not work is held back there, unsaved, until it is fixed */
+export function templateWaits(
+  store: { getState: () => { pending: SettingsPayload } },
+  key: TemplateKey,
+): boolean {
+  const pending = store.getState().pending.file_organization;
+  return !!pending && (`templates.${key}` in pending || 'templates' in pending);
 }
 
 /** the Playlist File Naming rule saveSettings checked on its own: a file

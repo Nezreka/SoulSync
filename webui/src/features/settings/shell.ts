@@ -16,10 +16,12 @@
  */
 
 // rest: nothing changed or saved yet this visit (#2187)
-// blocked: a rule holds every save back until a field is fixed
+// blocked: something is held back until its field is fixed (a naming
+// template that would not work is not saved; a MusicBrainz address holds
+// every save)
 type SaveState = 'rest' | 'idle' | 'pending' | 'saving' | 'saved' | 'error' | 'blocked';
 
-/** what holds every save back: the words, and where the field is */
+/** what is held back: the words (the host knows where the field is) */
 interface Blocker {
   message: string;
 }
@@ -33,12 +35,10 @@ interface Shell {
     hydrate: (settings: unknown) => void;
     show: (tab: string) => void;
     flush: () => Promise<boolean>;
-    templateErrors: () => string[];
-    playlistItemError: () => string | null;
     musicbrainzError: () => string | null;
     /** how many changed settings wait to be saved */
     pendingCount?: () => number;
-    /** what holds every save back right now */
+    /** what is held back right now */
     blockers?: () => Blocker[];
     /** go to the field the first of them is about */
     showBlocker?: () => void;
@@ -129,7 +129,8 @@ export function setSettingsSaveState(state: SaveState) {
 /**
  * The save button's save, and the one the pages' own code asks for. Every
  * control is React and saves through the store; this still refuses while
- * the settings never loaded or a rule says no, still posts the page's
+ * the settings never loaded or the MusicBrainz address would not work,
+ * says what a naming template held back (only that key waits), still posts the page's
  * sections that have nothing left in them (the server re-reads its services
  * on a settings save), and flushes the store.
  */
@@ -156,24 +157,8 @@ export async function saveSettings(quiet = false): Promise<void> {
     }
     return;
   }
-  // a naming template that would not work (the Organization card)
-  const validationErrors = host?.templateErrors?.() || [];
-  if (validationErrors.length > 0) {
-    setSettingsSaveState('blocked');
-    if (!quiet) {
-      toast('Template validation failed: ' + validationErrors.join(', '), 'error');
-      host?.showBlocker?.();
-    }
-    return;
-  }
-  // the optional Playlist File Naming template: toasted even when quiet
-  const plItemErr = host?.playlistItemError?.();
-  if (plItemErr) {
-    setSettingsSaveState('blocked');
-    toast(plItemErr, 'error');
-    if (!quiet) host?.showBlocker?.();
-    return;
-  }
+  // a naming template that would not work no longer holds the save back:
+  // the store keeps only that key waiting, and the status says so below
 
   // what saveSettings still posted once every control was React: the
   // sections with nothing left in them
@@ -210,7 +195,15 @@ export async function saveSettings(quiet = false): Promise<void> {
       setSettingsSaveState('error');
       toast('Some settings failed to save', 'error', 'set-services');
     } else if (result.success) {
-      setSettingsSaveState('saved');
+      // everything else saved; a template that would not work did not
+      const held = host?.blockers?.() ?? [];
+      if (held.length) {
+        setSettingsSaveState('blocked');
+        if (!quiet) {
+          toast(held[0].message, 'error');
+          host?.showBlocker?.();
+        }
+      } else setSettingsSaveState('saved');
       shell()._forceServiceStatusRefresh?.();
     } else {
       setSettingsSaveState('error');

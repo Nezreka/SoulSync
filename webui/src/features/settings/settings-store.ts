@@ -22,7 +22,9 @@ import { apiClient, readJson } from '@/app/api-client';
 
 export type SettingsSection = Record<string, unknown>;
 export type SettingsPayload = Record<string, SettingsSection | undefined>;
-// blocked: a rule holds every save back (a naming template that would not work)
+// blocked: something is held back until it is fixed (a naming template that
+// would not work is not saved; a MusicBrainz address that would not work
+// holds every save)
 export type SaveState = 'idle' | 'pending' | 'saving' | 'saved' | 'error' | 'blocked';
 
 /** the same wait settings.js gives a change before it saves */
@@ -58,6 +60,13 @@ export interface SettingsState {
  */
 export type ExtraSaver = (value: unknown) => Promise<boolean>;
 
+/** one key a hold keeps back: a dotted key is one key of a dict
+ *  ('templates.album_path' in file_organization) */
+export interface HeldKey {
+  section: string;
+  key: string;
+}
+
 export interface SettingsStore {
   getState: () => SettingsState;
   subscribe: (listener: (state: SettingsState) => void) => () => void;
@@ -88,10 +97,14 @@ export interface SettingsStore {
   hasPending: () => boolean;
   /** how many changed settings wait to be saved */
   pendingCount: () => number;
-  /** a rule that holds every save back while it says so (a naming template
-   *  that would not work: the old page refused the whole save). Returns the
-   *  way to take it off. */
+  /** a rule that holds every save back while it says so (a MusicBrainz
+   *  address that would not work). Returns the way to take it off. */
   block: (holds: () => boolean) => () => void;
+  /** keys whose value would not work right now (a naming template): a save
+   *  sends everything else and keeps these waiting, unsaved, until they are
+   *  fixed. While any is named the save status says something is held.
+   *  Returns the way to take it off. */
+  hold: (keys: () => HeldKey[]) => () => void;
   /** stop a queued autosave (the page is going away) */
   cancel: () => void;
 }
@@ -160,6 +173,29 @@ export function createSettingsStore({
   let timer: ReturnType<typeof setTimeout> | null = null;
   let saving: Promise<boolean> | null = null;
   const blocks = new Set<() => boolean>();
+  const holds = new Set<() => HeldKey[]>();
+
+  /** the keys held right now, as section and key */
+  const heldNow = () => {
+    const out = new Set<string>();
+    for (const keys of holds)
+      for (const { section, key } of keys()) out.add(`${section}\u0000${key}`);
+    return out;
+  };
+  /** what is pending split in two: what a save sends, and what it keeps back */
+  const split = (held = heldNow()) => {
+    const send: SettingsPayload = {};
+    const kept: SettingsPayload = {};
+    for (const [section, values] of Object.entries(store.getState().pending)) {
+      for (const [key, value] of Object.entries(values || {})) {
+        const into = held.has(`${section}\u0000${key}`) ? kept : send;
+        into[section] = { ...into[section], [key]: value };
+      }
+    }
+    return { send, kept };
+  };
+  const count = (payload: SettingsPayload) =>
+    Object.values(payload).reduce((sum, section) => sum + Object.keys(section || {}).length, 0);
 
   const show = (state: SaveState) => shell().setSettingsSaveState?.(state);
   const hasPending = () =>
@@ -183,9 +219,16 @@ export function createSettingsStore({
       show('blocked');
       return false;
     }
-    const body = store.getState().pending;
+    // a key that would not work stays here, unsaved; everything else goes
+    const held = heldNow();
+    const { send: body, kept } = split(held);
+    if (Object.keys(body).length === 0 && Object.keys(extras).length === 0) {
+      // only what is held is waiting: nothing failed, it waits to be fixed
+      show('blocked');
+      return true;
+    }
     const sending = extras;
-    store.setState({ pending: {} });
+    store.setState({ pending: kept });
     extras = {};
     show('saving');
     saving = (async () => {
@@ -223,7 +266,8 @@ export function createSettingsStore({
           return false;
         }
         store.setState({ error: null });
-        show(hasPending() ? 'pending' : 'saved');
+        // a key held back is said, not hidden behind "saved"
+        show(heldNow().size > 0 ? 'blocked' : hasPending() ? 'pending' : 'saved');
         // the sidebar's server and source dots follow a saved setting at once,
         // as after every save of the page's (saveSettings, autosaves too)
         if (Object.keys(body).length > 0) shell()._forceServiceStatusRefresh?.();
@@ -290,14 +334,15 @@ export function createSettingsStore({
     },
     flush,
     hasPending,
-    pendingCount: () =>
-      Object.values(store.getState().pending).reduce(
-        (sum, section) => sum + Object.keys(section || {}).length,
-        0,
-      ) + Object.keys(extras).length,
-    block(holds) {
-      blocks.add(holds);
-      return () => blocks.delete(holds);
+    // what a save would send: a key held back is not counted
+    pendingCount: () => count(split().send) + Object.keys(extras).length,
+    block(rule) {
+      blocks.add(rule);
+      return () => blocks.delete(rule);
+    },
+    hold(keys) {
+      holds.add(keys);
+      return () => holds.delete(keys);
     },
     cancel,
   };

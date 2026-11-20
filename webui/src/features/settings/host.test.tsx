@@ -145,10 +145,8 @@ describe('the settings host', () => {
     delete (window as Window & { _settingsAutosaveOff?: boolean })._settingsAutosaveOff;
   });
 
-  it('a bad Playlist File Naming holds the autosave and says why, as the quiet save did', async () => {
+  it('a bad Playlist File Naming is held back on its own; everything else autosaves', async () => {
     const posted: unknown[] = [];
-    const toast = vi.fn();
-    window.showToast = toast;
     const store = createSettingsStore({
       post: (body) => {
         posted.push(body);
@@ -156,20 +154,27 @@ describe('the settings host', () => {
       },
       delay: 0,
     });
-    createSettingsHost({ tabs: { library: () => null }, store });
+    const host = createSettingsHost({ tabs: { library: () => null }, store });
+    // set as a whole dict, or as its own key: either way it is not sent
     store.set('file_organization', 'templates', { playlist_item: '$position - $artist' });
-    await vi.waitFor(() =>
-      expect(toast).toHaveBeenCalledWith(
-        'Playlist File Naming must include $title so every file has a name.',
-        'error',
-      ),
-    );
-    expect(posted).toEqual([]);
+    store.set('ui_appearance', 'sidebar_visualizer', 'wave');
+    await vi.waitFor(() => expect(posted).toHaveLength(1));
+    expect(posted).toEqual([{ ui_appearance: { sidebar_visualizer: 'wave' } }]);
     expect(store.hasPending()).toBe(true);
+    // the save status says why, and that it is not saved
+    expect(host.blockers()).toEqual([
+      {
+        message:
+          'Playlist File Naming must include $title so every file has a name. It is not saved until it is fixed.',
+      },
+    ]);
     store.set('file_organization', 'templates', { playlist_item: '$position - $title' });
     expect(await store.flush()).toBe(true);
-    expect(posted).toHaveLength(1);
-    delete window.showToast;
+    expect(posted).toHaveLength(2);
+    expect(posted[1]).toEqual({
+      file_organization: { templates: { playlist_item: '$position - $title' } },
+    });
+    expect(store.hasPending()).toBe(false);
   });
 
   it('catches up when the page loaded its settings before this bundle ran', () => {

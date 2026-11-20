@@ -114,20 +114,32 @@ describe('the shell hands over to the React tabs', () => {
     expect(btn.dataset.state).toBe('saved');
   });
 
-  it('a save the settings never loaded for is refused, and a template rule holds it back', async () => {
+  it('a save the settings never loaded for is refused; a bad template holds back only itself', async () => {
     shell.showToast = vi.fn();
     const fetcher = respond({ success: true });
     shell._settingsLoadFailed = true;
     await saveSettings(false);
     expect(fetcher).not.toHaveBeenCalled();
     shell._settingsLoadFailed = false;
-    shell.SoulSyncSettings = { templateErrors: () => ['album: no $title'], flush: vi.fn() };
+    document.body.innerHTML = `<button id="save-settings" data-state="idle"><span></span></button>`;
+    const showBlocker = vi.fn();
+    const flush = vi.fn(async () => true);
+    const held =
+      'The album path template would not work: no $title. It is not saved until it is fixed.';
+    shell.SoulSyncSettings = {
+      templateErrors: () => ['album: no $title'],
+      blockers: () => [{ message: held }],
+      showBlocker,
+      flush,
+    };
     await saveSettings(false);
-    expect(fetcher).not.toHaveBeenCalled();
-    expect(shell.showToast).toHaveBeenCalledWith(
-      'Template validation failed: album: no $title',
-      'error',
-    );
+    // the save goes ahead: the store sends everything but that template
+    expect(fetcher).toHaveBeenCalled();
+    expect(flush).toHaveBeenCalledOnce();
+    // and the status says what was held, and goes to it
+    expect(document.getElementById('save-settings')!.dataset.state).toBe('blocked');
+    expect(shell.showToast).toHaveBeenCalledWith(held, 'error');
+    expect(showBlocker).toHaveBeenCalledOnce();
   });
 
   it("the page wires no field of its own: every control is a React tab's; the button saves", async () => {
