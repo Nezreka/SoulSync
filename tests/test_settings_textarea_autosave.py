@@ -88,7 +88,8 @@ def test_every_settings_textarea_is_either_bound_or_deliberately_skipped():
     which is the whole bug, and it sat there unnoticed."""
     index = index_with_settings_page()
     start = index.index('id="settings-page"')
-    page = index[start:index.index('data-stg-react="logs"', start)]
+    # to the last slot (Logs was the last until it became a pill of System)
+    page = index[start:index.index('data-stg-react="people"', start)]
     # none is left in the page's markup: each is a React tab's, bound above
     assert re.findall(r"<textarea[^>]*>", page) == []
 
