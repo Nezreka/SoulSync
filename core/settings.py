@@ -655,6 +655,11 @@ class ConfigManager:
                 # engine off while existing configs got it on. CI caught the
                 # split: its fresh default config failed all 7 requeue tests).
                 "retry_next_candidate_on_mismatch": True,
+                # a track that imports clears the near-misses it quarantined
+                # on the way (to the recycle bin, restorable); and Review
+                # items older than N days go there too (0 = keep them)
+                "clear_near_misses_on_success": True,
+                "review_auto_reject_days": 0,
                 # Opt-in exhaustive retry: budget retries PER SOURCE so every
                 # source (Soulseek, then HiFi/Tidal/…) gets its own attempts
                 # before the track gives up. Default off (single global cap).

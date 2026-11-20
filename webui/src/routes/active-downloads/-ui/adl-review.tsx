@@ -900,6 +900,13 @@ function deletedSource(source: string | null): string | null {
     // corrupt file detector: kept until the re-download replaces it
     case 'corrupt_audio':
       return 'Corrupt file (re-downloading)';
+    // a near-miss whose track downloaded after all, or an automatic upgrade
+    // that kept the current file: cleared from Review on its own
+    case 'near_miss':
+      return 'Near-miss, cleared from Review';
+    // Review items past the "auto-reject after N days" setting
+    case 'review_auto_reject':
+      return 'Review item expired';
     default:
       return null;
   }

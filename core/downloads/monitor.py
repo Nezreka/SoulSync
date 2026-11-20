@@ -532,6 +532,10 @@ def _requeue_decide_and_mark(task_id, trigger):
         # set this, so they re-search fresh.
         task['_quarantine_retry'] = True
         # Drop the stale download identity + the prior attempt's quarantine link.
+        # The link is remembered as a near-miss: if a later candidate imports,
+        # this file leaves Review on its own (core/downloads/near_misses.py).
+        from core.downloads.near_misses import remember as _remember_near_miss
+        _remember_near_miss(task, task.get('quarantine_entry_id'))
         task.pop('download_id', None)
         task.pop('username', None)
         task.pop('filename', None)
