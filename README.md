@@ -274,6 +274,7 @@ A personal front page shaped by your library, your listening and your watchlist.
 
 - **Start Here**: a "next best move" card plus zones for *For You*, *New & Missing*, *Your Taste Map* and *Browse & Build*.
 - **Your Mixes**: *Fresh Tape* (new from artists you follow), *The Archives* (your Spotify Discover Weekly, refreshed weekly), *Hidden Gems*, *Popular Picks*, *Discovery Shuffle*, *Your Listening Mix*, and decade *Time Machine* mixes. Download or sync any of them to your server.
+- **A full Discover from day one**: a new profile sees trending picks from Deezer's genre charts, SoulSync Charts and Beatport, each saying where it came from, plus a banner to connect ListenBrainz or Last.fm or **pick five artists you love**. Picks seed that profile's recommendations straight away instead of waiting for a scan.
 - **Adventurousness dial**: drag from "safe" to "deep cuts" and the recommendations re-rank live. Each profile has its own dial; one that never turned it follows the default set in Settings.
 - **Shelves**: Recommended artists, Because you listen to…, New releases for you, New in your genres, Albums you're missing, More from your labels, Deep cuts.
 - **What you love counts**: Liked Songs, songs you starred or rated highly on your media server, and the artists on your Watchlist seed recommendations, Daily Mixes and stations next to what you play, per profile, weighed against your own play counts.
@@ -354,7 +355,7 @@ An inbox for everything in your staging folder, with a Picard-style matcher.
 ## Listening stats & scrobbling
 
 - **Listening stats**: plays, time, top artists / albums / tracks, genres, when you listen, streaks, and how much of what you own you actually play.
-- **Your Year**: a full-screen, Wrapped-style story of your year, ending in a card studio that exports shareable images using your real album art.
+- **Your Year**: a full-screen, Wrapped-style story of your year, with your streak, biggest day, top genre and a calendar of every day, played over your own top songs in full. Save it as a "Your <year>" playlist, export the card as an image or the whole story as a video, and from December 1 the dashboard tells you it's ready.
 - **Scrobbling** to Last.fm and ListenBrainz from Plex, Jellyfin, Navidrome and the web player. ListenBrainz is the recommended one: from 1 December 2026 Last.fm API keys need a Last.fm Pro subscription. The web player also sends **now playing** when a song starts, and a play is sent the moment it counts (half the song or 4 minutes) instead of in the next batch. Self-hosted **Maloja** and **Koito** work through the ListenBrainz card, with one-click address buttons.
 - **Last.fm is optional**: without a key, or with one Last.fm no longer accepts, top tracks, similar artists, Radio and Your Artists fill in from ListenBrainz, Deezer and your own plays, the album flame ranks tracks on ListenBrainz listens, and earlier Last.fm answers stay cached.
 - **Per-profile**: a profile with its own Plex account, Jellyfin user, ListenBrainz or Last.fm gets its own stats and recommendations, and can scrobble its plays to its own account.

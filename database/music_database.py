@@ -8291,14 +8291,18 @@ class MusicDatabase:
                         'top_artist': None} for k, lbl in month_keys],
             'top_artists': [], 'top_albums': [], 'top_tracks': [],
             'discoveries': [],
-            'peak_day': {'date': None, 'plays': 0},
+            'peak_day': {'date': None, 'plays': 0, 'minutes': 0, 'top_artist': None},
             'top_hour': {'hour': None, 'plays': 0},
+            'days': [],
+            'streak': {'days': 0, 'start': None, 'end': None},
+            'top_genres': [],
         }
 
         conn = None
         try:
             from core.listening_scope import play_duration_sql, stats_owner_clause
-            scope = stats_owner_clause(self._listening_owner(profile_id))
+            owner = self._listening_owner(profile_id)
+            scope = stats_owner_clause(owner)
             conn = self._get_connection()
             cursor = conn.cursor()
             window = f"WHERE date(played_at, 'localtime') >= ? AND date(played_at, 'localtime') <= ? AND {scope}"
@@ -8437,6 +8441,39 @@ class MusicDatabase:
             """, span)
             hour = cursor.fetchone()
 
+            # every day with music, for the calendar and the longest streak
+            from core.stats.year_extras import longest_streak, top_genres
+            cursor.execute(f"""
+                SELECT date(played_at, 'localtime') AS d, COUNT(*),
+                       COALESCE(SUM({play_duration_sql()}), 0)
+                FROM listening_history {window}
+                GROUP BY d ORDER BY d
+            """, span)
+            days = [{'date': r[0], 'plays': r[1], 'minutes': int((r[2] or 0) // 60000)}
+                    for r in cursor.fetchall() if r[0]]
+
+            peak_day = {'date': None, 'plays': 0, 'minutes': 0, 'top_artist': None}
+            if peak and peak[0]:
+                cursor.execute(f"""
+                    SELECT artist, COUNT(*) AS plays FROM listening_history
+                    WHERE date(played_at, 'localtime') = ? AND {scope}
+                      AND artist IS NOT NULL AND artist != ''
+                    GROUP BY LOWER(artist) ORDER BY plays DESC, LOWER(artist) LIMIT 1
+                """, (peak[0],))
+                leader = cursor.fetchone()
+                peak_day = {'date': peak[0], 'plays': peak[1],
+                            'minutes': next((d['minutes'] for d in days if d['date'] == peak[0]), 0),
+                            'top_artist': leader[0] if leader else None}
+
+            # genres come from the library's artists, so only plays of tracks
+            # the library knows count; the share is of those plays
+            lh_window = (f"WHERE date(lh.played_at, 'localtime') >= ? "
+                         f"AND date(lh.played_at, 'localtime') <= ? AND {stats_owner_clause(owner, 'lh')}")
+            cursor.execute(self._played_genres_sql(lh_window), span)
+            genre_counts = {}
+            for genres_str, n in cursor.fetchall():
+                self._accumulate_genres(genre_counts, genres_str, n or 0)
+
             return {
                 'period': period,
                 'has_data': True,
@@ -8446,14 +8483,49 @@ class MusicDatabase:
                 'top_albums': top_albums,
                 'top_tracks': top_tracks,
                 'discoveries': discoveries,
-                'peak_day': {'date': peak[0], 'plays': peak[1]} if peak and peak[0]
-                            else {'date': None, 'plays': 0},
+                'peak_day': peak_day,
                 'top_hour': {'hour': hour[0], 'plays': hour[1]} if hour
                             else {'hour': None, 'plays': 0},
+                'days': days,
+                'streak': longest_streak(d['date'] for d in days),
+                'top_genres': top_genres(genre_counts),
             }
         except Exception as e:
             logger.error(f"Error building year in listening: {e}")
             return empty
+        finally:
+            if conn:
+                conn.close()
+
+    def get_year_top_tracks(self, limit=50, now=None, months=12, profile_id=None):
+        """The year's most played songs, the same window and pile as the Year
+        in Listening story. Each row carries the library track id its plays
+        were matched to (the newest one when plays disagree), or None."""
+        from datetime import datetime as _dt
+        from core.listening_scope import owner_clause
+
+        now = now or _dt.now()
+        month_keys = self._year_month_keys(now, months)
+        span = (f'{month_keys[0][0]}-01', now.strftime('%Y-%m-%d'))
+        scope = owner_clause(self._listening_owner(profile_id))
+        conn = None
+        try:
+            conn = self._get_connection()
+            rows = conn.execute(f"""
+                SELECT title, artist, album, COUNT(*) AS plays, MAX(lib2_track_id),
+                       MAX(duration_ms)
+                FROM listening_history
+                WHERE date(played_at, 'localtime') >= ? AND date(played_at, 'localtime') <= ?
+                  AND {scope} AND title IS NOT NULL AND title != ''
+                  AND artist IS NOT NULL AND artist != ''
+                GROUP BY LOWER(title), LOWER(artist)
+                ORDER BY plays DESC, LOWER(artist), LOWER(title) LIMIT ?
+            """, (*span, int(limit))).fetchall()
+            return [{'title': r[0], 'artist': r[1], 'album': r[2], 'plays': r[3],
+                     'lib2_track_id': r[4], 'duration_ms': r[5] or 0} for r in rows]
+        except Exception as e:
+            logger.error(f"Error reading the year's top tracks: {e}")
+            return []
         finally:
             if conn:
                 conn.close()
@@ -20696,6 +20768,13 @@ class MusicDatabase:
         """, (profile_id,))
         for row in cursor.fetchall():
             owned.update(str(v) for v in tuple(row) if v)
+        # artists picked on discover's "pick artists you love" are chosen
+        # too: their similar artists are what fills a new profile's shelves
+        from core.discovery.cold_start import SEEDS_KEY, picked_source_ids
+        cursor.execute("SELECT value FROM metadata WHERE key = ?", (f"{SEEDS_KEY}:{int(profile_id)}",))
+        picked = cursor.fetchone()
+        if picked and picked[0]:
+            owned.update(picked_source_ids(picked[0]))
         return owned
 
     def _stray_similar_artist_sources(self, cursor, profile_id: int = 1) -> set:

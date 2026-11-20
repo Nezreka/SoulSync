@@ -147,7 +147,9 @@ def test_the_year_reads_local_days_1840(db, server_tz):
     # the 00:04 play is tomorrow, past the window
     assert year['totals']['plays'] == 5
     assert year['totals']['active_days'] == 1
-    assert year['peak_day'] == {'date': '2026-10-21', 'plays': 5}
+    assert {k: year['peak_day'][k] for k in ('date', 'plays')} == {'date': '2026-10-21', 'plays': 5}
+    # the calendar buckets the same local day
+    assert [d['date'] for d in year['days']] == ['2026-10-21']
 
 def test_a_play_lands_in_its_own_weekday_and_hour(db):
     # 2026-08-12 is a Wednesday -> strftime %w == 3.

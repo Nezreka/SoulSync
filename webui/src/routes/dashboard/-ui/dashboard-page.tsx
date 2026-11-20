@@ -39,6 +39,7 @@ import { ListenBand } from './listen-band';
 import { ListeningHistoryBand } from './listening-history-band';
 import { SyncRail } from './sync-band';
 import { WeeklyDigest } from './weekly-digest';
+import { YearReadyBanner } from './year-ready-banner';
 
 /** `isAdmin` decides the worker orbs, their sheet and Manage Workers: server
  *  maintenance, the admins' (#2196). */
@@ -69,6 +70,9 @@ export function DashboardPage({ isAdmin }: { isAdmin: boolean }) {
           jump to Settings, is nothing a member can act on (#2208). */}
       {isAdmin ? <AlertsBand /> : null}
       <div className="room-top">
+        {/* "Your <year> is ready", Dec 1 to Jan 15, until this profile
+            hides it. Renders nothing the rest of the year. */}
+        {statsOn ? <YearReadyBanner /> : null}
         {/* What setup left for later. Renders nothing once it's all done,
             dismissed, or for anyone who isn't an admin. */}
         <FinishSetupCard />

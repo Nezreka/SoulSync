@@ -13,7 +13,12 @@ import {
   prefersReducedMotion,
   staggerDelay,
 } from '../-year.animation';
-import { fetchAlbumPlayTracks, yearInListeningQueryOptions } from '../-year.api';
+import {
+  fetchAlbumPlayTracks,
+  fetchYearSoundtrack,
+  saveYearPlaylist,
+  yearInListeningQueryOptions,
+} from '../-year.api';
 import {
   DEFAULT_YEAR_CARD_OPTIONS,
   MAX_YEAR_CARD_STATS,
@@ -33,13 +38,17 @@ import {
   type YearCardTheme,
 } from '../-year.card';
 import {
+  buildCalendar,
   buildYearSlides,
   describeListeningTime,
   formatHour,
   formatStoryDate,
   monthBarHeight,
   peakMonthPlays,
+  sharePercent,
 } from '../-year.helpers';
+import { shouldAutostart, StorySoundtrack, type SoundtrackTrack } from '../-year.soundtrack';
+import { buildReelScenes, canRecordVideo, recordReel, videoFilename } from '../-year.video';
 import styles from './year-story.module.css';
 
 /**
@@ -72,6 +81,7 @@ export function YearStory({ onClose }: YearStoryProps) {
   const [step, setStep] = useState(0);
 
   const slides = useMemo(() => buildYearSlides(data), [data]);
+  const soundtrack = useStorySoundtrack(Boolean(data?.has_data && data.totals.plays > 0));
   // A shorter story after a refetch must not strand the reader past the end.
   const current = Math.min(step, slides.length - 1);
 
@@ -141,6 +151,8 @@ export function YearStory({ onClose }: YearStoryProps) {
         ))}
       </div>
 
+      <SoundtrackPill controller={soundtrack} />
+
       <button type="button" className={styles.close} onClick={onClose} aria-label="Close your year">
         ✕
       </button>
@@ -158,7 +170,12 @@ export function YearStory({ onClose }: YearStoryProps) {
             </p>
           </div>
         ) : (
-          <YearSlide kind={slides[current]} year={data} onNavigate={onClose} />
+          <YearSlide
+            kind={slides[current]}
+            year={data}
+            onNavigate={onClose}
+            soundtrack={soundtrack}
+          />
         )}
       </div>
 
@@ -184,6 +201,110 @@ export function YearStory({ onClose }: YearStoryProps) {
       </div>
     </div>,
     document.body,
+  );
+}
+
+/** The soundtrack's state, re-read whenever the controller changes. */
+interface SoundtrackHandle {
+  controller: StorySoundtrack;
+  tracks: SoundtrackTrack[];
+  /** bumps on every controller change, so readers re-render */
+  version: number;
+}
+
+function audioElement(): HTMLAudioElement | null {
+  return document.getElementById('audio-player') as HTMLAudioElement | null;
+}
+
+/**
+ * The story plays the year's top songs you own, in full, through the app's
+ * player. It starts by itself only when nothing else is playing; otherwise
+ * the pill offers it. Closing the story fades it out.
+ */
+function useStorySoundtrack(enabled: boolean): SoundtrackHandle {
+  const [controller] = useState(
+    () =>
+      new StorySoundtrack({
+        play: (tracks, context) => window.playTrackList?.(tracks, context),
+        audio: audioElement,
+      }),
+  );
+  const [version, setVersion] = useState(0);
+  const { data: tracks = [] } = useQuery({
+    queryKey: ['stats', 'year', 'soundtrack'],
+    queryFn: fetchYearSoundtrack,
+    enabled,
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  });
+
+  useEffect(() => controller.subscribe(() => setVersion((v) => v + 1)), [controller]);
+
+  useEffect(() => {
+    if (!tracks.length || controller.state !== 'idle') return;
+    if (shouldAutostart(audioElement())) void controller.start(tracks);
+  }, [tracks, controller]);
+
+  useEffect(
+    () => () => {
+      void controller.stop();
+    },
+    [controller],
+  );
+
+  return { controller, tracks, version };
+}
+
+function SoundtrackPill({ controller: handle }: { controller: SoundtrackHandle }) {
+  const { controller, tracks } = handle;
+  if (!tracks.length) return null;
+  const playing = controller.state === 'playing' || controller.state === 'starting';
+  const track = controller.current ?? tracks[0];
+  if (!playing) {
+    return (
+      <button
+        type="button"
+        className={styles.soundtrack}
+        onClick={() => void controller.start(tracks)}
+        aria-label={`Play your soundtrack: ${track.title}`}
+      >
+        <span className={styles.soundtrackIcon} aria-hidden="true">
+          ▶
+        </span>
+        <span className={styles.soundtrackText}>
+          <span className={styles.soundtrackLabel}>Play your soundtrack</span>
+          <span className={styles.soundtrackTitle}>{track.title}</span>
+        </span>
+      </button>
+    );
+  }
+  return (
+    <div className={styles.soundtrack} role="group" aria-label="Your soundtrack">
+      <span
+        className={`${styles.soundtrackBars} ${controller.muted ? styles.soundtrackBarsMuted : ''}`}
+        aria-hidden="true"
+      >
+        <i />
+        <i />
+        <i />
+      </span>
+      <span className={styles.soundtrackText}>
+        <span className={styles.soundtrackLabel}>Now playing</span>
+        <span className={styles.soundtrackTitle}>
+          {track.title}
+          {track.artist ? ` · ${track.artist}` : ''}
+        </span>
+      </span>
+      <button
+        type="button"
+        className={styles.soundtrackMute}
+        aria-pressed={controller.muted}
+        aria-label={controller.muted ? 'Unmute your soundtrack' : 'Mute your soundtrack'}
+        onClick={() => controller.setMuted(!controller.muted)}
+      >
+        {controller.muted ? 'Unmute' : 'Mute'}
+      </button>
+    </div>
   );
 }
 
@@ -313,10 +434,12 @@ function YearSlide({
   kind,
   year,
   onNavigate,
+  soundtrack,
 }: {
   kind: YearSlideKind;
   year: YearInListening | undefined;
   onNavigate: () => void;
+  soundtrack?: SoundtrackHandle;
 }) {
   if (!year) return null;
 
@@ -492,6 +615,76 @@ function YearSlide({
       );
     }
 
+    case 'top-genre': {
+      const [top, ...rest] = year.top_genres ?? [];
+      return (
+        <div className={styles.slide}>
+          <p className={styles.kicker}>Your sound</p>
+          <h2 className={`${styles.hero} ${styles.genreHero}`}>{top.genre}</h2>
+          <p className={styles.lede}>{sharePercent(top.share)} of what you played</p>
+          {rest.length ? (
+            <div className={styles.genreBars}>
+              {[top, ...rest].slice(0, 5).map((g, index) => (
+                <Reveal key={g.genre} index={index} className={styles.genreRow}>
+                  <span className={styles.genreName}>{g.genre}</span>
+                  <span className={styles.genreTrack}>
+                    <span
+                      className={styles.genreFill}
+                      style={{ ['--genre-share' as string]: `${(g.share / top.share) * 100}%` }}
+                    />
+                  </span>
+                  <span className={styles.genreShare}>{sharePercent(g.share)}</span>
+                </Reveal>
+              ))}
+            </div>
+          ) : null}
+          <p className={styles.footnote}>
+            From the genres your library knows for the artists you played.
+          </p>
+        </div>
+      );
+    }
+
+    case 'streak': {
+      const streak = year.streak!;
+      const from = formatStoryDate(streak.start);
+      const to = formatStoryDate(streak.end);
+      return (
+        <div className={styles.slide}>
+          <p className={styles.kicker}>Your longest streak</p>
+          <h2 className={styles.hero}>
+            <CountUp value={streak.days} />
+          </h2>
+          <p className={styles.lede}>days in a row with music</p>
+          {from && to ? (
+            <p className={styles.footnote}>
+              From {from} to {to}.
+            </p>
+          ) : null}
+        </div>
+      );
+    }
+
+    case 'busiest-day': {
+      const day = formatStoryDate(year.peak_day.date);
+      return (
+        <div className={styles.slide}>
+          <p className={styles.kicker}>Your biggest day</p>
+          <h2 className={styles.heroSmall}>{day}</h2>
+          <p className={styles.lede}>
+            <CountUp value={year.peak_day.plays} /> plays
+            {year.peak_day.minutes ? ` · ${describeListeningTime(year.peak_day.minutes)}` : ''}
+          </p>
+          {year.peak_day.top_artist ? (
+            <p className={styles.footnote}>Mostly {year.peak_day.top_artist}.</p>
+          ) : null}
+        </div>
+      );
+    }
+
+    case 'calendar':
+      return <CalendarSlide year={year} />;
+
     case 'discoveries':
       return (
         <div className={styles.slide}>
@@ -523,7 +716,8 @@ function YearSlide({
       );
 
     case 'when': {
-      const day = formatStoryDate(year.peak_day.date);
+      // with its own slide, the busiest day isn't said twice
+      const day = Array.isArray(year.days) ? null : formatStoryDate(year.peak_day.date);
       const hour = formatHour(year.top_hour.hour);
       return (
         <div className={styles.slide}>
@@ -536,21 +730,151 @@ function YearSlide({
               </p>
             </>
           ) : null}
-          {hour ? (
+          {hour && day ? (
             <p className={styles.footnote}>
               More than any other hour, you pressed play around {hour}.
             </p>
+          ) : hour ? (
+            <>
+              <h2 className={styles.heroSmall}>Around {hour}</h2>
+              <p className={styles.lede}>More than any other hour, that's when you pressed play.</p>
+            </>
           ) : null}
         </div>
       );
     }
 
     case 'card':
-      return <YearCard year={year} />;
+      return <YearCard year={year} soundtrack={soundtrack} />;
 
     default:
       return null;
   }
+}
+
+const WEEKDAYS = ['Mon', '', 'Wed', '', 'Fri', '', ''];
+
+/** Every day of the year, one square each, darker the more you played. */
+function CalendarSlide({ year }: { year: YearInListening }) {
+  const cal = useMemo(
+    () => buildCalendar(year.days ?? [], year.period.start, year.period.end),
+    [year],
+  );
+  return (
+    <div className={styles.slide}>
+      <p className={styles.kicker}>Every day of it</p>
+      <h2 className={styles.heroSmall}>
+        <CountUp value={year.totals.active_days} /> days with music
+      </h2>
+      <div className={styles.calendarScroll} style={{ ['--weeks' as string]: cal.weeks.length }}>
+        <div
+          className={styles.calendar}
+          role="img"
+          aria-label={`A calendar of your year: ${year.totals.active_days} days with music`}
+        >
+          <div className={styles.calendarMonths} aria-hidden="true">
+            {cal.months.map((m) => (
+              <span key={`${m.week}-${m.label}`} style={{ gridColumnStart: m.week + 2 }}>
+                {m.label}
+              </span>
+            ))}
+          </div>
+          <div className={styles.calendarDays} aria-hidden="true">
+            {WEEKDAYS.map((d, i) => (
+              <span key={i}>{d}</span>
+            ))}
+          </div>
+          {cal.weeks.map((week, wi) => (
+            <div
+              key={wi}
+              className={styles.calendarWeek}
+              style={{ animationDelay: `${wi * 12}ms` }}
+            >
+              {week.map((cell) => (
+                <span
+                  key={cell.date}
+                  className={`${styles.calendarCell} ${cell.inYear ? '' : styles.calendarOut}`}
+                  data-level={cell.level}
+                  title={
+                    cell.inYear
+                      ? `${formatStoryDate(cell.date)}: ${
+                          cell.plays ? `${cell.plays.toLocaleString()} plays` : 'nothing played'
+                        }`
+                      : undefined
+                  }
+                />
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className={styles.calendarLegend} aria-hidden="true">
+        <span>Less</span>
+        {[0, 1, 2, 3, 4].map((l) => (
+          <span key={l} className={styles.calendarCell} data-level={l} />
+        ))}
+        <span>More</span>
+      </div>
+    </div>
+  );
+}
+
+/** "Save your year as a playlist": the top 50 or 100 into "Your <year>". */
+function SaveYearPlaylist() {
+  const [size, setSize] = useState<50 | 100>(50);
+  const [status, setStatus] = useState<'idle' | 'working' | 'error'>('idle');
+  const [saved, setSaved] = useState<{ name: string; count: number } | null>(null);
+  const save = async () => {
+    setStatus('working');
+    try {
+      const result = await saveYearPlaylist(size);
+      setSaved({ name: result.name, count: result.track_count });
+      setStatus('idle');
+      window.showToast?.(
+        `${result.created ? 'Saved' : 'Updated'} ${result.name}: ${result.track_count} songs`,
+        'success',
+      );
+    } catch (e) {
+      setStatus('error');
+      window.showToast?.(e instanceof Error ? e.message : 'Could not save the playlist', 'error');
+    }
+  };
+  return (
+    <div className={styles.playlistSave}>
+      <div className={styles.playlistSaveText}>
+        <strong>Save your year as a playlist</strong>
+        <span>
+          {saved
+            ? `${saved.name} has your top ${saved.count} songs. Saving again updates it.`
+            : 'Your most played songs, in one playlist you can keep.'}
+        </span>
+      </div>
+      <div className={styles.playlistSaveActions}>
+        <div className={styles.chipRow} role="radiogroup" aria-label="How many songs">
+          {([50, 100] as const).map((n) => (
+            <button
+              key={n}
+              type="button"
+              role="radio"
+              aria-checked={size === n}
+              className={`${styles.chip} ${size === n ? styles.chipActive : ''}`}
+              onClick={() => setSize(n)}
+            >
+              Top {n}
+            </button>
+          ))}
+        </div>
+        <button
+          type="button"
+          className={styles.copyButton}
+          disabled={status === 'working'}
+          onClick={() => void save()}
+        >
+          {status === 'working' ? 'Saving…' : saved ? 'Update playlist' : 'Save as playlist'}
+        </button>
+      </div>
+    </div>
+  );
 }
 
 /**
@@ -688,9 +1012,16 @@ function loadCardImage(src: string): Promise<HTMLImageElement | null> {
  * Content and geometry live in `-year.card.ts` so both are testable without a
  * canvas; this file wires the controls and owns the export.
  */
-function YearCard({ year }: { year: YearInListening }) {
+function YearCard({ year, soundtrack }: { year: YearInListening; soundtrack?: SoundtrackHandle }) {
   const [options, setOptions] = useState<YearCardOptions>(DEFAULT_YEAR_CARD_OPTIONS);
   const [status, setStatus] = useState<'idle' | 'working' | 'saved' | 'copied' | 'error'>('idle');
+  const [video, setVideo] = useState<{ state: 'idle' | 'recording' | 'error'; progress: number }>({
+    state: 'idle',
+    progress: 0,
+  });
+  const videoAbort = useRef<AbortController | null>(null);
+  const videoSupported = useMemo(() => canRecordVideo(), []);
+  useEffect(() => () => videoAbort.current?.abort(), []);
   const previewRef = useRef<HTMLCanvasElement | null>(null);
 
   const model = useMemo(() => buildYearCardModel(year, options), [year, options]);
@@ -784,6 +1115,77 @@ function YearCard({ year }: { year: YearInListening }) {
       setStatus('copied');
     } catch {
       setStatus('error');
+    }
+  };
+
+  /**
+   * The story as a video, ending on this card. Recorded in real time, so it
+   * takes as long as it plays; the soundtrack goes in when it is playing.
+   */
+  const saveVideo = async () => {
+    if (video.state === 'recording') {
+      videoAbort.current?.abort();
+      return;
+    }
+    const abort = new AbortController();
+    videoAbort.current = abort;
+    setVideo({ state: 'recording', progress: 0 });
+    try {
+      const scenes = buildReelScenes(year);
+      const urls = Array.from(
+        new Set(scenes.map((sc) => sc.art).filter((u): u is string => Boolean(u))),
+      );
+      const loaded = await Promise.all(urls.map(loadCardImage));
+      const images = new Map(urls.map((u, i) => [u, loaded[i]]));
+      const cardImages = await Promise.all(model.artUrls.map(loadCardImage));
+      let audioStream: MediaStream | null = null;
+      const audio = audioElement();
+      const ctl = soundtrack?.controller;
+      if (audio && ctl?.state === 'playing' && !ctl.muted) {
+        try {
+          audioStream =
+            (audio as HTMLAudioElement & { captureStream?: () => MediaStream }).captureStream?.() ??
+            null;
+        } catch {
+          audioStream = null;
+        }
+      }
+      const record = (
+        imgs: Map<string, CanvasImageSource | null>,
+        cards: (CanvasImageSource | null)[],
+      ) =>
+        recordReel({
+          card: model,
+          year,
+          scenes,
+          images: imgs,
+          cardImages: cards,
+          audio: audioStream,
+          signal: abort.signal,
+          onProgress: (p) => setVideo({ state: 'recording', progress: p }),
+        });
+      let result;
+      try {
+        result = await record(images, cardImages);
+      } catch (e) {
+        if ((e as DOMException)?.name === 'AbortError') throw e;
+        // artwork without CORS taints the canvas; the reel without it still works
+        result = await record(new Map(), []);
+      }
+      const url = URL.createObjectURL(result.blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = videoFilename(model.filename, result.ext);
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+      setVideo({ state: 'idle', progress: 0 });
+    } catch (e) {
+      setVideo({
+        state: (e as DOMException)?.name === 'AbortError' ? 'idle' : 'error',
+        progress: 0,
+      });
+    } finally {
+      videoAbort.current = null;
     }
   };
 
@@ -929,11 +1331,38 @@ function YearCard({ year }: { year: YearInListening }) {
               {status === 'copied' ? 'Copied' : 'Copy'}
             </button>
           </div>
+          {videoSupported ? (
+            <button
+              type="button"
+              className={styles.videoButton}
+              onClick={() => void saveVideo()}
+              aria-label={
+                video.state === 'recording'
+                  ? 'Stop recording the video'
+                  : 'Save your year as a video'
+              }
+            >
+              {video.state === 'recording' ? (
+                <>
+                  <span className={styles.videoProgress} aria-hidden="true">
+                    <span style={{ ['--video-progress' as string]: `${video.progress * 100}%` }} />
+                  </span>
+                  Recording {Math.round(video.progress * 100)}% · Stop
+                </>
+              ) : (
+                'Save video'
+              )}
+            </button>
+          ) : null}
           {status === 'error' ? (
             <span className={styles.cardError}>Could not render the card.</span>
           ) : null}
+          {video.state === 'error' ? (
+            <span className={styles.cardError}>Could not record the video.</span>
+          ) : null}
         </div>
       </div>
+      <SaveYearPlaylist />
     </div>
   );
 }

@@ -1344,3 +1344,413 @@
     font-size: 0.8rem;
   }
 }
+
+/* --- The soundtrack pill, centred under the progress pips --- */
+.soundtrack {
+  position: relative;
+  z-index: 2;
+  align-self: center;
+  margin: 12px auto 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(360px, calc(100vw - 120px));
+  padding: 6px 8px 6px 12px;
+  border: 1px solid var(--white-a12);
+  border-radius: var(--radius-pill);
+  background: var(--white-a06);
+  backdrop-filter: blur(20px);
+  color: var(--text-bright);
+  font-family: inherit;
+  text-align: left;
+  box-shadow: 0 4px 16px var(--black-a30);
+}
+
+button.soundtrack {
+  cursor: pointer;
+  padding-right: 16px;
+  transition: background var(--dur-base) var(--ease-emphasized);
+}
+
+button.soundtrack:hover {
+  background: var(--white-a12);
+}
+
+.soundtrackIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-circle);
+  background: var(--accent-light);
+  color: var(--black-a85);
+  font-size: 0.7rem;
+  flex: none;
+}
+
+.soundtrackText {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.2;
+}
+
+.soundtrackLabel {
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--white-a55);
+}
+
+.soundtrackTitle {
+  overflow: hidden;
+  font-size: 0.84rem;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.soundtrackBars {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 16px;
+  flex: none;
+}
+
+.soundtrackBars i {
+  width: 3px;
+  height: 100%;
+  border-radius: var(--radius-pill);
+  background: var(--accent-light);
+  transform-origin: bottom;
+  animation: soundtrackBar 0.9s ease-in-out infinite;
+}
+
+.soundtrackBars i:nth-child(2) {
+  animation-delay: -0.3s;
+}
+
+.soundtrackBars i:nth-child(3) {
+  animation-delay: -0.6s;
+}
+
+.soundtrackBarsMuted i {
+  animation: none;
+  transform: scaleY(0.25);
+  opacity: 0.6;
+}
+
+@keyframes soundtrackBar {
+  0%,
+  100% {
+    transform: scaleY(0.3);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+.soundtrackMute {
+  flex: none;
+  padding: 5px 12px;
+  border: 1px solid var(--white-a14);
+  border-radius: var(--radius-pill);
+  background: var(--white-a06);
+  color: var(--white-a85);
+  font-family: inherit;
+  font-size: 0.76rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.soundtrackMute:hover {
+  background: var(--white-a14);
+}
+
+.soundtrackMute[aria-pressed='true'] {
+  border-color: rgba(var(--accent-light-rgb), 0.5);
+  color: var(--accent-light);
+}
+
+/* --- Top genre --- */
+.genreHero {
+  text-transform: capitalize;
+}
+
+.genreBars {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(520px, 100%);
+  margin: 36px auto 0;
+}
+
+.genreRow {
+  display: grid;
+  grid-template-columns: 130px minmax(0, 1fr) 48px;
+  align-items: center;
+  gap: 14px;
+  text-align: left;
+}
+
+.genreName {
+  overflow: hidden;
+  font-size: 0.92rem;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-transform: capitalize;
+}
+
+.genreTrack {
+  position: relative;
+  height: 10px;
+  border-radius: var(--radius-pill);
+  background: var(--white-a08);
+  overflow: hidden;
+}
+
+.genreFill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--genre-share, 0%);
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent-light), rgba(var(--accent-light-rgb), 0.55));
+  box-shadow: 0 0 12px rgba(var(--accent-light-rgb), 0.45);
+}
+
+.genreShare {
+  color: var(--white-a60);
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* --- Calendar heatmap --- */
+.calendarScroll {
+  width: 100%;
+  margin-top: 34px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.calendarScroll::-webkit-scrollbar {
+  display: none;
+}
+
+.calendarScroll,
+.calendarLegend {
+  --cell: 12px;
+  --cell-gap: 3px;
+}
+
+.calendar {
+  display: grid;
+  grid-template-columns: 28px repeat(var(--weeks, 53), var(--cell));
+  grid-template-rows: auto;
+  column-gap: var(--cell-gap);
+  justify-content: center;
+  width: max-content;
+  margin: 0 auto;
+  padding: 18px 20px;
+  border: 1px solid var(--white-a08);
+  border-radius: var(--radius-sheet);
+  background: var(--white-a03);
+}
+
+.calendarMonths {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 28px repeat(var(--weeks, 53), var(--cell));
+  column-gap: var(--cell-gap);
+  margin-bottom: 6px;
+  color: var(--white-a50);
+  font-size: 0.68rem;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.calendarDays {
+  display: grid;
+  grid-template-rows: repeat(7, var(--cell));
+  row-gap: var(--cell-gap);
+  color: var(--white-a40);
+  font-size: 0.6rem;
+  line-height: var(--cell);
+  text-align: left;
+}
+
+.calendarWeek {
+  display: grid;
+  grid-template-rows: repeat(7, var(--cell));
+  row-gap: var(--cell-gap);
+  animation: yearSlideIn 0.42s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.calendarCell {
+  display: block;
+  width: var(--cell);
+  height: var(--cell);
+  border-radius: 3px;
+  background: var(--white-a06);
+}
+
+.calendarCell[data-level='1'] {
+  background: rgba(var(--accent-light-rgb), 0.28);
+}
+
+.calendarCell[data-level='2'] {
+  background: rgba(var(--accent-light-rgb), 0.48);
+}
+
+.calendarCell[data-level='3'] {
+  background: rgba(var(--accent-light-rgb), 0.7);
+}
+
+.calendarCell[data-level='4'] {
+  background: var(--accent-light);
+  box-shadow: 0 0 8px rgba(var(--accent-light-rgb), 0.55);
+}
+
+.calendarOut {
+  visibility: hidden;
+}
+
+.calendarLegend {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 14px;
+  color: var(--white-a50);
+  font-size: 0.72rem;
+}
+
+.calendarLegend span:first-child {
+  margin-right: 4px;
+}
+
+.calendarLegend span:last-child {
+  margin-left: 4px;
+}
+
+/* --- Save as playlist, save video --- */
+.playlistSave {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  width: min(820px, 100%);
+  margin: 26px auto 0;
+  padding: 18px 22px;
+  border: 1px solid var(--white-a10);
+  border-radius: var(--radius-sheet);
+  background: var(--white-a04);
+  backdrop-filter: blur(16px);
+  text-align: left;
+}
+
+.playlistSaveText {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1 1 260px;
+}
+
+.playlistSaveText strong {
+  font-size: 1rem;
+}
+
+.playlistSaveText span {
+  color: var(--white-a60);
+  font-size: 0.86rem;
+}
+
+.playlistSaveActions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.videoButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  padding: 11px 18px;
+  border: 1px solid var(--white-a16);
+  border-radius: var(--radius-lg);
+  background: var(--white-a05);
+  color: var(--text-bright);
+  font-family: inherit;
+  font-size: 0.88rem;
+  font-weight: 650;
+  cursor: pointer;
+  transition: background var(--dur-base) var(--ease-emphasized);
+}
+
+.videoButton:hover {
+  background: var(--white-a12);
+}
+
+.videoProgress {
+  position: relative;
+  width: 64px;
+  height: 4px;
+  border-radius: var(--radius-pill);
+  background: var(--white-a14);
+  overflow: hidden;
+}
+
+.videoProgress span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--video-progress, 0%);
+  background: var(--accent-light);
+}
+
+@media (max-width: 640px) {
+  .soundtrack {
+    margin-top: 10px;
+    max-width: calc(100vw - 32px);
+  }
+
+  .genreRow {
+    grid-template-columns: 96px minmax(0, 1fr) 40px;
+    gap: 10px;
+  }
+
+  /* the whole year fits the screen: the squares shrink rather than scroll */
+  .calendarScroll {
+    --cell-gap: 2px;
+    --cell: max(4px, calc((100vw - 84px) / var(--weeks, 53) - var(--cell-gap)));
+  }
+
+  .calendar,
+  .calendarMonths {
+    grid-template-columns: 0 repeat(var(--weeks, 53), var(--cell));
+  }
+
+  .calendar {
+    padding: 12px 10px;
+  }
+
+  .calendarMonths {
+    font-size: 0.6rem;
+  }
+
+  /* no room for weekday names beside squares this small */
+  .calendarDays {
+    visibility: hidden;
+  }
+
+  .playlistSave {
+    padding: 16px;
+  }
+}

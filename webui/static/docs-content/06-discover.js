@@ -22,6 +22,21 @@ The hero showcases **recommended artists** based on your library. Each slide say
 `
         },
         {
+            id: 'disc-new-profile',
+            title: 'A New Profile',
+            lede: 'Discover is full on day one, and five artists you pick make it yours right away.',
+            body: `
+Until a profile has told SoulSync about **five artists** (played a couple of times each, on its watchlist, or picked by hand), Discover doesn't wait for a watchlist scan to have something to show:
+
+- **Trending picks**: the hero and Recommended Artists fill from charts SoulSync already reads, Deezer's genre charts, SoulSync Charts from the network, and Beatport when it has been opened. Every pick says where it came from, for example *Trending from Deezer's Rock chart*. Artists you already own are left out.
+- **Make Discover yours**: a banner at the top offers the quickest ways in. **Pick artists you love** opens a picker: search, or browse what's popular by genre, and choose five or more. **Connect ListenBrainz** and **Connect Last.fm** open My Accounts (an account you already linked isn't offered again). **Import Spotify history** shows up once that import is on your server.
+
+Picked artists count as artists you chose, exactly like your library and watchlist. Their similar artists are fetched the moment you save, the banner shows the progress, and the hero and Recommended Artists fill as each one lands, with the reason *Because you picked …*. The next watchlist scan builds on them like any other seed.
+
+The banner is per profile. Hide it with **×** and it stays hidden; once a profile has enough history it never shows again.
+`
+        },
+        {
             id: 'disc-playlists',
             title: 'Discovery Playlists',
             lede: 'Auto-generated playlists from your discovery pool and your own listening data.',

@@ -170,6 +170,25 @@ Each works on the caller's own listening history: the admin's is the shared one,
 - `GET /api/library/v2/artists/<id>/your-plays` (Library): `{listening: {play_count, first_played, last_played, plays_30d, rank, artists_played, months: [{month, plays}], top_tracks: [{title, album, play_count, last_played, track_id, album_id, thumb_url}]}}`, or `listening: null` when the caller never played them. A play counts when it names the artist or one of its aliases, or is linked to one of its library tracks.
 - Album tracks (`GET /api/library/v2/albums/<id>`) carry `popular_source`, `lastfm` or `listenbrainz`, on the tracks marked `popular`.
 
+### A new profile's Discover (web UI routes)
+
+A profile with fewer than five taste seeds (artists played at least twice, watchlist artists, artists it picked) is new. Everything here is per profile.
+
+- `GET /api/discover/starter`: `{seeds, threshold, needs_seeds, dismissed, show_banner, picked: [{name, deezer_id, image_url}], connections: {listenbrainz, lastfm}, spotify_import: {available, href}, build: {state, done, total, stored}}`. `build.state` is `idle`, `running`, `done` or `failed`.
+- `POST /api/discover/starter/dismiss`: hide the banner for this profile.
+- `GET /api/discover/starter/artists?genre=<deezer genre id>` or `?q=<search>`: `{artists: [{name, deezer_id, image_url, popularity}], genres: [{id, name}]}` for the picker. Blocked artists are left out.
+- `POST /api/discover/starter/picks` `{artists: [{name, deezer_id, image_url}]}`: keep them as this profile's picked artists and fetch their similar artists in the background (`build` reports progress). An empty list is a `400`.
+- While a profile is new and has no recommendations, `GET /api/discover/similar-artists` answers chart picks with `starter: true`, each with `explanation: {kind: "trending", seeds: [{name: "Deezer's Rock chart"}]}`, and the hero does the same. Recommendations from picked artists carry `explanation.kind: "picked"`.
+
+### Your Year extras (web UI routes)
+
+Everything reads the same twelve-month window and listening pile as `GET /api/stats/year`.
+
+- `GET /api/stats/year` now also has `days` (`[{date, plays, minutes}]`, every day with music), `streak` (`{days, start, end}`, the longest run), `top_genres` (`[{genre, plays, share}]`, from the library's artists) and `peak_day.minutes` / `peak_day.top_artist`. A year cached before these arrives without them until the worker rebuilds it.
+- `POST /api/stats/year/playlist` `{size: 50 | 100}`: the year's most played songs into this profile's user playlist "Your <year>". Saving again updates the same playlist. `{id, name, track_count, created}`; `400` when nothing was played.
+- `GET /api/stats/year/soundtrack`: `{tracks}`, up to three of the year's top songs that are in the library with a file, in the player's queue shape plus `start_ms` and `duration_ms`.
+- `GET /api/stats/year/banner`: `{show, year}`, true from Dec 1 to Jan 15 when there is a year to show and this profile hasn't hidden it. The first time it shows, the profile gets one notification. `POST /api/stats/year/banner/dismiss` hides it until next season.
+
 ### Update file locations (web UI routes, admins only)
 
 After the music library folder moves, these point the library's file records at where the files are now. Files are never touched, and the media server's own path for a file is never changed. One job runs at a time, in the background.
