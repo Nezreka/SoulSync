@@ -12607,19 +12607,28 @@ class MusicDatabase:
             params)
         return cursor.fetchall()
 
-    def get_tracks_for_m3u_resolution(self, server_source: Optional[str] = None) -> List[Dict[str, str]]:
+    def get_tracks_for_m3u_resolution(self, server_source: Optional[str] = None) -> List[Dict[str, Any]]:
         """Bulk-load (artist, title, file_path) for in-memory M3U path resolution.
 
         ONE indexed read instead of a per-artist search loop. SQLite WAL allows it
         to run concurrently with the enrichment/scan writers, so M3U export no
         longer blocks behind them (the 'Export M3U hangs forever' report). Only
         rows that actually have a file_path are returned (the rest can't go in an
-        M3U anyway)."""
+        M3U anyway).
+
+        ``artist`` is the album artist. ``credits`` is everyone the track is
+        credited to (lib2_track_artists, read through its primary key) and
+        ``track_artist`` the per-track credit text, so "A & B" on A's album
+        resolves for a playlist that says "A & B" or just "B" (#2214)."""
         try:
             from core.library2.sql_util import scoped_primary_file_join
             conn = self._get_connection()
             cursor = conn.cursor()
             sql = ("SELECT tracks.title AS title, artists.name AS artist_name, "
+                   "       tracks.track_artist AS track_artist, "
+                   "       (SELECT GROUP_CONCAT(ca.name, char(31)) FROM lib2_track_artists ta "
+                   "        JOIN lib2_artists ca ON ca.id = ta.artist_id "
+                   "        WHERE ta.track_id = tracks.id) AS credit_names, "
                    "       COALESCE((SELECT NULLIF(m.server_path, '') "
                    "FROM lib2_media_server_mappings m "
                    "WHERE m.entity_type='track' AND m.entity_id=tracks.id "
@@ -12639,7 +12648,10 @@ class MusicDatabase:
                 sql += " AND " + on_sql
                 params.extend(on_params)
             cursor.execute(sql, params)
-            return [{'title': r['title'] or '', 'artist': r['artist_name'] or '', 'file_path': r['file_path']}
+            return [{'title': r['title'] or '', 'artist': r['artist_name'] or '',
+                     'track_artist': r['track_artist'] or '',
+                     'credits': [n for n in (r['credit_names'] or '').split('\x1f') if n],
+                     'file_path': r['file_path']}
                     for r in cursor.fetchall()]
         except Exception as e:
             logger.error(f"Error bulk-loading tracks for M3U resolution: {e}")

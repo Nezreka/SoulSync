@@ -26,6 +26,7 @@ def test_returns_artist_title_path(tmp_path):
                         file_path='/music/nb/how.flac')
     rows = db.get_tracks_for_m3u_resolution(server_source='jellyfin')
     assert rows == [{'title': 'How You Remind Me', 'artist': 'Nickelback',
+                     'track_artist': '', 'credits': ['Nickelback'],
                      'file_path': '/music/nb/how.flac'}]
 
 
