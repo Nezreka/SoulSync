@@ -3,7 +3,7 @@
  * services, MetaSync (music) and Notifications (video), one pill each.
  *
  * Servers and services reads the tab back in one sentence, then: the media
- * server as a pick-one row with its state in words (View Configuration opens
+ * server as a pick-one row with its state in words (View configuration opens
  * that server's panel in the side sheet), the metadata source, and the
  * services as tiles whose status is what SoulSync knows (serviceStatus), each
  * opening its card in the side sheet.
@@ -175,7 +175,7 @@ export function ConnectionsPage(props: SettingsTabProps) {
       : typeof meta.fallback_source === 'string' && meta.fallback_source
         ? meta.fallback_source
         : 'deezer';
-  // the sheet's answer: its own Test, else Test Server's while it is the active one
+  // the sheet's answer: its own Test, else Test server's while it is the active one
   const viewingNow = viewing
     ? serverState(
         viewing,

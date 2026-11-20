@@ -103,11 +103,20 @@ export function Pills({
   idPrefix?: string;
 }) {
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
-    if (!step) return;
-    event.preventDefault();
     const at = items.findIndex((item) => item.key === value);
-    const next = items[(at + step + items.length) % items.length];
+    const to =
+      event.key === 'ArrowRight'
+        ? (at + 1) % items.length
+        : event.key === 'ArrowLeft'
+          ? (at - 1 + items.length) % items.length
+          : event.key === 'Home'
+            ? 0
+            : event.key === 'End'
+              ? items.length - 1
+              : -1;
+    if (to < 0) return;
+    event.preventDefault();
+    const next = items[to];
     onChange(next.key);
     const buttons = event.currentTarget.querySelectorAll<HTMLElement>('[role="tab"]');
     buttons[items.indexOf(next)]?.focus();

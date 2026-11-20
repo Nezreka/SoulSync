@@ -13,7 +13,7 @@ SoulSync needs credentials for the services it queries for metadata and enrichme
 
 Settings save themselves a moment after you change them. The status at the top right says **All changes saved**, **Save now** while a change is waiting (click it to save straight away), or **Retry save** if a save failed. Rather save by hand? Turn off **Save settings as I change them** under System, General. Changes then wait for the save button, and leaving Settings without saving drops them.
 
-![Service credentials in Settings: the service cards grouped under Metadata, Scrobbling and Extras](settings-services.jpg)
+![Connections, Servers and services: the service tiles grouped under Metadata, Scrobbling and Extras, each with its status in words](settings-services.jpg)
 
 ## Service list
 
@@ -123,7 +123,7 @@ These live on other tabs, not Downloads:
 - **Lossy copy** — on the **Quality** tab ("Create lossy copy of downloaded FLAC files"): optionally keep a lossy copy of each downloaded FLAC alongside the original
 - **YouTube cookies** — on **Downloads › Sources**, in the YouTube sheet ("Browser cookies" / "Paste cookies.txt"): authenticate with a browser profile or a \`cookies.txt\` file when YouTube rate-limits anonymous downloads
 
-![Downloads settings: the download chain with Soulseek tried first and YouTube as fallback](settings-downloads.jpg)
+![Downloads, Sources: the music order read back in a sentence, Soulseek tried first, then YouTube, then Qobuz](settings-downloads.jpg)
 `
         },
         {
@@ -231,7 +231,7 @@ On **Library › Folders**. Your **Music library folder** is already covered —
             title: 'Database Maintenance',
             lede: 'Backups, vacuuming, and cache management to keep SoulSync healthy.',
             body: `
-![Database maintenance: database size, Compact database and incremental vacuum](settings-maintenance.jpg)
+![System, Maintenance: the database read back in a sentence, its size, free space, write-ahead log, Tidy up and Show biggest tables](settings-maintenance.jpg)
 
 ## Backups
 

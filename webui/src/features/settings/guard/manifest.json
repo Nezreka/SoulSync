@@ -11189,15 +11189,15 @@
       "sides": ["music"],
       "scenario": "music"
     },
-    "#stg-server-card \"Test Server\"": {
-      "label": "Test Server",
+    "#stg-server-card \"Test server\"": {
+      "label": "Test server",
       "anchor": "stg-server-card",
       "count": 1,
       "sides": ["music", "video"],
       "scenario": "music"
     },
-    "#stg-server-card \"View Configuration\"": {
-      "label": "View Configuration",
+    "#stg-server-card \"View configuration\"": {
+      "label": "View configuration",
       "anchor": "stg-server-card",
       "count": 1,
       "sides": ["music", "video"],
@@ -11233,15 +11233,15 @@
       "sides": ["music", "video"],
       "scenario": "music"
     },
-    "#stg-video-server-card \"Test Server\"": {
-      "label": "Test Server",
+    "#stg-video-server-card \"Test server\"": {
+      "label": "Test server",
       "anchor": "stg-video-server-card",
       "count": 1,
       "sides": ["music", "video"],
       "scenario": "music"
     },
-    "#stg-video-server-card \"View Configuration\"": {
-      "label": "View Configuration",
+    "#stg-video-server-card \"View configuration\"": {
+      "label": "View configuration",
       "anchor": "stg-video-server-card",
       "count": 1,
       "sides": ["music", "video"],
@@ -13139,7 +13139,7 @@
     "#post-processing-options \"More about this setting\"": {
       "label": "More about this setting",
       "anchor": "post-processing-options",
-      "count": 11,
+      "count": 10,
       "sides": ["music", "video"],
       "scenario": "music"
     },

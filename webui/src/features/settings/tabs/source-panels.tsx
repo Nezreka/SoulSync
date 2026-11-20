@@ -306,6 +306,13 @@ export function LidarrPanel({ store }: { store: SettingsStore }) {
           onChange={(value) => store.set('lidarr_download', 'api_key', value)}
         />
       </SheetField>
+      <Note info>
+        Lidarr downloads through its own indexers and download clients (usenet and torrent).{' '}
+        <strong>Best for whole albums.</strong> Lidarr is album-first: a search by track name
+        usually finds nothing, so for playlists it mostly passes the search on to the next source in
+        the order. Put it first in the music order only when you want whole albums through your
+        indexers.
+      </Note>
       <SheetGroup title="Albums and folders" />
       <Row
         label="Whole album via Lidarr, on by default"
@@ -352,13 +359,6 @@ export function LidarrPanel({ store }: { store: SettingsStore }) {
           onChange={(event) => store.set('lidarr_download', 'download_path', event.target.value)}
         />
       </SheetField>
-      <Note info>
-        Lidarr downloads through its own indexers and download clients (usenet and torrent).{' '}
-        <strong>Best for whole albums.</strong> Lidarr is album-first: a search by track name
-        usually finds nothing, so for playlists it mostly passes the search on to the next source in
-        the order. Put it first in the music order only when you want whole albums through your
-        indexers.
-      </Note>
     </Panel>
   );
 }

@@ -75,6 +75,24 @@ describe('what it finds', () => {
     expect(find(index, 'SoulSync API').path).toBe('System › General');
   });
 
+  it('a curated entry says where its field really is, pill and sheet included', () => {
+    page(`${PAGE}<div id="lidarr-download-settings-container" class="src-config-panel">
+      <div data-row><label for="soulseek-url">slskd URL</label><input id="soulseek-url"></div></div>`);
+    const hit = buildIndex('music').find(
+      (h) =>
+        h.curated &&
+        h.entry?.anchor &&
+        'id' in h.entry.anchor &&
+        h.entry.anchor.id === 'soulseek-url',
+    )!;
+    expect(hit.path).toBe('Downloads › Sources › Lidarr');
+    // off the page, the tab and its hint
+    page(PAGE);
+    const off = buildIndex('music').find((h) => h.key === hit.key)!;
+    expect(off.path.startsWith('Downloads')).toBe(true);
+    expect(off.path).not.toBe('Downloads › Sources › Lidarr');
+  });
+
   it('the curated entries speak for their field, so it is not listed twice', () => {
     const index = buildIndex('music');
     // "retry-exhaustive" has no curated entry here; "Concurrent downloads" does
@@ -125,6 +143,30 @@ describe('landing on one', () => {
     });
     expect(open).toHaveBeenCalledWith('soulseek');
     expect(nav.get()).toMatchObject({ tab: 'downloads', view: 'sources' });
+  });
+
+  it('a field drawn again in its sheet is found by its id, and the More over it opens', async () => {
+    const hit = find(buildIndex('music'), 'Peer patience');
+    // the sheet draws the panel anew: the indexed node is gone, a copy with
+    // the same id sits behind a closed More in an open dialog
+    document.getElementById('made-up-timeout')!.closest('[data-row]')!.remove();
+    document.body.insertAdjacentHTML(
+      'beforeend',
+      `<aside role="dialog"><button aria-controls="more-1" aria-expanded="false">More</button>
+        <div id="more-1" hidden><div data-row><input id="made-up-timeout"></div></div></aside>`,
+    );
+    const more = document.querySelector<HTMLButtonElement>('[aria-controls="more-1"]')!;
+    more.addEventListener('click', () => {
+      document.getElementById('more-1')!.hidden = false;
+      more.setAttribute('aria-expanded', 'true');
+    });
+    let landed = false;
+    await act(async () => {
+      landed = await landHit({ ...hit, open: { source: 'soulseek' } });
+    });
+    expect(landed).toBe(true);
+    expect(document.getElementById('more-1')!.hidden).toBe(false);
+    expect(document.activeElement?.id).toBe('made-up-timeout');
   });
 });
 

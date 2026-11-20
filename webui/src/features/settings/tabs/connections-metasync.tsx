@@ -433,13 +433,15 @@ export function MetaSyncSection({ opened }: Pick<SettingsTabProps, 'opened'>) {
     <div data-metasync="">
       <MetaSyncHero facts={facts} />
       <div className={s.cards}>
-        <Note info>
-          MetaSync is a small companion program that runs next to SoulSync and joins pools for you.
-          The first pool is SIN, the signal network. Step 1 connects the two programs on this
-          machine; step 2 joins a pool, and MetaSync does the joining: SoulSync never talks to a
-          pool itself, it only hands MetaSync your pool key. Installing MetaSync joins nothing by
-          itself.
-        </Note>
+        <div className={s.stack}>
+          <Note info>
+            MetaSync is a small companion program that runs next to SoulSync and joins pools for
+            you. The first pool is SIN, the signal network. Step 1 connects the two programs on this
+            machine; step 2 joins a pool, and MetaSync does the joining: SoulSync never talks to a
+            pool itself, it only hands MetaSync your pool key. Installing MetaSync joins nothing by
+            itself.
+          </Note>
+        </div>
 
         <Card
           title="Step 1: connect SoulSync and MetaSync"
@@ -451,6 +453,7 @@ export function MetaSyncSection({ opened }: Pick<SettingsTabProps, 'opened'>) {
           }
         >
           <Row
+            field
             label="Connection"
             help="Connect shows a code here and in MetaSync's dashboard. Approve it there and the two programs swap keys on their own."
             more="MetaSync gets a key to read this SoulSync, SoulSync gets a key to talk to MetaSync. You never type or see either key."
@@ -591,7 +594,7 @@ export function MetaSyncSection({ opened }: Pick<SettingsTabProps, 'opened'>) {
           }
         >
           <Row label="MetaSync" stack>
-            <StatusWords id="metasync-status" tone={statusTone}>
+            <StatusWords id="metasync-status" tone={statusTone} className={s.stWrap}>
               {status}
             </StatusWords>
             <FieldNote id="metasync-status-detail">

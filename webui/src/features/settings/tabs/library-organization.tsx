@@ -786,7 +786,12 @@ export function MusicTagOptions({ store }: { store: SettingsStore }) {
       <Row
         label="Move featured artists to title"
         htmlFor="feat-in-title"
-        help="Only the primary artist in the ARTIST tag; the others go in the title as (feat. ...)."
+        // a node, not a string: the "." in "feat." is not the end of a sentence
+        help={
+          <>
+            Only the primary artist in the ARTIST tag; the others go in the title as (feat. Name).
+          </>
+        }
       >
         <Switch
           id="feat-in-title"

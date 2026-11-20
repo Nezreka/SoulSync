@@ -1337,6 +1337,15 @@ button.chip:hover:not(:disabled) {
   white-space: nowrap;
 }
 
+/* a status that is a sentence (MetaSync's): it wraps instead of cutting */
+.stWrap {
+  align-items: baseline;
+}
+
+.stWrap .stText {
+  white-space: normal;
+}
+
 .st[data-tone='ok'] {
   color: var(--white-a80);
 }

@@ -1613,7 +1613,7 @@ Enter API keys for **TMDB, TVDB, OMDb, fanart.tv, OpenSubtitles, SubDL, SubSourc
             body: `
 Turn on **Download subtitles** (Settings → Library → Subtitles) and every import gets external \`.srt\` files for your **subtitle languages**, written next to the video as \`<video>.<lang>.srt\`. Per-movie and per-show language overrides live on the detail pages.
 
-![Subtitle provider settings: the OpenSubtitles, SubDL and SubSource cards](vset-subtitles.jpg)
+![Library, Subtitles on the video side: the languages, the hearing-impaired preference, forced tracks and what counts as already having one](vset-subtitles.jpg)
 
 **Providers.** OpenSubtitles, SubDL and SubSource (free API keys, each with a **Test** button), **Embedded** (extracts a text track already inside the file) and optional **Whisper** local transcription as the last resort. Drag the **provider chain** to set the order. Candidates are scored hash-first: a subtitle timed for your exact file beats one that only shares the release name, and anything under the minimum score is never downloaded.
 
@@ -1638,7 +1638,7 @@ A hearing-impaired track counts for a plain request. A forced track never does, 
             body: `
 Wire up event **notifications** — Discord, webhook, Telegram — for grabs, imports, and upgrades, and send a **test** to verify delivery before you rely on it.
 
-![Notification settings live at the bottom of the video side's Connections settings](vset-notify.jpg)
+![Notification settings live on the Notifications pill of the video side's Connections](vset-notify.jpg)
 
 > [!WARNING]
 > Notification config exposes webhook URLs and bot tokens, so it's **admin-only**.

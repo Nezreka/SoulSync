@@ -121,6 +121,24 @@ describe('the address and the sources model', () => {
     expect(model.getState().open).toBe('soulseek');
   });
 
+  it('the search going to the tab and opening the sheet in one go keeps the sheet', async () => {
+    act(() => nav.go('connections'));
+    page();
+    await settle();
+    // shell/search.tsx landHit: nav.go, then window.openSourceModal, one render
+    act(() => {
+      nav.go('downloads', 'sources');
+      model.openModal('lidarr');
+    });
+    await settle();
+    expect(model.getState().open).toBe('lidarr');
+    expect(nav.get()).toMatchObject({ tab: 'downloads', view: 'sources', open: 'lidarr' });
+    // and Back to no sheet still closes it
+    act(() => nav.fromAddress({ tab: 'downloads', view: 'sources' }));
+    await settle();
+    expect(model.getState().open).toBeNull();
+  });
+
   it('leaving the tab closes the sheet; a name that is no source is dropped', async () => {
     act(() => nav.fromAddress({ tab: 'downloads', view: 'sources', open: 'nonsense' }));
     page();

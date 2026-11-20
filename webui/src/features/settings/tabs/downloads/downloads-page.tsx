@@ -79,9 +79,17 @@ function useAddressSync(model: SourcesModel) {
       nav.patch({ kind: now.kind });
   }, [kind, onSources]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // what the address said last time, so a tab change is not read as a close
+  const addressOpen = useRef(state.open);
   useEffect(() => {
+    const was = addressOpen.current;
+    addressOpen.current = state.open;
     const now = model.getState().open;
     if (state.open === now) return;
+    // opened from somewhere else (window.openSourceModal) as the tab arrived:
+    // the address had no sheet before either, so the sheet stays and the
+    // address follows it (the effect below)
+    if (state.tab === TAB && !state.open && !was && now) return;
     // the sheet belongs to this tab: leaving the tab closes it
     if (state.tab !== TAB || !state.open) {
       if (now) {

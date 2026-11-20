@@ -518,6 +518,17 @@ function typingIn(target: EventTarget | null): boolean {
   );
 }
 
+/** on screen and taking clicks: not hidden, not display:none, not faded out
+ *  with its clicks off (the track detail overlay at rest) */
+function showing(el: HTMLElement): boolean {
+  for (let node: HTMLElement | null = el; node; node = node.parentElement) {
+    if (node.hidden) return false;
+    const style = getComputedStyle(node);
+    if (style.display === 'none' || style.visibility === 'hidden') return false;
+  }
+  return getComputedStyle(el).pointerEvents !== 'none';
+}
+
 /** `/` on the Settings page goes to its search. Ctrl/Cmd K is the help
  *  palette's everywhere, Settings included (features/help/host.tsx), and the
  *  palette finds settings too. */
@@ -527,8 +538,10 @@ export function onSettingsSearchKey(e: KeyboardEvent) {
   const page = document.getElementById('settings-page');
   const input = document.getElementById('stg-search-input') as HTMLInputElement | null;
   if (!page || !input || !page.offsetParent) return;
-  // a modal on top (a service or source window) keeps its own keys
-  if (document.querySelector('[aria-modal="true"]')) return;
+  // a modal on top (a service or source sheet) keeps its own keys. The
+  // closed sheets stay in the page with aria-modal, hidden, so only one that
+  // is showing counts
+  if ([...document.querySelectorAll<HTMLElement>('[aria-modal="true"]')].some(showing)) return;
   e.preventDefault();
   input.focus();
   input.select();

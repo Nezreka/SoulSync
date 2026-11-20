@@ -83,7 +83,7 @@ SoulSync downloads from multiple sources. Connect each source and set their try-
 
 Torrent and Usenet search each Prowlarr indexer on its own, so one slow or broken indexer never costs you the others' results. When some indexers fail, a note above the results names them (click **Details** for each one's error), so you know the list may be missing releases.
 
-![Download source settings with the hybrid chain, Soulseek first and YouTube as fallback](dl-sources.jpg)
+![Downloads, Sources: the music order, Soulseek tried first, then YouTube, then Qobuz](dl-sources.jpg)
 
 > [!TIP]
 > **Hybrid mode** is recommended for most users. It tries your primary source first, then falls back through your configured priority order. Order all sources via drag-and-drop in Settings → Downloads.

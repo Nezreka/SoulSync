@@ -63,7 +63,8 @@ def test_extra_libraries_section_stops_being_a_red_herring():
 
 
 def test_docs_and_setup_tell_the_same_story():
-    assert "Additional Music Libraries" in _DOCS
+    # the docs name the card as Library > Folders titles it (settings-bic phase 7)
+    assert "Additional music libraries" in _DOCS
     # setup says downloads and music library, never the old transfer words
     assert "name: 'Downloads'" in _SETUP and "name: 'Music library'" in _SETUP
     assert "Transfer" not in _SETUP.split("FOLDER_INFO", 1)[1].split("};", 1)[0]

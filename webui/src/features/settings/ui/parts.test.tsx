@@ -68,6 +68,14 @@ describe('Pills', () => {
     expect(onChange).toHaveBeenLastCalledWith('filtering');
     fireEvent.click(tabs[2]);
     expect(onChange).toHaveBeenLastCalledWith('filtering');
+    // Home and End, as the People pills and the WAI tabs pattern have them
+    fireEvent.keyDown(screen.getByRole('tablist'), { key: 'End' });
+    expect(onChange).toHaveBeenLastCalledWith('filtering');
+    fireEvent.keyDown(screen.getByRole('tablist'), { key: 'Home' });
+    expect(onChange).toHaveBeenLastCalledWith('sources');
+    onChange.mockClear();
+    fireEvent.keyDown(screen.getByRole('tablist'), { key: 'Enter' });
+    expect(onChange).not.toHaveBeenCalled();
   });
   it('marks a pill that needs a look, and shows a count', () => {
     render(<Pills label="Downloads" items={items} value="sources" onChange={() => undefined} />);

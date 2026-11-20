@@ -882,7 +882,8 @@ export function SecurityView({ store }: { store: SettingsStore }) {
               rows={2}
               invalid={!!authHeader.value && !proxyTrusted.value}
               placeholder={'172.18.0.2\n172.18.0.0/16'}
-              {...proxyTrusted}
+              value={proxyTrusted.value}
+              onChange={proxyTrusted.onChange}
             />
           </Row>
           <Row

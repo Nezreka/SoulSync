@@ -247,7 +247,7 @@ The **Podcast Media Format** setting (Settings → Library → Organization) cho
             body: `
 All podcast settings live under **Settings → Library** (inside the Music media sub-tab — there is no Podcasts sub-tab):
 
-![Podcast settings live under Settings → Library, inside the Music media sub-tab](pod-settings.jpg)
+![Podcast settings live under Settings → Library → Naming, with Podcasts picked](pod-settings.jpg)
 
 | Setting (exact label) | Location | Default |
 |----------------------|----------|---------|

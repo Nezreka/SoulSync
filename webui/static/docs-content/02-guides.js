@@ -126,10 +126,10 @@ Once your services are connected, do these five things to get the most out of So
             title: 'How to: Connect Your Media Server',
             lede: 'Link your media server so downloaded music appears in your library and streams in the built-in player.',
             body: `
-![Server Connections in Settings, with connection cards for Plex, Jellyfin, Navidrome and the other supported servers](settings-media-server.jpg)
+![Server connections in Settings, with connection cards for Plex, Jellyfin, Navidrome and the other supported servers](settings-media-server.jpg)
 
 ::: steps
-1. **Go to Settings** — scroll to the Server Connections section.
+1. **Go to Settings** — scroll to the Server connections section.
 2. **Enter your server details** — URL plus credentials: Plex (URL + Token), Jellyfin/Emby (URL + API Key), or Navidrome (URL + Username + Password). Then select your music library from the dropdown.
 3. **Click Test** — a green checkmark confirms the connection works.
 :::

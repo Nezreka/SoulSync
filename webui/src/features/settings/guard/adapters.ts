@@ -313,7 +313,7 @@ const genres = {
   },
 };
 
-// ── which media server is the active one (Connections > Server Connections) ──
+// ── which media server is the active one (Connections > Server connections) ──
 
 const SERVERS = ['plex', 'jellyfin', 'navidrome', 'music_assistant', 'soulsync'];
 const server = {

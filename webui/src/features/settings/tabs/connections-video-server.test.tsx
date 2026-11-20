@@ -98,12 +98,12 @@ function State() {
 }
 
 describe('the video media server', () => {
-  it('one card on the parts: a pick-one row, Test and View Configuration in its head, no colons', async () => {
+  it('one card on the parts: a pick-one row, Test and View configuration in its head, no colons', async () => {
     const { container } = render(<VideoServerConnection />);
     await shown();
     const cards = container.querySelectorAll('[data-card]');
     expect(cards).toHaveLength(1);
-    expect(cards[0].getAttribute('data-card')).toBe('Server Connections');
+    expect(cards[0].getAttribute('data-card')).toBe('Server connections');
     // one heading: the old group's own "Server Connection" heading went
     expect(container.querySelectorAll('h3')).toHaveLength(0);
     const radios = [...container.querySelectorAll('[role="radio"]')];
@@ -111,7 +111,7 @@ describe('the video media server', () => {
     expect(q('[data-video-server-toggle="jellyfin"]').getAttribute('aria-checked')).toBe('true');
     fireEvent.click(
       [...container.querySelectorAll('button')].find(
-        (b) => b.textContent === 'View Configuration',
+        (b) => b.textContent === 'View configuration',
       )!,
     );
     expect(onView).toHaveBeenCalled();

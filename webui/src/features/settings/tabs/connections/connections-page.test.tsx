@@ -66,7 +66,7 @@ describe('the music server sheet', () => {
   it('holds the server being looked at, on the parts, with no colon in a label', () => {
     const root = page();
     act(() => store.hydrate({ active_media_server: 'jellyfin', jellyfin: {} }));
-    fireEvent.click(button(root, 'View Configuration'));
+    fireEvent.click(button(root, 'View configuration'));
     const sheet = document.getElementById('server-config-sheet')!;
     expect(sheet.hidden).toBe(false);
     expect(document.getElementById('server-sheet-title')!.textContent).toBe('Jellyfin');
@@ -82,7 +82,7 @@ describe('the music server sheet', () => {
   it('has one Test, in its foot, for the server it shows; its answer is beside it', async () => {
     const root = page();
     act(() => store.hydrate({ active_media_server: 'navidrome', navidrome: {} }));
-    fireEvent.click(button(root, 'View Configuration'));
+    fireEvent.click(button(root, 'View configuration'));
     const sheet = document.getElementById('server-config-sheet')!;
     const tests = [...sheet.querySelectorAll('button')].filter((b) =>
       /^(Test|Verify)/.test(b.textContent ?? ''),
@@ -102,7 +102,7 @@ describe('the music server sheet', () => {
   it('Standalone verifies the music library folder', () => {
     const root = page();
     act(() => store.hydrate({ active_media_server: 'soulsync' }));
-    fireEvent.click(button(root, 'View Configuration'));
+    fireEvent.click(button(root, 'View configuration'));
     expect(document.getElementById('server-sheet-test')!.textContent).toBe(
       'Verify music library folder',
     );
@@ -116,7 +116,7 @@ describe('the music server sheet', () => {
 });
 
 describe('the video server', () => {
-  it('is one card with the same pattern, and View Configuration opens its own sheet', async () => {
+  it('is one card with the same pattern, and View configuration opens its own sheet', async () => {
     document.body.setAttribute('data-side', 'video');
     const root = page();
     act(() => videoServer.load());
@@ -130,7 +130,7 @@ describe('the video server', () => {
     expect([...root.querySelectorAll('h3')].map((h) => h.textContent)).not.toContain(
       'Server Connection',
     );
-    fireEvent.click(button(card, 'View Configuration'));
+    fireEvent.click(button(card, 'View configuration'));
     const sheet = document.getElementById('video-server-sheet')!;
     expect(sheet.hidden).toBe(false);
     expect(document.getElementById('video-server-sheet-title')!.textContent).toBe('Plex');

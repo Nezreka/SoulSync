@@ -1,6 +1,6 @@
 /**
- * Connections > Server Connections: the pick-one row and the active server
- * (state in words, View Configuration, Test Server), Plex's setup and PIN link,
+ * Connections > Server connections: the pick-one row and the active server
+ * (state in words, View configuration, Test server), Plex's setup and PIN link,
  * the library pickers and their endpoints, the playlist account, Music
  * Assistant's source, and testConnection.
  */
@@ -113,7 +113,7 @@ describe('the pick-one row', () => {
     expect(servers.every((b) => b.querySelector('img'))).toBe(true);
     expect(el('plex-toggle').getAttribute('aria-checked')).toBe('true');
     // its state is words: nothing is known yet
-    expect(document.querySelector('[data-card="Server Connections"]')!.textContent).toContain(
+    expect(document.querySelector('[data-card="Server connections"]')!.textContent).toContain(
       'Plex: Not tested yet',
     );
     // every panel is in the page (in the sheet's body, or a hidden home)
@@ -134,17 +134,17 @@ describe('the pick-one row', () => {
     expect(serverState('soulsync', null, undefined).text).toBe('Standalone: no media server');
   });
 
-  it('View Configuration opens the server being looked at; Test Server is in the card', async () => {
+  it('View configuration opens the server being looked at; Test server is in the card', async () => {
     const onView = vi.fn();
     render(<ServerConnections store={store} onView={onView} />);
     loaded({ active_media_server: 'navidrome' });
     const view = [...document.querySelectorAll('button')].find(
-      (b) => b.textContent === 'View Configuration',
+      (b) => b.textContent === 'View configuration',
     )!;
     fireEvent.click(view);
     expect(onView).toHaveBeenCalledWith('navidrome');
     const test = [...document.querySelectorAll('button')].find(
-      (b) => b.textContent === 'Test Server',
+      (b) => b.textContent === 'Test server',
     )!;
     fireEvent.click(test);
     await waitFor(() =>
@@ -221,7 +221,7 @@ describe('the servers', () => {
 });
 
 describe('Plex', () => {
-  it('configured: the setup offers View Configuration, which opens the fields', async () => {
+  it('configured: the setup offers View configuration, which opens the fields', async () => {
     answers['/api/plex/music-libraries'] = {
       success: true,
       libraries: [{ title: 'Music' }],

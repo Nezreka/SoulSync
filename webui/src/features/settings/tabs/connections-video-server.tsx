@@ -2,8 +2,8 @@
  * Connections > the video side's media server (SETTINGS_PORT.md, video pass
  * V3b; on the settings parts in settings-bic phase 3, the same card pattern
  * as the music side's): Plex or Jellyfin as a pick-one row with its state in
- * words, Test and View Configuration in the card's head, and which Movies, TV
- * and other TV libraries the scan reads as rows under it. View Configuration
+ * words, Test and View configuration in the card's head, and which Movies, TV
+ * and other TV libraries the scan reads as rows under it. View configuration
  * opens the server's fields (URL, token or key, the Jellyfin user) in the
  * side sheet (VideoServerFields). The state is video-server.ts. A field saves
  * when it is left, a pick or a switch at once.
@@ -162,7 +162,7 @@ export function VideoServerConnection({ onView }: { onView?: () => void }) {
   const state = useVideoServerState();
   return (
     <Card
-      title="Server Connections"
+      title="Server connections"
       hint="Pick one. Its fields start as your music side's: change them to point video at another server."
       id="stg-video-server-card"
       data-video-only=""
@@ -176,10 +176,10 @@ export function VideoServerConnection({ onView }: { onView?: () => void }) {
             disabled={!active}
             onClick={() => active && void videoServer.test(active)}
           >
-            Test Server
+            Test server
           </Btn>
           <Btn small icon="gear" disabled={!active} onClick={() => onView?.()}>
-            View Configuration
+            View configuration
           </Btn>
         </>
       }

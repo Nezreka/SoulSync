@@ -951,7 +951,7 @@ def test_both_server_sections_use_the_same_copy_style(index):
     # (settings-bic phase 3) both are the parts' Card with a one-line hint,
     # and the closing note is the card's quiet foot line
     servers = _read(_TABS + "connections-servers.tsx")
-    assert 'title="Server Connections"' in seg and 'title="Server Connections"' in servers
+    assert 'title="Server connections"' in seg and 'title="Server connections"' in servers
     assert '<p className={s.cardFoot}>' in seg
 
 def test_the_music_tab_shows_every_music_server_from_either_side():

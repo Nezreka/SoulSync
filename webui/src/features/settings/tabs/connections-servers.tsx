@@ -1,9 +1,9 @@
 /**
- * Connections > Server Connections (SETTINGS_PORT.md, step 10c): the music
+ * Connections > Server connections (SETTINGS_PORT.md, step 10c): the music
  * media server. The five toggles, Plex (its setup, Link to Plex by PIN,
  * re-link, manual setup, clear), Jellyfin, Navidrome (and the admin's own
  * playlist account), Music Assistant and Standalone, each server's library
- * picker, and Test Server. Also settings.js testConnection, which every
+ * picker, and Test server. Also settings.js testConnection, which every
  * card's Test button uses: a good Plex, Jellyfin or Navidrome test reloads
  * that server's library picker.
  *
@@ -690,7 +690,7 @@ function PlexServer({
               hidden={!configured}
               onClick={() => showConfiguration()}
             >
-              View Configuration
+              View configuration
             </Btn>
           </ActionRow>
         </div>
@@ -880,7 +880,7 @@ export function ServerConnections({
   store: SettingsStore;
   /** the sheet body the open server's panel shows in; hidden home otherwise */
   host?: HTMLElement | null;
-  /** View Configuration: open the sheet */
+  /** View configuration: open the sheet */
   onView?: (server: Server) => void;
 }) {
   const frame = useSyncExternalStore(statusFrames.subscribe, statusFrames.get);
@@ -912,7 +912,7 @@ export function ServerConnections({
   /** settings.js toggleServer: the server's panel, its pickers loaded */
   function show(server: Server) {
     setActive(server);
-    // Plex opens on its setup (Link, Manual, View Configuration)
+    // Plex opens on its setup (Link, Manual, View configuration)
     setView((v) => ({ ...v, config: server !== 'plex', setup: server === 'plex' }));
     if (server === 'plex') void plexLibs.reload();
     if (server === 'jellyfin') void jfUsers.reload().then(() => jfLibs.reload());
@@ -1175,7 +1175,7 @@ export function ServerConnections({
   return (
     <>
       <Card
-        title="Server Connections"
+        title="Server connections"
         hint="Pick one. Picking a server makes it the active one."
         id="stg-server-card"
         data-svc-side="music"
@@ -1183,7 +1183,7 @@ export function ServerConnections({
           <>
             <StatusWords tone={state.tone}>{`${serverName(chosen)}: ${state.text}`}</StatusWords>
             <Btn small onClick={() => void testConnection('server', store)}>
-              Test Server
+              Test server
             </Btn>
             <Btn
               small
@@ -1195,7 +1195,7 @@ export function ServerConnections({
                 if (active === 'plex' && plex && plex.style.display !== 'none') plex.click();
               }}
             >
-              View Configuration
+              View configuration
             </Btn>
           </>
         }

@@ -114,11 +114,20 @@ export function buildIndex(side: 'music' | 'video', root: ParentNode = document)
     const place = resolveTab(entry.tab);
     const def = tabDef(place.tab);
     if ('id' in entry.anchor) anchored.add(entry.anchor.id);
+    // where the field really is (tab, pill, sheet), when it is on the page;
+    // else the tab and the entry's hint
+    const at =
+      'id' in entry.anchor
+        ? root.querySelector<HTMLElement>(`#settings-page #${CSS.escape(entry.anchor.id)}`)
+        : null;
+    const trail = at ? placeOf(at).trail : [];
+    if (trail[trail.length - 1] === entry.label) trail.pop();
     hits.push({
       key: entry.id,
       label: entry.label,
-      path: [def.label, entry.hint].filter(Boolean).join(' › '),
-      words: entry.keywords ?? '',
+      path:
+        trail.length > 1 ? trail.join(' › ') : [def.label, entry.hint].filter(Boolean).join(' › '),
+      words: `${entry.hint ?? ''} ${entry.keywords ?? ''}`,
       tab: place.tab,
       open: entry.open,
       entry,
@@ -218,13 +227,30 @@ export async function landHit(hit: Hit): Promise<boolean> {
   } else if (hit.open && 'source' in hit.open) w.openSourceModal?.(hit.open.source);
   else if (hit.open && 'people' in hit.open) w.openPeopleSettings?.(hit.open.people);
   const anchor = hit.entry?.anchor ?? hit.anchor;
-  const find = () => (anchor ? findAnchor(anchor) : hit.el?.isConnected ? hit.el : null);
+  // a field drawn again (a source's panel is drawn anew in its sheet) is
+  // found again by its id
+  const find = () =>
+    anchor
+      ? findAnchor(anchor)
+      : hit.el?.isConnected
+        ? hit.el
+        : hit.el?.id
+          ? document.getElementById(hit.el.id)
+          : null;
   let el = find();
   for (let tries = 0; !el && tries < 20; tries += 1) {
     await new Promise((resolve) => setTimeout(resolve, 50));
     el = find();
   }
   if (!el) return false;
+  // a sheet's fields move into the sheet as it opens (and draw again there):
+  // wait for that, or the More it is behind opens on the copy that goes
+  if (hit.open && !('people' in hit.open)) {
+    const inSheet = () => !!find()?.closest('[role="dialog"]:not([hidden])');
+    for (let tries = 0; !inSheet() && tries < 20; tries += 1)
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    el = find() ?? el;
+  }
   reveal(el);
   // a click above re-renders its card: find it again before scrolling
   await new Promise((resolve) => setTimeout(resolve, 30));
