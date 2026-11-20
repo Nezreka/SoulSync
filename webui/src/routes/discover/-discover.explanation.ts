@@ -8,7 +8,13 @@
  * names that shelf happened to carry.
  */
 
-export type ExplanationKind = 'similar_to' | 'listened' | 'genre' | 'new_release' | 'trending';
+export type ExplanationKind =
+  | 'similar_to'
+  | 'listened'
+  | 'genre'
+  | 'new_release'
+  | 'trending'
+  | 'picked';
 
 export interface ExplanationSeed {
   name: string;
@@ -34,6 +40,7 @@ const LEAD: Record<ExplanationKind, string> = {
   genre: 'Because you like',
   new_release: 'New from',
   trending: 'Trending from',
+  picked: 'Because you picked',
 };
 
 /** When no seed could be named, say only what the kind truthfully is. */
@@ -43,6 +50,7 @@ const NO_SEEDS: Record<ExplanationKind, string> = {
   genre: 'From your genres',
   new_release: 'A new release',
   trending: 'Trending now',
+  picked: 'From artists you picked',
 };
 
 const TITLE_LEAD: Record<ExplanationKind, string> = {
@@ -51,6 +59,7 @@ const TITLE_LEAD: Record<ExplanationKind, string> = {
   genre: 'Your genres',
   new_release: 'New from',
   trending: 'Trending from',
+  picked: 'You picked',
 };
 
 function known(kind: string): kind is ExplanationKind {

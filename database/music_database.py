@@ -20696,6 +20696,13 @@ class MusicDatabase:
         """, (profile_id,))
         for row in cursor.fetchall():
             owned.update(str(v) for v in tuple(row) if v)
+        # artists picked on discover's "pick artists you love" are chosen
+        # too: their similar artists are what fills a new profile's shelves
+        from core.discovery.cold_start import SEEDS_KEY, picked_source_ids
+        cursor.execute("SELECT value FROM metadata WHERE key = ?", (f"{SEEDS_KEY}:{int(profile_id)}",))
+        picked = cursor.fetchone()
+        if picked and picked[0]:
+            owned.update(picked_source_ids(picked[0]))
         return owned
 
     def _stray_similar_artist_sources(self, cursor, profile_id: int = 1) -> set:

@@ -63,6 +63,19 @@ _HERO_CACHE = {}  # (profile_id, source) -> (expiry_ts, payload)
 _HERO_TTL_S = 1800
 
 
+def _starter_hero(database, profile_id, limit=10):
+    """the starter shelf's first picks for a new profile's hero, or []."""
+    try:
+        from core.discovery import cold_start
+        if not cold_start.is_new_profile(database, profile_id):
+            return []
+        from core.metadata.registry import get_deezer_client
+        return cold_start.starter_shelf(database, get_deezer_client(), limit=limit)
+    except Exception as e:  # noqa: BLE001 - the hero falls back to empty
+        logger.debug("starter hero skipped: %s", e)
+        return []
+
+
 def billboard_order(hero_artists):
     """a billboard needs a photo. deezer answers "no photo" with a real url
     to a grey silhouette (the md5 of an empty string), and coldplay sat on
@@ -119,6 +132,12 @@ def get_discover_hero():
             watchlist_artists = database.get_watchlist_artists(profile_id=pid)
 
             if not watchlist_artists:
+                # a new profile: chart picks until it has taste of its own
+                # (core/discovery/cold_start.py), never an empty hero
+                starter = _starter_hero(database, pid)
+                if starter:
+                    return jsonify({"success": True, "artists": starter, "source": 'deezer',
+                                    "fallback": "starter"})
                 return jsonify({"success": True, "artists": [], "source": active_source})
 
             # Convert watchlist artists to hero format

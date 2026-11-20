@@ -3,7 +3,8 @@
 Every producer writes this at the moment it makes the recommendation, from
 the signal it actually used, so no screen has to guess afterwards::
 
-    {"kind": "similar_to" | "listened" | "genre" | "new_release" | "trending",
+    {"kind": "similar_to" | "listened" | "genre" | "new_release" | "trending"
+             | "picked",
      "seeds": [{"name": "Tool", "id": "...", "source": "deezer"}],
      "confidence": 0.82}
 
@@ -12,7 +13,8 @@ artist cards and the per-track note on BYLT rows.
 
 ``kind`` says what the seeds are: artists yours resembles (similar_to),
 artists you play (listened), genres (genre), the artist with something new
-(new_release), or nothing personal (trending). ``confidence`` is 0..1, or
+(new_release), nothing personal (trending), or artists you picked by hand
+when discover asked what you love (picked). ``confidence`` is 0..1, or
 None when the producer has no honest number.
 """
 
@@ -21,7 +23,7 @@ from __future__ import annotations
 import math
 from typing import Any, Dict, Iterable, List, Optional
 
-KINDS = ('similar_to', 'listened', 'genre', 'new_release', 'trending')
+KINDS = ('similar_to', 'listened', 'genre', 'new_release', 'trending', 'picked')
 MAX_SEEDS = 5
 
 

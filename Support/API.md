@@ -157,6 +157,16 @@ Each kind (music, movies, TV, audiobooks) can be set to have an admin pick the r
 - Download automatically instead: `POST /api/requests/music/awaiting/auto` `{profile_id, key}`, `POST /api/requests/media/<id>/auto`, `POST /api/video/requests/<id>/auto` (a show joins the watchlist then).
 - The requester's list says it too: music and book rows in status `awaiting_selection`, video rows with `awaiting_selection: true` (nothing picked yet) or `picking: true` (a picked release is downloading).
 
+### A new profile's Discover (web UI routes)
+
+A profile with fewer than five taste seeds (artists played at least twice, watchlist artists, artists it picked) is new. Everything here is per profile.
+
+- `GET /api/discover/starter`: `{seeds, threshold, needs_seeds, dismissed, show_banner, picked: [{name, deezer_id, image_url}], connections: {listenbrainz, lastfm}, spotify_import: {available, href}, build: {state, done, total, stored}}`. `build.state` is `idle`, `running`, `done` or `failed`.
+- `POST /api/discover/starter/dismiss`: hide the banner for this profile.
+- `GET /api/discover/starter/artists?genre=<deezer genre id>` or `?q=<search>`: `{artists: [{name, deezer_id, image_url, popularity}], genres: [{id, name}]}` for the picker. Blocked artists are left out.
+- `POST /api/discover/starter/picks` `{artists: [{name, deezer_id, image_url}]}`: keep them as this profile's picked artists and fetch their similar artists in the background (`build` reports progress). An empty list is a `400`.
+- While a profile is new and has no recommendations, `GET /api/discover/similar-artists` answers chart picks with `starter: true`, each with `explanation: {kind: "trending", seeds: [{name: "Deezer's Rock chart"}]}`, and the hero does the same. Recommendations from picked artists carry `explanation.kind: "picked"`.
+
 ### Update file locations (web UI routes, admins only)
 
 After the music library folder moves, these point the library's file records at where the files are now. Files are never touched, and the media server's own path for a file is never changed. One job runs at a time, in the background.
