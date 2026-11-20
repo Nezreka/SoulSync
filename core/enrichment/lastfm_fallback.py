@@ -10,7 +10,9 @@ free sources, only for the fields last.fm has nothing for:
 - popularity: listenbrainz listeners and listens, and deezer fans
 - track popularity: listenbrainz listen counts for the artist's top
   recordings, onto each track last.fm has no playcount for, so an album's
-  popular flame still shows (core.library2.track_popularity)
+  popular flame still shows (core.library2.track_popularity). listenbrainz
+  wants a token for those since nov 2026: with no saved listenbrainz token
+  the tracks are not asked (and not stamped, so connecting it fills them)
 
 every source writes its own bucket in ``lib2_artists.enrichment``, never the
 ``lastfm`` one, so stored last.fm data is never touched and wins again the
@@ -40,6 +42,7 @@ logger = get_logger("lastfm_fallback")
 USER_AGENT = "SoulSync/2 (https://github.com/Nezreka/SoulSync)"
 WIKIDATA_API = "https://www.wikidata.org/w/api.php"
 WIKIPEDIA_SUMMARY = "https://en.wikipedia.org/api/rest_v1/page/summary/"
+LISTENBRAINZ_HOST = "api.listenbrainz.org"
 LISTENBRAINZ_POPULARITY = "https://api.listenbrainz.org/1/popularity/artist"
 LISTENBRAINZ_TOP_RECORDINGS = "https://api.listenbrainz.org/1/popularity/top-recordings-for-artist/"
 # in the artist's enrichment: when its tracks' listenbrainz counts were asked
@@ -68,16 +71,24 @@ def _throttle(host: str) -> None:
 def _http_json(method: str, url: str, *, params=None, json_body=None,
                host: str = "") -> Optional[Any]:
     """json, or None on a 404. anything else that is not a 200 raises
-    SourceError."""
+    SourceError. listenbrainz api calls carry the saved token when there is
+    one; a 401 to it puts that token aside for a while."""
     import requests
 
-    _throttle(host or url.split("/")[2])
+    from core import listenbrainz_auth
+
+    host = host or url.split("/")[2]
+    _throttle(host)
+    headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
+    tok = listenbrainz_auth.token() if host == LISTENBRAINZ_HOST else None
+    headers.update(listenbrainz_auth.headers(tok))
     try:
         response = requests.request(
-            method, url, params=params, json=json_body, timeout=10,
-            headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
+            method, url, params=params, json=json_body, timeout=10, headers=headers)
     except requests.RequestException as exc:
         raise SourceError(str(exc)) from exc
+    if response.status_code == 401 and tok:
+        listenbrainz_auth.reject(tok)
     if response.status_code == 404:
         return None
     if response.status_code != 200:
@@ -204,7 +215,12 @@ class ArtistAboutFallback:
 
     def top_recordings(self, mbid: str) -> list:
         """the artist's most listened recordings on listenbrainz:
-        [{mbid, title, listens, listeners}]. SourceError when it is down."""
+        [{mbid, title, listens, listeners}]. SourceError when it is down, or
+        when there is no listenbrainz token (it answers 401 without one)."""
+        from core import listenbrainz_auth
+        if not listenbrainz_auth.available():
+            listenbrainz_auth.note_missing()
+            raise SourceError("listenbrainz top recordings need a token")
         data = self._http("GET", LISTENBRAINZ_TOP_RECORDINGS + quote(str(mbid), safe=""),
                           host="api.listenbrainz.org")
         rows = data.get("payload") if isinstance(data, dict) else data
@@ -355,6 +371,16 @@ def tracks_due(conn, row, now: Optional[datetime] = None,
         (int(row["id"]),)).fetchone() is not None
 
 
+def _tracks_askable() -> bool:
+    """the top recordings need a listenbrainz token. without one an artist is
+    not due for its tracks, so the sweep neither loops on it nor stamps it."""
+    from core import listenbrainz_auth
+    if listenbrainz_auth.available():
+        return True
+    listenbrainz_auth.note_missing()
+    return False
+
+
 def _write_track_counts(conn, artist_id: int, recordings: list) -> int:
     """put each recording's listens on the artist's tracks that last.fm has
     no playcount for: by recording mbid, else by title. returns tracks written."""
@@ -401,8 +427,9 @@ def next_due_artist(conn, after_id: int, *, batch: int = 500,
             f"ORDER BY e.id LIMIT ?", (cursor, batch)).fetchall()
         if not rows:
             return None, None
+        tracks_ok = _tracks_askable()
         for row in rows:
-            if _due(row) or tracks_due(conn, row):
+            if _due(row) or (tracks_ok and tracks_due(conn, row)):
                 return row, int(row["id"])
         cursor = int(rows[-1]["id"])
     return None, cursor
@@ -430,7 +457,7 @@ def fill_artist(connect: Callable[[], Any], artist_id: int,
         if row is None:
             return False
         needs = _due(row)
-        tracks = tracks_due(conn, row)
+        tracks = _tracks_askable() and tracks_due(conn, row)
         if not needs and not tracks:
             return False
         mbid, audiodb_id, deezer_id = _ids(row)

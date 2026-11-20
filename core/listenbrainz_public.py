@@ -1,10 +1,12 @@
-"""the public, keyless listenbrainz reads the last.fm fallbacks lean on.
+"""the public listenbrainz reads the last.fm fallbacks lean on.
 
-- an artist's most played recordings (popularity)
+- an artist's most played recordings (popularity, needs a token since nov 2026)
 - similar artists (the labs dataset)
 - a user's top artists (stats)
 
-no token: these are open endpoints on the official server. listenbrainz
+the api reads send a saved listenbrainz token when there is one
+(core.listenbrainz_auth): better rate limits, and the top recordings answer
+401 without one, so with no token that read is skipped up front. listenbrainz
 sends X-RateLimit-* headers (about 30 calls a 10s window); every call here
 goes through one gate that keeps a small gap and waits out an empty window.
 results go through core.provider_cache.
@@ -18,7 +20,7 @@ from typing import Any, Dict, List, Optional
 
 import requests
 
-from core import provider_cache
+from core import listenbrainz_auth, provider_cache
 from utils.logging_config import get_logger
 
 logger = get_logger("listenbrainz_public")
@@ -46,8 +48,11 @@ def _get(url: str, params: Optional[Dict[str, Any]] = None, timeout: int = 15) -
         if wait > 0:
             time.sleep(wait)
         _next_at[0] = time.monotonic() + MIN_GAP_SECONDS
+    # the labs host is a separate service: no token there
+    tok = listenbrainz_auth.token() if url.startswith(API) else None
     try:
-        response = _session.get(url, params=params, timeout=timeout)
+        response = _session.get(url, params=params, timeout=timeout,
+                                headers=listenbrainz_auth.headers(tok))
     except Exception as exc:  # noqa: BLE001
         logger.debug("listenbrainz %s failed: %s", url, exc)
         return None
@@ -60,7 +65,11 @@ def _get(url: str, params: Optional[Dict[str, Any]] = None, timeout: int = 15) -
     if remaining <= 0 or response.status_code == 429:
         with _gate:
             _next_at[0] = max(_next_at[0], time.monotonic() + min(MAX_WINDOW_WAIT, max(reset_in, 1.0)))
+    if response.status_code == 401 and tok:
+        listenbrainz_auth.reject(tok)
     if response.status_code != 200:
+        # None, never []: provider_cache keeps nothing for it, so a 401 or an
+        # outage is not remembered as "no answer" for a month
         logger.debug("listenbrainz %s answered %s", url, response.status_code)
         return None
     try:
@@ -137,6 +146,11 @@ def top_recordings_for_artist(mbid: str, limit: int = 50) -> List[Dict[str, Any]
     keep_n = max(limit, 50)
 
     def fetch():
+        # listenbrainz answers 401 here without a token: skip the round trip.
+        # None keeps a cached answer (stale beats nothing) and caches nothing
+        if not listenbrainz_auth.available():
+            listenbrainz_auth.note_missing()
+            return None
         return _top_recordings_rows(_get(f"{API}/popularity/top-recordings-for-artist/{mbid}"), keep_n)
 
     rows, _how = provider_cache.cached("listenbrainz", "top-recordings-for-artist", {"mbid": mbid},

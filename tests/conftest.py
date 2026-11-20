@@ -1147,7 +1147,13 @@ def _fresh_provider_cache_and_lastfm_key(monkeypatch):
     monkeypatch.setattr(lastfm_fallback, "_deezer_get", lambda *a, **k: None)
     monkeypatch.setattr(listenbrainz_public, "_get", lambda *a, **k: None)
     monkeypatch.setattr(listenbrainz_public, "artist_mbid", lambda *a, **k: None)
+    # no saved listenbrainz token unless a test gives one; never the live
+    # settings or profiles
+    from core import listenbrainz_auth
+    listenbrainz_auth.reset()
+    monkeypatch.setattr(listenbrainz_auth, "_candidates", lambda: [])
     yield
+    listenbrainz_auth.reset()
     lastfm_client.reset_key_state()
     provider_cache.use_store(provider_cache.MemoryStore())
 

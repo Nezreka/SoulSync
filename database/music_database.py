@@ -6279,8 +6279,9 @@ class MusicDatabase:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
-                    SELECT id, listenbrainz_token, listenbrainz_base_url
+                    SELECT id, listenbrainz_token, listenbrainz_base_url, COALESCE(is_admin, 0)
                     FROM profiles WHERE listenbrainz_token IS NOT NULL
+                    ORDER BY id
                 """)
                 results = []
                 for row in cursor.fetchall():
@@ -6290,6 +6291,7 @@ class MusicDatabase:
                             'id': row[0],
                             'token': token,
                             'base_url': row[2] or '',
+                            'is_admin': bool(row[3]),
                         })
                 return results
         except Exception as e:

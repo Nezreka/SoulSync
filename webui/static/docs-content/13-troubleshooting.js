@@ -267,6 +267,7 @@ This gives you an \`https://your-device.tailnet.ts.net\` address that satisfies 
 From 1 December 2026 Last.fm only accepts API keys from accounts with a **Last.fm Pro** subscription. Without one:
 
 - Top tracks, similar artists, Radio and the seasonal mixes keep working from ListenBrainz and Deezer, and what Last.fm already told SoulSync stays cached.
+- ListenBrainz now asks for an account token before it shares an artist's top tracks. Connect ListenBrainz in Settings (the global token or any profile's) and SoulSync sends it; without one, top tracks and the album flame come from Deezer and your library instead.
 - Scrobbles to Last.fm wait in the queue rather than being lost. Turn on **Scrobble plays to ListenBrainz** in Settings to keep scrobbling now.
 - Last.fm history import stops. Import from ListenBrainz instead.
 
