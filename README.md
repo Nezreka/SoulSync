@@ -357,7 +357,7 @@ An inbox for everything in your staging folder, with a Picard-style matcher.
 - **Scrobbling** to Last.fm and ListenBrainz from Plex, Jellyfin, Navidrome and the web player. ListenBrainz is the recommended one: from 1 December 2026 Last.fm API keys need a Last.fm Pro subscription. The web player also sends **now playing** when a song starts, and a play is sent the moment it counts (half the song or 4 minutes) instead of in the next batch. Self-hosted **Maloja** and **Koito** work through the ListenBrainz card, with one-click address buttons.
 - **Last.fm is optional**: without a key, or with one Last.fm no longer accepts, top tracks, similar artists, Radio and Your Artists fill in from ListenBrainz, Deezer and your own plays, and earlier Last.fm answers stay cached.
 - **Per-profile**: a profile with its own Plex account, Jellyfin user, ListenBrainz or Last.fm gets its own stats and recommendations, and can scrobble its plays to its own account.
-- **History import** from Last.fm, ListenBrainz, Maloja and Koito.
+- **History import** from Last.fm, ListenBrainz, Maloja and Koito, and **Spotify streaming history** from Spotify's privacy export (account data or extended history). The export is read in your browser and only music plays are sent; plays under 30 seconds, podcasts and private-session plays stay out. Plays already in your history from ListenBrainz or Last.fm aren't doubled, it can count in Stats and Your Year or feed only your mixes and recommendations, and **Remove this import** takes it back out.
 
 ## Player & radio
 

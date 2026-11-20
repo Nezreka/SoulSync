@@ -730,3 +730,113 @@ def listenbrainz_listening_import_cancel():
         return jsonify({'success': True, **worker.status()})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# --- Spotify streaming history (privacy export) ---
+# the browser reads the export and sends parsed music plays in batches; the
+# file itself never comes here. every route works on the caller's own pile:
+# the admin's import is the shared history, a member's is their own.
+
+def _rebuild_pile_cache(owner):
+    """refresh one pile's stats cache in the background after its imported
+    history changed, so the page shows it without waiting for the next poll"""
+    worker = _listening_stats_worker()
+    build = getattr(worker, '_build_stats_cache', None) if worker else None
+    if build is None:
+        return
+
+    def run():
+        try:
+            build(owners=[owner])
+        except Exception as e:  # noqa: BLE001 - the next poll rebuilds it anyway
+            logger.debug("stats cache rebuild after spotify import failed: %s", e)
+
+    threading.Thread(target=run, name='spotify-history-cache', daemon=True).start()
+
+
+def _spotify_summary_payload():
+    from core.listening_import import spotify_export
+    return {'success': True, **spotify_export.summary(get_database(), get_current_profile_id()),
+            'max_batch': spotify_export.MAX_BATCH}
+
+
+@bp.route('/api/listening-import/spotify', methods=['GET'])
+@requires("music.stats")
+def spotify_history_status():
+    """what the caller's imported spotify history holds"""
+    try:
+        return jsonify(_spotify_summary_payload())
+    except Exception as e:
+        logger.error("spotify history status failed: %s", e)
+        return jsonify({'success': False, 'error': 'Could not read the imported history'}), 500
+
+
+@bp.route('/api/listening-import/spotify/batch', methods=['POST'])
+@requires("music.stats")
+def spotify_history_batch():
+    """one batch of parsed plays from a spotify privacy export"""
+    from core.listening_import import spotify_export
+    body = request.get_json(silent=True) or {}
+    rows = body.get('rows')
+    if not isinstance(rows, list):
+        return jsonify({'success': False, 'error': 'rows must be a list'}), 400
+    if len(rows) > spotify_export.MAX_BATCH:
+        return jsonify({'success': False,
+                        'error': f'send at most {spotify_export.MAX_BATCH} plays at a time'}), 400
+    include = body.get('include_in_stats')
+    try:
+        result = spotify_export.import_batch(
+            get_database(), rows, get_current_profile_id(),
+            include_in_stats=None if include is None else bool(include))
+        return jsonify({'success': True, **result})
+    except Exception as e:
+        logger.error("spotify history batch failed: %s", e)
+        return jsonify({'success': False, 'error': 'Could not store these plays'}), 500
+
+
+@bp.route('/api/listening-import/spotify/finish', methods=['POST'])
+@requires("music.stats")
+def spotify_history_finish():
+    """the last batch is in: refresh the stats and say what was imported"""
+    from core.listening_import import spotify_export
+    try:
+        _rebuild_pile_cache(spotify_export.import_owner(get_current_profile_id()))
+        return jsonify(_spotify_summary_payload())
+    except Exception as e:
+        logger.error("spotify history finish failed: %s", e)
+        return jsonify({'success': False, 'error': 'Could not finish the import'}), 500
+
+
+@bp.route('/api/listening-import/spotify/settings', methods=['POST'])
+@requires("music.stats")
+def spotify_history_settings():
+    """include the import in stats and your year, or keep it for taste only"""
+    from core.listening_import import spotify_export
+    body = request.get_json(silent=True) or {}
+    if 'include_in_stats' not in body:
+        return jsonify({'success': False, 'error': 'include_in_stats is required'}), 400
+    try:
+        profile_id = get_current_profile_id()
+        if not spotify_export.set_include_in_stats(get_database(), profile_id,
+                                                   bool(body.get('include_in_stats'))):
+            return jsonify({'success': False, 'error': 'Nothing imported yet'}), 404
+        _rebuild_pile_cache(spotify_export.import_owner(profile_id))
+        return jsonify(_spotify_summary_payload())
+    except Exception as e:
+        logger.error("spotify history settings failed: %s", e)
+        return jsonify({'success': False, 'error': 'Could not save that'}), 500
+
+
+@bp.route('/api/listening-import/spotify', methods=['DELETE'])
+@requires("music.stats")
+def spotify_history_remove():
+    """take the imported spotify history back out"""
+    from core.listening_import import spotify_export
+    try:
+        profile_id = get_current_profile_id()
+        removed = spotify_export.remove_import(get_database(), profile_id)
+        _rebuild_pile_cache(spotify_export.import_owner(profile_id))
+        return jsonify({'success': True, 'removed': removed})
+    except Exception as e:
+        logger.error("spotify history remove failed: %s", e)
+        return jsonify({'success': False, 'error': 'Could not remove the import'}), 500

@@ -8297,8 +8297,8 @@ class MusicDatabase:
 
         conn = None
         try:
-            from core.listening_scope import owner_clause, play_duration_sql
-            scope = owner_clause(self._listening_owner(profile_id))
+            from core.listening_scope import play_duration_sql, stats_owner_clause
+            scope = stats_owner_clause(self._listening_owner(profile_id))
             conn = self._get_connection()
             cursor = conn.cursor()
             window = f"WHERE date(played_at, 'localtime') >= ? AND date(played_at, 'localtime') <= ? AND {scope}"
@@ -8709,9 +8709,9 @@ class MusicDatabase:
 
         always scoped to one pile. no owner means the shared one, so a caller
         that forgets can never read a profile's private plays."""
-        from core.listening_scope import owner_clause
+        from core.listening_scope import stats_owner_clause
         prefix = f"{alias}." if alias else ""
-        scope = owner_clause(owner, alias)
+        scope = stats_owner_clause(owner, alias)
         if time_range == '7d':
             return f"WHERE {prefix}played_at >= datetime('now', '-7 days') AND {scope}"
         elif time_range == '30d':
@@ -8740,7 +8740,7 @@ class MusicDatabase:
         Returns None for 'all' (and anything unrecognised) — there is no
         "before everything", and a caller that gets None must omit the
         comparison rather than compare against nothing."""
-        from core.listening_scope import owner_clause
+        from core.listening_scope import stats_owner_clause
         window = MusicDatabase._PREVIOUS_WINDOW.get(time_range)
         if not window:
             return None
@@ -8748,7 +8748,7 @@ class MusicDatabase:
         prefix = f"{alias}." if alias else ""
         return (f"WHERE {prefix}played_at >= datetime('now', '{start}') "
                 f"AND {prefix}played_at < datetime('now', '{end}') "
-                f"AND {owner_clause(owner, alias)}")
+                f"AND {stats_owner_clause(owner, alias)}")
 
     def set_profile_spotify(self, profile_id: int, client_id: str, client_secret: str,
                             redirect_uri: str = '') -> bool:

@@ -157,6 +157,17 @@ Each kind (music, movies, TV, audiobooks) can be set to have an admin pick the r
 - Download automatically instead: `POST /api/requests/music/awaiting/auto` `{profile_id, key}`, `POST /api/requests/media/<id>/auto`, `POST /api/video/requests/<id>/auto` (a show joins the watchlist then).
 - The requester's list says it too: music and book rows in status `awaiting_selection`, video rows with `awaiting_selection: true` (nothing picked yet) or `picking: true` (a picked release is downloading).
 
+### Listening history and your plays (web UI routes)
+
+Each works on the caller's own listening history: the admin's is the shared one, a member's is their own.
+
+- Spotify streaming history, from Spotify's privacy export. The browser reads the export and sends only music plays; the file never comes to the server. All five need **Listening stats** (`music.stats`).
+  - `GET /api/listening-import/spotify`: `{imported, include_in_stats, plays, first_played, last_played, artists, matched, linked, updated_at, max_batch}`. `plays` are the plays the import added, `linked` the ones already in the history from ListenBrainz or Last.fm, `matched` the added plays linked to a library track.
+  - `POST /api/listening-import/spotify/batch` `{rows: [{ended_at, ms_played, track, artist, album?, uri?, coarse?}], include_in_stats?}`: at most `max_batch` (5000) rows. `ended_at` is the stream's end in utc (`2024-01-15T08:23:45Z`, or `2019-03-02 21:14` with `coarse: true` for account data). Plays under 30 seconds, podcast or audiobook rows and rows marked `incognito` or `episode` are dropped. Answers `{received, kept, added, merged, dropped: {short, podcast, private, invalid}}`. A member's first import makes their listening history their own.
+  - `POST /api/listening-import/spotify/finish`: refreshes the stats and returns the summary.
+  - `POST /api/listening-import/spotify/settings` `{include_in_stats}`: off keeps the import out of Stats, Your Year, the dashboard's week and the artist page; recommendations and mixes still use it. `404` when nothing is imported.
+  - `DELETE /api/listening-import/spotify`: removes every play the import added (`{removed}`); plays from other sources stay.
+
 ### Update file locations (web UI routes, admins only)
 
 After the music library folder moves, these point the library's file records at where the files are now. Files are never touched, and the media server's own path for a file is never changed. One job runs at a time, in the background.
