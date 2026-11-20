@@ -169,6 +169,49 @@ def test_find_album_prefers_lidarrs_own_library(client):
         assert client._find_album('a fourth demo', 'PISS') is None
 
 
+def _af(year, rg):
+    return {'foreignAlbumId': rg, 'title': 'American Football', 'releaseDate': f'{year}-01-01T00:00:00Z',
+            'artist': {'foreignArtistId': 'ar-af', 'artistName': 'American Football'}}
+
+
+def test_same_titled_albums_are_told_apart_by_year(client):
+    fake = FakeLidarr({'American Football American Football': [_af(1999, 'lp1'), _af(2016, 'lp2'), _af(2019, 'lp3')]})
+    with patch.object(client, '_api_get', side_effect=fake.get):
+        assert client._find_album('American Football', 'American Football', '', '2016')['foreignAlbumId'] == 'lp2'
+        # no record from that year: guessing would grab another album
+        assert client._find_album('American Football', 'American Football', '', '2026') is None
+
+
+def test_library_match_from_another_year_is_not_trusted(client):
+    # Lidarr holds only the 2019 record; a 2026 request must not take it.
+    lp3 = dict(_af(2019, 'lp3'), id=5, artist={'id': 3, 'artistName': 'American Football'})
+    fake = FakeLidarr({'American Football American Football': [_af(1999, 'lp1'), _af(2019, 'lp3')]})
+    fake.library = [lp3]
+    with patch.object(client, '_api_get', side_effect=fake.get):
+        assert client._find_album('American Football', 'American Football', '', '2026') is None
+        assert client._find_album('American Football', 'American Football', '', '2019') is lp3
+
+
+def test_a_lone_match_from_another_year_is_a_reissue(client):
+    fake = FakeLidarr({'PISS you made me / skin on linen': [dict(PISS, releaseDate='2025-11-01')]})
+    with patch.object(client, '_api_get', side_effect=fake.get):
+        assert client._find_album('you made me / skin on linen', 'PISS', '', '2026')['foreignAlbumId'] == PISS['foreignAlbumId']
+
+
+def test_lookup_retries_a_failed_metadata_search(client):
+    answers = [None, [PISS]]
+    with patch.object(client, '_api_get', side_effect=lambda *a, **k: answers.pop(0)), \
+            patch('core.lidarr_download_client.time.sleep'):
+        assert client._lookup('PISS you made me / skin on linen') == [PISS]
+
+
+def test_release_year_of_requires_agreement():
+    from core.downloads.master import release_year_of
+    assert release_year_of([{'album': {'release_date': '2026-05-01'}}, {'album': {}}]) == '2026'
+    assert release_year_of([{'album': {'release_date': '2026-05-01'}},
+                            {'album': {'release_date': '2019-03-22'}}]) is None
+
+
 def test_wishlist_tracks_carry_the_release_group_id():
     from core.downloads.master import release_group_id_of
     from core.wishlist.service import WishlistService

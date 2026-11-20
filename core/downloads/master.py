@@ -441,6 +441,22 @@ def release_group_id_of(tracks_json) -> Optional[str]:
     return groups.pop() if len(groups) == 1 else None
 
 
+def release_year_of(tracks_json) -> Optional[str]:
+    """The release year every requested track's album gives, or None.
+
+    Tells a band's same-titled albums apart in Lidarr. Tracks without a date
+    are ignored; tracks that disagree make the answer None.
+    """
+    years = set()
+    for entry in tracks_json or []:
+        if isinstance(entry, dict):
+            album = entry.get('album') if isinstance(entry.get('album'), dict) else {}
+            value = str(album.get('release_date') or '')[:4]
+            if value.isdigit():
+                years.add(value)
+    return years.pop() if len(years) == 1 else None
+
+
 def expected_release_duration_seconds(tracks_json) -> Optional[int]:
     """Total playing time of the requested release, or None if unknown.
 
@@ -1276,6 +1292,9 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
                 _group = release_group_id_of(tracks_json)
                 if _group:
                     kwargs['release_group_id'] = _group
+                _year = release_year_of(tracks_json)
+                if _year:
+                    kwargs['release_year'] = _year
             return kwargs or None
 
         def _stamp_terminal_bundle_failure():
