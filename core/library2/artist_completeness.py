@@ -127,10 +127,11 @@ _RULE_CTES = """
           CROSS JOIN lib2_artists wa ON wa.id = cm.member_id
          GROUP BY cm.canonical_id
     ),
-    -- the artist's own releases, as the list counts them (album artist or a
-    -- primary album credit). lead: the album's primary artist, the only
-    -- claim strong enough to count the whole release (the junction's
-    -- 'primary' role also sits on guests of compilations)
+    -- the artist's own releases, as the list counts them (sql_util's
+    -- release_artist): filed under them, or co-leading a joint album
+    -- (co_lead_sql; a primary album credit alone is a guest, #2142). lead:
+    -- the album's primary artist, the only claim strong enough to count the
+    -- whole release
     cc_release AS MATERIALIZED (
         SELECT r.artist_id, r.album_id, MAX(r.lead) AS lead,
                MAX(al.expected_track_count IS NULL) AS unknown_size,
@@ -139,7 +140,9 @@ _RULE_CTES = """
           FROM (SELECT cm.canonical_id AS artist_id, aa.album_id, 0 AS lead
                   FROM {members} cm
                   CROSS JOIN lib2_album_artists aa ON aa.artist_id = cm.member_id
-                 WHERE aa.role = 'primary'
+                  CROSS JOIN lib2_albums jal ON jal.id = aa.album_id
+                 WHERE aa.role = 'primary' AND jal.primary_artist_id <> aa.artist_id
+                   AND {co_lead}
                 UNION ALL
                 SELECT cm.canonical_id, al.id, 1
                   FROM {members} cm
@@ -262,7 +265,9 @@ def rule_ctes(members: str, parts: Optional[Dict[str, Any]] = None, *,
     caller's own CTEs and a comma)."""
     parts = parts or _scope_parts()
     scope_tracks = "lib2_tracks t" if whole_library else _PAGE_SCOPE_TRACKS.format(members=members)
-    return _RULE_CTES.format(members=members, scope_tracks=scope_tracks, **parts)
+    from .sql_util import co_lead_sql
+    return _RULE_CTES.format(members=members, scope_tracks=scope_tracks,
+                             co_lead=co_lead_sql("aa.artist_id", "jal", "cc"), **parts)
 
 
 _LIBRARY_SQL = "WITH" + _ALL_MEMBERS + "{rule}" + """

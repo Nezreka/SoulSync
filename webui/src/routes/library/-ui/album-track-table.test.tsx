@@ -376,7 +376,8 @@ describe('library v2 album track table', () => {
 
     const recognition = await screen.findByLabelText('Recognised by Navidrome and Plex');
     expect(recognition).toHaveAttribute('title', 'Recognised by Navidrome and Plex');
-    expect(recognition).toHaveTextContent('✓2');
+    // one grouped mark in a table cell: both logos, one tick
+    expect(recognition.querySelectorAll('img')).toHaveLength(2);
     expect(screen.getByRole('columnheader', { name: 'Media server' })).toBeInTheDocument();
     expect(recognition.closest('td')).not.toContainElement(screen.getByText('Track Seven'));
     expect(screen.queryByText('Navidrome')).not.toBeInTheDocument();

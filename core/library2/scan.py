@@ -318,7 +318,8 @@ def rescan_files(
     ``missing`` for paths that did not resolve, ``path_drift``/``path_repointed``
     for renames spotted and repaired, ``missing_suspected``/``missing_confirmed``
     for lifecycle transitions written, and ``recovered`` for files that came
-    back.  ``released`` appears when ``library.redownload_externally_deleted``
+    back.  ``paths_relocated`` appears when records followed a music library
+    folder that moved (``core.library2.path_repoint``).  ``released`` appears when ``library.redownload_externally_deleted``
     is off and counts the tracks that are no longer wanted.  Never raises for individual files — a broken file just stays on its
     imported values.
 
@@ -446,8 +447,17 @@ def _rescan_loop(database, rows, total, *, progress, stats, manual: bool = False
     observations are buffered and flushed in batches (see
     ``_OBSERVATION_FLUSH_BATCH``).
     """
+    relocated: List[Dict[str, Any]] = []
     unresolved = _probe_rows(database, rows, total, progress=progress, stats=stats,
-                             presence=presence, source=source)
+                             presence=presence, source=source, relocated=relocated)
+    if relocated:
+        # the file was found, but not where the record says: the music
+        # library folder moved (Storm: /app/Transfer -> /music). the record
+        # follows, under the same rules as Tools > Update File Locations
+        from core.library2.path_repoint import repoint_scanned
+        moved = repoint_scanned(database, relocated)
+        if moved:
+            stats["paths_relocated"] = stats.get("paths_relocated", 0) + len(moved)
     if not unresolved:
         return
     repointed, ambiguous, still_missing = _reconcile_drifted_paths(
@@ -465,8 +475,11 @@ def _rescan_loop(database, rows, total, *, progress, stats, manual: bool = False
 
 
 def _probe_rows(database, rows, total, *, progress, stats,
-                presence=None, source='scan') -> List[Dict[str, Any]]:
-    """Phase 1: measure every file that resolves; return the ones that do not."""
+                presence=None, source='scan', relocated=None) -> List[Dict[str, Any]]:
+    """Phase 1: measure every file that resolves; return the ones that do not.
+
+    ``relocated`` collects the rows that resolved somewhere other than their
+    stored path, for the file-location pass."""
     from core.imports.file_ops import probe_audio_quality
     from core.library2.paths import resolve_lib2_path
     from core.library2.status import quality_tier
@@ -483,6 +496,8 @@ def _probe_rows(database, rows, total, *, progress, stats,
         if not path:
             unresolved.append(row)
             continue
+        if relocated is not None and path != row["path"]:
+            relocated.append(row)
 
         stats["scanned"] += 1
         file_tags = read_tag_snapshot(path)

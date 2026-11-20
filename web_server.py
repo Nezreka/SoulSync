@@ -3919,15 +3919,6 @@ def _regenerate_batch_m3u(batch, tracks):
     """Regenerate M3U file for a completed batch using real library DB paths.
     Called from batch completion handler after all post-processing is done."""
     try:
-        from difflib import SequenceMatcher
-        try:
-            from unidecode import unidecode as _unidecode
-        except ImportError:
-            _unidecode = lambda x: x
-
-        def _norm(text):
-            return _unidecode(text).lower().strip() if text else ''
-
         playlist_name = batch.get('playlist_name', 'Playlist')
         db = get_database()
         active_server = config_manager.get_active_media_server()
@@ -3937,36 +3928,11 @@ def _regenerate_batch_m3u(batch, tracks):
         from core.playlists.batch_m3u import playlist_m3u_tracks
         tracks = playlist_m3u_tracks(batch, tracks, db)
 
-        # Resolve file paths from library DB
-        from collections import defaultdict
-        artist_groups = defaultdict(list)
-        for idx, t in enumerate(tracks):
-            artist_groups[t.get('artist', '') or ''].append((idx, t))
-
-        file_path_map = {}
-        for artist, group in artist_groups.items():
-            if not artist:
-                for idx, _ in group:
-                    file_path_map[idx] = None
-                continue
-            db_tracks = db.search_tracks(artist=artist, limit=500, server_source=active_server)
-            if not db_tracks:
-                for idx, _ in group:
-                    file_path_map[idx] = None
-                continue
-            db_entries = [(_norm(t.title), t) for t in db_tracks]
-            for idx, track in group:
-                name = track.get('name', '')
-                if not name:
-                    file_path_map[idx] = None
-                    continue
-                s_norm = _norm(name)
-                matched = None
-                for db_n, db_t in db_entries:
-                    if s_norm == db_n or SequenceMatcher(None, s_norm, db_n).ratio() >= 0.7:
-                        matched = db_t
-                        break
-                file_path_map[idx] = matched.file_path if matched else None
+        # Resolve file paths from library DB: one read, every credited artist
+        # (#2214), the same resolver the export uses
+        from core.library.m3u_resolve import resolve_m3u_paths
+        file_path_map = resolve_m3u_paths(
+            db.get_tracks_for_m3u_resolution(server_source=active_server), tracks)
 
         # Build M3U content
         import datetime as _dt
@@ -4090,61 +4056,18 @@ def generate_playlist_m3u():
         db = get_database()
         active_server = config_manager.get_active_media_server()
 
-        # --- fuzzy matching helpers (same logic as library_check_tracks) ---
         import re as _re
-        from difflib import SequenceMatcher
-        try:
-            from unidecode import unidecode as _unidecode
-        except ImportError:
-            _unidecode = lambda x: x
-
-        def _norm(text):
-            return _unidecode(text).lower().strip() if text else ''
-
-        def _clean(text):
-            s = _norm(text)
-            s = _re.sub(r'\s*[\[\(].*?[\]\)]', '', s)
-            s = _re.sub(r'\s*-\s*', ' ', s)
-            s = _re.sub(r'\s*feat\..*', '', s)
-            s = _re.sub(r'\s*featuring.*', '', s)
-            s = _re.sub(r'\s*ft\..*', '', s)
-            s = _re.sub(r'\s*\d{4}\s*remaster.*', '', s)
-            s = _re.sub(r'\s*remaster(ed)?.*', '', s)
-            return _re.sub(r'\s+', ' ', s).strip()
 
         # Resolve each track's library file path. We bulk-load the library ONCE and
-        # match in memory, keyed by cleaned artist, instead of issuing a
-        # search_tracks() query per distinct artist. The per-artist loop could
-        # block for a long time behind the enrichment/scan writers (SQLite lock
-        # contention) — which is exactly why "Export M3U" hung with nothing in the
-        # logs. One WAL-concurrent read can't be starved that way.
-        from collections import defaultdict
-        from core.text.title_match import choose_best_title_candidate
-        lib_by_artist = defaultdict(list)
-        for row in db.get_tracks_for_m3u_resolution(server_source=active_server):
-            lib_by_artist[_clean(row['artist'])].append(
-                (_norm(row['title']), _clean(row['title']), row['file_path'])
-            )
-
-        file_path_map = {}
-        for idx, track in enumerate(tracks):
-            name = track.get('name', '') or ''
-            artist = track.get('artist', '') or ''
-            if not name or not artist:
-                file_path_map[idx] = None
-                continue
-            candidates = lib_by_artist.get(_clean(artist))
-            if not candidates:
-                file_path_map[idx] = None
-                continue
-            s_norm, s_clean = _norm(name), _clean(name)
-            matched_path = choose_best_title_candidate(
-                s_norm,
-                s_clean,
-                candidates,
-                lambda left, right: SequenceMatcher(None, left, right).ratio(),
-            )
-            file_path_map[idx] = matched_path
+        # match in memory instead of issuing a search_tracks() query per distinct
+        # artist. The per-artist loop could block for a long time behind the
+        # enrichment/scan writers (SQLite lock contention) — which is exactly why
+        # "Export M3U" hung with nothing in the logs. One WAL-concurrent read can't
+        # be starved that way. Tracks are filed under every credited artist, so
+        # "A & B" resolves (#2214).
+        from core.library.m3u_resolve import resolve_m3u_paths
+        file_path_map = resolve_m3u_paths(
+            db.get_tracks_for_m3u_resolution(server_source=active_server), tracks)
 
         # where it will be saved, worked out up front so entries can be
         # relative to it. a content-only request has no folder: absolute.
@@ -24491,6 +24414,10 @@ app.register_blueprint(_bp_mc())
 from api.deleted_files import configure as _cfg_df, create_blueprint as _bp_df
 _cfg_df(config_manager_=config_manager, docker_resolve_path_=docker_resolve_path)
 app.register_blueprint(_bp_df())
+# Tools > Update File Locations: records follow a music library folder that moved (api/file_locations.py).
+from api.file_locations import configure as _cfg_fl, create_blueprint as _bp_fl
+_cfg_fl(get_database_=get_database)
+app.register_blueprint(_bp_fl())
 # Review-queue verification endpoints (api/verification.py).
 from api.verification import configure as _cfg_verif, create_blueprint as _bp_verif
 _cfg_verif(get_database_=get_database, config_manager_=config_manager,

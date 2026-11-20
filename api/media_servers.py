@@ -11,7 +11,7 @@ Read-only. Injected deps are web_server's boot singletons."""
 
 from __future__ import annotations
 
-from flask import Blueprint, jsonify
+from flask import Blueprint, jsonify, request
 
 from core.media_server import specs
 from utils.logging_config import get_logger
@@ -53,7 +53,10 @@ def _connected(name: str):
         return False
 
 
-def describe_all(include_state: bool = True):
+def describe_all(include_state: bool = True, probe: bool = True):
+    """``probe=False`` keeps configured/active (config reads only) and skips
+    the live connection and capability checks, which can reach the network.
+    the library's recognition badges only need to know what is set up."""
     active = config_manager.get_active_media_server() if config_manager else None
     out = []
     for d in specs.iter_descriptors():
@@ -61,8 +64,9 @@ def describe_all(include_state: bool = True):
         if include_state and config_manager is not None:
             item['configured'] = d.is_configured_in(config_manager)
             item['active'] = (d.name == active)
-            item['connected'] = _connected(d.name)
-            item['capabilities'] = _capabilities(d.name)
+            if probe:
+                item['connected'] = _connected(d.name)
+                item['capabilities'] = _capabilities(d.name)
         out.append(item)
     return {'active': active, 'servers': out}
 
@@ -70,7 +74,8 @@ def describe_all(include_state: bool = True):
 @bp.route('/api/media-servers', methods=['GET'])
 @signed_in
 def list_media_servers():
-    return jsonify(describe_all())
+    probe = request.args.get('probe', '1').strip().lower() not in ('0', 'false', 'no')
+    return jsonify(describe_all(probe=probe))
 
 
 def create_blueprint():

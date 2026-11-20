@@ -60,6 +60,9 @@ beforeEach(() => {
     // cause false positive tests". A test that cares about the badge overrides
     // this with its own handler.
     http.get('/api/issues/counts', () => HttpResponse.json({ success: true, counts: {} })),
+    // #2213: the library's recognition badges ask which servers are set up.
+    // an empty list hides nothing, so a test only sets it up to test that.
+    http.get('/api/media-servers', () => HttpResponse.json({ active: null, servers: [] })),
   );
 });
 
