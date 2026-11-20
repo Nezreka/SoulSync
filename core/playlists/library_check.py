@@ -41,7 +41,29 @@ RECHECK_MISSING_AFTER = 6 * 3600
 _VIA = "library_checked_via"
 
 
-def _query_track(row: Dict[str, Any], extra: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def _credit_artists(db: Any, artist: str) -> List[str]:
+    """the source's credit text, then each artist in it ("A & B" -> A, B).
+
+    the matcher skips an artist form the library has no artist for, so the
+    whole "A & B" asked alone never got to compare titles (#2214). split the
+    way the importer splits, keeping a run the library knows as one artist
+    whole ("Above & Beyond")."""
+    from core.library2.importer import split_known_artist_credits
+
+    def known(name: str) -> bool:
+        try:
+            return bool(db._library_artist_forms([name]))
+        except Exception:  # noqa: BLE001 - a failed probe just splits
+            return False
+
+    out = [artist]
+    for piece in split_known_artist_credits(artist, known):
+        if piece.casefold() not in {a.casefold() for a in out}:
+            out.append(piece)
+    return out
+
+
+def _query_track(row: Dict[str, Any], extra: Dict[str, Any], db: Any = None) -> Optional[Dict[str, Any]]:
     """the track to look for: the identified match when there is a real one,
     else the source's own title and artist."""
     md = extra.get("matched_data")
@@ -62,7 +84,7 @@ def _query_track(row: Dict[str, Any], extra: Dict[str, Any]) -> Optional[Dict[st
         return None
     return {
         "name": name,
-        "artists": [artist],
+        "artists": _credit_artists(db, artist),
         "id": row.get("source_track_id"),
         "source_track_id": row.get("source_track_id"),
     }
@@ -114,7 +136,7 @@ def check_mirror_tracks(db: Any, tracks: List[Dict[str, Any]], *, profile_id: in
             break
         attempted += 1
         extra = parse_extra(row.get("extra_data"))
-        query = _query_track(row, extra)
+        query = _query_track(row, extra, db)
         found, lib_id, id_kind = False, None, None
         if query is not None:
             try:
