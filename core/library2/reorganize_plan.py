@@ -299,6 +299,31 @@ def _credited_artists(conn, track_id: int) -> List[str]:
     return [n for n in (names.get(int(r["id"]), r["name"]) for r in rows) if n]
 
 
+def _track_performers(conn, track_id: int, album_artist: str) -> List[str]:
+    """who $artist names: the track's performer, the same credit the ARTIST
+    tag carries. a compilation track is credited to its album artist first
+    ("Various Artists", then the performer), and the planner took that first
+    credit, so a reorganize renamed "10 - Super Frika - Love Satisfaction"
+    to "10 - Various Artists - Love Satisfaction" (pertti). the album artist
+    stays $albumartist."""
+    from core.imports.compilation import is_various_artists_name
+    from core.library2.retag import _performers
+
+    credited = _credited_artists(conn, track_id)
+    row = conn.execute("SELECT track_artist FROM lib2_tracks WHERE id=?",
+                       (int(track_id),)).fetchone()
+    own = str((row[0] if row else "") or "").strip()
+    performers = _performers(credited, album_artist, own)
+    # "various artists" is never a performer when the track names one
+    performers = [a for a in performers if not is_various_artists_name(a)] or performers
+    if own and not is_various_artists_name(own) and all(
+            is_various_artists_name(a) for a in performers):
+        # credited to the various-artists name alone, the file's own artist
+        # tag names who sings it
+        return [own]
+    return performers
+
+
 def _templates_use_quality() -> bool:
     """any naming template uses $quality (#2195). True when the templates
     can't be read: a slower plan beats a name without its quality."""
@@ -544,7 +569,7 @@ def plan_album_reorganize(
             _uncatalogued_lossy_twins(conn, resolved, item['sibling_files'],
                                       resolve_file_path_fn))
 
-        artists = _credited_artists(conn, track["id"]) or [artist_name]
+        artists = _track_performers(conn, track["id"], artist_name) or [artist_name]
         context = _build_post_process_context(
             _as_provider_album({**album, "title": track['album_title'], "album_type": filing["type"],
                                 "duration_ms": filing.get("duration_ms") or 0},
