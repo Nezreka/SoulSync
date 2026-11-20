@@ -180,6 +180,8 @@ const ALIASES: Record<string, { tab: TabKey; view?: string }> = {
   // pill until settings-bic phase 6)
   advanced: { tab: 'advanced', view: 'general' },
   system: { tab: 'advanced', view: 'general' },
+  // a health fix that names the place it means (core/help/health.py)
+  security: { tab: 'advanced', view: 'security' },
 };
 
 /** a tab key from anywhere (a button, an old caller, the address) as a place */

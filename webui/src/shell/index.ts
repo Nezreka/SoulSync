@@ -12,7 +12,6 @@
  */
 
 import {
-  filterSettings,
   initializeSettings,
   landPendingSettingsSave,
   loadSettingsData,
@@ -185,7 +184,6 @@ export const SHELL_WINDOW_EXPORTS = {
   loadSettingsData,
   saveSettings,
   setSettingsSaveState,
-  filterSettings,
   landPendingSettingsSave,
   probeSourceOnOpen,
   openSourceConfig,

@@ -6,9 +6,9 @@
  *
  * Every tab is mounted all the time and shown or hidden, never unmounted: an
  * edit that has not saved yet survives any tab or pill switch, and the search,
- * the help palette and the key guard find every field. Tabs rebuilt on the
- * new parts (Downloads) render their own pages; the rest still render the
- * blocks they always did (`data-stg`), in the same order, shown by tab here.
+ * the help palette and the key guard find every field. Each tab renders its
+ * own page and hides itself while another tab is open; People shows while
+ * it is the open tab.
  *
  * `#webui-react-root` is the `.page` the vanilla page was, so this is not one
  * (two would pad twice); `active` is kept for the stylesheet's `:has()`.
@@ -83,28 +83,6 @@ function useSide(): 'music' | 'video' {
     () => (document.body.getAttribute('data-side') === 'video' ? 'video' : 'music'),
     () => 'music',
   );
-}
-
-/**
- * The blocks of the tabs not rebuilt yet, shown by tab as the shell's tab
- * switch did: a block is its tab's when its `data-stg` says so, a folded
- * section's body stays folded, and a column with nothing to show goes too.
- */
-export function showLegacyBlocks(key: string, root: ParentNode = document) {
-  for (const block of root.querySelectorAll<HTMLElement>('#settings-page [data-stg]'))
-    block.style.display = block.dataset.stg === key ? '' : 'none';
-  for (const body of root.querySelectorAll<HTMLElement>(
-    '#settings-page .settings-section-body.collapsed',
-  ))
-    body.style.display = 'none';
-  for (const column of root.querySelectorAll<HTMLElement>(
-    '#settings-page .settings-left-column, #settings-page .settings-right-column, #settings-page .settings-third-column',
-  )) {
-    const visible = [...column.querySelectorAll<HTMLElement>('.settings-group[data-stg]')].some(
-      (group) => group.style.display !== 'none',
-    );
-    column.style.display = visible ? '' : 'none';
-  }
 }
 
 // ── the tab strip ──
@@ -304,11 +282,6 @@ export function SettingsPage({
   const side = useSide();
   // People is for admins only (the page is too, but a member never sees it)
   const viewer = useViewer();
-  const loads = useSyncExternalStore(
-    store.subscribe,
-    () => store.getState().loads,
-    () => 0,
-  );
   const attention = useSourcesAttention();
   const key = legacyKey(state);
   const def = tabDef(state.tab);
@@ -324,17 +297,12 @@ export function SettingsPage({
     [],
   );
 
-  // the open tab: its content is told (what reloads on arrival does), and
-  // the old tabs' blocks are shown and hidden. Again after each settings load,
-  // for blocks that only exist once the settings have
+  // the open tab: its content is told (what reloads on arrival does)
   useLayoutEffect(() => {
     pageTabs.show(key);
     if (key === 'library')
       document.dispatchEvent(new CustomEvent('soulsync:library-settings-shown'));
   }, [key]);
-  useLayoutEffect(() => {
-    showLegacyBlocks(key);
-  }, [key, loads, viewer.admin]);
 
   // the password managers kept off fields React adds after the page opened
   // (rows added, fields shown later), as off every field the vanilla page had

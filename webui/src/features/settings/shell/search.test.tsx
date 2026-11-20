@@ -28,15 +28,15 @@ const PAGE = `
     <div class="form-group"><label>Cleanup scope:</label>
       <select id="made-up-scope"><option value="own" selected>Only SoulSync's own transfers</option></select></div>
   </div>
-  <div class="settings-section-header" data-stg="appearance"><h3>Post-Processing</h3></div>
-  <div class="settings-section-body collapsed" data-stg="appearance">
+  <div class="settings-section-header" data-stg-react="appearance"><h3>Post-Processing</h3></div>
+  <div class="settings-section-body collapsed" data-stg-react="appearance">
     <div class="form-group" data-video-only><label>Video only thing</label><input type="text" id="vo"></div>
     <div class="form-group"><label>Write multi-artist tags</label><input type="checkbox" id="made-up-tags"></div>
   </div>
-  <div data-stg="advanced" class="settings-group"><h3>SoulSync API</h3>
+  <div data-stg-react="advanced" class="settings-group"><h3>SoulSync API</h3>
     <div class="form-group"><label>Secret thing</label><input type="password" id="made-up-secret" value="hunter2"></div>
   </div>
-  <div data-stg="logs" class="settings-group"><label>Follow the made-up log</label><input type="checkbox" id="made-up-follow"></div>
+  <div data-stg-react="logs" class="settings-group"><label>Follow the made-up log</label><input type="checkbox" id="made-up-follow"></div>
 `;
 
 const find = (index: Hit[], label: string) => index.find((hit) => hit.label === label) as Hit;

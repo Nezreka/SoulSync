@@ -566,13 +566,7 @@ function ListenbrainzCard({ store }: { store: SettingsStore }) {
 export function MusicApiGroup({ store }: { store: SettingsStore }) {
   const [home, setHome] = useState<HTMLElement | null>(null);
   return (
-    <div
-      className="settings-group"
-      data-stg="connections"
-      data-music-only=""
-      data-svc-legacy=""
-      ref={setHome}
-    >
+    <div data-music-only="" data-svc-legacy="" ref={setHome}>
       <ServiceHome.Provider value={home}>
         <Cards store={store} />
       </ServiceHome.Provider>

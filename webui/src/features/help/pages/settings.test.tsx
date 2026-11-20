@@ -13,7 +13,12 @@ import { HttpResponse, http, server } from '@/test/msw';
 
 import { answer, asProfile, renderAnswers, titles } from './answers.test-utils';
 import { pageHelpFor } from './index';
-import { hybridOrder, useMusicSettingsAnswers, useVideoSettingsAnswers } from './settings';
+import {
+  hybridOrder,
+  settingsHeading,
+  useMusicSettingsAnswers,
+  useVideoSettingsAnswers,
+} from './settings';
 
 const FINDINGS = [
   {
@@ -150,6 +155,15 @@ describe('settings answers', () => {
     await new Promise((r) => setTimeout(r, 60));
     expect(titles(container)).toEqual([]);
     expect(asked).toBe(0);
+  });
+});
+
+describe('settingsHeading', () => {
+  it("names the tab, System's Logs and Server Activity pills included", () => {
+    expect(settingsHeading('downloads', 'music')?.title).toBe('Settings, Downloads');
+    expect(settingsHeading('logs', 'music')?.title).toBe('Settings, System');
+    expect(settingsHeading('server-activity', 'video')?.title).toBe('Video Settings, System');
+    expect(settingsHeading('downloads', 'music', false)).toBeNull();
   });
 });
 

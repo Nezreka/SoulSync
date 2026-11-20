@@ -116,7 +116,7 @@ In Docker, Movies, TV and YouTube start on \`/media/movies\`, \`/media/tv\` and 
 
 ## Your library's folders
 
-Plex and Jellyfin report every file at the path *they* see it under, like \`/mnt/easystore3/PLEX/MOVIES/...\`. Settings > Folders > Video > **Your library's folders** lists every folder your libraries read (asked from the server itself), each marked Movies or TV with how many files are in it.
+Plex and Jellyfin report every file at the path *they* see it under, like \`/mnt/easystore3/PLEX/MOVIES/...\`. Settings > Library > Folders (Video) > **Your library's folders** lists every folder your libraries read (asked from the server itself), each marked Movies or TV with how many files are in it.
 
 - The folders SoulSync already reaches, like your Movies and TV output folders, are recognised from their files and ticked. You never type them twice.
 - For the rest, type where SoulSync reaches each one. It checks a sample of that folder's real files right away (**48 of 50 sample files found**).
@@ -126,7 +126,7 @@ Plex and Jellyfin report every file at the path *they* see it under, like \`/mnt
 
 ## 4K libraries
 
-To keep 4K copies apart, like a separate **Movies 4K** library in Plex, switch on **Separate 4K movies folder** and / or **Separate 4K TV folder** under Settings > Folders > Video > 4K libraries and give each a folder. Then set **Save to: 4K library** on the [quality profile](#vdl-quality) those titles use.
+To keep 4K copies apart, like a separate **Movies 4K** library in Plex, switch on **Separate 4K movies folder** and / or **Separate 4K TV folder** under Settings > Library > Folders (Video) > 4K libraries and give each a folder. Then set **Save to: 4K library** on the [quality profile](#vdl-quality) those titles use.
 
 - New grabs of a title on that profile file into the 4K folder, from the wishlist, RSS sync, a manual grab or a manual import.
 - Titles you already have stay where they are, and their upgrades land beside the copy you have, so changing a profile never duplicates a title.
@@ -137,7 +137,7 @@ In Docker, map each 4K folder in your compose file (the default compose has comm
 
 ## More libraries
 
-Add your own movie and TV libraries, like a **Stand-Up**, **Documentaries** or **Kids** library in Plex, under Settings > Folders > Video > More libraries. Each has a name, its own folder and optional rules. The main and 4K libraries are listed there too (their folders are the ones set above), so an install with no extra library works exactly as before.
+Add your own movie and TV libraries, like a **Stand-Up**, **Documentaries** or **Kids** library in Plex, under Settings > Library > Folders (Video) > More libraries. Each has a name, its own folder and optional rules. The main and 4K libraries are listed there too (their folders are the ones set above), so an install with no extra library works exactly as before.
 
 A new title files into, first match wins:
 
@@ -157,7 +157,7 @@ A new title files into, first match wins:
 
 **Where a library downloads from.** **Download from** on a library's card picks the sources its automatic searches use (the wishlist, Search now, retries), in the order you click them: Usenet first then Torrent, say. None picked follows the global order in Settings > Downloads. RSS sync still runs on the global order's indexer sources, and keeps only releases from the library's own sources. **Torrent category / label** and **Usenet category** give that library's downloads their own category in the client (qBittorrent / SABnzbd / NZBGet category, Deluge / Transmission label); empty uses the client's own. Make the category in the client first: SABnzbd files an unknown one under its default. SoulSync talks to one torrent client and one usenet client (Settings > Downloads), so a library picks between those; two instances of the same client aren't supported.
 
-**Which indexers a library searches.** Open **Indexers** on a library's card to tick the Prowlarr indexers its searches use: private 4K trackers for Movies 4K, say. None ticked searches every indexer (within Settings > Indexers' own allowlist), as before. The wishlist, Search now, retries, manual search in Get, and RSS sync all follow it (an EXT.to release has no indexer and is kept).
+**Which indexers a library searches.** Open **Indexers** on a library's card to tick the Prowlarr indexers its searches use: private 4K trackers for Movies 4K, say. None ticked searches every indexer (within the Prowlarr allowlist under Settings > Downloads > Sources), as before. The wishlist, Search now, retries, manual search in Get, and RSS sync all follow it (an EXT.to release has no indexer and is kept).
 
 **Searching and upgrading per library.** **Search automatically** off: the wishlist drain and RSS sync leave that library's titles alone, and they're only searched when you click Search now (or Search all missing). **Upgrade what you have** off: titles you already have in that library stop being upgraded toward their profile's cutoff; missing ones are still hunted.
 
@@ -601,7 +601,7 @@ Tick episodes (the box under an episode's number, shown when you point at a row)
 
 **Hunting one episode.** A monitored season hunts every missing episode in it. To leave one out, open the episode's menu and pick **Stop hunting this episode**; the row then says *Not hunted*. **Hunt this episode** turns it back on. Nothing on disk changes either way.
 
-**Move to another drive or library…** (in the page's **More** menu, beside a movie's files, and over **Where it lives**) moves the title's files, named by your template. A library can sit on many drives: the main library is its own folder plus your additional folders and the server folders you mapped under Settings > Folders > Video. The window lists each library with every drive it has and the free space on each. Pick another drive of the same library to shift the title there, or another library to move it and file it under that library. New episodes of a show follow it to wherever its files are. It shows how many files move, how much has to be copied to another drive and whether there is room, before anything moves. **More** also has **Rename files…** for every file of the title.
+**Move to another drive or library…** (in the page's **More** menu, beside a movie's files, and over **Where it lives**) moves the title's files, named by your template. A library can sit on many drives: the main library is its own folder plus your additional folders and the server folders you mapped under Settings > Library > Folders (Video). The window lists each library with every drive it has and the free space on each. Pick another drive of the same library to shift the title there, or another library to move it and file it under that library. New episodes of a show follow it to wherever its files are. It shows how many files move, how much has to be copied to another drive and whether there is room, before anything moves. **More** also has **Rename files…** for every file of the title.
 
 **Where it lives** lists the folders the show's files are in, each with its drive, file count and size. When a show is split, part of it forked off somewhere else, usually an upgrade that couldn't find the original. **Bring together…** asks which folder to keep and shows what would move before anything does: how many files, how much has to be copied because it sits on another drive, and the free space there. Files keep their names and land in that folder's season folders, subtitles go along, and nothing is overwritten. A copy to another drive only takes its real name once it is complete, so a move that is interrupted leaves the original where it was. The move runs in the background; you can close the window, come back to its progress, or stop it after the current file.
 
@@ -897,7 +897,7 @@ A later step only matters when everything above it ties, so a +100 format beats 
 
 ## Save to
 
-**Save to** picks the library new titles on the profile are filed in: **Main library**, or **4K library** once that folder is switched on in Settings > Folders. Until then a 4K profile files into the main folder. See [4K libraries](#vid-sources).
+**Save to** picks the library new titles on the profile are filed in: **Main library**, or **4K library** once that folder is switched on in Settings > Library > Folders. Until then a 4K profile files into the main folder. See [4K libraries](#vid-sources).
 
 ## Custom formats
 
@@ -1227,7 +1227,7 @@ Every action below is a DO block you can drop into your own automations. Config 
 | **Refresh Airing TV Schedules** | Re-pull TMDB episode schedules for still-airing watchlisted shows — run a couple hours before the airing run | — |
 | **Refresh Stale Metadata** | Rolling freshness pass over the stalest matched titles (ratings, overviews, art, air dates); never clobbers your locked data | Items per run (500), Skip movies/shows refreshed within 30 days |
 | **Clean Old YouTube Episodes** | Delete downloaded channel episodes outside each channel's keep window (history kept so they're never re-downloaded) | — |
-| **Empty Recycle Bin** | Permanently delete recycled files older than the keep window in Settings → Library Organization | — |
+| **Empty Recycle Bin** | Permanently delete recycled files older than the keep window in Settings → Library → Import and files | — |
 | **Wishlist Aired Episodes** | Add every episode that aired in the last week (followed shows) to the wishlist, once each, so a removed one stays removed; optionally prune ended/canceled shows | Prune ended shows (on) |
 | **Scan Watchlist People** | Wishlist every movie a followed person acted in or directed that you don't own | — |
 | **Scan Watchlist Studios** | Wishlist every movie a followed studio produced that you don't own | — |

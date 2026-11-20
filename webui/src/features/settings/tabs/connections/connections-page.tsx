@@ -41,7 +41,6 @@ import {
 import { notificationsSentence } from '../discovery/words';
 import { ViewPanel } from '../downloads/downloads-page';
 import { LibHero } from '../library-card';
-import { SectionFlat } from '../parts';
 import { NotificationsCard, useNotifyLines } from '../video-row-lists';
 import { useVideoServer, videoServer } from '../video-server';
 import { markVideoShown, useVideoShown } from '../video-shown';
@@ -311,9 +310,7 @@ export function ConnectionsPage(props: SettingsTabProps) {
       </ViewPanel>
 
       <ViewPanel tab={TAB} view="metasync" open={view === 'metasync'}>
-        <SectionFlat.Provider value>
-          <MetaSyncSection opened={opened} />
-        </SectionFlat.Provider>
+        <MetaSyncSection opened={opened} />
       </ViewPanel>
 
       <ViewPanel tab={TAB} view="notifications" open={view === 'notifications'}>

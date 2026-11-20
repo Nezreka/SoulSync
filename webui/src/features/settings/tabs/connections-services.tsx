@@ -315,7 +315,7 @@ function frames(kind: Kind): HTMLElement[] {
   // preferences panel, not a service
   return [
     ...document.querySelectorAll<HTMLElement>(`#settings-page [data-svc-frame][${attr}]`),
-  ].filter((f) => f.closest('[data-stg="connections"]'));
+  ].filter((f) => f.closest('[data-svc-legacy]'));
 }
 
 export interface ServiceMeta {

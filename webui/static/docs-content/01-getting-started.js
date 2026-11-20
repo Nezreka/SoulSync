@@ -341,7 +341,7 @@ Go through every item — if you miss any single one, the pipeline breaks:
 1. **slskd's folder is mounted in SoulSync's container** — both containers must mount the **same host directory**. The host paths (left side of \`:\`) must be identical.
 2. **Media server's music folder is mounted as your music library folder** — mount the folder your Plex/Jellyfin/Navidrome monitors as \`/app/Transfer\` with \`:rw\` permissions.
 3. **SoulSync Settings are configured** — open **Settings → Library → Folders**. Set Download folder to \`/app/downloads\` and Music library folder to \`/app/Transfer\` (or whatever container paths you used on the right side of \`:\`).
-4. **slskd URL and API key are set** — in **Settings → Sources**, open the **Soulseek** source panel and enter your slskd URL (e.g. \`http://slskd:5030\`) and API key.
+4. **slskd URL and API key are set** — in **Settings → Downloads → Sources**, open **Soulseek** and enter your slskd URL (e.g. \`http://slskd:5030\`) and API key.
 5. **PUID/PGID match your host user** — run \`id\` on your host and set those values in docker-compose. Both slskd and SoulSync should use the same PUID/PGID.
 6. **Test with one track** — download a single track and watch the logs. If it downloads but never reaches your music library folder, the paths are wrong.
 :::
@@ -372,7 +372,7 @@ If paths are correct but files still won't move into your music library folder, 
 | Files download but never reach the music library folder | App settings not configured — volumes are set but Settings still have defaults | Open **Settings → Library → Folders** and set the Download Folder and Music Library Folder to your **container-side** mount paths |
 | Post-processing log is empty | Download folder doesn't match where slskd saves files in the container | Run \`docker exec soulsync ls /app/downloads\` — the Download folder in Settings must match exactly |
 | Same tracks downloading repeatedly | Post-processing fails so SoulSync thinks the track never completed | Fix folder paths first; once post-processing works, files move to the music library folder and are recognized |
-| Files not renamed properly | Post-processing isn't running (path mismatch) or organization disabled | Verify File Organization is enabled in **Settings → Library → Organization**; fix the Download folder first |
+| Files not renamed properly | Post-processing isn't running (path mismatch) or organization disabled | Verify file organization is on in **Settings → Library → Naming**; fix the Download folder first |
 | Permission denied in logs | Container user can't write to the music library folder | Set PUID/PGID to match the host owner; \`chmod -R 755\` the music library folder on the host |
 | Media server doesn't see new files | Music library folder doesn't map to the monitored folder | Ensure the **host path** in your SoulSync volume mount is the folder Plex/Jellyfin/Navidrome watches |
 | File paths still show the old folder after moving the library | The library remembers where files were, not where they are now | Run **Tools → Update File Locations**: check, then update. See [Moving the music library folder](#gs-folders) |

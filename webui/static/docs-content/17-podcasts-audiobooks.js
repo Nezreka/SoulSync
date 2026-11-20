@@ -252,8 +252,8 @@ All podcast settings live under **Settings → Library** (inside the Music media
 | Setting (exact label) | Location | Default |
 |----------------------|----------|---------|
 | **Podcasts folder:** | Library → Folders → Music | \`./podcasts\` (\`/app/podcasts\` in Docker; locked, **Unlock** to edit) |
-| **Podcast Path Template:** | Library → Organization → File Organization | \`$show/Season $season/$title\` |
-| **Podcast Media Format:** | Library → Organization → File Organization | Audio Only (MP3 / M4A) |
+| **Podcast Path Template:** | Library → Naming (Podcasts) | \`$show/Season $season/$title\` |
+| **Podcast Media Format:** | Library → Naming (Podcasts) | Audio Only (MP3 / M4A) |
 
 The folder hint reads: "Where downloaded podcast episodes are saved and organized."
 

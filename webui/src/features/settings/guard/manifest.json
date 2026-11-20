@@ -11586,9 +11586,23 @@
       "sides": ["music", "video"],
       "scenario": "music"
     },
-    "#metasync-pair-box \"I've approved it — finish connecting\"": {
-      "label": "I've approved it — finish connecting",
+    "#stg-view-connections-metasync \"More about this setting\"": {
+      "label": "More about this setting",
+      "anchor": "stg-view-connections-metasync",
+      "count": 7,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#metasync-pair-box \"I approved it, finish connecting\"": {
+      "label": "I approved it, finish connecting",
       "anchor": "metasync-pair-box",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#stg-view-connections-metasync \"Connect with a key instead· paste a local API key\"": {
+      "label": "Connect with a key instead· paste a local API key",
+      "anchor": "stg-view-connections-metasync",
       "count": 1,
       "sides": ["music", "video"],
       "scenario": "music"

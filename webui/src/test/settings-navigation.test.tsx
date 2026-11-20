@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 import { createSettingsHost } from '@/features/settings/host';
 import { nav } from '@/features/settings/nav';
-import { SettingsPage, showLegacyBlocks } from '@/features/settings/settings-page';
+import { SettingsPage } from '@/features/settings/settings-page';
 import { switchSettingsTab } from '@/features/settings/shell';
 
 // the page's shell without the tabs: one bar of eight tabs, where the page is
@@ -97,28 +97,4 @@ it('a pill is hidden on the side it is not for, unless it is the open one', () =
   } finally {
     document.body.removeAttribute('data-side');
   }
-});
-
-it("shows the open tab's old blocks and hides the rest, folded sections staying folded", () => {
-  const host = document.createElement('div');
-  host.id = 'settings-page';
-  host.innerHTML = `
-    <div class="settings-left-column"><div class="settings-group" data-stg="connections"></div></div>
-    <div class="settings-right-column">
-      <div class="settings-section-header" data-stg="library"></div>
-      <div class="settings-section-body collapsed settings-group" data-stg="library"></div>
-      <div class="settings-group" data-stg="logs"></div>
-    </div>`;
-  const root = document.createElement('div');
-  root.append(host);
-  showLegacyBlocks('library', root);
-  const shown = (selector: string) => root.querySelector<HTMLElement>(selector)!.style.display;
-  expect(shown('[data-stg="connections"]')).toBe('none');
-  expect(shown('.settings-section-header')).toBe('');
-  expect(shown('.settings-section-body')).toBe('none');
-  // a column with nothing of this tab's goes too
-  expect(shown('.settings-left-column')).toBe('none');
-  showLegacyBlocks('logs', root);
-  expect(shown('[data-stg="logs"]')).toBe('');
-  expect(shown('.settings-right-column')).toBe('');
 });

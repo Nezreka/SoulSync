@@ -94,7 +94,7 @@ Stations turn an artist into endless radio. **Library Radio**, the first card, d
 
 ## Inbox
 
-New & Missing opens with your inbox: new releases from artists you watch, what's coming out, and concerts. Concerts need a Ticketmaster key; set **Concerts near you** in Settings > Concerts (two letters, like US) to keep them to your country.
+New & Missing opens with your inbox: new releases from artists you watch, what's coming out, and concerts. Concerts need a Ticketmaster key; set **Concerts near you** in Settings, Connections (the Concerts service) (two letters, like US) to keep them to your country.
 
 ## ListenBrainz Playlists
 
@@ -336,7 +336,7 @@ The DJ is the lexicographically-smallest protocol-capable SoulSync username in t
 Flip the **📻 Auto-DJ** headbar toggle (a shared room toggle — latest sender wins; toast: "📻 Auto-DJ on — the queue keeps itself fed"). When the queue runs dry and at least one listener is tuned in, the DJ requests a pick with the seed title and an avoid-list of recently played tracks: Last.fm similar tracks first, then similar artists, then your local similar-artist graph, falling back to searching the seed title. Auto picks queue marked **📻 auto** with a "why" credit ("similar to X") and stay vote- and skip-able. Cooldown is 25 seconds, and it never runs in an empty, unwatched room — "Auto-DJ is on, but it needs a starting point — add one song and it takes over from there."
 
 > [!TIP]
-> Jukebox needs the same Soulseek connection as chat. If the page shows the "slskd isn't configured" notice, neither rooms nor the Jukebox will work until Settings → Sources is set up.
+> Jukebox needs the same Soulseek connection as chat. If the page shows the "slskd isn't configured" notice, neither rooms nor the Jukebox will work until Soulseek is set up under Settings → Downloads → Sources.
 `
         },
     ]

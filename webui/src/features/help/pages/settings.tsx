@@ -118,7 +118,9 @@ export const useVideoSettingsAnswers = makeUseSettingsAnswers('video');
  * their account, so they keep the plain heading.
  */
 export function settingsHeading(tab: string, media: Media, isAdmin = true): PageHeading | null {
-  const t = TAB_TITLES[tab];
+  // System's Logs and Server Activity pills report their old tab keys
+  // (nav.ts legacyKey); they are System
+  const t = TAB_TITLES[tab === 'logs' || tab === 'server-activity' ? 'advanced' : tab];
   if (!t || !isAdmin) return null;
   return {
     title: `${media === 'video' ? 'Video Settings' : 'Settings'}, ${t.title}`,

@@ -68,7 +68,6 @@ function controlOf(label: HTMLElement): HTMLElement | null {
 /** where on the page an element lives */
 function placeOf(el: HTMLElement): Pick<Hit, 'tab' | 'view' | 'open'> & { trail: string[] } {
   const view = el.closest<HTMLElement>('[data-stg-view]');
-  const block = el.closest<HTMLElement>('[data-stg]');
   const slot = el.closest<HTMLElement>('[data-stg-react]');
   const inSheet = el.closest<HTMLElement>('.src-config-panel');
   // a source's panel is parked outside the pills: its sheet opens on Sources
@@ -76,7 +75,7 @@ function placeOf(el: HTMLElement): Pick<Hit, 'tab' | 'view' | 'open'> & { trail:
     ? resolveTab('downloads', 'sources')
     : view
       ? resolveTab(view.dataset.stgTab, view.dataset.stgView)
-      : resolveTab(block?.dataset.stg ?? slot?.dataset.stgReact);
+      : resolveTab(slot?.dataset.stgReact);
   const def = tabDef(place.tab);
   const trail = [def.label];
   if (def.views.length > 1) {

@@ -25,7 +25,8 @@ describe('where sections live', () => {
       resolve(process.cwd(), 'src/features/settings/tabs/connections-metasync.tsx'),
       'utf8',
     );
-    expect(section).toMatch(/tab="connections"\s+title="MetaSync"/);
+    // settings-bic phase 7: on the parts, one card per step
+    expect(section).toContain('title="Step 1: connect SoulSync and MetaSync"');
     // settings-bic: a pill of the Connections page, which the page draws as one slot
     expect(html).toContain('<div data-stg-react="connections" data-stg-part="page"');
     expect(tabDef('connections').views.map((v) => v.key)).toContain('metasync');

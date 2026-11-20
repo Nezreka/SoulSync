@@ -410,7 +410,7 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
   {
     label: 'MetaSync',
     tab: 'connections',
-    anchor: heading('MetaSync'),
+    anchor: { id: 'metasync-node-url' },
     file: 'connections-metasync.tsx',
     hint: 'the shared metadata network',
     keywords: 'metasync node pool network',

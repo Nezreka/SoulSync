@@ -3,9 +3,6 @@
  * page's markup as it is after settings.js has finished with it, so the
  * page's css, its search and its keyboard handlers find what they always did.
  *
- *  - Section: a collapsible tile. The header's hint shows a live summary of
- *    the section once the settings have loaded, else its fixed description
- *    (settings.js refreshLibrarySummaries did this by rewriting the hint).
  *  - The help line: settings.js initSettingHelpLines puts the first sentence
  *    of a setting's help under it, and moves the "i" to the end of that line
  *    when there is more to read, or hides it when there is not. The "i" opens
@@ -16,117 +13,12 @@ import type React from 'react';
 
 import {
   Children,
-  createContext,
   type KeyboardEvent,
-  type MouseEvent,
   type ReactNode,
   isValidElement,
   useCallback,
-  useContext,
   useState,
 } from 'react';
-
-/** the page's collapsible tile, exactly as its inline handler did it. the
- *  settings search and the tab switch change these classes on the nodes
- *  themselves, so this stays out of React state */
-export function toggleSection(event: MouseEvent<HTMLElement>) {
-  const header = event.currentTarget;
-  header.classList.toggle('collapsed');
-  const body = header.nextElementSibling as HTMLElement | null;
-  if (!body) return;
-  body.classList.toggle('collapsed');
-  body.style.display = body.classList.contains('collapsed') ? 'none' : '';
-}
-
-type Side = 'music' | 'video' | undefined;
-
-function sideAttrs(side: Side) {
-  if (side === 'music') return { 'data-music-only': '' };
-  if (side === 'video') return { 'data-video-only': '' };
-  return {};
-}
-
-/** a Section drawn flat: its body only, open, no folding header. A tab
- *  rebuilt on pills (Connections > MetaSync, Notifications) puts its old
- *  sections on a pill of their own this way */
-export const SectionFlat = createContext(false);
-
-export function Section({
-  tab,
-  title,
-  hint,
-  summaryKey,
-  summary,
-  side,
-  bodyStyle,
-  bodyClass,
-  badge,
-  children,
-}: {
-  tab: string;
-  title: string;
-  /** what sits between the title and the hint (the Quality tab's "Profile") */
-  badge?: ReactNode;
-  /** the fixed description, shown until (and whenever) there is no summary */
-  hint: string;
-  /** data-stg-summary: the hint shows `summary` once it is not empty */
-  summaryKey?: string;
-  summary?: string;
-  side?: Side;
-  bodyStyle?: Record<string, string>;
-  /** more classes on the body (the media cards' stg-media-card) */
-  bodyClass?: string;
-  children: ReactNode;
-}) {
-  const live = !!summaryKey && !!summary;
-  const flat = useContext(SectionFlat);
-  if (flat)
-    return (
-      <div data-stg={tab} data-stg-flat="" {...sideAttrs(side)}>
-        {children}
-      </div>
-    );
-  return (
-    <>
-      <div
-        className="settings-section-header collapsed"
-        data-stg={tab}
-        {...sideAttrs(side)}
-        onClick={toggleSection}
-        role="button"
-        tabIndex={0}
-        aria-expanded="false"
-      >
-        <span className="settings-section-arrow">&#9660;</span>
-        <h3>{title}</h3>
-        {badge}
-        {summaryKey ? (
-          <span
-            className={live ? 'settings-section-hint is-live' : 'settings-section-hint'}
-            data-stg-summary={summaryKey}
-            data-stg-fallback={hint}
-          >
-            {live ? summary : hint}
-          </span>
-        ) : (
-          <span className="settings-section-hint">{hint}</span>
-        )}
-      </div>
-      <div
-        className={
-          bodyClass
-            ? `settings-section-body collapsed ${bodyClass}`
-            : 'settings-section-body collapsed'
-        }
-        data-stg={tab}
-        {...sideAttrs(side)}
-        style={{ display: 'none', ...bodyStyle }}
-      >
-        {children}
-      </div>
-    </>
-  );
-}
 
 /** settings.js settingHelpFirstLine: the first sentence, at most ~140 chars */
 export function helpFirstLine(text: string): { line: string; rest: boolean } {

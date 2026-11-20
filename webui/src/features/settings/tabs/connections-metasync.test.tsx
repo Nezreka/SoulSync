@@ -7,8 +7,7 @@
 import { act, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { shape, vanilla } from './__fixtures__/shape';
-import { detectTried, MetaSyncSection } from './connections-metasync';
+import { detectTried, MetaSyncSection, metasyncSentence } from './connections-metasync';
 
 type Shell = Window & Record<string, unknown>;
 const shell = window as unknown as Shell;
@@ -46,10 +45,21 @@ const sent = (method: string, url: string) =>
   calls.filter((c) => c.method === method && c.url === url);
 
 describe('MetaSync', () => {
-  it('is the markup it replaced, before it loads', () => {
-    const { container } = render(<MetaSyncSection opened={0} />);
-    expect(shape(container)).toEqual(shape(vanilla('connections-metasync.vanilla.html')));
+  it('asks nothing before it opens, and reads back loading', () => {
+    render(<MetaSyncSection opened={0} />);
     expect(calls).toEqual([]);
+    expect(document.body.textContent).toContain('Loading MetaSync.');
+    // the steps are cards, Disconnect is in a danger zone
+    for (const title of [
+      'Step 1: connect SoulSync and MetaSync',
+      'Step 2: join a pool',
+      'Status',
+      'Danger zone',
+    ])
+      expect(document.querySelector(`[data-card="${title}"]`), title).toBeTruthy();
+    expect(document.querySelector('[data-card="Danger zone"]')!.textContent).toContain(
+      'Disconnect',
+    );
   });
 
   it('loads each time Connections opens: the fields, the connection and the status lines', async () => {
@@ -76,16 +86,16 @@ describe('MetaSync', () => {
     const { rerender } = render(<MetaSyncSection opened={1} />);
     await waitFor(() =>
       expect(el('metasync-status').textContent).toBe(
-        'Step 1: connected — MetaSync 1.2 is reading this SoulSync',
+        'Step 1: connected to MetaSync 1.2, which is reading this SoulSync',
       ),
     );
     expect(el('metasync-node-url').value).toBe('http://ms:8790');
     expect(el('metasync-pool-url').value).toBe('https://pool');
-    expect(el('metasync-pool-key').placeholder).toBe('Saved — type a new key only to replace it');
-    expect(el('metasync-connect-state').textContent).toBe('Connected — MetaSync ID ab:cd');
+    expect(el('metasync-pool-key').placeholder).toBe('Saved, type a new key only to replace it');
+    expect(el('metasync-connect-state').textContent).toBe('Connected, MetaSync ID ab:cd');
     const detail = el('metasync-status-detail');
     expect(detail.querySelectorAll('br')).toHaveLength(3);
-    expect(detail.textContent).toContain('Pool — SIN (https://pool): Bound to the pool');
+    expect(detail.textContent).toContain('Pool SIN (https://pool): Bound to the pool');
     expect(detail.textContent).toContain(
       'Your report for 2026-W46 is ready (12 anonymous album signals)',
     );
@@ -107,7 +117,7 @@ describe('MetaSync', () => {
     render(<MetaSyncSection opened={1} />);
     await waitFor(() =>
       expect(el('metasync-status').textContent).toBe(
-        'Found MetaSync on this machine at http://localhost:8790 — click Connect to pair with it.',
+        'Found MetaSync on this machine at http://localhost:8790. Press Connect to pair with it.',
       ),
     );
     expect(el('metasync-node-url').value).toBe('http://localhost:8790');
@@ -138,7 +148,7 @@ describe('MetaSync', () => {
     expect(el('metasync-pair-box').style.display).toBe('');
     expect(el('metasync-pair-fingerprint').textContent).toBe('ff');
     expect(sent('POST', '/api/metasync/pair/request')[0].body).toEqual({ node_url: 'http://ms' });
-    fireEvent.click(button("I've approved it — finish connecting"));
+    fireEvent.click(button('I approved it, finish connecting'));
     await waitFor(() => expect(el('metasync-pair-box').style.display).toBe('none'));
     expect(shell.showToast).toHaveBeenCalledWith('MetaSync connected', 'success');
   });
@@ -159,7 +169,7 @@ describe('MetaSync', () => {
     fireEvent.click(button('Send pool key to MetaSync'));
     await waitFor(() =>
       expect(shell.showToast).toHaveBeenCalledWith(
-        'Pool key handed over — waiting for approval in the portal',
+        'Pool key handed over, waiting for approval in the portal',
         'warning',
       ),
     );
@@ -175,7 +185,7 @@ describe('MetaSync', () => {
     fireEvent.click(button('Disconnect'));
     await waitFor(() =>
       expect(shell.showToast).toHaveBeenCalledWith(
-        'Disconnected here — MetaSync could not be reached, so clear its pool key from its dashboard too',
+        'Disconnected here. MetaSync could not be reached, so clear its pool key from its dashboard too',
         'success',
       ),
     );
@@ -183,5 +193,57 @@ describe('MetaSync', () => {
       expect.objectContaining({ title: 'Disconnect MetaSync?', destructive: true }),
     );
     await act(() => Promise.resolve());
+  });
+
+  it('the hero reads the connection, the pools and the reports back', async () => {
+    answers['GET /api/metasync'] = { success: true, local_key_set: true };
+    answers['GET /api/metasync/status'] = {
+      success: true,
+      status: {
+        version: '1.2',
+        soulsync_connected: true,
+        pools: [{ name: 'SIN', binding_status: 'pending_approval' }],
+        dry_run: false,
+      },
+    };
+    render(<MetaSyncSection opened={1} />);
+    await waitFor(() => expect(document.body.textContent).toContain('It is in SIN'));
+    expect(document.body.textContent).toContain('SIN: waiting for approval in the portal');
+    expect(document.body.textContent).toContain('It sends one anonymous report a week.');
+  });
+});
+
+describe('metasyncSentence', () => {
+  const words = (f: Parameters<typeof metasyncSentence>[0]) =>
+    metasyncSentence(f)
+      .map((p) => p.text)
+      .join('');
+  it('says loading, then not connected, then what it is in', () => {
+    expect(words({ linked: null, pools: [] })).toBe('Loading MetaSync.');
+    expect(words({ linked: false, pools: [] })).toMatch(/^SoulSync is not connected to MetaSync\./);
+    expect(words({ linked: true, version: '2', pools: [] })).toBe(
+      'SoulSync is connected to MetaSync 2. It has not joined a pool, so nothing is shared.',
+    );
+    expect(
+      words({
+        linked: true,
+        reading: false,
+        pools: [{ name: 'SIN', binding_status: 'bound' }],
+        dryRun: true,
+      }),
+    ).toBe(
+      'SoulSync is connected to MetaSync, which cannot read this SoulSync yet. It is in SIN. Dry run is on, so nothing is sent yet.',
+    );
+  });
+  it('marks what needs a look', () => {
+    const parts = metasyncSentence({
+      linked: true,
+      reading: false,
+      pools: [{ name: 'SIN', binding_status: 'auth_failed' }],
+    });
+    expect(parts.filter((p) => p.kind === 'warn').map((p) => p.text)).toEqual([
+      'cannot read this SoulSync yet',
+      'SIN: pool authentication failed',
+    ]);
   });
 });

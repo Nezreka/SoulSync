@@ -56,8 +56,8 @@ describe('the shell hands over to the React tabs', () => {
     document.body.innerHTML = `<div id="settings-page">
       <button class="stg-tab" data-tab="appearance"></button>
       <button class="stg-tab" data-tab="logs"></button>
-      <div data-stg="appearance" data-stg-react="appearance"></div>
-      <div data-stg="logs"></div></div>`;
+      <div data-stg-react="appearance"></div>
+      <div data-stg-react="advanced"></div></div>`;
     const shown: string[] = [];
     shell.SoulSyncSettings = {
       show: (tab: string) => {
@@ -67,9 +67,8 @@ describe('the shell hands over to the React tabs', () => {
     };
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     switchSettingsTab('appearance');
-    // the page owns where it is (nav.ts) and shows the tab's blocks itself
-    // (settings-page.tsx showLegacyBlocks); old keys such as 'logs' are its
-    // aliases, so they are handed over as they came
+    // the page owns where it is (nav.ts) and shows its own tabs; old keys
+    // such as 'logs' are its aliases, so they are handed over as they came
     expect(shown).toEqual(['appearance']);
     expect(() => switchSettingsTab('logs')).not.toThrow();
     expect(shown).toEqual(['appearance', 'logs']);

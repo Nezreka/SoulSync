@@ -432,67 +432,6 @@ export function switchSettingsTab(tab: string) {
   }
 }
 
-// ── the search ──
-
-/** labels and help only, never saved values or credentials. a result opens
- *  its tab rather than showing hidden, unloaded forms */
-export function filterSettings(query: string) {
-  const results = document.getElementById('stg-search-results');
-  if (!results) return;
-  const q = (query || '').trim().toLowerCase();
-  results.replaceChildren();
-  results.hidden = !q;
-  if (!q) return;
-  const matches: HTMLElement[] = [];
-  for (const section of document.querySelectorAll<HTMLElement>(
-    '#settings-page .settings-group[data-stg], #settings-page .settings-section-body[data-stg]',
-  )) {
-    if (!(section.textContent || '').toLowerCase().includes(q)) continue;
-    if (matches.some((item) => item.contains(section))) continue;
-    matches.push(section);
-  }
-  if (!matches.length) {
-    const empty = document.createElement('p');
-    empty.setAttribute('role', 'status');
-    empty.textContent = 'No settings found. Try a service name, folder, or feature.';
-    results.append(empty);
-  }
-  for (const section of matches.slice(0, 10)) {
-    const category = section.dataset.stg || '';
-    const tab = document.querySelector(`#settings-page .stg-tab[data-tab="${category}"]`);
-    const heading =
-      section.querySelector('h3') || section.previousElementSibling?.querySelector('h3');
-    const title = heading?.textContent?.trim() || category;
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.textContent = `${tab?.textContent?.trim() || category} — ${title}`;
-    button.addEventListener('click', () => {
-      switchSettingsTab(category);
-      if (section.classList.contains('settings-section-body')) {
-        section.classList.remove('collapsed');
-        section.style.display = '';
-        const header = section.previousElementSibling;
-        header?.classList.remove('collapsed');
-        header?.setAttribute('aria-expanded', 'true');
-      }
-      const label = [...section.querySelectorAll('label, h4')].find((l) =>
-        (l.textContent || '').toLowerCase().includes(q),
-      );
-      const panel = label?.closest('[role="tabpanel"]');
-      if (panel) {
-        // the Library media cards are React: a click moves their own state
-        document.querySelector<HTMLElement>(`[aria-controls="${panel.id}"]`)?.click();
-      }
-      section.tabIndex = -1;
-      section.focus({ preventScroll: true });
-      section.scrollIntoView({ block: 'start', behavior: 'auto' });
-      section.classList.add('stg-search-target');
-      window.setTimeout(() => section.classList.remove('stg-search-target'), 2000);
-    });
-    results.append(button);
-  }
-}
-
 // ── the Sources helpers other pages and the chain call ──
 
 /** the src id → the config panel that belongs to it */

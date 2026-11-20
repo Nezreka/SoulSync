@@ -35,6 +35,7 @@ describe('the tabs', () => {
     expect(resolveTab('system')).toEqual({ tab: 'advanced', view: 'general' });
     // System's pills (settings-bic phase 6); Server Activity kept its own
     expect(resolveTab('server-activity')).toEqual({ tab: 'advanced', view: 'activity' });
+    expect(resolveTab('security')).toEqual({ tab: 'advanced', view: 'security' });
     expect(resolveTab('system', 'maintenance')).toEqual({ tab: 'advanced', view: 'maintenance' });
     // an old address's view=system is the first pill
     expect(resolveTab('system', 'system')).toEqual({ tab: 'advanced', view: 'general' });

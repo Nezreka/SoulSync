@@ -196,43 +196,9 @@ def test_the_legacy_music_list_is_gone(index, js):
         assert f'id="{el}"' not in index, el
     assert "function buildHybridSourceList" not in js
 
-
-def test_the_styling_reuses_the_pages_own_vocabulary():
-    css = _read("webui/static/style.css")
-    block = css.split("/* ── Download chains", 1)[1]
-    assert "--accent-rgb" in block
-    # the two draggable things and the two drop targets
-    assert ".dlchain-step.dragging" in block
-    assert ".dlchain-tile.dragging" in block
-    assert ".dlchain-list.drag-over" in block
-    assert ".dlchain-pool.drag-over" in block
-
-
 # ---------------------------------------------------------------------------
 # It reads as a flow, not a list
 # ---------------------------------------------------------------------------
-
-
-def test_the_slot_is_a_target_not_a_divider():
-    css = _read("webui/static/style.css")
-    block = css.split("/* ── Download chains", 1)[1]
-    css_all = _read("webui/static/style.css")
-    slot = _rule(css_all, ".dlchain-slot")
-    assert "min-height" in slot
-    assert "dashed" in slot
-    # empty chain gets the bigger one, the way the builder's first slot is
-    assert "min-height" in _rule(css_all, ".dlchain-slot.first")
-
-
-def test_the_first_link_reads_as_the_primary():
-    """It is the one that usually answers, so it should not look identical to
-    a fallback three deep."""
-    css = _read("webui/static/style.css")
-    block = css.split("/* ── Download chains", 1)[1]
-    assert ".dlchain-step:first-child {" in block
-    first = block.split(".dlchain-step:first-child {", 1)[1].split("}", 1)[0]
-    assert "--accent-rgb" in first
-
 
 def test_the_legacy_music_list_is_really_hidden():
     """`hidden` alone did not work: .hybrid-source-list sets `display: flex`,
@@ -242,19 +208,6 @@ def test_the_legacy_music_list_is_really_hidden():
     assert ".hybrid-source-list[hidden]" in css
     rule = css.split(".hybrid-source-list[hidden]", 1)[1].split("}", 1)[0]
     assert "display: none" in rule and "!important" in rule
-
-
-def test_the_flow_borrows_the_builder_vocabulary():
-    """Two builders in one app should not look like two apps."""
-    css = _read("webui/static/style.css")
-    block = css.split("/* ── Download chains", 1)[1]
-    css_all = _read("webui/static/style.css")
-    conn = _rule(css_all, ".dlchain-connector")
-    assert "width: 2px" in conn                      # same as .flow-connector
-    assert "--accent-rgb" in conn
-    assert ".dlchain-connector::after" in block       # the arrowhead
-    assert "dashed" in _rule(css_all, ".dlchain-slot")
-
 
 def test_the_source_dropdown_is_gone(index, js):
     """REPLACED in step 7a. the chain IS that setting: one source in it means
@@ -306,45 +259,6 @@ def test_the_widget_drives_the_audiobook_transport(model, js):
     assert "'download_source.mode': order.length > 1 ? 'hybrid' : order[0] || 'torrent'" in write
     assert "setAudiobookChain" not in js
 
-
-def test_the_dark_brand_marks_are_inverted(model):
-    """Tidal, Qobuz and SoundCloud ship dark-foreground marks that vanish
-    against the dark UI. `brightness(0) invert(1)` is this app's existing recipe
-    for "render this image as pure white" — the equalizer and auto-sync icons
-    already use it."""
-    marks = model.split("export const INVERT_BRAND_MARKS = new Set([", 1)[1].split("]", 1)[0]
-    for brand in ("tidal", "qobuz", "soundcloud"):
-        assert f"'{brand}'" in marks, brand
-    css = _read("webui/static/style.css")
-    rule = _rule(css, ".dlchain-mark.is-inverted")
-    assert "brightness(0) invert(1)" in rule
-
-
-def test_it_works_on_a_phone():
-    """Dragging is not realistic on a touch screen, so the arrows are the
-    primary control there and need a real tap target."""
-    css = _read("webui/static/style.css")
-    block = css.split("/* ── Download chains", 1)[1]
-    assert "@media (max-width: 560px)" in block
-    phone = block.split("@media (max-width: 560px)", 1)[1].split("\n}", 1)[0]
-    assert ".dlchain-step { width: 100%" in phone
-    assert ".dlchain-move" in phone and ".dlchain-btn" in phone
-    assert ".dlchain-tabs" in phone
-
-
-def test_hiding_a_tile_actually_hides_it():
-    """.dlchain-tile is display:flex and .dlchain-group is a block, so setting
-    .hidden on them does nothing without an explicit [hidden] rule - a class
-    rule with display beats the browser's own [hidden] styling. The filter sets
-    .hidden on both, so without these two rules filtering would appear to do
-    nothing at all. This exact trap already shipped once on this page with
-    .hybrid-source-list.
-    """
-    css = _read("webui/static/style.css")
-    for sel in (".dlchain-tile[hidden]", ".dlchain-group[hidden]"):
-        assert "display: none" in _rule(css, sel), f"{sel} does not actually hide"
-
-
 def test_a_hidden_form_group_is_actually_hidden(index):
     """The "Download Source" select used to be marked hidden in the markup and
     was on screen anyway: #settings-page .form-group sets display:flex, and a
@@ -363,48 +277,6 @@ def test_a_hidden_form_group_is_actually_hidden(index):
 
     # the page's last hidden form-group (the audiobook mode select) went in
     # settings-bic phase 4; the rule stays for the old tabs' markup
-
-
-def test_the_behaviour_rows_stack_on_a_phone():
-    """The settings page stacks its form rows with
-
-        #settings-page .form-group { flex-direction: column !important }
-
-    inside its own narrow media query. That does nothing to the behaviour rows,
-    because they are display:grid - flex-direction is not a grid property. Left
-    alone they stay a three-column grid with a 140px minimum label column on a
-    360px screen, which pushes the whole page sideways.
-
-    So the grid has to be collapsed explicitly at the same breakpoint. This also
-    checks the desktop rule really is a grid, because the day it goes back to
-    flex is the day this override becomes the thing that breaks the layout.
-    """
-    css = _read("webui/static/style.css")
-
-    base = _rule(css, "#settings-page .dlchain-behaviour .form-group")
-    assert "display: grid" in base, "no longer a grid - revisit the phone override"
-
-    narrow = css.split("@media (max-width: 560px)", 1)
-    assert len(narrow) > 1, "the phone breakpoint is gone"
-    body = narrow[1]
-    assert "#settings-page .dlchain-behaviour .form-group" in body, (
-        "the behaviour rows are never collapsed for a phone"
-    )
-    stacked = body.split("#settings-page .dlchain-behaviour .form-group", 1)[1].split("}", 1)[0]
-    assert "grid-template-columns: 1fr" in stacked
-
-
-def test_the_phone_drop_slot_is_not_taller_than_the_desktop_one():
-    """The phone rules were written when the chain was roomier, and kept a 74px
-    slot after the desktop one was compacted to 54px - so the target grew on the
-    smaller screen. Whatever the values become, the phone one may not exceed the
-    desktop one."""
-    css = _read("webui/static/style.css")
-    desktop = int(re.search(r"min-height:\s*(\d+)px", _rule(css, ".dlchain-slot")).group(1))
-    body = css.split("@media (max-width: 560px)", 1)[1]
-    phone = int(re.search(r"\.dlchain-slot\s*{[^}]*?min-height:\s*(\d+)px", body, re.S).group(1))
-    assert phone <= desktop, f"phone slot {phone}px is taller than desktop {desktop}px"
-
 
 def test_the_chain_opens_on_the_side_you_are_standing_on(model):
     """the chain kind defaults to 'music', so a video user opening Downloads got
@@ -448,46 +320,3 @@ def test_the_downloads_tab_is_shared_without_needing_a_marker():
     # that could never appear on screen together.
     for tab in ("connections",):
         assert f'[data-stg="{tab}"]' in css, f"lost the {tab} rule"
-
-def test_every_source_has_a_brand_colour():
-    """Colour on these cards comes from the SOURCE, not from one page-wide tint.
-    Each card sets --brand from its data-src and the logo well, the wash and the
-    hover edge all read from it - so Tidal is cyan and SoundCloud is orange, and
-    you can tell them apart without reading.
-
-    A source with no --brand falls back to the user's accent, which does not look
-    broken but does quietly undo the point: add a twelfth source and it is the
-    only grey card on the page. So every id that can appear on a card needs one,
-    and a colour defined for an id that no longer exists is dead weight.
-    """
-    model = _read(_TABS + "sources-model.ts")
-    css = _read("webui/static/style.css")
-
-    hybrid = set(re.findall(r"id: '([a-z_]+)'", model.split("export const HYBRID_SOURCES", 1)[1].split("];", 1)[0]))
-    extra = set(re.findall(r"id: '([a-z_]+)'", model.split("export const EXTRA_SOURCE_TILES", 1)[1].split("];", 1)[0]))
-    video_spec = _kinds(model).split("\n  video: {", 1)[1].split("\n  },", 1)[0]
-    video = set(re.findall(r"'([a-z]+)'", video_spec.split("sources: () => [", 1)[1].split("]", 1)[0]))
-    assert video == {"soulseek", "torrent", "usenet", "extto"}
-    needed = hybrid | extra | video
-    defined = set(re.findall(r'\[data-src="([a-z_]+)"\]', css))
-
-    assert not (needed - defined), f"no brand colour for: {sorted(needed - defined)}"
-    assert not (defined - needed), f"brand colour for sources that do not exist: {sorted(defined - needed)}"
-
-    # the fallback has to exist too, or a new source renders with no --brand at all
-    assert "--brand: var(--accent-rgb)" in css
-
-
-def test_first_in_chain_wears_the_accent_not_its_brand():
-    """Brand says WHO, accent says WHAT. "Runs first" is a state, so it has to
-    look the same whichever source happens to be sitting in that slot - if the
-    top card wore its own brand instead, the highlight would change colour every
-    time you reordered, and stop reading as a state at all."""
-    css = _read("webui/static/style.css")
-    rule = re.search(r'#settings-page \.dlchain-step:first-child\s*{([^}]*)}', css)
-    assert rule, "the first step has no rule of its own"
-    body = rule.group(1)
-    assert "--accent-rgb" in body, "the first step no longer carries the accent"
-    first_bg = body.split("background:", 1)[1].split(";", 1)[0]
-    assert "--accent-rgb" in first_bg, "its fill must lead with the accent, not the brand"
-

@@ -13,19 +13,6 @@
     padding: 24px 32px 72px !important;
     box-sizing: border-box;
 }
-#settings-page .stg-category-nav { min-width: 0; margin-bottom: 28px; }
-#settings-page .stg-navigation-heading {
-    display: flex; align-items: center; justify-content: space-between;
-    gap: 24px; margin-bottom: 22px;
-}
-/* the page frame's title type (.pgf-title in style.css) */
-#settings-page .stg-navigation-heading h2 { margin: 6px 0 0; font-size: 28px; font-weight: 600; letter-spacing: -.02em; line-height: 1.15; }
-#settings-page .stg-nav-search-wrap { position: relative; width: min(340px, 45%); }
-#settings-page .stg-nav-search-wrap input {
-    width: 100%; padding: 11px 14px 11px 38px !important; border-radius: var(--radius-control);
-    border: 1px solid var(--white-a09); background: rgba(0,0,0,.16); color: var(--text-bright); box-sizing: border-box;
-}
-#settings-page .stg-search-icon { position: absolute; left: 13px; top: 50%; transform: translateY(-50%); width: 15px; height: 15px; fill: var(--stg-text-secondary); pointer-events: none; }
 #settings-page .stg-tabbar {
     display: flex !important; flex-direction: row !important; flex-wrap: nowrap !important; gap: 4px !important;
     width: 100%; overflow-x: auto; background: transparent !important;
@@ -43,17 +30,6 @@
 }
 #settings-page .stg-tab:hover { color: var(--text-bright) !important; }
 #settings-page .stg-tab.active { color: var(--text-bright) !important; border-bottom-color: var(--accent) !important; }
-#settings-page .stg-tab-badge { display: inline-flex; width: 16px; height: 16px; background: none; box-shadow: none; }
-#settings-page .stg-tab-badge svg { width: 16px; height: 16px; fill: currentColor; opacity: .75; }
-#settings-page .stg-tab.active .stg-tab-badge { color: var(--accent); }
-#settings-page .stg-detail-pane { width: 100%; min-width: 0; }
-#settings-page .settings-nav-row {
-    display: flex !important; flex-direction: row !important; align-items: center; justify-content: space-between;
-    gap: 24px; margin-bottom: 24px; border: 0 !important; box-shadow: none !important; flex-wrap: nowrap;
-}
-#settings-page .stg-active-section-title { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-#settings-page .stg-active-title-text { font-size: 20px; font-weight: 650; letter-spacing: -.02em; }
-#settings-page .stg-active-sub-text { color: var(--stg-text-secondary); font-size: 13px; line-height: 1.5; }
 #settings-page .save-button {
     display: inline-flex; align-items: center; justify-content: center; gap: 8px;
     border: 1px solid rgba(var(--accent-rgb),.35); border-radius: 9px;
@@ -89,16 +65,9 @@ body:not([data-side="video"]) #settings-page .save-button[data-state="rest"] { d
     display: flex !important; flex-direction: column !important; gap: 18px !important;
     width: 100%; margin: 0; padding: 0;
 }
-#settings-page .settings-left-column,
-#settings-page .settings-right-column,
-#settings-page .settings-third-column { min-width: 0; width: 100%; display: flex; flex-direction: column; gap: 18px; }
-#settings-page [data-stg][style*="display: none"],
-#settings-page [data-stg][style*="display:none"],
-#settings-page .settings-left-column[style*="display: none"],
-#settings-page .settings-right-column[style*="display: none"],
-#settings-page .settings-third-column[style*="display: none"] { display: none !important; }
-#settings-page .settings-group,
-#settings-page .stg-media-card {
+#settings-page .settings-left-column { min-width: 0; width: 100%; display: flex; flex-direction: column; gap: 18px; }
+#settings-page .settings-left-column[style*="display: none"] { display: none !important; }
+#settings-page .settings-group {
     background: var(--stg-surface) !important; border: 1px solid var(--white-a09) !important;
     border-radius: var(--radius-card) !important; padding: 22px 24px !important; margin-bottom: 0 !important;
     box-shadow: none !important; backdrop-filter: none !important;
@@ -166,8 +135,6 @@ body:not([data-side="video"]) #settings-page .save-button[data-state="rest"] { d
 #settings-page select:focus-visible:where(:not([data-ui] *)), #settings-page textarea:focus-visible:where(:not([data-ui] *)) {
     outline: 2px solid var(--accent) !important; outline-offset: 3px;
 }
-#settings-page .svc-tile-row { display: grid !important; grid-template-columns: repeat(auto-fill,minmax(120px,1fr)); gap: 10px; }
-#settings-page .svc-tile { border-radius: var(--radius-lg); box-shadow: none; }
 #settings-page .stg-search-results { margin-bottom: 18px; padding: 8px; border: 1px solid var(--white-a09); border-radius: var(--radius-lg); background: var(--stg-surface); }
 #settings-page .stg-search-results[hidden] { display: none; }
 #settings-page .stg-search-results button { display: block; width: 100%; text-align: left; padding: 12px; border: 0; border-radius: 7px; background: transparent; color: var(--text-bright); cursor: pointer; font: inherit; font-size: 13px; }
@@ -177,52 +144,25 @@ body:not([data-side="video"]) #settings-page .save-button[data-state="rest"] { d
 @media (max-width: 900px) {
     #settings-page .settings-content { padding: 20px 18px 60px !important; }
     #settings-page .stg-tab { padding: 12px 10px !important; }
-    #settings-page .stg-tab-badge { display: none; }
 }
 @media (max-width: 560px) {
     #settings-page .settings-content { padding: 16px 12px 48px !important; }
-    #settings-page .stg-navigation-heading { align-items: stretch; flex-direction: column; gap: 16px; margin-bottom: 12px; }
-    #settings-page .stg-nav-search-wrap { width: 100%; }
-    #settings-page .stg-navigation-heading h2 { font-size: 24px; }
     /* #2187: the title takes the row and the status wraps under it; side by
        side the status squeezed the title and a one-word title ran under it */
-    #settings-page .settings-nav-row { align-items: flex-start; justify-content: flex-end; gap: 12px; flex-wrap: wrap; }
-    #settings-page .stg-active-section-title { flex: 1 1 100%; }
     #settings-page .save-button { padding: 10px 12px; font-size: 12px; }
     #settings-page .save-button svg { display: none; }
-    #settings-page .stg-active-sub-text { font-size: 12px; }
-    #settings-page .settings-group, #settings-page .stg-media-card { padding: 16px !important; }
-    #settings-page .settings-section-hint { display: none; }
+    #settings-page .settings-group { padding: 16px !important; }
 }
 @media (prefers-reduced-motion: reduce) { #settings-page *, #settings-page *::before, #settings-page *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; } }
 
-#settings-page .stg-cardgroup { margin: 12px 0 0; gap: 10px; }
-#settings-page .stg-cardgroup:first-child { margin-top: 0; }
-#settings-page .stg-cardgroup-label { color: var(--stg-text-secondary); }
 #settings-page .header-actions { flex: 0 0 auto; }
 
-#settings-page .stg-media-card .form-group {
-    display: block !important; padding: 12px 0 !important;
-}
-#settings-page .stg-media-card .form-group[hidden] { display: none !important; }
-#settings-page .stg-media-card .form-group > label { display: block; }
-#settings-page .stg-media-card .form-group > input:not([type="checkbox"]):not([type="radio"]),
-#settings-page .stg-media-card .form-group > select,
-#settings-page .stg-media-card .form-group > textarea {
-    display: block; width: 100% !important; max-width: 100% !important;
-}
-#settings-page .settings-nav-row .header-actions { width: auto !important; margin: 0 !important; }
 
 /* Legacy media pages require 960px; forms should fit beside the app sidebar. */
 .main-container:has(#settings-page.active),
 .main-content:has(#settings-page.active) { min-width: 0 !important; }
 
 /* Keep saving within reach while scrolling a long category. */
-/* stylelint-disable-next-line no-duplicate-selectors -- order-sensitive: a rule between the copies sets the same property at equal specificity */
-#settings-page .settings-nav-row {
-    position: sticky !important; top: 0; z-index: 20;
-    background: rgb(15, 15, 15) !important; padding: 12px 0 !important;
-}
 
 /* the media server row on the video side: the music servers it hides there
    (video-side.css) are offered on the Connections page's own row */

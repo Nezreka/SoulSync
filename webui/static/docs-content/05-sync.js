@@ -243,7 +243,7 @@ Pick **Generate cover art** from a playlist card's **⋯** menu, or the **⋯** 
 - The playlist's name and where it's from ("Tidal playlist") go across the top. **Show name on cover** in the preview takes them off or puts them back without making a new image
 - A generated cover stays when the playlist refreshes from its source, and syncs to Plex, Jellyfin or Navidrome
 - **Restore original cover** in the same menu puts the source's own cover back
-- Free with no setup: one image every 45 seconds, with a small Pollinations mark in the corner. A key from enter.pollinations.ai in **Settings → Pollinations** removes both
+- Free with no setup: one image every 45 seconds, with a small Pollinations mark in the corner. A key from enter.pollinations.ai in **Settings → Connections** (the Pollinations service) removes both
 
 ## Rotating playlists
 
@@ -276,7 +276,7 @@ Mirrored playlists can refresh and re-sync on a schedule from **More → Bulk sc
 
 - Pick an interval per playlist — from every hour up to weekly (1, 2, 4, 8, 12, 16, 24, 48, 72, or 168 hours)
 - Weekly schedules let you choose specific days
-- Scheduled runs refresh the playlist, run discovery on new tracks, and sync them to your wishlist — fully hands-free (unless you've turned off **Add missing tracks to the wishlist during sync** in Settings → Playlists)
+- Scheduled runs refresh the playlist, run discovery on new tracks, and sync them to your wishlist — fully hands-free (unless you've turned off **Add missing tracks to the wishlist during sync** in Settings → Discovery → Playlists)
 `
         },
         {

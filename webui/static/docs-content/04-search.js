@@ -65,7 +65,7 @@ Narrow results by:
             title: 'Download Sources',
             lede: 'Ten download sources plus Hybrid mode — configure them in Settings and let SoulSync pick the best one.',
             body: `
-SoulSync downloads from multiple sources. Connect each source in **Settings → Sources**, and set their try-order (the hybrid chain) in **Settings → Downloads**. Each has different strengths:
+SoulSync downloads from multiple sources. Connect each source and set their try-order (the hybrid chain) in **Settings → Downloads → Sources**. Each has different strengths:
 
 | Source | Description | Best for |
 |--------|-------------|----------|

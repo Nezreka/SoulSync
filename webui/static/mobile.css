@@ -1087,9 +1087,7 @@
         flex-direction: column;
     }
 
-    .settings-left-column,
-    .settings-right-column,
-    .settings-third-column {
+    .settings-left-column {
         min-width: 0;
         width: 100%;
     }
@@ -1112,11 +1110,6 @@
     .api-test-buttons .test-button {
         width: 100%;
         min-width: 0;
-    }
-
-    .server-toggle-btn {
-        flex: 1;
-        min-height: 44px;
     }
 
     .path-input-group {
@@ -3750,15 +3743,6 @@ body:has(.artist-map-container) #gsearch-bar {
     .page-header,
     .page-title,
     h1.page-title {
-        padding-left: 56px;
-    }
-
-    /* Settings sub-pages title their pane with .stg-active-title-text, not
-       .page-title, so they slid under the hamburger too ("…brary",
-       "…wnloads", "…ality" in the batch #2 screenshots). The title sits in
-       the detail pane, right of the category rail; indent the title block
-       itself so the Save button on the same row is untouched. */
-    #settings-page .stg-active-section-title {
         padding-left: 56px;
     }
 }

@@ -306,13 +306,7 @@ function Cards() {
 export function VideoApiGroup() {
   const [home, setHome] = useState<HTMLElement | null>(null);
   return (
-    <div
-      className="settings-group"
-      data-stg="connections"
-      data-video-only=""
-      data-svc-legacy=""
-      ref={setHome}
-    >
+    <div data-video-only="" data-svc-legacy="" ref={setHome}>
       <ServiceHome.Provider value={home}>
         <Cards />
       </ServiceHome.Provider>

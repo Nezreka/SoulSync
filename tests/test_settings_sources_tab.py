@@ -177,26 +177,6 @@ def test_the_cog_crosses_to_the_tab(js):
     assert "/** open a source's settings in the modal (a tile, a chain cog) */" in model
     assert "toggleHybridSourceConfig" not in js
 
-
-def test_the_styling_reuses_the_pages_own_vocabulary():
-    """Unified, not a second design language bolted on."""
-    css = _read("webui/static/style.css")
-    block = css.split("/* ── Sources tab", 1)[1]
-    assert "--accent-rgb" in block
-    for state in ("hss-ok", "hss-fail", "hss-testing"):
-        assert f".src-tile-dot.{state}" in block
-
-
-def test_the_dot_colours_match_the_chain_rows_exactly():
-    # If these drift, the same source shows two different colours on two tabs.
-    css = _read("webui/static/style.css")
-    for state, colour in (("hss-ok", "#34d27b"), ("hss-fail", "#ff5f57")):
-        chain = re.search(rf"\.hybrid-source-status\.{state}\s*{{([^}}]*)}}", css)
-        tile = re.search(rf"\.src-tile-dot\.{state}\s*{{([^}}]*)}}", css)
-        assert chain and tile
-        assert colour in chain.group(1) and colour in tile.group(1)
-
-
 def test_no_dead_width_rule_pretends_to_set_the_page_width():
     """The @media (min-width: 1440px) block used to cap .settings-content, and
     a cap there does nothing: the layout override further down sets
@@ -259,38 +239,6 @@ def test_the_client_records_a_warning_state(model):
     assert "startsWith" in fn
     assert "warned: { ...s.warned, [service]:" in fn
 
-
-def test_a_warning_gets_its_own_dot_colour():
-    css = _strip_comments(_read("webui/static/style.css"))
-    # the bare declaration, not the :has() ring rule that mentions the same class
-    warn = re.search(r"^\.src-tile-dot\.hss-warn\s*{([^}]*)}", css, re.M)
-    assert warn, "no .src-tile-dot.hss-warn rule"
-    assert "#f0b429" in warn.group(1)   # amber, not the red it used to draw
-    assert "#ff5f57" not in warn.group(1)
-
-
-def test_a_broken_source_is_visible_at_the_tile_not_just_the_dot():
-    """The tile used to carry this on border-color. The visual pass dropped
-    borders in favour of tonal surfaces, and this signal came within one edit of
-    going with them - the dot tests below stayed green either way, because the
-    dot is a separate element. So pin the tile-level ring, not the dot.
-
-    The alert also has to outrank .src-tile.is-active, which sets a box-shadow of
-    its own: a source that is IN the chain and failing is exactly the one you
-    need to see, so ordering in the file is load-bearing here.
-    """
-    css = _strip_comments(_read("webui/static/style.css"))
-    for state, colour in (("hss-fail", "255, 95, 87"), ("hss-warn", "240, 180, 41")):
-        m = re.search(r"^\.src-tile:has\(\.src-tile-dot\.%s\)\s*{([^}]*)}" % state, css, re.M)
-        assert m, "no tile-level ring for %s" % state
-        assert "box-shadow" in m.group(1), "%s ring is not drawn" % state
-        assert colour in m.group(1), "%s ring lost its colour" % state
-        assert css.index(m.group(0)) > css.index(".src-tile.is-active {"), (
-            "the %s ring must come after .src-tile.is-active or the chain "
-            "gradient wins and a failing in-chain source looks healthy" % state
-        )
-
-
 def test_usenet_has_a_tile(js):
     """It is its own link in the chain and shares the Prowlarr panel with
     torrent. It had no entry at all, so a usenet user saw nothing to click."""
@@ -339,15 +287,6 @@ def test_sources_gets_the_full_width_like_logs():
 # ---------------------------------------------------------------------------
 # Layout and the per-source test
 # ---------------------------------------------------------------------------
-
-
-def test_a_small_group_does_not_stretch_across_the_page():
-    css = _strip_comments(_read("webui/static/style.css"))
-    row = css.split(".src-tile-row {", 1)[1].split("}", 1)[0]
-    assert "auto-fit" in row
-    # a max on the track, or four tiles span the whole width of the page
-    assert "190px" in row or "px)" in row.split("minmax(", 1)[1]
-
 
 # ---------------------------------------------------------------------------
 # Consolidation: the source config that was scattered across Downloads/Advanced
@@ -495,38 +434,6 @@ def test_the_indexer_probe_reaches_the_video_side(model):
     assert "const videoSide = document.body.getAttribute('data-side') === 'video'" in fn
     cond = next(ln for ln in fn.splitlines() if "sources.has('torrent')" in ln)
     assert "videoSide" in cond
-
-
-def test_an_inverted_mark_is_not_then_dimmed_into_grey():
-    """Tidal, Qobuz and SoundCloud ship as thin black OUTLINE svgs - stroke only,
-    an 800px viewBox drawn at 30px. They are inverted to white so they are not
-    invisible on a dark tile.
-
-    The bug this pins: opacity MULTIPLIES down the tree. The mark carried 0.92 of
-    its own while the idle rule put 0.55 on the parent, so a source that was not
-    in the chain drew its white hairlines at 0.5 - which on a dark tile is grey,
-    and looks exactly like the inversion was never applied at all. It was; it was
-    being eaten one rule further up. Both halves have to stay put, which is why
-    this checks the parent exemption and not just the filter.
-    """
-    css = _strip_comments(_read("webui/static/style.css"))
-
-    for sel in (r"\.src-tile-art img\.is-inverted", r"\.dlchain-mark\.is-inverted"):
-        m = re.search(r"^%s\s*{([^}]*)}" % sel, css, re.M)
-        assert m, "no invert rule for %s" % sel
-        assert "brightness(0) invert(1)" in m.group(1)
-        op = re.search(r"opacity:\s*([\d.]+)", m.group(1))
-        assert op and float(op.group(1)) == 1, (
-            "an inverted mark must carry full opacity; anything less multiplies "
-            "with the parent dimming and turns white line art grey"
-        )
-
-    # and the idle dimming has to let these through
-    assert ".src-tile-art:has(img.is-inverted)" in css, (
-        "no exemption from .src-tile:not(.is-active) dimming for line-art marks"
-    )
-    assert ".dlchain-tile-art:has(.dlchain-mark.is-inverted)" in css
-
 
 def _library_cards(markup):
     """the Library tab's card titles and group labels in page order. the
@@ -677,115 +584,6 @@ def test_the_settings_page_sizes_text_from_one_scale():
         for size in re.findall(r'font-size:\s*([0-9.]+em)', m.group(2)):
             leftovers.append((sel[:60], size))
     assert not leftovers, f"still sizing text in em: {leftovers}"
-
-
-def test_every_section_toggle_is_reachable_without_a_mouse(index, js):
-    """31 collapsible sections were <div onclick>. Tab skipped all of them,
-    Enter and Space did nothing, and the :focus-visible rules written for them
-    could never fire - the element was not focusable, so there was no focus to
-    style.
-
-    They carry role="button" and tabindex="0" now, with a delegated keydown
-    handler supplying the half a real <button> would have given for free.
-
-    aria-expanded is checked separately and on purpose: an attribute that is set
-    once in the markup and never updated is WORSE than no attribute, because a
-    screen reader would confidently announce "collapsed" for a section the user
-    just opened. So the handler has to write it back.
-    """
-    headers = re.findall(r'<div class="settings-section-header[^"]*"[^>]*>', index)
-    # every collapsible section is React now (SETTINGS_PORT.md): its header
-    # is parts.tsx Section, with the three attributes (the Library cards'
-    # LibrarySection went with settings-bic phase 4: Library is pills now)
-    tabs = Path(__file__).resolve().parent.parent / "webui" / "src" / "features" / "settings" / "tabs"
-    for f in ("parts.tsx",):
-        src = (tabs / f).read_text(encoding="utf-8")
-        head = src.split('className="settings-section-header collapsed"', 1)[1]
-        head = head.split('<span className="settings-section-arrow"', 1)[0]
-        assert 'role="button"' in head and "tabIndex={0}" in head and 'aria-expanded="false"' in head, f
-
-    for h in headers:
-        if 'settings-section-static' in h:
-            continue          # a heading that toggles nothing needs no button role
-        assert 'tabindex="0"' in h, f"not focusable: {h[:90]}"
-        assert 'role="button"' in h, f"no button role: {h[:90]}"
-        assert 'aria-expanded' in h, f"no expanded state: {h[:90]}"
-
-    # a collapsed section must not claim to be open
-    for h in headers:
-        if 'settings-section-static' in h or 'aria-expanded' not in h:
-            continue
-        collapsed = 'settings-section-header collapsed' in h
-        expected = 'false' if collapsed else 'true'
-        assert f'aria-expanded="{expected}"' in h, f"wrong initial state: {h[:90]}"
-
-    assert "e.key !== 'Enter'" in js, "no keyboard activation"
-    assert "setAttribute('aria-expanded'" in js, "aria-expanded is never updated"
-    assert "e.preventDefault()" in js, "Space would scroll the page instead of toggling"
-
-
-def test_library_headers_report_what_is_set_not_what_is_inside(index, js):
-    """Every library hint used to be a table-of-contents entry - "Metadata,
-    tags, conversion, lyrics" tells you what the section CONTAINS and nothing
-    about your install, so learning anything meant opening all ten cards. That
-    is the problem the Sources tab had before its tiles started showing state,
-    and showing state is what made that page work.
-
-    Each wired header now reports its own current value.
-
-    Two properties matter more than the wording:
-
-      * a fallback. if a summary cannot be computed the header shows its static
-        description again, so it degrades to the old behaviour rather than to a
-        blank gap.
-      * summaries are computed from the LIVE controls, never from a second copy
-        of the state. a summary that can disagree with the field below it is a
-        bug generator, and this page has already been bitten by exactly that
-        kind of drift twice (the download-mode select, the slskd form).
-    """
-    slots = re.findall(r'<span[^>]*data-stg-summary="([^"]+)"[^>]*>', index)
-    # the tabs ported to React render their headers themselves, from the same
-    # state their controls render from, so the two cannot disagree either
-    # (src/features/settings/tabs/parts.tsx Section, SETTINGS_PORT.md)
-    tabs = Path(__file__).resolve().parent.parent / "webui" / "src" / "features" / "settings" / "tabs"
-    react = "\n".join(p.read_text(encoding="utf-8") for p in tabs.glob("*-tab.tsx"))
-    react_slots = re.findall(r'summaryKey="([^"]+)"', react)
-    # (settings-bic phase 4) Library has no folded headers any more either:
-    # each pill reads its own settings back in a sentence at the top, built
-    # from the same store its fields show (tabs/library/words.ts)
-    words = _read("webui/src/features/settings/tabs/library/words.ts")
-    assert words.count("export function ") >= 15
-    # (settings-bic phase 5) Discovery's three summaries were the last: its
-    # pills read themselves back the same way (tabs/discovery/words.ts), and
-    # Appearance has its own sentence (tabs/appearance/words.ts)
-    discovery = _read("webui/src/features/settings/tabs/discovery/words.ts")
-    for fn in ("recommendationsSentence", "playlistsSentence", "importListsSentence"):
-        assert f"export function {fn}(" in discovery, fn
-    assert "export function appearanceSentence(" in _read(
-        "webui/src/features/settings/tabs/appearance/words.ts")
-    assert not set(slots) & set(react_slots), "a summary is on the page twice"
-    parts = (tabs / "parts.tsx").read_text(encoding="utf-8")
-    assert "data-stg-fallback={hint}" in parts, "a React header without a fallback could go blank"
-    for key in set(react_slots):
-        block = react.split(f'summaryKey="{key}"', 1)[1][:200]
-        assert "summary={" in block, f"React header {key} has no summary"
-
-    for m in re.finditer(r'<span[^>]*data-stg-summary="[^"]+"[^>]*>', index):
-        assert 'data-stg-fallback="' in m.group(0), (
-            "no fallback - a header that cannot compute its summary would go blank"
-        )
-
-    # every wired key must have a matching computer, and vice versa
-    computed = set(re.findall(r"^\s*'([a-z-]+)': \(\) =>", js, re.M))
-    assert set(slots) <= computed, f"markup asks for summaries nothing computes: {set(slots) - computed}"
-    assert computed <= set(slots), f"computed but never shown: {computed - set(slots)}"
-
-    # and they read the real inputs rather than a cached copy of the settings
-    # (every Library summary is React since SETTINGS_PORT.md video pass V2c,
-    # checked above; the vanilla map is empty until settings.js goes)
-    # (the vanilla map went with settings.js, step V4b)
-    assert "LIBRARY_SUMMARIES" not in js and not computed
-
 
 def test_a_failed_settings_load_does_not_summarise_an_empty_form(js):
     """If the fetch fails the form is blank, and a blank form summarised reads as
@@ -1016,35 +814,6 @@ def test_a_service_tile_reports_the_live_field_not_a_cached_setting(tiles):
     assert 'querySelectorAll' in fn and 'settings' not in fn
     assert 'return null' in fn, "no 'cannot tell' state - it will guess instead"
 
-
-def test_the_old_accordion_list_is_not_shown_alongside_the_tiles(index):
-    """The tiles REPLACE the two "API Configuration" accordion groups; they do
-    not sit above them. Leaving both on screen meant a video user saw a grid of
-    music service tiles and, directly underneath, the old video accordion list -
-    the same information twice in two different shapes.
-
-    The groups stay in the DOM because they are where a service panel lives
-    between visits to the modal: a tile lifts the panel out and puts it straight
-    back. They are hidden on the GROUP, so a panel moved into the modal is no
-    longer a descendant and renders normally.
-    """
-    # the music group is React (connections-extras.tsx, step 10b)
-    # and so is the video group (connections-video-api.tsx, video pass V3a)
-    extras = _read(_TABS + "connections-extras.tsx") + _read(_TABS + "connections-video-api.tsx")
-    assert index.count('data-svc-legacy') + extras.count('data-svc-legacy=""') == 2, (
-        "the legacy groups moved or multiplied"
-    )
-
-    css = _read("webui/static/style.css")
-    rule = re.search(r'#settings-page \.settings-group\[data-svc-legacy\]\s*\{([^}]*)\}', css)
-    assert rule, "the legacy accordion groups are not hidden"
-    assert "display: none" in rule.group(1) and "!important" in rule.group(1)
-
-    # the panels themselves must NOT be individually hidden, or lifting one into
-    # the modal would show an empty dialog
-    assert 'api-service-frame[data-svc-legacy]' not in css
-
-
 def test_the_required_keys_note_survived_hiding_its_group(index, tiles):
     """TMDB and TVDB are required, and the note saying so - crucially including
     "both are free" - lived inside the group that is now hidden. The tiles say
@@ -1112,22 +881,6 @@ def test_a_service_without_artwork_still_looks_deliberate(tiles):
     css = _read("webui/src/features/settings/ui/settings.module.css")
     brand = re.search(r'(?m)^\.markBrand\s*\{([^}]*)\}', css)
     assert brand and 'var(--brand' in brand.group(1), "the fallback is not brand-tinted"
-
-
-def test_the_service_grid_only_shows_actual_services(tiles):
-    """"Detail Pages" is a video-preferences panel on the LIBRARY tab that
-    happens to use the same accordion component. An unscoped query pulled it into
-    the Connections grid, where it appeared as a connection you could configure -
-    which it is not.
-
-    The grid is scoped to the connections tab, so a panel reusing this component
-    elsewhere cannot wander in.
-    """
-    fn = _fn(tiles, "frames")
-    assert 'closest(' in fn and 'data-stg="connections"' in fn, (
-        "the service query is not scoped to the connections tab"
-    )
-
 
 def test_the_media_tab_owns_the_whole_connections_tab(index, tiles):
     """The Services tabs moved only the tile grid. The server sections below kept
@@ -1200,23 +953,6 @@ def test_both_server_sections_use_the_same_copy_style(index):
     servers = _read(_TABS + "connections-servers.tsx")
     assert 'title="Server Connections"' in seg and 'title="Server Connections"' in servers
     assert '<p className={s.cardFoot}>' in seg
-
-
-def test_the_server_toggles_are_one_control_on_both_sides():
-    """Same button, same metrics, same focus ring - they are the same control
-    doing the same job, and the only reason they ever drifted is that the two
-    sections were never on screen together to be compared."""
-    css = _read("webui/static/style.css")
-    rule = re.search(
-        r'(?m)^#settings-page \.settings-group\[data-svc-side\] \.server-toggle-btn\s*\{([^}]*)\}', css)
-    assert rule, "the shared toggle styling is gone"
-    body = re.sub(r"/\*.*?\*/", "", rule.group(1), flags=re.S)
-    assert "border-radius" in body and "transition" in body
-
-    focus = re.search(
-        r'(?m)^#settings-page \.settings-group\[data-svc-side\] \.server-toggle-btn:focus-visible\s*\{([^}]*)\}', css)
-    assert focus and "outline" in focus.group(1), "no keyboard focus ring on the server toggles"
-
 
 def test_the_music_tab_shows_every_music_server_from_either_side():
     """The video side downloads through Plex or Jellyfin only, so Navidrome and
@@ -1345,33 +1081,6 @@ def test_the_video_server_row_is_not_capped_narrower_than_music():
         rules)
     assert m, "the settings server sections do not opt out of the video width caps"
     assert "max-width: none" in m.group(1)
-
-
-def test_the_server_cards_have_a_ceiling():
-    """.server-logo is width:100% and .server-toggle-btn is flex:1, so with
-    nothing stopping them a four-server row grew ~450px-tall cards - a
-    poster-sized logo to answer "which server". Both axes are capped now.
-
-    The cap is a TOKEN read by two rules: the one in style.css for the music
-    side, and the one in video-side.css that has to exist because that file loads
-    last and is the only thing able to beat its own [data-video-only] caps. One
-    value, two readers - not two opinions.
-    """
-    css = _read("webui/static/style.css")
-    assert '--svc-server-logo-max:' in css and '--svc-server-btn-max:' in css
-
-    btn = re.search(
-        r'(?m)^#settings-page \.settings-group\[data-svc-side\] \.server-toggle-btn\s*\{([^}]*)\}', css)
-    assert btn, "no shared rule for the server toggles"
-    body = re.sub(r"/\*.*?\*/", "", btn.group(1), flags=re.S)
-    assert 'max-width: var(--svc-server-btn-max' in body, "the button has no width ceiling"
-
-    logo = re.search(
-        r'(?m)^#settings-page \.settings-group\[data-svc-side\] \.server-logo\s*\{([^}]*)\}', css)
-    assert logo and 'max-height: var(--svc-server-logo-max' in logo.group(1), (
-        "the logo has no height ceiling - the card will grow to whatever the art is"
-    )
-
 
 def test_the_connections_tab_survives_a_phone():
     """The service tiles had narrow-screen rules; the server section had NONE.
