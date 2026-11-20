@@ -143,6 +143,14 @@ Playback serves the **local file on SoulSync's disk**: the browser asks \`/api/l
 - **Navidrome fallback** — when the file isn't on SoulSync's disk (e.g. the library isn't mounted into the container) and Navidrome is the active media server, playback falls back to streaming via Navidrome's own Subsonic-compatible stream API — no disk mount needed. Plex and Jellyfin have no such fallback, so their files must be reachable on SoulSync's disk.
 
 The browser auto-detects which audio formats it can play. Album art, track metadata, and ambient colors are all pulled from your server in real time.
+
+**Lyrics** in Now Playing come from the first place that has them:
+
+1. the \`.lrc\` (synced) or \`.txt\` (plain) file beside the song
+2. lyrics embedded in the file's own tags: ID3 USLT and synced SYLT (MP3), LYRICS or UNSYNCEDLYRICS (FLAC, Ogg, Opus), and the lyrics atom (M4A). Files tagged by beets or Picard often carry these only
+3. LRClib
+
+An \`[offset:]\` line in LRC lyrics is honoured, so lyrics that run early or late line up. When LRClib finds lyrics for a song in your library, SoulSync saves them as a \`.lrc\` (or \`.txt\`) beside the file, so the next play needs no lookup. It never overwrites a sidecar you already have, skips locked albums and folders it can't write to, and never changes the audio file. Turn it off in Settings, Library, Post-Processing: **Save lyrics the player finds as .lrc files beside library songs** (it's also off whenever .lrc files are turned off for downloads).
 `
         },
         {

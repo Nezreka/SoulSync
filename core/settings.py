@@ -870,6 +870,9 @@ class ConfigManager:
             "metadata_enhancement": {
                 "enabled": True,
                 "embed_album_art": True,
+                # the player saves an LRClib hit beside a library song as a
+                # .lrc / .txt (core.lyrics_local), never over an existing one
+                "lrclib_cache_player": True,
                 "post_process_order": ["musicbrainz", "deezer", "audiodb", "tidal", "qobuz", "lastfm", "genius"],
                 # Ordered preferred cover-art sources (empty = use the
                 # download's own art, i.e. today's behavior). Resolved + walked
