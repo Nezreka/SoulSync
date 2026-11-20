@@ -138,3 +138,10 @@ Pick one:
   are reaching SoulSync over plain `http://`. The session cookie is now HTTPS-only;
   use `https://`, or turn the setting off for direct HTTP access.
 - **Scans time out** → raise `proxy_read_timeout` / `proxy_send_timeout`.
+- **Compression** → SoulSync compresses its own pages, JSON and web UI files
+  (brotli, or gzip for browsers without it; the Docker image ships them
+  precompressed), so you don't need `gzip on` / `encode` for it. Leaving your
+  proxy's compression on is harmless: SoulSync never compresses audio, video,
+  images, downloads, live updates or byte-range answers, and a proxy leaves an
+  already-compressed answer alone. If you see garbled pages, check the proxy
+  isn't stripping `Content-Encoding` while keeping the body.

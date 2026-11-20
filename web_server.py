@@ -327,6 +327,13 @@ app.jinja_env.auto_reload = DEV_STATIC_NO_CACHE
 # / CSS doesn't require a server restart between edits.
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0 if DEV_STATIC_NO_CACHE else 31536000
 
+# brotli/gzip for pages, JSON and static text; never for streams, media,
+# downloads or ranges. registered first, so it runs after every other
+# after_request hook and sees the final body (core/http_compression.py).
+# SOULSYNC_COMPRESSION=0 turns it off.
+from core.http_compression import install as _install_compression
+_install_compression(app)
+
 _MIGRATION_BLOCKED_ENDPOINTS = frozenset({
     'start_download', 'start_matched_download', 'process_wishlist_api',
     'enriched_start', 'manual_start',

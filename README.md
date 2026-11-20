@@ -879,6 +879,7 @@ Settings save as you change them. If you'd rather press save yourself, turn off 
 | `SOULSYNC_URL_BASE` | Serve under a sub-path. See [docs/REVERSE_PROXY_SUBPATH.md](docs/REVERSE_PROXY_SUBPATH.md). |
 | `SOULSYNC_LOG_LEVEL` | Log verbosity |
 | `SOULSYNC_GUNICORN_THREADS` | Request threads, default 32. Every open browser tab holds one for its websocket. |
+| `SOULSYNC_COMPRESSION` | `0` turns off SoulSync's own brotli/gzip compression of pages, JSON and web UI files (on by default). |
 
 ### 5. Sign in with OIDC (optional)
 
