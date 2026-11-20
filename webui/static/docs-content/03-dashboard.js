@@ -623,6 +623,27 @@ The button shows **Starting…** then **Scanning…** (disabled while busy) — 
 `
         },
         {
+            id: 'dash-tool-file-locations',
+            title: 'Update File Locations',
+            lede: 'Moved your music library folder? Point the library at where the files are now.',
+            body: `
+The **Update File Locations** card (Tools → Database & Scanning, admins only) is for after you move the music library folder, for example from \`/app/Transfer\` to \`/music\` in Settings and in your docker-compose mount. Files keep playing after a move, but the library still names the old folder in the File column, Edit Track, findings and rename previews until this runs.
+
+::: steps
+1. Click **Check Locations**. Every record is read, nothing is written. The card lists each folder that moved with a count, like "12,340 files: /app/Transfer → /music", and what it would leave alone and why.
+2. Untick any folder pair you don't want, then click **Update N files** and confirm. It runs in the background with a progress bar and a **Stop** button; a stopped run picks up where it left off next time.
+3. Every run is listed under the buttons with an **Undo**.
+:::
+
+## What gets updated
+
+A record moves only when its file is not where it says, the file is found in exactly one place by the same path under one of your library folders (the music library folder or a Settings → Library music path, never the download folder), and it is the same size the library recorded. Anything else is left alone: not found anywhere, found in two places, a different size, no size recorded, or a path some other record already holds. Files are never moved or touched, and the path your media server reports for a file is never changed.
+
+> [!NOTE]
+> A library scan (Refresh & Scan, Full Refresh, Deep Scan) does the same on its own, with one more rule: the old folder has to be gone or empty. If it still has files in it, the scan leaves the records for you to check here. Those runs show up on the card too and can be undone the same way.
+`
+        },
+        {
             id: 'dash-tool-media-scan',
             title: 'Media Server Scan',
             lede: 'Manually trigger a Plex library scan for your music.',

@@ -300,6 +300,10 @@ Your Music Library Folder (output) must ultimately point to the same physical di
 >
 > **Result:** SoulSync writes to \`/app/Transfer\` in the container → appears at \`/mnt/media/music\` on the host → Plex sees it and adds it to your library.
 
+## Moving the music library folder
+
+To move it (say from \`/app/Transfer\` to \`/music\`), change both halves: the volume mount in docker-compose and **Settings → Library → Folders → Music Library Folder (output)**. Restart the container. Your files keep playing straight away, but the library still remembers the old locations until you run **Tools → Update File Locations** (check, then update). A library scan also catches up on its own once the old folder is gone. Only the library's records change, never the files, and a run can be undone from the same card.
+
 ## Complete docker-compose example (slskd + SoulSync)
 
 \`\`\`yaml
@@ -371,6 +375,7 @@ If paths are correct but files still won't move into your music library folder, 
 | Files not renamed properly | Post-processing isn't running (path mismatch) or organization disabled | Verify File Organization is enabled in **Settings → Library → Organization**; fix the Download Folder (input) first |
 | Permission denied in logs | Container user can't write to the music library folder | Set PUID/PGID to match the host owner; \`chmod -R 755\` the music library folder on the host |
 | Media server doesn't see new files | Music Library Folder (output) doesn't map to the monitored folder | Ensure the **host path** in your SoulSync volume mount is the folder Plex/Jellyfin/Navidrome watches |
+| File paths still show the old folder after moving the library | The library remembers where files were, not where they are now | Run **Tools → Update File Locations**: check, then update. See [Moving the music library folder](#gs-folders) |
 | slskd works alone but not via SoulSync | slskd's folder and SoulSync's Download Folder (input) are different physical locations | Both containers must mount the **same host directory** — check the left side of \`:\` in both |
 
 > [!TIP]

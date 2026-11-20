@@ -157,6 +157,15 @@ Each kind (music, movies, TV, audiobooks) can be set to have an admin pick the r
 - Download automatically instead: `POST /api/requests/music/awaiting/auto` `{profile_id, key}`, `POST /api/requests/media/<id>/auto`, `POST /api/video/requests/<id>/auto` (a show joins the watchlist then).
 - The requester's list says it too: music and book rows in status `awaiting_selection`, video rows with `awaiting_selection: true` (nothing picked yet) or `picking: true` (a picked release is downloading).
 
+### Update file locations (web UI routes, admins only)
+
+After the music library folder moves, these point the library's file records at where the files are now. Files are never touched, and the media server's own path for a file is never changed. One job runs at a time, in the background.
+
+- `POST /api/library/file-locations/preview`: check every record, write nothing. The finished result (on `/status` as `preview`) has `counts` per outcome (`repoint`, `present`, `not_found`, `ambiguous`, `different_file`, `unverified`, `outside_library`, `partial_match`, `claimed`, `old_root_live`) and `groups`: `[{old_root, new_root, count, examples}]`.
+- `POST /api/library/file-locations/apply` `{groups?: [{old_root, new_root}]}`: move the records, every one checked again; `groups` limits it to those folder pairs. An interrupted apply continues in the same run.
+- `GET /api/library/file-locations/status`: `{status, action, checked, total, result, preview, error, runs}`. `runs` lists recent runs, manual and from library scans, with `id`, `kind`, `status`, `repointed` and `groups`.
+- `POST /api/library/file-locations/runs/<id>/undo`: put a run's records back. A record changed since is left as it is. `POST /api/library/file-locations/stop` stops the running job.
+
 ---
 
 ## MCP for AI clients
