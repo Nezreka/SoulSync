@@ -492,6 +492,7 @@ The Library page is your movies and shows three ways: posters, a sortable table 
 - **An editor for every title**: details with per-field locks, poster, quality profile, series type, and for a show an **Episodes** tab that files a run of episode files under the right season and episode (specials are season 0) and renames them to match.
 - **History and undo**: every rename, move, delete and re-file made by hand is listed, and one click puts it back, a whole bulk run at once. A deleted file comes back owned while the recycle folder still holds it.
 - **The padlock**: lock a title once it is the way you want it, and maintenance jobs, mass rename and automatic upgrades leave it and its files alone.
+- **Shelf Life**: a 0 to 100 keep-or-cut score for every movie and show, from who watches it, how hard it is to replace, how well regarded it is, its size for its runtime and whether someone asked for it. Titles under your line show up for review, **Free up space** picks the lowest until you get the space you asked for, and every title is checked again right before it goes to the recycle bin. Off until you turn it on.
 
 <details>
 <summary><b>Bulk operations, self-refreshing pages and managing a title from its own page</b></summary>

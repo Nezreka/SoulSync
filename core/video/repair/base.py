@@ -72,6 +72,9 @@ class VideoRepairJob(ABC):
     auto_fix: bool = False
     # finding_type strings this job produces AND can fix (dispatch keys).
     finding_types: tuple = ()
+    # a fix_action meant for ONE finding (Shelf Life's typed title): a bulk
+    # run may only carry it per finding (fix_actions), never one for all
+    fix_action_per_finding: bool = False
 
     @abstractmethod
     def scan(self, context: JobContext) -> JobResult:

@@ -35,7 +35,7 @@ beforeEach(() => {
     sb.fetch = (url) => { sb.calls.push(url); return new Promise(() => {}); };
     sb.renderShelf = () => {};
     vm.createContext(sb);
-    vm.runInContext(['esc', '_isAdmin', 'shelfAgo', 'shelfPanelHtml', 'loadShelfLife'].map(lift).join('\n') +
+    vm.runInContext(['esc', '_isAdmin', 'shelfAgo', 'shelfShield', 'shelfPanelHtml', 'loadShelfLife'].map(lift).join('\n') +
         '\nvar currentId = 5, currentKind = "movie";', sb);
 });
 
@@ -64,6 +64,8 @@ describe('shelfPanelHtml', () => {
     test('a gated title shows the gate, not a score or reasons', () => {
         const html = sb.shelfPanelHtml(view({ score: null, gate: 'in_progress', gate_text: 'someone is part-way through it' }));
         assert.match(html, /Protected/);
+        assert.match(html, /<svg[^>]*aria-hidden/);
+        assert.doesNotMatch(html, /\u{1F6E1}/u);
         assert.match(html, /someone is part-way through it/);
         assert.doesNotMatch(html, /<li>/);
     });
@@ -71,6 +73,8 @@ describe('shelfPanelHtml', () => {
     test('kept wins over the stored score, and the button takes it off', () => {
         const html = sb.shelfPanelHtml(view({ keep: true }));
         assert.match(html, /Kept/);
+        assert.match(html, /<svg[^>]*aria-hidden/);
+        assert.doesNotMatch(html, /\u{1F6E1}/u);
         assert.doesNotMatch(html, /vd-shelf-chip--low/);
         assert.match(html, /data-vd-shelf-keep="0" aria-pressed="true"/);
     });

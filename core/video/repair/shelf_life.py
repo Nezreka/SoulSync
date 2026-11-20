@@ -28,6 +28,8 @@ flagged again.
 
 from __future__ import annotations
 
+import threading
+import time
 from datetime import datetime
 
 from core.video import shelf_life as sl
@@ -119,29 +121,30 @@ def _play_log_watch(db):
         where = _locate(r, index, movie_ids, ep_ids, ep_shows)
         if where is None:
             continue          # not a title the library holds
-        kind, lid, eid = where
+        kind, places = where
         when = _stamp(r.get("last_seen"))
         finished = r.get("source") == "plex_history" or int(r.get("percent") or 0) >= FINISHED_PERCENT
         part_way = not finished and int(r.get("max_position_ms") or 0) > 0
         if when and (out["last"].get(acct) or "") < when:
             out["last"][acct] = when
-        if kind == "movie":
-            st = out["movie"].setdefault(lid, {}).setdefault(
-                acct, {"plays": 0, "last": None, "in_progress_at": None})
-        else:
-            st = out["show"].setdefault(lid, {}).setdefault(
-                acct, {"episodes": set(), "plays": 0, "last": None, "in_progress_at": None})
-        if finished:
-            st["plays"] += 1
-            st["last"] = when or st["last"]
-            if kind == "show":
-                st["episodes"].add(eid)
-            if kind == "movie" or st.get("_open") == eid:
-                st["in_progress_at"] = None      # finished since: no longer part-way
-        elif part_way:
-            st["in_progress_at"] = when
-            if kind == "show":
-                st["_open"] = eid
+        for lid, eid in places:
+            if kind == "movie":
+                st = out["movie"].setdefault(lid, {}).setdefault(
+                    acct, {"plays": 0, "last": None, "in_progress_at": None})
+            else:
+                st = out["show"].setdefault(lid, {}).setdefault(
+                    acct, {"episodes": set(), "plays": 0, "last": None, "in_progress_at": None})
+            if finished:
+                st["plays"] += 1
+                st["last"] = when or st["last"]
+                if kind == "show":
+                    st["episodes"].add(eid)
+                if kind == "movie" or st.get("_open") == eid:
+                    st["in_progress_at"] = None      # finished since: no longer part-way
+            elif part_way:
+                st["in_progress_at"] = when
+                if kind == "show":
+                    st["_open"] = eid
     for kind in ("movie", "show"):
         for accts in out[kind].values():
             for st in accts.values():
@@ -150,7 +153,9 @@ def _play_log_watch(db):
 
 
 def _locate(r, index, movie_ids, ep_ids, ep_shows):
-    """(kind, library id, episode id) for one logged play, or None."""
+    """(kind, [(library id, episode id)]) for one logged play, or None. a play
+    the log can only place by its TMDB id goes to every row holding that id:
+    which copy was played isn't known, and Delete Title takes them together."""
     import json
     link = r.get("link")
     if isinstance(link, str):
@@ -162,24 +167,27 @@ def _locate(r, index, movie_ids, ep_ids, ep_shows):
     if r["kind"] == "movie":
         if link.get("kind") == "movie" and link.get("id"):
             if link.get("source") == "library":
-                return ("movie", int(link["id"]), None)
+                return ("movie", [(int(link["id"]), None)])
             ids = index["movie"].get(int(link["id"]), []) if link.get("source") == "tmdb" else []
             if ids:
-                return ("movie", ids[0], None)
+                return ("movie", [(i, None) for i in ids])
         mid = movie_ids.get(str(r.get("rating_key") or ""))
-        return ("movie", mid, None) if mid is not None else None
+        return ("movie", [(mid, None)]) if mid is not None else None
     eid = ep_ids.get(str(r.get("rating_key") or ""))
     if eid is not None and ep_shows.get(eid) is not None:
-        return ("show", ep_shows[eid], eid)
+        return ("show", [(ep_shows[eid], eid)])
     if link.get("kind") == "show" and link.get("id") and r.get("season") is not None and r.get("episode") is not None:
         if link.get("source") == "library":
             shows = [int(link["id"])]
         else:
             shows = index["show"].get(("tmdb", int(link["id"])), [])
+        hits = []
         for sid in shows:
             eid = index["episode"].get((sid, int(r["season"]), int(r["episode"])))
             if eid is not None:
-                return ("show", sid, eid)
+                hits.append((sid, eid))
+        if hits:
+            return ("show", hits)
     return None
 
 
@@ -187,8 +195,8 @@ def _playing_now(db):
     """{(kind, library id)} for every title playing or paused right now, on
     any server, whoever is watching; a show is held for any of its episodes.
     an empty set when no server is set up, None when a server can't be
-    asked. a movie the activity view could only place by its TMDB id (playing
-    on a server the library wasn't scanned from) is found by that id."""
+    asked. a movie or show the activity view could only place by its TMDB id
+    (playing on a server the library wasn't scanned from) is found by that id."""
     from core import server_activity
     act = server_activity.get_activity(db)
     if not act.get("ok"):
@@ -196,17 +204,19 @@ def _playing_now(db):
     if any(not s.get("reachable") for s in act.get("servers") or []):
         return None
     out = set()
-    tmdb_movies = None
+    index = None
     for sess in act.get("sessions") or []:
         link = sess.get("link") or {}
         if not link.get("id") or link.get("kind") not in ("movie", "show"):
             continue
         if link.get("source") == "library":
             out.add((link["kind"], int(link["id"])))
-        elif link.get("source") == "tmdb" and link["kind"] == "movie":
-            if tmdb_movies is None:
-                tmdb_movies = db.shelf_life_external_index()["movie"]
-            out.update(("movie", mid) for mid in tmdb_movies.get(int(link["id"]), []))
+        elif link.get("source") == "tmdb":
+            if index is None:
+                index = db.shelf_life_external_index()
+            ids = (index["movie"].get(int(link["id"]), []) if link["kind"] == "movie"
+                   else index["show"].get(("tmdb", int(link["id"])), []))
+            out.update((link["kind"], i) for i in ids)
     return out
 
 
@@ -238,6 +248,55 @@ def _merge_history(people: dict, plays: dict, person, owned=None) -> None:
             p["last"] = h["last"]
         if h.get("in_progress_at") and (p.get("in_progress_at") or "") < h["in_progress_at"]:
             p["in_progress_at"] = h["in_progress_at"]
+
+
+def _merge_people(into: dict, people: dict) -> None:
+    """fold one copy's watchers into its title's: each person keeps the larger
+    of each count and the latest of each date, so a watch on any copy counts
+    for the title."""
+    for key, p in people.items():
+        q = into.get(key)
+        if q is None:
+            into[key] = dict(p)
+            continue
+        for n in ("plays", "frac", "offset"):
+            q[n] = max(q.get(n) or 0, p.get(n) or 0)
+        for n in ("last", "in_progress_at"):
+            if p.get(n) and (q.get(n) or "") < p[n]:
+                q[n] = p[n]
+
+
+def _title_groups(rows) -> list:
+    """the library rows as titles: every row with the same TMDB id on the same
+    server is one title, the rows Delete Title removes together
+    (title_delete_rows), lowest id first. a row with no TMDB id is its own."""
+    groups: dict = {}
+    for r in sorted(rows, key=lambda r: r["id"]):
+        key = (int(r["tmdb_id"]), r.get("server_source")) if r.get("tmdb_id") else ("row", r["id"])
+        groups.setdefault(key, []).append(r)
+    return list(groups.values())
+
+
+def _title_row(group) -> dict:
+    """one row standing for a title's copies: the lowest id's, with the size
+    of every copy (what a delete frees), the padlock if any copy has it, the
+    newest add date (a copy that just arrived is a new arrival) and any data a
+    copy lacks taken from another. ``group_ids`` lists every copy."""
+    row = dict(group[0])
+    row["group_ids"] = [r["id"] for r in group]
+    if len(group) == 1:
+        return row
+    for r in group[1:]:
+        for k, v in r.items():
+            if row.get(k) is None and v is not None:
+                row[k] = v
+    row["size_bytes"] = sum(int(r.get("size_bytes") or 0) for r in group)
+    runtimes = [r["runtime_minutes"] for r in group if r.get("runtime_minutes")]
+    row["runtime_minutes"] = max(runtimes) if runtimes else None
+    row["hands_off"] = int(any(r.get("hands_off") for r in group))
+    newest = max(group, key=lambda r: r.get("added_at") or "")
+    row["added_at"], row["added_from"] = newest.get("added_at"), newest.get("added_from")
+    return row
 
 
 def _active(activity: dict, now: datetime, active_days: int) -> int:
@@ -297,7 +356,7 @@ def _requester_watched(req, admins, known, people):
 
 
 def _failed_grabs(kind, row, failed, history):
-    keys = [(kind, "library", str(row["id"]))]
+    keys = [(kind, "library", str(i)) for i in row.get("group_ids") or [row["id"]]]
     if row.get("tmdb_id"):
         keys.append((kind, "tmdb", str(int(row["tmdb_id"]))))
     if not any(k in history for k in keys):
@@ -354,24 +413,34 @@ def gather(db, settings: dict, now: datetime | None = None) -> dict:
     out = {"movie": [], "show": []}
     for kind, rows, members_by in (("movie", db.shelf_life_movies(trust_after) or [], movie_members),
                                    ("show", db.shelf_life_shows(trust_after) or [], show_members)):
-        median = sl.median_gb_per_hour(rows)
-        median_ratio = sl.median_lists_per_vote(rows)
-        for row in rows:
-            members = members_by.get(row["id"]) or {}
+        # a title is all its copies: scored, gated and sized as the rows
+        # Delete Title removes together, so a watch, a play or a padlock on
+        # any copy holds them all
+        groups = _title_groups(rows)
+        titles = [_title_row(g) for g in groups]
+        median = sl.median_gb_per_hour(titles)
+        median_ratio = sl.median_lists_per_vote(titles)
+        for group, row in zip(groups, titles, strict=True):
+            people = {}
+            for copy in group:
+                members = members_by.get(copy["id"]) or {}
+                if kind == "movie":
+                    mine = _movie_people(copy, members)
+                    if server_plays:
+                        _merge_history(mine, server_plays["movie"].get(copy["id"]), person)
+                else:
+                    mine = _show_people(copy, members)
+                    if server_plays:
+                        _merge_history(mine, server_plays["show"].get(copy["id"]), person,
+                                       owned=int(copy.get("owned_episodes") or 0))
+                _merge_people(people, mine)
             if kind == "movie":
-                people = _movie_people(row, members)
-                if server_plays:
-                    _merge_history(people, server_plays["movie"].get(row["id"]), person)
                 # anyone part-way through holds it: the library's own resume
                 # points whenever they're from, the log's within active days
                 in_progress = any(p.get("offset", 0) > 0 or _recent(p.get("in_progress_at"), now, active_days)
                                   for p in people.values())
                 watching = False
             else:
-                people = _show_people(row, members)
-                if server_plays:
-                    _merge_history(people, server_plays["show"].get(row["id"]), person,
-                                   owned=int(row.get("owned_episodes") or 0))
                 # an episode left part-way long ago doesn't hold a whole show forever
                 in_progress = any(_recent(p.get("in_progress_at"), now, active_days) for p in people.values())
                 # someone watching a show finishes an episode every so often
@@ -388,7 +457,7 @@ def gather(db, settings: dict, now: datetime | None = None) -> dict:
                 "kind": kind, "title": row.get("title"), "year": row.get("year"),
                 "added_at": row.get("added_at"),
                 "added_from": row.get("added_from"),
-                "playing": (kind, row["id"]) in playing,
+                "playing": any((kind, i) in playing for i in row["group_ids"]),
                 "in_progress": in_progress,
                 "watching": watching,
                 # the padlock: reviewed and locked, automation leaves it alone
@@ -414,6 +483,78 @@ def gather(db, settings: dict, now: datetime | None = None) -> dict:
     return out
 
 
+# ── checked again at delete time ─────────────────────────────────────────────
+OFF_ERROR = ("Shelf Life is switched off, so nothing it flagged can be deleted. "
+             "Turn it on in Library Maintenance first. Nothing was deleted.")
+OFF_PLAN = ("Shelf Life is switched off, so nothing it flagged can be deleted. "
+            "Turn it on in Library Maintenance to plan a cleanup.")
+
+# a batch checks every title once up front (one gather, not one per title);
+# its deletes then skip the full check for this long.
+# {(database, finding id): when}
+_PRECHECK_TTL = 15 * 60
+_prechecked: dict = {}
+_precheck_lock = threading.Lock()
+
+
+def _config(db) -> dict:
+    """the job's saved config: {enabled, interval_hours, settings} with the
+    settings over the defaults."""
+    from core.video.repair.worker import VideoRepairWorker
+    cfg = VideoRepairWorker(db).job_config(ShelfLifeJob.job_id) or {}
+    return {**cfg, "settings": {**ShelfLifeJob.default_settings, **(cfg.get("settings") or {})}}
+
+
+def _threshold(settings) -> int:
+    return _int_setting(settings, "threshold", sl.DEFAULT_THRESHOLD)
+
+
+def recheck(db, findings, settings: dict, now: datetime | None = None) -> dict:
+    """each finding's title gathered and scored again, now, with the job's
+    current settings: {finding id: {ok, reason, score, size_bytes}}. a
+    finding is only still good while its title is in the library, no gate
+    holds it (playing, part-way, watched lately, padlock, Keep, a request in
+    its grace, a followed show airing, a new arrival) and it still scores
+    under the current line. ``reason`` says why not, in plain words. the
+    whole library is gathered once, however many findings there are."""
+    now = now or datetime.now()
+    titles = gather(db, settings, now)
+    by_row = {}
+    for kind in ("movie", "show"):
+        for row, facts in titles[kind]:
+            for rid in row.get("group_ids") or [row["id"]]:
+                by_row[(kind, int(rid))] = (row, facts)
+    threshold = _threshold(settings)
+    out = {}
+    for f in findings:
+        d = f.get("details") or {}
+        try:
+            hit = by_row.get((d.get("kind"), int(d.get("item_id"))))
+        except (TypeError, ValueError):
+            hit = None
+        if hit is None:
+            out[f["id"]] = {"ok": False, "reason": "it is no longer in the library", "score": None,
+                            "size_bytes": 0}
+            continue
+        row, facts = hit
+        r = sl.score(facts, settings, now)
+        size = int(row.get("size_bytes") or 0)
+        if r["gate"]:
+            reason = sl.GATE_TEXT.get(r["gate"]) or r["gate"]
+        elif not r["candidate"]:
+            reason = "it scores %d now, not under the line of %d" % (r["score"], threshold)
+        else:
+            reason = None
+        out[f["id"]] = {"ok": reason is None, "reason": reason, "score": r["score"], "size_bytes": size}
+    return out
+
+
+def _label(f) -> str:
+    d = f.get("details") or {}
+    name = d.get("title") or "?"
+    return "%s (%s)" % (name, d["year"]) if d.get("year") else name
+
+
 def batch_phrase(count: int) -> str:
     """what an admin types to delete a batch of titles at once."""
     return "delete %d title%s" % (count, "" if count == 1 else "s")
@@ -428,47 +569,78 @@ def _pending_findings(db) -> list:
 def _cleanup_findings(db) -> list:
     """the open findings a cleanup can act on. one filed before its title was
     locked waits for the next run to clear it, and a cleanup leaves it out"""
-    return [f for f in _pending_findings(db)
-            if not db.is_hands_off(f["details"].get("kind"), f["details"]["item_id"])]
+    locked = db.hands_off_ids()
+    out = []
+    for f in _pending_findings(db):
+        try:
+            if (f["details"].get("kind"), int(f["details"]["item_id"])) in locked:
+                continue
+        except (TypeError, ValueError):
+            continue
+        out.append(f)
+    return out
 
 
 def plan_cleanup(db, target_bytes=None, ids=None) -> dict:
     """the titles a cleanup would delete, lowest Shelf Life first (the bigger
     one first on a tie). with ``target_bytes`` it stops once the total reaches
-    it; only titles already below the line are ever picked, so a target the
-    candidates can't reach says how short it falls instead of reaching higher.
-    with ``ids`` it plans exactly those findings. sizes go to the recycle bin
-    and come back as free space once the bin's retention clears them."""
+    it; only titles below the line NOW are ever picked: every open finding is
+    gathered and scored again with the job's current settings, and one that a
+    gate holds or that no longer scores under the current threshold is left
+    out (``skipped`` says why), so a target the candidates can't reach says
+    how short it falls instead of reaching higher. with ``ids`` it plans
+    exactly those findings. sizes go to the recycle bin and come back as free
+    space once the bin's retention clears them. while the job is switched off
+    nothing is planned and ``error`` says so."""
     from core.video import organization
+    cfg = _config(db)
+    settings = organization.load(db)
+    target = int(target_bytes) if target_bytes else None
+    out = {"items": [], "total_bytes": 0, "target_bytes": target, "short_bytes": 0,
+           "candidates": 0, "skipped": [], "enabled": bool(cfg.get("enabled")),
+           "threshold": _threshold(cfg["settings"]),
+           "recycling": bool(settings.get("recycle_deletes", True)),
+           "keep_days": int(settings.get("recycle_keep_days") or 7),
+           "phrase": batch_phrase(0)}
+    if not cfg.get("enabled"):
+        out["error"] = OFF_PLAN
+        return out
     pending = _cleanup_findings(db)
     if ids is not None:
         wanted = {int(i) for i in ids}
         pending = [f for f in pending if f["id"] in wanted]
-    pending.sort(key=lambda f: ((f["details"].get("score") if f["details"].get("score") is not None else 100),
-                                -(f["details"].get("size_bytes") or 0), f["id"]))
-    target = int(target_bytes) if target_bytes else None
+    fresh = recheck(db, pending, cfg["settings"]) if pending else {}
+    out["skipped"] = [{"id": f["id"], "title": (f["details"] or {}).get("title"),
+                       "year": (f["details"] or {}).get("year"), "reason": fresh[f["id"]]["reason"]}
+                      for f in pending if not fresh[f["id"]]["ok"]]
+    pending = [f for f in pending if fresh[f["id"]]["ok"]]
+    pending.sort(key=lambda f: (fresh[f["id"]]["score"], -fresh[f["id"]]["size_bytes"], f["id"]))
     picked, total = [], 0
     for f in pending:
         if target is not None and total >= target:
             break
         d = f["details"]
+        size = fresh[f["id"]]["size_bytes"]
         picked.append({"id": f["id"], "kind": d.get("kind"), "item_id": d.get("item_id"),
-                       "title": d.get("title"), "year": d.get("year"), "score": d.get("score"),
-                       "size_bytes": int(d.get("size_bytes") or 0)})
-        total += int(d.get("size_bytes") or 0)
-    settings = organization.load(db)
-    return {"items": picked, "total_bytes": total, "target_bytes": target,
-            "short_bytes": max(0, target - total) if target is not None else 0,
-            "candidates": len(pending),
-            "recycling": bool(settings.get("recycle_deletes", True)),
-            "keep_days": int(settings.get("recycle_keep_days") or 7),
-            "phrase": batch_phrase(len(picked))}
+                       "title": d.get("title"), "year": d.get("year"), "score": fresh[f["id"]]["score"],
+                       "size_bytes": size})
+        total += size
+    out.update({"items": picked, "total_bytes": total,
+                "short_bytes": max(0, target - total) if target is not None else 0,
+                "candidates": len(pending), "phrase": batch_phrase(len(picked))})
+    return out
 
 
 def batch_delete_actions(db, ids, phrase: str):
     """check a batch delete before it starts. returns ({finding id: typed
-    title}, None) for the run, or (None, error). every id must be a pending
-    Shelf Life finding, and the phrase must name exactly how many there are."""
+    title}, None) for the run, or (None, error). the job must be switched on,
+    every id must be a pending Shelf Life finding, the phrase must name
+    exactly how many there are, and every title must still be one the job
+    would flag now (gathered and scored again, once for the whole batch); a
+    title that isn't refuses the batch, naming it and why."""
+    cfg = _config(db)
+    if not cfg.get("enabled"):
+        return None, OFF_ERROR
     pending = {f["id"]: f for f in _cleanup_findings(db)}
     try:
         wanted = sorted({int(i) for i in (ids or [])})
@@ -481,7 +653,38 @@ def batch_delete_actions(db, ids, phrase: str):
         return None, "%d of these aren't open Shelf Life findings any more. Refresh and try again." % len(missing)
     if (phrase or "").strip() != batch_phrase(len(wanted)):
         return None, "Type '%s' to confirm. Nothing was deleted." % batch_phrase(len(wanted))
+    fresh = recheck(db, [pending[i] for i in wanted], cfg["settings"])
+    refused = ["%s: %s" % (_label(pending[i]), fresh[i]["reason"]) for i in wanted if not fresh[i]["ok"]]
+    if refused:
+        return None, ("%d of these can't be deleted now. %s. Nothing was deleted; plan the cleanup again."
+                      % (len(refused), "; ".join(refused)))
+    stamp = time.monotonic()
+    with _precheck_lock:
+        for i in wanted:
+            _prechecked[_precheck_key(db, i)] = stamp
     return {i: pending[i]["details"].get("title") or "" for i in wanted}, None
+
+
+def _precheck_key(db, finding_id):
+    return (str(getattr(db, "database_path", id(db))), int(finding_id))
+
+
+def _take_precheck(db, finding_id) -> bool:
+    """True once for a finding a batch checked moments ago."""
+    try:
+        key = _precheck_key(db, finding_id)
+    except (TypeError, ValueError):
+        return False
+    with _precheck_lock:
+        stamp = _prechecked.pop(key, None)
+    return stamp is not None and time.monotonic() - stamp < _PRECHECK_TTL
+
+
+def forget_precheck(db, ids) -> None:
+    """a batch that didn't start: its titles get the full check next time."""
+    with _precheck_lock:
+        for i in ids or ():
+            _prechecked.pop(_precheck_key(db, i), None)
 
 
 def title_view(db, kind: str, item_id) -> dict | None:
@@ -584,10 +787,15 @@ class ShelfLifeJob(VideoRepairJob):
         "request its requester hasn't watched yet (within Request Grace Days), a followed show still airing, "
         "and anything newer than New Arrival Days. A play counts as watched once it reaches 90%. A movie "
         "Watched Cleanup has already flagged is scored but "
-        "not flagged twice. Dismissed titles are never flagged again.\n\n"
+        "not flagged twice. Dismissed titles are never flagged again. A title is all its copies: two rows for "
+        "one film on the same server (a 4K library, say) are scored together, a watch or padlock on either "
+        "holds both, and the size is every copy, because deleting the title takes them all.\n\n"
         "Approving deletes the whole title the way Delete Title does: acquisition stopped for every profile, "
         "the folder to the recycle bin, and the title hidden from Discover (undo that in Discover's ignore "
-        "list). You type the title to confirm, so Fix All never deletes anything.\n\n"
+        "list). You type the title to confirm, so Fix All never deletes anything. Right before a delete "
+        "everything is checked again with the settings as they are then; anything watched, kept, locked or "
+        "requested since, or no longer under the Threshold, is left alone. While this job is off, nothing it "
+        "flagged can be deleted.\n\n"
         "Settings:\n"
         "- Preset: how many of the 100 points each signal carries. Balanced: Watching 40, Hard To Replace 20, "
         "Cultural Value 20, Size 10, Requests 10. Space First: Watching 35, Hard To Replace 15, Cultural Value "
@@ -623,6 +831,8 @@ class ShelfLifeJob(VideoRepairJob):
                        "trust_add_date_after_days": [90, 180]}
     auto_fix = False
     finding_types = (FINDING_TYPE,)
+    # the typed title confirms one title: a bulk fix can't spread one over many
+    fix_action_per_finding = True
 
     def estimate_scope(self, context: JobContext) -> int:
         return len(context.db.shelf_life_movies() or []) + len(context.db.shelf_life_shows() or [])
@@ -644,13 +854,15 @@ class ShelfLifeJob(VideoRepairJob):
                 result.scanned += 1
                 context.report(processed=done, current_item=row.get("title"))
                 r = sl.score(facts, settings, now)
-                stored.append({"item_id": row["id"], "score": r["score"], "gate": r["gate"],
+                copies = row.get("group_ids") or [row["id"]]
+                stored.extend({"item_id": i, "score": r["score"], "gate": r["gate"],
                                "signals": r["signals"], "reasons": r["reasons"],
-                               "size_bytes": row.get("size_bytes")})
+                               "size_bytes": row.get("size_bytes")} for i in copies)
                 if not r["candidate"]:
                     continue
-                entity_id = ("m:%d" if kind == "movie" else "s:%d") % row["id"]
-                if kind == "movie" and entity_id in held:
+                prefix = "m:%d" if kind == "movie" else "s:%d"
+                entity_id = prefix % row["id"]
+                if kind == "movie" and any(prefix % i in held for i in copies):
                     result.skipped += 1          # Watched Cleanup already has it
                     continue
                 valid.append(entity_id)
@@ -658,16 +870,20 @@ class ShelfLifeJob(VideoRepairJob):
                 if row.get("year"):
                     name = "%s (%s)" % (name, row["year"])
                 said = [x["text"] for x in r["reasons"] if x["signal"] in sl.SIGNALS]
+                size = _gb(row.get("size_bytes"))
+                if len(copies) > 1:
+                    size = "%s in %d copies" % (size, len(copies))
                 context.create_finding(
                     finding_type=FINDING_TYPE, severity="info",
                     entity_type=kind, entity_id=entity_id,
-                    title="%s: Shelf Life %d, %s" % (name, r["score"], _gb(row.get("size_bytes"))),
+                    title="%s: Shelf Life %d, %s" % (name, r["score"], size),
                     description="; ".join(said[:3]),
                     # library_id + kind is what the findings page reads for the poster
                     details={"kind": kind, "item_id": row["id"], "library_id": row["id"], "tmdb_id": row.get("tmdb_id"),
                              "title": row.get("title"), "year": row.get("year"),
                              "score": r["score"], "signals": r["signals"], "reasons": r["reasons"],
-                             "size_bytes": row.get("size_bytes"), "preset": settings.get("preset")})
+                             "size_bytes": row.get("size_bytes"), "item_ids": copies,
+                             "preset": settings.get("preset")})
             context.db.shelf_life_save(kind, stored)
         logger.info("Shelf Life: scored %d title(s), %d candidate(s), %d left to Watched Cleanup",
                     result.scanned, len(valid), result.skipped)
@@ -682,22 +898,38 @@ class ShelfLifeJob(VideoRepairJob):
         kind, item_id = d.get("kind"), d.get("item_id")
         if kind not in ("movie", "show") or not item_id:
             return {"success": False, "error": "finding has no title to delete"}
-        if context.db.is_hands_off(kind, item_id):
+        # Delete Title takes every copy (same TMDB id, same server): each one is checked
+        copies = context.db.title_delete_rows(kind, item_id) or [int(item_id)]
+        if any(context.db.is_hands_off(kind, i) for i in copies):
             return {"success": False,
                     "error": "This title is locked, so maintenance leaves it alone. Nothing was deleted."}
-        tmdb = d.get("tmdb_id")
-        if tmdb and (kind, int(tmdb)) in context.db.shelf_life_keeps():
+        # Keep is held by TMDB id: the rows' ids now (matched since the scan,
+        # perhaps) as well as the one the finding was filed with
+        tmdbs = {d.get("tmdb_id")} | {(context.db.shelf_life_title(kind, i) or {}).get("tmdb_id") for i in copies}
+        keeps = context.db.shelf_life_keeps()
+        if any(t and (kind, int(t)) in keeps for t in tmdbs):
             return {"success": False, "error": "This title is marked Keep. Nothing was deleted."}
         typed = fix_action if isinstance(fix_action, str) else ""
         if not typed.strip():
             return {"success": False, "error": "Type the title to confirm. Nothing was deleted."}
+        cfg = _config(context.db)
+        if not cfg.get("enabled"):
+            return {"success": False, "error": OFF_ERROR}
         # the scan may be a day old: ask the server again, right before deleting
         playing = _playing_now(context.db)
         if playing is None:
             return {"success": False,
                     "error": "Couldn't ask the server whether anyone is playing it. Nothing was deleted."}
-        if (kind, int(item_id)) in playing:
+        if any((kind, i) in playing for i in copies):
             return {"success": False, "error": "Someone is playing it right now. Nothing was deleted."}
+        # the finding may be a day old: everything it was flagged on is checked
+        # again, with the settings as they are now. a batch did that for all
+        # its titles at once moments ago
+        if not _take_precheck(context.db, finding.get("id")):
+            fresh = recheck(context.db, [finding], cfg["settings"]).get(finding.get("id")) or {}
+            if not fresh.get("ok"):
+                return {"success": False,
+                        "error": "Not deleted: %s." % (fresh.get("reason") or "it can't be checked")}
         res = delete_title.run(context.db, kind, item_id, typed_title=typed,
                                resolved_by=_resolver_id(), notify=_notify)
         if not res.get("success"):

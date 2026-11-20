@@ -1,15 +1,17 @@
 **SoulSync 3.6.8 is out** :musical_note:
 
-**Last.fm without Pro.** From 1 December 2026 a Last.fm API key needs a Last.fm Pro subscription. With a working key nothing changes. Without one, top tracks, similar artists, radio and Your Artists come from ListenBrainz and Deezer, and artist bios and tags from TheAudioDB, Wikipedia and MusicBrainz. Answers are cached, scrobbles wait for a working key, and ListenBrainz is the recommended scrobbler.
+**Last.fm without Pro.** From 1 December 2026 a Last.fm API key needs Pro. With a working key nothing changes. Without one, top tracks, similar artists, radio and Your Artists come from ListenBrainz and Deezer, and bios and tags from TheAudioDB, Wikipedia and MusicBrainz. Answers are cached and scrobbles wait for a working key.
 
-**Phones.** Worker status opens on a tap, the menu button stays on an open playlist, every page reaches its end, menus, import cards and long confirm boxes fit the screen, and Re-identify is a full-screen sheet (thanks Thibs, c5pie and wolf39us, #2180 to #2187, #2197).
+**Shelf Life.** A new video Library Maintenance job, off by default, scores every movie and show for how much it has earned its space and offers the lowest for Delete Title, with Keep and Free up space (thanks PapaBearDoes, #2211).
 
-**People and permissions.** Audiobook and podcast episode requests can require approval, controls show the value the policy keeps them at, chat only reaches people allowed to chat, the enrichment workers are admin only (#2196), and requests read Auto-approve, Require approval or Requests off everywhere (thanks SeadogsBooty, #2188 to #2192). Approved requests can wait for you to pick the release, per media type or per request (#2199), and audiobook search, files and details follow permissions (#2198, #2201).
+**Phones.** Worker status opens on a tap, the menu button stays, every page reaches its end, menus and long dialogs fit, and Re-identify is a full-screen sheet (thanks Thibs, c5pie and wolf39us, #2180 to #2187, #2197).
 
-**Library.** Titles beat track numbers when lining up a tracklist, a song's number heals from its file, and a deleted file stops borrowing another album's (thanks wolf39us). Rename / Organize keeps $quality (thanks Maegfea, #2195) and skips a removed album (#2194). A track you own can move into an album's missing slot, and Reassign moves instead of copying (#2193).
+**People and permissions.** Audiobook and podcast requests can require approval, approved requests can wait for you to pick the release, and members only see what is theirs (thanks SeadogsBooty, #2188 to #2201, #2207 to #2210).
 
-The transfer folder is now called the music library folder everywhere. In Docker it is still the /app/Transfer mount, so your setup doesn't change.
+**Library.** Titles beat track numbers, a deleted file stops borrowing another album's, same-named albums stay apart, a track you own can move into a missing slot, and Rename keeps $quality (thanks wolf39us, Maegfea, #2110, #2193, #2195).
 
-**Big libraries.** Library search no longer piles every request onto one rebuild, and the database prunes old caches and trims its log on its own (thanks xcrittpm, #2205).
+**Big libraries.** Library search no longer piles every request onto one rebuild, and the database tidies itself (thanks xcrittpm, #2205).
+
+The transfer folder is now called the music library folder. In Docker it is still the /app/Transfer mount.
 
 Full notes on GitHub.

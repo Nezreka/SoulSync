@@ -95,7 +95,13 @@ def _show(db, title, *, tmdb, owned=4, watched=0, status="Ended", added=1000, si
     return sid
 
 
+def _on(db, on=True, **settings):
+    """switch the job on (or off): a cleanup only deletes while it is on."""
+    VideoRepairWorker(db).set_job_config("shelf_life", enabled=on, settings=settings or None)
+
+
 def _run(worker):
+    _on(worker.db)
     worker._run_job("shelf_life", forced=True)
 
 
@@ -216,6 +222,18 @@ def test_a_followed_show_still_airing_is_protected(db, worker):
              "VALUES (1, 'show', 20, 'Airing', 'mute')")
     _run(worker)
     assert _stored(db, "show", [sid])[sid]["gate"] is None
+
+
+@pytest.mark.parametrize("status,held", [
+    (None, True), ("", True), ("  ", True), ("Returning Series", True), ("In Production", True),
+    ("Ended", False), ("canceled", False), ("Cancelled", False)])
+def test_a_show_with_no_status_yet_is_not_assumed_ended(db, status, held):
+    # the calendar's loose rule (#2211 review S3): an enrichment gap never lets it go
+    sid = _show(db, "Maybe", tmdb=21)
+    _sql(db, "UPDATE shows SET status=? WHERE id=?", (status, sid))
+    assert (21 in db.shelf_life_followed_airing([1])) is held
+    gate = sl.score(_facts(db, "show")[sid], {}, datetime.now())["gate"]
+    assert (gate == "following") is held
 
 
 def test_the_server_add_date_wins_over_soulsync_first_seeing_it(db, worker):
@@ -411,6 +429,34 @@ def test_fix_all_cannot_delete_anything(db, worker, monkeypatch):
     assert out["fixed"] == 0 and out["failed"] == 2 and calls == []
 
 
+def test_one_typed_title_never_rides_a_generic_bulk_fix(db, worker, monkeypatch):
+    # Dune (1984) and Dune (2021) must not both go on one typed "Dune" (#2211 review S4)
+    calls = _capture_delete(monkeypatch)
+    _movie(db, "Dune", tmdb=1, imdb=5.0, streaming="ok", count=5)
+    _movie(db, "Dune ", tmdb=2, imdb=5.0, streaming="ok", count=5)
+    _run(worker)
+    ids = [f["id"] for f in _pending(db)]
+    out = worker.bulk_fix_findings(ids=ids, fix_action="Dune")
+    assert out["fixed"] == 0 and "each need their own confirmation" in out["error"]
+    res = worker.start_bulk_fix(ids=ids, finding_type="shelf_life", fix_action="Dune")
+    assert res["started"] is False and res["invalid"] is True
+    assert calls == [] and len(_pending(db)) == 2
+
+
+def test_the_generic_bulk_fix_route_refuses_shelf_life(client, monkeypatch):
+    c, db, _ = client
+    calls = _capture_delete(monkeypatch)
+    _on(db)
+    mid = _movie(db, "Dune", tmdb=1, imdb=5.0, streaming="ok", count=5)
+    fid = _flag(db, "Dune", score=10, size_gb=60, item_id=mid)
+    r = c.post("/api/video/repair/findings/bulk-fix-start",
+               json={"ids": [fid], "finding_type": "shelf_life", "fix_action": "Dune"})
+    assert r.status_code == 400 and "own confirmation" in r.get_json()["error"]
+    r = c.post("/api/video/repair/findings/bulk-fix", json={"ids": [fid], "fix_action": "Dune"})
+    assert r.get_json()["fixed"] == 0
+    assert calls == [] and db.repair_get_finding(fid)["status"] == "pending"
+
+
 def test_a_finding_names_its_title_the_way_the_findings_page_reads_posters(db, worker):
     # the findings page puts the poster beside a row from details library_id + kind
     from api.video.repair import finding_poster
@@ -433,12 +479,24 @@ def _flag(db, title, *, score, size_gb, item_id):
     return next(f["id"] for f in items if f["entity_id"] == "m:%d" % item_id)
 
 
+@pytest.fixture()
+def as_filed(monkeypatch):
+    """the planner's ordering and totals on their own: every finding still
+    holds, at the score and size it was filed with (the fresh check has its
+    own tests below)."""
+    def fresh(db, findings, settings, now=None):
+        return {f["id"]: {"ok": True, "reason": None, "score": f["details"].get("score"),
+                          "size_bytes": int(f["details"].get("size_bytes") or 0)} for f in findings}
+    monkeypatch.setattr(job_module, "recheck", fresh)
+
+
 def test_batch_phrase():
     from core.video.repair.shelf_life import batch_phrase
     assert batch_phrase(1) == "delete 1 title" and batch_phrase(14) == "delete 14 titles"
 
 
-def test_plan_picks_lowest_first_until_the_target(db):
+def test_plan_picks_lowest_first_until_the_target(db, as_filed):
+    _on(db)
     from core.video.repair.shelf_life import plan_cleanup
     a = _flag(db, "A", score=25, size_gb=40, item_id=1)
     b = _flag(db, "B", score=10, size_gb=10, item_id=2)
@@ -451,7 +509,8 @@ def test_plan_picks_lowest_first_until_the_target(db):
     assert plan["recycling"] is True and plan["keep_days"] == 7
 
 
-def test_plan_says_how_short_and_never_reaches_past_the_candidates(db):
+def test_plan_says_how_short_and_never_reaches_past_the_candidates(db, as_filed):
+    _on(db)
     from core.video.repair.shelf_life import plan_cleanup
     _flag(db, "A", score=25, size_gb=40, item_id=1)
     plan = plan_cleanup(db, target_bytes=500 * GB)
@@ -459,7 +518,8 @@ def test_plan_says_how_short_and_never_reaches_past_the_candidates(db):
     assert len(plan["items"]) == 1
 
 
-def test_plan_of_chosen_ids_and_of_everything(db):
+def test_plan_of_chosen_ids_and_of_everything(db, as_filed):
+    _on(db)
     from core.video.repair.shelf_life import plan_cleanup
     a = _flag(db, "A", score=25, size_gb=40, item_id=1)
     b = _flag(db, "B", score=10, size_gb=10, item_id=2)
@@ -467,7 +527,8 @@ def test_plan_of_chosen_ids_and_of_everything(db):
     assert [x["id"] for x in plan_cleanup(db)["items"]] == [b, a]
 
 
-def test_batch_needs_the_exact_phrase_and_open_findings(db):
+def test_batch_needs_the_exact_phrase_and_open_findings(db, as_filed):
+    _on(db)
     from core.video.repair.shelf_life import batch_delete_actions
     a = _flag(db, "A", score=25, size_gb=40, item_id=1)
     b = _flag(db, "B", score=10, size_gb=10, item_id=2)
@@ -482,7 +543,8 @@ def test_batch_needs_the_exact_phrase_and_open_findings(db):
     assert batch_delete_actions(db, [], "delete 0 titles")[1] == "Nothing selected."
 
 
-def test_a_watched_cleanup_finding_cannot_ride_a_shelf_life_batch(db):
+def test_a_watched_cleanup_finding_cannot_ride_a_shelf_life_batch(db, as_filed):
+    _on(db)
     from core.video.repair.shelf_life import batch_delete_actions
     db.repair_create_finding("watched_cleanup", "watched_cleanup", title="W", entity_type="movie",
                              entity_id="m:9", details={"movie_id": 9, "title": "W"})
@@ -510,8 +572,9 @@ def client(tmp_path):
         videoapi._video_db = None
 
 
-def test_plan_route(client):
+def test_plan_route(client, as_filed):
     c, db, _ = client
+    _on(db)
     _flag(db, "A", score=25, size_gb=40, item_id=1)
     r = c.post("/api/video/repair/shelf-life/plan", json={"target_gb": 10})
     assert r.status_code == 200
@@ -522,7 +585,7 @@ def test_plan_route(client):
     assert c.post("/api/video/repair/shelf-life/plan", json={"ids": "1"}).status_code == 400
 
 
-def test_delete_route_runs_each_title_with_its_own_name(client, monkeypatch):
+def test_delete_route_runs_each_title_with_its_own_name(client, as_filed, monkeypatch):
     import time
     from core.video import delete_title
     c, db, worker_mod = client
@@ -532,6 +595,7 @@ def test_delete_route_runs_each_title_with_its_own_name(client, monkeypatch):
         calls.append((item_id, kw["typed_title"]))
         return {"success": True}
     monkeypatch.setattr(delete_title, "run", _run_delete)
+    _on(db)
     a = _flag(db, "A", score=25, size_gb=40, item_id=1)
     b = _flag(db, "B", score=10, size_gb=10, item_id=2)
     bad = c.post("/api/video/repair/shelf-life/delete", json={"ids": [a, b], "phrase": "delete 1 title"})
@@ -627,6 +691,22 @@ def test_a_kept_title_is_never_deleted_even_from_an_old_finding(db, worker, monk
     assert mid
 
 
+def test_a_title_matched_and_kept_since_its_finding_is_never_deleted(db, worker, monkeypatch):
+    # filed with no TMDB match; matched and kept afterwards (#2211 review S5).
+    # a batch's own check ran before the Keep, so only the fix's Keep check stands
+    calls = _capture_delete(monkeypatch)
+    mid = _movie(db, "Low", tmdb=None, imdb=5.0, streaming="ok", count=5)
+    _run(worker)
+    fid = _pending(db)[0]["id"]
+    assert db.repair_get_finding(fid)["details"]["tmdb_id"] is None
+    actions, err = job_module.batch_delete_actions(db, [fid], "delete 1 title")
+    assert err is None
+    _sql(db, "UPDATE movies SET tmdb_id=7 WHERE id=?", (mid,))
+    db.shelf_life_set_keep("movie", 7, True)
+    res = worker.fix_finding(fid, actions[fid])
+    assert res["success"] is False and "Keep" in res["error"] and calls == []
+
+
 def test_a_locked_show_is_stored_with_the_padlock_and_never_flagged(db, worker):
     sid = _show(db, "Locked Show", tmdb=55, streaming="ok", count=5)
     _run(worker)
@@ -652,7 +732,8 @@ def test_a_title_locked_behind_an_old_finding_is_never_deleted(db, worker, monke
     assert calls == []
 
 
-def test_a_cleanup_leaves_out_a_finding_whose_title_was_locked_since(db):
+def test_a_cleanup_leaves_out_a_finding_whose_title_was_locked_since(db, as_filed):
+    _on(db)
     from core.video.repair.shelf_life import batch_delete_actions, batch_phrase, plan_cleanup
     a = _movie(db, "A", tmdb=1)
     b = _movie(db, "B", tmdb=2)
@@ -948,6 +1029,26 @@ def test_playing_now_reads_every_session_linked_to_the_library(db, monkeypatch):
     assert _REAL_PLAYING_NOW(db) is None
 
 
+def test_a_show_playing_on_a_second_server_is_held(db, worker, monkeypatch):
+    # a show session the activity view could only place by its TMDB id (#2211 review S1)
+    from core import server_activity
+    from core.video import delete_title
+    calls = []
+    monkeypatch.setattr(delete_title, "run", lambda *a, **k: calls.append(a) or {"success": True})
+    sid = _show(db, "Nobody", tmdb=10, streaming="ok", count=5)
+    up = [{"server": "plex", "reachable": True}, {"server": "jellyfin", "reachable": True}]
+    monkeypatch.setattr(server_activity, "get_activity", lambda db=None: {"ok": True, "servers": up, "sessions": [
+        {"link": {"source": "tmdb", "kind": "show", "id": 10}}]})
+    assert _REAL_PLAYING_NOW(db) == {("show", sid)}
+    _run(worker)
+    fid = _pending(db)[0]["id"]                      # flagged while the stub says nothing plays
+    monkeypatch.setattr(job_module, "_playing_now", _REAL_PLAYING_NOW)
+    res = worker.fix_finding(fid, "Nobody")
+    assert res["success"] is False and "playing it right now" in res["error"] and calls == []
+    _run(worker)
+    assert _stored(db, "show", [sid])[sid]["gate"] == "playing"
+
+
 def test_playing_now_cant_say_while_any_server_cant_be_asked(db, monkeypatch):
     # plex answered with nothing playing, jellyfin didn't answer: not "nothing playing"
     from core import server_activity
@@ -991,3 +1092,209 @@ def test_following_is_measured_in_lists_per_vote_against_the_library(db, worker)
     _run(worker)
     stored = _stored(db, "movie", [a, b, c, d])
     assert stored[a]["score"] > stored[c]["score"] == stored[b]["score"] == stored[d]["score"]
+
+
+# ── everything is checked again at delete time (review of #2211, B1) ────────
+def _capture_delete(monkeypatch):
+    from core.video import delete_title
+    calls = []
+
+    def fake(db_, kind, item_id, **kw):
+        calls.append((kind, item_id, kw["typed_title"], db_.title_delete_rows(kind, item_id)))
+        return {"success": True}
+    monkeypatch.setattr(delete_title, "run", fake)
+    return calls
+
+
+def test_a_title_watched_since_its_finding_is_not_deleted(db, worker, monkeypatch):
+    # flagged at 03:00; by evening someone watched it three times and stopped
+    # part-way into a fourth: neither the batch nor a single fix deletes it
+    calls = _capture_delete(monkeypatch)
+    mid = _movie(db, "Dead", tmdb=1, imdb=5.0, streaming="ok", count=5)
+    _run(worker)
+    fid = _pending(db)[0]["id"]
+    _sql(db, "UPDATE movies SET play_count=3, last_viewed_at=?, view_offset_ms=600000 WHERE id=?", (_ago(0), mid))
+    actions, err = job_module.batch_delete_actions(db, [fid], "delete 1 title")
+    assert actions is None and "Dead (2015): someone is part-way through it" in err
+    assert "Nothing was deleted" in err
+    res = worker.fix_finding(fid, "Dead")
+    assert res["success"] is False and res["error"] == "Not deleted: someone is part-way through it."
+    # finished it since: it scores over the line now
+    _sql(db, "UPDATE movies SET view_offset_ms=0 WHERE id=?", (mid,))
+    res = worker.fix_finding(fid, "Dead")
+    assert res["success"] is False and "not under the line of 30" in res["error"]
+    plan = job_module.plan_cleanup(db)
+    assert plan["items"] == [] and plan["skipped"][0]["id"] == fid
+    assert calls == [] and db.repair_get_finding(fid)["status"] == "pending"
+
+
+def test_a_show_that_started_airing_again_is_not_deleted(db, worker, monkeypatch):
+    calls = _capture_delete(monkeypatch)
+    sid = _show(db, "Nobody", tmdb=10, streaming="ok", count=5)
+    _run(worker)
+    fid = _pending(db)[0]["id"]
+    _sql(db, "UPDATE shows SET status='Returning Series' WHERE id=?", (sid,))
+    res = worker.fix_finding(fid, "Nobody")
+    assert res["success"] is False and "followed show that is still airing" in res["error"]
+    assert calls == []
+
+
+def test_a_request_approved_since_its_finding_holds_it(db, worker, monkeypatch):
+    calls = _capture_delete(monkeypatch)
+    _movie(db, "Asked", tmdb=1, imdb=5.0, streaming="ok", count=5)
+    _run(worker)
+    fid = _pending(db)[0]["id"]
+    _sql(db, "INSERT INTO video_requests (profile_id, kind, tmdb_id, title, status, available_at) "
+             "VALUES (1, 'movie', 1, 'Asked', 'approved', ?)", (_ago(2),))
+    actions, err = job_module.batch_delete_actions(db, [fid], "delete 1 title")
+    assert actions is None and "requested and not yet watched" in err
+    assert calls == []
+
+
+def test_a_lowered_threshold_leaves_out_what_is_over_it_now(db, worker, monkeypatch):
+    # filed at threshold 50; the line drops to 20 before anyone cleans up
+    calls = _capture_delete(monkeypatch)
+    _movie(db, "Mid", tmdb=3, imdb=6.0, streaming="ok", count=2, added=400)
+    _on(db, threshold=50)
+    worker._run_job("shelf_life", forced=True)
+    fid = _pending(db)[0]["id"]
+    _on(db, threshold=20)
+    plan = job_module.plan_cleanup(db, target_bytes=500 * GB)
+    assert plan["items"] == [] and plan["candidates"] == 0 and plan["threshold"] == 20
+    assert plan["skipped"][0]["id"] == fid and "not under the line of 20" in plan["skipped"][0]["reason"]
+    actions, err = job_module.batch_delete_actions(db, [fid], "delete 1 title")
+    assert actions is None and "not under the line of 20" in err
+    assert worker.fix_finding(fid, "Mid")["success"] is False and calls == []
+
+
+def test_the_planner_shows_the_fresh_score(db, worker):
+    _movie(db, "Dead", tmdb=1, imdb=5.0, streaming="ok", count=5)
+    _run(worker)
+    f = _pending(db)[0]
+    db.repair_set_finding_details(f["id"], {**f["details"], "score": 1})
+    item = job_module.plan_cleanup(db)["items"][0]
+    assert item["score"] == f["details"]["score"] != 1
+
+
+def test_a_switched_off_job_plans_and_deletes_nothing(db, worker, monkeypatch):
+    # findings outlive the job being switched off; they stay in the list, but
+    # nothing is planned or deleted from them
+    calls = _capture_delete(monkeypatch)
+    _movie(db, "Dead", tmdb=1, imdb=5.0, streaming="ok", count=5)
+    _run(worker)
+    fid = _pending(db)[0]["id"]
+    _on(db, False)
+    plan = job_module.plan_cleanup(db)
+    assert plan["items"] == [] and plan["enabled"] is False and "switched off" in plan["error"]
+    actions, err = job_module.batch_delete_actions(db, [fid], "delete 1 title")
+    assert actions is None and "switched off" in err
+    res = worker.fix_finding(fid, "Dead")
+    assert res["success"] is False and "switched off" in res["error"]
+    assert calls == [] and db.repair_get_finding(fid)["status"] == "pending"
+
+
+def test_a_batch_gathers_the_library_once(db, worker, monkeypatch):
+    calls = _capture_delete(monkeypatch)
+    _movie(db, "A", tmdb=1, imdb=5.0, streaming="ok", count=5)
+    _movie(db, "B", tmdb=2, imdb=5.0, streaming="ok", count=5)
+    _run(worker)
+    ids = sorted(f["id"] for f in _pending(db))
+    real, gathers = job_module.gather, []
+    monkeypatch.setattr(job_module, "gather", lambda *a, **k: gathers.append(1) or real(*a, **k))
+    actions, err = job_module.batch_delete_actions(db, ids, "delete 2 titles")
+    assert err is None
+    for fid in ids:
+        assert worker.fix_finding(fid, actions[fid])["success"] is True
+    assert len(gathers) == 1 and len(calls) == 2
+
+
+# ── a title is all its copies (review of #2211, B2) ─────────────────────────
+def _twin(db, title, *, tmdb, size=80 * GB, added=1000):
+    """a second row for the same TMDB title on the same server (a 4K library
+    copy, or a stale twin after a re-key): what Delete Title takes with it."""
+    uhd = db.upsert_movie("plex", {"server_id": "m-%s-4k" % title, "title": title, "year": 2015,
+                                   "tmdb_id": tmdb, "play_count": 0})
+    _sql(db, "INSERT INTO media_files (movie_id, relative_path, size_bytes) VALUES (?, ?, ?)",
+         (uhd, "/m4k/%s.mkv" % title, size))
+    _sql(db, "UPDATE movies SET has_file=1, added_at=?, runtime_minutes=120, imdb_rating=7.0, "
+             "streaming_status='ok', streaming_count=5 WHERE id=?", (_ago(added), uhd))
+    return uhd
+
+
+def test_a_copy_watched_last_week_protects_its_unwatched_twin(db, worker, monkeypatch):
+    calls = _capture_delete(monkeypatch)
+    hd = _movie(db, "Twin", tmdb=77, plays=5, last=_ago(7), size=10 * GB, imdb=7.0, streaming="ok", count=5)
+    uhd = _twin(db, "Twin", tmdb=77)
+    _run(worker)
+    stored = _stored(db, "movie", [hd, uhd])
+    assert stored[hd]["score"] == stored[uhd]["score"] >= 30
+    assert stored[hd]["size_bytes"] == stored[uhd]["size_bytes"] == 90 * GB
+    assert _pending(db) == [] and calls == []
+
+
+def test_a_flagged_title_is_sized_and_deleted_as_all_its_copies(db, worker, monkeypatch):
+    calls = _capture_delete(monkeypatch)
+    hd = _movie(db, "Twin", tmdb=77, size=10 * GB, imdb=5.0, streaming="ok", count=5)
+    uhd = _twin(db, "Twin", tmdb=77)
+    _run(worker)
+    items = _pending(db)
+    assert len(items) == 1
+    f = items[0]
+    assert f["details"]["item_id"] == hd and f["details"]["item_ids"] == [hd, uhd]
+    assert f["details"]["size_bytes"] == 90 * GB and "90.0 GB in 2 copies" in f["title"]
+    plan = job_module.plan_cleanup(db)
+    assert plan["items"][0]["size_bytes"] == plan["total_bytes"] == 90 * GB
+    assert worker.fix_finding(f["id"], "Twin")["success"] is True
+    assert set(calls[0][3]) == {hd, uhd}
+
+
+def test_a_twin_playing_now_holds_the_title(db, worker, monkeypatch):
+    calls = _capture_delete(monkeypatch)
+    hd = _movie(db, "Twin", tmdb=77, size=10 * GB, imdb=5.0, streaming="ok", count=5)
+    uhd = _twin(db, "Twin", tmdb=77)
+    _run(worker)
+    fid = _pending(db)[0]["id"]
+    # checked by a batch a moment ago, so only the check right before the delete stands
+    actions, err = job_module.batch_delete_actions(db, [fid], "delete 1 title")
+    assert err is None
+    # the finding names the lower row; the other copy is the one playing
+    monkeypatch.setattr(job_module, "_playing_now", lambda db_: {("movie", uhd)})
+    res = worker.fix_finding(fid, actions[fid])
+    assert res["success"] is False and "playing it right now" in res["error"] and calls == []
+    assert hd
+
+
+def test_a_padlock_or_resume_point_on_one_copy_holds_the_title(db, worker, monkeypatch):
+    hd = _movie(db, "Twin", tmdb=77, size=10 * GB, imdb=5.0, streaming="ok", count=5)
+    uhd = _twin(db, "Twin", tmdb=77)
+    _sql(db, "UPDATE movies SET view_offset_ms=5000 WHERE id=?", (uhd,))
+    _run(worker)
+    assert {s["gate"] for s in _stored(db, "movie", [hd, uhd]).values()} == {"in_progress"}
+    _sql(db, "UPDATE movies SET view_offset_ms=0 WHERE id=?", (uhd,))
+    _run(worker)
+    fid = _pending(db)[0]["id"]
+    actions, err = job_module.batch_delete_actions(db, [fid], "delete 1 title")
+    assert err is None
+    db.set_hands_off("movie", uhd, True)            # the other copy locked behind the batch's back
+    calls = _capture_delete(monkeypatch)
+    res = worker.fix_finding(fid, actions[fid])
+    assert res["success"] is False and "locked" in res["error"] and calls == []
+
+
+def test_copies_on_another_server_are_their_own_title(db, worker):
+    # Delete Title only takes rows on the same server, so neither does the score
+    a = _movie(db, "Twin", tmdb=77, size=10 * GB, imdb=5.0, streaming="ok", count=5)
+    b = db.upsert_movie("jellyfin", {"server_id": "j-Twin", "title": "Twin", "year": 2015, "tmdb_id": 77})
+    _sql(db, "UPDATE movies SET has_file=1, added_at=? WHERE id=?", (_ago(1000), b))
+    rows = {r["id"]: r for r, _f in job_module.gather(db, dict(job_module.ShelfLifeJob.default_settings))["movie"]}
+    assert rows[a]["group_ids"] == [a] and rows[b]["group_ids"] == [b]
+
+
+def test_a_play_known_only_by_tmdb_counts_for_every_copy(db, play_log):
+    hd = _movie(db, "Twin", tmdb=77, size=10 * GB)
+    uhd = _twin(db, "Twin", tmdb=77)
+    play_log([_p("jellyfin", "abc", "movie", 5, link={"kind": "movie", "id": 77, "source": "tmdb"})])
+    log = job_module._play_log_watch(db)
+    assert set(log["movie"]) == {hd, uhd}
+    facts = _facts(db, "movie")
+    assert facts[hd]["watch"]["watched"] == 1 and set(facts) == {hd}

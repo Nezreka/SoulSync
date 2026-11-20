@@ -516,6 +516,35 @@ describe('video findings', () => {
     expect(document.getElementById('shelf-life-short')?.textContent).toContain('short of');
   });
 
+  it('titles the server left out on its fresh check are named with why', async () => {
+    renderShelfLifeInbox({
+      ...shelfPlan,
+      skipped: [{ id: 9, title: 'Dune', year: 1984, reason: 'someone is part-way through it' }],
+    });
+    await flush();
+    await flush();
+    fireEvent.click(await screen.findByText('Free up space…'));
+    await flush();
+    expect(document.getElementById('shelf-life-skipped')?.textContent).toContain(
+      'Dune (1984): someone is part-way through it',
+    );
+  });
+
+  it('a switched-off job says so instead of listing anything', async () => {
+    renderShelfLifeInbox({
+      ...shelfPlan,
+      items: [],
+      enabled: false,
+      error: 'Shelf Life is switched off, so nothing it flagged can be deleted.',
+    });
+    await flush();
+    await flush();
+    fireEvent.click(await screen.findByText('Free up space…'));
+    await flush();
+    expect(screen.getByRole('alert').textContent).toContain('switched off');
+    expect(document.getElementById('shelf-life-items')).toBeNull();
+  });
+
   it('cancelling the picker deletes nothing', async () => {
     renderShelfLifeInbox();
     await flush();

@@ -4,7 +4,9 @@
  * Opens on every open Shelf Life finding (or the ones picked in the list),
  * lowest score first. Type how much space you want back and it trims the list
  * to the fewest titles that reach it, lowest score first; it never reaches
- * above the threshold to make the number, it says how short it falls. Tick
+ * above the threshold to make the number, it says how short it falls. Every
+ * title is checked again on the server as the list loads; one that no longer
+ * holds (watched since, kept, over today's line) is listed as left out. Tick
  * titles off freely; the total follows. "Delete" hands the chosen ids back,
  * and the caller gates the batch on one typed phrase ('delete 14 titles').
  */
@@ -176,6 +178,18 @@ export function ShelfLifeCleanupDialog({ ids, resolve }: ShelfLifeCleanupProps) 
               No open Shelf Life findings. Run the job first; it only offers titles below the line.
             </p>
           )}
+          {plan.skipped?.length ? (
+            <p
+              id="shelf-life-skipped"
+              style={{ margin: '8px 0 0', fontSize: '0.85em', opacity: 0.8 }}
+            >
+              Left out, checked again just now:{' '}
+              {plan.skipped
+                .map((item) => `${item.title}${item.year ? ` (${item.year})` : ''}: ${item.reason}`)
+                .join('; ')}
+              .
+            </p>
+          ) : null}
           <p id="shelf-life-total" style={{ margin: '12px 0 4px', fontWeight: 600 }}>
             {picked.length.toLocaleString()} title{picked.length === 1 ? '' : 's'},{' '}
             {formatLibrarySize(total)}

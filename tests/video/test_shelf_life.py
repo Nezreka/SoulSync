@@ -102,6 +102,14 @@ def test_watch_never_watched_decays_with_tenure():
     assert 40 < fresh < 50 and old < 7 and "never watched" in text
 
 
+def test_watch_never_watched_with_no_add_date_is_no_data():
+    # how long it sat unwatched isn't known: neutral, not zero (#2211 review S2)
+    value, text = sl.watch_signal(_facts(added_at=None, watch={"active": 3, "watched": 0}), NOW)
+    assert value is None and text == "never watched, add date unknown"
+    r = sl.score(_facts(added_at=None, watch={"active": 3, "watched": 0}), {}, NOW)
+    assert r["signals"]["watch"] is None
+
+
 def test_watch_says_when_it_counts_from_soulsyncs_first_sight():
     _, server = sl.watch_signal(_facts(added_at="2026-10-01", added_from="server", watch={"active": 3}), NOW)
     _, seen = sl.watch_signal(_facts(added_at="2026-10-01", added_from="first_seen", watch={"active": 3}), NOW)
