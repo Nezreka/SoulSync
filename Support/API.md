@@ -1971,6 +1971,19 @@ Get retag queue statistics.
 
 ---
 
+
+### Filled tags (web UI routes)
+
+With **Fill empty tags automatically** on (`metadata_enhancement.fill_empty_tags`: `off`, `fill` (the default while post-processing writes tags) or `update`), SoulSync writes what the library knows into the tags a file left blank. These routes back the Tools page's **Filled Tags** card. Reading needs `admin.tools`; the POST routes are admin only.
+
+| Route | What it does |
+|-------|--------------|
+| `GET /api/repair/tag-fills?days=7&limit=20` | `{mode, days, files, fields, covers, runs: [{batch_id, source, at, files, fields, covers, undone}], undo}`: what was filled over `days`, and the latest runs. `undo` is the state of a run being undone |
+| `GET /api/repair/tag-fills/files?run=<batch_id>` | Every file one run filled: `{id, file_id, path, mode, status, fields: [{key, label, before, after}], cover, filled_at, undone_at, undo}` |
+| `POST /api/repair/tag-fills/<id>/undo` | Puts one file's filled tags back to blank (a tag changed since is kept and named in `kept`). Undone tags are never filled again |
+| `POST /api/repair/tag-fills/undo-run` | `{"run": "<batch_id>"}`. Undoes a whole run in the background (`202`); progress shows in `undo` |
+| `POST /api/repair/tag-fills/run` | Runs a fill pass on the repair worker's next idle moment (`202`); `400` when the setting is off |
+
 ### ListenBrainz
 
 Browse cached ListenBrainz playlists and their tracks. Playlists are cached locally when SoulSync pulls recommendations from ListenBrainz.

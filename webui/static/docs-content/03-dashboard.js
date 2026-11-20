@@ -240,6 +240,7 @@ The view switch offers two more ways in: **Albums** is a lens on the findings th
 
 - **Dismiss** means "don't raise this again". Every dismiss shows an **Undo** for a few seconds, and dismissed findings can be reopened from the Dismissed view.
 - **A tag finding shows both sides.** Open a Library Re-tag row and each tag is listed with the value in the file now beside the value Apply Tags would write. Nothing outside that list is touched.
+- **Blank tags fill themselves.** With **Fill empty tags automatically** on (the default while post-processing writes tags), SoulSync fills a tag finding's blanks on its own within a few minutes and closes it. What it filled is on the **Filled Tags** card, with **Undo**. Findings for files it leaves alone (hand-tagged, locked, read-only, still downloading) stay here.
 - **Fix All on tag findings only fills.** It writes the tags that are blank in a file and never replaces a tag the file already has. A finding where the file and the library disagree stays open: open it, read both values, then **Apply Tags** or **Dismiss**. If a finding had both, the blanks are filled, the rest waits, and the row shows what was filled with **Undo the fill**. The prompt has a second answer, **Also replace tags that differ**, which asks again before it runs.
 - **A different genre or year is not a fault.** The file is as often right as the catalogue (a remaster's year, "Electro" against "Electronic"), so those two are shown on the finding as "differs from the library. Left as it is" and are not filed on their own. To have them filed, turn on **Flag genre differences** or **Flag year differences** in the Library Re-tag job's settings. A blank genre or year is always filed.
 - **Fixed tag findings keep their history.** In the Fixed view, a re-tag row shows every tag as it was and as it is now. **Undo changes** writes the old values back and reopens the finding. A cover that was embedded stays, since the old picture is not kept.
@@ -274,7 +275,7 @@ The background repair worker runs automated jobs on configurable schedules, incl
 | Expired Download Cleaner | Proposes deleting watchlist/playlist-sourced downloads past their per-origin retention window; always keeps actively-mirrored playlists, watched artists, and tracks you've played more than once (optional auto-delete). Also cleans up after **Rotating** playlists: a song the playlist downloaded goes once it has left the playlist, with no retention window |
 | Genre Tag Cleanup | Re-applies the strict genre whitelist to genres stored before it was enabled — one finding per artist/album with off-whitelist genres |
 | Genre Enrichment | Adds conservatively translated genres from stored metadata and caches |
-| Library Re-tag | Rewrites tags + cover art from a fresh metadata-source pull, in place (no moves, renames, or re-matching) — dry-run findings show old → new for every track. An import fills the tags it left blank from what the library knows (genre, disc total) before it checks the file, so a fresh import doesn't file blanks as findings. Two spellings of one artist ("The" and case aside) are one credit |
+| Library Re-tag | Rewrites tags + cover art from a fresh metadata-source pull, in place (no moves, renames, or re-matching) — dry-run findings show old → new for every track. An import fills the tags it left blank from what the library knows (genre, disc total) before it checks the file, so a fresh import doesn't file blanks as findings. Blanks the library learns about later are filled the same way while **Fill empty tags automatically** allows it (see Filled Tags), and only what differs is filed. Two spellings of one artist ("The" and case aside) are one credit |
 | Live/Commentary Cleaner | Finds live performances, commentary, interviews, and spoken-word content in the library |
 | Lossy Converter | Finds lossless files with no lossy copy alongside and converts them with ffmpeg using your configured codec/bitrate |
 | Lyrics Filler | Finds tracks with no \`.lrc\` sidecar, checks LRClib so instrumentals are never flagged, then fetches synced lyrics — writes the \`.lrc\` and embeds them |
@@ -626,6 +627,32 @@ Rules: each file is read once, read-only — nothing is written back to disk. On
 :::
 
 The button shows **Starting…** then **Scanning…** (disabled while busy) — there is no stop button, and a second run while one is active is rejected. No admin gate.
+`
+        },
+        {
+            id: 'dash-tool-filled-tags',
+            title: 'Filled Tags',
+            lede: 'The blank tags SoulSync filled from your library on its own, and how to undo them.',
+            body: `
+When the library learns something after a download (enrichment finds a genre, a media server sync brings a year, an edition gives a track total), the file's tags don't change by themselves. With **Fill empty tags automatically** on (Settings → Library → Post-Processing), SoulSync writes it into the tags the file left blank, so you don't get a Library Re-tag finding per file to apply.
+
+| Setting | What it writes |
+|---|---|
+| **Fill empty tags only** (the default while post-processing writes tags) | A tag that is blank in the file and known to the library: title, artist, album artist, album, year, genre, track and disc numbers and totals. A cover only when the file has none and the album already has one in your library. A tag the file has is never replaced |
+| **Fill and update** | Also replaces tags that differ from the library, the same write as applying the finding. A genre or year difference stays alone unless **Flag genre differences** / **Flag year differences** is on |
+| **Off** | Nothing. Blanks are filed as Library Re-tag findings, as before. An import does not fill blanks either |
+
+With post-processing off, nothing is filled whatever the setting says.
+
+**When it runs.** The Library Re-tag job fills while it compares, and files a finding only for what is left. Between jobs, the repair worker works through the open tag findings in small batches every ten minutes, never while a job or a library scan is running. **Fill Now** on the card starts a pass right away.
+
+**What it leaves alone** (the finding stays for you): hand-tagged files and every file of their album, albums or artists locked for tags, files in the download, staging, torrent or usenet download folders (where a seeding torrent's data lives), files changed in the last ten minutes or being written by something else, files SoulSync can't write (a read-only mount), findings you dismissed, and any write whose audio check fails (then nothing is written at all).
+
+**No loops.** SoulSync fills a tag in a file at most once. If you or another tagger clears it afterwards, it stays cleared; if you change it, your value stays.
+
+## The card
+
+The **Filled Tags** card (Tools → Metadata & Cache, admins only) shows how many tags were filled this week and the setting. Each run is listed (on its own, or a Library Re-tag run): **Show** lists its files with every tag before and after, **Undo** on a file or on the run puts the blanks back. A tag that was changed since the fill keeps its new value, and a cover the fill added is taken out again. What you undo is never filled again: it comes back as a Library Re-tag finding for you to decide. The Re-tag job's own **Auto apply** writes are listed and undone here too.
 `
         },
         {
