@@ -661,3 +661,60 @@ def test_prefixed_artists_still_match_themselves(monkeypatch):
                               duration_ms=180_000, popularity=0)
         kept = validation._score_streaming_candidates([_tidal_hit('Song Title', got_artist)], wanted)
         assert len(kept) == 1, (wanted_artist, got_artist)
+
+
+@dataclass
+class _AlbumTrack:
+    duration_ms: int
+    name: str
+    artists: tuple[str, ...]
+    album: Optional[str] = None
+
+
+def _lidarr_album_row(artist, album):
+    # What LidarrDownloadClient._search_sync yields when Lidarr's album/lookup
+    # has no track lists: one row for the whole album, titled with its name.
+    return _Candidate(
+        username='lidarr', duration=0, title=album, artist=artist,
+        filename=f'release-group-mbid||{artist} - {album}',
+    )
+
+
+def test_lidarr_rows_take_the_structured_metadata_lane():
+    assert 'lidarr' in validation._STREAMING_USERNAMES
+
+
+def test_lidarr_album_row_matches_a_track_of_that_album(monkeypatch):
+    from core.matching_engine import MusicMatchingEngine
+
+    monkeypatch.setattr(validation, 'matching_engine', MusicMatchingEngine())
+    expected = _AlbumTrack(duration_ms=240_000, name='Brown Metal', artists=('Hella',),
+                           album='Hold Your Horse Is')
+    row = _lidarr_album_row('Hella', 'Hold Your Horse Is')
+    row.album = 'Hold Your Horse Is'
+
+    assert get_valid_candidates([row], expected, 'hella brown metal') == [row]
+
+
+def test_lidarr_album_row_rejects_another_album_of_the_artist(monkeypatch):
+    from core.matching_engine import MusicMatchingEngine
+
+    monkeypatch.setattr(validation, 'matching_engine', MusicMatchingEngine())
+    expected = _AlbumTrack(duration_ms=240_000, name='Brown Metal', artists=('Hella',),
+                           album='Hold Your Horse Is')
+    row = _lidarr_album_row('Hella', 'Church Gone Wild / Chirpin Hard')
+    row.album = 'Church Gone Wild / Chirpin Hard'
+
+    assert get_valid_candidates([row], expected, 'hella brown metal') == []
+
+
+def test_lidarr_album_row_rejects_the_wrong_artist(monkeypatch):
+    from core.matching_engine import MusicMatchingEngine
+
+    monkeypatch.setattr(validation, 'matching_engine', MusicMatchingEngine())
+    expected = _AlbumTrack(duration_ms=240_000, name='Brown Metal', artists=('Hella',),
+                           album='Hold Your Horse Is')
+    row = _lidarr_album_row('Somebody Else', 'Hold Your Horse Is')
+    row.album = 'Hold Your Horse Is'
+
+    assert get_valid_candidates([row], expected, 'hella brown metal') == []
