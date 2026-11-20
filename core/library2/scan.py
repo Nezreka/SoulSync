@@ -286,6 +286,7 @@ def rescan_files(
     source='scan',
     on_presence_change: Optional[Callable[[List[int]], None]] = None,
     confirmed_gone: bool = False,
+    outage_guard: bool = True,
 ) -> Dict[str, int]:
     """Probe the files in scope and persist their measured audio properties.
 
@@ -313,6 +314,16 @@ def rescan_files(
     that still does not resolve is confirmed missing on this pass, whatever
     the share of the library and whatever its root looks like. A file that is
     there is still read as there, and a rename is still repointed first.
+
+    ``outage_guard=False`` is for a caller that already judged the whole set
+    before scanning it in pieces (Dead File Cleaner looks at every file, read
+    only, before its first write). The share-of-the-batch outage test is then
+    the wrong question: it sees one 500-file piece, and a run of deleted
+    files that sit next to each other in the catalogue (one artist, one
+    import) is far more than a quarter of that piece while being 4% of the
+    library (#2216). Every miss still needs its own root to be reachable
+    (``missing_path_root_is_healthy``), so an unmounted drive still advances
+    nothing.
 
     Returns a stats dict: ``scanned``/``updated`` for files that were there,
     ``missing`` for paths that did not resolve, ``path_drift``/``path_repointed``
@@ -348,7 +359,8 @@ def rescan_files(
     confirmed: List[int] = []
     _rescan_loop(database, rows, total, progress=progress, stats=stats,
                  manual=manual or confirmed_gone, presence=presence, source=source,
-                 confirmed=confirmed, confirmed_gone=confirmed_gone)
+                 confirmed=confirmed, confirmed_gone=confirmed_gone,
+                 outage_guard=outage_guard)
     if confirmed and not _redownload_externally_deleted():
         # Before the presence consumer: it mirrors the wanted projection, so
         # it has to see the track already released.
@@ -430,7 +442,7 @@ def _flush_observations(database, pending, stats, presence=None,
 
 def _rescan_loop(database, rows, total, *, progress, stats, manual: bool = False,
                  presence=None, source='scan', confirmed=None,
-                 confirmed_gone: bool = False) -> None:
+                 confirmed_gone: bool = False, outage_guard: bool = True) -> None:
     """The per-file body of :func:`rescan_files`, in three ordered phases.
 
     The order is the behaviour, not an implementation detail:
@@ -471,7 +483,7 @@ def _rescan_loop(database, rows, total, *, progress, stats, manual: bool = False
                     presence=presence, source=source)
     _observe_missing(database, still_missing, stats=stats, manual=manual,
                      ambiguous=ambiguous, presence=presence, confirmed=confirmed,
-                     confirmed_gone=confirmed_gone)
+                     confirmed_gone=confirmed_gone, outage_guard=outage_guard)
 
 
 def _probe_rows(database, rows, total, *, progress, stats,
@@ -596,7 +608,8 @@ def _reconcile_drifted_paths(database, rows, *, stats, repair: bool):
 
 
 def _observe_missing(database, rows, *, stats, manual: bool, ambiguous,
-                     presence=None, confirmed=None, confirmed_gone: bool = False) -> None:
+                     presence=None, confirmed=None, confirmed_gone: bool = False,
+                     outage_guard: bool = True) -> None:
     """Phase 3: what survived the drift check is genuinely absent."""
     from core.library2.paths import missing_path_root_is_healthy
 
@@ -604,7 +617,7 @@ def _observe_missing(database, rows, *, stats, manual: bool, ambiguous,
     # a library someone emptied and confirmed would otherwise read as a
     # dropped mount on every scan after it (#2005)
     fresh = sum(1 for row in rows if row.get("file_state") != "missing_confirmed")
-    mass = (not confirmed_gone and fresh >= MASS_MISSING_MIN
+    mass = (not confirmed_gone and outage_guard and fresh >= MASS_MISSING_MIN
             and fresh > MASS_MISSING_SHARE * (stats["scanned"] + len(rows)))
     if mass:
         stats["mass_missing_deferred"] = len(rows)
