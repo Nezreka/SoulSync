@@ -426,6 +426,21 @@ def preview_ownership(db, tracks_json, *, album_context, artist_context, is_albu
     return results
 
 
+def release_group_id_of(tracks_json) -> Optional[str]:
+    """The MusicBrainz release group every requested track belongs to, or None.
+
+    Wishlist rows carry the id the MusicBrainz worker matched. Tracks without
+    one are ignored; tracks that disagree make the answer None.
+    """
+    groups = set()
+    for entry in tracks_json or []:
+        if isinstance(entry, dict):
+            value = str(entry.get('musicbrainz_release_group_id') or '').strip()
+            if value:
+                groups.add(value)
+    return groups.pop() if len(groups) == 1 else None
+
+
 def expected_release_duration_seconds(tracks_json) -> Optional[int]:
     """Total playing time of the requested release, or None if unknown.
 
@@ -1193,7 +1208,7 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
                     return None
             return plugin
 
-        def _bundle_plugin_kwargs():
+        def _bundle_plugin_kwargs(source=None):
             """What the album plugins need beyond album/artist/staging.
 
             Both dispatch sites send the same thing, and a key is omitted
@@ -1207,6 +1222,12 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
             _duration = expected_release_duration_seconds(tracks_json)
             if _duration:
                 kwargs['expected_duration_seconds'] = _duration
+            if source == 'lidarr':
+                # Lidarr looks albums up in MusicBrainz: the id finds the
+                # exact release group where a text search often cannot.
+                _group = release_group_id_of(tracks_json)
+                if _group:
+                    kwargs['release_group_id'] = _group
             return kwargs or None
 
         def _stamp_terminal_bundle_failure():
@@ -1248,7 +1269,7 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
                     plugin_resolver=lambda _name, _plugin=plugin: _plugin,
                     state=_bundle_state,
                     source_override=source,
-                    plugin_kwargs=_bundle_plugin_kwargs(),
+                    plugin_kwargs=_bundle_plugin_kwargs(source),
                 ):
                     _stamp_terminal_bundle_failure()
                     return True

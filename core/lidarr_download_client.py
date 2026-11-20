@@ -18,6 +18,7 @@ import time
 import uuid
 import shutil
 import threading
+from difflib import SequenceMatcher
 from typing import List, Optional, Dict, Any, Tuple
 from pathlib import Path
 
@@ -54,6 +55,13 @@ class LidarrDownloadClient(DownloadSourcePlugin):
 
         self.active_downloads: Dict[str, Dict[str, Any]] = {}
         self._download_lock = threading.Lock()
+        # One lock per album: the tracks of one album run in parallel workers,
+        # and each used to add the same artist and album at the same time.
+        self._album_locks: Dict[str, threading.Lock] = {}
+        self._album_locks_guard = threading.Lock()
+        # foreignAlbumId -> monotonic time of the last AlbumSearch we sent, so
+        # parallel tracks of one album trigger one indexer search, not one each
+        self._album_searched_at: Dict[str, float] = {}
         self.shutdown_check = None
         self._load_config()
 
@@ -63,6 +71,14 @@ class LidarrDownloadClient(DownloadSourcePlugin):
         self._root_folder = config_manager.get('lidarr_download.root_folder', '') or ''
         self._quality_profile = config_manager.get('lidarr_download.quality_profile', 'Any') or 'Any'
         self._cleanup = config_manager.get('lidarr_download.cleanup_after_import', True)
+        # Whole albums only: Lidarr serves album downloads (the album-bundle
+        # flow) and answers no per-track search, so single tracks go to the
+        # next source in hybrid mode.
+        self._albums_only = bool(config_manager.get('lidarr_download.albums_only', False))
+        try:
+            self._download_timeout = int(config_manager.get('lidarr_download.download_timeout', 21600) or 21600)
+        except (TypeError, ValueError):
+            self._download_timeout = 21600
 
     def set_shutdown_check(self, check_callable):
         self.shutdown_check = check_callable
@@ -104,6 +120,9 @@ class LidarrDownloadClient(DownloadSourcePlugin):
         """
         if not self.is_configured():
             return ([], [])
+        if self._albums_only:
+            # Whole albums only: per-track searches are left to other sources.
+            return ([], [])
 
         try:
             return await run_blocking(self._search_sync, query)
@@ -114,8 +133,16 @@ class LidarrDownloadClient(DownloadSourcePlugin):
     def _search_sync(self, query: str) -> Tuple[List[TrackResult], List[AlbumResult]]:
         """Synchronous search implementation."""
         try:
-            # Search for albums
-            albums_data = self._api_get('album/lookup', params={'term': query})
+            # album/lookup is a release-group search: a query that carries the
+            # track title often leaves the wanted album out entirely. When the
+            # task knows its album, look that up first (by MusicBrainz id when
+            # known, else by artist + album) and keep the text query after it.
+            albums_data = self._hinted_album_lookup()
+            seen = {a.get('foreignAlbumId') for a in albums_data}
+            for album in self._api_get('album/lookup', params={'term': query}) or []:
+                if album.get('foreignAlbumId') not in seen:
+                    albums_data.append(album)
+                    seen.add(album.get('foreignAlbumId'))
             if not albums_data:
                 return ([], [])
 
@@ -271,132 +298,35 @@ class LidarrDownloadClient(DownloadSourcePlugin):
                 return
 
             album = album_data[0] if isinstance(album_data, list) else album_data
-            artist_data = album.get('artist', {})
 
-            # Step 2: Ensure artist exists in Lidarr
-            artist_id = artist_data.get('id')
-            if not artist_id:
-                # Add artist to Lidarr
-                try:
-                    root_folder = self._get_root_folder()
-                    quality_profile_id = self._get_quality_profile_id()
+            # Steps 2-3: make sure Lidarr has the artist and the album, and
+            # that one search for the album is running.
+            lidarr_album_id, error = self._ensure_album_searched(album)
+            if not lidarr_album_id:
+                self._set_error(download_id, error or 'Failed to add album to Lidarr')
+                return
 
-                    metadata_profile_id = self._get_metadata_profile_id()
-                    add_artist = {
-                        'foreignArtistId': artist_data.get('foreignArtistId', ''),
-                        'artistName': artist_data.get('artistName', ''),
-                        'qualityProfileId': quality_profile_id,
-                        'metadataProfileId': metadata_profile_id,
-                        'rootFolderPath': root_folder,
-                        'monitored': False,
-                        'addOptions': {'monitor': 'none', 'searchForMissingAlbums': False},
-                    }
-                    result = self._api_post('artist', data=add_artist)
-                    artist_id = result.get('id') if result else None
-                except Exception as e:
-                    logger.warning(f"Failed to add artist to Lidarr: {e}")
-
-            # Step 3: Add album and trigger search
             with self._download_lock:
                 self.active_downloads[download_id]['state'] = 'InProgress, Downloading'
                 self.active_downloads[download_id]['progress'] = 5.0
 
-            try:
-                root_folder = self._get_root_folder()
-                quality_profile_id = self._get_quality_profile_id()
-
-                add_album = {
-                    'foreignAlbumId': album.get('foreignAlbumId', ''),
-                    'title': album.get('title', ''),
-                    'artistId': artist_id,
-                    'qualityProfileId': quality_profile_id,
-                    'rootFolderPath': root_folder,
-                    'monitored': True,
-                    'addOptions': {'searchForNewAlbum': True},
-                }
-
-                # Check if album already exists
-                existing = self._api_get('album', params={'foreignAlbumId': album.get('foreignAlbumId', '')})
-                if existing and isinstance(existing, list) and len(existing) > 0:
-                    lidarr_album_id = existing[0].get('id')
-                    # Trigger search for existing album
-                    self._api_post('command', data={
-                        'name': 'AlbumSearch',
-                        'albumIds': [lidarr_album_id],
-                    })
-                else:
-                    result = self._api_post('album', data=add_album)
-                    lidarr_album_id = result.get('id') if result else None
-
-                if not lidarr_album_id:
-                    self._set_error(download_id, 'Failed to add album to Lidarr')
-                    return
-
-            except Exception as e:
-                self._set_error(download_id, f'Failed to trigger download: {e}')
-                return
-
-            # Step 4: Poll until Lidarr reports the album has imported files.
-            #
-            # Old approach used `for/else` with `break` from the inner queue
-            # loop, but inner-break only escaped the queue iteration — the
-            # outer poll loop kept spinning even after we'd detected
-            # completion. Replaced with an explicit `download_complete` flag
-            # that breaks the OUTER loop once trackFileCount > 0.
-            max_polls = 600  # 10 minutes max
-            download_complete = False
-            for poll in range(max_polls):
-                if self.shutdown_check and self.shutdown_check():
-                    self._set_error(download_id, 'Server shutting down')
-                    return
-
+            # Step 4: wait until Lidarr has imported the album.
+            def _progress(pct):
                 with self._download_lock:
-                    if download_id not in self.active_downloads:
-                        return
-                    if self.active_downloads[download_id]['state'] == 'Cancelled':
-                        return
+                    if download_id in self.active_downloads:
+                        self.active_downloads[download_id]['progress'] = min(pct, 95.0)
 
-                try:
-                    queue = self._api_get('queue', params={'includeAlbum': 'true'})
-                    if queue and 'records' in queue:
-                        for item in queue['records']:
-                            item_album = item.get('album', {})
-                            if item_album.get('foreignAlbumId') == album.get('foreignAlbumId', ''):
-                                # Surface progress while still downloading.
-                                status = item.get('status', '').lower()
-                                size_left = item.get('sizeleft', 0)
-                                size_total = max(item.get('size', 1), 1)
-                                progress = 100.0 - (size_left / size_total * 100)
+            def _cancelled():
+                with self._download_lock:
+                    dl = self.active_downloads.get(download_id)
+                    return dl is None or dl['state'] == 'Cancelled'
 
-                                with self._download_lock:
-                                    self.active_downloads[download_id]['progress'] = min(progress, 95.0)
-
-                                if status in ('failed', 'warning'):
-                                    self._set_error(download_id, f'Lidarr download failed: {status}')
-                                    return
-                                # 'completed' / 'imported' in the queue is
-                                # transient — Lidarr drops the item once
-                                # import finishes. Don't break here; let the
-                                # trackFileCount check below decide.
-
-                    # Authoritative completion signal: album has imported
-                    # files. Cheap to call (single GET on a known id) and
-                    # works even when the queue record disappeared between
-                    # polls.
-                    if poll > 5:  # Give Lidarr a few seconds to start
-                        album_check = self._api_get(f'album/{lidarr_album_id}')
-                        if (album_check
-                                and album_check.get('statistics', {}).get('trackFileCount', 0) > 0):
-                            download_complete = True
-                            break
-
-                except Exception as e:
-                    logger.debug(f"Queue poll error: {e}")
-
-                time.sleep(1)
-
-            if not download_complete:
-                self._set_error(download_id, 'Download timed out')
+            outcome = self._wait_for_album(lidarr_album_id, album.get('foreignAlbumId', ''),
+                                           on_progress=_progress, cancelled=_cancelled)
+            if outcome == 'cancelled':
+                return
+            if outcome != 'complete':
+                self._set_error(download_id, self._WAIT_ERRORS.get(outcome, outcome))
                 return
 
             # Step 5: Find and import the wanted track.
@@ -486,8 +416,10 @@ class LidarrDownloadClient(DownloadSourcePlugin):
                 self._set_error(download_id, f'Import failed: {e}')
                 return
 
-            # Step 6: Cleanup — remove from Lidarr if configured
-            if self._cleanup:
+            # Step 6: Cleanup — remove from Lidarr if configured. Another
+            # track of the same album may still be waiting on this album id,
+            # so leave it until the last one is done.
+            if self._cleanup and not self._album_in_use(album_foreign_id, download_id):
                 try:
                     self._api_delete(f'album/{lidarr_album_id}', params={'deleteFiles': 'false'})
                     logger.debug(f"Cleaned up album {lidarr_album_id} from Lidarr")
@@ -497,6 +429,341 @@ class LidarrDownloadClient(DownloadSourcePlugin):
         except Exception as e:
             logger.error(f"Lidarr download thread failed: {e}")
             self._set_error(download_id, str(e))
+
+    # ==================== Album flow ====================
+
+    # How long an album may sit with no download in Lidarr's queue before we
+    # decide Lidarr found nothing to grab. Indexer searches (Soulseek ones
+    # especially) can take minutes.
+    _GRAB_WINDOW_SECONDS = 600
+    _SEARCH_DEDUP_SECONDS = 900
+    _WAIT_ERRORS = {
+        'not_grabbed': 'Lidarr found no release to grab',
+        'failed': 'Lidarr download failed',
+        'timeout': 'Download timed out',
+        'gone': 'Album was removed from Lidarr',
+        'shutdown': 'Server shutting down',
+    }
+
+    def download_album_to_staging(
+        self,
+        album_name: str,
+        artist_name: str,
+        staging_dir: str,
+        progress_callback=None,
+        release_group_id: str = '',
+        **_kwargs,
+    ) -> Dict[str, Any]:
+        """Album-bundle flow: have Lidarr fetch the whole album, then copy its
+        imported files into ``staging_dir`` for the per-track staging matcher.
+
+        One lookup (artist + album), one add and one search per album, where
+        the per-track flow ran a lookup, an add and a search for every track.
+
+        A miss is fallback-eligible only in hybrid mode: in Lidarr-only mode the
+        per-track flow would just ask Lidarr again, once per track.
+        """
+        result: Dict[str, Any] = {'success': False, 'files': [], 'error': None}
+        fallback = self._has_fallback_source()
+
+        def _emit(state: str, **extra) -> None:
+            if progress_callback:
+                try:
+                    progress_callback({'state': state, **extra})
+                except Exception as cb_exc:
+                    logger.debug("[Lidarr album] progress callback failed: %s", cb_exc)
+
+        def _fail(error: str, can_fall_back: bool = fallback) -> Dict[str, Any]:
+            result['error'] = error
+            result['fallback'] = can_fall_back
+            return result
+
+        if not self.is_configured():
+            return _fail('Lidarr is not configured', True)
+
+        _emit('searching', query=f"{artist_name} {album_name}".strip())
+        album = self._find_album(album_name, artist_name, release_group_id)
+        if not album:
+            return _fail(f"Lidarr has no album '{album_name}' by '{artist_name}'")
+
+        lidarr_album_id, error = self._ensure_album_searched(album)
+        if not lidarr_album_id:
+            return _fail(error or 'Failed to add album to Lidarr')
+
+        release = f"{(album.get('artist') or {}).get('artistName', artist_name)} - {album.get('title', album_name)}"
+        _emit('downloading', release=release, progress=0)
+        outcome = self._wait_for_album(
+            lidarr_album_id, album.get('foreignAlbumId', ''),
+            on_progress=lambda pct: _emit('downloading', release=release, progress=round(pct, 1)),
+        )
+        if outcome != 'complete':
+            return _fail(self._WAIT_ERRORS.get(outcome, outcome))
+
+        _emit('staging', release=release)
+        stats = (self._api_get(f'album/{lidarr_album_id}') or {}).get('statistics') or {}
+        track_files = self._api_get('trackfile', params={'albumId': lidarr_album_id}) or []
+        os.makedirs(staging_dir, exist_ok=True)
+        files = []
+        for tf in track_files:
+            src = tf.get('path', '')
+            if not src or not os.path.exists(src):
+                continue
+            dst = os.path.join(staging_dir, os.path.basename(src))
+            shutil.copy2(src, dst)  # an OSError here is fallback-eligible upstream
+            files.append(dst)
+        if not files:
+            return _fail('Lidarr imported the album but its files are not readable here')
+
+        expected = stats.get('trackCount') or stats.get('totalTrackCount') or len(files)
+        if self._cleanup and not self._album_in_use(album.get('foreignAlbumId', '')):
+            self._api_delete(f'album/{lidarr_album_id}', params={'deleteFiles': 'false'})
+
+        logger.info(f"[Lidarr album] staged {len(files)} files for {release}")
+        result.update({
+            'success': True,
+            'files': files,
+            'expected_count': expected,
+            'completed_count': len(files),
+            'partial': len(files) < expected,
+        })
+        return result
+
+    def _has_fallback_source(self) -> bool:
+        mode = (config_manager.get('download_source.mode', '') or '').lower()
+        if mode != 'hybrid':
+            return False
+        order = config_manager.get('download_source.hybrid_order', []) or []
+        return any(str(s).lower() != 'lidarr' for s in order)
+
+    def _find_album(self, album_name: str, artist_name: str,
+                    release_group_id: str = '') -> Optional[Dict[str, Any]]:
+        """The Lidarr lookup record for this album, or None.
+
+        By MusicBrainz release-group id when known. Otherwise by artist +
+        album, then by album alone (long terms sometimes get a 503 from
+        Lidarr's metadata proxy), accepting only a result whose artist and
+        title both match: a near miss would grab someone else's album.
+        """
+        if release_group_id:
+            found = self._api_get('album/lookup', params={'term': f'lidarr:{release_group_id}'})
+            if found:
+                return found[0] if isinstance(found, list) else found
+
+        if not album_name or not artist_name:
+            return None
+        for term in (f"{artist_name} {album_name}", album_name):
+            best, best_score = None, 0.0
+            for candidate in (self._api_get('album/lookup', params={'term': term}) or [])[:20]:
+                title_score = self._name_score(album_name, candidate.get('title', ''))
+                artist_score = self._name_score(
+                    artist_name, (candidate.get('artist') or {}).get('artistName', ''))
+                if title_score < 0.8 or artist_score < 0.8:
+                    continue
+                score = title_score + artist_score
+                if score > best_score:
+                    best, best_score = candidate, score
+            if best:
+                return best
+        return None
+
+    @classmethod
+    def _name_score(cls, wanted: str, candidate: str) -> float:
+        a, b = cls._normalize_for_match(wanted), cls._normalize_for_match(candidate)
+        if not a or not b:
+            return 0.0
+        if a == b:
+            return 1.0
+        return SequenceMatcher(None, a, b).ratio()
+
+    def _hinted_album_lookup(self) -> List[Dict[str, Any]]:
+        """Lookup results for the album of the track being searched (from the
+        download task's track hint), cached on the hint so the task's query
+        ladder asks Lidarr once."""
+        try:
+            from core.downloads.track_hint import current_track_hint
+            hint = current_track_hint()
+        except Exception:
+            return []
+        if not hint:
+            return []
+        if '_lidarr_album' not in hint:
+            album = self._find_album(
+                str(hint.get('album') or '').strip(),
+                str(hint.get('artist') or '').strip(),
+                self._hint_release_group_id(hint),
+            )
+            hint['_lidarr_album'] = album
+        return [hint['_lidarr_album']] if hint.get('_lidarr_album') else []
+
+    @staticmethod
+    def _hint_release_group_id(hint: Dict[str, Any]) -> str:
+        info = ((hint.get('catalogue_context') or {}).get('track_info')) or {}
+        album = info.get('album') if isinstance(info.get('album'), dict) else {}
+        for source in (info, album):
+            for key in ('musicbrainz_release_group_id', 'musicbrainz_releasegroup_id', 'release_group_mbid'):
+                value = str(source.get(key) or '').strip()
+                if value:
+                    return value
+        return ''
+
+    def _album_lock(self, foreign_album_id: str) -> threading.Lock:
+        with self._album_locks_guard:
+            return self._album_locks.setdefault(foreign_album_id or '', threading.Lock())
+
+    def _album_in_use(self, foreign_album_id: str, exclude_download_id: str = '') -> bool:
+        with self._download_lock:
+            return any(
+                dl.get('album_foreign_id') == foreign_album_id
+                and dl_id != exclude_download_id
+                and dl.get('state') not in ('Completed, Succeeded', 'Errored', 'Cancelled')
+                for dl_id, dl in self.active_downloads.items()
+            )
+
+    def _ensure_artist(self, artist_data: Dict[str, Any]) -> Optional[int]:
+        """Lidarr id of the album's artist, adding the artist when missing."""
+        if artist_data.get('id'):
+            return artist_data['id']
+        foreign_artist_id = artist_data.get('foreignArtistId', '')
+
+        def _existing():
+            if not foreign_artist_id:
+                return None
+            for a in self._api_get('artist', params={'mbId': foreign_artist_id}) or []:
+                if a.get('foreignArtistId') == foreign_artist_id:
+                    return a.get('id')
+            return None
+
+        artist_id = _existing()
+        if artist_id:
+            return artist_id
+        try:
+            added = self._api_post('artist', data={
+                'foreignArtistId': foreign_artist_id,
+                'artistName': artist_data.get('artistName', ''),
+                'qualityProfileId': self._get_quality_profile_id(),
+                'metadataProfileId': self._get_metadata_profile_id(),
+                'rootFolderPath': self._get_root_folder(),
+                'monitored': False,
+                'addOptions': {'monitor': 'none', 'searchForMissingAlbums': False},
+            })
+        except Exception as e:
+            logger.warning(f"Failed to add artist to Lidarr: {e}")
+            added = None
+        # A failed add usually means the artist already exists (added by a
+        # previous run, or by hand in Lidarr): look it up again.
+        return (added or {}).get('id') or _existing()
+
+    def _existing_album(self, foreign_album_id: str) -> Optional[Dict[str, Any]]:
+        found = self._api_get('album', params={'foreignAlbumId': foreign_album_id})
+        if isinstance(found, list) and found:
+            return found[0]
+        return None
+
+    def _ensure_album_searched(self, album: Dict[str, Any]) -> Tuple[Optional[int], Optional[str]]:
+        """Make sure Lidarr has this album, monitored, with a search running.
+
+        Serialized per album: parallel tracks of one album share the add and
+        the search. Returns (lidarr album id, error).
+        """
+        foreign_album_id = album.get('foreignAlbumId', '')
+        if not foreign_album_id:
+            return None, 'Album has no MusicBrainz id'
+        with self._album_lock(foreign_album_id):
+            existing = self._existing_album(foreign_album_id)
+            if not existing:
+                artist_id = self._ensure_artist(album.get('artist') or {})
+                if not artist_id:
+                    return None, 'Failed to add artist to Lidarr'
+                # Adding the artist makes Lidarr refresh it, and that refresh
+                # may create the album on its own; a POST then fails as a
+                # duplicate. Give the refresh a moment, then add if still missing.
+                for _ in range(10):
+                    existing = self._existing_album(foreign_album_id)
+                    if existing:
+                        break
+                    time.sleep(1)
+                if not existing:
+                    existing = self._api_post('album', data={
+                        'foreignAlbumId': foreign_album_id,
+                        'title': album.get('title', ''),
+                        'artistId': artist_id,
+                        'qualityProfileId': self._get_quality_profile_id(),
+                        'rootFolderPath': self._get_root_folder(),
+                        'monitored': True,
+                        'addOptions': {'searchForNewAlbum': False},
+                    }) or self._existing_album(foreign_album_id)
+                if not existing or not existing.get('id'):
+                    return None, 'Failed to add album to Lidarr'
+
+            lidarr_album_id = existing['id']
+            if not existing.get('monitored'):
+                # an album found by the artist refresh is unmonitored, and
+                # Lidarr's later RSS grabs and upgrades skip it
+                try:
+                    url = f"{self._url}/api/v1/album/monitor"
+                    http_requests.put(url, headers={'X-Api-Key': self._api_key},
+                                      json={'albumIds': [lidarr_album_id], 'monitored': True}, timeout=15)
+                except Exception as e:
+                    logger.debug(f"Lidarr album monitor failed: {e}")
+
+            has_files = ((existing.get('statistics') or {}).get('trackFileCount') or 0) > 0
+            last = self._album_searched_at.get(foreign_album_id)
+            recent = last is not None and time.monotonic() - last < self._SEARCH_DEDUP_SECONDS
+            if not has_files and not recent and not self._queue_records(foreign_album_id):
+                self._api_post('command', data={'name': 'AlbumSearch', 'albumIds': [lidarr_album_id]})
+                self._album_searched_at[foreign_album_id] = time.monotonic()
+            return lidarr_album_id, None
+
+    def _queue_records(self, foreign_album_id: str) -> List[Dict[str, Any]]:
+        queue = self._api_get('queue', params={'includeAlbum': 'true', 'pageSize': 200})
+        records = (queue or {}).get('records') or [] if isinstance(queue, dict) else []
+        return [r for r in records
+                if (r.get('album') or {}).get('foreignAlbumId') == foreign_album_id]
+
+    def _wait_for_album(self, lidarr_album_id: int, foreign_album_id: str,
+                        on_progress=None, cancelled=None, poll_seconds: float = 2.0) -> str:
+        """Poll Lidarr until the album is imported.
+
+        Returns 'complete', 'not_grabbed' (nothing reached the queue within
+        the grab window), 'failed', 'timeout', 'gone', 'shutdown' or
+        'cancelled'. The overall deadline is long because a real download
+        (a slow torrent, a Soulseek queue) can take hours; the short grab
+        window is what catches "Lidarr found nothing".
+        """
+        start = time.monotonic()
+        seen_in_queue = False
+        while True:
+            if self.shutdown_check and self.shutdown_check():
+                return 'shutdown'
+            if cancelled and cancelled():
+                return 'cancelled'
+            elapsed = time.monotonic() - start
+            try:
+                records = self._queue_records(foreign_album_id)
+                for item in records:
+                    seen_in_queue = True
+                    status = (item.get('status') or '').lower()
+                    if status == 'failed':
+                        return 'failed'
+                    size = max(item.get('size', 0) or 0, 1)
+                    left = item.get('sizeleft', 0) or 0
+                    if on_progress:
+                        on_progress(max(0.0, 100.0 - left / size * 100))
+                album_check = self._api_get(f'album/{lidarr_album_id}')
+                if album_check is None and elapsed > 30:
+                    return 'gone'
+                files = ((album_check or {}).get('statistics') or {}).get('trackFileCount', 0) or 0
+                # Lidarr imports file by file: wait for the queue to let go of
+                # the album before calling it complete.
+                if files > 0 and not records:
+                    return 'complete'
+            except Exception as e:
+                logger.debug(f"Lidarr poll error: {e}")
+            if not seen_in_queue and elapsed > self._GRAB_WINDOW_SECONDS:
+                return 'not_grabbed'
+            if elapsed > self._download_timeout:
+                return 'timeout'
+            time.sleep(poll_seconds)
 
     def _set_error(self, download_id: str, error: str):
         with self._download_lock:

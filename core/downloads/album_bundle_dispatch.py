@@ -7,7 +7,7 @@ can be unit-tested in isolation.
 The gate fires only when ALL conditions hold:
 
 - Batch is an album-context download (``is_album_download`` flag).
-- Active download source is ``torrent``, ``usenet``, or ``soulseek``.
+- Active download source is ``torrent``, ``usenet``, ``soulseek`` or ``lidarr``.
   In hybrid mode the caller may pass one source from the consecutive
   release-capable prefix as an override; the caller preserves source order.
 - Both album-name and artist-name are populated in batch context.
@@ -70,10 +70,11 @@ _MIRRORED_KEYS = ('progress', 'release', 'speed', 'downloaded',
                   'size', 'seeders', 'grabs', 'count', 'failed', 'query')
 
 
-# Sources whose plugins implement ``download_album_to_staging``. YouTube is
+# Sources whose plugins implement ``download_album_to_staging``. Lidarr only
+# ever grabs whole albums, so the bundle is its natural shape. YouTube is
 # only bundle-capable once ``download_source.youtube_album_bundle`` is on: it
 # changes how every YouTube album is fetched, so it is opt-in.
-_ALBUM_BUNDLE_SOURCES = frozenset(('torrent', 'usenet', 'soulseek'))
+_ALBUM_BUNDLE_SOURCES = frozenset(('torrent', 'usenet', 'soulseek', 'lidarr'))
 
 
 def album_bundle_sources(config_get: Callable[..., Any]) -> frozenset:

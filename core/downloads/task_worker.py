@@ -879,7 +879,7 @@ def _download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWork
                         if isinstance(_b, dict):
                             _batch_is_album = bool(_b.get('is_album_download'))
                     if _batch_is_album and getattr(deps.download_orchestrator, 'mode', '') == 'hybrid':
-                        _exclude_for_hybrid_album = ['torrent', 'usenet']
+                        _exclude_for_hybrid_album = ['torrent', 'usenet', 'lidarr']
                 except Exception as _exc_filter_err:
                     logger.debug("[Modal Worker] album-source-exclusion check failed: %s", _exc_filter_err)
                 # Fold in budget-exhausted sources (per-source quarantine retry).

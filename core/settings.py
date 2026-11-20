@@ -718,6 +718,11 @@ class ConfigManager:
                 "root_folder": "",
                 "quality_profile": "Any",
                 "cleanup_after_import": True,
+                # Lidarr serves album downloads only; single tracks go to the
+                # next source in hybrid mode.
+                "albums_only": False,
+                # Seconds to wait for a grabbed album to finish importing.
+                "download_timeout": 21600,
             },
             # Prowlarr — indexer aggregator. Feeds the torrent / usenet
             # download plugins. Not a standalone source.

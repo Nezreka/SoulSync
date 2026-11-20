@@ -296,6 +296,22 @@ export function LidarrPanel({ store }: { store: SettingsStore }) {
           Found in Lidarr → Settings → General → Security → API Key
         </div>
       </div>
+      <div className="form-group">
+        <label className="checkbox-label">
+          <input
+            type="checkbox"
+            id="lidarr-albums-only"
+            checked={settings.lidarr_download?.albums_only === true}
+            onChange={(event) => store.set('lidarr_download', 'albums_only', event.target.checked)}
+          />
+          Whole albums only
+        </label>
+        <div className="setting-help-text">
+          Lidarr downloads only full-album requests. Single tracks and playlists go to the next
+          source in hybrid mode (e.g. Soulseek). Off: Lidarr also tries single tracks, grabbing the
+          whole album to keep one track.
+        </div>
+      </div>
       <TestRow
         label="Lidarr Status:"
         buttonId="lidarr-test-btn"
