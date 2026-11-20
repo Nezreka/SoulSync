@@ -296,6 +296,25 @@ export function LidarrPanel({ store }: { store: SettingsStore }) {
           Found in Lidarr → Settings → General → Security → API Key
         </div>
       </div>
+      <div className="form-group">
+        <label className="checkbox-label">
+          <input
+            type="checkbox"
+            id="lidarr-whole-album-default"
+            checked={settings.lidarr_download?.whole_album_default !== false}
+            onChange={(event) =>
+              store.set('lidarr_download', 'whole_album_default', event.target.checked)
+            }
+          />
+          "Whole album via Lidarr" on by default
+        </label>
+        <div className="setting-help-text">
+          The download dialogs and the wishlist have a "Whole album via Lidarr" toggle (hybrid mode
+          with Lidarr and another source). On, Lidarr downloads the whole album; off, the next
+          source (e.g. Soulseek) gets the tracks. This sets where the toggle starts, and what
+          automatic wishlist runs do.
+        </div>
+      </div>
       <TestRow
         label="Lidarr Status:"
         buttonId="lidarr-test-btn"

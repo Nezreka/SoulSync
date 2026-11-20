@@ -340,6 +340,24 @@ def shared_transfer_root() -> str:
     return config_root_path(_get_config_manager().get("soulseek.transfer_path", "./Transfer"), "./Transfer")
 
 
+def lidarr_root_for_context(context) -> Optional[str]:
+    """The folder for a track that came from Lidarr, or None.
+
+    Lidarr has already imported the whole album into its own root folder; the
+    copy SoulSync imports is a duplicate when Lidarr's root is the library the
+    media server reads. ``lidarr_download.transfer_path`` sends those copies
+    somewhere else (a scratch folder) while every other source keeps the
+    transfer folder. Empty (the default) changes nothing.
+    """
+    if not isinstance(context, dict):
+        return None
+    result = context.get('original_search_result') or context.get('search_result') or {}
+    if not isinstance(result, dict) or str(result.get('username') or '').lower() != 'lidarr':
+        return None
+    path = _get_config_manager().get('lidarr_download.transfer_path', '') or ''
+    return config_root_path(path) if path else None
+
+
 def transfer_root_for_context(context) -> str:
     """Where this download's files go.
 
@@ -351,7 +369,7 @@ def transfer_root_for_context(context) -> str:
     every download on an install without own directories.
     """
     from core.audiobook_routing import routed_root_for_context
-    routed = routed_root_for_context(context)
+    routed = routed_root_for_context(context) or lidarr_root_for_context(context)
     if routed:
         return routed
     owner = import_owner_id(context)

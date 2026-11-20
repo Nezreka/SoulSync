@@ -441,6 +441,7 @@ def start_wishlist_missing_downloads():
             track_ids=data.get('track_ids'),
             category=data.get('category'),
             force_download_all=data.get('force_download_all', False),
+            lidarr_whole_album=data.get('lidarr_whole_album'),
         )
         return jsonify(payload), status_code
 
@@ -495,7 +496,7 @@ def bulk_wishlist_action():
             }), 409
         manual_runtime = _build_wishlist_manual_runtime()
         start_batch = lambda ids: _start_manual_wishlist_download_batch(
-            manual_runtime, track_ids=ids)
+            manual_runtime, track_ids=ids, lidarr_whole_album=data.get('lidarr_whole_album'))
 
     try:
         runtime = _build_wishlist_route_runtime()

@@ -19392,6 +19392,23 @@ def playlist_ownership_preview(playlist_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@app.route('/api/downloads/lidarr-whole-album', methods=['GET'])
+@requires("music.access")
+def lidarr_whole_album_option():
+    """Whether the download dialogs show "Whole album via Lidarr", and its
+    starting state. Shown only in hybrid mode with Lidarr and another source in
+    the chain: otherwise there is nothing to choose between."""
+    mode = (config_manager.get('download_source.mode', '') or '').lower()
+    order = [str(s).lower() for s in (config_manager.get('download_source.hybrid_order', []) or [])]
+    available = (mode == 'hybrid' and 'lidarr' in order and any(s != 'lidarr' for s in order)
+                 and bool(config_manager.get('lidarr_download.url', ''))
+                 and bool(config_manager.get('lidarr_download.api_key', '')))
+    return jsonify({
+        'available': available,
+        'default': bool(config_manager.get('lidarr_download.whole_album_default', True)),
+    })
+
+
 @app.route('/api/playlists/<playlist_id>/start-missing-process', methods=['POST'])
 @requires("music.access")
 def start_missing_tracks_process(playlist_id):
@@ -19424,6 +19441,10 @@ def start_missing_tracks_process(playlist_id):
     skip_acoustid = bool(data.get('skip_acoustid', False))
     # Blocklist override (Phase 2b): set by the modal's "download anyway" confirm.
     ignore_blocklist = bool(data.get('ignore_blocklist', False))
+    # "Whole album via Lidarr" (download dialog). None = the configured default.
+    lidarr_whole_album = data.get('lidarr_whole_album')
+    if lidarr_whole_album is not None:
+        lidarr_whole_album = bool(lidarr_whole_album)
     # Quality Profile chosen in the shared acquisition dialog. Search, Discover,
     # Library, album, single, discography and playlist-explorer all POST here, so
     # this one field gives every manual path the same explicit choice (P1-01).
@@ -19584,6 +19605,7 @@ def start_missing_tracks_process(playlist_id):
             'playlist_folder_mode': playlist_folder_mode,  # Organize downloads by playlist folder
             # Album context for artist album downloads (explicit folder structure)
             'is_album_download': is_album_download,
+            'lidarr_whole_album': lidarr_whole_album,
             'album_context': album_context,
             'artist_context': artist_context,
             'wing_it': wing_it,

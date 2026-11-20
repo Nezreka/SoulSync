@@ -718,6 +718,19 @@ class ConfigManager:
                 "root_folder": "",
                 "quality_profile": "Any",
                 "cleanup_after_import": True,
+                # The download dialogs' "Whole album via Lidarr" toggle starts
+                # on; automatic (wishlist) downloads use this value too. Off,
+                # Lidarr is skipped and the next hybrid source is used.
+                "whole_album_default": True,
+                # Where Lidarr-sourced tracks are imported. Lidarr already put
+                # the album in its own root folder, so a copy in the library
+                # would be a duplicate; empty = the shared transfer folder.
+                "transfer_path": "",
+                # Where the Lidarr source copies a track out of Lidarr's import;
+                # empty = soulseek.download_path.
+                "download_path": "",
+                # Seconds to wait for a grabbed album to finish importing.
+                "download_timeout": 21600,
             },
             # Prowlarr — indexer aggregator. Feeds the torrent / usenet
             # download plugins. Not a standalone source.

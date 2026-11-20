@@ -1230,6 +1230,7 @@ def start_manual_wishlist_download_batch(
     track_ids=None,
     category: str | None = None,
     force_download_all: bool = False,
+    lidarr_whole_album: Optional[bool] = None,
 ) -> tuple[Dict[str, Any], int]:
     """Submit a manual wishlist batch.
 
@@ -1263,6 +1264,7 @@ def start_manual_wishlist_download_batch(
             batch_id,
             track_ids,
             category,
+            lidarr_whole_album,
         )
 
         return {"success": True, "batch_id": batch_id}, 200
@@ -1280,6 +1282,7 @@ def _prepare_and_run_manual_wishlist_batch(
     batch_id: str,
     track_ids,
     category: str | None,
+    lidarr_whole_album: Optional[bool] = None,
 ) -> None:
     """Background worker for the manual wishlist batch — does the slow cleanup
     + sanitize + filter + master-worker hand-off off the request thread."""
@@ -1411,6 +1414,9 @@ def _prepare_and_run_manual_wishlist_batch(
             run_id=str(uuid.uuid4()),
             auto_initiated=False,
             first_batch_id=batch_id,
+            # "Whole album via Lidarr" from the dialog; None = the default
+            batch_extra_fields=({'lidarr_whole_album': bool(lidarr_whole_album)}
+                                if lidarr_whole_album is not None else None),
         )
         logger.info(
             f"[Manual-Wishlist] Dispatched {result['album_batches']} album batch(es) + "
