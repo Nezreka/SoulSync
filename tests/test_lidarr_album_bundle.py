@@ -296,3 +296,30 @@ def test_lidarr_tracks_land_in_the_lidarr_folder(tmp_path):
         assert paths.lidarr_root_for_context(peer_ctx) is None
         values['lidarr_download.transfer_path'] = ''
         assert paths.lidarr_root_for_context(lidarr_ctx) is None
+
+
+def test_settings_reload_keeps_lidarrs_own_download_path(tmp_path):
+    """The orchestrator used to copy soulseek.download_path onto every
+    source on reload, so Lidarr's copies landed in slskd's folder."""
+    from core import download_orchestrator as orch_mod
+    values = {'soulseek.download_path': str(tmp_path / 'slskd'),
+              'lidarr_download.download_path': str(tmp_path / 'lidarr')}
+    lidarr = LidarrDownloadClient(download_path=str(tmp_path / 'old'))
+    other = type('Other', (), {'download_path': tmp_path / 'old'})()
+
+    class Registry:
+        def all_plugins(self):
+            return [('lidarr', lidarr), ('youtube', other)]
+
+        def display_name(self, name):
+            return name
+
+    orch = orch_mod.DownloadOrchestrator.__new__(orch_mod.DownloadOrchestrator)
+    orch.registry = Registry()
+    orch.client = lambda name: None
+    get = lambda key, default=None: values.get(key, default)
+    with patch.object(orch_mod.config_manager, 'get', side_effect=get), \
+            patch('core.lidarr_download_client.config_manager.get', side_effect=get):
+        orch.reload_settings()
+    assert lidarr.download_path == tmp_path / 'lidarr'
+    assert other.download_path == tmp_path / 'slskd'

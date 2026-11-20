@@ -77,6 +77,12 @@ class LidarrDownloadClient(DownloadSourcePlugin):
         except (TypeError, ValueError):
             self._download_timeout = 21600
 
+    @staticmethod
+    def own_download_path() -> str:
+        """lidarr_download.download_path when set: the folder the orchestrator
+        must not replace with Soulseek's on a settings reload."""
+        return config_manager.get('lidarr_download.download_path', '') or ''
+
     def set_shutdown_check(self, check_callable):
         self.shutdown_check = check_callable
 
