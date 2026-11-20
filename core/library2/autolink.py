@@ -84,6 +84,40 @@ def _primary_artist_name(ti: Dict[str, Any]) -> str:
     return _get(ti, "artist")
 
 
+def _release_artist_name(file_path: str, album: Dict[str, Any], lead: str) -> Optional[str]:
+    """whose release a downloaded track is on, when that isn't its lead.
+
+    the file's album artist tag, which the import just wrote with the same
+    choice its folder took, else the album's first credited artist. track 8
+    of 16BL's dj mix is by Rampa and a PhaseOne single fetched for 12th
+    Planet is tagged 12th Planet: filing each under its track's lead split
+    one release over every performer and put each of them on the Artists
+    list (#2142). "A & B" with the lead listed first stays the lead's, the
+    way the folder files a collab. None: the lead's own.
+    """
+    listed = []
+    for entry in (album.get("artists") or []) if isinstance(album, dict) else []:
+        name = entry.get("name") if isinstance(entry, dict) else entry
+        if isinstance(name, str) and name.strip():
+            listed.append(name.strip())
+    tagged = None
+    if file_path:
+        try:
+            from core.imports.track_number import read_embedded_album_artist
+            tagged = read_embedded_album_artist(file_path)
+        except Exception as exc:  # noqa: BLE001 - the album context still says
+            logger.debug("album artist tag read failed (%s): %s", file_path, exc)
+    candidate = str(tagged or (listed[0] if listed else "") or "").strip()
+    if normalize_name(candidate) in ("", normalize_name(UNKNOWN_ARTIST)):
+        return None
+    from core.imports.collab_artist import listed_primary_of
+    for name in (lead, *listed):
+        if name and (normalize_name(name) == normalize_name(candidate)
+                     or listed_primary_of(candidate, name)):
+            return None if normalize_name(name) == normalize_name(lead or "") else name
+    return candidate
+
+
 def _primary_artist_provider_id(ti: Dict[str, Any]) -> Optional[str]:
     # `artists[0]["id"]` is populated by every client with its provider-local
     # id. §62.4: the namespace decision (spotify column vs. external_ids vs.
@@ -925,6 +959,13 @@ def link_download_into_library_v2(context: Dict[str, Any], *,
         except (TypeError, ValueError):
             disc_number = None
 
+        # whose release this is when the name heuristics below file it (a
+        # stale direct entity falls through to them too). read before the
+        # write transaction opens: it is a file read
+        release_artist_name = None if fallback else _release_artist_name(
+            file_path, canonical_album if canonical_album.get("artists") else album_raw,
+            artist_name)
+
         from database.music_database import get_database
         db = get_database()
         with closing(db._get_connection()) as conn:
@@ -978,7 +1019,8 @@ def link_download_into_library_v2(context: Dict[str, Any], *,
                 # leaves that row's own monitoring untouched.
                 derived_monitored = 0 if fallback or context.get("_scan_discovered") else None
                 release_artist_id = artist_id
-                album_artist_name = fallback.get("album_artist") if fallback else None
+                album_artist_name = (fallback.get("album_artist") if fallback
+                                     else release_artist_name)
                 if (album_artist_name and normalize_name(album_artist_name)
                         != normalize_name(artist_name or "")):
                     release_artist_id = _find_or_create_artist(

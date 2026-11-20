@@ -1248,7 +1248,8 @@ def test_a_guest_spot_is_an_appearance_and_a_collaboration_is_their_own(imported
     """Kendrick Lamar's page listed every album he guests on as his own. The
     album junction files each non-main track artist as "featured", the
     co-headliner of a collaboration and a one-verse guest alike, so the
-    track credits decide: leading at least half the tracks is their own."""
+    track credits decide: credited primary beside the album's own artist on
+    more than half the tracks is their own (#2142: leading alone is not)."""
     from tests import lib2_seed
     host = lib2_seed.artist(imported_conn, 'Host')
     guest = lib2_seed.artist(imported_conn, 'Guest')
@@ -1260,7 +1261,8 @@ def test_a_guest_spot_is_an_appearance_and_a_collaboration_is_their_own(imported
     for n in range(2):
         tid = lib2_seed.track(imported_conn, 'Host', 'Together', f'Duet {n}', track_number=n + 1)
         imported_conn.execute("INSERT INTO lib2_track_artists(track_id, artist_id, role, position) "
-                              "VALUES (?, ?, 'primary', 1)", (tid, guest))
+                              "VALUES (?, ?, 'primary', 0), (?, ?, 'primary', 1)",
+                              (tid, host, tid, guest))
     from core.library2.importer import _rebuild_album_artist_credits
     albums = {r[0] for r in imported_conn.execute(
         "SELECT id FROM lib2_albums WHERE title IN ('Hosted', 'Together')")}
@@ -1391,6 +1393,9 @@ def test_library_index_membership_searches_each_ownership_branch_by_index(import
     assert "INDEX idx_lib2_albums_artist (primary_artist_id=?)" in plan, plan
     # #2142: the lead-credit branch starts from the artist's own credits
     assert "INDEX idx_lib2_track_artists_artist (artist_id=?)" in plan, plan
+    # and the joint-album counts seek by album and by credit, never walk a table
+    for alias in ("owned_ct", "owned_ca", "owned_cp", "owned_cb", "owned_nt"):
+        assert f"SCAN {alias}" not in plan, plan
 
 
 def test_an_artists_counts_are_their_own_releases_and_live_files(imported_conn):

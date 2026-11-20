@@ -893,6 +893,30 @@ def _split_same_named_releases(database: Any, conn: Any) -> Dict[str, int]:
     return {key: value for key, value in stats.items() if value}
 
 
+def _rehome_track_lead_releases_once(database: Any, conn: Any) -> Dict[str, int]:
+    """#2142: releases a download filed under its track's lead artist go back
+    under the album artist their files name, once the import is done. once:
+    it reads every live file's tag snapshot. commits."""
+    if get_state(database).get("status") != "done":
+        return {}
+    from core.library2.schema import _done_once, _mark_done
+    name = "track_lead_releases_rehomed_v1"
+    if _done_once(conn.cursor(), name):
+        return {}
+    from core.library2.release_artist_repair import rehome_track_lead_releases
+    stats = rehome_track_lead_releases(conn)
+    _mark_done(conn.cursor(), name)
+    conn.commit()
+    if stats.get("albums_moved") or stats.get("albums_merged"):
+        logger.info("releases filed under a track's lead moved to their album artist: %s", stats)
+        try:
+            from core.library2.mirror_outbox import drain
+            drain(database)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("post-rehome outbox drain failed: %s", exc)
+    return {key: value for key, value in stats.items() if value}
+
+
 def run_deferred_backfills(database: Any, *,
                            should_stop: Optional[Callable[[], bool]] = None,
                            batch_size: int = 500) -> Dict[str, Any]:
@@ -937,6 +961,10 @@ def run_deferred_backfills(database: Any, *,
                 stats["same_named_releases"] = _split_same_named_releases(database, conn)
             except sqlite3.Error as exc:
                 logger.warning("same-named releases not split yet: %s", exc)
+            try:
+                stats["track_lead_releases"] = _rehome_track_lead_releases_once(database, conn)
+            except sqlite3.Error as exc:
+                logger.warning("releases filed under a track's lead not moved yet: %s", exc)
             # guests an older twin merge dropped from the kept album, once
             # (review 5 W2-WE-1)
             try:

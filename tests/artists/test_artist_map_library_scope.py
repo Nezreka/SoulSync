@@ -65,10 +65,16 @@ def test_a_featured_credit_alone_does_not_join_the_genre_map(db):
         seed.artist(conn, "Owned Band", genres=rock)
         conn.execute("INSERT INTO lib2_track_artists (track_id, artist_id, role, position) "
                      "VALUES (?, ?, 'featured', 1)", (song, seed.artist(conn, "Guest Star", genres=rock)))
-        # a joint album's second lead still counts (#2142: by its track
-        # credits, the way the artist page reads it)
+        # a joint album's second lead still counts: credited primary beside
+        # the album's own artist, the way the artist page reads it (#2142)
         conn.execute("INSERT INTO lib2_track_artists (track_id, artist_id, role, position) "
-                     "VALUES (?, ?, 'primary', 0)", (song, seed.artist(conn, "Co Lead", genres=rock)))
+                     "VALUES (?, ?, 'primary', 0), (?, ?, 'primary', 1)",
+                     (song, seed.artist(conn, "Owned Band"),
+                      song, seed.artist(conn, "Co Lead", genres=rock)))
+        # leading a track of someone else's release alone is a guest (#2142)
+        cut = seed.track(conn, "Mix Host", "Mix", "Cut")
+        conn.execute("INSERT INTO lib2_track_artists (track_id, artist_id, role, position) "
+                     "VALUES (?, ?, 'primary', 0)", (cut, seed.artist(conn, "Lone Lead", genres=rock)))
         conn.commit()
 
     assert _genre_map_names("shared") == {"Owned Band", "Co Lead"}
