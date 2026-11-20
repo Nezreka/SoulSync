@@ -122,10 +122,31 @@ export async function removeWishlistTrack(trackId: string): Promise<void> {
 export async function bulkWishlistAction(
   action: WishlistBulkAction,
   trackIds: string[],
+  options: BulkGrabOptions = {},
 ): Promise<WishlistBulkResponse> {
-  return readJson<WishlistBulkResponse>(
-    apiClient.post('wishlist/bulk', { json: { action, track_ids: trackIds } }),
-  );
+  const json: Record<string, unknown> = { action, track_ids: trackIds };
+  if (action === 'grab' && options.lidarrWholeAlbum !== undefined) {
+    json.lidarr_whole_album = options.lidarrWholeAlbum;
+  }
+  return readJson<WishlistBulkResponse>(apiClient.post('wishlist/bulk', { json }));
+}
+
+/** "Whole album via Lidarr": undefined leaves the server's default. */
+export interface BulkGrabOptions {
+  lidarrWholeAlbum?: boolean;
+}
+
+/** Whether the "Whole album via Lidarr" toggle applies, and how it starts. */
+export interface LidarrWholeAlbumOption {
+  available: boolean;
+  default: boolean;
+}
+
+export function lidarrWholeAlbumQueryOptions() {
+  return queryOptions({
+    queryKey: ['downloads', 'lidarr-whole-album'] as const,
+    queryFn: () => readJson<LidarrWholeAlbumOption>(apiClient.get('downloads/lidarr-whole-album')),
+  });
 }
 
 /**
@@ -140,6 +161,7 @@ export const BULK_WISHLIST_MAX_IDS = 200;
 export async function bulkWishlistActionChunked(
   action: WishlistBulkAction,
   trackIds: string[],
+  options: BulkGrabOptions = {},
 ): Promise<WishlistBulkResponse> {
   const results: WishlistBulkResult[] = [];
   let batchId: string | undefined;
@@ -148,7 +170,7 @@ export async function bulkWishlistActionChunked(
     const chunk = trackIds.slice(i, i + BULK_WISHLIST_MAX_IDS);
     let response: WishlistBulkResponse;
     try {
-      response = await bulkWishlistAction(action, chunk);
+      response = await bulkWishlistAction(action, chunk, options);
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       throw new Error(

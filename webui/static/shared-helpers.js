@@ -1277,10 +1277,67 @@ function downloadModalQualityProfileSelectId(playlistId) {
 }
 
 function downloadModalQualityProfileSelectHtml(playlistId) {
-    return acquisitionQualityProfileSelectHtml(downloadModalQualityProfileSelectId(playlistId));
+    return acquisitionQualityProfileSelectHtml(downloadModalQualityProfileSelectId(playlistId))
+        + downloadModalLidarrWholeAlbumHtml(playlistId);
+}
+
+/**
+ * "Whole album via Lidarr". On, the download goes to Lidarr, which grabs
+ * whole albums; off, to the next source of the hybrid chain (e.g. Soulseek).
+ * Rendered hidden and shown by hydration only when the server says the
+ * choice exists (hybrid mode with Lidarr and another source).
+ */
+function downloadModalLidarrWholeAlbumId(playlistId) {
+    return `lidarr-whole-album-${playlistId}`;
+}
+
+function downloadModalLidarrWholeAlbumHtml(playlistId) {
+    return `
+        <label class="force-download-toggle" data-lidarr-whole-album hidden
+            title="On: Lidarr downloads the whole album. Off: the next download source (e.g. Soulseek) gets the tracks.">
+            <input type="checkbox" id="${downloadModalLidarrWholeAlbumId(playlistId)}" checked>
+            <span>Whole album via Lidarr</span>
+        </label>`;
+}
+
+let _lidarrWholeAlbumOptionPromise = null;
+
+function lidarrWholeAlbumOption() {
+    if (!_lidarrWholeAlbumOptionPromise) {
+        _lidarrWholeAlbumOptionPromise = fetch('/api/downloads/lidarr-whole-album')
+            .then(r => (r.ok ? r.json() : { available: false }))
+            .catch(() => ({ available: false }));
+        // settings can change; ask again for the next dialog
+        _lidarrWholeAlbumOptionPromise.finally(() => {
+            setTimeout(() => { _lidarrWholeAlbumOptionPromise = null; }, 30000);
+        });
+    }
+    return _lidarrWholeAlbumOptionPromise;
+}
+
+async function hydrateDownloadModalLidarrWholeAlbum(playlistId) {
+    const option = await lidarrWholeAlbumOption();
+    const checkbox = document.getElementById(downloadModalLidarrWholeAlbumId(playlistId));
+    if (!checkbox) return;
+    const label = checkbox.closest('[data-lidarr-whole-album]');
+    if (!option || !option.available) {
+        if (label) label.hidden = true;
+        return;
+    }
+    checkbox.checked = option.default !== false;
+    if (label) label.hidden = false;
+}
+
+/** The dialog's choice, or undefined when the toggle is not shown (server default). */
+function getDownloadModalLidarrWholeAlbum(playlistId) {
+    const checkbox = document.getElementById(downloadModalLidarrWholeAlbumId(playlistId));
+    const label = checkbox ? checkbox.closest('[data-lidarr-whole-album]') : null;
+    if (!checkbox || (label && label.hidden)) return undefined;
+    return checkbox.checked;
 }
 
 function hydrateDownloadModalQualityProfileSelect(playlistId, options = {}) {
+    hydrateDownloadModalLidarrWholeAlbum(playlistId);
     return hydrateAcquisitionQualityProfileSelect(
         downloadModalQualityProfileSelectId(playlistId),
         { playlistRef: playlistId, ...options },

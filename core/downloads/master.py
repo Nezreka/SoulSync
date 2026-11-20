@@ -426,6 +426,21 @@ def preview_ownership(db, tracks_json, *, album_context, artist_context, is_albu
     return results
 
 
+def release_group_id_of(tracks_json) -> Optional[str]:
+    """The MusicBrainz release group every requested track belongs to, or None.
+
+    Wishlist rows carry the id the MusicBrainz worker matched. Tracks without
+    one are ignored; tracks that disagree make the answer None.
+    """
+    groups = set()
+    for entry in tracks_json or []:
+        if isinstance(entry, dict):
+            value = str(entry.get('musicbrainz_release_group_id') or '').strip()
+            if value:
+                groups.add(value)
+    return groups.pop() if len(groups) == 1 else None
+
+
 def expected_release_duration_seconds(tracks_json) -> Optional[int]:
     """Total playing time of the requested release, or None if unknown.
 
@@ -1144,6 +1159,8 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
             batch_artist_context = batch.get('artist_context')
             batch_is_album = batch.get('is_album_download', False)
             batch_private_album_bundle = bool(batch.get('album_bundle_private_staging'))
+            batch_lidarr_whole_album = _album_bundle_dispatch.lidarr_whole_album(
+                batch, deps.config_manager.get)
             batch_playlist_folder_mode = batch.get('playlist_folder_mode', False)
             batch_playlist_name = batch.get('playlist_name', 'Unknown Playlist')
 
@@ -1153,6 +1170,9 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
         # owned album would still trigger a release download.
         _bundle_state = _BatchStateAccessImpl()
         _album_bundle_sources = _resolve_album_bundle_sources(deps.config_manager)
+        if not batch_lidarr_whole_album:
+            # "Whole album via Lidarr" off: the next source gets the album
+            _album_bundle_sources = [s for s in _album_bundle_sources if s != 'lidarr']
         _album_bundle_staged = batch_private_album_bundle
 
         def _configured_bundle_plugin(source):
@@ -1193,7 +1213,7 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
                     return None
             return plugin
 
-        def _bundle_plugin_kwargs():
+        def _bundle_plugin_kwargs(source=None):
             """What the album plugins need beyond album/artist/staging.
 
             Both dispatch sites send the same thing, and a key is omitted
@@ -1207,6 +1227,12 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
             _duration = expected_release_duration_seconds(tracks_json)
             if _duration:
                 kwargs['expected_duration_seconds'] = _duration
+            if source == 'lidarr':
+                # Lidarr looks albums up in MusicBrainz: the id finds the
+                # exact release group where a text search often cannot.
+                _group = release_group_id_of(tracks_json)
+                if _group:
+                    kwargs['release_group_id'] = _group
             return kwargs or None
 
         def _stamp_terminal_bundle_failure():
@@ -1248,7 +1274,7 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
                     plugin_resolver=lambda _name, _plugin=plugin: _plugin,
                     state=_bundle_state,
                     source_override=source,
-                    plugin_kwargs=_bundle_plugin_kwargs(),
+                    plugin_kwargs=_bundle_plugin_kwargs(source),
                 ):
                     _stamp_terminal_bundle_failure()
                     return True

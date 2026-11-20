@@ -284,7 +284,9 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
 
         # A routed artist's files belong in the audiobook folder, not the music library.
         from core.audiobook_routing import routed_root_for_context
-        transfer_dir = routed_root_for_context(context) or transfer_dir
+        from core.imports.paths import lidarr_root_for_context
+        transfer_dir = (routed_root_for_context(context) or lidarr_root_for_context(context)
+                        or transfer_dir)
 
         expected_final_path = (context or {}).get('_final_processed_path')
 

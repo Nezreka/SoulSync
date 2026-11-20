@@ -647,4 +647,21 @@ describe('Lidarr', () => {
     await waitFor(() => expect(store.hasPending()).toBe(false));
     expect(saved()).toEqual({ lidarr_download: { url: 'http://lidarr:8686' } });
   });
+
+  it('saves the whole album default and its two folders', async () => {
+    act(() => store.hydrate({ lidarr_download: { url: 'http://l:8686' } }));
+    render(<LidarrPanel store={store} />);
+    expect(input('lidarr-whole-album-default').checked).toBe(true);
+    fireEvent.click(input('lidarr-whole-album-default'));
+    fireEvent.change(input('lidarr-transfer-path'), { target: { value: '/lidarr-imports' } });
+    fireEvent.change(input('lidarr-download-path'), { target: { value: '/lidarr-dl' } });
+    await waitFor(() => expect(store.hasPending()).toBe(false));
+    expect(saved()).toEqual({
+      lidarr_download: {
+        whole_album_default: false,
+        transfer_path: '/lidarr-imports',
+        download_path: '/lidarr-dl',
+      },
+    });
+  });
 });

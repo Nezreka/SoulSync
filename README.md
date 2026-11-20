@@ -229,7 +229,7 @@ Use one, or build a **hybrid chain** in the order you prefer. If a source can't 
 | **HiFi** | free lossless via public instances, no account, automatic failover |
 | **YouTube** | yt-dlp, cookies supported |
 | **SoundCloud** | anonymous; a free account's token gets the original file when the uploader allows downloads |
-| **Lidarr** | hand an album to Lidarr's indexers, import only the tracks you need |
+| **Lidarr** | hand an album to Lidarr's indexers: an album request is one lookup (by MusicBrainz release group when known), one add and one search, then SoulSync imports the tracks. In a hybrid chain a "Whole album via Lidarr" switch in the download dialogs and the wishlist picks Lidarr or the next source |
 | **Torrent** | Prowlarr search; qBittorrent, Transmission, Deluge or aria2; seeding goals; archive extraction; an option to start SoulSync's torrents on a qBittorrent that adds them stopped |
 | **Usenet** | Prowlarr search; SABnzbd or NZBGet, sent the NZB file itself (no Prowlarr link or api key in their queue); remote path mappings |
 

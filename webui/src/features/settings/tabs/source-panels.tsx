@@ -296,6 +296,53 @@ export function LidarrPanel({ store }: { store: SettingsStore }) {
           Found in Lidarr → Settings → General → Security → API Key
         </div>
       </div>
+      <div className="form-group">
+        <label className="checkbox-label">
+          <input
+            type="checkbox"
+            id="lidarr-whole-album-default"
+            checked={settings.lidarr_download?.whole_album_default !== false}
+            onChange={(event) =>
+              store.set('lidarr_download', 'whole_album_default', event.target.checked)
+            }
+          />
+          "Whole album via Lidarr" on by default
+        </label>
+        <div className="setting-help-text">
+          The download dialogs and the wishlist have a "Whole album via Lidarr" toggle (hybrid mode
+          with Lidarr and another source). On, Lidarr downloads the whole album; off, the next
+          source (e.g. Soulseek) gets the tracks. This sets where the toggle starts, and what
+          automatic wishlist runs do.
+        </div>
+      </div>
+      <div className="form-group">
+        <label>Lidarr imports folder:</label>
+        <input
+          type="text"
+          id="lidarr-transfer-path"
+          placeholder="empty: the music library folder"
+          value={text(settings.lidarr_download?.transfer_path)}
+          onChange={(event) => store.set('lidarr_download', 'transfer_path', event.target.value)}
+        />
+        <div className="setting-help-text">
+          Where tracks that came from Lidarr are imported. Lidarr already keeps the whole album in
+          its own root folder; if that folder is your library, the copy SoulSync imports is a second
+          one. Empty imports them like every other download.
+        </div>
+      </div>
+      <div className="form-group">
+        <label>Lidarr download folder:</label>
+        <input
+          type="text"
+          id="lidarr-download-path"
+          placeholder="empty: the Soulseek download folder"
+          value={text(settings.lidarr_download?.download_path)}
+          onChange={(event) => store.set('lidarr_download', 'download_path', event.target.value)}
+        />
+        <div className="setting-help-text">
+          Where SoulSync copies a track out of Lidarr before it imports it.
+        </div>
+      </div>
       <TestRow
         label="Lidarr Status:"
         buttonId="lidarr-test-btn"

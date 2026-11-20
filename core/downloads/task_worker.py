@@ -872,14 +872,18 @@ def _download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWork
                 # torrent and rely on the auto-import sweep to clean up.
                 _exclude_for_hybrid_album = None
                 try:
-                    _batch_is_album = False
+                    _b = None
                     if batch_id:
                         from core.runtime_state import download_batches as _db
                         _b = _db.get(batch_id)
-                        if isinstance(_b, dict):
-                            _batch_is_album = bool(_b.get('is_album_download'))
-                    if _batch_is_album and getattr(deps.download_orchestrator, 'mode', '') == 'hybrid':
-                        _exclude_for_hybrid_album = ['torrent', 'usenet']
+                    from core.downloads.album_bundle_dispatch import per_track_exclusions
+                    from core.downloads.master import _resolve_album_bundle_sources
+                    from core.settings import config_manager as _cfg
+                    _exclude_for_hybrid_album = per_track_exclusions(
+                        _b, _cfg.get,
+                        hybrid=getattr(deps.download_orchestrator, 'mode', '') == 'hybrid',
+                        bundle_sources=_resolve_album_bundle_sources(_cfg),
+                    )
                 except Exception as _exc_filter_err:
                     logger.debug("[Modal Worker] album-source-exclusion check failed: %s", _exc_filter_err)
                 # Fold in budget-exhausted sources (per-source quarantine retry).
