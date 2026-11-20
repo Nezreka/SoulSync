@@ -29,6 +29,7 @@ import {
   resolveAppearance,
   savedEffectValue,
 } from './appearance';
+import { VideoPagesCard } from './library-video-prefs';
 
 const TAB = 'appearance';
 
@@ -535,5 +536,6 @@ function SidebarWeather({ opened }: SettingsTabProps) {
 }
 
 export function AppearanceTab(props: SettingsTabProps) {
+  if (props.part === 'video-pages') return <VideoPagesCard />;
   return props.part === 'weather' ? <SidebarWeather {...props} /> : <UiAppearance {...props} />;
 }

@@ -1,6 +1,7 @@
 /**
- * The Organization card's Video panel (SETTINGS_PORT.md, video pass V2b): the
- * markup it replaced, the load (once, the first time the Library tab or the
+ * The video organization settings, wherever DESIGN 3.3 draws them now
+ * (settings-bic phase 4: Library > Naming, Import and files, Tags and
+ * artwork, Subtitles; Quality > YouTube; Downloads > Behaviour): the load (once, the first time the Library tab or the
  * video settings page is shown, with a retry), the previews, what saves and
  * when, the languages check, the subtitle chain, Whisper, Reset and the
  * Missing Subtitles job. The load cases settings-video-library-load.test.ts
@@ -10,8 +11,18 @@
 import { act, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { shape, vanilla } from './__fixtures__/shape';
-import { VideoOrganizationPanel } from './library-video-organization';
+import {
+  SubtitlesHero,
+  VideoImport,
+  VideoImportHero,
+  VideoNaming,
+  VideoNamingHero,
+  VideoSubtitles,
+  VideoTags,
+  VideoTagsHero,
+  YoutubeFileOptions,
+  YoutubeFollowCount,
+} from './library-video-organization';
 import { jobLine, providerOrder, renderTemplate, videoOrganization } from './video-organization';
 
 const ORG = {
@@ -93,7 +104,20 @@ function typeAndLeave(input: HTMLInputElement, value: string) {
   fireEvent.input(input, { target: { value } });
   input.dispatchEvent(new Event('change', { bubbles: true }));
 }
-const panel = () => render(<VideoOrganizationPanel hidden={false} />);
+const panel = () =>
+  render(
+    <div>
+      <VideoNamingHero />
+      <VideoNaming />
+      <VideoImportHero />
+      <VideoImport />
+      <VideoTagsHero />
+      <VideoTags />
+      <SubtitlesHero />
+      <VideoSubtitles />
+    </div>,
+  );
+const seg = (id: string) => document.getElementById(id)!.getAttribute('data-value');
 async function shown() {
   act(() => {
     document.dispatchEvent(new CustomEvent('soulsync:library-settings-shown'));
@@ -102,13 +126,6 @@ async function shown() {
   await waitFor(() => expect(el('vo-movie-template').disabled).toBe(false));
   await waitFor(() => expect(el('vo-whisper-status').textContent).not.toBe(''));
 }
-
-describe('the panel is the markup it replaced', () => {
-  it('before the settings load', () => {
-    const { container } = panel();
-    expect(shape(container)).toEqual(shape(vanilla('video-organization.vanilla.html')));
-  });
-});
 
 describe('the load', () => {
   it('loads once, on the Library tab, and keeps what was typed', async () => {
@@ -120,9 +137,11 @@ describe('the load', () => {
     });
     expect(el('vo-movie-template').disabled).toBe(true);
     await shown();
-    // the organization, and the Whisper model status it fills in
-    expect(calls.map((c) => c.url)).toEqual([
+    // the organization, the Whisper model status it fills in, and the
+    // Missing Subtitles job's line (blank from the music side before, AUDIT 36)
+    expect([...new Set(calls.map((c) => c.url))].sort()).toEqual([
       '/api/video/organization',
+      '/api/video/repair/jobs',
       '/api/video/subtitles/whisper/status',
     ]);
     fireEvent.input(el('vo-movie-template'), { target: { value: '/unsaved' } });
@@ -185,12 +204,15 @@ describe('the fields', () => {
   it('fills from the settings, with the page defaults', async () => {
     panel();
     await shown();
-    expect(el('vo-transfer-mode').value).toBe('move');
+    expect(seg('vo-transfer-mode')).toBe('move');
     expect(el('vo-verify').checked).toBe(true);
     expect(el('vo-sub-langs').value).toBe('en,es');
     expect(el('vo-recycle-days').value).toBe('7');
     expect(el('vo-sub-min-score').value).toBe('24');
-    expect(el('vo-yt-follow-count').value).toBe('5');
+    // Quality > YouTube draws these two; it loads the settings itself
+    render(<YoutubeFileOptions />);
+    expect(el('vo-sponsorblock').getAttribute('data-value')).toBe('off');
+    expect(el('vo-yt-subs').checked).toBe(false);
     expect(el('vo-whisper-model').value).toBe('base');
   });
 
@@ -243,10 +265,8 @@ describe('the fields', () => {
     await shown();
     expect(el('vo-sub-use-embedded').checked).toBe(false);
     expect(el('vo-sub-ignore-pgs').disabled).toBe(true);
-    expect(el('vo-sub-ignore-pgs').closest('label')!.style.opacity).toBe('0.45');
     fireEvent.click(el('vo-sub-use-embedded'));
     expect(el('vo-sub-ignore-pgs').disabled).toBe(false);
-    expect(el('vo-sub-ignore-pgs').closest('label')!.style.opacity).toBe('');
   });
 
   it('a language that is not a code is put back, with a note, and not saved', async () => {
@@ -265,9 +285,19 @@ describe('the fields', () => {
     expect(el('vo-sub-langs-error').hidden).toBe(true);
   });
 
-  it('Reset posts the standard layout and shows what came back', async () => {
+  it('Reset asks first, posts the standard layout and shows what came back', async () => {
     panel();
     await shown();
+    const confirm = vi.fn(() => Promise.resolve(false));
+    shell.showConfirmDialog = confirm;
+    await act(async () => {
+      fireEvent.click(el('vo-reset'));
+    });
+    expect(confirm).toHaveBeenCalledWith(
+      expect.objectContaining({ title: 'Put the standard layout back?' }),
+    );
+    expect(posts()).toHaveLength(0);
+    delete shell.showConfirmDialog;
     answers['POST /api/video/organization'] = { ...ORG, movie_template: '$title ($year)' };
     fireEvent.click(el('vo-reset'));
     await waitFor(() => expect(el('vo-movie-template').value).toBe('$title ($year)'));
@@ -280,58 +310,82 @@ describe('the fields', () => {
     );
     expect(shell.showToast).toHaveBeenCalledWith('Reset to the standard layout', 'success');
   });
+
+  it('the heroes read the naming, the import and the sidecars back', async () => {
+    panel();
+    await shown();
+    const text = document.body.textContent!;
+    expect(text).toContain('A movie is saved as The Matrix (1999) / The Matrix.mkv');
+    expect(text).toContain('A finished file is moved in and checked with ffprobe.');
+    expect(text).toContain('Finished files are filed alone');
+  });
+
+  it('the YouTube follow count, drawn on Downloads > Behaviour, saves when it is left', async () => {
+    render(<YoutubeFollowCount />);
+    act(() => {
+      document.dispatchEvent(new CustomEvent('soulsync:library-settings-shown'));
+    });
+    await waitFor(() => expect(el('vo-yt-follow-count').value).toBe('5'));
+    await waitFor(() => expect(el('vo-yt-follow-count').disabled).toBe(false));
+    typeAndLeave(el('vo-yt-follow-count'), '12');
+    await waitFor(() => expect(posts()).toHaveLength(1));
+    expect(posts()[0].youtube_follow_count).toBe('12');
+  });
 });
 
 describe('the subtitle chain', () => {
   const steps = () =>
-    [...document.querySelectorAll('#subchain-list .dlchain-step')].map((s) =>
-      s.getAttribute('data-src'),
-    );
+    [
+      ...document.querySelectorAll<HTMLElement>('#subchain-widget ul[aria-label] > li[data-id]'),
+    ].map((s) => s.dataset.id);
+  const menu = (id: string, entry: string) => {
+    fireEvent.click(document.querySelector(`#subchain-widget [data-more="${id}"]`)!);
+    return [
+      ...document.querySelectorAll<HTMLButtonElement>('#subchain-widget [role="menu"] button'),
+    ].find((b) => b.textContent!.startsWith(entry))!;
+  };
 
-  it('the stored order, Whisper pinned last while it can run', async () => {
+  it('the stored order on the order list, Whisper pinned last while it can run', async () => {
+    answers['GET /api/video/organization'] = { ...ORG, download_subtitles: true };
     panel();
     await shown();
-    expect(steps()).toEqual(['subdl', 'opensubtitles', 'whisper']);
-    expect(el('subchain-mode-hint').textContent).toBe('chain — 2 providers');
-    const whisper = document.querySelector('#subchain-list [data-src="whisper"]')!;
-    expect(whisper.hasAttribute('draggable')).toBe(false);
-    expect(whisper.querySelector('.dlchain-step-role')!.textContent).toBe('Last resort');
+    expect(steps()).toEqual(['subdl', 'opensubtitles']);
+    expect(document.querySelector('#subchain-widget li[data-id="subdl"]')!.textContent).toContain(
+      'Tried first',
+    );
+    const whisper = document.querySelector('#subchain-widget [data-pinned="whisper"]')!;
+    expect(whisper.textContent).toContain('Last resort, always tried last');
     expect(
-      [...document.querySelectorAll('#subchain-pool .dlchain-tile')].map((t) =>
-        t.getAttribute('data-src'),
+      [...document.querySelectorAll<HTMLElement>('#subchain-widget [data-pool] > li[data-id]')].map(
+        (t) => t.dataset.id,
       ),
     ).toEqual(['subsource', 'embedded']);
+    // and the hero reads it back
+    expect(document.body.textContent).toContain(
+      'Subtitles in en, es come from SubDL, then OpenSubtitles. When none has them, Whisper transcribes the audio.',
+    );
   });
 
   it('add, move and remove save at once; the last one stays', async () => {
     panel();
     await shown();
-    fireEvent.click(document.querySelector('#subchain-pool [data-src="embedded"]')!);
+    fireEvent.click(document.querySelector('#subchain-widget [data-use="embedded"]')!);
     await waitFor(() => expect(posts()).toHaveLength(1));
     expect(posts()[0].subtitle_provider_order).toEqual(['subdl', 'opensubtitles', 'embedded']);
-    fireEvent.click(
-      document.querySelector('#subchain-list [data-src="embedded"] [data-action="up"]')!,
-    );
+    fireEvent.click(menu('embedded', 'Move up'));
     await waitFor(() => expect(posts()).toHaveLength(2));
     expect(posts()[1].subtitle_provider_order).toEqual(['subdl', 'embedded', 'opensubtitles']);
-    for (const id of ['subdl', 'embedded'])
-      fireEvent.click(
-        document.querySelector(`#subchain-list [data-src="${id}"] [data-action="remove"]`)!,
-      );
+    fireEvent.click(menu('subdl', 'Stop using'));
+    await waitFor(() => expect(posts()).toHaveLength(3));
+    fireEvent.click(menu('embedded', 'Stop using'));
     await waitFor(() => expect(posts()).toHaveLength(4));
-    fireEvent.click(
-      document.querySelector('#subchain-list [data-src="opensubtitles"] [data-action="remove"]')!,
+    // the last one cannot go, and says why
+    const stop = menu('opensubtitles', 'Stop using');
+    expect(stop.disabled).toBe(true);
+    expect(document.querySelector('#subchain-widget [role="menu"]')!.textContent).toContain(
+      'Keep at least one provider: subtitles need somewhere to come from',
     );
-    expect(shell.showToast).toHaveBeenCalledWith(
-      'Keep at least one provider — subtitles need somewhere to come from',
-      'info',
-    );
-    expect(steps()).toEqual(['opensubtitles', 'whisper']);
-    expect(
-      document.querySelector<HTMLButtonElement>(
-        '#subchain-list [data-src="opensubtitles"] [data-action="up"]',
-      )!.disabled,
-    ).toBe(true);
+    expect(steps()).toEqual(['opensubtitles']);
   });
 
   it('the stored order: a list, JSON, or nothing', () => {
@@ -346,11 +400,11 @@ describe('Whisper', () => {
     panel();
     await shown();
     expect(el('vo-whisper-status').textContent).toBe('Downloaded: base (145 MB) on 2026-11-01.');
-    expect(el('vo-whisper-dl').textContent).toBe('✓ base downloaded');
+    expect(el('vo-whisper-dl').textContent).toBe('base downloaded');
     expect(el('vo-whisper-dl').disabled).toBe(true);
     expect(el('vo-whisper-enabled').disabled).toBe(false);
     expect(document.querySelector('#vo-whisper-model option[value="base"]')!.textContent).toBe(
-      'base — balanced',
+      'base: balanced',
     );
     // another model picked: it has to be downloaded first, and the switch waits
     fireEvent.change(el('vo-whisper-model'), { target: { value: 'small' } });
@@ -404,7 +458,7 @@ describe('Whisper', () => {
     expect(el('vo-whisper-status').textContent).toBe(
       'No model downloaded yet. Transcription engine missing on the server: pip install faster-whisper.',
     );
-    expect(el('vo-whisper-enabled').title).toBe(
+    expect(el('vo-whisper-enabled').closest('[data-row]')!.textContent).toContain(
       'Download a model first (and install faster-whisper on the server).',
     );
     videoOrganization.resetState();

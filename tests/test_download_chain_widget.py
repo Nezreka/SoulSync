@@ -265,26 +265,16 @@ def test_the_source_dropdown_is_gone(index, js):
     assert "download-source-mode" not in js
 
 
-def _mode_group_is_hidden() -> bool:
-    """the audiobook mode select's form-group is hidden (the React panel,
-    step 8c: a HintGroup given `hidden`, which HintGroup puts on its div)"""
+def test_the_audiobook_mode_dropdown_went():
+    """the hidden audiobook mode select and its empty arrow-list home went
+    (settings-bic phase 4, DESIGN 3.3): the audiobook order on Downloads
+    writes the same key, so nothing was lost with them"""
     panel = _read(_TABS + "library-audiobooks.tsx")
-    before = panel.split('id="audiobook-download-mode"', 1)[0]
-    group = before[before.rindex("<HintGroup"):]
-    card = _read(_TABS + "library-card.tsx")
-    return ("\n          hidden\n" in group
-            and '<div className="form-group" hidden={hidden}>' in card)
-
-
-def test_the_audiobook_mode_dropdown_is_hidden_too():
-    assert _mode_group_is_hidden()
-
-
-def test_the_old_audiobook_arrow_list_is_hidden():
-    """kept, empty and hidden, in the React Audiobooks panel (step 8c)"""
-    panel = _read(_TABS + "library-audiobooks.tsx")
-    line = next(ln for ln in panel.splitlines() if 'id="audiobook-hybrid-rows"' in ln)
-    assert "hidden" in line
+    for gone in ('id="audiobook-download-mode"', 'id="audiobook-hybrid-rows"',
+                 'id="audiobook-hybrid-container"'):
+        assert gone not in panel
+    model = _read(_TABS + "sources-model.ts")
+    assert "'download_source.mode': order.length > 1 ? 'hybrid' : order[0] || 'torrent'," in model
 
 
 def test_mode_is_still_persisted(model, js):
@@ -361,7 +351,7 @@ def test_a_hidden_form_group_is_actually_hidden(index):
     class rule with display outranks the browser's own [hidden] styling, so the
     attribute did nothing. Exactly the trap .hybrid-source-list hit on this same
     page. Any form-group the page hides is affected, so the guard stays though
-    that select is gone (step 7a): the audiobook mode select is still one.
+    that select is gone (step 7a), and so is the audiobook mode select (phase 4).
     """
     css = _read("webui/static/style.css")
     rule = _rule(css, "#settings-page .form-group[hidden]")
@@ -371,8 +361,8 @@ def test_a_hidden_form_group_is_actually_hidden(index):
     base = _rule(css, "#settings-page .form-group")
     assert "display: flex" in base
 
-    # a hidden form-group the page still has
-    assert _mode_group_is_hidden()
+    # the page's last hidden form-group (the audiobook mode select) went in
+    # settings-bic phase 4; the rule stays for the old tabs' markup
 
 
 def test_the_behaviour_rows_stack_on_a_phone():

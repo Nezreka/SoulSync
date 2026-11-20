@@ -1,8 +1,8 @@
 """The video settings' Subtitles section (subtitle-finish redesign).
 
 Covers the redesigned section: master toggle, languages input, the EDITABLE
-provider chain (mirroring the download-chain widget: pool tiles + ordered
-steps, drag + arrow buttons, Whisper pinned last), the HI/forced preference
+provider chain (the shared order list since settings-bic phase 4: a pool of
+unused providers, drag, keyboard and a row menu, Whisper pinned last), the HI/forced preference
 and auto-sync controls, the advanced tuning knobs, and the API key fields
 for the keyed providers.
 
@@ -22,7 +22,8 @@ import pytest
 _ROOT = Path(__file__).resolve().parents[1]
 
 # the panel is React (SETTINGS_PORT.md video pass V2b): its markup is
-# library-video-organization.tsx, its settings video-organization.ts
+# library-video-organization.tsx (Library > Subtitles since settings-bic
+# phase 4), its settings video-organization.ts
 _TABS = "webui/src/features/settings/tabs/"
 
 
@@ -58,13 +59,12 @@ def panel():
 def _bound(panel, element_id, key, kind="Check"):
     """a control of the panel, bound to a key of the settings (and so saved
     when it changes: Check and Select save, TextField when left)"""
-    return re.search(rf'<{kind}\s+id="{element_id}"\s+field="{key}"', panel) is not None
+    return re.search(rf'<{kind}\s+(?:\w+\s+)*id="{element_id}"\s+field="{key}"', panel) is not None
 
 
 def test_section_lives_in_the_video_panel(panel):
     assert "Subtitles" in panel
     for element_id in ("vo-subs-dl", "vo-sub-langs", "subchain-widget",
-                       "subchain-pool", "subchain-list",
                        "vo-sub-hi-forced", "vo-sub-autosync",
                        "vo-sub-open-job", "vo-sub-job-status"):
         assert f'id="{element_id}"' in panel, element_id
@@ -72,7 +72,7 @@ def test_section_lives_in_the_video_panel(panel):
 
 def test_ids_are_unique(panel):
     for element_id in ("vo-subs-dl", "vo-sub-langs", "vo-sub-langs-error",
-                       "subchain-widget", "subchain-pool", "subchain-list",
+                       "subchain-widget",
                        "vo-sub-hi-forced", "vo-sub-autosync",
                        "vo-sub-min-score", "vo-sub-daily-quota",
                        "vo-sub-upgrade-delta", "vo-sub-worker-interval",
@@ -89,34 +89,37 @@ def test_master_toggle_wired_to_download_subtitles(panel, org_src):
 def test_toggle_help_text_describes_semantics(panel):
     """On by default for new imports; best-effort; ~20/day quota; misses retried."""
     assert "On by default for new" in panel
-    assert "~20" in panel
-    assert "retried later" in panel
+    assert "about 20 downloads a day" in panel
+    assert "tried again later" in panel
 
 
 def test_langs_input_wired_to_subtitle_langs(panel, org_src):
     assert "subtitle_langs: text(o.subtitle_langs" in org_src
     assert "subtitle_langs: s('subtitle_langs')" in org_src
-    assert _bound(panel, "vo-sub-langs", "subtitle_langs", "TextField")
+    # a field typed in, saved when it is left (the languages are checked first)
+    assert "const langs = useField('subtitle_langs');" in panel
+    assert re.search(r'<TextField\s+id="vo-sub-langs"', panel)
+    assert "if (target === 'vo-sub-langs') videoOrganization.commitLangs();" in panel
 
 
 def test_langs_input_validates_lightly(index, video_js, panel):
     # 2-3 letter codes, same separators the backend parse_langs accepts
     assert r"/^[A-Za-z]{2,3}$/" in video_js
     assert 'id="vo-sub-langs-error"' in panel
-    assert "2&ndash;3 letters" in panel
-    assert "commas, spaces, or semicolons" in panel
+    assert "2 or 3 letters" in panel
+    assert "commas, spaces or semicolons" in panel
     # invalid input reverts to the last saved value instead of saving
     assert "form: { ...state.form, subtitle_langs: langsGood }" in video_js
 
 
 def test_provider_chain_is_editable(panel, video_js):
-    # the download-chain widget structure, not a read-only list
+    # the shared order list (settings-bic phase 4), not a read-only list: a
+    # pool of the unused ones, drag, the keyboard and a row menu (so a phone
+    # can move one without dragging)
     assert 'id="subchain-widget"' in panel
-    assert 'id="subchain-pool"' in panel
-    assert 'id="subchain-list"' in panel
-    # drag AND arrow buttons (drag is impossible on phones)
-    assert "draggable" in video_js
-    assert "dlchain-move" in video_js
+    assert "<OrderList" in panel.split("function SubtitleChain", 1)[1]
+    assert "onChange={(next) => videoOrganization.setOrder(next)}" in panel
+    assert "pool={pool.map(" in panel
     # rendered from the backend order and posted back; the backend
     # normalizes via parse_provider_order
     assert "subtitle_provider_order: order.slice()" in video_js
@@ -130,11 +133,13 @@ def test_chain_knows_all_providers(video_js):
 
 
 def test_hi_forced_preference_wired(panel, org_src):
-    assert _bound(panel, "vo-sub-hi-forced", "subtitle_hi_forced", "Select")
+    # a choice of two: a segmented control, saved at once
+    assert re.search(r'<Segmented\s+id="vo-sub-hi-forced"', panel)
+    assert "onChange={(value) => save('subtitle_hi_forced', value)}" in panel
     assert "subtitle_hi_forced: text(o.subtitle_hi_forced, 'off')" in org_src
     assert "subtitle_hi_forced: s('subtitle_hi_forced') || 'off'" in org_src
     for value in ("off", "prefer_hi"):
-        assert f'value="{value}"' in panel
+        assert f"value: '{value}'" in panel
     # forced is its own toggle now, never a preference
     assert 'value="prefer_forced"' not in panel
 
@@ -153,12 +158,12 @@ def test_every_subtitle_control_autosaves(panel):
     # the hi preference and auto-sync used to have no change listener, so
     # flipping them never saved on its own: a Check or Select saves on change
     assert "onChange={(event) => save(field, event.target.checked)}" in panel
-    assert "onChange={(event) => save(field, event.target.value)}" in panel
-    for element_id, kind in (("vo-sub-hi-forced", "Select"), ("vo-sub-autosync", "Check"),
+    assert "onChange={(value) => save('subtitle_hi_forced', value)}" in panel
+    for element_id, kind in (("vo-sub-hi-forced", "Segmented"), ("vo-sub-autosync", "Check"),
                              ("vo-sub-forced", "Check"), ("vo-sub-use-embedded", "Check"),
                              ("vo-sub-ignore-pgs", "Check"), ("vo-sub-ignore-vobsub", "Check"),
                              ("vo-sub-ignore-ass", "Check")):
-        assert re.search(rf'<{kind}\s+id="{element_id}"', panel), element_id
+        assert re.search(rf'<{kind}\s+(?:\w+\s+)*id="{element_id}"', panel), element_id
     # and the knobs save when left
     for element_id in ("vo-sub-min-score", "vo-sub-daily-quota", "vo-sub-upgrade-delta",
                        "vo-sub-worker-interval", "vo-sub-worker-batch"):
@@ -224,8 +229,8 @@ def test_provider_api_keys_have_fields_and_endpoints(panel):
     # keys save through the enrichment config endpoint, as <field>_api_key
     assert "export const CONFIG_URL = '/api/video/enrichment/config';" in cards
     assert "`${k}_api_key`, s.keys[k]" in cards
-    # the section points at the Services keys
-    assert "Services" in panel
+    # the section points at the keys, on Connections
+    assert "API keys are on Connections" in panel
 
 
 def test_sane_defaults(org_src):

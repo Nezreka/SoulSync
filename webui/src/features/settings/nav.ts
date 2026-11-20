@@ -93,8 +93,14 @@ export const TABS: TabDef[] = [
     label: 'Library',
     icon: 'lib',
     title: 'Library',
-    sub: 'Folders, file organization, tagging and import',
-    views: ONE,
+    sub: 'Where your files live, how they are named and tagged, and what happens on import',
+    views: [
+      { key: 'folders', label: 'Folders' },
+      { key: 'naming', label: 'Naming' },
+      { key: 'tags', label: 'Tags and artwork' },
+      { key: 'import', label: 'Import and files' },
+      { key: 'subtitles', label: 'Subtitles', side: 'video' },
+    ],
   },
   {
     key: 'discovery',

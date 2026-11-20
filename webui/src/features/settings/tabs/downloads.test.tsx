@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createSettingsStore, type SettingsPayload, type SettingsStore } from '../settings-store';
 import { addGenre, filteringSummary, resolveDownloads } from './downloads';
 import { MusicBehaviour, VideoBehaviour } from './downloads/behaviour-view';
-import { FilteringView } from './downloads/filtering-view';
+import { FilteringView, GenresCard } from './downloads/filtering-view';
 import { SourcesView } from './downloads/sources-view';
 import { sourcesModel } from './sources-model';
 
@@ -44,7 +44,11 @@ afterEach(() => {
 const part = (name: 'behaviour' | 'retry' | 'filtering' | 'sources') =>
   render(
     name === 'filtering' ? (
-      <FilteringView store={store} />
+      <>
+        <FilteringView store={store} />
+        {/* the genre list moved to Library > Tags and artwork (phase 4) */}
+        <GenresCard store={store} />
+      </>
     ) : name === 'sources' ? (
       <SourcesView store={store} opened={0} active={false} />
     ) : (
@@ -110,6 +114,7 @@ describe('the words that name each setting', () => {
       <>
         <MusicBehaviour store={store} />
         <FilteringView store={store} />
+        <GenresCard store={store} />
       </>,
     );
     const names: Record<string, RegExp> = {

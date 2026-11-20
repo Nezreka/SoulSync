@@ -202,6 +202,37 @@ describe('settings: more libraries', () => {
   });
 });
 
+describe('settings: saving one library keeps what is typed in another (settings-bic AUDIT 32)', () => {
+  it('only the saved card is drawn again', async () => {
+    const { doc, fetcher } = setup();
+    await waitFor(() => expect(doc.querySelectorAll('.video-library-row').length).toBe(3));
+    const card = (i: number) => doc.querySelectorAll('.video-library-row')[i] as HTMLElement;
+    // typed into the main library, not saved
+    const keywords = card(0).querySelector('.video-library-keywords') as HTMLInputElement;
+    keywords.value = 'drama';
+    const before = card(0);
+    // the custom one is saved, made default: each reloads the list
+    click(card(2).querySelector('[data-library-action="save"]'));
+    await waitFor(() => expect(calls(fetcher).some((c) => c[1]?.method === 'PUT')).toBe(true));
+    await waitFor(() =>
+      expect(
+        calls(fetcher).filter((c) => c[0] === '/api/video/libraries/folders' && !c[1]?.method),
+      ).toHaveLength(2),
+    );
+    click(card(2).querySelector('[data-library-action="default"]'));
+    await waitFor(() =>
+      expect(
+        calls(fetcher).filter((c) => c[0] === '/api/video/libraries/folders' && !c[1]?.method),
+      ).toHaveLength(3),
+    );
+    // the other card is the same card, with what was typed
+    expect(card(0)).toBe(before);
+    expect((card(0).querySelector('.video-library-keywords') as HTMLInputElement).value).toBe(
+      'drama',
+    );
+  });
+});
+
 describe('get window: the library picker', () => {
   const ESC = VIEW.slice(VIEW.indexOf('function esc'), VIEW.indexOf('function toast'));
   const SRC = VIEW.slice(

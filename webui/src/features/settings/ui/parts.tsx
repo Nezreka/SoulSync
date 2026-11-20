@@ -10,6 +10,7 @@
 
 import clsx from 'clsx';
 import {
+  Fragment,
   type ButtonHTMLAttributes,
   type InputHTMLAttributes,
   type KeyboardEvent,
@@ -17,6 +18,7 @@ import {
   type Ref,
   type SelectHTMLAttributes,
   type TextareaHTMLAttributes,
+  useEffect,
   useId,
   useRef,
   useState,
@@ -239,6 +241,8 @@ export interface RowProps {
   stack?: boolean;
   /** a field, not a switch: goes under its label on a phone */
   field?: boolean;
+  /** a folder or a template: the control gets a wide column, top aligned */
+  wide?: boolean;
   /** what is wrong with it; the row is marked */
   error?: string | null;
   /** changed and not saved yet */
@@ -261,6 +265,7 @@ export function Row({
   off,
   stack,
   field,
+  wide,
   error,
   changed,
   saved,
@@ -288,7 +293,8 @@ export function Row({
         sub && s.rowSub,
         off && s.rowOff,
         stack && s.rowStack,
-        (field || stack) && s.rowField,
+        wide && s.rowWide,
+        (field || stack || wide) && s.rowField,
         error && s.rowError,
       )}
     >
@@ -388,7 +394,7 @@ export function More({
 export function Switch({
   className,
   ...rest
-}: Omit<InputHTMLAttributes<HTMLInputElement>, 'type'>) {
+}: Omit<InputHTMLAttributes<HTMLInputElement>, 'type'> & { ref?: Ref<HTMLInputElement> }) {
   return <input {...rest} type="checkbox" role="switch" className={clsx(s.switch, className)} />;
 }
 
@@ -513,6 +519,8 @@ interface FieldLook {
   trailing?: ReactNode;
   /** the input itself (a field that saves on the browser's change event) */
   ref?: Ref<HTMLInputElement>;
+  /** a class on the input itself (a hook other code finds it by) */
+  inputClass?: string;
 }
 
 export function TextField({
@@ -524,6 +532,7 @@ export function TextField({
   icon,
   trailing,
   className,
+  inputClass,
   ...rest
 }: FieldLook & InputHTMLAttributes<HTMLInputElement>) {
   return (
@@ -547,7 +556,7 @@ export function TextField({
         type="text"
         {...rest}
         aria-invalid={invalid || undefined}
-        className={clsx(s.input, mono && s.inputMono)}
+        className={clsx(s.input, mono && s.inputMono, inputClass)}
       />
       {unit ? <span className={s.unit}>{unit}</span> : null}
       {trailing}
@@ -650,10 +659,15 @@ export interface FolderCheck {
   text: string;
 }
 
+/** folder-check.js's tones, as the check line's */
+const FOLDER_TONE: Record<string, Tone> = { ok: 'ok', info: 'idle', warn: 'warn', bad: 'bad' };
+
 /**
  * A folder. Mono text, a lock that keeps a working path from being changed by
  * a stray key, and the folder check under it in words. `inputProps` carries
- * the `data-folder-*` attributes static/folder-check.js reads.
+ * the `data-folder-*` attributes static/folder-check.js reads; a checked field
+ * draws the check's answer itself (`data-folder-own`), so the line is part of
+ * the field, not a node put after it. `check` wins over what it heard.
  */
 export function PathField({
   id,
@@ -662,9 +676,11 @@ export function PathField({
   locked,
   onLock,
   check,
+  onCheck,
   placeholder,
   invalid,
   inputProps,
+  inputClass,
 }: {
   id?: string;
   value: string;
@@ -673,18 +689,49 @@ export function PathField({
   locked?: boolean;
   onLock?: (locked: boolean) => void;
   check?: FolderCheck | null;
+  /** told each answer the folder check gives (null: none) */
+  onCheck?: (check: FolderCheck | null) => void;
   placeholder?: string;
   invalid?: boolean;
-  inputProps?: InputHTMLAttributes<HTMLInputElement> & Record<`data-${string}`, string>;
+  inputProps?: InputHTMLAttributes<HTMLInputElement> &
+    Record<`data-${string}`, string | undefined> & { ref?: Ref<HTMLInputElement> };
+  /** a class on the input (a hook other code finds it by) */
+  inputClass?: string;
 }) {
+  const own = useRef<HTMLInputElement | null>(null);
+  const [heard, setHeard] = useState<FolderCheck | null>(null);
+  const checked = !!inputProps?.['data-folder-check'];
+  const told = useRef(onCheck);
+  told.current = onCheck;
+  useEffect(() => {
+    const input = own.current;
+    if (!input || !checked) return;
+    const hear = (event: Event) => {
+      const { tone, text } = (event as CustomEvent<{ tone: string; text: string }>).detail;
+      const next = text ? { tone: FOLDER_TONE[tone] ?? 'idle', text } : null;
+      setHeard(next);
+      told.current?.(next);
+    };
+    input.addEventListener('ss:folder-check', hear);
+    return () => input.removeEventListener('ss:folder-check', hear);
+  }, [checked]);
+  const { ref: outer, ...attrs } = inputProps ?? {};
+  const shown = check ?? heard;
   return (
     <div className={s.fieldStack}>
       <TextField
-        {...inputProps}
+        {...attrs}
+        {...(checked ? { 'data-folder-own': '' } : {})}
+        ref={(el: HTMLInputElement | null) => {
+          own.current = el;
+          if (typeof outer === 'function') outer(el);
+          else if (outer) (outer as { current: HTMLInputElement | null }).current = el;
+        }}
         id={id}
         full
         mono
         icon="folder"
+        inputClass={inputClass}
         invalid={invalid}
         value={value}
         placeholder={placeholder}
@@ -692,19 +739,26 @@ export function PathField({
         onChange={(event) => onChange(event.target.value)}
         trailing={
           locked !== undefined && onLock ? (
-            <button type="button" className={s.fieldBtn} onClick={() => onLock(!locked)}>
+            <button
+              type="button"
+              className={s.fieldBtn}
+              data-lock=""
+              aria-pressed={!locked}
+              onClick={() => onLock(!locked)}
+            >
+              <Icon name={locked ? 'lock' : 'unlock'} size={13} />
               {locked ? 'Unlock' : 'Lock'}
             </button>
           ) : null
         }
       />
-      {check ? (
-        <div className={s.check} data-tone={check.tone} role="status">
+      {shown ? (
+        <div className={s.check} data-tone={shown.tone} role="status" data-folder-line="">
           <Icon
-            name={check.tone === 'ok' ? 'check' : check.tone === 'idle' ? 'info' : 'warn'}
+            name={shown.tone === 'ok' ? 'check' : shown.tone === 'idle' ? 'info' : 'warn'}
             size={13}
           />
-          {check.text}
+          {shown.text}
         </div>
       ) : null}
     </div>
@@ -753,9 +807,15 @@ export function TemplateField({
           {preview.folders.map((folder, index) => (
             // a template can name the same folder twice
             // eslint-disable-next-line react/no-array-index-key
-            <span className={s.crumb} key={`${index}-${folder}`}>
-              {folder}
-            </span>
+            <Fragment key={`${index}-${folder}`}>
+              <span className={s.crumb}>
+                <Icon name="folder" size={12} />
+                {folder}
+              </span>
+              <span className={s.crumbSep} aria-hidden="true">
+                /
+              </span>
+            </Fragment>
           ))}
           {preview.file ? <span className={clsx(s.crumb, s.crumbFile)}>{preview.file}</span> : null}
         </div>
@@ -828,24 +888,37 @@ export function CheckChips({
   options,
   value,
   onToggle,
+  disabled,
+  inputAttrs,
+  hidden,
 }: {
   id?: string;
   label: string;
   options: Array<{ value: string; label: string }>;
   value: string[];
   onToggle: (value: string, on: boolean) => void;
+  /** every chip off (its parent switch is off): dimmed, values kept */
+  disabled?: boolean;
+  /** attributes each tick box carries (`data-config`) */
+  inputAttrs?: (value: string) => Record<`data-${string}`, string>;
+  hidden?: boolean;
 }) {
   return (
-    <div className={s.chips} role="group" aria-label={label} id={id}>
+    <div className={s.chips} role="group" aria-label={label} id={id} hidden={hidden}>
       {options.map((option) => {
         const on = value.includes(option.value);
         return (
-          <label key={option.value} className={clsx(s.chip, s.chipCheck, on && s.chipOn)}>
+          <label
+            key={option.value}
+            className={clsx(s.chip, s.chipCheck, on && s.chipOn, disabled && s.chipOff)}
+          >
             <input
               type="checkbox"
               className={s.chipInput}
               value={option.value}
               checked={on}
+              disabled={disabled}
+              {...inputAttrs?.(option.value)}
               onChange={(event) => onToggle(option.value, event.target.checked)}
             />
             {on ? (

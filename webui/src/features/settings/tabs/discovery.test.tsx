@@ -66,6 +66,15 @@ const box = (id: string) => document.getElementById(id) as HTMLInputElement;
 describe('the Discovery tab is the same page it replaced', () => {
   it('main: the same elements, ids, classes, help lines and words', () => {
     const { container } = main();
+    // the three M3U path options came from Library > Folders (settings-bic
+    // phase 4); the fixture is the Discovery tab before that, so they are
+    // checked on their own below and left out here
+    const m3u = container.querySelector('[data-m3u-paths]')!;
+    expect(m3u.querySelector('#m3u-relative-paths')).not.toBeNull();
+    expect(m3u.querySelector('#m3u-entry-base-path')).not.toBeNull();
+    expect(m3u.querySelector('#m3u-rewrite-from')).not.toBeNull();
+    expect(m3u.querySelector('#m3u-rewrite-to')).not.toBeNull();
+    m3u.remove();
     const want = shape(vanilla('discovery-main.vanilla.html', { afterInit: true }));
     const got = shape(container);
     expect(got.elements).toEqual(want.elements);

@@ -1,8 +1,9 @@
 /**
- * Library > Organization (SETTINGS_PORT.md, step 8b): the markup it replaced
- * (with the path preview drawn, and the parked vanilla panels back in their
- * places), the help words with their spaces, the template rules, each saved
- * key, the preview, Reset, and the settings search reaching a React tab.
+ * Library > Naming, Music and Podcasts, and the pieces of the old Organization
+ * card drawn elsewhere now (tag options, wishlist rules, re-download, podcast
+ * format) (settings-bic phase 4): the template rules, each saved key, the
+ * "Saves as" preview under each field, a bad template marked on its own field
+ * and named in the save status, Reset (asking first), and the hero.
  */
 
 import { act, fireEvent, render, waitFor } from '@testing-library/react';
@@ -10,14 +11,24 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createSettingsHost } from '../host';
 import { createSettingsStore, type SettingsPayload, type SettingsStore } from '../settings-store';
-import { shape, vanilla } from './__fixtures__/shape';
-import { LibraryTab } from './library-folders';
-import { OrganizationCard } from './library-organization';
+import { Card } from '../ui';
+import { AudiobookNaming } from './library-audiobooks';
+import {
+  MusicNaming,
+  MusicNamingHero,
+  MusicTagOptions,
+  PodcastImport,
+  PodcastNaming,
+  RedownloadDeleted,
+  WishlistRules,
+} from './library-organization';
+import { LibraryTab } from './library/library-page';
 import {
   musicOrgSummary,
   playlistItemError,
   SCENARIO_KEY,
   templateErrors,
+  templateFieldErrors,
   templatesOf,
 } from './organization';
 
@@ -69,11 +80,29 @@ afterEach(async () => {
   await act(() => store.flush());
   vi.unstubAllGlobals();
   delete shell.debouncedAutoSaveSettings;
+  delete shell.showConfirmDialog;
   localStorage.removeItem(SCENARIO_KEY);
 });
 
 const card = () =>
-  render(<OrganizationCard store={store} part="organization" opened={0} active={false} />);
+  render(
+    <div>
+      <MusicNamingHero store={store} />
+      <MusicNaming store={store} />
+      <Card>
+        <MusicTagOptions store={store} />
+        <RedownloadDeleted store={store} />
+      </Card>
+      <WishlistRules store={store} />
+      <AudiobookNaming store={store} />
+      <PodcastNaming store={store} />
+      <PodcastImport store={store} />
+    </div>,
+  );
+/** a segmented control's value, and a pick of one of its options */
+const seg = (id: string) => document.getElementById(id)!.getAttribute('data-value');
+const pick = (id: string, value: string) =>
+  fireEvent.click(document.querySelector(`#${id} [data-value="${CSS.escape(value)}"]`)!);
 const input = (id: string) => document.getElementById(id) as HTMLInputElement;
 function saved(): SettingsPayload {
   const merged: SettingsPayload = {};
@@ -81,41 +110,6 @@ function saved(): SettingsPayload {
     for (const [k, v] of Object.entries(body)) merged[k] = { ...merged[k], ...v };
   return merged;
 }
-
-describe('the Organization card is the markup it replaced', () => {
-  it('with the preview drawn and the React Audiobooks and Video panels', () => {
-    const { container } = card();
-    const want = shape(vanilla('library-organization.vanilla.html', { afterInit: true }));
-    const got = shape(container);
-    expect(got.elements).toEqual(want.elements);
-    expect(got.text).toBe(want.text);
-  });
-
-  it('every help reads the same, spaces included', () => {
-    const words = (root: Element) =>
-      [...root.querySelectorAll('.setting-help-body, .help-text, .stg-help-text, .settings-hint')]
-        .filter((el) => !el.closest('#organization-audiobooks-panel'))
-        .map((el) => (el.textContent || '').replace(/\s+/g, ' ').trim());
-    const { container } = card();
-    expect(words(container)).toEqual(
-      words(vanilla('library-organization.vanilla.html', { afterInit: true })),
-    );
-  });
-
-  it('a tick box keeps the space before its words', () => {
-    // the markup's line break between <input> and the words is a space on
-    // screen; JSX drops it unless it is written in
-    const labels = (root: Element) =>
-      [...root.querySelectorAll('label')]
-        .filter((el) => !el.closest('#organization-audiobooks-panel'))
-        .filter((el) => el.querySelector('input[type="checkbox"]'))
-        .map((el) => (el.textContent || '').replace(/\s+/g, ' ').trimEnd());
-    const { container } = card();
-    const want = labels(vanilla('library-organization.vanilla.html'));
-    expect(want.every((t) => t.startsWith(' '))).toBe(true);
-    expect(labels(container)).toEqual(want);
-  });
-});
 
 describe('the rules', () => {
   it('fields show the saved template or the default; the old single default upgrades', () => {
@@ -160,7 +154,7 @@ describe('the rules', () => {
     expect(err('')).toBeNull();
     expect(err('$position - $title')).toBeNull();
     expect(err('$artist/$title')).toBe(
-      "Playlist File Naming can't contain a folder separator ( / or \\ ) — it names the file, not a path.",
+      "Playlist File Naming can't contain a folder separator ( / or \\ ): it names the file, not a path.",
     );
     expect(err('$artist\\$title')).toMatch(/folder separator/);
     expect(err('$position - $artist')).toBe(
@@ -175,9 +169,23 @@ describe('the rules', () => {
     );
     expect(musicOrgSummary(true, ' ')).toBe('organizing on');
   });
+
+  it('each bad template is named by its own key', () => {
+    expect(
+      templateFieldErrors({
+        file_organization: { templates: { album_path: '$album', sample_path: '$a//$chop' } },
+      }),
+    ).toEqual({
+      album_path: ['Album template must include at least one folder (use / separator)'],
+      sample_path: [
+        'Sample template cannot have consecutive slashes //',
+        'Invalid variable "$a" in sample template. Valid: $artist, $track, $album, $chop, $stem',
+      ],
+    });
+  });
 });
 
-describe('the card', () => {
+describe('the page', () => {
   it('loads every field with its default, and each change saves its own key', async () => {
     act(() =>
       store.hydrate({
@@ -192,8 +200,10 @@ describe('the card', () => {
     expect(input('detect-multi-artist-compilations').checked).toBe(true);
     expect(input('artistletter-symbol-fallback').checked).toBe(false);
     expect(input('template-single-path').value).toBe('$albumartist/$albumartist - $title/$title');
-    expect(input('disc-label').value).toBe('Disc');
-    expect(input('artist-separator').value).toBe(', ');
+    // the small choices are segments now
+    expect(seg('disc-label')).toBe('Disc');
+    expect(seg('collab-artist-mode')).toBe('first');
+    expect(seg('artist-separator')).toBe(', ');
     expect(input('allow-duplicate-tracks').checked).toBe(true);
     expect(input('wishlist-ignore-ttl').value).toBe('30');
     expect(input('reorganize-preserve-casing').checked).toBe(true);
@@ -205,8 +215,8 @@ describe('the card', () => {
       target: { value: '$albumartist/$album/$title' },
     });
     fireEvent.click(input('unicode-substitution'));
-    fireEvent.change(input('collab-artist-mode'), { target: { value: 'all' } });
-    fireEvent.change(input('artist-separator'), { target: { value: '; ' } });
+    pick('collab-artist-mode', 'all');
+    pick('artist-separator', '; ');
     fireEvent.click(input('feat-in-title'));
     fireEvent.click(input('wishlist-wing-it-guesses'));
     fireEvent.change(input('wishlist-ignore-ttl'), { target: { value: '900' } });
@@ -240,26 +250,49 @@ describe('the card', () => {
     expect(saved().wishlist?.ignore_ttl_days).toBe(30);
   });
 
-  it('a template that would not work holds every save back, and the page save hears why', async () => {
+  it('a template that would not work is marked on its own field and named in the save status', async () => {
     const host = createSettingsHost({ store, tabs: { library: LibraryTab }, effects: [] });
     act(() => store.hydrate({ file_organization: {} }));
     card();
+    const row = (id: string) => input(id).closest<HTMLElement>('[data-row]')!;
     fireEvent.change(input('template-album-path'), { target: { value: '$album' } });
     store.set('ui_appearance', 'sidebar_visualizer', 'wave');
+    // it still holds every save back, as the old page refused its whole save
     expect(await store.flush()).toBe(false);
     expect(posted).toEqual([]);
     expect(host.templateErrors()).toEqual([
       'Album template must include at least one folder (use / separator)',
     ]);
+    // ...but now says so on the field, and the save status names the template
+    expect(input('template-album-path').getAttribute('aria-invalid')).toBe('true');
+    expect(row('template-album-path').querySelector('[role="alert"]')!.textContent).toBe(
+      'Album template must include at least one folder (use / separator)',
+    );
+    expect(host.blockers()).toEqual([
+      {
+        message:
+          'The album path template would not work: Album template must include at least one folder (use / separator).',
+      },
+    ]);
+    // two bad templates are two things to fix, each on its own field
+    fireEvent.change(input('template-podcast-path'), { target: { value: '$Show' } });
+    expect(host.blockers()).toHaveLength(2);
+    expect(row('template-podcast-path').querySelector('[role="alert"]')!.textContent).toMatch(
+      /should be lowercase/,
+    );
+    fireEvent.change(input('template-podcast-path'), { target: { value: '$show' } });
     // the playlist file naming rule holds the saves back too
     fireEvent.change(input('template-album-path'), { target: { value: '$albumartist/$album' } });
+    expect(row('template-album-path').querySelector('[role="alert"]')).toBeNull();
     fireEvent.change(input('template-playlist-item'), { target: { value: '$artist' } });
     expect(await store.flush()).toBe(false);
     expect(host.playlistItemError()).toMatch(/must include \$title/);
+    expect(row('template-playlist-item').querySelector('[role="alert"]')!.textContent).toMatch(
+      /must include \$title/,
+    );
     fireEvent.change(input('template-playlist-item'), { target: { value: '' } });
-    fireEvent.change(input('template-album-path'), { target: { value: '$albumartist/$album' } });
     expect(await store.flush()).toBe(true);
-    expect(saved()).toEqual({
+    expect(saved()).toMatchObject({
       file_organization: {
         'templates.album_path': '$albumartist/$album',
         'templates.playlist_item': '',
@@ -268,18 +301,31 @@ describe('the card', () => {
     });
   });
 
-  it('the summary follows the switch and the album template once loaded', () => {
+  it('the old playlist path template shows only when it is what holds the save back', () => {
+    act(() => store.hydrate({ file_organization: {} }));
     card();
-    const summary = () => document.querySelector('[data-stg-summary="library-music-org"]')!;
-    expect(summary().textContent).toBe('File naming templates & reorganize');
-    act(() => store.hydrate({ file_organization: { enabled: false } }));
-    expect(summary().textContent).toBe('organizing off');
-    expect(summary().classList.contains('is-live')).toBe(true);
-    fireEvent.click(input('file-organization-enabled'));
-    expect(summary().textContent).toBe('$albumartist - $album/$track - $title');
+    const row = () => input('template-playlist-path').closest<HTMLElement>('[data-row]')!;
+    expect(row().hidden).toBe(true);
+    act(() => store.hydrate({ file_organization: { templates: { playlist_path: '$playlist' } } }));
+    expect(row().hidden).toBe(false);
+    expect(row().textContent).toContain('no longer used');
   });
 
-  it('Reset writes every default, the audiobook template included', async () => {
+  it('the hero reads the album template back; templates off says so', async () => {
+    act(() => store.hydrate({ file_organization: {} }));
+    card();
+    await waitFor(() =>
+      expect(document.body.textContent).toContain(
+        'An album track is saved as Daft Punk / Daft Punk - Discovery / 01 - One More Time.flac',
+      ),
+    );
+    fireEvent.click(input('file-organization-enabled'));
+    expect(document.body.textContent).toContain(
+      "Custom templates are off, so files keep SoulSync's built-in layout.",
+    );
+  });
+
+  it('Reset asks first, then writes every default, the audiobook template included', async () => {
     act(() =>
       store.hydrate({
         file_organization: {
@@ -288,11 +334,21 @@ describe('the card', () => {
       }),
     );
     card();
+    let answerIs = false;
+    const confirm = vi.fn(() => Promise.resolve(answerIs));
+    shell.showConfirmDialog = confirm;
     fireEvent.change(input('template-audiobook-path'), { target: { value: 'mine' } });
     fireEvent.change(input('template-album-path'), { target: { value: 'typed/$title' } });
-    fireEvent.click(
-      document.querySelector('#organization-music-panel .form-group:last-child button')!,
-    );
+    // kept: nothing changes
+    await act(async () => {
+      fireEvent.click(document.getElementById('file-org-reset')!);
+    });
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(input('template-album-path').value).toBe('typed/$title');
+    answerIs = true;
+    await act(async () => {
+      fireEvent.click(document.getElementById('file-org-reset')!);
+    });
     expect(input('template-audiobook-path').value).toBe('$author/$series/$seriespos - $title');
     expect(input('template-album-path').value).toBe(
       '$albumartist/$albumartist - $album/$track - $title',
@@ -327,7 +383,12 @@ describe('the card', () => {
 });
 
 describe('the path preview', () => {
-  const slot = (id: string) => input(id).nextElementSibling as HTMLElement;
+  /** what is drawn under a field: its "Saves as" folders and file, or a note */
+  const slot = (id: string) => input(id).closest<HTMLElement>('[data-row]')!;
+  const crumbs = (id: string) =>
+    [...slot(id).querySelectorAll('[data-template-preview] > span:not([aria-hidden])')].map(
+      (el) => el.textContent,
+    );
 
   it('renders each template once loaded, with its notes, and follows typing', async () => {
     card();
@@ -339,38 +400,30 @@ describe('the path preview', () => {
       templates: { album_path: '$albumartist/$albumartist - $album/$track - $title' },
       settings: { auto_disambiguation: true, collab_artist_mode: 'first', disc_label: 'CD' },
     });
+    // the folders, then the file
     await waitFor(() =>
-      expect(slot('template-album-path').textContent).toBe(
-        'Daft Punk/Daft Punk - Discovery/01 - One More Time.flac',
-      ),
-    );
-    const album = slot('template-album-path');
-    expect(album.className).toBe('path-preview');
-    expect([...album.querySelectorAll('code > span')].map((s) => s.className)).toEqual([
-      'path-preview-folder',
-      'path-preview-sep',
-      'path-preview-folder',
-      'path-preview-sep',
-      'path-preview-file',
-    ]);
-    expect(album.querySelector('code')!.title).toBe(
-      'Daft Punk/Daft Punk - Discovery/01 - One More Time.flac',
+      expect(crumbs('template-album-path')).toEqual([
+        'Daft Punk',
+        'Daft Punk - Discovery',
+        '01 - One More Time.flac',
+      ]),
     );
     // a single the source calls one gets the album-template line under it
-    expect(slot('template-single-path').querySelectorAll('.path-preview-row')).toHaveLength(2);
     expect(slot('template-single-path').textContent).toContain(
       'A release the source calls a single uses the album template until you change this one',
     );
-    expect(slot('disc-label').textContent).toContain('Disc 2 of a two-disc album');
-    expect(slot('template-compilation-path').textContent).toBe('bad template');
-    expect(slot('template-video-path').textContent).toBe('Nothing to preview');
+    expect(document.querySelector('[data-disc-preview]')!.textContent).toBe(
+      'Disc 2 of a two-disc album is saved in Daft Punk / Daft Punk - Discovery / Disc 2 /',
+    );
+    expect(slot('template-compilation-path').textContent).toContain('bad template');
+    expect(slot('template-video-path').textContent).toContain('Nothing to preview');
 
     fireEvent.change(input('template-album-path'), { target: { value: '$album/$title' } });
     await waitFor(() => expect(previews).toHaveLength(2));
     expect((previews[1].templates as Record<string, string>).album_path).toBe('$album/$title');
   });
 
-  it('the scenario is remembered and asked for; organizing off hides it all', async () => {
+  it('the example is remembered and asked for; organizing off hides it all', async () => {
     act(() => store.hydrate({ file_organization: {} }));
     card();
     await waitFor(() => expect(previews).toHaveLength(1));
@@ -382,8 +435,8 @@ describe('the path preview', () => {
     expect(multidisc.getAttribute('aria-checked')).toBe('true');
 
     fireEvent.click(input('file-organization-enabled'));
-    expect(document.getElementById('path-preview-scenarios')!.hidden).toBe(true);
-    expect(slot('template-album-path').hidden).toBe(true);
+    expect(document.getElementById('path-preview-scenarios-row')!.hidden).toBe(true);
+    expect(slot('template-album-path').querySelector('[data-template-preview]')).toBeNull();
     await new Promise((done) => setTimeout(done, 20));
     expect(previews).toHaveLength(2);
   });
@@ -393,10 +446,7 @@ describe('the path preview', () => {
     act(() => store.hydrate({ file_organization: {} }));
     card();
     await waitFor(() =>
-      expect(slot('template-sample-path').textContent).toBe('Preview unavailable: boom'),
-    );
-    expect(slot('template-sample-path').firstElementChild!.className).toBe(
-      'path-preview-row path-preview-error',
+      expect(slot('template-sample-path').textContent).toContain('Preview unavailable: boom'),
     );
   });
 });

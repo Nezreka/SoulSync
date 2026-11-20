@@ -93,8 +93,8 @@ The chain editor lives on the Downloads tab: drag sources from **Available** int
 
 ## Paths
 
-- **Download Folder (input)** — where new downloads land before processing. Match this to your slskd download folder.
-- **Music Library Folder (output)** — your finished, organized library, filed into Artist/Album folders.
+- **Download folder** — where new downloads land before processing. Match this to your slskd download folder.
+- **Music library folder** — your finished, organized library, filed into Artist/Album folders.
 - **Import Folder** — the folder the import watcher scans for files to bring in.
 
 > [!WARNING]

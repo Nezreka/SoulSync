@@ -79,8 +79,8 @@ _DOCS_N = {p.name: _norm(p.read_text(encoding="utf-8")) for p in sorted(_DOCS_DI
 LABELS: list[tuple[str, str]] = [
     # Field labels
     ("Import Folder", "10-import-player.js"),
-    ("Download Folder (input)", "11-settings.js"),
-    ("Music Library Folder (output)", "11-settings.js"),
+    ("Download folder", "11-settings.js"),
+    ("Music library folder", "11-settings.js"),
     ("Plex Server URL", "11-settings.js"),
     ("Link to Plex", "11-settings.js"),
     ("Jellyfin Server URL", "11-settings.js"),

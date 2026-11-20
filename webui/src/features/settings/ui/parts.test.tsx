@@ -329,7 +329,7 @@ describe('fields', () => {
       />,
     );
     expect(document.querySelector('[data-template-preview]')?.textContent).toBe(
-      'Saves asBurialUntrue01 Archangel.flac',
+      'Saves asBurial/Untrue/01 Archangel.flac',
     );
     rerender(
       <TemplateField

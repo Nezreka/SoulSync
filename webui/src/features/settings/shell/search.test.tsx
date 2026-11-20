@@ -28,8 +28,8 @@ const PAGE = `
     <div class="form-group"><label>Cleanup scope:</label>
       <select id="made-up-scope"><option value="own" selected>Only SoulSync's own transfers</option></select></div>
   </div>
-  <div class="settings-section-header" data-stg="library"><h3>Post-Processing</h3></div>
-  <div class="settings-section-body collapsed" data-stg="library">
+  <div class="settings-section-header" data-stg="appearance"><h3>Post-Processing</h3></div>
+  <div class="settings-section-body collapsed" data-stg="appearance">
     <div class="form-group" data-video-only><label>Video only thing</label><input type="text" id="vo"></div>
     <div class="form-group"><label>Write multi-artist tags</label><input type="checkbox" id="made-up-tags"></div>
   </div>
@@ -64,7 +64,7 @@ describe('what it finds', () => {
       open: { source: 'soulseek' },
     });
     // a folded section of a tab not rebuilt yet
-    expect(find(index, 'Write multi-artist tags').path).toBe('Library › Post-Processing');
+    expect(find(index, 'Write multi-artist tags').path).toBe('Appearance › Post-Processing');
     // old tab keys are where their content went
     expect(find(index, 'Follow the made-up log')).toMatchObject({
       path: 'System › Logs',

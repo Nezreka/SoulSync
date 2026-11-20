@@ -1,6 +1,5 @@
 /**
- * The Folders card's Video panel (SETTINGS_PORT.md, video pass V2a): the
- * markup it replaced, the load (once, the first time the Library tab or the
+ * Library > Folders, Video (settings-bic phase 4): the load (once, the first time the Library tab or the
  * video settings page is shown, with a retry when it fails), each folder
  * saved whole into the video downloads config when it is left, the extra
  * folders, the 4K switches and their locks, and the Docker lines. The cases
@@ -10,8 +9,8 @@
 import { act, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { shape, vanilla } from './__fixtures__/shape';
 import {
+  VideoFoldersHero,
   VideoFoldersPanel,
   composeLines,
   drivePrefix,
@@ -79,6 +78,8 @@ afterEach(() => {
 });
 
 const el = (id: string) => document.getElementById(id) as HTMLInputElement;
+const lockOf = (id: string) =>
+  el(id).parentElement!.querySelector<HTMLButtonElement>('[data-lock]')!;
 const posts = () =>
   calls
     .filter((c) => c.method === 'POST' && c.url === '/api/video/downloads/config')
@@ -88,7 +89,13 @@ function typeAndLeave(input: HTMLInputElement, value: string) {
   fireEvent.input(input, { target: { value } });
   input.dispatchEvent(new Event('change', { bubbles: true }));
 }
-const panel = () => render(<VideoFoldersPanel hidden={false} docker={null} settingsLoaded />);
+const panel = () =>
+  render(
+    <>
+      <VideoFoldersHero />
+      <VideoFoldersPanel hidden={false} docker={null} />
+    </>,
+  );
 async function shown() {
   act(() => {
     document.dispatchEvent(new CustomEvent('soulsync:library-settings-shown'));
@@ -97,11 +104,17 @@ async function shown() {
   await waitFor(() => expect(el('video-movies-path').disabled).toBe(false));
 }
 
-describe('the panel is the markup it replaced', () => {
-  it('before the video folders load', () => {
-    const { container } = render(<VideoFoldersPanel hidden={false} docker={null} />);
-    const old = vanilla('video-folders.vanilla.html');
-    expect(shape(container)).toEqual(shape(old));
+describe('the deployment guides', () => {
+  it('follow the deployment; both show until the settings load', () => {
+    const guide = (k: string) =>
+      (document.querySelector(`#folders-video-panel [data-paths-guide="${k}"]`) as HTMLElement)
+        .hidden;
+    const { rerender } = render(<VideoFoldersPanel hidden={false} docker={null} />);
+    expect([guide('docker'), guide('native')]).toEqual([false, false]);
+    rerender(<VideoFoldersPanel hidden={false} docker={false} />);
+    expect([guide('docker'), guide('native')]).toEqual([true, false]);
+    rerender(<VideoFoldersPanel hidden={false} docker />);
+    expect([guide('docker'), guide('native')]).toEqual([false, true]);
   });
 });
 
@@ -114,11 +127,11 @@ describe('the load', () => {
       document.dispatchEvent(new CustomEvent('soulsync:library-settings-shown'));
     });
     expect(el('video-movies-path').disabled).toBe(true);
-    expect(document.querySelector('.stg-library-load-status')!.textContent).toBe(
+    expect(document.querySelector('#folders-video-panel [role="status"]')!.textContent).toBe(
       'Loading saved video settings...',
     );
     await shown();
-    expect(document.querySelector('.stg-library-load-status')).toBeNull();
+    expect(document.body.textContent).not.toContain('Loading saved video settings...');
     expect(el('video-download-path').value).toBe('/downloads');
     expect(document.querySelector('#folders-video-panel')!.getAttribute('aria-busy')).toBe('false');
     expect(calls.filter((c) => c.url === '/api/video/downloads/config')).toHaveLength(1);
@@ -138,9 +151,6 @@ describe('the load', () => {
     });
     expect(calls.filter((c) => c.url === '/api/video/downloads/config')).toHaveLength(1);
     expect(el('video-movies-path').value).toBe('/unsaved');
-    expect(document.querySelector('[data-stg-summary]')!.textContent).toBe(
-      '3 of 3 libraries set · 2 additional',
-    );
   });
 
   it('a failed load keeps the controls off and offers a retry', async () => {
@@ -150,7 +160,7 @@ describe('the load', () => {
       document.dispatchEvent(new CustomEvent('soulsync:library-settings-shown'));
     });
     await waitFor(() => expect(document.querySelector('.stg-library-retry')).not.toBeNull());
-    expect(document.querySelector('.stg-library-load-status')!.textContent).toBe(
+    expect(document.querySelector('#folders-video-panel [role="status"]')!.textContent).toBe(
       'Could not load saved video settings. Retry',
     );
     expect(el('video-movies-path').disabled).toBe(true);
@@ -205,11 +215,15 @@ describe('the folders', () => {
       expect(posts().at(-1)?.movies_additional_paths).toEqual(['/movies2', '/movies3']),
     );
     expect(posts().at(-1)?.tv_additional_paths).toEqual(['/tv2']);
-    fireEvent.click(document.querySelector('#video-movies-additional-paths button')!);
+    fireEvent.click(
+      document.querySelector(
+        '#video-movies-additional-paths button[aria-label="Remove /movies2"]',
+      )!,
+    );
     await waitFor(() => expect(posts().at(-1)?.movies_additional_paths).toEqual(['/movies3']));
   });
 
-  it("removing a folder takes its own row and status line, not the last one's", async () => {
+  it("removing a folder takes its own row and check, not the last one's", async () => {
     answers['GET /api/video/downloads/config'] = {
       ...CONFIG,
       movies_additional_paths: ['/a', '/b', '/c'],
@@ -217,26 +231,28 @@ describe('the folders', () => {
     panel();
     await shown();
     const list = document.getElementById('video-movies-additional-paths')!;
-    // folder-check.js puts a status line after each row
-    for (const row of list.querySelectorAll('[data-folder-row]')) {
-      const line = document.createElement('div');
-      line.className = 'folder-check';
-      line.textContent = `status ${(row.querySelector('input') as HTMLInputElement).value}`;
-      row.after(line);
+    // folder-check.js tells each row its answer; the row draws it
+    for (const input of list.querySelectorAll<HTMLInputElement>('input')) {
+      act(() => {
+        input.dispatchEvent(
+          new CustomEvent('ss:folder-check', {
+            detail: { tone: 'ok', text: `status ${input.value}` },
+          }),
+        );
+      });
     }
     fireEvent.click(list.querySelector('[data-folder-row] button')!);
     await waitFor(() => expect(list.querySelectorAll('[data-folder-row]')).toHaveLength(2));
-    // each row is still followed by its own status line
+    // each row still shows its own check
     expect(
       [...list.querySelectorAll('[data-folder-row]')].map((row) => [
         (row.querySelector('input') as HTMLInputElement).value,
-        row.nextElementSibling?.textContent,
+        row.querySelector('[data-folder-line]')?.textContent,
       ]),
     ).toEqual([
       ['/b', 'status /b'],
       ['/c', 'status /c'],
     ]);
-    expect([...list.querySelectorAll('input')].map((i) => i.value)).toEqual(['/b', '/c']);
   });
 
   it('a 4K folder shows only while its switch is on; switched off it keeps its path', async () => {
@@ -267,16 +283,12 @@ describe('the folders', () => {
     panel();
     for (const id of ['download', 'movies', 'tv', 'anime', 'youtube', 'movies-4k', 'tv-4k']) {
       expect(el(`video-${id}-path`).readOnly).toBe(true);
-      expect(
-        el(`video-${id}-path`).closest('.path-input-group')!.querySelector('button')!.textContent,
-      ).toBe('Unlock');
+      expect(lockOf(`video-${id}-path`).textContent).toBe('Unlock');
     }
     await shown();
     fireEvent.click(el('video-tv-4k-enabled'));
     expect(el('video-tv-4k-path').readOnly).toBe(false);
-    expect(
-      el('video-tv-4k-path').closest('.path-input-group')!.querySelector('button')!.textContent,
-    ).toBe('Lock');
+    expect(lockOf('video-tv-4k-path').textContent).toBe('Lock');
   });
 
   it('lists a Docker volume line for each folder that is set', async () => {
@@ -290,6 +302,23 @@ describe('the folders', () => {
     expect(pre.textContent).toContain('/path/on/your/machine/movies2:/movies2');
     // the TV 4K folder is off, so it has no line
     expect(pre.textContent).not.toContain('tv-4k');
+  });
+
+  it('the hero says where downloads land and where each kind goes', async () => {
+    panel();
+    expect(document.body.textContent).toContain('Loading the video folders.');
+    await shown();
+    expect(document.body.textContent).toContain(
+      'Downloads land in /downloads. Movies go to /movies and TV shows to /tv.',
+    );
+    expect(document.body.textContent).toContain('3 of 3');
+  });
+
+  it('the video minimum free disk space sits beside the download folder', () => {
+    panel();
+    const row = el('vo-min-free').closest('[data-row]')!;
+    expect(row.textContent).toContain('Minimum free disk space');
+    expect(row.parentElement!.contains(el('video-download-path'))).toBe(true);
   });
 });
 
@@ -327,7 +356,7 @@ describe('the import folder (#2129)', () => {
     expect(el('video-import-folder-path').readOnly).toBe(true);
     // its own endpoint, never the downloads config
     expect(posts()).toEqual([]);
-    fireEvent.click(el('video-import-folder-path').nextElementSibling!);
+    fireEvent.click(lockOf('video-import-folder-path'));
     expect(el('video-import-folder-path').readOnly).toBe(false);
     typeAndLeave(el('video-import-folder-path'), '/drop');
     await waitFor(() => expect(sent()).toEqual([{ path: '/drop', auto: true }]));

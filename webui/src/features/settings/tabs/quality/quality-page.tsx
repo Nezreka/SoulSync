@@ -16,6 +16,7 @@ import type { SettingsTabProps } from '../../host';
 
 import { useNav } from '../../nav';
 import { ViewPanel } from '../downloads/downloads-page';
+import { YoutubeFileOptions } from '../library-video-organization';
 import { MusicQualityTab } from '../quality-tab';
 import { VideoQualitySections, YoutubeQuality } from '../video-quality';
 import { markVideoShown, useVideoShown } from '../video-shown';
@@ -62,6 +63,8 @@ export function QualityPage(props: SettingsTabProps) {
       </ViewPanel>
       <ViewPanel tab={TAB} view="youtube" open={view === 'youtube'}>
         <YoutubeQuality shown={shown} />
+        {/* what a YouTube file contains (DESIGN 3.3: from Library) */}
+        <YoutubeFileOptions />
       </ViewPanel>
     </div>
   );

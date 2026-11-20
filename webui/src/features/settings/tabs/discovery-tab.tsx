@@ -21,6 +21,7 @@ import {
   discoverySummaries,
   resolveDiscovery,
 } from './discovery';
+import { M3uExportOptions } from './library-folders';
 import { Section, helpBits, useDraft, useHelp } from './parts';
 import { ImportListsSection } from './video-row-lists';
 
@@ -210,6 +211,8 @@ function Main({ store }: SettingsTabProps) {
             onChange={set('playlist_sync', 'create_backup')}
             inside
           />
+          {/* the M3U path options, from Library > Folders (DESIGN 3.3) */}
+          <M3uExportOptions store={store} />
         </div>
       </Section>
 

@@ -15,7 +15,7 @@ from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parent.parent
 _INDEX = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8")
-# the Folders card is React (SETTINGS_PORT.md step 8a); its copy is checked
+# Library > Folders (settings-bic phase 4); its copy is checked
 # with the whitespace JSX wraps lines with collapsed
 _FOLDERS = (_ROOT / "webui" / "src" / "features" / "settings" / "tabs" / "library-folders.tsx").read_text(
     encoding="utf-8")
@@ -45,18 +45,21 @@ def test_warning_serves_both_audiences_not_just_docker():
 
 
 def test_labels_dropped_the_ambiguous_transfer_language():
-    assert "Download Folder (input):" in _FOLDERS
-    assert "Music Library Folder (output):" in _FOLDERS
+    # sentence case, no colon (settings-bic phase 4); the flow line says which
+    # is the input and which the output
+    assert 'label="Download folder"' in _FOLDERS
+    assert 'label="Music library folder"' in _FOLDERS
+    assert "<b>Download folder</b>" in _FOLDERS and "<b>Music library</b>" in _FOLDERS
     for ui in (_INDEX, _FOLDERS):
         assert "Input Folder (Download Dir):" not in ui
         assert "Output Folder (Music Library):" not in ui
 
 
 def test_extra_libraries_section_stops_being_a_red_herring():
-    assert "<h3>Additional Music Libraries</h3>" in _FOLDERS
+    assert 'title="Additional music libraries"' in _FOLDERS
     for ui in (_INDEX, _FOLDERS):
         assert "<h3>Music Library Paths</h3>" not in ui
-    assert "you don't need to repeat it here" in _FOLDERS_FLAT
+    assert "need to repeat it here" in _FOLDERS_FLAT
 
 
 def test_docs_and_setup_tell_the_same_story():
@@ -67,19 +70,19 @@ def test_docs_and_setup_tell_the_same_story():
 
 
 def test_podcasts_folder_field_present():
-    assert "Podcasts Folder (output):" in _FOLDERS
+    assert 'label="Podcasts folder"' in _FOLDERS
     assert 'id="podcasts-path"' in _FOLDERS
     # behind its Unlock button, like the other folders
-    field = _FOLDERS.split('id="podcasts-path"', 1)[0].rsplit("<LockedPath", 1)[1]
-    # nothing closes between the LockedPath tag and the id: the id is its prop
+    field = _FOLDERS.split('id="podcasts-path"', 1)[0].rsplit("<LibPath", 1)[1]
+    # nothing closes between the LibPath tag and the id: the id is its prop
     assert "/>" not in field and "</" not in field
 
 
 def test_podcast_path_template_field_present():
-    # the Organization card is React (SETTINGS_PORT.md step 8b)
+    # Library > Naming, Podcasts (settings-bic phase 4)
     card = (Path(__file__).resolve().parent.parent / "webui/src/features/settings/tabs"
             / "library-organization.tsx").read_text(encoding="utf-8")
-    assert "<label>Podcast Path Template:</label>" in card
+    assert 'label="Podcast path template"' in card
     assert 'id="template-podcast-path"' in card
     assert 'placeholder="$show/Season $season/$title"' in card
 

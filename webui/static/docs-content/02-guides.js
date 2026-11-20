@@ -135,7 +135,7 @@ Once your services are connected, do these five things to get the most out of So
 :::
 
 > [!TIP]
-> Make sure your **Music Library Folder (output)** points to the same folder your media server monitors — that's how new downloads automatically appear in your library. See [Folder Setup](#gs-folders).
+> Make sure your **Music library folder** points to the same folder your media server monitors — that's how new downloads automatically appear in your library. See [Folder Setup](#gs-folders).
 `
         },
     ]

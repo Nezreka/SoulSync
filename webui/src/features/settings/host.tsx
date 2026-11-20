@@ -24,9 +24,23 @@ import { servicesModel } from './tabs/connections-services';
 import { ConnectionsTab } from './tabs/connections-tab';
 import { DiscoveryTab } from './tabs/discovery-tab';
 import { DownloadsTab } from './tabs/downloads-tab';
-import { LibraryTab } from './tabs/library-folders';
+import { LibraryTab } from './tabs/library/library-page';
 import { LogsTab } from './tabs/logs-tab';
-import { playlistItemError, templateErrors } from './tabs/organization';
+import {
+  type TemplateKey,
+  playlistItemError,
+  templateErrors,
+  templateFieldErrors,
+} from './tabs/organization';
+
+/** a template's name, as its field says it */
+const TEMPLATE_NAMES: Partial<Record<TemplateKey, string>> = {
+  album_path: 'The album path template',
+  single_path: 'The single path template',
+  playlist_path: 'The old playlist path template',
+  podcast_path: 'The podcast path template',
+  sample_path: 'The sample path template',
+};
 import { PeopleTab, openPeopleSettings } from './tabs/people/people-tab';
 import { QualityTab } from './tabs/quality-tab';
 import { sourcesModel } from './tabs/sources-model';
@@ -142,7 +156,14 @@ export function createSettingsHost({
 
   /** where each thing that can hold a save is, so the save status can go there */
   function blockers() {
-    const found: Array<{ message: string; tab: string; id: string; service?: string }> = [];
+    const found: Array<{
+      message: string;
+      tab: string;
+      id: string;
+      service?: string;
+      view?: string;
+      kind?: string;
+    }> = [];
     const mb = mbError();
     if (mb)
       found.push({
@@ -151,15 +172,30 @@ export function createSettingsHost({
         id: 'musicbrainz-base-url',
         service: 'musicbrainz',
       });
-    const templates = errors();
-    if (templates.length)
-      found.push({
-        message: `A naming template would not work: ${templates.join(', ')}.`,
-        tab: 'library',
-        id: 'template-album-path',
-      });
+    // each template that would not work is its own thing to fix, and goes
+    // to its own field (Library > Naming, on its kind)
+    if (tabs.library)
+      for (const [key, problems] of Object.entries(
+        templateFieldErrors(store.getState().settings),
+      )) {
+        const name = TEMPLATE_NAMES[key as TemplateKey] ?? 'A naming template';
+        found.push({
+          message: `${name} would not work: ${(problems ?? []).join('. ')}.`,
+          tab: 'library',
+          view: 'naming',
+          kind: key === 'podcast_path' ? 'podcasts' : 'music',
+          id: `template-${key.replace('_', '-')}`,
+        });
+      }
     const item = itemError();
-    if (item) found.push({ message: item, tab: 'library', id: 'template-playlist-item' });
+    if (item)
+      found.push({
+        message: item,
+        tab: 'library',
+        view: 'naming',
+        kind: 'music',
+        id: 'template-playlist-item',
+      });
     return found;
   }
 
@@ -188,12 +224,15 @@ export function createSettingsHost({
     showBlocker() {
       const first = blockers()[0];
       if (!first) return;
+      // a template's kind first, so its field is the one on screen
+      if (first.view) nav.go(first.tab, first.view, first.kind ? { kind: first.kind } : undefined);
       void landHit({
         key: `blocker:${first.id}`,
         label: first.message,
         path: '',
         words: '',
         tab: resolveTab(first.tab).tab,
+        view: first.view,
         curated: true,
         open: first.service ? { service: first.service } : undefined,
         anchor: { id: first.id },

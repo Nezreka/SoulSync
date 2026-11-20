@@ -11,6 +11,9 @@ import type { SettingsStore } from '../../settings-store';
 
 import { Card, NumberField, Row, Select, Switch } from '../../ui';
 import { CONCURRENCY, STREAM_SOURCES, resolveDownloads, toInt } from '../downloads';
+import { WishlistRules } from '../library-organization';
+import { YoutubeFollowCount } from '../library-video-organization';
+import { MonitorSpecialsRow } from '../library-video-prefs';
 import { useDraft } from '../parts';
 import { useVideoDownloads, videoDownloads } from '../video-downloads';
 
@@ -284,32 +287,41 @@ export function MusicBehaviour({ store }: { store: SettingsStore }) {
           />
         </Row>
       </Card>
+
+      <WishlistRules store={store} />
     </>
   );
 }
 
-/** the video side's rule: a key of the video downloads config, saved at once */
+/** the video side's rules: what happens when a download fails, the specials,
+ *  and the YouTube follow count (each saves at once, or when its field is left) */
 export function VideoBehaviour() {
   const { config } = useVideoDownloads();
   // the config loads with whichever page shows it first (once a page)
   useEffect(() => void videoDownloads.load(), []);
   return (
-    <Card title="When a download fails" hint="Movies and TV. Saves at once.">
-      <Row
-        id="video-redownload-failed-group"
-        label="When a video download fails, grab the next best release"
-        htmlFor="video-redownload-failed"
-        help="A failed or stalled release is blocklisted and the next one your quality profile ranks is grabbed right away."
-        more="This covers torrents and usenet. It stops after 5 failed releases of the same title in 2 days, and you get the failed notification when nothing else could be taken."
-      >
-        <Switch
-          id="video-redownload-failed"
-          checked={config ? config.redownload_failed !== false : true}
-          onChange={(event) =>
-            void videoDownloads.change({ redownload_failed: event.target.checked })
-          }
-        />
-      </Row>
-    </Card>
+    <>
+      <Card title="When a download fails" hint="Movies and TV. Saves at once.">
+        <Row
+          id="video-redownload-failed-group"
+          label="When a video download fails, grab the next best release"
+          htmlFor="video-redownload-failed"
+          help="A failed or stalled release is blocklisted and the next one your quality profile ranks is grabbed right away."
+          more="This covers torrents and usenet. It stops after 5 failed releases of the same title in 2 days, and you get the failed notification when nothing else could be taken."
+        >
+          <Switch
+            id="video-redownload-failed"
+            checked={config ? config.redownload_failed !== false : true}
+            onChange={(event) =>
+              void videoDownloads.change({ redownload_failed: event.target.checked })
+            }
+          />
+        </Row>
+      </Card>
+      <Card title="Monitoring" hint="What is hunted. Saves at once.">
+        <MonitorSpecialsRow />
+      </Card>
+      <YoutubeFollowCount />
+    </>
   );
 }

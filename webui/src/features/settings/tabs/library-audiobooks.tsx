@@ -1,44 +1,61 @@
 /**
- * Library > Audiobooks (SETTINGS_PORT.md, step 8c): the Audiobooks panel of
- * the Folders card (the folder, more folders, the spoken-word artists) and of
- * the Organization card (the template, the recycle bin, quality, downloads and
- * import). Same markup, classes and ids.
+ * The Library tab's Audiobooks kind (settings-bic phase 4): the folders (the
+ * folder, more folders, the spoken-word artists), the naming template, what
+ * happens on import (completeness, staging, chapters, M4B, the wishlist, the
+ * recycle bin) and what is written into a book (tags, covers, sidecars). The
+ * three download options (Audible marketplace, downloader category, Prowlarr
+ * categories) are drawn on Downloads > Sources, Audiobooks (DESIGN 3.3), by
+ * AudiobookDownloadOptions here. Same ids and keys.
  *
- * The audiobook download chain is a settings key (audiobooks.download_source):
- * the chain widget on the Downloads tab reads and writes it through the store
- * (sources-model.ts). The hidden mode select here is the old transport, kept.
+ * The hidden "Audiobook Download Sources" select and its empty hybrid rows
+ * went (DESIGN 3.3): the audiobook order on Downloads writes that key
+ * (audiobooks.download_source, sources-model.ts).
  *
  * audiobooks.quality and audiobooks.download_source are dicts: each key is
  * saved alone as a dotted key, the rest of the dict kept (settings-store.ts).
  */
 
-import { type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useState } from 'react';
 
 import type { SettingsStore } from '../settings-store';
 
-import { HintGroup, int, isDocker, LIBRARY_TAB, LockedPath, useLoadedDraft } from './library-card';
+import {
+  Btn,
+  Card,
+  Items,
+  NumberField,
+  Row,
+  SectionLabel,
+  Select,
+  Switch,
+  TemplateField,
+  TextField,
+} from '../ui';
+import s from '../ui/settings.module.css';
+import {
+  FolderRows,
+  LibHero,
+  LibPath,
+  checkAttrs,
+  int,
+  isDocker,
+  shell,
+  toast,
+  useLoadedDraft,
+  useLoads,
+  useSettings,
+} from './library-card';
+import { useTemplateField } from './library-organization';
+import {
+  audiobookFoldersSentence,
+  audiobookImportSentence,
+  audiobookNamingSentence,
+  audiobookTagsSentence,
+} from './library/words';
+import { templatesOf } from './organization';
 import { text } from './source-panels';
 
-const TAB = LIBRARY_TAB;
 type Section = Record<string, unknown>;
-
-type Shell = Window & {
-  SoulSyncFolderCheck?: { refresh: (group: string) => void };
-  showToast?: (message: string, type?: string) => void;
-  showConfirmDialog?: (options: {
-    title: string;
-    message: string;
-    confirmText: string;
-  }) => Promise<boolean>;
-};
-const shell = () => window as Shell;
-
-function useSettings(store: SettingsStore) {
-  return useSyncExternalStore(store.subscribe, () => store.getState().settings);
-}
-function useLoads(store: SettingsStore) {
-  return useSyncExternalStore(store.subscribe, () => store.getState().loads);
-}
 
 /** the audiobooks folder as loadSettingsData filled it: Docker's own default
  *  replaces the bare './audiobooks' */
@@ -51,121 +68,54 @@ export function audiobooksPath(settings: Record<string, Record<string, unknown> 
     : current || fallback;
 }
 
-const hint = (children: ReactNode) => <small className="settings-hint">{children}</small>;
+const on = (value: unknown) => value !== false;
 
 // ── Folders > Audiobooks ──
 
-/** More audiobook folders (addAudiobookExtraPathRow and friends) */
-function ExtraFolders({ store }: { store: SettingsStore }) {
-  const settings = useSettings(store);
-  const loads = useLoads(store);
-  const [rows, setRows] = useState<string[]>([]);
-  const [focusLast, setFocusLast] = useState(false);
-  const list = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!loads) return;
-    const saved = settings.library?.audiobooks_additional_paths;
-    setRows(Array.isArray(saved) ? saved.map((p) => text(p)) : []);
-  }, [loads]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    if (!focusLast) return;
-    setFocusLast(false);
-    const inputs = list.current?.querySelectorAll<HTMLInputElement>('.audiobook-extra-input');
-    inputs?.[inputs.length - 1]?.focus();
-  }, [focusLast]);
-  const refresh = () => setTimeout(() => shell().SoulSyncFolderCheck?.refresh('audiobooks'), 0);
-  // a list that never loaded is never saved over the stored one
-  const save = (next: string[]) => {
-    if (loads)
-      store.set(
-        'library',
-        'audiobooks_additional_paths',
-        next.map((r) => r.trim()).filter(Boolean),
-      );
-  };
-  return (
-    <>
-      <div id="audiobooks-extra-paths" ref={list}>
-        {rows.map((value, i) => (
-          <div
-            key={i}
-            className="audiobook-extra-row"
-            data-folder-row=""
-            style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '8px' }}
-          >
-            <input
-              type="text"
-              className="audiobook-extra-input"
-              value={value}
-              placeholder="/app/audiobooks2"
-              style={{ flex: '1', minWidth: '0' }}
-              aria-label="Extra audiobook folder"
-              data-folder-check="audiobooks"
-              data-folder-label="Extra audiobook folder"
-              data-folder-role="existing"
-              onChange={(event) => {
-                const next = rows.map((r, k) => (k === i ? event.target.value : r));
-                setRows(next);
-                save(next);
-              }}
-            />
-            <button
-              type="button"
-              className="test-button"
-              aria-label="Remove this folder"
-              onClick={(event) => {
-                // folder-check.js's status line for this row goes with it
-                const status =
-                  event.currentTarget.closest('.audiobook-extra-row')?.nextElementSibling;
-                if (status?.classList.contains('folder-check')) status.remove();
-                const next = rows.filter((_, k) => k !== i);
-                setRows(next);
-                save(next);
-                refresh();
-              }}
-            >
-              ×
-            </button>
-          </div>
-        ))}
-      </div>
-      <button
-        type="button"
-        className="test-button"
-        onClick={() => {
-          setRows([...rows, '']);
-          setFocusLast(true);
-          refresh();
-        }}
-      >
-        + Add folder
-      </button>
-    </>
-  );
-}
-
 type Route = { label?: string; route_key: string };
+
+/** the spoken-word artists, loaded with each settings load (the hero counts them) */
+let routesNow: Route[] | 'error' | null = null;
+const routeListeners = new Set<() => void>();
+function setRoutes(next: Route[] | 'error') {
+  routesNow = next;
+  for (const listener of routeListeners) listener();
+}
+async function loadRoutes() {
+  try {
+    const { artists = [] } = (await (await fetch('/api/audiobook-routes')).json()) as {
+      artists?: Route[];
+    };
+    setRoutes(artists);
+  } catch {
+    setRoutes('error');
+  }
+}
+function useRoutes() {
+  const [, bump] = useState(0);
+  useEffect(() => {
+    const listener = () => bump((n) => n + 1);
+    routeListeners.add(listener);
+    return () => {
+      routeListeners.delete(listener);
+    };
+  }, []);
+  return routesNow;
+}
+/** for tests: the next page asks again */
+export function resetRoutes() {
+  routesNow = null;
+}
 
 /** the spoken-word artists list (loadAudiobookRoutes, audiobookRouteAction) */
 function RoutesList({ store }: { store: SettingsStore }) {
   const loads = useLoads(store);
-  const [routes, setRoutes] = useState<Route[] | 'error' | null>(null);
-
-  async function load() {
-    try {
-      const { artists = [] } = (await (await fetch('/api/audiobook-routes')).json()) as {
-        artists?: Route[];
-      };
-      setRoutes(artists);
-    } catch {
-      setRoutes('error');
-    }
-  }
+  const routes = useRoutes();
   useEffect(() => {
-    if (loads) void load();
-  }, [loads]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (loads) void loadRoutes();
+  }, [loads]);
 
-  async function act(action: string, key: string) {
+  async function act(action: string, key: string, label: string) {
     const url = '/api/audiobook-routes/' + encodeURIComponent(key);
     const call = (path: string, init: RequestInit) =>
       fetch(url + path, init).then(async (r) => {
@@ -185,11 +135,23 @@ function RoutesList({ store }: { store: SettingsStore }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ apply }),
       });
-    const toast = (message: string, type: string) => shell().showToast?.(message, type);
     try {
       if (action === 'remove') {
+        // a route taken off is a choice someone made on an artist's page
+        const confirm = shell().showConfirmDialog;
+        if (confirm) {
+          const ok = await confirm({
+            title: `Stop filing ${label} as audiobooks?`,
+            message:
+              'New downloads by this artist go to the music library again. Albums already moved stay where they are.',
+            confirmText: 'Stop',
+            cancelText: 'Keep it',
+            destructive: true,
+          });
+          if (!ok) return;
+        }
         await call('', { method: 'DELETE' });
-        await load();
+        await loadRoutes();
         return;
       }
       const items = (await post(false)).items || [];
@@ -226,113 +188,448 @@ function RoutesList({ store }: { store: SettingsStore }) {
   return (
     <div id="audiobook-routes-list">
       {routes === 'error' ? (
-        'Could not load the list.'
+        <p className={s.listEmpty}>Could not load the list.</p>
       ) : routes === null ? null : routes.length ? (
-        routes.map((a) => (
-          <div className="abr-row" key={a.route_key}>
-            <span>{a.label || a.route_key}</span>{' '}
-            <button
-              className="test-button"
-              type="button"
-              data-route={a.route_key}
-              data-action="move"
-              onClick={() => void act('move', a.route_key)}
-            >
-              Move existing…
-            </button>{' '}
-            <button
-              className="test-button abr-remove"
-              type="button"
-              data-route={a.route_key}
-              data-action="remove"
-              onClick={() => void act('remove', a.route_key)}
-            >
-              &times;
-            </button>
-          </div>
-        ))
+        <Items>
+          {routes.map((a) => {
+            const label = a.label || a.route_key;
+            return (
+              <div className={s.routeRow} key={a.route_key} data-route-row={a.route_key}>
+                <span className={s.routeName}>{label}</span>
+                <Btn
+                  small
+                  data-route={a.route_key}
+                  data-action="move"
+                  onClick={() => void act('move', a.route_key, label)}
+                >
+                  Move existing…
+                </Btn>
+                <Btn
+                  kind="ghost"
+                  small
+                  iconOnly
+                  icon="x"
+                  data-route={a.route_key}
+                  data-action="remove"
+                  aria-label={`Stop filing ${label} as audiobooks`}
+                  onClick={() => void act('remove', a.route_key, label)}
+                />
+              </div>
+            );
+          })}
+        </Items>
       ) : (
-        <div className="abr-empty">
-          No artists routed. Use “Treat as audiobook” on an artist’s page.
-        </div>
+        <p className={s.listEmpty}>
+          No artists routed. Use &ldquo;Treat as audiobook&rdquo; on an artist&apos;s page.
+        </p>
       )}
     </div>
   );
 }
 
-export function AudiobookFoldersPanel({
-  store,
-  hidden,
-}: {
-  store: SettingsStore;
-  hidden: boolean;
-}) {
+export function AudiobookFoldersHero({ store }: { store: SettingsStore }) {
   const settings = useSettings(store);
   const loads = useLoads(store);
-  const path = loads ? audiobooksPath(settings) : '';
+  const routes = useRoutes();
+  const extra = ((settings.library?.audiobooks_additional_paths as unknown[] | undefined) || [])
+    .map((p) => text(p).trim())
+    .filter(Boolean).length;
   return (
-    <div
-      id="folders-audiobooks-panel"
-      role="tabpanel"
-      aria-labelledby="folders-audiobooks-tab"
-      className="stg-media-panel"
-      hidden={hidden}
-      tabIndex={0}
-    >
-      <div className="stg-media-context">
-        <strong>Audiobook folders</strong>
-        <span className="stg-media-summary">Where finished books live</span>
-      </div>
+    <LibHero
+      parts={
+        loads
+          ? audiobookFoldersSentence({
+              path: audiobooksPath(settings),
+              extra,
+              routed: Array.isArray(routes) ? routes.length : null,
+            })
+          : [{ text: 'Loading your folders.' }]
+      }
+    />
+  );
+}
 
-      <div className="settings-group" data-stg={TAB}>
-        <div className="form-group">
-          <label>Audiobooks Folder (output):</label>
-          <LockedPath
-            loads={loads}
+export function AudiobookFolders({ store }: { store: SettingsStore }) {
+  const settings = useSettings(store);
+  const loads = useLoads(store);
+  const [rows, setRows] = useState<string[]>([]);
+  useEffect(() => {
+    if (!loads) return;
+    const saved = settings.library?.audiobooks_additional_paths;
+    setRows(Array.isArray(saved) ? saved.map((p) => text(p)) : []);
+  }, [loads]); // eslint-disable-line react-hooks/exhaustive-deps
+  // a list that never loaded is never saved over the stored one
+  const save = (next: string[]) => {
+    setRows(next);
+    if (loads)
+      store.set(
+        'library',
+        'audiobooks_additional_paths',
+        next.map((r) => r.trim()).filter(Boolean),
+      );
+  };
+  return (
+    <>
+      <Card>
+        <Row
+          wide
+          label="Audiobooks folder"
+          htmlFor="audiobooks-path"
+          help="Where downloaded audiobooks are saved and organized."
+          more="Keep it apart from your music library so a media server does not index chapter files as albums."
+        >
+          <LibPath
+            store={store}
             id="audiobooks-path"
-            check={{ 'data-folder-check': 'audiobooks', 'data-folder-label': 'Audiobooks folder' }}
+            check={checkAttrs('audiobooks', 'Audiobooks folder')}
             placeholder={loads && isDocker(settings) ? '/app/audiobooks' : './audiobooks'}
-            value={path}
+            value={loads ? audiobooksPath(settings) : ''}
             onChange={(v) => {
               // one folder, saved under both keys, as the collector did
               store.set('audiobooks', 'download_path', v || './audiobooks');
               store.set('library', 'audiobooks_path', v || './audiobooks');
             }}
           />
-          {hint(
-            'Where downloaded audiobooks are saved and organized. Keep this separate from your music library so a media server does not index chapter files as albums.',
-          )}
-        </div>
-        <div className="form-group">
-          <label>More audiobook folders:</label>
-          <ExtraFolders store={store} />
-          {hint(
-            "An existing collection on another drive. SoulSync scans and manages it, but new books always land in the folder above. In Docker, mount it at its own container path, like /app/audiobooks2. If a drive is unplugged, its books stay in your library until it's back.",
-          )}
-        </div>
-      </div>
+        </Row>
+        <Row
+          stack
+          label="More audiobook folders"
+          help="An existing collection on another drive. SoulSync scans and manages it; new books always land in the folder above."
+          more="In Docker, mount it at its own container path, like /app/audiobooks2. If a drive is unplugged, its books stay in your library until it's back."
+        >
+          <FolderRows
+            id="audiobooks-extra-paths"
+            rows={rows}
+            onRows={save}
+            placeholder="/app/audiobooks2"
+            itemLabel="Extra audiobook folder"
+            check={checkAttrs('audiobooks', 'Extra audiobook folder', 'existing')}
+          />
+        </Row>
+      </Card>
 
-      <div className="settings-group">
-        <div className="form-group">
-          <label>Spoken-word artists (music downloads filed as audiobooks):</label>
+      <SectionLabel
+        title="Spoken-word artists"
+        hint="Music downloads by these artists are filed as audiobooks"
+      />
+      <Card>
+        <div className={s.cardPad}>
           <RoutesList store={store} />
-          {hint(
-            <>
-              Children's audio plays and similar releases are found by the music search, not the
-              audiobook search. Downloads by the artists listed here are filed in the audiobooks
-              folder above instead of the music library, and count as owned so playlist syncs do not
-              fetch them again. Add an artist with <strong>Treat as audiobook</strong> on the
-              artist's page or in the watchlist settings. Routing only affects new downloads;{' '}
-              <em>Move existing…</em> relocates albums already in the music library.
-            </>,
-          )}
         </div>
-      </div>
-    </div>
+        <p className={s.cardFoot}>
+          Children&apos;s audio plays and similar releases are found by the music search, not the
+          audiobook search. Downloads by the artists here go to the audiobooks folder instead of the
+          music library, and count as owned so playlist syncs don&apos;t fetch them again. Add one
+          with <strong>Treat as audiobook</strong> on the artist&apos;s page or in the watchlist
+          settings. Only new downloads follow; <em>Move existing…</em> moves albums already in the
+          music library.
+        </p>
+      </Card>
+    </>
   );
 }
 
-// ── Organization > Audiobooks ──
+// ── Naming > Audiobooks ──
+
+export function AudiobookNamingHero({ store }: { store: SettingsStore }) {
+  const settings = useSettings(store);
+  const loads = useLoads(store);
+  return (
+    <LibHero
+      parts={
+        loads
+          ? audiobookNamingSentence(templatesOf(settings).audiobook_path)
+          : [{ text: 'Loading your naming templates.' }]
+      }
+    />
+  );
+}
+
+export function AudiobookNaming({ store }: { store: SettingsStore }) {
+  const field = useTemplateField(store, 'audiobook_path');
+  return (
+    <Card>
+      <Row
+        stack
+        label="Audiobook path template"
+        htmlFor="template-audiobook-path"
+        help="A book with no series drops the series folder and its number cleanly."
+        more={
+          <>
+            Variables: <code>$author</code>, <code>$authorletter</code>, <code>$narrator</code>,{' '}
+            <code>$title</code>, <code>$series</code>, <code>$seriespos</code> (01),{' '}
+            <code>$year</code>, <code>$asin</code>. Default:{' '}
+            <code>$author/$series/$seriespos - $title</code>. Use <code>{'${var}'}</code> to put
+            text right after a variable.
+          </>
+        }
+      >
+        <TemplateField
+          id="template-audiobook-path"
+          placeholder="$author/$series/$seriespos - $title"
+          value={field.value}
+          onChange={field.onChange}
+        />
+      </Row>
+    </Card>
+  );
+}
+
+// ── Import and files > Audiobooks ──
+
+function useAudiobookImport(store: SettingsStore) {
+  const settings = useSettings(store);
+  const ab = (settings.audiobooks || {}) as Section;
+  const percent = Math.round(
+    (typeof ab.completeness_tolerance === 'number' ? ab.completeness_tolerance : 0.92) * 100,
+  );
+  return { ab, percent };
+}
+
+export function AudiobookImportHero({ store }: { store: SettingsStore }) {
+  const loads = useLoads(store);
+  const { ab, percent } = useAudiobookImport(store);
+  return (
+    <LibHero
+      parts={
+        loads
+          ? audiobookImportSentence({
+              percent,
+              days: int(text(ab.staging_days ?? 7), 7),
+              merge: ab.merge_m4b === true,
+            })
+          : [{ text: 'Loading.' }]
+      }
+    />
+  );
+}
+
+export function AudiobookImport({ store }: { store: SettingsStore }) {
+  const { ab, percent } = useAudiobookImport(store);
+  const set = (key: string, value: unknown) => store.set('audiobooks', key, value);
+  const tolerance = useLoadedDraft(store, text(percent), (raw) =>
+    set('completeness_tolerance', Math.min(1, Math.max(0.1, int(raw, 92) / 100))),
+  );
+  const staging = useLoadedDraft(store, text(ab.staging_days ?? 7), (raw) =>
+    set('staging_days', Math.min(90, Math.max(1, int(raw, 7)))),
+  );
+  const keepDays = useLoadedDraft(store, text(ab.recycle_keep_days ?? 7), (raw) =>
+    set('recycle_keep_days', Math.min(365, Math.max(0, int(raw, 0)))),
+  );
+  const recycle = on(ab.recycle_deletes);
+  return (
+    <>
+      <Card title="When a book arrives">
+        <Row
+          field
+          label="Import when the runtime reaches"
+          htmlFor="audiobook-completeness-tolerance"
+          help="How much of Audible's runtime has to be on disk before a book is filed into your library. Short books wait in staging, never failed outright."
+          more={
+            <>
+              A download client says &ldquo;complete&rdquo; when the files it was <em>asked</em> for
+              finished, which is not the same as the book being whole, and a book missing its last
+              chapters plays perfectly until you run out of it. Default: <code>92</code>
+            </>
+          }
+        >
+          <NumberField
+            id="audiobook-completeness-tolerance"
+            min="10"
+            max="100"
+            step="1"
+            placeholder="92"
+            unit="%"
+            value={tolerance.value}
+            onChange={(event) => tolerance.onChange(event.target.value)}
+          />
+        </Row>
+        <Row
+          field
+          label="Give up on a short book after"
+          htmlFor="audiobook-staging-days"
+          help="How long an incomplete book waits in staging before it fails and goes back to the wishlist."
+          more={
+            <>
+              Torrents finish late and uploaders repair releases, so patience is right here; forever
+              would mean one broken release holds a wishlist row for good. Default: <code>7</code>
+            </>
+          }
+        >
+          <NumberField
+            id="audiobook-staging-days"
+            min="1"
+            max="90"
+            step="1"
+            placeholder="7"
+            unit="days"
+            value={staging.value}
+            onChange={(event) => staging.onChange(event.target.value)}
+          />
+        </Row>
+        <Row
+          label="Renumber chapter files on import"
+          htmlFor="audiobook-renumber-chapters"
+          help="Chapter files arrive named however the uploader left them; a book whose files sort wrong plays wrong."
+          more="On by default. Turn it off only if you trust your releases' own numbering."
+        >
+          <Switch
+            id="audiobook-renumber-chapters"
+            checked={on(ab.renumber_chapters)}
+            onChange={(event) => set('renumber_chapters', event.target.checked)}
+          />
+        </Row>
+        <Row
+          label="Merge multi-file books into one M4B on import"
+          htmlFor="audiobook-merge-m4b"
+          help="A book in many files becomes one .m4b with a chapter marker per file. Needs ffmpeg on the server."
+          more="Off by default. The Docker image ships ffmpeg. The originals are only removed after the merged file checks out, so a failed merge never loses the book."
+        >
+          <Switch
+            id="audiobook-merge-m4b"
+            checked={ab.merge_m4b === true}
+            onChange={(event) => set('merge_m4b', event.target.checked)}
+          />
+        </Row>
+        <Row
+          label="Remove books from the wishlist once they're in the library"
+          htmlFor="audiobook-remove-owned-from-wishlist"
+          help={
+            'Off by default: a book you have stays on the wishlist, marked "In library". On drops it, the way the music wishlist does.'
+          }
+        >
+          <Switch
+            id="audiobook-remove-owned-from-wishlist"
+            checked={ab.remove_owned_from_wishlist === true}
+            onChange={(event) => set('remove_owned_from_wishlist', event.target.checked)}
+          />
+        </Row>
+      </Card>
+
+      <Card title="Deleting">
+        <Row
+          label="Recycle deleted audiobooks"
+          htmlFor="audiobook-recycle-deletes"
+          help="A deleted book moves to a hidden .deleted folder in your audiobook library, so a mis-click can be undone."
+          more="The folder is hidden so Audiobookshelf, Plex and Jellyfin don't keep showing books you removed. The space is freed when the bin is emptied. Off, deletes are permanent at once."
+        >
+          <Switch
+            id="audiobook-recycle-deletes"
+            checked={recycle}
+            onChange={(event) => set('recycle_deletes', event.target.checked)}
+          />
+        </Row>
+        <Row
+          sub
+          field
+          off={!recycle}
+          label="Empty the recycle bin after"
+          htmlFor="audiobook-recycle-keep-days"
+          help="How long a deleted book can be brought back before the daily cleanup erases it. 0 turns the bin off."
+          more={
+            <>
+              0 does not mean &ldquo;erase everything now&rdquo;: that would destroy what was
+              recycled while the bin was still on. Default: <code>7</code>
+            </>
+          }
+        >
+          <NumberField
+            id="audiobook-recycle-keep-days"
+            min="0"
+            max="365"
+            step="1"
+            placeholder="7"
+            unit="days"
+            value={keepDays.value}
+            onChange={(event) => keepDays.onChange(event.target.value)}
+          />
+        </Row>
+      </Card>
+    </>
+  );
+}
+
+// ── Tags and artwork > Audiobooks ──
+
+export function AudiobookTagsHero({ store }: { store: SettingsStore }) {
+  const settings = useSettings(store);
+  const loads = useLoads(store);
+  const ab = (settings.audiobooks || {}) as Section;
+  return (
+    <LibHero
+      parts={
+        loads
+          ? audiobookTagsSentence({
+              tags: on(ab.embed_metadata),
+              embed: on(ab.embed_artwork),
+              cover: on(ab.save_artwork),
+              sidecars: on(ab.write_nfo),
+            })
+          : [{ text: 'Loading.' }]
+      }
+    />
+  );
+}
+
+export function AudiobookTags({ store }: { store: SettingsStore }) {
+  const settings = useSettings(store);
+  const ab = (settings.audiobooks || {}) as Section;
+  const set = (key: string, value: unknown) => store.set('audiobooks', key, value);
+  return (
+    <Card>
+      <Row
+        label="Write tags into audiobook files"
+        htmlFor="audiobook-embed-metadata"
+        help="Title, author, series and narrator go into each file on import. The narrator goes in COMPOSER, as every audiobook server expects."
+        more={
+          'Without this a book keeps whatever the uploader\'s ripper wrote, which is usually chapter 4 of a 27-hour book tagged as a track on an album called "audiobook".'
+        }
+      >
+        <Switch
+          id="audiobook-embed-metadata"
+          checked={on(ab.embed_metadata)}
+          onChange={(event) => set('embed_metadata', event.target.checked)}
+        />
+      </Row>
+      <Row
+        label="Embed cover art in audiobook files"
+        htmlFor="audiobook-embed-artwork"
+        help="The cover goes into every chapter file. A cover the release shipped is used first, so this works offline."
+      >
+        <Switch
+          id="audiobook-embed-artwork"
+          checked={on(ab.embed_artwork)}
+          onChange={(event) => set('embed_artwork', event.target.checked)}
+        />
+      </Row>
+      <Row
+        label="Save cover.jpg beside audiobooks"
+        htmlFor="audiobook-save-artwork"
+        help="Plex, Jellyfin, Audiobookshelf and Booksonic all read it from the book folder."
+      >
+        <Switch
+          id="audiobook-save-artwork"
+          checked={on(ab.save_artwork)}
+          onChange={(event) => set('save_artwork', event.target.checked)}
+        />
+      </Row>
+      <Row
+        label="Write audiobook metadata sidecars"
+        htmlFor="audiobook-write-nfo"
+        help="metadata.opf (Audiobookshelf, Plex, Calibre) and book.nfo (Kodi, Jellyfin, Emby)."
+        more="Both, because the servers disagree about which to look for, and they are a few hundred bytes each. They also carry the ASIN, which lets the daily library scan recognise a book you imported months ago."
+      >
+        <Switch
+          id="audiobook-write-nfo"
+          checked={on(ab.write_nfo)}
+          onChange={(event) => set('write_nfo', event.target.checked)}
+        />
+      </Row>
+    </Card>
+  );
+}
+
+// ── Downloads > Sources > Audiobooks: where books come from ──
 
 const MARKETS: Array<[string, string]> = [
   ['us', 'United States (audible.com)'],
@@ -347,30 +644,10 @@ const MARKETS: Array<[string, string]> = [
   ['jp', 'Japan (audible.co.jp)'],
 ];
 
-/** the format and layout switches: Quality > Audiobooks has them now */
-export { qualitySwitches } from './quality/audiobooks-view';
-
-export function AudiobookOrganizationPanel({
-  store,
-  hidden,
-  template,
-}: {
-  store: SettingsStore;
-  hidden: boolean;
-  /** the audiobook template field: the card owns every template (Reset) */
-  template: { value: string; onChange: (event: { target: { value: string } }) => void };
-}) {
+export function AudiobookDownloadOptions({ store }: { store: SettingsStore }) {
   const settings = useSettings(store);
   const loads = useLoads(store);
   const ab = (settings.audiobooks || {}) as Section;
-  const source = (ab.download_source || {}) as Section;
-  const mode = text(source.mode) || 'hybrid';
-  const set = (key: string, value: unknown) => store.set('audiobooks', key, value);
-  const on = (value: unknown) => value !== false;
-
-  const keepDays = useLoadedDraft(store, text(ab.recycle_keep_days ?? 7), (raw) =>
-    set('recycle_keep_days', Math.min(365, Math.max(0, int(raw, 0)))),
-  );
   const category = useLoadedDraft(store, text(ab.torrent_category) || 'audiobooks', (raw) => {
     // one category covers both clients, as before
     const value = raw.trim() || 'audiobooks';
@@ -382,7 +659,8 @@ export function AudiobookOrganizationPanel({
       .map((c) => text(c))
       .join(', '),
     (raw) =>
-      set(
+      store.set(
+        'audiobooks',
         'prowlarr_categories',
         raw
           .split(',')
@@ -392,332 +670,57 @@ export function AudiobookOrganizationPanel({
           .filter((n) => Number.isFinite(n)),
       ),
   );
-  const tolerance = useLoadedDraft(
-    store,
-    text(
-      Math.round(
-        (typeof ab.completeness_tolerance === 'number' ? ab.completeness_tolerance : 0.92) * 100,
-      ),
-    ),
-    (raw) => set('completeness_tolerance', Math.min(1, Math.max(0.1, int(raw, 92) / 100))),
-  );
-  const staging = useLoadedDraft(store, text(ab.staging_days ?? 7), (raw) =>
-    set('staging_days', Math.min(90, Math.max(1, int(raw, 7)))),
-  );
-
-  const check = (
-    id: string,
-    checked: boolean,
-    save: (value: boolean) => void,
-    label: string,
-    help: ReactNode,
-  ) => (
-    <HintGroup help={help}>
-      <label className="checkbox-label">
-        <input
-          type="checkbox"
-          id={id}
-          checked={checked}
-          onChange={(event) => save(event.target.checked)}
-        />{' '}
-        <span>{label}</span>
-      </label>
-    </HintGroup>
-  );
-  const number = (
-    id: string,
-    draft: { value: string; onChange: (raw: string) => void },
-    attrs: { min: string; max: string; placeholder: string },
-  ) => (
-    <input
-      type="number"
-      id={id}
-      min={attrs.min}
-      max={attrs.max}
-      step="1"
-      placeholder={attrs.placeholder}
-      value={loads ? draft.value : ''}
-      onChange={(event) => draft.onChange(event.target.value)}
-    />
-  );
-  const unit = (text: string) => <span className="settings-unit">{text}</span>;
-
   return (
-    <div
-      id="organization-audiobooks-panel"
-      role="tabpanel"
-      aria-labelledby="organization-audiobooks-tab"
-      className="stg-media-panel"
-      hidden={hidden}
-      tabIndex={0}
+    <Card
+      title="Audiobook download options"
+      hint="Books use the same torrent, usenet and Soulseek clients as music; only these differ"
+      id="audiobook-download-options"
     >
-      <div className="stg-media-context">
-        <strong>Audiobook organization</strong>
-        <span className="stg-media-summary">Naming, quality, tags &amp; recycle</span>
-      </div>
-
-      <div className="settings-group" data-stg={TAB}>
-        <HintGroup
-          help={
-            <>
-              Variables: <code>$author</code>, <code>$authorletter</code>, <code>$narrator</code>,{' '}
-              <code>$title</code>, <code>$series</code>, <code>$seriespos</code> (01),{' '}
-              <code>$year</code>, <code>$asin</code>. Default:{' '}
-              <code>$author/$series/$seriespos - $title</code>. Books with no series collapse the
-              series folder and its number cleanly, the same way podcast season folders do. Use{' '}
-              <code>{'${var}'}</code> to append text.
-            </>
-          }
-        >
-          <label>Audiobook Path Template:</label>
-          <input
-            type="text"
-            id="template-audiobook-path"
-            placeholder="$author/$series/$seriespos - $title"
-            {...template}
-          />
-        </HintGroup>
-
-        {check(
-          'audiobook-recycle-deletes',
-          on(ab.recycle_deletes),
-          (v) => set('recycle_deletes', v),
-          'Recycle deleted audiobooks',
-          <>
-            Deleting a book MOVES it to a hidden <code>.deleted</code> folder inside your audiobook
-            library instead of erasing it, so a mis-click can be undone. The folder is hidden so
-            Audiobookshelf, Plex and Jellyfin do not keep showing books you removed. Note the space
-            is not freed until the bin is emptied. Off, deletes are permanent immediately.
-          </>,
-        )}
-
-        <HintGroup
-          help={
-            <>
-              How long a deleted book stays recoverable before the daily cleanup erases it for good.{' '}
-              <strong>0 turns the bin off</strong> &mdash; it does not mean "erase everything now",
-              because purging on that reading would destroy what was recycled while the bin was
-              still on. Default: <code>7</code>
-            </>
-          }
-        >
-          <label>Empty The Recycle Bin After:</label>
-          {number('audiobook-recycle-keep-days', keepDays, {
-            min: '0',
-            max: '365',
-            placeholder: '7',
-          })}
-          {unit('days')}
-        </HintGroup>
-
-        {/* Audiobook Quality moved to Quality > Audiobooks (settings-bic phase 3) */}
-
-        <h4 className="settings-subheading">Downloads &amp; Import</h4>
-        {hint(
-          <>
-            Books use the same torrent, usenet and Soulseek clients as music &mdash; set those up
-            under Sources.
-          </>,
-        )}
-
-        <HintGroup
-          help={
-            <>
-              Which Audible storefront the audiobook catalogue pages, author scans and follow checks
-              query. Some titles are exclusive to one country's store, so picking the store you buy
-              from finds books the US store never lists. Default: <code>us</code>
-            </>
-          }
-        >
-          <label>Audible Marketplace:</label>
-          <select
-            id="audiobook-marketplace"
-            className="form-select"
-            value={text(ab.marketplace) || 'us'}
-            onChange={(event) => set('marketplace', event.target.value)}
-          >
-            {MARKETS.map(([v, label]) => (
-              <option key={v} value={v}>
-                {label}
-              </option>
-            ))}
-          </select>
-        </HintGroup>
-
-        {/* the Audiobooks tab of the chain widget (Settings > Downloads) IS this
-            setting. Kept hidden, as before */}
-        <HintGroup
-          hidden
-          help={
-            <>
-              Which sources a book search asks. Separate from the music chain on purpose &mdash;
-              Tidal, Qobuz, HiFi and Deezer carry no audiobooks at all, so a book on the music chain
-              would burn an attempt on each of them before it could succeed. The clients themselves
-              are the same ones music uses; only the order and the category differ.
-            </>
-          }
-        >
-          <label>Audiobook Download Sources:</label>
-          <select
-            id="audiobook-download-mode"
-            className="form-select"
-            value={loads ? mode : 'soulseek'}
-            onChange={(event) => set('download_source.mode', event.target.value)}
-          >
-            <option value="soulseek">Soulseek Only</option>
-            <option value="torrent">Torrent Only (via Prowlarr)</option>
-            <option value="usenet">Usenet Only (via Prowlarr)</option>
-            <option value="hybrid">Hybrid (Primary + Fallback)</option>
-          </select>
-        </HintGroup>
-
-        {/* the arrow-button list the chain widget replaced: kept empty and
-            hidden, as the old one only ever drew into a hidden list */}
-        <div
-          id="audiobook-hybrid-container"
-          style={{ display: loads && mode === 'hybrid' ? '' : 'none' }}
-        >
-          <div className="hybrid-source-list" id="audiobook-hybrid-rows" hidden></div>
-        </div>
-
-        <HintGroup
-          help={
-            <>
-              The category SoulSync tags audiobook torrents and NZBs with in your download client.
-              Keep it different from your music category so a finished book is never picked up by
-              anything watching for music. Default: <code>audiobooks</code>
-            </>
-          }
-        >
-          <label>Audiobook Downloader Category:</label>
-          <input
-            type="text"
-            id="audiobook-torrent-category"
-            placeholder="audiobooks"
-            value={loads ? category.value : ''}
-            onChange={(event) => category.onChange(event.target.value)}
-          />
-        </HintGroup>
-
-        <HintGroup
-          help={
-            <>
-              Newznab category IDs searched for audiobooks. <code>3030</code> is the standard
-              audiobook category and is deliberately kept OUT of music searches, so asking for it
-              here costs the music side nothing. Only change this if your indexer uses a
-              non-standard ID.
-            </>
-          }
-        >
-          <label>Audiobook Prowlarr Categories:</label>
-          <input
-            type="text"
-            id="audiobook-prowlarr-categories"
-            placeholder="3030"
-            value={loads ? prowlarr.value : ''}
-            onChange={(event) => prowlarr.onChange(event.target.value)}
-          />
-        </HintGroup>
-
-        <HintGroup
-          help={
-            <>
-              How much of the runtime Audible publishes has to actually be on disk before a book is
-              filed into your library. A download client reports "complete" when the files it was{' '}
-              <em>asked</em> for finished, which is not the same as the book being whole &mdash; and
-              a book missing its last chapters plays perfectly until you run out of it. Short books
-              are held in staging, never failed outright. Default: <code>92</code>
-            </>
-          }
-        >
-          <label>Import When Runtime Reaches:</label>
-          {number('audiobook-completeness-tolerance', tolerance, {
-            min: '10',
-            max: '100',
-            placeholder: '92',
-          })}
-          {unit('%')}
-        </HintGroup>
-
-        <HintGroup
-          help={
-            <>
-              How long an incomplete book is kept staged before it is failed and sent back to the
-              wishlist. Torrents finish late and uploaders repair releases, so patience is right
-              here; forever would mean one broken release holds a wishlist row for good. Default:{' '}
-              <code>7</code>
-            </>
-          }
-        >
-          <label>Give Up On A Short Book After:</label>
-          {number('audiobook-staging-days', staging, { min: '1', max: '90', placeholder: '7' })}
-          {unit('days')}
-        </HintGroup>
-
-        {check(
-          'audiobook-renumber-chapters',
-          on(ab.renumber_chapters),
-          (v) => set('renumber_chapters', v),
-          'Renumber chapter files on import',
-          "Chapter files arrive named however the uploader left them. On by default: a book whose files sort wrong plays wrong. Turn this off only if you trust your releases' own numbering.",
-        )}
-        {check(
-          'audiobook-merge-m4b',
-          ab.merge_m4b === true,
-          (v) => set('merge_m4b', v),
-          'Merge multi-file books into one M4B on import',
-          <>
-            Off by default: when a book arrives as many files, combine them into a single{' '}
-            <code>.m4b</code> with one chapter marker per file during import. Needs{' '}
-            <code>ffmpeg</code> on the server (the Docker image ships it). The originals are only
-            removed after the merged file verifies, so a failed merge never loses the book.
-          </>,
-        )}
-        {check(
-          'audiobook-remove-owned-from-wishlist',
-          ab.remove_owned_from_wishlist === true,
-          (v) => set('remove_owned_from_wishlist', v),
-          "Remove books from the wishlist once they're in the library",
-          'Off by default: a book that is downloaded or found in your library stays on the wishlist, marked "In library". Turn this on to drop it instead, the way the music wishlist does.',
-        )}
-        {check(
-          'audiobook-embed-metadata',
-          on(ab.embed_metadata),
-          (v) => set('embed_metadata', v),
-          'Write tags into audiobook files',
-          'Embeds title, author, series and narrator into each file on import. Narrator goes in the COMPOSER field, which is the convention every audiobook server settled on. Without this a book keeps whatever the uploader\'s ripper wrote, which is usually chapter 4 of a 27-hour book tagged as a track on an album called "audiobook".',
-        )}
-        {check(
-          'audiobook-embed-artwork',
-          on(ab.embed_artwork),
-          (v) => set('embed_artwork', v),
-          'Embed cover art in audiobook files',
-          'Embeds the cover into every chapter file. A cover the release already shipped is preferred over fetching one, so this still works offline.',
-        )}
-        {check(
-          'audiobook-save-artwork',
-          on(ab.save_artwork),
-          (v) => set('save_artwork', v),
-          'Save cover.jpg beside audiobooks',
-          <>
-            Writes <code>cover.jpg</code> into the book folder. Plex, Jellyfin, Audiobookshelf and
-            Booksonic all read it from there.
-          </>,
-        )}
-        {check(
-          'audiobook-write-nfo',
-          on(ab.write_nfo),
-          (v) => set('write_nfo', v),
-          'Write audiobook metadata sidecars',
-          <>
-            Writes <code>metadata.opf</code> (Audiobookshelf, Plex, Calibre) and{' '}
-            <code>book.nfo</code> (Kodi, Jellyfin, Emby). Both, because the servers genuinely
-            disagree about which to look for and they are a few hundred bytes each. These also carry
-            the ASIN, which is what lets the daily library scan recognise a book you imported months
-            ago.
-          </>,
-        )}
-      </div>
-    </div>
+      <Row
+        field
+        label="Audible marketplace"
+        htmlFor="audiobook-marketplace"
+        help="The Audible store the catalogue pages, author scans and follow checks ask."
+        more="Some titles are only in one country's store, so the store you buy from finds books the US store never lists. Default: us"
+      >
+        <Select
+          id="audiobook-marketplace"
+          value={text(ab.marketplace) || 'us'}
+          onChange={(event) => store.set('audiobooks', 'marketplace', event.target.value)}
+          options={MARKETS.map(([value, label]) => ({ value, label }))}
+        />
+      </Row>
+      <Row
+        field
+        label="Audiobook downloader category"
+        htmlFor="audiobook-torrent-category"
+        help="The category audiobook torrents and NZBs get in your download client."
+        more="Keep it different from your music category so a finished book is never picked up by anything watching for music. Default: audiobooks"
+      >
+        <TextField
+          id="audiobook-torrent-category"
+          placeholder="audiobooks"
+          value={loads ? category.value : ''}
+          onChange={(event) => category.onChange(event.target.value)}
+        />
+      </Row>
+      <Row
+        field
+        label="Audiobook Prowlarr categories"
+        htmlFor="audiobook-prowlarr-categories"
+        help="Newznab category IDs searched for audiobooks, separated by commas."
+        more="3030 is the standard audiobook category and is kept out of music searches on purpose, so asking for it here costs music nothing. Change it only if your indexer uses another ID."
+      >
+        <TextField
+          id="audiobook-prowlarr-categories"
+          placeholder="3030"
+          value={loads ? prowlarr.value : ''}
+          onChange={(event) => prowlarr.onChange(event.target.value)}
+        />
+      </Row>
+    </Card>
   );
 }
+
+/** the format and layout switches: Quality > Audiobooks has them now */
+export { qualitySwitches } from './quality/audiobooks-view';

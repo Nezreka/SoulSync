@@ -128,25 +128,34 @@ const chainAdapter = (side: Side, label: string, what: string): Adapter => ({
   script: chainScript(chain),
 });
 
-// ── the subtitle provider chain (Library > Organization > Video) ──
+// ── the subtitle provider chain (Library > Subtitles) ──
 
+// repointed for the order list (settings-bic phase 4): rows are li[data-id],
+// the pool's "Use" adds, the moves and the removal are the row menu's;
+// Whisper is pinned under the list, not a row
+const subtitleMenu = (id: string, entry: string, what: string) => {
+  press(one(`#subchain-widget [data-more="${id}"]`), `the menu of ${id}`);
+  press(
+    button(one('#subchain-widget [role="menu"]'), (words) => words.startsWith(entry)),
+    what,
+  );
+};
 const subtitles = {
   root: () => one('#subchain-widget'),
-  readOrder: () => all('#subchain-list [data-src]').map((step) => step.dataset.src ?? ''),
-  readPool: () => all('#subchain-pool [data-src]').map((tile) => tile.dataset.src ?? ''),
-  /** the steps that can be moved and removed */
+  /** the order, then Whisper when it is pinned last (it was the chain's last step) */
+  readOrder: () => [
+    ...all('#subchain-widget ul[aria-label] > li[data-id]').map((row) => row.dataset.id ?? ''),
+    ...(one('#subchain-widget [data-pinned="whisper"]') ? ['whisper'] : []),
+  ],
+  readPool: () =>
+    all('#subchain-widget [data-pool] > li[data-id]').map((row) => row.dataset.id ?? ''),
+  /** the steps that can be moved and removed (every row: Whisper is not one) */
   movable: () =>
-    all('#subchain-list [data-src]')
-      .filter((step) => one('[data-action="remove"]', step))
-      .map((step) => step.dataset.src ?? ''),
-  add: (id: string) => press(one(`#subchain-pool [data-src="${id}"]`), `add ${id}`),
-  remove: (id: string) =>
-    press(one(`#subchain-list [data-src="${id}"] [data-action="remove"]`), `remove ${id}`),
+    all('#subchain-widget ul[aria-label] > li[data-id]').map((row) => row.dataset.id ?? ''),
+  add: (id: string) => press(one(`#subchain-widget [data-use="${id}"]`), `add ${id}`),
+  remove: (id: string) => subtitleMenu(id, 'Stop using', `remove ${id}`),
   move: (id: string, delta: -1 | 1) =>
-    press(
-      one(`#subchain-list [data-src="${id}"] [data-action="${delta < 0 ? 'up' : 'down'}"]`),
-      `move ${id}`,
-    ),
+    subtitleMenu(id, delta < 0 ? 'Move up' : 'Move down', `move ${id}`),
 };
 
 // ── the music quality profile's ranked targets (Quality) ──
@@ -196,25 +205,31 @@ const ladder = {
   },
 };
 
-// ── the album art sources (Library > Post-processing) ──
+// ── the album art sources (Library > Tags and artwork) ──
 
+// repointed for the order list (settings-bic phase 4): rows are li[data-id]
+// with their switch; a move is the row menu's
 const art = {
   root: () => one('#art-source-list'),
-  rows: () => all('#art-source-list [data-source-id]'),
+  rows: () => all('#art-source-list ul[aria-label] > li[data-id]'),
   /** every source in the order shown; the switched-on ones are what is saved */
   readOrder: () =>
     art
       .rows()
       .map(
         (row) =>
-          `${row.dataset.sourceId}${one<HTMLInputElement>('input', row)?.checked ? '' : ' (off)'}`,
+          `${row.dataset.id}${one<HTMLInputElement>('input[type="checkbox"]', row)?.checked ? '' : ' (off)'}`,
       ),
-  row: (id: string) => one(`#art-source-list [data-source-id="${id}"]`),
-  move: (id: string, delta: -1 | 1) =>
+  row: (id: string) => one(`#art-source-list li[data-id="${id}"]`),
+  move: (id: string, delta: -1 | 1) => {
+    press(one(`#art-source-list [data-more="${id}"]`), `the menu of ${id}`);
     press(
-      button(art.row(id), (words) => words === (delta < 0 ? 'Move up' : 'Move down')),
+      button(one('#art-source-list [role="menu"]'), (words) =>
+        words.startsWith(delta < 0 ? 'Move up' : 'Move down'),
+      ),
       `move ${id}`,
-    ),
+    );
+  },
   toggle: (id: string) => press(one('input[type="checkbox"]', art.row(id) ?? undefined), id),
 };
 
@@ -245,10 +260,11 @@ const hifi = {
 const folderList = (listId: string) => {
   const list = () => one(`#${listId}`);
   const fields = () => all('input[type="text"]', list() ?? undefined);
-  /** the list's own Add button: the nearest one going up from the list */
+  /** the list's own Add button: the nearest one going up from the list
+   *  (settings-bic phase 4: "Add path", its plus an icon) */
   const adder = () => {
     for (let anc = list()?.parentElement; anc; anc = anc.parentElement) {
-      const hit = button(anc, (words) => words.startsWith('+ Add'));
+      const hit = button(anc, (words) => /^(\+ )?Add/.test(words));
       if (hit) return hit;
     }
     return undefined;
@@ -262,7 +278,9 @@ const folderList = (listId: string) => {
     },
     remove: (index: number) =>
       press(
-        button(fields()[index]?.parentElement ?? null, () => true),
+        button(fields()[index]?.closest('[data-folder-row]') ?? null, (words) =>
+          words.startsWith('Remove'),
+        ),
         `remove row ${index} of ${listId}`,
       ),
   };
@@ -410,14 +428,14 @@ export const ADAPTERS: Record<string, Adapter> = {
     readOrder: art.readOrder,
     script: [
       () => {
-        const id = art.rows()[1]?.dataset.sourceId ?? '';
+        const id = art.rows()[1]?.dataset.id ?? '';
         art.move(id, -1);
         return `move ${id} up`;
       },
       () => {
         // the first one that is off: it stays where it is when it goes on
         const row = art.rows().find((r) => !one<HTMLInputElement>('input', r)?.checked);
-        const id = row?.dataset.sourceId ?? '';
+        const id = row?.dataset.id ?? '';
         art.toggle(id);
         return `switch ${id} on`;
       },

@@ -57,7 +57,7 @@ export function templatesOf(settings: SettingsPayload): Record<TemplateKey, stri
   return out;
 }
 
-const VALID_VARS = {
+export const VALID_VARS = {
   album: [
     '$artist',
     '$albumartist',
@@ -171,17 +171,28 @@ function check(
   return errors;
 }
 
+/** each template's problems, by its key: the field a problem is about is
+ *  marked with it (settings-bic phase 4) */
+export function templateFieldErrors(
+  settings: SettingsPayload,
+): Partial<Record<TemplateKey, string[]>> {
+  const t = templatesOf(settings);
+  const out: Partial<Record<TemplateKey, string[]>> = {};
+  const add = (key: TemplateKey, errors: string[]) => {
+    if (errors.length) out[key] = errors;
+  };
+  add('album_path', check('album', t.album_path, { needsFolder: true }));
+  // a single may be a flat file ("$artist - $title")
+  add('single_path', check('single', t.single_path, { needsFolder: false }));
+  add('playlist_path', check('playlist', t.playlist_path, { needsFolder: true }));
+  add('podcast_path', check('podcast', t.podcast_path, { needsFolder: false }));
+  add('sample_path', check('sample', t.sample_path, { needsFolder: false }));
+  return out;
+}
+
 /** validateFileOrganizationTemplates: the save is refused while any is set */
 export function templateErrors(settings: SettingsPayload): string[] {
-  const t = templatesOf(settings);
-  return [
-    ...check('album', t.album_path, { needsFolder: true }),
-    // a single may be a flat file ("$artist - $title")
-    ...check('single', t.single_path, { needsFolder: false }),
-    ...check('playlist', t.playlist_path, { needsFolder: true }),
-    ...check('podcast', t.podcast_path, { needsFolder: false }),
-    ...check('sample', t.sample_path, { needsFolder: false }),
-  ];
+  return Object.values(templateFieldErrors(settings)).flat();
 }
 
 /** the Playlist File Naming rule saveSettings checked on its own: a file
@@ -190,7 +201,7 @@ export function playlistItemError(settings: SettingsPayload): string | null {
   const item = templatesOf(settings).playlist_item.trim();
   if (!item) return null;
   if (item.includes('/') || item.includes('\\'))
-    return "Playlist File Naming can't contain a folder separator ( / or \\ ) — it names the file, not a path.";
+    return "Playlist File Naming can't contain a folder separator ( / or \\ ): it names the file, not a path.";
   if (!item.includes('$title'))
     return 'Playlist File Naming must include $title so every file has a name.';
   return null;

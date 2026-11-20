@@ -41,14 +41,14 @@ describe('where sections live', () => {
     expect(tabDef('quality').views.map((v) => v.label)).toContain('Movies and TV');
   });
 
-  it('Video Preferences is on library (React, SETTINGS_PORT.md video pass V2c)', () => {
+  it('the video pages card is on Appearance (settings-bic phase 4, DESIGN 3.3)', () => {
     const section = readFileSync(
       resolve(process.cwd(), 'src/features/settings/tabs/library-video-prefs.tsx'),
       'utf8',
     );
-    expect(section).toContain("const TAB = 'library';");
-    expect(section).toMatch(/tab=\{TAB\}\s+title="Video Preferences"/);
-    expect(html).toContain('<div data-stg-react="library" data-stg-part="video-prefs"');
+    expect(section).toContain('data-stg="appearance" data-video-only=""');
+    expect(section).toContain('title="Video pages"');
+    expect(html).toContain('<div data-stg-react="appearance" data-stg-part="video-pages"');
   });
 
   it.each([

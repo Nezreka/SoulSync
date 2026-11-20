@@ -1,8 +1,9 @@
 /**
  * Downloads > Filtering: what is skipped or preferred when music downloads.
- * Explicit content, a size cap, a preferred version, and the genre whitelist
- * (it filters enrichment tags; it moves with the Library tab's tags). Same
- * keys, ids and saves as the old Downloads tab's Filtering section.
+ * Explicit content, a size cap and a preferred version. The genre whitelist
+ * filters enrichment tags, so Library > Tags and artwork draws it
+ * (GenresCard, settings-bic phase 4). Same keys, ids and saves as the old
+ * Downloads tab's Filtering section.
  */
 
 import { useState } from 'react';
@@ -102,7 +103,6 @@ export function FilteringView({ store }: { store: SettingsStore }) {
   const cf = (key: string) => useChanged(store, 'content_filter', key); // eslint-disable-line react-hooks/rules-of-hooks
   const maxChanged = useChanged(store, 'download_source', 'max_mb_per_minute');
   const versionChanged = useChanged(store, 'soulseek', 'preferred_version');
-  const genreChanged = useChanged(store, 'genre_whitelist', 'enabled', 'genres');
   return (
     <>
       <Card title="Explicit content" hint="What is done with tracks marked explicit">
@@ -207,28 +207,39 @@ export function FilteringView({ store }: { store: SettingsStore }) {
           />
         </Row>
       </Card>
-
-      <Card title="Genres" hint="Which genre tags are kept when music is tagged">
-        <Row
-          label="Enable strict genre filtering"
-          htmlFor="genre-whitelist-enabled"
-          changed={genreChanged}
-          help="When on, only genres on the list below are kept during enrichment."
-          more="Junk tags (artist names, radio shows, playlist names) are dropped without a word. When off, all genres pass through unchanged."
-        >
-          <Switch
-            id="genre-whitelist-enabled"
-            checked={values.genreWhitelist}
-            onChange={(event) => {
-              const on = event.target.checked;
-              store.set('genre_whitelist', 'enabled', on);
-              // the first time it is switched on with nothing in it, load the defaults
-              if (on && values.genres.length === 0) void resetGenres(store);
-            }}
-          />
-        </Row>
-        <Genres store={store} enabled={values.genreWhitelist} genres={values.genres} />
-      </Card>
     </>
+  );
+}
+
+/**
+ * The genre whitelist. It was on Filtering; it filters the genre tags
+ * enrichment writes, not downloads, so it is drawn on Library > Tags and
+ * artwork (DESIGN 3.3).
+ */
+export function GenresCard({ store }: { store: SettingsStore }) {
+  const { values } = useValues(store);
+  const genreChanged = useChanged(store, 'genre_whitelist', 'enabled', 'genres');
+  return (
+    <Card>
+      <Row
+        label="Enable strict genre filtering"
+        htmlFor="genre-whitelist-enabled"
+        changed={genreChanged}
+        help="When on, only genres on the list below are kept during enrichment."
+        more="Junk tags (artist names, radio shows, playlist names) are dropped without a word. When off, all genres pass through unchanged."
+      >
+        <Switch
+          id="genre-whitelist-enabled"
+          checked={values.genreWhitelist}
+          onChange={(event) => {
+            const on = event.target.checked;
+            store.set('genre_whitelist', 'enabled', on);
+            // the first time it is switched on with nothing in it, load the defaults
+            if (on && values.genres.length === 0) void resetGenres(store);
+          }}
+        />
+      </Row>
+      <Genres store={store} enabled={values.genreWhitelist} genres={values.genres} />
+    </Card>
   );
 }

@@ -391,7 +391,10 @@ export const TAB_TITLES: Record<string, { title: string; sub: string }> = {
     sub: 'Where downloads come from, in what order, and what gets skipped',
   },
   quality: { title: 'Quality', sub: 'Audio and video formats, release profiles and ladders' },
-  library: { title: 'Library', sub: 'Folders, file organization, tagging and import' },
+  library: {
+    title: 'Library',
+    sub: 'Where your files live, how they are named and tagged, and what happens on import',
+  },
   discovery: {
     title: 'Discovery',
     sub: 'Playlists, listening stats, recommendations and import lists',

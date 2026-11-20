@@ -885,7 +885,7 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
   {
     label: '4K libraries',
     tab: 'library',
-    anchor: heading('4K libraries (optional)'),
+    anchor: heading('4K libraries'),
     file: 'library-video-folders.tsx',
     hint: 'a second copy in 4K',
     keywords: '4k uhd 2160p library',
@@ -981,7 +981,7 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
   {
     label: 'Post-Processing',
     tab: 'library',
-    anchor: heading('Post-Processing'),
+    anchor: id('metadata-enabled'),
     file: 'library-processing.tsx',
     hint: 'tagging, artwork, lyrics',
     keywords: 'tags tagging cover art lyrics replaygain',
@@ -989,7 +989,7 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
   {
     label: 'Import',
     tab: 'library',
-    anchor: heading('Import'),
+    anchor: id('import-folder-artist-override'),
     file: 'library-processing.tsx',
     hint: 'auto-import and matching',
     keywords: 'auto import match',

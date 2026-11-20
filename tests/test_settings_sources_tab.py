@@ -569,57 +569,37 @@ def _library_cards(markup):
 
 def test_the_library_tab_speaks_one_card_language():
     """It used to be three loose blocks of video settings followed by seven
-    music cards - and the music half was hidden on the video side entirely, so
-    neither side ever saw the whole tab.
-
-    Now every section is an expandable card and they are ordered by SUBJECT
-    rather than by side: music paths beside video folders, music post-processing
-    beside video organization (which is where video's post-processing lives).
-    Grouping by which side a setting came from is an implementation detail
-    leaking into the layout.
+    music cards, then five folded cards with two media tab strips. Now
+    (settings-bic phase 4) it is pills by SUBJECT, each with a kind switch:
+    music paths beside video folders under Folders, music post-processing
+    beside the video sidecars under Tags and artwork. Grouping by which side
+    a setting came from is an implementation detail leaking into the layout.
     """
-    index = index_with_settings_page()
-    markup = re.sub(r"<!--.*?-->", "", index, flags=re.S)
-
-    titles, groups = _library_cards(markup)
-
-    assert titles == [
-        # files & folders
-        "Folders", "Organization",
-        # processing
-        "Post-Processing", "Import",
-        # video
-        "Video Preferences",
-    ], titles
-    # #1822: playlists, listening stats and discovery have their own Discovery
-    # tab now, and filtering (explicit content, genre whitelist) is a download
-    # rule, so it sits on Downloads
-
-    # ...and they sit under three labelled groups. ten identical cards in a flat
-    # column is a list you scan by reading every label; three groups is a list
-    # you scan by skipping two of them.
-    # scoped to THIS tab: the same group markup is used on Connections now, and
-    # a global sweep would pick its heading up too
-    assert groups == ["Files &amp; folders", "Processing", "Video"], groups
-
-    # no bare settings-group left stranded outside a card on this tab
-    for m in re.finditer(r'<div class="settings-group"[^>]*data-stg="library"[^>]*>', markup):
-        before = markup[:m.start()]
-        assert before.rstrip().endswith('>'), "a library group is not inside a card"
-
-    # every card's body must be its header's next sibling or the toggle misses it
-    for m in re.finditer(r'<div class="settings-section-header[^"]*"[^>]*data-stg="library"[^>]*>', markup):
-        depth = 0
-        for mm in re.finditer(r"<(/?)div\b[^>]*?(/?)>", markup[m.start():]):
-            if mm.group(2) == "/":
-                continue
-            depth += -1 if mm.group(1) else 1
-            if depth == 0:
-                end = m.start() + mm.end()
-                break
-        assert markup[end:].lstrip().startswith('<div class="settings-section-body'), (
-            "a library card's body is not its header's next sibling"
-        )
+    nav = _read("webui/src/features/settings/nav.ts")
+    library = nav.split("key: 'library',", 1)[1].split("},\n  {", 1)[0]
+    pills = re.findall(r"\{ key: '(\w+)', label: '([^']+)'", library)
+    assert pills == [
+        ("folders", "Folders"),
+        ("naming", "Naming"),
+        ("tags", "Tags and artwork"),
+        ("import", "Import and files"),
+        ("subtitles", "Subtitles"),
+    ], pills
+    # the subtitles are the video side's own pill
+    assert "{ key: 'subtitles', label: 'Subtitles', side: 'video' }" in library
+    # every pill but Subtitles has its music and video kinds side by side
+    page = _read("webui/src/features/settings/tabs/library/library-page.tsx")
+    pages = page.split("const PAGES", 1)[1].split("\n};", 1)[0]
+    for pill in ("folders", "naming", "tags", "import"):
+        block = pages.split(f"  {pill}: {{", 1)[1].split("\n  },", 1)[0]
+        assert "music: {" in block and "video: {" in block, pill
+    # no folded cards left on the tab
+    for f in ("library-folders.tsx", "library-organization.tsx", "library-processing.tsx",
+              "library-audiobooks.tsx", "library-video-folders.tsx",
+              "library-video-organization.tsx"):
+        src = _read(f"webui/src/features/settings/tabs/{f}")
+        assert "settings-section-header" not in src, f
+        assert "LibrarySection" not in src, f
 
 
 def test_no_settings_selector_is_defined_twice_at_the_top_level():
@@ -715,10 +695,10 @@ def test_every_section_toggle_is_reachable_without_a_mouse(index, js):
     """
     headers = re.findall(r'<div class="settings-section-header[^"]*"[^>]*>', index)
     # every collapsible section is React now (SETTINGS_PORT.md): its header
-    # is parts.tsx Section or the Library cards' LibrarySection, with the
-    # same three attributes
+    # is parts.tsx Section, with the three attributes (the Library cards'
+    # LibrarySection went with settings-bic phase 4: Library is pills now)
     tabs = Path(__file__).resolve().parent.parent / "webui" / "src" / "features" / "settings" / "tabs"
-    for f in ("parts.tsx", "library-card.tsx"):
+    for f in ("parts.tsx",):
         src = (tabs / f).read_text(encoding="utf-8")
         head = src.split('className="settings-section-header collapsed"', 1)[1]
         head = head.split('<span className="settings-section-arrow"', 1)[0]
@@ -769,25 +749,19 @@ def test_library_headers_report_what_is_set_not_what_is_inside(index, js):
     # (src/features/settings/tabs/parts.tsx Section, SETTINGS_PORT.md)
     tabs = Path(__file__).resolve().parent.parent / "webui" / "src" / "features" / "settings" / "tabs"
     react = "\n".join(p.read_text(encoding="utf-8") for p in tabs.glob("*-tab.tsx"))
-    # and Video Preferences, its own Section (SETTINGS_PORT.md video pass V2c)
-    react += "\n" + (tabs / "library-video-prefs.tsx").read_text(encoding="utf-8")
     react_slots = re.findall(r'summaryKey="([^"]+)"', react)
-    # the Library tab's media cards (steps 8a, 8b) render their summary span
-    # themselves, with the same fallback attribute the markup had
-    cards = "\n".join(p.read_text(encoding="utf-8") for p in tabs.glob("library-*.tsx")
-                      if not p.name.endswith(".test.tsx"))
-    card_slots = re.findall(r'data-stg-summary="([^"]+)"', cards)
-    for key in card_slots:
-        block = cards.split(f'data-stg-summary="{key}"', 1)[1][:120]
-        assert "data-stg-fallback={fallback}" in block, f"React summary {key} has no fallback"
-    react_slots += card_slots
-    # (settings-bic) Downloads has no folded headers any more: its pills show
-    # everything, and its state is the sentence at the top. seven are left
-    assert len(slots) + len(react_slots) >= 7, f"only {len(slots) + len(react_slots)} headers report live values"
+    # (settings-bic phase 4) Library has no folded headers any more either:
+    # each pill reads its own settings back in a sentence at the top, built
+    # from the same store its fields show (tabs/library/words.ts)
+    words = _read("webui/src/features/settings/tabs/library/words.ts")
+    assert words.count("export function ") >= 15
+    # (settings-bic) Downloads and Library have no folded headers any more:
+    # their pills show everything, and their state is the sentence at the top
+    assert len(slots) + len(react_slots) >= 3, f"only {len(slots) + len(react_slots)} headers report live values"
     assert not set(slots) & set(react_slots), "a summary is on the page twice"
     parts = (tabs / "parts.tsx").read_text(encoding="utf-8")
     assert "data-stg-fallback={hint}" in parts, "a React header without a fallback could go blank"
-    for key in set(react_slots) - set(card_slots):
+    for key in set(react_slots):
         block = react.split(f'summaryKey="{key}"', 1)[1][:200]
         assert "summary={" in block, f"React header {key} has no summary"
 
@@ -821,32 +795,21 @@ def test_a_failed_settings_load_does_not_summarise_an_empty_form(js):
     good = fn.split("} catch (error) {", 1)[0]
     assert good.index("throw new Error(") < good.index("SoulSyncSettings?.hydrate(settings)")
     assert "hydrate" not in fn.split("} catch (error) {")[-1][:400]
-    # a React header shows its summary only after a load
+    # a hero reads the settings back only after a load (Library, settings-bic
+    # phase 4): before it, it says it is loading
     folders = _read("webui/src/features/settings/tabs/library-folders.tsx")
-    assert "const summary = loads" in folders
+    assert "loads\n          ? musicFoldersSentence(" in folders
+    assert "[{ text: 'Loading your folders.' }]" in folders
 
 
 def test_the_two_sides_name_their_sections_the_same_way():
-    """Folders and Organization are shared cards, each retaining both media
-    contexts so neither music nor video settings disappear in consolidation.
-    """
-    index = index_with_settings_page()
-    markup = re.sub(r"<!--.*?-->", "", index, flags=re.S)
-
-    titles, _ = _library_cards(markup)
-
-    for noun in ("Folders", "Organization"):
-        assert titles.count(noun) == 1, f"expected one shared {noun} card"
-        # React cards (steps 8a, 8b): music in the component, video in its
-        # own (SETTINGS_PORT.md video pass V2a, V2b), mounted by the card
-        card = _read(f"webui/src/features/settings/tabs/library-{noun.lower()}.tsx")
-        assert f"<strong>Music {noun.lower()}</strong>" in card
-        assert f"<Video{noun}Panel" in card
-        video = _read(f"webui/src/features/settings/tabs/library-video-{noun.lower()}.tsx")
-        assert f"<strong>Video {noun.lower()}</strong>" in video
-
-    # Folder locations and naming rules remain separate subjects.
-    assert "Paths &amp; Organization" not in titles
+    """Folders and Naming are shared pills, each keeping both media kinds so
+    neither music nor video settings disappear in consolidation; a pill opens
+    on the side the page is on (settings-bic phase 4)."""
+    page = _read("webui/src/features/settings/tabs/library/library-page.tsx")
+    for component in ("MusicFolders", "VideoFoldersBody", "MusicNaming", "<VideoNaming />"):
+        assert component in page, component
+    assert "return kinds.includes(side) ? side : (kinds[0] ?? 'music');" in page
 
 
 def test_a_settings_row_reads_left_to_right_the_same_way_everywhere(index):

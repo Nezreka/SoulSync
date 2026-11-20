@@ -36,6 +36,7 @@ import {
   StatusWords,
   type Tone,
 } from '../../ui';
+import { AudiobookDownloadOptions } from '../library-audiobooks';
 import { SourcePanels } from '../source-panels';
 import { MoreSourcePanels } from '../source-panels-more';
 import {
@@ -476,6 +477,12 @@ export function SourcesView({
             menuBodyClass="stg-menu-open"
           />
         </div>
+      </div>
+
+      {/* where books come from, besides the order (DESIGN 3.3: from Library) */}
+      <div hidden={kind !== 'audiobooks'} data-audiobook-options="">
+        <SectionLabel title="Audiobook download options" hint="Only books use these" />
+        <AudiobookDownloadOptions store={store} />
       </div>
 
       <SectionLabel title="Indexers" hint="Searched by Torrent and Usenet" />

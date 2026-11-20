@@ -167,6 +167,10 @@
     {
       "match": "data-folder-label=\"Stand-Up library\"",
       "click": ["Save"]
+    },
+    {
+      "match": "aria-label=\"Switched on\"",
+      "click": ["Save"]
     }
   ],
   "noSave": [
@@ -222,6 +226,22 @@
     "youtube.cookies_file": "shown read-only as the name of the saved cookies file; the paste box (#youtube-cookies-paste) writes cookies_paste and is never filled from the payload"
   },
   "auditOnly": {
+    "folders-music-tab": "the Library tab's old media tab strips (Folders, Organization) went with settings-bic phase 4: the Library page's kind switch per pill (#stg-library-<pill>-kind) replaced them",
+    "folders-audiobooks-tab": "the Library tab's old media tab strips (Folders, Organization) went with settings-bic phase 4: the Library page's kind switch per pill (#stg-library-<pill>-kind) replaced them",
+    "folders-podcasts-tab": "the Library tab's old media tab strips (Folders, Organization) went with settings-bic phase 4: the Library page's kind switch per pill (#stg-library-<pill>-kind) replaced them",
+    "folders-video-tab": "the Library tab's old media tab strips (Folders, Organization) went with settings-bic phase 4: the Library page's kind switch per pill (#stg-library-<pill>-kind) replaced them",
+    "organization-music-tab": "the Library tab's old media tab strips (Folders, Organization) went with settings-bic phase 4: the Library page's kind switch per pill (#stg-library-<pill>-kind) replaced them",
+    "organization-audiobooks-tab": "the Library tab's old media tab strips (Folders, Organization) went with settings-bic phase 4: the Library page's kind switch per pill (#stg-library-<pill>-kind) replaced them",
+    "organization-podcasts-tab": "the Library tab's old media tab strips (Folders, Organization) went with settings-bic phase 4: the Library page's kind switch per pill (#stg-library-<pill>-kind) replaced them",
+    "organization-video-tab": "the Library tab's old media tab strips (Folders, Organization) went with settings-bic phase 4: the Library page's kind switch per pill (#stg-library-<pill>-kind) replaced them",
+    "audiobook-download-mode": "the hidden audiobook download mode select and its empty hybrid rows went (settings-bic phase 4, DESIGN 3.3): the audiobook order on Downloads writes audiobooks.download_source, pinned by the audiobookChain composite",
+    "audiobook-hybrid-container": "the hidden audiobook download mode select and its empty hybrid rows went (settings-bic phase 4, DESIGN 3.3): the audiobook order on Downloads writes audiobooks.download_source, pinned by the audiobookChain composite",
+    "audiobook-hybrid-rows": "the hidden audiobook download mode select and its empty hybrid rows went (settings-bic phase 4, DESIGN 3.3): the audiobook order on Downloads writes audiobooks.download_source, pinned by the audiobookChain composite",
+    "subchain-pool": "the subtitle provider chain is the shared order list in #subchain-widget now (settings-bic phase 4); what it sends is pinned by the subtitleChain composite",
+    "subchain-list": "the subtitle provider chain is the shared order list in #subchain-widget now (settings-bic phase 4); what it sends is pinned by the subtitleChain composite",
+    "subchain-slot": "the subtitle provider chain is the shared order list in #subchain-widget now (settings-bic phase 4); what it sends is pinned by the subtitleChain composite",
+    "subchain-mode-hint": "the subtitle provider chain is the shared order list in #subchain-widget now (settings-bic phase 4); what it sends is pinned by the subtitleChain composite",
+    "data-source-id": "the album art sources are the shared order list in #art-source-list now (settings-bic phase 4, rows are li[data-id]); what they send is pinned by the artOrder composite",
     "vq-used-for": "a chip picker (buttons, not a form control) that only shows for a named video quality profile; the recorded page is on Default",
     "data-vq-used-for-pick": "the chips of #vq-used-for: buttons, shown for a named video quality profile only",
     "qp-profile-new-input": "drawn by the New profile button and gone on blur; what it sends is pinned by the musicProfiles composite",

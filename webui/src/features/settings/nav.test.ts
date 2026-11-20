@@ -97,8 +97,13 @@ describe('the address', () => {
     });
   });
   it('writes only what is needed', () => {
-    expect(navToSearch({ tab: 'library', view: 'all', kind: null, open: null })).toEqual({
+    expect(navToSearch({ tab: 'people', view: 'all', kind: null, open: null })).toEqual({
+      tab: 'people',
+    });
+    expect(navToSearch({ tab: 'library', view: 'naming', kind: 'podcasts', open: null })).toEqual({
       tab: 'library',
+      view: 'naming',
+      kind: 'podcasts',
     });
     expect(
       navToSearch({ tab: 'connections', view: 'notifications', kind: null, open: null }),

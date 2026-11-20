@@ -168,14 +168,17 @@ def test_the_video_settings_live_with_their_subject_not_on_one_dumping_tab():
     index = (_WEBUI / "index.html").read_text(encoding="utf-8")
     tabs = _WEBUI / "src" / "features" / "settings" / "tabs"
 
-    # the download folders and the seeding are React (SETTINGS_PORT.md video
-    # pass V2a): the folders in the Folders card's Video panel, on Library
+    # the download folders are Library > Folders, Video (settings-bic phase 4)
     folders = (tabs / "library-video-folders.tsx").read_text(encoding="utf-8")
-    assert "const TAB = 'library';" in folders and 'id="video-download-path"' in folders
-    # what to hunt is a library choice, not a usenet one (Video Preferences,
-    # React: SETTINGS_PORT.md video pass V2c)
+    assert 'id="video-download-path"' in folders
+    page = (tabs / "library" / "library-page.tsx").read_text(encoding="utf-8")
+    assert "<VideoFolders docker=" in page
+    # what to hunt is an acquisition rule (DESIGN 3.3: Monitor Specials on
+    # Downloads > Behaviour, Video), not a usenet one
     prefs = (tabs / "library-video-prefs.tsx").read_text(encoding="utf-8")
-    assert "const TAB = 'library';" in prefs and 'id="video-monitor-specials"' in prefs
+    assert 'id="video-monitor-specials"' in prefs
+    behaviour = (tabs / "downloads" / "behaviour-view.tsx").read_text(encoding="utf-8")
+    assert "<MonitorSpecialsRow />" in behaviour
     # #1822: import lists add to what you discover (React, video pass V3c)
     lists = (tabs / "video-row-lists.tsx").read_text(encoding="utf-8")
     section = lists.split("export function ImportListsSection(", 1)[1]
@@ -249,9 +252,17 @@ def test_the_downloads_tab_holds_only_download_settings():
     # #1822: Filtering (explicit content, genre whitelist) decides what gets
     # downloaded, so it joined the download cards
     titles += re.findall(r'<Card\s+title="([^"]+)"', (tabs / "filtering-view.tsx").read_text(encoding="utf-8"))
-    assert titles == ["Download order", "Indexers", "Download behaviour", "Retry logic",
-                      "Album publishing", "When a download fails", "Explicit content",
-                      "Size and version", "Genres"], titles
+    # (settings-bic phase 4) the audiobook download options sit under the
+    # audiobook order; Monitoring joined Behaviour, Video; the genre list went
+    # to Library > Tags and artwork (it filters tags, not downloads). The
+    # wishlist rules and the YouTube follow count are Behaviour cards too,
+    # drawn by components of their own (WishlistRules, YoutubeFollowCount)
+    assert titles == ["Download order", "Audiobook download options", "Indexers",
+                      "Download behaviour", "Retry logic", "Album publishing",
+                      "When a download fails", "Monitoring", "Explicit content",
+                      "Size and version"], titles
+    assert "<WishlistRules store={store} />" in behaviour
+    assert "<YoutubeFollowCount />" in behaviour
 
     # the two that moved must not have crept back
     # #1822: notifications sit with the other connected services, import lists

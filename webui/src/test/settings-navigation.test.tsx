@@ -53,9 +53,16 @@ it('a tab click opens it: the title, the open mark, and its pills', () => {
   expect(
     [...document.querySelectorAll('[role="tablist"] [role="tab"]')].map((pill) => pill.textContent),
   ).toEqual(['Sources', 'Behaviour', 'Filtering']);
-  // a tab with one page shows no pills
+  // Library has its pills (phase 4); Subtitles is the video side's own
   act(() => document.querySelector<HTMLButtonElement>('.stg-tab[data-tab="library"]')!.click());
-  expect(document.querySelector('[role="tablist"]')).toBeNull();
+  expect(
+    [...document.querySelectorAll('[role="tablist"] [role="tab"]')]
+      .filter((pill) => pill.id.startsWith('stg-pill-'))
+      .map((pill) => pill.textContent),
+  ).toEqual(['Folders', 'Naming', 'Tags and artwork', 'Import and files']);
+  // a tab with one page shows no pills
+  act(() => document.querySelector<HTMLButtonElement>('.stg-tab[data-tab="people"]')!.click());
+  expect(document.querySelector('[id^="stg-pill-"]')).toBeNull();
 });
 
 it('the old tab keys still land: sources is Downloads > Sources, logs is System > Logs', () => {

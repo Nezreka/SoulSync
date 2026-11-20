@@ -209,7 +209,7 @@ Episode downloads are tracked server-side with live status polled every few seco
 
 Downloads dedupe by id — queueing an episode that's already queued or downloading returns the existing record instead of starting a second copy. Parallelism is bounded by a semaphore (1–10 concurrent). A **cancel-queued** action clears everything still waiting.
 
-Files land in your **Podcasts Folder (output)** (Settings → Library → Folders), organized by the **Podcast Path Template** (default \`$show/Season $season/$title\`).
+Files land in your **Podcasts folder** (Settings → Library → Folders), organized by the **Podcast Path Template** (default \`$show/Season $season/$title\`).
 
 ## Playback
 
@@ -251,7 +251,7 @@ All podcast settings live under **Settings → Library** (inside the Music media
 
 | Setting (exact label) | Location | Default |
 |----------------------|----------|---------|
-| **Podcasts Folder (output):** | Library → Folders → Music | \`./podcasts\` (\`/app/podcasts\` in Docker; locked, **Unlock** to edit) |
+| **Podcasts folder:** | Library → Folders → Music | \`./podcasts\` (\`/app/podcasts\` in Docker; locked, **Unlock** to edit) |
 | **Podcast Path Template:** | Library → Organization → File Organization | \`$show/Season $season/$title\` |
 | **Podcast Media Format:** | Library → Organization → File Organization | Audio Only (MP3 / M4A) |
 
@@ -657,7 +657,7 @@ Backend defaults: format order m4b → m4a → mp3 → opus → ogg → flac; mi
 
 | Control (exact label) | Notes |
 |----------------------|-------|
-| **Audiobooks Folder (output):** | "Where downloaded audiobooks are saved and organized. Keep this separate from your music library so a media server does not index chapter files as albums." |
+| **Audiobooks folder:** | "Where downloaded audiobooks are saved and organized. Keep this separate from your music library so a media server does not index chapter files as albums." |
 | **More audiobook folders:** | Extra folders for an existing collection on another drive. Scanned, matched, covered and deletable like the main folder, but new books always land in the **Audiobooks Folder**. An unplugged drive is skipped and its books stay in your library until it's back. A folder inside (or around) one already listed is ignored, so nothing is read twice. In Docker, mount each at its own container path, like \`/app/audiobooks2\`. |
 | **Audiobook Path Template:** | Variables \`$author\`, \`$authorletter\`, \`$narrator\`, \`$title\`, \`$series\`, \`$seriespos\` (01), \`$year\`, \`$asin\`. Default \`$author/$series/$seriespos - $title\`; series-less books collapse the folder cleanly. |
 
