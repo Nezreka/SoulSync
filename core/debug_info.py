@@ -76,6 +76,18 @@ app = None
 get_database = None
 
 
+
+def database_size_label() -> str:
+    """the music database's size for the diagnostics block. read where the
+    app really opens it: docker sets DATABASE_PATH (/app/data/music_library.db),
+    and the old fixed relative path read "not found" on every container
+    install (#2216)."""
+    db_path = os.environ.get('DATABASE_PATH') or os.path.join('database', 'music_library.db')
+    try:
+        return f"{os.path.getsize(db_path) / (1024 * 1024):.1f} MB"
+    except OSError:
+        return 'not found'
+
 def init(
     soulsync_version,
     direct_run,
@@ -365,13 +377,7 @@ def collect_debug_info(log_lines=20, log_source='app'):
         info['api_debug_summary'] = {}
         info['spotify_rate_limit'] = {'active': False}
 
-    # Database size
-    db_path = os.path.join('database', 'music_library.db')
-    if os.path.exists(db_path):
-        db_size_mb = os.path.getsize(db_path) / (1024 * 1024)
-        info['database_size'] = f"{db_size_mb:.1f} MB"
-    else:
-        info['database_size'] = 'not found'
+    info['database_size'] = database_size_label()
 
     # Memory & CPU
     process = psutil.Process(os.getpid())

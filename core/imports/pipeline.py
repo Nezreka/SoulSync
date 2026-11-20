@@ -1048,7 +1048,7 @@ def _recover_moved_file_bookkeeping(context, artist_context=None, album_info=Non
     try:
         from core.library2.autolink import link_download_into_library_v2
         linked_lib2_file_id = link_download_into_library_v2(
-            context, raise_on_error=True)
+            context, raise_on_error=True, fill_known_tags=True)
         if linked_lib2_file_id is None:
             raise RuntimeError("The Library did not create a file row")
         from core.settings import config_manager

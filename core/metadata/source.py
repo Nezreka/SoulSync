@@ -2426,6 +2426,19 @@ def album_artist_override(verdict: dict):
     return None
 
 
+def _known_total_discs(album_info: Any, album_ctx: Any, disc_number: Any) -> int:
+    """the release's disc count as far as the import knows it, 1 when it
+    doesn't. a track on disc 3 proves at least three."""
+    def _int(value: Any) -> int:
+        try:
+            return int(value or 0)
+        except (TypeError, ValueError):
+            return 0
+    found = [_int(source.get("total_discs")) for source in (album_info, album_ctx)
+             if isinstance(source, dict)]
+    return max([1, _int(disc_number), *found])
+
+
 def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> dict:
     if album_info is None:
         album_info = {}
@@ -2775,13 +2788,23 @@ def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> di
     # as disc-less and ungroup the track in Jellyfin/Plex).
     from core.imports.track_number import resolve_disc_for_track
     metadata["disc_number"] = resolve_disc_for_track(original_search, album_info)
+    # the disc total the import already knows (the album context, or the path
+    # builder that filed this track under "Disc 1"): it was never handed to
+    # the tag writer, so every multi-disc import wrote "1" with no total and
+    # Library Re-tag filed "Disc total: empty -> 3" for each track (#2217).
+    # a one-disc release writes none, as before: there is nothing missing
+    total_discs = _known_total_discs(
+        album_info, {} if batch_album_distrusted else album_ctx, metadata["disc_number"])
+    if total_discs > 1:
+        metadata["total_discs"] = total_discs
     reference = context.get('_metadata_reference')
     if reference:
         for key, ref_key in (('title', 'title'), ('artist', 'track_artist'), ('album', 'album_title'), ('album_artist', 'artist_name')):
             if reference.get(ref_key):
                 metadata[key] = reference[ref_key]
         metadata.update(track_number=reference.get('track_number') or metadata['track_number'], total_tracks=reference.get('track_count'),
-                        disc_number=reference.get('disc_number') or metadata['disc_number'], total_discs=reference.get('total_discs'))
+                        disc_number=reference.get('disc_number') or metadata['disc_number'],
+                        total_discs=reference.get('total_discs') or metadata.get('total_discs'))
 
     if album_ctx and album_ctx.get("release_date") and not batch_album_distrusted:
         release_date = _normalize_release_date_tag(album_ctx.get("release_date"))

@@ -819,13 +819,18 @@ def _link_companion_file(
 
 
 def link_download_into_library_v2(context: Dict[str, Any], *,
-                                  raise_on_error: bool = False) -> Optional[int]:
+                                  raise_on_error: bool = False,
+                                  fill_known_tags: bool = False) -> Optional[int]:
     """Link a finished download's file into ``lib2_*``. Returns the file-row id.
 
     Idempotent: an existing path on the same track is updated, not duplicated.
     Background repair callers keep the historical best-effort default;
     completion paths pass ``raise_on_error=True`` so an import cannot be
     reported successful while its Library-v2 row is missing.
+
+    ``fill_known_tags``: the import pipeline, which just tagged the file,
+    has the library fill the tags it left blank (#2217). A re-index of files
+    already on disk leaves it off: it never writes a file.
     """
     try:
         from core.settings import config_manager
@@ -1263,7 +1268,9 @@ def link_download_into_library_v2(context: Dict[str, Any], *,
             # of leaving the first browse on the cold path.
             _warm_new_artwork(db, conn, album_id)
             from core.library2.validation import refresh_imported_metadata
-            context['_metadata_status'] = refresh_imported_metadata(db, [file_path, *(context.get('_companion_file_paths') or [])])
+            context['_metadata_status'] = refresh_imported_metadata(
+                db, [file_path, *(context.get('_companion_file_paths') or [])],
+                fill_blanks=fill_known_tags)
             logger.info("Library auto-linked download: %s → track %s (file %s)",
                         os.path.basename(str(file_path)), track_id, file_id)
             return file_id
