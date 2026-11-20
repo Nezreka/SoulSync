@@ -642,6 +642,9 @@ function VideoLibraries({ loads }: { loads: number }) {
   // (and a new one, which comes back with an id)
   const [drawn, setDrawn] = useState<Record<string, number>>({});
   const [added, setAdded] = useState(0);
+  // a fresh load (the settings loaded again, Retry) draws every card again,
+  // with the list it brought: in the same render, so no card is drawn twice
+  const [generation, setGeneration] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
 
   async function load(drawAgain?: string) {
@@ -660,7 +663,8 @@ function VideoLibraries({ loads }: { loads: number }) {
     if (libs && libs.libraries) {
       setList(libs.libraries);
       setGenres(libs.genres || []);
-      if (drawAgain === '') {
+      if (drawAgain === undefined) setGeneration((n) => n + 1);
+      else if (drawAgain === '') {
         // the new card was saved: it comes back with an id
         setAdding(false);
         setAdded((n) => n + 1);
@@ -688,7 +692,7 @@ function VideoLibraries({ loads }: { loads: number }) {
       <div id="video-libraries-list" className={`video-libraries ${s.libList}`} ref={listRef}>
         {(list || []).map((lib) => (
           <LibraryRow
-            key={`${lib.id}-${loads}-${drawn[str(lib.id)] ?? 0}`}
+            key={`${lib.id}-${generation}-${drawn[str(lib.id)] ?? 0}`}
             lib={lib}
             profiles={profiles}
             reload={(drawAgain) => void load(drawAgain)}
