@@ -138,3 +138,29 @@ def test_media_servers_endpoint_lists_every_server_without_secrets():
     plex = body['servers'][0]
     assert plex['configured'] is True and plex['active'] is True and plex['connected'] is None
     assert 'sekrit' not in str(body)
+
+
+def test_media_servers_endpoint_can_skip_the_live_probes():
+    """#2213: the library's recognition badges ask which servers are set up.
+    probe=0 answers from config alone, never touching a server client."""
+    from flask import Flask
+
+    from api import media_servers
+
+    class _Engine:
+        def client(self, name):
+            raise AssertionError(f'probe=0 asked the {name} client')
+
+    cm = _Cfg({'plex': {'base_url': 'http://p', 'token': 't'}}, active='plex')
+    media_servers.configure(config_manager_=cm, engine_getter=lambda: _Engine())
+    app = Flask(__name__)
+    app.register_blueprint(media_servers.create_blueprint())
+    try:
+        body = app.test_client().get('/api/media-servers?probe=0').get_json()
+    finally:
+        media_servers.configure(config_manager_=cm, engine_getter=lambda: None)
+
+    by_name = {s['name']: s for s in body['servers']}
+    assert by_name['plex']['configured'] is True and by_name['plex']['active'] is True
+    assert by_name['jellyfin']['configured'] is False
+    assert 'connected' not in by_name['plex'] and 'capabilities' not in by_name['plex']
