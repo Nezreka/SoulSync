@@ -63,6 +63,10 @@ class LidarrDownloadClient(DownloadSourcePlugin):
         # foreignAlbumId -> monotonic time of the last AlbumSearch we sent, so
         # parallel tracks of one album trigger one indexer search, not one each
         self._album_searched_at: Dict[str, float] = {}
+        # foreignAlbumId -> album-bundle runs waiting on it right now. they are
+        # not in active_downloads, and the cleanup must not delete an album
+        # another run is still waiting on
+        self._bundle_waits: Dict[str, int] = {}
         self.shutdown_check = None
         self._load_config()
 
@@ -437,11 +441,18 @@ class LidarrDownloadClient(DownloadSourcePlugin):
     # especially) can take minutes.
     _GRAB_WINDOW_SECONDS = 600
     _SEARCH_DEDUP_SECONDS = 900
+    # a Lidarr restart or a slow answer is not "the album was deleted": only
+    # this many failed album reads in a row are
+    _GONE_AFTER_MISSES = 15
+    # queue states that need a person in Lidarr, so waiting on them would just
+    # hold the batch until the timeout
+    _STUCK_IMPORT_STATES = frozenset(('importfailed', 'importblocked'))
     _WAIT_ERRORS = {
         'not_grabbed': 'Lidarr found no release to grab',
         'failed': 'Lidarr download failed',
         'timeout': 'Download timed out',
         'gone': 'Album was removed from Lidarr',
+        'import_failed': "Lidarr could not import the album (see Activity in Lidarr)",
         'shutdown': 'Server shutting down',
     }
 
@@ -476,6 +487,9 @@ class LidarrDownloadClient(DownloadSourcePlugin):
         def _fail(error: str, can_fall_back: bool = fallback) -> Dict[str, Any]:
             result['error'] = error
             result['fallback'] = can_fall_back
+            # the other album sources end on 'failed' too, so the batch row
+            # does not sit on the last 'downloading' state
+            _emit('failed', release=f"{artist_name} - {album_name}".strip(' -'))
             return result
 
         if not self.is_configured():
@@ -491,31 +505,40 @@ class LidarrDownloadClient(DownloadSourcePlugin):
             return _fail(error or 'Failed to add album to Lidarr')
 
         release = f"{(album.get('artist') or {}).get('artistName', artist_name)} - {album.get('title', album_name)}"
+        foreign_album_id = album.get('foreignAlbumId', '')
         _emit('downloading', release=release, progress=0)
-        outcome = self._wait_for_album(
-            lidarr_album_id, album.get('foreignAlbumId', ''),
-            on_progress=lambda pct: _emit('downloading', release=release, progress=round(pct, 1)),
-        )
-        if outcome != 'complete':
-            return _fail(self._WAIT_ERRORS.get(outcome, outcome))
+        with self._download_lock:
+            self._bundle_waits[foreign_album_id] = self._bundle_waits.get(foreign_album_id, 0) + 1
+        try:
+            outcome = self._wait_for_album(
+                lidarr_album_id, foreign_album_id,
+                on_progress=lambda pct: _emit('downloading', release=release, progress=round(pct, 1)),
+            )
+            if outcome != 'complete':
+                return _fail(self._WAIT_ERRORS.get(outcome, outcome))
 
-        _emit('staging', release=release)
-        stats = (self._api_get(f'album/{lidarr_album_id}') or {}).get('statistics') or {}
-        track_files = self._api_get('trackfile', params={'albumId': lidarr_album_id}) or []
-        os.makedirs(staging_dir, exist_ok=True)
-        files = []
-        for tf in track_files:
-            src = tf.get('path', '')
-            if not src or not os.path.exists(src):
-                continue
-            dst = os.path.join(staging_dir, os.path.basename(src))
-            shutil.copy2(src, dst)  # an OSError here is fallback-eligible upstream
-            files.append(dst)
-        if not files:
-            return _fail('Lidarr imported the album but its files are not readable here')
+            _emit('staging', release=release)
+            stats = (self._api_get(f'album/{lidarr_album_id}') or {}).get('statistics') or {}
+            track_files = self._api_get('trackfile', params={'albumId': lidarr_album_id}) or []
+            sources = [Path(tf['path']) for tf in track_files
+                       if tf.get('path') and os.path.isfile(tf['path'])]
+            # atomic and collision-safe: two discs can both have a
+            # "01 - Intro.flac", and a half-copied file must never sit in
+            # staging under its real name
+            from core.download_plugins.album_bundle import copy_audio_files_atomically
+            files = copy_audio_files_atomically(sources, Path(staging_dir)) if sources else []
+            if not files:
+                return _fail('Lidarr imported the album but its files are not readable here')
+        finally:
+            with self._download_lock:
+                left = self._bundle_waits.get(foreign_album_id, 1) - 1
+                if left > 0:
+                    self._bundle_waits[foreign_album_id] = left
+                else:
+                    self._bundle_waits.pop(foreign_album_id, None)
 
         expected = stats.get('trackCount') or stats.get('totalTrackCount') or len(files)
-        if self._cleanup and not self._album_in_use(album.get('foreignAlbumId', '')):
+        if self._cleanup and not self._album_in_use(foreign_album_id):
             self._api_delete(f'album/{lidarr_album_id}', params={'deleteFiles': 'false'})
 
         logger.info(f"[Lidarr album] staged {len(files)} files for {release}")
@@ -554,7 +577,7 @@ class LidarrDownloadClient(DownloadSourcePlugin):
         for term in (f"{artist_name} {album_name}", album_name):
             best, best_score = None, 0.0
             for candidate in (self._api_get('album/lookup', params={'term': term}) or [])[:20]:
-                title_score = self._name_score(album_name, candidate.get('title', ''))
+                title_score = self._album_title_score(album_name, candidate.get('title', ''))
                 artist_score = self._name_score(
                     artist_name, (candidate.get('artist') or {}).get('artistName', ''))
                 if title_score < 0.8 or artist_score < 0.8:
@@ -565,6 +588,25 @@ class LidarrDownloadClient(DownloadSourcePlugin):
             if best:
                 return best
         return None
+
+    # an edition note on one side only: Spotify says "Album (Deluxe Edition)",
+    # the MusicBrainz release group Lidarr finds says "Album". Only edition
+    # words go; "(Live)" or "(Remixes)" is a different record and stays.
+    _EDITION_NOTE = re.compile(
+        r'\s*(?:[\(\[][^\)\]]*\b(?:deluxe|expanded|edition|remaster(?:ed)?|anniversary|bonus'
+        r'|special|collector\'?s|reissue)\b[^\)\]]*[\)\]]'
+        r'|\s-\s(?:\d{4}\s)?remaster(?:ed)?(?:\s\d{4})?(?:\sversion)?)\s*$',
+        re.IGNORECASE,
+    )
+
+    @classmethod
+    def _album_title_score(cls, wanted: str, candidate: str) -> float:
+        score = cls._name_score(wanted, candidate)
+        bare_wanted = cls._EDITION_NOTE.sub('', wanted or '').strip()
+        bare_candidate = cls._EDITION_NOTE.sub('', candidate or '').strip()
+        if (bare_wanted, bare_candidate) != (wanted, candidate):
+            score = max(score, cls._name_score(bare_wanted, bare_candidate))
+        return score
 
     @classmethod
     def _name_score(cls, wanted: str, candidate: str) -> float:
@@ -612,6 +654,8 @@ class LidarrDownloadClient(DownloadSourcePlugin):
 
     def _album_in_use(self, foreign_album_id: str, exclude_download_id: str = '') -> bool:
         with self._download_lock:
+            if self._bundle_waits.get(foreign_album_id):
+                return True
             return any(
                 dl.get('album_foreign_id') == foreign_album_id
                 and dl_id != exclude_download_id
@@ -714,10 +758,14 @@ class LidarrDownloadClient(DownloadSourcePlugin):
                 self._album_searched_at[foreign_album_id] = time.monotonic()
             return lidarr_album_id, None
 
-    def _queue_records(self, foreign_album_id: str) -> List[Dict[str, Any]]:
-        queue = self._api_get('queue', params={'includeAlbum': 'true', 'pageSize': 200})
-        records = (queue or {}).get('records') or [] if isinstance(queue, dict) else []
-        return [r for r in records
+    def _queue_records(self, foreign_album_id: str) -> Optional[List[Dict[str, Any]]]:
+        """This album's queue records, or None when the queue could not be
+        read. None is "unknown", never "nothing queued": an empty answer lets
+        the wait call a half-imported album complete."""
+        queue = self._api_get('queue', params={'includeAlbum': 'true', 'pageSize': 1000})
+        if not isinstance(queue, dict):
+            return None
+        return [r for r in (queue.get('records') or [])
                 if (r.get('album') or {}).get('foreignAlbumId') == foreign_album_id]
 
     def _wait_for_album(self, lidarr_album_id: int, foreign_album_id: str,
@@ -732,6 +780,7 @@ class LidarrDownloadClient(DownloadSourcePlugin):
         """
         start = time.monotonic()
         seen_in_queue = False
+        album_misses = 0
         while True:
             if self.shutdown_check and self.shutdown_check():
                 return 'shutdown'
@@ -740,22 +789,29 @@ class LidarrDownloadClient(DownloadSourcePlugin):
             elapsed = time.monotonic() - start
             try:
                 records = self._queue_records(foreign_album_id)
-                for item in records:
+                for item in records or []:
                     seen_in_queue = True
                     status = (item.get('status') or '').lower()
                     if status == 'failed':
                         return 'failed'
+                    if (item.get('trackedDownloadState') or '').lower() in self._STUCK_IMPORT_STATES:
+                        return 'import_failed'
                     size = max(item.get('size', 0) or 0, 1)
                     left = item.get('sizeleft', 0) or 0
                     if on_progress:
                         on_progress(max(0.0, 100.0 - left / size * 100))
                 album_check = self._api_get(f'album/{lidarr_album_id}')
-                if album_check is None and elapsed > 30:
-                    return 'gone'
+                if album_check is None:
+                    album_misses += 1
+                    if album_misses >= self._GONE_AFTER_MISSES and elapsed > 30:
+                        return 'gone'
+                else:
+                    album_misses = 0
                 files = ((album_check or {}).get('statistics') or {}).get('trackFileCount', 0) or 0
                 # Lidarr imports file by file: wait for the queue to let go of
-                # the album before calling it complete.
-                if files > 0 and not records:
+                # the album before calling it complete. An unreadable queue
+                # (None) says nothing either way.
+                if files > 0 and records is not None and not records:
                     return 'complete'
             except Exception as e:
                 logger.debug(f"Lidarr poll error: {e}")

@@ -323,3 +323,144 @@ def test_settings_reload_keeps_lidarrs_own_download_path(tmp_path):
         orch.reload_settings()
     assert lidarr.download_path == tmp_path / 'lidarr'
     assert other.download_path == tmp_path / 'slskd'
+
+
+# ---------------------------------------------------------------------------
+# review fixes: waiting through blips, stuck imports, staging, shared albums
+# ---------------------------------------------------------------------------
+
+
+def _clock(step=2):
+    ticks = iter(range(0, 10_000_000, step))
+    return lambda: next(ticks)
+
+
+def test_wait_survives_a_lidarr_blip(client):
+    """one failed album read after 30 s used to end a 6 h wait as 'gone'."""
+    reads = {'n': 0}
+    album = {'id': 100, 'statistics': {'trackFileCount': 0}}
+
+    def get(endpoint, params=None):
+        if endpoint == 'queue':
+            return {'records': [{'album': {'foreignAlbumId': 'rg'}, 'status': 'downloading',
+                                 'size': 10, 'sizeleft': 5}]} if reads['n'] < 40 else {'records': []}
+        reads['n'] += 1
+        if 20 <= reads['n'] < 25:
+            return None  # lidarr restarting
+        if reads['n'] >= 40:
+            album['statistics']['trackFileCount'] = 2
+        return album
+
+    with patch.object(client, '_api_get', side_effect=get), \
+            patch('core.lidarr_download_client.time.sleep'), \
+            patch('core.lidarr_download_client.time.monotonic', side_effect=_clock()):
+        assert client._wait_for_album(100, 'rg') == 'complete'
+
+
+def test_wait_still_reports_a_deleted_album(client):
+    def get(endpoint, params=None):
+        if endpoint == 'queue':
+            return {'records': [{'album': {'foreignAlbumId': 'rg'}, 'status': 'downloading'}]}
+        return None
+
+    with patch.object(client, '_api_get', side_effect=get), \
+            patch('core.lidarr_download_client.time.sleep'), \
+            patch('core.lidarr_download_client.time.monotonic', side_effect=_clock()):
+        assert client._wait_for_album(100, 'rg') == 'gone'
+
+
+def test_an_unreadable_queue_is_not_an_empty_one(client):
+    """lidarr imports file by file. a failed queue read used to look like
+    "nothing queued", and an album with 1 of 12 files in was staged as done."""
+    polls = {'n': 0}
+
+    def get(endpoint, params=None):
+        if endpoint == 'queue':
+            polls['n'] += 1
+            if polls['n'] > 5:
+                return {'records': []}
+            if polls['n'] % 2:
+                return None
+            return {'records': [{'album': {'foreignAlbumId': 'rg'}, 'status': 'downloading'}]}
+        return {'id': 100, 'statistics': {'trackFileCount': 1 if polls['n'] <= 5 else 12}}
+
+    with patch.object(client, '_api_get', side_effect=get), \
+            patch('core.lidarr_download_client.time.sleep'), \
+            patch('core.lidarr_download_client.time.monotonic', side_effect=_clock()):
+        assert client._wait_for_album(100, 'rg') == 'complete'
+    assert polls['n'] > 5
+
+
+def test_wait_gives_up_on_an_import_lidarr_cannot_finish(client):
+    def get(endpoint, params=None):
+        if endpoint == 'queue':
+            return {'records': [{'album': {'foreignAlbumId': 'rg'}, 'status': 'completed',
+                                 'trackedDownloadState': 'importBlocked'}]}
+        return {'id': 100, 'statistics': {'trackFileCount': 0}}
+
+    with patch.object(client, '_api_get', side_effect=get), \
+            patch('core.lidarr_download_client.time.sleep'), \
+            patch('core.lidarr_download_client.time.monotonic', side_effect=_clock()):
+        assert client._wait_for_album(100, 'rg') == 'import_failed'
+
+
+def test_staging_keeps_two_discs_same_named_files(client, tmp_path):
+    disc1 = tmp_path / 'music' / 'CD1' / '01 - Intro.flac'
+    disc2 = tmp_path / 'music' / 'CD2' / '01 - Intro.flac'
+    for p, body in ((disc1, b'one'), (disc2, b'two')):
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(body)
+    fake = FakeLidarr({'PISS you made me / skin on linen': [PISS]}, [str(disc1), str(disc2)])
+    with _wired(client, fake):
+        out = client.download_album_to_staging('you made me / skin on linen', 'PISS',
+                                               str(tmp_path / 'staging'))
+    assert out['success'], out
+    assert sorted(Path(f).read_bytes() for f in out['files']) == [b'one', b'two']
+    assert not list((tmp_path / 'staging').glob('*.tmp*'))
+
+
+def test_failed_bundle_ends_on_a_failed_state(client, tmp_path):
+    states = []
+    fake = FakeLidarr({})
+    cfg = {'download_source.mode': 'lidarr'}
+    with patch.object(client, '_api_get', side_effect=fake.get), \
+            patch('core.lidarr_download_client.config_manager.get',
+                  side_effect=lambda k, d=None: cfg.get(k, d)):
+        out = client.download_album_to_staging('Nope', 'Nobody', str(tmp_path / 's'),
+                                               lambda p: states.append(p['state']))
+    assert not out['success']
+    assert states[-1] == 'failed'
+
+
+def test_cleanup_waits_for_every_bundle_on_the_album(client, tmp_path):
+    """two batches wanting one album: the first to finish deleted the album
+    from lidarr, and the second read that as 'Album was removed from Lidarr'."""
+    client._cleanup = True
+    files = _audio(tmp_path, '01.flac')
+    fake = FakeLidarr({'PISS you made me / skin on linen': [PISS]}, files)
+    with _wired(client, fake):
+        client._bundle_waits['rg-piss'] = 1  # another batch is still waiting
+        out = client.download_album_to_staging('you made me / skin on linen', 'PISS',
+                                               str(tmp_path / 's'))
+        assert out['success'], out
+        assert fake.deleted == []
+        assert client._bundle_waits == {'rg-piss': 1}
+        client._bundle_waits.clear()
+        out = client.download_album_to_staging('you made me / skin on linen', 'PISS',
+                                               str(tmp_path / 's2'))
+        assert out['success'], out
+        assert fake.deleted == ['album/100']
+    assert client._bundle_waits == {}
+
+
+def test_find_album_looks_past_an_edition_note(client):
+    rumours = {'foreignAlbumId': 'rg-rumours', 'title': 'Rumours',
+               'artist': {'foreignArtistId': 'ar-fm', 'artistName': 'Fleetwood Mac'}}
+    live = {'foreignAlbumId': 'rg-live', 'title': 'Rumours',
+            'artist': {'foreignArtistId': 'ar-fm', 'artistName': 'Fleetwood Mac'}}
+    fake = FakeLidarr({'Fleetwood Mac Rumours (Deluxe Edition)': [rumours]})
+    with patch.object(client, '_api_get', side_effect=fake.get):
+        assert client._find_album('Rumours (Deluxe Edition)', 'Fleetwood Mac') is rumours
+    fake = FakeLidarr({'Fleetwood Mac Rumours (Live)': [live]})
+    with patch.object(client, '_api_get', side_effect=fake.get):
+        assert client._find_album('Rumours (Live)', 'Fleetwood Mac') is None
