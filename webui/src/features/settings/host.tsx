@@ -25,7 +25,6 @@ import { ConnectionsTab } from './tabs/connections-tab';
 import { DiscoveryTab } from './tabs/discovery/discovery-page';
 import { DownloadsTab } from './tabs/downloads-tab';
 import { LibraryTab } from './tabs/library/library-page';
-import { LogsTab } from './tabs/logs-tab';
 import {
   type TemplateKey,
   playlistItemError,
@@ -44,7 +43,7 @@ const TEMPLATE_NAMES: Partial<Record<TemplateKey, string>> = {
 import { PeopleTab, openPeopleSettings } from './tabs/people/people-tab';
 import { QualityTab } from './tabs/quality-tab';
 import { sourcesModel } from './tabs/sources-model';
-import { SystemTab } from './tabs/system-tab';
+import { SystemTab } from './tabs/system/system-page';
 
 export type SettingsTabKey =
   | 'connections'
@@ -110,7 +109,6 @@ export const SETTINGS_TABS: Partial<Record<SettingsTabKey, ComponentType<Setting
   discovery: DiscoveryTab,
   downloads: DownloadsTab,
   library: LibraryTab,
-  logs: LogsTab,
   people: PeopleTab,
   quality: QualityTab,
 };

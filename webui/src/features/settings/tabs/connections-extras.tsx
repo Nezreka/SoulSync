@@ -16,7 +16,6 @@ import type { SettingsStore } from '../settings-store';
 import {
   ActionRow,
   Btn,
-  DangerRow,
   More,
   Note,
   Row,
@@ -407,43 +406,6 @@ function FanartCard({ store }: { store: SettingsStore }) {
 
 // ── AcoustID ──
 
-/** settings.js clearQuarantine */
-async function clearQuarantine() {
-  const w = shell() as Shell & {
-    showConfirmDialog?: (o: {
-      title: string;
-      message: string;
-      confirmText?: string;
-      destructive?: boolean;
-    }) => Promise<boolean>;
-  };
-  if (
-    !(await w.showConfirmDialog?.({
-      title: 'Clear Quarantine',
-      message: 'Delete all files in the quarantine folder? This cannot be undone.',
-      confirmText: 'Delete',
-      destructive: true,
-    }))
-  )
-    return;
-  try {
-    w.showLoadingOverlay?.('Clearing quarantine folder...');
-    const response = await fetch('/api/quarantine/clear', { method: 'POST' });
-    const result = (await response.json()) as {
-      success?: boolean;
-      message?: string;
-      error?: string;
-    };
-    if (result.success) toast(result.message || 'Quarantine cleared', 'success');
-    else toast(`Failed to clear quarantine: ${result.error}`, 'error');
-  } catch (error) {
-    console.error('Error clearing quarantine:', error);
-    toast('Failed to clear quarantine', 'error');
-  } finally {
-    w.hideLoadingOverlay?.();
-  }
-}
-
 function AcoustidCard({ store }: { store: SettingsStore }) {
   const enabled = useChecked(store, 'acoustid', 'enabled');
   const key = useText(store, 'acoustid', 'api_key');
@@ -476,16 +438,10 @@ function AcoustidCard({ store }: { store: SettingsStore }) {
         label="Verify downloads"
         htmlFor="acoustid-enabled"
         help="Checks a downloaded file is the expected track by its fingerprint. A file that fails goes to the quarantine folder."
-        more="Turning it off only stops the check on new downloads: the AcoustID Scanner in Tools still scans when you run it yourself."
+        more="Turning it off only stops the check on new downloads: the AcoustID Scanner in Tools still scans when you run it yourself. Clear the quarantine folder from System, Maintenance."
       >
         <Switch id="acoustid-enabled" {...enabled} />
       </Row>
-      <DangerRow
-        label="Clear quarantine"
-        help="Deletes every file in the quarantine folder."
-        action="Clear Quarantine"
-        onAction={() => void clearQuarantine()}
-      />
     </ServiceCard>
   );
 }

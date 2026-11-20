@@ -28,6 +28,8 @@ import {
   TextField,
 } from '../ui';
 import s from '../ui/settings.module.css';
+import { LibHero } from './library-card';
+import { activitySentence } from './system/words';
 const MAX_PRESETS = 12;
 
 export const RETENTION = [
@@ -41,7 +43,14 @@ export const RETENTION = [
 
 const toast = (message: string, type: string) => window.showToast?.(message, type);
 
-export function ServerActivitySettingsCard({ denied }: { denied?: ReactNode } = {}) {
+export function ServerActivitySettingsCard({
+  denied,
+  hero,
+}: {
+  denied?: ReactNode;
+  /** read the settings back in a hero sentence first (System > Server Activity) */
+  hero?: boolean;
+} = {}) {
   const [settings, setSettings] = useState<ServerActivitySettings | null>(null);
   const [hidden, setHidden] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -130,8 +139,33 @@ export function ServerActivitySettingsCard({ denied }: { denied?: ReactNode } = 
     );
   };
 
+  const retention =
+    RETENTION.find((r) => r.value === settings.retention_days)?.label.toLowerCase() ??
+    `${settings.retention_days} days`;
+
   return (
     <div data-server-activity-settings="" data-ui="">
+      {hero ? (
+        <LibHero
+          parts={activitySentence({
+            retentionDays: settings.retention_days,
+            retentionLabel: retention,
+            uploadMbps: settings.upload_mbps || null,
+            geo: settings.geo_lookup,
+          })}
+          stats={[
+            { value: settings.retention_days ? retention : 'Forever', label: 'Plays kept' },
+            {
+              value: settings.upload_mbps ? `${settings.upload_mbps} Mbps` : 'Not set',
+              label: 'Upload',
+            },
+            {
+              value: presets.length,
+              label: presets.length === 1 ? 'Stop message' : 'Stop messages',
+            },
+          ]}
+        />
+      ) : null}
       <SectionLabel title="Now playing" hint="What the drawer measures and shows" />
       <Card>
         <Row

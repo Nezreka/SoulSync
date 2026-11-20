@@ -1375,9 +1375,10 @@ export function FieldNote({ children, id }: { children: ReactNode; id?: string }
   );
 }
 
-/** a field with a button beside it (Auto-detect) */
-export function FieldLine({ children }: { children: ReactNode }) {
-  return <div className={s.fieldLine}>{children}</div>;
+/** a field with a button beside it (Auto-detect). `wrap`: several fields
+ *  and a button, which go onto more lines when they do not fit */
+export function FieldLine({ children, wrap }: { children: ReactNode; wrap?: boolean }) {
+  return <div className={clsx(s.fieldLine, wrap && s.fieldLineWrap)}>{children}</div>;
 }
 
 /** under the hero: which kind of media the page is showing, and the page's own action */

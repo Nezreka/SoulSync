@@ -31,8 +31,13 @@ describe('the tabs', () => {
   it('old tab keys land where their content went', () => {
     expect(resolveTab('sources')).toEqual({ tab: 'downloads', view: 'sources' });
     expect(resolveTab('logs')).toEqual({ tab: 'advanced', view: 'logs' });
-    expect(resolveTab('advanced')).toEqual({ tab: 'advanced', view: 'system' });
-    expect(resolveTab('system')).toEqual({ tab: 'advanced', view: 'system' });
+    expect(resolveTab('advanced')).toEqual({ tab: 'advanced', view: 'general' });
+    expect(resolveTab('system')).toEqual({ tab: 'advanced', view: 'general' });
+    // System's pills (settings-bic phase 6); Server Activity kept its own
+    expect(resolveTab('server-activity')).toEqual({ tab: 'advanced', view: 'activity' });
+    expect(resolveTab('system', 'maintenance')).toEqual({ tab: 'advanced', view: 'maintenance' });
+    // an old address's view=system is the first pill
+    expect(resolveTab('system', 'system')).toEqual({ tab: 'advanced', view: 'general' });
     expect(resolveTab('downloads')).toEqual({ tab: 'downloads', view: 'sources' });
     // nonsense is the first tab, never a blank page
     expect(resolveTab('nope')).toEqual({ tab: 'connections', view: 'services' });

@@ -92,8 +92,7 @@ LABELS: list[tuple[str, str]] = [
     ("Auto-save M3U file when downloading playlists", "05-sync.js"),
     # Buttons
     ("Test Connection", "13-troubleshooting.js"),
-    ("Compact Database (VACUUM)", "11-settings.js"),
-    ("Enable Incremental Vacuum", "11-settings.js"),
+    ("Compact database", "11-settings.js"),
     # Processing & organization settings
     ("AcoustID verification", "11-settings.js"),
     ("Path templates", "11-settings.js"),

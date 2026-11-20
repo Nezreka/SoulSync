@@ -109,21 +109,21 @@
       "also": {
         "#security-login-password-confirm": "guard-secret"
       },
-      "click": ["Save Password"]
+      "click": ["Save password"]
     },
     {
       "match": "^#security-login-password-confirm$",
       "also": {
         "#security-login-password": "guard-secret"
       },
-      "click": ["Save Password"]
+      "click": ["Save password"]
     },
     {
       "match": "^#security-recovery-question$",
       "also": {
         "#security-recovery-answer": "guard-probe"
       },
-      "click": ["Save Recovery Question"]
+      "click": ["Save recovery question"]
     },
     {
       "match": "^#security-recovery-custom$",
@@ -131,18 +131,18 @@
         "#security-recovery-question": "__custom__",
         "#security-recovery-answer": "guard-probe"
       },
-      "click": ["Save Recovery Question"]
+      "click": ["Save recovery question"]
     },
     {
       "match": "^#security-recovery-answer$",
       "also": {
         "#security-recovery-question": "What was the name of your first pet?"
       },
-      "click": ["Save Recovery Question"]
+      "click": ["Save recovery question"]
     },
     {
       "match": "^#api-key-(label|scope)$",
-      "click": ["🔑 Generate API Key"]
+      "click": ["Generate key"]
     },
     {
       "match": "^#dev-mode-password$",

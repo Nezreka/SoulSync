@@ -88,14 +88,17 @@ describe('where sections live', () => {
     expect(tabDef('discovery').views.find((v) => v.key === 'import-lists')?.side).toBe('video');
   });
 
-  it('Database Maintenance is on advanced (React, SETTINGS_PORT.md step 9a)', () => {
-    const tab = readFileSync(
-      resolve(process.cwd(), 'src/features/settings/tabs/system-tab.tsx'),
-      'utf8',
-    );
-    expect(tab).toContain("const TAB = 'advanced';");
-    expect(tab).toContain('title="Database Maintenance"');
-    expect(html).toContain('<div data-stg-react="advanced" data-stg-part="database"');
+  it('Database Maintenance is a pill of System, with Clear quarantine (settings-bic phase 6)', () => {
+    const read = (f: string) =>
+      readFileSync(resolve(process.cwd(), 'src/features/settings/tabs/' + f), 'utf8');
+    const page = read('system/system-page.tsx');
+    expect(page).toContain("const TAB = 'advanced';");
+    expect(page).toContain('<MaintenanceView store={store}');
+    expect(read('system-tab.tsx')).toContain('title="Database"');
+    expect(read('system-tab.tsx')).toContain('id="quarantine-clear-btn"');
+    // it left the AcoustID sheet
+    expect(read('connections-extras.tsx')).not.toContain('/api/quarantine/clear');
+    expect(html).toContain('<div data-stg-react="advanced" data-stg-part="page"');
   });
 
   it('has a tab for every section tag and no tab left empty', () => {

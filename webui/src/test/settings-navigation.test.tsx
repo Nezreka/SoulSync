@@ -73,7 +73,9 @@ it('the old tab keys still land: sources is Downloads > Sources, logs is System 
   expect(open()).toBe('advanced');
   expect(document.getElementById('stg-active-title')?.textContent).toBe('System');
   act(() => switchSettingsTab('advanced'));
-  expect(nav.get()).toMatchObject({ tab: 'advanced', view: 'system' });
+  expect(nav.get()).toMatchObject({ tab: 'advanced', view: 'general' });
+  act(() => switchSettingsTab('server-activity'));
+  expect(nav.get()).toMatchObject({ tab: 'advanced', view: 'activity' });
   act(() => switchSettingsTab('library'));
   expect(open()).toBe('library');
 });

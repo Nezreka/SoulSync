@@ -65,7 +65,7 @@ import {
   statusFrames,
 } from './connections';
 import { type CardActions, ServiceFrame } from './connections-services';
-import { helpBits, REDACTED_SECRET_SENTINEL, Section, useDraft, useHelp } from './parts';
+import { REDACTED_SECRET_SENTINEL, useDraft } from './parts';
 import { secretNote, text, useSettings } from './source-panels';
 
 type Section_ = Record<string, unknown>;
@@ -1371,53 +1371,7 @@ const BANDCAMP_ASK = {
     "Bandcamp has no official public search/metadata API — this uses Bandcamp's own public search and release-page endpoints. Coverage and availability may change without notice. Once enabled, Bandcamp will appear as a search source in Discover and as a metadata enrichment source for downloaded tracks.",
 };
 
-function ExperimentalRow({
-  id,
-  label,
-  checked,
-  onChange,
-  help,
-}: {
-  id: string;
-  label: ReactNode;
-  checked: boolean;
-  onChange: (checked: boolean) => void;
-  help: string;
-}) {
-  const state = useHelp();
-  const bits = helpBits(help, state);
-  return (
-    <div className="form-group">
-      <div className="setting-row" style={{ flex: 1, minWidth: 0 }}>
-        <label
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            cursor: 'pointer',
-            fontWeight: 'normal',
-            margin: 0,
-          }}
-        >
-          <input
-            type="checkbox"
-            id={id}
-            checked={checked}
-            onChange={(event) => onChange(event.target.checked)}
-          />{' '}
-          <span>{label}</span>
-        </label>
-        {bits.icon}
-      </div>
-      <div className="setting-help-text setting-help-body" hidden={!state.open}>
-        {help}
-      </div>
-      {bits.line}
-    </div>
-  );
-}
-
-export function ExperimentalSection({ store }: { store: SettingsStore }) {
+export function ExperimentalCard({ store }: { store: SettingsStore }) {
   const settings = useSettings(store);
   const loads = useLoads(store);
   const exp = sec(settings, 'experimental');
@@ -1464,28 +1418,37 @@ export function ExperimentalSection({ store }: { store: SettingsStore }) {
 
   return (
     <>
-      <Section tab="advanced" title="Experimental" hint="Opt-in preview features" side="music">
-        <div className="settings-group" data-stg="advanced" data-music-only="">
-          <p className="settings-experimental-intro">
-            Features in this section are optional, may change without notice, and are not held to
-            the same support standard as core metadata sources.
-          </p>
-          <ExperimentalRow
+      <Card
+        title="Experimental"
+        hint="Optional preview features. They may change without notice and are not held to the same support standard as the core metadata sources."
+        data-music-only=""
+        id="stg-experimental"
+      >
+        <Row
+          label="JioSaavn metadata source"
+          htmlFor="experimental-jiosaavn-enabled"
+          help="Offers JioSaavn as a primary metadata source on Connections and in search. Strong for Indian and Bollywood catalogs."
+          more="Free, no account. It goes through a public proxy API, limited to one request a second. Off by default. Turning it off moves the metadata source back to Deezer if JioSaavn was picked."
+        >
+          <Switch
             id="experimental-jiosaavn-enabled"
-            label="Enable JioSaavn metadata source"
             checked={jiosaavn}
-            onChange={(on) => void toggleJiosaavn(on)}
-            help="Exposes JioSaavn as a primary metadata source on the Connections tab and in search. Free, no account — strong for Indian and Bollywood catalogs; limited to 1 request/sec via the public proxy API. Off by default."
+            onChange={(event) => void toggleJiosaavn(event.target.checked)}
           />
-          <ExperimentalRow
+        </Row>
+        <Row
+          label="Bandcamp search and enrichment"
+          htmlFor="experimental-bandcamp-enabled"
+          help="Adds Bandcamp as a search source in Discover and fills in tags, label and credits for downloaded tracks."
+          more="Free, no account. It uses Bandcamp's own public search and release pages, which are unofficial: no promised uptime or rate limits. Off by default."
+        >
+          <Switch
             id="experimental-bandcamp-enabled"
-            label="Enable Bandcamp search & enrichment"
             checked={exp.bandcamp_enabled === true}
-            onChange={(on) => void toggleBandcamp(on)}
-            help="Adds Bandcamp as a Discover search source and a track/album metadata enrichment source (tags, label, credits). Free, no account — uses Bandcamp's own public search and release-page endpoints (unofficial, no guaranteed uptime or rate limits). Off by default."
+            onChange={(event) => void toggleBandcamp(event.target.checked)}
           />
-        </div>
-      </Section>
+        </Row>
+      </Card>
       <EnableDialog asking={asking} close={close} />
     </>
   );

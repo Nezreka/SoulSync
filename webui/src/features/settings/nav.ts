@@ -138,8 +138,12 @@ export const TABS: TabDef[] = [
     title: 'System',
     sub: 'Security, the database, caches, the API, developer tools and logs',
     views: [
-      { key: 'system', label: 'Settings' },
+      { key: 'general', label: 'General' },
+      { key: 'security', label: 'Security' },
+      { key: 'api', label: 'API' },
+      { key: 'maintenance', label: 'Maintenance' },
       { key: 'activity', label: 'Server Activity' },
+      { key: 'developer', label: 'Developer' },
       { key: 'logs', label: 'Logs' },
     ],
   },
@@ -172,9 +176,10 @@ const ALIASES: Record<string, { tab: TabKey; view?: string }> = {
   logs: { tab: 'advanced', view: 'logs' },
   // it was under the media server on Connections until settings-bic phase 3
   'server-activity': { tab: 'advanced', view: 'activity' },
-  // the old System tab had no logs: asked for by key, it is the settings
-  advanced: { tab: 'advanced', view: 'system' },
-  system: { tab: 'advanced', view: 'system' },
+  // the System tab asked for by key opens on General (it was one Settings
+  // pill until settings-bic phase 6)
+  advanced: { tab: 'advanced', view: 'general' },
+  system: { tab: 'advanced', view: 'general' },
 };
 
 /** a tab key from anywhere (a button, an old caller, the address) as a place */

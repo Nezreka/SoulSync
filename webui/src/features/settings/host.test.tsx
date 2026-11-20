@@ -38,7 +38,7 @@ describe('the settings host', () => {
     await act(async () => host.show('appearance'));
     expect(slot.firstElementChild).toBe(first);
     await act(async () => host.show('logs'));
-    expect(document.querySelector('[data-stg-react="logs"]')!.innerHTML).toBe('');
+    expect(document.querySelector('[data-stg-react="advanced"]')!.innerHTML).toBe('');
     expect(host.ported()).toEqual(['appearance']);
   });
 
@@ -46,20 +46,20 @@ describe('the settings host', () => {
     const Part = ({ part, opened, active }: SettingsTabProps) => (
       <p>{`${part ?? 'whole'} ${opened}${active ? ' open' : ''}`}</p>
     );
-    const tabs = { appearance: Part, logs: Part };
+    const tabs = { appearance: Part, advanced: Part };
     const host = createSettingsHost({ tabs, effects: [] });
     render(<SettingsPage tabs={tabs} />);
     const text = () =>
-      [...document.querySelectorAll('[data-stg-react="appearance"], [data-stg-react="logs"]')].map(
-        (el) => el.textContent,
-      );
-    // opening Logs leaves Appearance on the page too: the settings search reads
+      [
+        ...document.querySelectorAll('[data-stg-react="appearance"], [data-stg-react="advanced"]'),
+      ].map((el) => el.textContent);
+    // opening System leaves Appearance on the page too: the settings search reads
     // every tab, and the shell is about to hide what is not the open tab
-    await act(async () => host.show('logs'));
-    expect(text()).toEqual(['page 0', 'whole 1 open']);
+    await act(async () => host.show('advanced'));
+    expect(text()).toEqual(['page 0', 'page 1 open']);
     // opening a tab again tells it so (the weather tile reloads on arrival)
     await act(async () => host.show('appearance'));
-    expect(text()).toEqual(['page 1 open', 'whole 1']);
+    expect(text()).toEqual(['page 1 open', 'page 1']);
   });
 
   it('a new visit mounts its tabs closed, not as the last visit left them', async () => {
@@ -68,14 +68,14 @@ describe('the settings host', () => {
       seen.push(`${part ?? 'whole'} ${opened}${active ? ' open' : ''}`);
       return null;
     };
-    const tabs = { logs: Part };
+    const tabs = { advanced: Part };
     const host = createSettingsHost({ tabs, effects: [] });
     const first = render(<SettingsPage tabs={tabs} />);
-    await act(async () => host.show('logs'));
+    await act(async () => host.show('advanced'));
     first.unmount();
     seen.length = 0;
     render(<SettingsPage tabs={tabs} />);
-    expect(seen[0]).toBe('whole 0');
+    expect(seen[0]).toBe('page 0');
   });
 
   it("the page's buttons call the shell bundle's functions, one copy of its state", () => {

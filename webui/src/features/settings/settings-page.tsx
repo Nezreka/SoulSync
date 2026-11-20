@@ -31,10 +31,8 @@ import { type NavState, TABS, type TabDef, legacyKey, nav, tabDef, useNav, views
 import { pageTabs, usePageTabs } from './page-tabs';
 import { type SettingsStore, settingsStore } from './settings-store';
 import { SettingsSearch } from './shell/search';
-import { ViewPanel } from './tabs/downloads/downloads-page';
 import { useSourcesAttention } from './tabs/downloads/sources-view';
 import { useViewer } from './tabs/people/data';
-import { ServerActivitySettingsCard } from './tabs/server-activity-settings';
 import { Btn, Icon, Note, Pills } from './ui';
 import s from './ui/settings.module.css';
 
@@ -408,38 +406,16 @@ export function SettingsPage({
         {slot('library', 'page')}
         {slot('discovery', 'page')}
         {slot('appearance', 'page')}
+        {slot('advanced', 'page')}
 
-        {/* the tabs not rebuilt yet: the blocks they always rendered, in the
-            order the old columns gave them */}
+        {/* the service cards' hidden homes: a tile opens one in its sheet */}
         <div className="settings-columns">
           <div className="settings-left-column">
-            {/* the service cards' hidden homes: a tile opens one in its sheet */}
             {slot('connections', 'api-music')}
             {slot('connections', 'api-video')}
           </div>
-          <div className="settings-right-column">
-            {slot('advanced', 'saving')}
-            {slot('advanced', 'security')}
-          </div>
-          <div className="settings-third-column">
-            {slot('advanced', 'database')}
-            {slot('advanced', 'tools')}
-            {slot('advanced', 'developer')}
-            {slot('advanced', 'experimental')}
-          </div>
         </div>
         {slot('people')}
-        {/* System > Server Activity: its own pill */}
-        <ViewPanel
-          tab="advanced"
-          view="activity"
-          open={state.tab === 'advanced' && state.view === 'activity'}
-        >
-          <ServerActivitySettingsCard
-            denied={<Note info>Only an admin can change Server Activity.</Note>}
-          />
-        </ViewPanel>
-        {slot('logs')}
       </div>
     </div>
   );

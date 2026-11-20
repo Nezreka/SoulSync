@@ -11,7 +11,7 @@ import { createSettingsStore, type SettingsPayload, type SettingsStore } from '.
 import { shape, vanilla } from './__fixtures__/shape';
 import { hydrabaseLink, musicbrainzKeys, musicbrainzRate } from './connections';
 import {
-  ExperimentalSection,
+  ExperimentalCard,
   musicbrainzError,
   syncMetadataSourceSelection,
 } from './connections-metadata';
@@ -193,11 +193,19 @@ describe('each part is the markup it replaced', () => {
     expect(button().hidden).toBe(true);
   });
 
-  it('Experimental, and its confirm in the page body', () => {
-    const { container } = render(<ExperimentalSection store={store} />);
-    expect(shape(container)).toEqual(
-      shape(vanilla('connections-experimental.vanilla.html', { afterInit: true })),
-    );
+  it('Experimental: a card of two switches, music side only; its confirm unchanged in the page body', () => {
+    const { container } = render(<ExperimentalCard store={store} />);
+    const card = container.querySelector('[data-card="Experimental"]')!;
+    expect(card.hasAttribute('data-music-only')).toBe(true);
+    for (const id of ['experimental-jiosaavn-enabled', 'experimental-bandcamp-enabled']) {
+      expect(el(id).getAttribute('role')).toBe('switch');
+      expect(card.contains(el(id))).toBe(true);
+    }
+    expect([...card.querySelectorAll('label')].map((l) => l.textContent)).toEqual([
+      'JioSaavn metadata source',
+      'Bandcamp search and enrichment',
+    ]);
+    expect(card.querySelector('.form-group, .settings-section-header')).toBeNull();
     const modal = document.createElement('div');
     modal.append(el('experimental-enable-modal-overlay').cloneNode(true));
     expect(shape(modal)).toEqual(shape(vanilla('connections-experimental-modal.vanilla.html')));
@@ -306,7 +314,7 @@ describe('Experimental', () => {
   it('JioSaavn waits for the confirm; turning it off takes the picker off it', async () => {
     render(
       <>
-        <ExperimentalSection store={store} />
+        <ExperimentalCard store={store} />
         <ConnectionsTab store={store} part="metadata" opened={0} active={false} />
       </>,
     );
@@ -336,7 +344,7 @@ describe('Experimental', () => {
   });
 
   it('Cancel leaves Bandcamp off; switching off needs no confirm', async () => {
-    render(<ExperimentalSection store={store} />);
+    render(<ExperimentalCard store={store} />);
     loaded({ experimental: { bandcamp_enabled: false } });
     fireEvent.click(el('experimental-bandcamp-enabled'));
     expect(el('experimental-enable-modal-title').textContent).toBe('Enable Bandcamp');

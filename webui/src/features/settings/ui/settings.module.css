@@ -16,6 +16,8 @@
 .say[hidden],
 .pre[hidden],
 .rtAddFields[hidden],
+.grow[hidden],
+.cardPad[hidden],
 .chips[hidden] {
   display: none;
 }
@@ -1106,6 +1108,21 @@
   display: flex;
   gap: 8px;
   align-items: center;
+}
+
+.fieldLineWrap {
+  flex-wrap: wrap;
+}
+
+/* a field that takes the room left on its line */
+.grow {
+  display: flex;
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+.grow > .field {
+  width: 100%;
 }
 
 /* the folder check under a path, in words */
@@ -3578,4 +3595,92 @@ button.chip:hover:not(:disabled) {
 .cards > .eyebrow:first-child,
 .cards > div:first-child > .eyebrow:first-child {
   margin-top: 0;
+}
+
+/* ── System ── */
+
+/* the OIDC-only status the shell draws (oidc-only.ts) */
+.oidcStatus {
+  padding: 0 20px 14px 40px;
+}
+
+/* an API key: its name and access over the prefix and dates */
+.keyText {
+  display: grid;
+  flex: 1;
+  gap: 2px;
+  min-width: 0;
+}
+
+.keyName {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  color: var(--white-a85);
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.keyText code {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+
+/* the log viewer: what is read, the lines, then how they are shown */
+.logBar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  padding: 14px 20px 0;
+}
+
+.logSearch {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+.logTerm {
+  padding: 12px 20px 0;
+}
+
+.logFoot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  align-items: center;
+  padding: 10px 20px 14px;
+}
+
+.logCount {
+  color: var(--white-a45);
+  font-size: 12px;
+}
+
+.logFollow {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  margin-left: auto;
+  color: var(--white-a70);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+@media (max-width: 768px) {
+  .logBar {
+    padding: 12px 16px 0;
+  }
+
+  .logTerm {
+    padding: 10px 16px 0;
+  }
+
+  .logFoot {
+    padding: 10px 16px 12px;
+  }
+
+  .logFollow {
+    margin-left: 0;
+  }
 }

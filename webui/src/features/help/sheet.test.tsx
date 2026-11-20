@@ -429,7 +429,7 @@ describe('on this page', () => {
     const here = within(dialog).getByRole('region', { name: 'On this page: Settings, Downloads' });
     expect(within(here).getByRole('heading', { name: 'Settings, Downloads' })).toBeInTheDocument();
     expect(here).toHaveTextContent(
-      'Queue behavior, retries, publishing, and what gets filtered out.',
+      'Where downloads come from, in what order, and what gets skipped.',
     );
     act(() => pageTabs.show('advanced'));
     expect(

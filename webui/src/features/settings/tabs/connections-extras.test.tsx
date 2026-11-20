@@ -140,19 +140,11 @@ describe('the Scrobbling and Extras cards', () => {
     opened.mockRestore();
   });
 
-  it('Clear Quarantine asks, then clears', async () => {
+  it('Clear quarantine is not in the AcoustID sheet any more: it moved to System > Maintenance', () => {
     group();
-    const button = [...document.querySelectorAll('[data-service="acoustid"] button')].find(
-      (b) => b.textContent === 'Clear Quarantine',
-    )!;
-    fireEvent.click(button);
-    await waitFor(() =>
-      expect(calls).toContainEqual({ url: '/api/quarantine/clear', method: 'POST' }),
-    );
-    expect(shell.showConfirmDialog).toHaveBeenCalledWith(
-      expect.objectContaining({ title: 'Clear Quarantine', destructive: true }),
-    );
-    expect(shell.showToast).toHaveBeenCalledWith('Quarantine cleared', 'success');
+    const card = document.querySelector('[data-service="acoustid"]')!;
+    expect(card.textContent).not.toContain('Clear quarantine');
+    expect(card.textContent).not.toContain('Clear Quarantine');
   });
 
   it('Last.fm says plainly when the key was refused (Pro only from 1 December 2026)', async () => {

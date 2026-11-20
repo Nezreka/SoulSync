@@ -11,7 +11,7 @@ registerDocsSection({
             body: `
 SoulSync needs credentials for the services it queries for metadata and enrichment. The Settings search finds any setting by name — handy when you're not sure which tab it lives under.
 
-Settings save themselves a moment after you change them. The status at the top right says **All changes saved**, **Save now** while a change is waiting (click it to save straight away), or **Retry save** if a save failed. Rather save by hand? Turn off **Save settings as I change them** under System, Saving. Changes then wait for the save button, and leaving Settings without saving drops them.
+Settings save themselves a moment after you change them. The status at the top right says **All changes saved**, **Save now** while a change is waiting (click it to save straight away), or **Retry save** if a save failed. Rather save by hand? Turn off **Save settings as I change them** under System, General. Changes then wait for the save button, and leaving Settings without saving drops them.
 
 ![Service credentials in Settings: the service cards grouped under Metadata, Scrobbling and Extras](settings-services.jpg)
 
@@ -225,7 +225,7 @@ Your **Music Library Folder** above is already covered — you don't need to rep
             title: 'Database Maintenance',
             lede: 'Backups, vacuuming, and cache management to keep SoulSync healthy.',
             body: `
-![Database maintenance: database size, Compact Database (VACUUM) and incremental vacuum](settings-maintenance.jpg)
+![Database maintenance: database size, Compact database and incremental vacuum](settings-maintenance.jpg)
 
 ## Backups
 
@@ -233,11 +233,11 @@ Backups don't live in Settings — they're on the **Tools** page, in the **Backu
 
 ## VACUUM
 
-Over time the database accumulates unused space from deleted rows. **Compact Database (VACUUM)** rewrites the database file to reclaim that space. Back up first: it needs free disk space about the size of the database (SoulSync refuses to start it without that), and the database is locked while it runs, which on a very large library can take a long time. **Incremental Vacuum** is a mode you switch on (**Enable Incremental Vacuum**): after a one-time full compact, freed pages are handed back in slices by Cache Maintenance.
+Over time the database accumulates unused space from deleted rows. **Settings → System → Maintenance** holds these. **Compact database** (in the danger zone, a VACUUM) rewrites the database file to reclaim that space. Back up first: it needs free disk space about the size of the database (SoulSync refuses to start it without that), and the database is locked while it runs, which on a very large library can take a long time. **Incremental vacuum** is a mode you switch on (its **Turn on** button): after a one-time full compact, freed pages are handed back in slices by Cache Maintenance.
 
 ## Tidy up and table sizes
 
-**Tidy Up (safe)** drops old rows from caches and logs that keep their own retention (never listening history or library data), merges the full-text search indexes, refreshes the query planner's stats and folds the write-ahead log back into the database. It doesn't lock the library for long and is safe to run any time; the Cache Maintenance repair job does the same on its schedule. **Show Biggest Tables** measures what takes the room; it reads the whole file, so it runs in the background and the list fills in when it's done. The **Write-Ahead Log** line shows the size of the \`-wal\` file; SoulSync folds it back every 10 minutes and caps it at 64 MB after each fold.
+**Tidy up** drops old rows from caches and logs that keep their own retention (never listening history or library data), merges the full-text search indexes, refreshes the query planner's stats and folds the write-ahead log back into the database. It doesn't lock the library for long and is safe to run any time; the Cache Maintenance repair job does the same on its schedule. **Show biggest tables** measures what takes the room; it reads the whole file, so it runs in the background and the list fills in when it's done. The **Write-ahead log** line shows the size of the \`-wal\` file; SoulSync folds it back every 10 minutes and caps it at 64 MB after each fold.
 
 Tuning for big libraries can be changed with environment variables: \`SOULSYNC_DB_CACHE_MB\` (page cache per connection, 8 by default), \`SOULSYNC_DB_WAL_LIMIT_MB\` (64), \`SOULSYNC_DB_MMAP_MB\` (0, off) and \`SOULSYNC_DB_CHECKPOINT_MINUTES\` (10, 0 turns it off).
 

@@ -7359,6 +7359,939 @@
       "asked": true,
       "showsEndpoint": "/api/weather"
     },
+    "#settings-autosave-enabled": {
+      "sel": "#settings-autosave-enabled",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": true,
+      "to": false,
+      "saves": {
+        "settings": {
+          "ui_appearance": {
+            "settings_autosave": false
+          }
+        }
+      },
+      "asked": false,
+      "shows": ["ui_appearance.settings_autosave"]
+    },
+    "#max-workers": {
+      "sel": "#max-workers",
+      "kind": "select",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "5",
+      "to": "3",
+      "saves": {
+        "settings": {
+          "database": {
+            "max_workers": 3
+          }
+        }
+      },
+      "asked": "3",
+      "shows": ["database.max_workers"]
+    },
+    "#log-level-select": {
+      "sel": "#log-level-select",
+      "kind": "radiogroup",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "INFO",
+      "to": "DEBUG",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/settings/log-level",
+            "body": "{\"level\":\"DEBUG\"}"
+          }
+        ]
+      },
+      "asked": "DEBUG",
+      "showsEndpoint": "/api/settings/log-level"
+    },
+    "#security-require-pin": {
+      "sel": "#security-require-pin",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "jellyfin",
+      "from": false,
+      "to": true,
+      "saves": {
+        "settings": {
+          "security": {
+            "require_pin_on_launch": true
+          }
+        }
+      },
+      "asked": true,
+      "shows": ["security.require_pin_on_launch"]
+    },
+    "#security-new-pin": {
+      "sel": "#security-new-pin",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/profiles/1/set-pin",
+            "body": "{\"pin\":\"1234\"}"
+          }
+        ]
+      },
+      "asked": "1234",
+      "also": {
+        "#security-confirm-pin": "1234"
+      },
+      "click": ["#security-save-pin-btn"]
+    },
+    "#security-confirm-pin": {
+      "sel": "#security-confirm-pin",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/profiles/1/set-pin",
+            "body": "{\"pin\":\"1234\"}"
+          }
+        ]
+      },
+      "asked": "1234",
+      "also": {
+        "#security-new-pin": "1234"
+      },
+      "click": ["#security-save-pin-btn"]
+    },
+    "#security-login-password": {
+      "sel": "#security-login-password",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/profiles/1/set-password",
+            "body": "{\"password\":\"guard-secret\"}"
+          }
+        ]
+      },
+      "asked": "guard-secret",
+      "also": {
+        "#security-login-password-confirm": "guard-secret"
+      },
+      "click": ["Save password"]
+    },
+    "#security-login-password-confirm": {
+      "sel": "#security-login-password-confirm",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/profiles/1/set-password",
+            "body": "{\"password\":\"guard-secret\"}"
+          }
+        ]
+      },
+      "asked": "guard-secret",
+      "also": {
+        "#security-login-password": "guard-secret"
+      },
+      "click": ["Save password"]
+    },
+    "#security-recovery-question": {
+      "sel": "#security-recovery-question",
+      "kind": "select",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "What was the name of your first pet?",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/profiles/1/set-recovery",
+            "body": "{\"question\":\"What was the name of your first pet?\",\"answer\":\"guard-probe\"}"
+          }
+        ]
+      },
+      "asked": "What was the name of your first pet?",
+      "also": {
+        "#security-recovery-answer": "guard-probe"
+      },
+      "click": ["Save recovery question"]
+    },
+    "#security-recovery-custom": {
+      "sel": "#security-recovery-custom",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "guard-probe",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/profiles/1/set-recovery",
+            "body": "{\"question\":\"guard-probe\",\"answer\":\"guard-probe\"}"
+          }
+        ]
+      },
+      "asked": "guard-probe",
+      "also": {
+        "#security-recovery-question": "__custom__",
+        "#security-recovery-answer": "guard-probe"
+      },
+      "click": ["Save recovery question"]
+    },
+    "#security-recovery-answer": {
+      "sel": "#security-recovery-answer",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/profiles/1/set-recovery",
+            "body": "{\"question\":\"What was the name of your first pet?\",\"answer\":\"guard-probe\"}"
+          }
+        ]
+      },
+      "asked": "guard-probe",
+      "also": {
+        "#security-recovery-question": "What was the name of your first pet?"
+      },
+      "click": ["Save recovery question"]
+    },
+    "#security-require-login": {
+      "sel": "#security-require-login",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "jellyfin",
+      "from": false,
+      "to": true,
+      "saves": {
+        "settings": {
+          "security": {
+            "require_login": true
+          }
+        }
+      },
+      "asked": true,
+      "shows": ["security.require_login"]
+    },
+    "#security-plex-signin": {
+      "sel": "#security-plex-signin",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": true,
+      "to": false,
+      "saves": {
+        "settings": {
+          "security": {
+            "plex_signin": false
+          }
+        }
+      },
+      "asked": false,
+      "shows": ["security.plex_signin"]
+    },
+    "#security-plex-signin-auto-create": {
+      "sel": "#security-plex-signin-auto-create",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": true,
+      "to": false,
+      "saves": {
+        "settings": {
+          "security": {
+            "plex_signin_auto_create": false
+          }
+        }
+      },
+      "asked": false,
+      "shows": ["security.plex_signin_auto_create"]
+    },
+    "#security-oidc-signin": {
+      "sel": "#security-oidc-signin",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": true,
+      "to": false,
+      "saves": {
+        "settings": {
+          "security": {
+            "oidc_signin": false
+          }
+        }
+      },
+      "asked": false,
+      "shows": ["security.oidc_signin"]
+    },
+    "#security-oidc-issuer": {
+      "sel": "#security-oidc-issuer",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "https://id.example",
+      "to": "http://guard.example:4321",
+      "saves": {
+        "settings": {
+          "security": {
+            "oidc_issuer": "http://guard.example:4321"
+          }
+        }
+      },
+      "asked": "http://guard.example:4321",
+      "shows": ["security.oidc_issuer"]
+    },
+    "#security-oidc-client-id": {
+      "sel": "#security-oidc-client-id",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "guard-probe",
+      "saves": {
+        "settings": {
+          "security": {
+            "oidc_client_id": "guard-probe"
+          }
+        }
+      },
+      "asked": "guard-probe",
+      "shows": ["security.oidc_client_id"]
+    },
+    "#security-oidc-client-secret": {
+      "sel": "#security-oidc-client-secret",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "__redacted_unchanged__",
+      "to": "guard-secret",
+      "saves": {
+        "settings": {
+          "security": {
+            "oidc_client_secret": "guard-secret"
+          }
+        }
+      },
+      "asked": "guard-secret",
+      "shows": ["security.oidc_client_secret"]
+    },
+    "#security-oidc-button-label": {
+      "sel": "#security-oidc-button-label",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "guard-probe",
+      "saves": {
+        "settings": {
+          "security": {
+            "oidc_button_label": "guard-probe"
+          }
+        }
+      },
+      "asked": "guard-probe",
+      "shows": ["security.oidc_button_label"]
+    },
+    "#security-oidc-signin-auto-create": {
+      "sel": "#security-oidc-signin-auto-create",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": true,
+      "to": false,
+      "saves": {
+        "settings": {
+          "security": {
+            "oidc_signin_auto_create": false
+          }
+        }
+      },
+      "asked": false,
+      "shows": ["security.oidc_signin_auto_create"]
+    },
+    "#security-oidc-icon-url": {
+      "sel": "#security-oidc-icon-url",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "http://guard.example:4321",
+      "saves": {
+        "settings": {
+          "security": {
+            "oidc_icon_url": "http://guard.example:4321"
+          }
+        }
+      },
+      "asked": "http://guard.example:4321",
+      "shows": ["security.oidc_icon_url"]
+    },
+    "#security-oidc-required-group": {
+      "sel": "#security-oidc-required-group",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "guard-probe",
+      "saves": {
+        "settings": {
+          "security": {
+            "oidc_required_group": "guard-probe"
+          }
+        }
+      },
+      "asked": "guard-probe",
+      "shows": ["security.oidc_required_group"]
+    },
+    "#security-oidc-groups-claim": {
+      "sel": "#security-oidc-groups-claim",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "guard-probe",
+      "saves": {
+        "settings": {
+          "security": {
+            "oidc_groups_claim": "guard-probe"
+          }
+        }
+      },
+      "asked": "guard-probe",
+      "shows": ["security.oidc_groups_claim"]
+    },
+    "#security-oidc-scopes": {
+      "sel": "#security-oidc-scopes",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "guard-probe",
+      "saves": {
+        "settings": {
+          "security": {
+            "oidc_scopes": "guard-probe"
+          }
+        }
+      },
+      "asked": "guard-probe",
+      "shows": ["security.oidc_scopes"]
+    },
+    "#security-oidc-redirect-uri": {
+      "sel": "#security-oidc-redirect-uri",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "guard-probe",
+      "saves": {
+        "settings": {
+          "security": {
+            "oidc_redirect_uri": "guard-probe"
+          }
+        }
+      },
+      "asked": "guard-probe",
+      "shows": ["security.oidc_redirect_uri"]
+    },
+    "#security-oidc-only": {
+      "sel": "#security-oidc-only",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": false,
+      "to": true,
+      "saves": {
+        "settings": {
+          "security": {
+            "oidc_only": true
+          }
+        }
+      },
+      "asked": true,
+      "shows": ["security.oidc_only"]
+    },
+    "#security-trust-proxy": {
+      "sel": "#security-trust-proxy",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": false,
+      "to": true,
+      "saves": {
+        "settings": {
+          "security": {
+            "trust_reverse_proxy": true
+          }
+        }
+      },
+      "asked": true,
+      "shows": ["security.trust_reverse_proxy"]
+    },
+    "#security-auth-proxy-header": {
+      "sel": "#security-auth-proxy-header",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "guard-probe",
+      "saves": {
+        "settings": {
+          "security": {
+            "auth_proxy_header": "guard-probe"
+          }
+        }
+      },
+      "asked": "guard-probe",
+      "shows": ["security.auth_proxy_header"]
+    },
+    "#security-cors-origins": {
+      "sel": "#security-cors-origins",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "https://ok.example",
+      "to": "http://guard.example:4321",
+      "saves": {
+        "settings": {
+          "security": {
+            "cors_origins": "http://guard.example:4321"
+          }
+        }
+      },
+      "asked": "http://guard.example:4321",
+      "shows": ["security.cors_origins"]
+    },
+    "#api-key-label": {
+      "sel": "#api-key-label",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "guard-probe",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/v1/api-keys-internal/generate",
+            "body": "{\"label\":\"guard-probe\",\"scope\":\"read\"}"
+          }
+        ]
+      },
+      "asked": "guard-probe",
+      "click": ["Generate key"]
+    },
+    "#api-key-scope": {
+      "sel": "#api-key-scope",
+      "kind": "radiogroup",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "read",
+      "to": "admin",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/v1/api-keys-internal/generate",
+            "body": "{\"label\":\"Default\",\"scope\":\"admin\"}"
+          }
+        ]
+      },
+      "asked": "admin",
+      "click": ["Generate key"]
+    },
+    "#mcp-enabled": {
+      "sel": "#mcp-enabled",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": true,
+      "to": false,
+      "saves": {
+        "settings": {
+          "mcp": {
+            "enabled": false
+          }
+        }
+      },
+      "asked": false,
+      "shows": ["mcp.enabled"]
+    },
+    "#lidarr-compat-enabled": {
+      "sel": "#lidarr-compat-enabled",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": false,
+      "to": true,
+      "saves": {
+        "settings": {
+          "lidarr_compat": {
+            "enabled": true
+          }
+        }
+      },
+      "asked": true,
+      "shows": ["lidarr_compat.enabled"]
+    },
+    "#lidarr-compat-profile": {
+      "sel": "#lidarr-compat-profile",
+      "kind": "select",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "1",
+      "to": "2",
+      "saves": {
+        "settings": {
+          "lidarr_compat": {
+            "profile_id": 2
+          }
+        }
+      },
+      "asked": "2",
+      "shows": ["lidarr_compat.profile_id"]
+    },
+    "#seerr-compat-enabled": {
+      "sel": "#seerr-compat-enabled",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": false,
+      "to": true,
+      "saves": {
+        "settings": {
+          "seerr_compat": {
+            "enabled": true
+          }
+        }
+      },
+      "asked": true,
+      "shows": ["seerr_compat.enabled"]
+    },
+    "#seerr-compat-refuse-unknown": {
+      "sel": "#seerr-compat-refuse-unknown",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": false,
+      "to": true,
+      "saves": {
+        "settings": {
+          "seerr_compat": {
+            "refuse_unknown": true
+          }
+        }
+      },
+      "asked": true,
+      "shows": ["seerr_compat.refuse_unknown"]
+    },
+    "#seerr-compat-profile": {
+      "sel": "#seerr-compat-profile",
+      "kind": "select",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "1",
+      "to": "2",
+      "saves": {
+        "settings": {
+          "seerr_compat": {
+            "profile_id": 2
+          }
+        }
+      },
+      "asked": "2",
+      "shows": ["seerr_compat.profile_id"]
+    },
+    "#imgcache-max-mb": {
+      "sel": "#imgcache-max-mb",
+      "kind": "number",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "128",
+      "saves": {
+        "settings": {
+          "image_cache": {
+            "max_cache_mb": 128
+          }
+        }
+      },
+      "asked": "128"
+    },
+    "#imgcache-thumbnails": {
+      "sel": "#imgcache-thumbnails",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": false,
+      "to": true,
+      "saves": {
+        "settings": {
+          "image_cache": {
+            "thumbnails": true
+          }
+        }
+      },
+      "asked": true
+    },
+    "#sa-upload-mbps": {
+      "sel": "#sa-upload-mbps",
+      "kind": "number",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "40",
+      "to": "41",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/server-activity/settings",
+            "body": "{\"upload_mbps\":41}"
+          }
+        ]
+      },
+      "asked": "41",
+      "showsEndpoint": "/api/server-activity/settings"
+    },
+    "#sa-geo-lookup": {
+      "sel": "#sa-geo-lookup",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": true,
+      "to": false,
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/server-activity/settings",
+            "body": "{\"geo_lookup\":false}"
+          }
+        ]
+      },
+      "asked": false,
+      "showsEndpoint": "/api/server-activity/settings"
+    },
+    "#sa-retention": {
+      "sel": "#sa-retention",
+      "kind": "select",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "90",
+      "to": "0",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/server-activity/settings",
+            "body": "{\"retention_days\":0}"
+          }
+        ]
+      },
+      "asked": "0",
+      "showsEndpoint": "/api/server-activity/settings"
+    },
+    "#sa-preset-new": {
+      "sel": "#sa-preset-new",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/server-activity/settings",
+            "body": "{\"stop_presets\":[\"Server maintenance, back soon.\",\"guard-probe\"]}"
+          }
+        ]
+      },
+      "asked": "guard-probe",
+      "click": ["Add"]
+    },
+    "#dev-mode-password": {
+      "sel": "#dev-mode-password",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/dev-mode",
+            "body": "{\"password\":\"guard-secret\"}"
+          }
+        ]
+      },
+      "asked": "guard-secret",
+      "click": ["Activate"]
+    },
+    "#sw-preview-preset": {
+      "sel": "#sw-preview-preset",
+      "kind": "select",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": null,
+      "saves": null,
+      "noSave": "a developer preview wired by the shell bundle from outside the page (not loaded here): saves nothing"
+    },
+    "#sw-preview-holiday": {
+      "sel": "#sw-preview-holiday",
+      "kind": "select",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "none",
+      "saves": null,
+      "asked": "none",
+      "noSave": "a developer preview wired by the shell bundle from outside the page (not loaded here): saves nothing"
+    },
+    "#sw-preview-date": {
+      "sel": "#sw-preview-date",
+      "kind": "date",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "2026-01-02",
+      "saves": null,
+      "asked": "2026-01-02",
+      "noSave": "a developer preview wired by the shell bundle from outside the page (not loaded here): saves nothing"
+    },
+    "#ob-preview-step": {
+      "sel": "#ob-preview-step",
+      "kind": "select",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "welcome",
+      "to": "account",
+      "saves": null,
+      "asked": "account",
+      "noSave": "a developer preview wired by the shell bundle from outside the page (not loaded here): saves nothing"
+    },
+    "#ob-preview-env": {
+      "sel": "#ob-preview-env",
+      "kind": "select",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "real",
+      "to": "docker",
+      "saves": null,
+      "asked": "docker",
+      "noSave": "a developer preview wired by the shell bundle from outside the page (not loaded here): saves nothing"
+    },
+    "#experimental-jiosaavn-enabled": {
+      "sel": "#experimental-jiosaavn-enabled",
+      "kind": "checkbox",
+      "only": "music",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": true,
+      "to": false,
+      "saves": {
+        "settings": {
+          "experimental": {
+            "jiosaavn_enabled": false
+          }
+        }
+      },
+      "asked": false,
+      "shows": ["experimental.jiosaavn_enabled"]
+    },
+    "#experimental-bandcamp-enabled": {
+      "sel": "#experimental-bandcamp-enabled",
+      "kind": "checkbox",
+      "only": "music",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": false,
+      "to": true,
+      "saves": {
+        "settings": {
+          "experimental": {
+            "bandcamp_enabled": true
+          }
+        }
+      },
+      "asked": true,
+      "click": ["#experimental-enable-ack-checkbox", "#experimental-enable-confirm-btn"],
+      "shows": ["experimental.bandcamp_enabled"]
+    },
+    "#log-viewer-source": {
+      "sel": "#log-viewer-source",
+      "kind": "select",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "app",
+      "to": "post_processing",
+      "saves": null,
+      "asked": "post_processing",
+      "noSave": "the log viewer: picks what is read (GET /api/logs/tail), nothing is saved"
+    },
+    "#log-viewer-level": {
+      "sel": "#log-viewer-level",
+      "kind": "radiogroup",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "DEBUG",
+      "saves": null,
+      "asked": "DEBUG",
+      "noSave": "the log viewer: picks what is read (GET /api/logs/tail), nothing is saved"
+    },
+    "#log-viewer-search": {
+      "sel": "#log-viewer-search",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "guard-probe",
+      "saves": null,
+      "asked": "guard-probe",
+      "noSave": "the log viewer: picks what is read (GET /api/logs/tail), nothing is saved"
+    },
+    "#log-viewer-autoscroll": {
+      "sel": "#log-viewer-autoscroll",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": true,
+      "to": false,
+      "saves": null,
+      "asked": false,
+      "noSave": "the log viewer: picks what is read (GET /api/logs/tail), nothing is saved"
+    },
     "#spotify-client-id": {
       "sel": "#spotify-client-id",
       "kind": "text",
@@ -8068,819 +9001,6 @@
       "asked": false,
       "shows": ["hydrabase.auto_connect"]
     },
-    "#settings-autosave-enabled": {
-      "sel": "#settings-autosave-enabled",
-      "kind": "checkbox",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": true,
-      "to": false,
-      "saves": {
-        "settings": {
-          "ui_appearance": {
-            "settings_autosave": false
-          }
-        }
-      },
-      "asked": false,
-      "shows": ["ui_appearance.settings_autosave"]
-    },
-    "#security-new-pin": {
-      "sel": "#security-new-pin",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "",
-      "to": "",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/profiles/1/set-pin",
-            "body": "{\"pin\":\"1234\"}"
-          }
-        ]
-      },
-      "asked": "1234",
-      "also": {
-        "#security-confirm-pin": "1234"
-      },
-      "click": ["#security-save-pin-btn"]
-    },
-    "#security-confirm-pin": {
-      "sel": "#security-confirm-pin",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "",
-      "to": "",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/profiles/1/set-pin",
-            "body": "{\"pin\":\"1234\"}"
-          }
-        ]
-      },
-      "asked": "1234",
-      "also": {
-        "#security-new-pin": "1234"
-      },
-      "click": ["#security-save-pin-btn"]
-    },
-    "#security-require-pin": {
-      "sel": "#security-require-pin",
-      "kind": "checkbox",
-      "sides": ["music", "video"],
-      "scenario": "jellyfin",
-      "from": false,
-      "to": true,
-      "saves": {
-        "settings": {
-          "security": {
-            "require_pin_on_launch": true
-          }
-        }
-      },
-      "asked": true,
-      "shows": ["security.require_pin_on_launch"]
-    },
-    "#security-login-password": {
-      "sel": "#security-login-password",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "",
-      "to": "",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/profiles/1/set-password",
-            "body": "{\"password\":\"guard-secret\"}"
-          }
-        ]
-      },
-      "asked": "guard-secret",
-      "also": {
-        "#security-login-password-confirm": "guard-secret"
-      },
-      "click": ["Save Password"]
-    },
-    "#security-login-password-confirm": {
-      "sel": "#security-login-password-confirm",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "",
-      "to": "",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/profiles/1/set-password",
-            "body": "{\"password\":\"guard-secret\"}"
-          }
-        ]
-      },
-      "asked": "guard-secret",
-      "also": {
-        "#security-login-password": "guard-secret"
-      },
-      "click": ["Save Password"]
-    },
-    "#security-recovery-question": {
-      "sel": "#security-recovery-question",
-      "kind": "select",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "",
-      "to": "What was the name of your first pet?",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/profiles/1/set-recovery",
-            "body": "{\"question\":\"What was the name of your first pet?\",\"answer\":\"guard-probe\"}"
-          }
-        ]
-      },
-      "asked": "What was the name of your first pet?",
-      "also": {
-        "#security-recovery-answer": "guard-probe"
-      },
-      "click": ["Save Recovery Question"]
-    },
-    "#security-recovery-custom": {
-      "sel": "#security-recovery-custom",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "",
-      "to": "guard-probe",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/profiles/1/set-recovery",
-            "body": "{\"question\":\"guard-probe\",\"answer\":\"guard-probe\"}"
-          }
-        ]
-      },
-      "asked": "guard-probe",
-      "also": {
-        "#security-recovery-question": "__custom__",
-        "#security-recovery-answer": "guard-probe"
-      },
-      "click": ["Save Recovery Question"]
-    },
-    "#security-recovery-answer": {
-      "sel": "#security-recovery-answer",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "",
-      "to": "",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/profiles/1/set-recovery",
-            "body": "{\"question\":\"What was the name of your first pet?\",\"answer\":\"guard-probe\"}"
-          }
-        ]
-      },
-      "asked": "guard-probe",
-      "also": {
-        "#security-recovery-question": "What was the name of your first pet?"
-      },
-      "click": ["Save Recovery Question"]
-    },
-    "#security-require-login": {
-      "sel": "#security-require-login",
-      "kind": "checkbox",
-      "sides": ["music", "video"],
-      "scenario": "jellyfin",
-      "from": false,
-      "to": true,
-      "saves": {
-        "settings": {
-          "security": {
-            "require_login": true
-          }
-        }
-      },
-      "asked": true,
-      "shows": ["security.require_login"]
-    },
-    "#security-plex-signin": {
-      "sel": "#security-plex-signin",
-      "kind": "checkbox",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": true,
-      "to": false,
-      "saves": {
-        "settings": {
-          "security": {
-            "plex_signin": false
-          }
-        }
-      },
-      "asked": false,
-      "shows": ["security.plex_signin"]
-    },
-    "#security-plex-signin-auto-create": {
-      "sel": "#security-plex-signin-auto-create",
-      "kind": "checkbox",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": true,
-      "to": false,
-      "saves": {
-        "settings": {
-          "security": {
-            "plex_signin_auto_create": false
-          }
-        }
-      },
-      "asked": false,
-      "shows": ["security.plex_signin_auto_create"]
-    },
-    "#security-oidc-signin": {
-      "sel": "#security-oidc-signin",
-      "kind": "checkbox",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": true,
-      "to": false,
-      "saves": {
-        "settings": {
-          "security": {
-            "oidc_signin": false
-          }
-        }
-      },
-      "asked": false,
-      "shows": ["security.oidc_signin"]
-    },
-    "#security-oidc-issuer": {
-      "sel": "#security-oidc-issuer",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "https://id.example",
-      "to": "http://guard.example:4321",
-      "saves": {
-        "settings": {
-          "security": {
-            "oidc_issuer": "http://guard.example:4321"
-          }
-        }
-      },
-      "asked": "http://guard.example:4321",
-      "shows": ["security.oidc_issuer"]
-    },
-    "#security-oidc-client-id": {
-      "sel": "#security-oidc-client-id",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "",
-      "to": "guard-probe",
-      "saves": {
-        "settings": {
-          "security": {
-            "oidc_client_id": "guard-probe"
-          }
-        }
-      },
-      "asked": "guard-probe",
-      "shows": ["security.oidc_client_id"]
-    },
-    "#security-oidc-client-secret": {
-      "sel": "#security-oidc-client-secret",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "__redacted_unchanged__",
-      "to": "guard-secret",
-      "saves": {
-        "settings": {
-          "security": {
-            "oidc_client_secret": "guard-secret"
-          }
-        }
-      },
-      "asked": "guard-secret",
-      "shows": ["security.oidc_client_secret"]
-    },
-    "#security-oidc-button-label": {
-      "sel": "#security-oidc-button-label",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "",
-      "to": "guard-probe",
-      "saves": {
-        "settings": {
-          "security": {
-            "oidc_button_label": "guard-probe"
-          }
-        }
-      },
-      "asked": "guard-probe",
-      "shows": ["security.oidc_button_label"]
-    },
-    "#security-oidc-icon-url": {
-      "sel": "#security-oidc-icon-url",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "",
-      "to": "http://guard.example:4321",
-      "saves": {
-        "settings": {
-          "security": {
-            "oidc_icon_url": "http://guard.example:4321"
-          }
-        }
-      },
-      "asked": "http://guard.example:4321",
-      "shows": ["security.oidc_icon_url"]
-    },
-    "#security-oidc-required-group": {
-      "sel": "#security-oidc-required-group",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "",
-      "to": "guard-probe",
-      "saves": {
-        "settings": {
-          "security": {
-            "oidc_required_group": "guard-probe"
-          }
-        }
-      },
-      "asked": "guard-probe",
-      "shows": ["security.oidc_required_group"]
-    },
-    "#security-oidc-groups-claim": {
-      "sel": "#security-oidc-groups-claim",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "",
-      "to": "guard-probe",
-      "saves": {
-        "settings": {
-          "security": {
-            "oidc_groups_claim": "guard-probe"
-          }
-        }
-      },
-      "asked": "guard-probe",
-      "shows": ["security.oidc_groups_claim"]
-    },
-    "#security-oidc-scopes": {
-      "sel": "#security-oidc-scopes",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "",
-      "to": "guard-probe",
-      "saves": {
-        "settings": {
-          "security": {
-            "oidc_scopes": "guard-probe"
-          }
-        }
-      },
-      "asked": "guard-probe",
-      "shows": ["security.oidc_scopes"]
-    },
-    "#security-oidc-redirect-uri": {
-      "sel": "#security-oidc-redirect-uri",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "",
-      "to": "guard-probe",
-      "saves": {
-        "settings": {
-          "security": {
-            "oidc_redirect_uri": "guard-probe"
-          }
-        }
-      },
-      "asked": "guard-probe",
-      "shows": ["security.oidc_redirect_uri"]
-    },
-    "#security-oidc-signin-auto-create": {
-      "sel": "#security-oidc-signin-auto-create",
-      "kind": "checkbox",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": true,
-      "to": false,
-      "saves": {
-        "settings": {
-          "security": {
-            "oidc_signin_auto_create": false
-          }
-        }
-      },
-      "asked": false,
-      "shows": ["security.oidc_signin_auto_create"]
-    },
-    "#security-oidc-only": {
-      "sel": "#security-oidc-only",
-      "kind": "checkbox",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": false,
-      "to": true,
-      "saves": {
-        "settings": {
-          "security": {
-            "oidc_only": true
-          }
-        }
-      },
-      "asked": true,
-      "shows": ["security.oidc_only"]
-    },
-    "#security-trust-proxy": {
-      "sel": "#security-trust-proxy",
-      "kind": "checkbox",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": false,
-      "to": true,
-      "saves": {
-        "settings": {
-          "security": {
-            "trust_reverse_proxy": true
-          }
-        }
-      },
-      "asked": true,
-      "shows": ["security.trust_reverse_proxy"]
-    },
-    "#security-auth-proxy-header": {
-      "sel": "#security-auth-proxy-header",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "",
-      "to": "guard-probe",
-      "saves": {
-        "settings": {
-          "security": {
-            "auth_proxy_header": "guard-probe"
-          }
-        }
-      },
-      "asked": "guard-probe",
-      "shows": ["security.auth_proxy_header"]
-    },
-    "#security-cors-origins": {
-      "sel": "#security-cors-origins",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "https://ok.example",
-      "to": "http://guard.example:4321",
-      "saves": {
-        "settings": {
-          "security": {
-            "cors_origins": "http://guard.example:4321"
-          }
-        }
-      },
-      "asked": "http://guard.example:4321",
-      "shows": ["security.cors_origins"]
-    },
-    "#max-workers": {
-      "sel": "#max-workers",
-      "kind": "select",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "5",
-      "to": "3",
-      "saves": {
-        "settings": {
-          "database": {
-            "max_workers": 3
-          }
-        }
-      },
-      "asked": "3",
-      "shows": ["database.max_workers"]
-    },
-    "#log-level-select": {
-      "sel": "#log-level-select",
-      "kind": "select",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "INFO",
-      "to": "DEBUG",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/settings/log-level",
-            "body": "{\"level\":\"DEBUG\"}"
-          }
-        ]
-      },
-      "asked": "DEBUG",
-      "showsEndpoint": "/api/settings/log-level"
-    },
-    "#api-key-label": {
-      "sel": "#api-key-label",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "",
-      "to": "guard-probe",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/v1/api-keys-internal/generate",
-            "body": "{\"label\":\"guard-probe\",\"scope\":\"read\"}"
-          }
-        ]
-      },
-      "asked": "guard-probe",
-      "click": ["🔑 Generate API Key"]
-    },
-    "#api-key-scope": {
-      "sel": "#api-key-scope",
-      "kind": "select",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "read",
-      "to": "admin",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/v1/api-keys-internal/generate",
-            "body": "{\"label\":\"Default\",\"scope\":\"admin\"}"
-          }
-        ]
-      },
-      "asked": "admin",
-      "click": ["🔑 Generate API Key"]
-    },
-    "#mcp-enabled": {
-      "sel": "#mcp-enabled",
-      "kind": "checkbox",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": true,
-      "to": false,
-      "saves": {
-        "settings": {
-          "mcp": {
-            "enabled": false
-          }
-        }
-      },
-      "asked": false,
-      "shows": ["mcp.enabled"]
-    },
-    "#lidarr-compat-enabled": {
-      "sel": "#lidarr-compat-enabled",
-      "kind": "checkbox",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": false,
-      "to": true,
-      "saves": {
-        "settings": {
-          "lidarr_compat": {
-            "enabled": true
-          }
-        }
-      },
-      "asked": true,
-      "shows": ["lidarr_compat.enabled"]
-    },
-    "#lidarr-compat-profile": {
-      "sel": "#lidarr-compat-profile",
-      "kind": "select",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "1",
-      "to": "2",
-      "saves": {
-        "settings": {
-          "lidarr_compat": {
-            "profile_id": 2
-          }
-        }
-      },
-      "asked": "2",
-      "shows": ["lidarr_compat.profile_id"]
-    },
-    "#seerr-compat-enabled": {
-      "sel": "#seerr-compat-enabled",
-      "kind": "checkbox",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": false,
-      "to": true,
-      "saves": {
-        "settings": {
-          "seerr_compat": {
-            "enabled": true
-          }
-        }
-      },
-      "asked": true,
-      "shows": ["seerr_compat.enabled"]
-    },
-    "#seerr-compat-refuse-unknown": {
-      "sel": "#seerr-compat-refuse-unknown",
-      "kind": "checkbox",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": false,
-      "to": true,
-      "saves": {
-        "settings": {
-          "seerr_compat": {
-            "refuse_unknown": true
-          }
-        }
-      },
-      "asked": true,
-      "shows": ["seerr_compat.refuse_unknown"]
-    },
-    "#seerr-compat-profile": {
-      "sel": "#seerr-compat-profile",
-      "kind": "select",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "1",
-      "to": "2",
-      "saves": {
-        "settings": {
-          "seerr_compat": {
-            "profile_id": 2
-          }
-        }
-      },
-      "asked": "2",
-      "shows": ["seerr_compat.profile_id"]
-    },
-    "#dev-mode-password": {
-      "sel": "#dev-mode-password",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "",
-      "to": "",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/dev-mode",
-            "body": "{\"password\":\"guard-secret\"}"
-          }
-        ]
-      },
-      "asked": "guard-secret",
-      "click": ["Activate"]
-    },
-    "#imgcache-max-mb": {
-      "sel": "#imgcache-max-mb",
-      "kind": "number",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "512",
-      "to": "640",
-      "saves": {
-        "settings": {
-          "image_cache": {
-            "max_cache_mb": 640
-          }
-        }
-      },
-      "asked": "640"
-    },
-    "#imgcache-thumbnails": {
-      "sel": "#imgcache-thumbnails",
-      "kind": "checkbox",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": true,
-      "to": false,
-      "saves": {
-        "settings": {
-          "image_cache": {
-            "thumbnails": false
-          }
-        }
-      },
-      "asked": false
-    },
-    "#sw-preview-preset": {
-      "sel": "#sw-preview-preset",
-      "kind": "select",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "",
-      "to": null,
-      "saves": null,
-      "noSave": "a developer preview wired by the shell bundle from outside the page (not loaded here): saves nothing"
-    },
-    "#sw-preview-holiday": {
-      "sel": "#sw-preview-holiday",
-      "kind": "select",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "",
-      "to": "none",
-      "saves": null,
-      "asked": "none",
-      "noSave": "a developer preview wired by the shell bundle from outside the page (not loaded here): saves nothing"
-    },
-    "#sw-preview-date": {
-      "sel": "#sw-preview-date",
-      "kind": "date",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "",
-      "to": "2026-01-02",
-      "saves": null,
-      "asked": "2026-01-02",
-      "noSave": "a developer preview wired by the shell bundle from outside the page (not loaded here): saves nothing"
-    },
-    "#ob-preview-step": {
-      "sel": "#ob-preview-step",
-      "kind": "select",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "welcome",
-      "to": "account",
-      "saves": null,
-      "asked": "account",
-      "noSave": "a developer preview wired by the shell bundle from outside the page (not loaded here): saves nothing"
-    },
-    "#ob-preview-env": {
-      "sel": "#ob-preview-env",
-      "kind": "select",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "real",
-      "to": "docker",
-      "saves": null,
-      "asked": "docker",
-      "noSave": "a developer preview wired by the shell bundle from outside the page (not loaded here): saves nothing"
-    },
-    "#experimental-jiosaavn-enabled": {
-      "sel": "#experimental-jiosaavn-enabled",
-      "kind": "checkbox",
-      "only": "music",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": true,
-      "to": false,
-      "saves": {
-        "settings": {
-          "experimental": {
-            "jiosaavn_enabled": false
-          }
-        }
-      },
-      "asked": false,
-      "shows": ["experimental.jiosaavn_enabled"]
-    },
-    "#experimental-bandcamp-enabled": {
-      "sel": "#experimental-bandcamp-enabled",
-      "kind": "checkbox",
-      "only": "music",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": false,
-      "to": true,
-      "saves": {
-        "settings": {
-          "experimental": {
-            "bandcamp_enabled": true
-          }
-        }
-      },
-      "asked": true,
-      "click": ["#experimental-enable-ack-checkbox", "#experimental-enable-confirm-btn"],
-      "shows": ["experimental.bandcamp_enabled"]
-    },
     "input[type=\"search\"][placeholder=\"Find someone\"]": {
       "sel": "input[type=\"search\"][placeholder=\"Find someone\"]",
       "weak": "context",
@@ -8892,115 +9012,6 @@
       "saves": null,
       "asked": "guard-probe",
       "noSave": "a filter box over a list on the page: saves nothing (Enter in the genre box adds a genre, pinned by the genreWhitelist composite)"
-    },
-    "#sa-upload-mbps": {
-      "sel": "#sa-upload-mbps",
-      "kind": "number",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "40",
-      "to": "41",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/server-activity/settings",
-            "body": "{\"upload_mbps\":41}"
-          }
-        ]
-      },
-      "asked": "41",
-      "showsEndpoint": "/api/server-activity/settings"
-    },
-    "#sa-geo-lookup": {
-      "sel": "#sa-geo-lookup",
-      "kind": "checkbox",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": true,
-      "to": false,
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/server-activity/settings",
-            "body": "{\"geo_lookup\":false}"
-          }
-        ]
-      },
-      "asked": false,
-      "showsEndpoint": "/api/server-activity/settings"
-    },
-    "#sa-retention": {
-      "sel": "#sa-retention",
-      "kind": "select",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "90",
-      "to": "0",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/server-activity/settings",
-            "body": "{\"retention_days\":0}"
-          }
-        ]
-      },
-      "asked": "0",
-      "showsEndpoint": "/api/server-activity/settings"
-    },
-    "#sa-preset-new": {
-      "sel": "#sa-preset-new",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "",
-      "to": "",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/server-activity/settings",
-            "body": "{\"stop_presets\":[\"Server maintenance, back soon.\",\"guard-probe\"]}"
-          }
-        ]
-      },
-      "asked": "guard-probe",
-      "click": ["Add"]
-    },
-    "#log-viewer-source": {
-      "sel": "#log-viewer-source",
-      "kind": "select",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "app",
-      "to": "post_processing",
-      "saves": null,
-      "asked": "post_processing",
-      "noSave": "the log viewer: picks what is read (GET /api/logs/tail), nothing is saved"
-    },
-    "#log-viewer-search": {
-      "sel": "#log-viewer-search",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "",
-      "to": "guard-probe",
-      "saves": null,
-      "asked": "guard-probe",
-      "noSave": "the log viewer: picks what is read (GET /api/logs/tail), nothing is saved"
-    },
-    "#log-viewer-autoscroll": {
-      "sel": "#log-viewer-autoscroll",
-      "kind": "checkbox",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": true,
-      "to": false,
-      "saves": null,
-      "asked": false,
-      "noSave": "the log viewer: picks what is read (GET /api/logs/tail), nothing is saved"
     },
     "#video-server-pick": {
       "sel": "#video-server-pick",
@@ -13452,6 +13463,345 @@
       "sides": ["music", "video"],
       "scenario": "music"
     },
+    "#stg-view-advanced-general \"More about this setting\"": {
+      "label": "More about this setting",
+      "anchor": "stg-view-advanced-general",
+      "count": 4,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#log-level-select \"Debug\"": {
+      "label": "Debug",
+      "anchor": "log-level-select",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#log-level-select \"Info\"": {
+      "label": "Info",
+      "anchor": "log-level-select",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#log-level-select \"Warning\"": {
+      "label": "Warning",
+      "anchor": "log-level-select",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#log-level-select \"Error\"": {
+      "label": "Error",
+      "anchor": "log-level-select",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#security-change-pin-section \"Change PIN\"": {
+      "label": "Change PIN",
+      "anchor": "security-change-pin-section",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#stg-view-advanced-security \"More about this setting\"": {
+      "label": "More about this setting",
+      "anchor": "stg-view-advanced-security",
+      "count": 7,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#security-pin-setup \"More about this setting\"": {
+      "label": "More about this setting",
+      "anchor": "security-pin-setup",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#security-save-pin-btn": {
+      "id": "security-save-pin-btn",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#stg-view-advanced-security \"Save password\"": {
+      "label": "Save password",
+      "anchor": "stg-view-advanced-security",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#stg-view-advanced-security \"Save recovery question\"": {
+      "label": "Save recovery question",
+      "anchor": "stg-view-advanced-security",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#security-oidc-provider \"Copy\"": {
+      "label": "Copy",
+      "anchor": "security-oidc-provider",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#security-oidc-provider \"More options· 5 · icon, required group, groups claim, scopes, callback override\"": {
+      "label": "More options· 5 · icon, required group, groups claim, scopes, callback override",
+      "anchor": "security-oidc-provider",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#security-oidc-provider \"More about this setting\"": {
+      "label": "More about this setting",
+      "anchor": "security-oidc-provider",
+      "count": 3,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#security-oidc-admin \"Connect my admin account\"": {
+      "label": "Connect my admin account",
+      "anchor": "security-oidc-admin",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#security-oidc-only-wrap \"More about this setting\"": {
+      "label": "More about this setting",
+      "anchor": "security-oidc-only-wrap",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#security-signup-template \"More about this setting\"": {
+      "label": "More about this setting",
+      "anchor": "security-signup-template",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#security-signup-template-open": {
+      "id": "security-signup-template-open",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#api-keys-list \"Revoke Bot\"": {
+      "label": "Revoke Bot",
+      "anchor": "api-keys-list",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#stg-view-advanced-api \"Generate key\"": {
+      "label": "Generate key",
+      "anchor": "stg-view-advanced-api",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#stg-view-advanced-api \"More about this setting\"": {
+      "label": "More about this setting",
+      "anchor": "stg-view-advanced-api",
+      "count": 4,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#api-key-scope \"Read-only\"": {
+      "label": "Read-only",
+      "anchor": "api-key-scope",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#api-key-scope \"Admin\"": {
+      "label": "Admin",
+      "anchor": "api-key-scope",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#api-key-generated \"Copy\"": {
+      "label": "Copy",
+      "anchor": "api-key-generated",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#db-maintenance-info \"More about this setting\"": {
+      "label": "More about this setting",
+      "anchor": "db-maintenance-info",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#stg-view-advanced-maintenance \"More about this setting\"": {
+      "label": "More about this setting",
+      "anchor": "stg-view-advanced-maintenance",
+      "count": 7,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#db-optimize-btn": {
+      "id": "db-optimize-btn",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#db-measure-btn": {
+      "id": "db-measure-btn",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#imgcache-prune-btn": {
+      "id": "imgcache-prune-btn",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#imgcache-clear-btn": {
+      "id": "imgcache-clear-btn",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#db-vacuum-btn": {
+      "id": "db-vacuum-btn",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#db-incvacuum-btn": {
+      "id": "db-incvacuum-btn",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#quarantine-clear-btn": {
+      "id": "quarantine-clear-btn",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#stg-view-advanced-activity \"More about this setting\"": {
+      "label": "More about this setting",
+      "anchor": "stg-view-advanced-activity",
+      "count": 3,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#stg-view-advanced-activity \"Clear play log\"": {
+      "label": "Clear play log",
+      "anchor": "stg-view-advanced-activity",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#stg-view-advanced-activity \"Remove \"Server maintenance, back soon.\"\"": {
+      "label": "Remove \"Server maintenance, back soon.\"",
+      "anchor": "stg-view-advanced-activity",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#stg-view-advanced-activity \"Add\"": {
+      "label": "Add",
+      "anchor": "stg-view-advanced-activity",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#stg-view-advanced-developer \"Activate\"": {
+      "label": "Activate",
+      "anchor": "stg-view-advanced-developer",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#stg-view-advanced-developer \"More about this setting\"": {
+      "label": "More about this setting",
+      "anchor": "stg-view-advanced-developer",
+      "count": 2,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#sw-preview-reset": {
+      "id": "sw-preview-reset",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#ob-preview-open": {
+      "id": "ob-preview-open",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#stg-experimental \"More about this setting\"": {
+      "label": "More about this setting",
+      "anchor": "stg-experimental",
+      "count": 2,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#stg-view-advanced-logs \"Download\"": {
+      "label": "Download",
+      "anchor": "stg-view-advanced-logs",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#log-viewer-level \"All\"": {
+      "label": "All",
+      "anchor": "log-viewer-level",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#log-viewer-level \"Debug\"": {
+      "label": "Debug",
+      "anchor": "log-viewer-level",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#log-viewer-level \"Info\"": {
+      "label": "Info",
+      "anchor": "log-viewer-level",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#log-viewer-level \"Warn\"": {
+      "label": "Warn",
+      "anchor": "log-viewer-level",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#log-viewer-level \"Error\"": {
+      "label": "Error",
+      "anchor": "log-viewer-level",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#stg-view-advanced-logs \"Copy\"": {
+      "label": "Copy",
+      "anchor": "stg-view-advanced-logs",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#stg-view-advanced-logs \"Clear\"": {
+      "label": "Clear",
+      "anchor": "stg-view-advanced-logs",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
     "\"More about this setting\"": {
       "label": "More about this setting",
       "anchor": "",
@@ -13462,7 +13812,7 @@
     "\"Copy\"": {
       "label": "Copy",
       "anchor": "",
-      "count": 4,
+      "count": 3,
       "sides": ["music", "video"],
       "scenario": "music"
     },
@@ -13532,13 +13882,6 @@
       "sides": ["music", "video"],
       "scenario": "music"
     },
-    "\"Clear Quarantine\"": {
-      "label": "Clear Quarantine",
-      "anchor": "",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
     "\"More options· 1 · your own server or Maloja\"": {
       "label": "More options· 1 · your own server or Maloja",
       "anchor": "",
@@ -13548,122 +13891,6 @@
     },
     "#hydrabase-connect-btn": {
       "id": "hydrabase-connect-btn",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#security-save-pin-btn": {
-      "id": "security-save-pin-btn",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#security-change-pin-section \"Change PIN\"": {
-      "label": "Change PIN",
-      "anchor": "security-change-pin-section",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "\"Save Password\"": {
-      "label": "Save Password",
-      "anchor": "",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "\"Save Recovery Question\"": {
-      "label": "Save Recovery Question",
-      "anchor": "",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#security-oidc-admin \"Connect my admin account\"": {
-      "label": "Connect my admin account",
-      "anchor": "security-oidc-admin",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#security-signup-template-open": {
-      "id": "security-signup-template-open",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#db-optimize-btn": {
-      "id": "db-optimize-btn",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#db-measure-btn": {
-      "id": "db-measure-btn",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#db-vacuum-btn": {
-      "id": "db-vacuum-btn",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#db-incvacuum-btn": {
-      "id": "db-incvacuum-btn",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#api-keys-list \"Revoke\"": {
-      "label": "Revoke",
-      "anchor": "api-keys-list",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "\"🔑 Generate API Key\"": {
-      "label": "🔑 Generate API Key",
-      "anchor": "",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#api-key-generated \"Copy\"": {
-      "label": "Copy",
-      "anchor": "api-key-generated",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "\"Activate\"": {
-      "label": "Activate",
-      "anchor": "",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#imgcache-prune-btn": {
-      "id": "imgcache-prune-btn",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#imgcache-clear-btn": {
-      "id": "imgcache-clear-btn",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#sw-preview-reset": {
-      "id": "sw-preview-reset",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#ob-preview-open": {
-      "id": "ob-preview-open",
       "count": 1,
       "sides": ["music", "video"],
       "scenario": "music"
@@ -13743,83 +13970,6 @@
     "#ppl-screen-people \"Add person\"": {
       "label": "Add person",
       "anchor": "ppl-screen-people",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#stg-view-advanced-activity \"More about this setting\"": {
-      "label": "More about this setting",
-      "anchor": "stg-view-advanced-activity",
-      "count": 3,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#stg-view-advanced-activity \"Clear play log\"": {
-      "label": "Clear play log",
-      "anchor": "stg-view-advanced-activity",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#stg-view-advanced-activity \"Remove \"Server maintenance, back soon.\"\"": {
-      "label": "Remove \"Server maintenance, back soon.\"",
-      "anchor": "stg-view-advanced-activity",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#stg-view-advanced-activity \"Add\"": {
-      "label": "Add",
-      "anchor": "stg-view-advanced-activity",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "\"All\"": {
-      "label": "All",
-      "anchor": "",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "\"Debug\"": {
-      "label": "Debug",
-      "anchor": "",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "\"Info\"": {
-      "label": "Info",
-      "anchor": "",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "\"Warn\"": {
-      "label": "Warn",
-      "anchor": "",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "\"Error\"": {
-      "label": "Error",
-      "anchor": "",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "\"Clear\"": {
-      "label": "Clear",
-      "anchor": "",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "\"Download\"": {
-      "label": "Download",
-      "anchor": "",
       "count": 1,
       "sides": ["music", "video"],
       "scenario": "music"
@@ -14761,7 +14911,7 @@
       "source-config-home": "not a form control: a <div> on the page",
       "Filtering": "a heading named in the audit's search anchors, not an id",
       "security-save-pin-btn": "a button, held in `buttons`",
-      "security-change-pin-section": "not a form control: a <div> on the page",
+      "security-change-pin-section": "not a form control: a <span> on the page",
       "security-signup-template-open": "a button, held in `buttons`",
       "security-signup-template": "not a form control: a <div> on the page",
       "db-size-display": "not a form control: a <span> on the page",
@@ -14770,7 +14920,7 @@
       "db-autovacuum-display": "not a form control: a <span> on the page",
       "db-vacuum-btn": "a button, held in `buttons`",
       "db-incvacuum-btn": "a button, held in `buttons`",
-      "log-path-display": "not a form control: a <div> on the page",
+      "log-path-display": "not a form control: a <span> on the page",
       "api-keys-list": "not a form control: a <div> on the page",
       "imgcache-entries": "not a form control: a <span> on the page",
       "imgcache-size": "not a form control: a <span> on the page",

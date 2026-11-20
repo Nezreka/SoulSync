@@ -71,8 +71,8 @@ describe('what it finds', () => {
       tab: 'advanced',
       view: 'logs',
     });
-    // sections too
-    expect(find(index, 'SoulSync API').path).toBe('System › Settings');
+    // sections too: a block under the old System key lands on its first pill
+    expect(find(index, 'SoulSync API').path).toBe('System › General');
   });
 
   it('the curated entries speak for their field, so it is not listed twice', () => {
