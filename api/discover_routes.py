@@ -125,11 +125,20 @@ def _discover_bylt_key():
         return 'unknown'
 
 
+def _profile_dial():
+    """This profile's adventurousness: its own dial, else the global default."""
+    from core.discovery.adventurousness import profile_level
+    cfg = config_manager
+    if cfg is None:
+        from core.settings import config_manager as cfg
+    return profile_level(get_database(), get_current_profile_id(), cfg)
+
+
 def _discover_dial_key():
     # The dial re-ranks similar-artists live; committing it must bust the key.
+    # Per profile: one person's dial never re-ranks another's shelf.
     try:
-        from core.settings import config_manager
-        return str(config_manager.get('discover.adventurousness', 0.3))
+        return str(_profile_dial())
     except Exception:
         return '0.3'
 
@@ -466,10 +475,7 @@ def get_discover_similar_artists():
         active_source = _get_active_discovery_source()
         from core.settings import config_manager
         active_server = config_manager.get_active_media_server()
-        try:
-            _adv_level = float(config_manager.get('discover.adventurousness', 0.3) or 0)
-        except (TypeError, ValueError):
-            _adv_level = 0.0
+        _adv_level = _profile_dial()
 
         # The dial drives candidate SELECTION here (not just the re-rank below): the pool shifts from
         # consensus picks toward obscure long-tail deep cuts as you turn it up.
@@ -616,24 +622,34 @@ def get_discover_similar_artists():
 @bp.route('/api/discover/adventurousness', methods=['GET', 'POST'])
 @requires("music.discover")
 def discover_adventurousness():
-    """Get/set the global Discover adventurousness dial (0..1). Shares the config key
-    ``discover.adventurousness`` with the Settings -> Discovery slider, so the two controls stay in
-    sync (change one, the other reflects it on next load). Read-only-safe; clamps to [0, 1]."""
+    """Get/set this profile's Discover adventurousness dial (0..1).
+
+    GET returns ``{value, default, own}``: the dial this profile's Discover
+    uses, the global default (Settings > Discovery), and whether the profile
+    has its own value. POST ``{value}`` stores the profile's own dial
+    (clamped to [0, 1]); POST ``{reset: true}`` clears it so the profile
+    follows the default again. The global default is only changed in
+    Settings, by an admin.
+    """
+    from core.discovery import adventurousness as adv
     try:
+        database = get_database()
+        profile_id = get_current_profile_id()
         if request.method == 'POST':
             data = request.get_json(silent=True) or {}
-            try:
-                v = float(data.get('value'))
-            except (TypeError, ValueError):
-                return jsonify({"success": False, "error": "value must be a number"}), 400
-            v = max(0.0, min(1.0, v))
-            config_manager.set('discover.adventurousness', v)
-            return jsonify({"success": True, "value": v})
-        try:
-            v = float(config_manager.get('discover.adventurousness', 0.3) or 0)
-        except (TypeError, ValueError):
-            v = 0.3
-        return jsonify({"success": True, "value": max(0.0, min(1.0, v))})
+            if data.get('reset') is True:
+                adv.set_own_level(database, profile_id, None)
+            else:
+                try:
+                    v = adv.clamp(data.get('value'))
+                except ValueError:
+                    return jsonify({"success": False, "error": "value must be a number"}), 400
+                if not adv.set_own_level(database, profile_id, v):
+                    return jsonify({"success": False, "error": "could not save the dial"}), 500
+        own = adv.own_level(database, profile_id)
+        default = adv.global_level(config_manager)
+        return jsonify({"success": True, "value": own if own is not None else default,
+                        "default": default, "own": own is not None})
     except Exception as e:
         logger.error(f"adventurousness endpoint error: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
@@ -776,10 +792,7 @@ def get_discover_listening_recommendations():
         except (ValueError, TypeError):
             stored = []
 
-        try:
-            level = float(config_manager.get('discover.adventurousness', 0.3) or 0)
-        except (TypeError, ValueError):
-            level = 0.0
+        level = _profile_dial()
 
         # Quality re-rank (aurral parity, always-on): the adventurousness dial BLENDS the weights —
         # genre/tag affinity boosts on-taste candidates (leash loosens as you get adventurous); novelty

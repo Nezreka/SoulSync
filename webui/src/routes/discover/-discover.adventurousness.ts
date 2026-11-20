@@ -6,8 +6,8 @@
  * `_advCommitLive` (133), `_advInitDrag` (140) and `loadAdventurousnessDial`
  * (168) — read end to end.
  *
- * Shares `discover.adventurousness` with the Settings slider, so the two stay
- * in sync; this is the same stored value, not a second setting.
+ * the dial is this profile's own. a profile that never turned it follows the
+ * global default from the Settings slider (`discover.adventurousness`).
  */
 
 /** `{ value: 0.3, ... }` (30) — the dial starts at Balanced, not at 0. */

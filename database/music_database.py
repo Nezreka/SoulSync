@@ -5805,6 +5805,7 @@ class MusicDatabase:
         ("max_rating", "TEXT DEFAULT NULL"),           # kids: highest movie/tv rating, NULL = any
         ("session_epoch", "INTEGER DEFAULT 0"),        # bump = every signed-in browser signs out
         ("disabled", "INTEGER DEFAULT 0"),             # turned off: kept, but nobody can open it
+        ("discover_adventurousness", "REAL DEFAULT NULL"),  # own Discover dial, NULL = the global default
     )
 
     def _add_profile_controls(self, cursor):
@@ -9593,6 +9594,34 @@ class MusicDatabase:
 
     _PERMISSION_CACHE_FIELDS = frozenset({'allowed_pages', 'can_download', 'allowed_sides', 'request_limit',
                                            'request_limit_days', 'hide_explicit', 'max_rating', 'is_admin'})
+
+    def get_profile_adventurousness(self, profile_id: int) -> Optional[float]:
+        """The profile's own Discover dial, or None when it follows the
+        global default (or the column isn't there yet)."""
+        try:
+            with self._get_connection() as conn:
+                row = conn.execute(
+                    "SELECT discover_adventurousness FROM profiles WHERE id = ?",
+                    (int(profile_id),)).fetchone()
+            if row is None or row[0] is None:
+                return None
+            return float(row[0])
+        except Exception as e:  # noqa: BLE001 - a read miss falls back to the global value
+            logger.debug("profile adventurousness read failed for %s: %s", profile_id, e)
+            return None
+
+    def set_profile_adventurousness(self, profile_id: int, value: Optional[float]) -> bool:
+        """Store the profile's own dial; None clears it back to the global default."""
+        try:
+            with self._get_connection() as conn:
+                cur = conn.execute(
+                    "UPDATE profiles SET discover_adventurousness = ? WHERE id = ?",
+                    (None if value is None else float(value), int(profile_id)))
+                conn.commit()
+                return cur.rowcount > 0
+        except Exception as e:  # noqa: BLE001
+            logger.error("profile adventurousness write failed for %s: %s", profile_id, e)
+            return False
 
     def update_profile(self, profile_id: int, **kwargs) -> bool:
         """Update profile fields. Accepts: name, avatar_color, avatar_url, pin_hash, is_admin, home_page, allowed_pages, can_download."""

@@ -17,6 +17,8 @@ The hero showcases **recommended artists** based on your library. Each slide say
 - **See all picks**: see 50+ similar artists with enrichment data
 
 ![Featured artist hero slider](disc-hero.jpg)
+
+**Adventurousness dial**: drag it from safe to deep cuts and the recommended artists re-rank live. The dial is yours alone: on a shared server, turning it changes your Discover and nobody else's. A profile that never touched it follows the default an admin sets in Settings, Discovery.
 `
         },
         {
