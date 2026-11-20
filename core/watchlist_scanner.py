@@ -5125,12 +5125,17 @@ class WatchlistScanner:
             # Recency-weighted seeds: lifetime top artists, boosted by recent (30d) plays.
             lifetime = [s for s in (self.database.get_top_artists('all', 30, profile_id=profile_id) or [])
                         if s.get('name')]
-            if not lifetime:
-                return
             recent_rows = self.database.get_top_artists('30d', 50, profile_id=profile_id) or []
             recent_counts = {r['name'].lower(): r.get('play_count', 0)
                              for r in recent_rows if r.get('name')}
-            seeds = build_recency_weighted_seeds(lifetime, recent_counts)
+            # liked songs, server stars and watchlist adds seed too, so a
+            # liked artist's neighbours turn up even before you play them much
+            from core.discovery.favorite_seeds import favorite_artist_units
+            seeds = build_recency_weighted_seeds(
+                lifetime, recent_counts,
+                favorites=favorite_artist_units(self.database, profile_id))
+            if not seeds:
+                return
             seed_names = {s['name'].lower() for s in seeds}
 
             # Owned-artist set (for exclusion) + the seeds' SOURCE ids (similar_artists.source_artist_id

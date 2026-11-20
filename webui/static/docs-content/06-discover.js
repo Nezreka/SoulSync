@@ -57,6 +57,16 @@ A mix is mostly songs you own (so it plays straight away): your artists first, a
 
 The mixes are rebuilt every day, shortly after midnight. Favourites usually make the cut and deep cuts sometimes do, and anything a mix played in the last three days is less likely to come back, so each day sounds like the same taste with different songs. Mix numbers stay with their artists, so a synced Daily Mix 2 keeps its flavour on your server. Blocking an artist, or saying more or less like this, rebuilds them straight away.
 
+## What you love counts too
+
+Your taste isn't only what you play. Three things you said you love feed the same seeds, per profile:
+
+- **Liked Songs**: every song you hearted counts for its artist (up to four songs' worth per artist).
+- **Server favourites**: songs you starred or rated 4 or 5 on Plex or Navidrome (and Jellyfin users linked to a profile), as read for the Expired Download Cleaner's keep list.
+- **Your Watchlist**: an artist you follow, more so in the first three months after you add them.
+
+Each one is weighed against your own play counts, so a liked artist sits among the artists you play rather than above your real favourites, and someone with few plays still gets seeds from what they liked. Artists you love but never play add at most 25 seeds, strongest first, so a long Watchlist can't crowd out what you actually listen to. Daily Mixes, Discover recommendations, Recommended Stations and the taste behind the Discover playlists all use them.
+
 ## Jump back in
 
 The top of Discover greets you and puts what you go back to in one grid: **Flow**, On Repeat, your first Daily Mixes, the mood that suits the hour, and Repeat Rewind.
