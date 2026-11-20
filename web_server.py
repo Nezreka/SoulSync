@@ -327,6 +327,13 @@ app.jinja_env.auto_reload = DEV_STATIC_NO_CACHE
 # / CSS doesn't require a server restart between edits.
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0 if DEV_STATIC_NO_CACHE else 31536000
 
+# brotli/gzip for pages, JSON and static text; never for streams, media,
+# downloads or ranges. registered first, so it runs after every other
+# after_request hook and sees the final body (core/http_compression.py).
+# SOULSYNC_COMPRESSION=0 turns it off.
+from core.http_compression import install as _install_compression
+_install_compression(app)
+
 _MIGRATION_BLOCKED_ENDPOINTS = frozenset({
     'start_download', 'start_matched_download', 'process_wishlist_api',
     'enriched_start', 'manual_start',
@@ -573,6 +580,13 @@ def _inject_static_cache_bust():
     return {'static_v': _get_static_v(), **_initial_appearance_context()}
 
 
+def _server_build_id():
+    """what this server serves: the version (with its commit) and the static
+    files' bust value. a tab whose page says something else is running old
+    JS, and the socket connect tells it so (webui/src/shell/build-check.ts)"""
+    return f"{SOULSYNC_VERSION}/{_get_static_v()}"
+
+
 @app.context_processor
 def _inject_soulsync_version():
     """Expose the version string to every Jinja template so the sidebar
@@ -580,7 +594,8 @@ def _inject_soulsync_version():
     edited at every release. The base version is the source of truth at
     `_SOULSYNC_BASE_VERSION`; bumping that single constant updates the UI
     everywhere it's rendered."""
-    return {'soulsync_version': SOULSYNC_VERSION, 'soulsync_base_version': _SOULSYNC_BASE_VERSION}
+    return {'soulsync_version': SOULSYNC_VERSION, 'soulsync_base_version': _SOULSYNC_BASE_VERSION,
+            'soulsync_build': _server_build_id()}
 
 
 @app.context_processor
@@ -632,6 +647,15 @@ app.config["SESSION_COOKIE_NAME"] = "soulsync_session"
 from core.security.reverse_proxy import apply_reverse_proxy_mode as _apply_reverse_proxy_mode
 if _apply_reverse_proxy_mode(app, config_manager.get):
     logger.info("[Security] Reverse-proxy mode ON: trusting X-Forwarded-* and Secure session cookie")
+# the auth proxy header only counts from security.auth_proxy_trusted; say so
+# loudly when the header is set without that list (it is ignored then)
+try:
+    from core.security.auth_proxy import setup_problem as _auth_proxy_problem
+    _proxy_problem = _auth_proxy_problem(config_manager.get)
+    if _proxy_problem:
+        logger.warning(f"[Security] {_proxy_problem}")
+except Exception as _proxy_exc:  # noqa: BLE001 - a log line never blocks startup
+    logger.debug(f"[Security] auth proxy setup check failed: {_proxy_exc}")
 
 # --- WebSocket (Socket.IO) Setup ---
 from core.socketio_cors import (
@@ -857,13 +881,10 @@ def _enforce_launch_pin():
     # An auth proxy (Authelia/Authentik/oauth2-proxy) that already authenticated the
     # user counts as verified — opt-in via security.auth_proxy_header, OFF (empty)
     # by default so a direct install is unaffected.
-    from core.security.auth_proxy import trusted_proxy_user
-    try:
-        _proxy_header = config_manager.get('security.auth_proxy_header', '') or ''
-    except Exception:
-        _proxy_header = ''
+    # only from an address in security.auth_proxy_trusted
+    from core.security.auth_proxy import request_proxy_user
     _verified = bool(session.get('launch_pin_verified', False)) or bool(
-        trusted_proxy_user(request.headers.get, _proxy_header)
+        request_proxy_user(request, config_manager.get if config_manager else None)
     )
     if request_is_locked(
         request.path, request.method,
@@ -939,9 +960,8 @@ def _set_profile_context():
     except Exception:
         require_pin = False
     if require_pin and not _require_login_enabled():
-        _proxy_header = (config_manager.get('security.auth_proxy_header', '') or '') if config_manager else ''
-        from core.security.auth_proxy import trusted_proxy_user
-        _proxy_authed = bool(trusted_proxy_user(request.headers.get, _proxy_header))
+        from core.security.auth_proxy import request_proxy_user
+        _proxy_authed = bool(request_proxy_user(request, config_manager.get if config_manager else None))
         if not session.get('launch_pin_verified', False) and not _proxy_authed:
             g.profile_id = None
             g.is_admin = False
@@ -11029,6 +11049,11 @@ def library_log_play():
         # means the shared one, same as before.
         from core.listening_scope import listening_owner
         db = get_database()
+        # a private session keeps the play out of everything: taste, blends,
+        # stats and scrobbles. checked here, not trusted to the page
+        from core.personalized.listening_privacy import in_private_session
+        if in_private_session(db, get_current_profile_id()):
+            return jsonify({"success": True, "skipped": True, "private": True}), 200
         event['profile_id'] = listening_owner(db, get_current_profile_id())
         play_id = db.record_web_player_play(event)
         return jsonify({"success": True, "play_id": play_id})
@@ -23881,9 +23906,8 @@ def _ws_connection_blocked():
         require_pin = bool(config_manager.get('security.require_pin_on_launch', False)) if config_manager else False
         if not require_login and not require_pin and not revoked:
             return False
-        proxy_header = (config_manager.get('security.auth_proxy_header', '') or '') if config_manager else ''
-        from core.security.auth_proxy import trusted_proxy_user
-        proxy_authed = bool(trusted_proxy_user(request.headers.get, proxy_header))
+        from core.security.auth_proxy import request_proxy_user
+        proxy_authed = bool(request_proxy_user(request, config_manager.get if config_manager else None))
         from core.security.ws_gate import is_ws_connection_blocked
         return is_ws_connection_blocked(
             require_login=require_login,
@@ -23912,6 +23936,12 @@ def handle_connect():
     # revocation sweep can drop it if that session is later revoked.
     _ws_store_snapshot()
     _ws_join_role_room()
+    # which build this server runs: an open tab from before an update offers
+    # a reload (never forces one)
+    try:
+        emit('server:build', {'build': _server_build_id()})
+    except Exception as e:  # noqa: BLE001 - the check is a nicety
+        logger.debug(f"server build emit failed: {e}")
     logger.info("WebSocket client connected")
 
 @socketio.on('disconnect')

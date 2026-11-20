@@ -1677,6 +1677,9 @@ class MusicDatabase:
             self._add_profile_plex_home_user(cursor)
             self._add_profile_oidc_identity(cursor)
             self._add_profile_controls(cursor)
+            # share listening (blends) and private session, off for everyone
+            from core.personalized.listening_privacy import ensure_schema as _ensure_listening_privacy
+            _ensure_listening_privacy(cursor)
             self._add_device_oidc_session(cursor)
             # people and permissions (#2166): templates, policy, personal
             # changes. after every profile column above it reads

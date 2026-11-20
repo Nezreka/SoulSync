@@ -4478,3 +4478,50 @@ a.dsc-now-artist:hover {
 .dsc-poster--typeset .dsc-poster-month {
     font-size: 1.2rem;
 }
+
+/* the one-time "share your listening" ask above Made For You */
+.discover-share-ask {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 16px;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 14px;
+    padding: 12px 16px;
+    border-radius: var(--radius-control);
+    border: 1px solid rgba(var(--accent-rgb), 0.18);
+    background: rgba(var(--accent-rgb), 0.06);
+    font-size: 0.85rem;
+    line-height: 1.5;
+    color: var(--white-a65);
+}
+
+.discover-share-ask-text {
+    flex: 1 1 320px;
+    min-width: 0;
+}
+
+.discover-share-ask-text strong {
+    color: var(--white-a90);
+}
+
+.discover-share-ask-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.discover-share-ask-later {
+    padding: 6px 14px;
+    border-radius: var(--radius-pill);
+    border: 1px solid var(--white-a12);
+    background: transparent;
+    color: var(--white-a65);
+    font-size: 0.85rem;
+    cursor: pointer;
+}
+
+.discover-share-ask-later:hover {
+    color: var(--white-a90);
+    border-color: var(--white-a20);
+}

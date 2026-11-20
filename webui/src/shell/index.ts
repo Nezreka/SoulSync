@@ -34,6 +34,7 @@ import {
   switchBlocklistTab,
   unblockEntry,
 } from './blocklist';
+import { installBuildCheck } from './build-check';
 import { patchChatMessages } from './chat-morph';
 import { refreshDiscoverInboxBadge, startDiscoverInboxBadge } from './discover-inbox-badge';
 import { installFeatures } from './features';
@@ -194,6 +195,8 @@ export const SHELL_WINDOW_EXPORTS = {
 Object.assign(window, SHELL_WINDOW_EXPORTS);
 // window.SoulSyncFeatures (#1909): what this profile chose to see
 installFeatures();
+// a tab left open across a server update offers a reload (never forces one)
+installBuildCheck();
 // window.SoulSyncPerms (#2166): what this profile may do, from the server
 installMyPermissions();
 // the Settings page's keyboard, and password managers kept off its fields

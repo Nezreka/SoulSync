@@ -358,6 +358,15 @@ A profile's stats, Recently Played and recommendations read its own listening wh
 
 The card at the top of **My Account** says which one you are on.
 
+## Who sees your listening
+
+Your plays are yours. Two switches under **My Account → Your listening** (the admin has them too):
+
+- **Share my listening**: off for everyone, including profiles that existed before this switch. A **Blend** on Discover (a mix of what you and someone else play) is only made when you both have it on. The first time you open Made For You, Discover asks once; **Not now** stops the asking and leaves it off. With several people sharing, you get blends with the three whose taste is closest to yours (most artists in common).
+- **Private session**: while it's on, what you play in SoulSync's player isn't saved at all, so it never reaches your stats, mixes, blends or scrobbles. It turns itself off after 6 hours. Plays you make in a Plex, Jellyfin or Navidrome app are read from the server's own history, so those still count.
+
+Profiles without a listening source of their own all play into the shared history, so that history only counts as shared when **everyone** on it has Share my listening on. Profiles that are turned off don't count. Install-wide shelves (the seasonal Rewind) read the shared history plus the own history of people who share; your mix recipes only ever read your own plays.
+
 ## Your sidebar weather
 
 The weather line under your name shows your own town and its local time, never the admin's. Set it under **Profile & account → Sidebar weather**: type a town or ZIP and save. You can switch to °C and turn holiday decorations on or off there too. With no town set, you see no weather line. Admins set theirs in Settings → Appearance.
@@ -417,6 +426,14 @@ To turn it on you have to be signed in with OIDC yourself, and every profile tha
 Passwords aren't deleted. They just aren't used, and work again when the switch is off. The admin's password can't be removed while login mode is on, because it's the way back in.
 
 **If the provider is down:** set \`SOULSYNC_OIDC_ONLY_OVERRIDE=off\` on the container and restart. OIDC only is off while it's set (the saved setting stays on), so you can sign in with the admin password and fix things. An amber shield joins the buttons at the bottom right for admins as a reminder. Remove the variable and restart to turn OIDC only back on.
+
+## Auth proxy header
+
+Behind Authelia, Authentik or oauth2-proxy, Settings > Security > Reverse proxy > **Auth proxy user header** (for example \`Remote-User\`) lets someone the proxy already signed in skip the launch PIN.
+
+SoulSync only believes that header when the request comes straight from an address in **Trusted proxy addresses**: your proxy's IP or a range, like \`172.18.0.2\` or \`172.18.0.0/16\` (one per line or comma separated). It checks the address that really connected, never \`X-Forwarded-For\`, so nobody can fake their way onto the list.
+
+**The list starts empty, and an empty list means the header is ignored.** If you set the header before this list existed, people now get the PIN screen until you add the proxy's address; Help > Health shows a warning until you do. To find the address, check the proxy container's IP (\`docker inspect\`) or the Docker network's range.
 `
         },
         {

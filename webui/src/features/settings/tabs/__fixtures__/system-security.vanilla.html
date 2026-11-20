@@ -319,9 +319,23 @@
                                                     <div class="setting-help-text">
                                                         If an auth proxy (Authelia / Authentik / oauth2-proxy) logs
                                                         users in in front of SoulSync, enter the header it sets and
-                                                        SoulSync trusts it. <strong>Only set this behind a proxy that
-                                                            strips any client-supplied copy of the header.</strong>
+                                                        SoulSync trusts it from the addresses below. <strong>Only set
+                                                            this behind a proxy that strips any client-supplied copy of
+                                                            the header.</strong>
                                                         Blank = off.
+                                                    </div>
+                                                </div>
+
+                                                <div class="form-group security-nested">
+                                                    <label for="security-auth-proxy-trusted">↳ Trusted proxy addresses:</label>
+                                                    <textarea id="security-auth-proxy-trusted" rows="2"
+                                                        placeholder="172.18.0.2&#10;172.18.0.0/16"
+                                                        style="width: 100%; font-family: monospace; font-size: 12px;"></textarea>
+                                                    <div class="setting-help-text">
+                                                        Your proxy's IP or range, one per line or comma separated. The
+                                                        header only counts on requests that really come from one of
+                                                        these (never from a forwarded address). <strong>Empty = the
+                                                            header is ignored.</strong>
                                                     </div>
                                                 </div>
 

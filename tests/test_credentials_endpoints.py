@@ -491,20 +491,52 @@ def test_verify_launch_pin_rate_limited_after_flood(client):
             conn.commit()
 
 
-def test_auth_proxy_header_satisfies_launch_lock(client, monkeypatch):
-    # Lock on + Remote-User trusted → a request with the header passes the gate.
+def _proxy_config(monkeypatch, header='Remote-User', trusted='10.0.0.0/24'):
     real_get = web_server.config_manager.get
     def fake_get(key, default=None):
         if key == 'security.require_pin_on_launch':
             return True
         if key == 'security.auth_proxy_header':
-            return 'Remote-User'
+            return header
+        if key == 'security.auth_proxy_trusted':
+            return trusted
         return real_get(key, default)
     monkeypatch.setattr(web_server.config_manager, 'get', fake_get)
 
-    assert client.get('/api/profiles/me/connections').status_code == 401            # no header → locked
+
+def _from(addr):
+    return {'REMOTE_ADDR': addr}
+
+
+def test_auth_proxy_header_satisfies_launch_lock(client, monkeypatch):
+    # Lock on + Remote-User from a trusted proxy address → the header passes the gate.
+    _proxy_config(monkeypatch)
     assert client.get('/api/profiles/me/connections',
-                      headers={'Remote-User': 'alice'}).status_code == 200          # trusted → in
+                      environ_base=_from('10.0.0.5')).status_code == 401           # no header → locked
+    assert client.get('/api/profiles/me/connections', headers={'Remote-User': 'alice'},
+                      environ_base=_from('10.0.0.5')).status_code == 200           # trusted → in
+
+
+def test_auth_proxy_header_from_untrusted_address_is_ignored(client, monkeypatch):
+    # a client that reaches SoulSync directly sends the header itself: it must not get in
+    _proxy_config(monkeypatch)
+    assert client.get('/api/profiles/me/connections', headers={'Remote-User': 'admin'},
+                      environ_base=_from('192.168.1.50')).status_code == 401
+
+
+def test_auth_proxy_header_ignored_with_an_empty_trusted_list(client, monkeypatch):
+    # header set the old way, no trusted list → ignored, even from loopback
+    _proxy_config(monkeypatch, trusted='')
+    assert client.get('/api/profiles/me/connections', headers={'Remote-User': 'admin'},
+                      environ_base=_from('127.0.0.1')).status_code == 401
+
+
+def test_auth_proxy_forwarded_for_cannot_fake_a_trusted_peer(client, monkeypatch):
+    # X-Forwarded-For naming a trusted address from an untrusted peer counts for nothing
+    _proxy_config(monkeypatch)
+    assert client.get('/api/profiles/me/connections',
+                      headers={'Remote-User': 'admin', 'X-Forwarded-For': '10.0.0.5'},
+                      environ_base=_from('192.168.1.50')).status_code == 401
 
 
 def test_spoofed_auth_proxy_header_ignored_when_feature_off(client, monkeypatch):
