@@ -167,6 +167,8 @@ Each works on the caller's own listening history: the admin's is the shared one,
   - `POST /api/listening-import/spotify/finish`: refreshes the stats and returns the summary.
   - `POST /api/listening-import/spotify/settings` `{include_in_stats}`: off keeps the import out of Stats, Your Year, the dashboard's week and the artist page; recommendations and mixes still use it. `404` when nothing is imported.
   - `DELETE /api/listening-import/spotify`: removes every play the import added (`{removed}`); plays from other sources stay.
+- `GET /api/library/v2/artists/<id>/your-plays` (Library): `{listening: {play_count, first_played, last_played, plays_30d, rank, artists_played, months: [{month, plays}], top_tracks: [{title, album, play_count, last_played, track_id, album_id, thumb_url}]}}`, or `listening: null` when the caller never played them. A play counts when it names the artist or one of its aliases, or is linked to one of its library tracks.
+- Album tracks (`GET /api/library/v2/albums/<id>`) carry `popular_source`, `lastfm` or `listenbrainz`, on the tracks marked `popular`.
 
 ### Update file locations (web UI routes, admins only)
 

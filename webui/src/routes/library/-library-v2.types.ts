@@ -696,6 +696,8 @@ export interface LibraryV2Track {
   is_missing?: boolean;
   /** #2144: one of the album's most played tracks on Last.fm (album detail only). */
   popular?: boolean;
+  /** whose play counts ranked it: Last.fm, or ListenBrainz when Last.fm knows too little */
+  popular_source?: 'lastfm' | 'listenbrainz' | null;
   /** Quality vs the album's profile (null when missing or not measurable). */
   meets_profile?: boolean | null;
   upgrade_candidate?: boolean | null;

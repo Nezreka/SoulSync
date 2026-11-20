@@ -164,7 +164,7 @@ LB = [{"artist_mbid": MBID, "total_listen_count": 812345, "total_user_count": 23
 
 def _http(**over):
     answers = {fb.WIKIDATA_API: WIKIDATA, fb.WIKIPEDIA_SUMMARY: WIKI_PAGE,
-               fb.LISTENBRAINZ_POPULARITY: LB}
+               fb.LISTENBRAINZ_POPULARITY: LB, fb.LISTENBRAINZ_TOP_RECORDINGS: []}
     answers.update(over)
     return _Http(answers)
 
@@ -428,3 +428,96 @@ def test_the_library_artist_payload_carries_about(db):
     with closing(db._get_connection()) as conn:
         about = get_artist(conn, 1)["about"]
     assert (about["bio_source"], about["tags_source"]) == ("wikipedia", "musicbrainz")
+
+
+# ── track popularity from listenbrainz, for the album flame ─────────────────
+
+TOP_RECORDINGS = [
+    {"recording_mbid": "rec-angel", "recording_name": "Angel", "total_listen_count": 5400,
+     "total_user_count": 900},
+    {"recording_mbid": "rec-teardrop", "recording_name": "Teardrop", "total_listen_count": 9100,
+     "total_user_count": 1500},
+    {"recording_mbid": "rec-inertia", "recording_name": "Inertia Creeps", "total_listen_count": 3000,
+     "total_user_count": 700},
+]
+
+
+def _tracks(db):
+    with closing(db._get_connection()) as conn:
+        return {r[0]: json.loads(r[1] or "{}") for r in conn.execute(
+            "SELECT title, enrichment FROM lib2_tracks ORDER BY id")}
+
+
+def _add_track(db, title, enrichment=None, mbid=None):
+    with closing(db._get_connection()) as conn:
+        conn.execute("INSERT INTO lib2_tracks(album_id,title,enrichment,musicbrainz_id) "
+                     "VALUES(1,?,?,?)", (title, json.dumps(enrichment or {}), mbid))
+        conn.commit()
+
+
+class TestTrackPopularity:
+    def _fetcher(self, recordings=TOP_RECORDINGS):
+        return fb.ArtistAboutFallback(
+            mb_client=_MB(MB_ARTIST), audiodb_client=_AudioDB(), deezer_client=_Deezer(),
+            http=_http(**{fb.LISTENBRAINZ_TOP_RECORDINGS: recordings}))
+
+    def test_tracks_without_a_lastfm_count_get_listenbrainz_listens(self, db):
+        _add_track(db, "Teardrop (Remastered)", mbid="rec-teardrop")
+        _add_track(db, "Inertia Creeps", {"lastfm": {"playcount": 123456}})
+
+        assert fb.fill_artist(db._get_connection, 1, self._fetcher())
+
+        tracks = _tracks(db)
+        assert tracks["Angel"]["listenbrainz"] == {"listen_count": 5400, "listeners": 900}
+        # by recording mbid when the title differs
+        assert tracks["Teardrop (Remastered)"]["listenbrainz"]["listen_count"] == 9100
+        # a track last.fm already counts is left to last.fm
+        assert "listenbrainz" not in tracks["Inertia Creeps"]
+        assert fb.TRACKS_CHECK_KEY in _enrichment(db)
+
+    def test_not_asked_again_within_the_ttl(self, db):
+        http = _http(**{fb.LISTENBRAINZ_TOP_RECORDINGS: []})
+        fetcher = fb.ArtistAboutFallback(mb_client=_MB(MB_ARTIST), audiodb_client=_AudioDB(),
+                                         deezer_client=_Deezer(), http=http)
+        fb.fill_artist(db._get_connection, 1, fetcher)
+        asked = [u for u in http.calls if u.startswith(fb.LISTENBRAINZ_TOP_RECORDINGS)]
+        assert len(asked) == 1
+        assert not fb.fill_artist(db._get_connection, 1, fetcher)
+        with closing(db._get_connection()) as conn:
+            assert fb.next_due_artist(conn, 0) == (None, None)
+
+    def test_an_artist_lastfm_fully_knows_is_still_asked_for_its_tracks(self, db):
+        """last.fm has the artist's bio and numbers, but no track counts (a new
+        album since the key stopped working): the flame still needs them"""
+        _set_enrichment(db, {"lastfm": FULL_LASTFM})
+        with closing(db._get_connection()) as conn:
+            row, _cursor = fb.next_due_artist(conn, 0)
+            assert row is not None and row["id"] == 1
+        assert fb.fill_artist(db._get_connection, 1, self._fetcher())
+        assert _tracks(db)["Angel"]["listenbrainz"]["listen_count"] == 5400
+
+    def test_listenbrainz_down_leaves_the_tracks_due(self, db):
+        fetcher = fb.ArtistAboutFallback(
+            mb_client=_MB(MB_ARTIST), audiodb_client=_AudioDB(), deezer_client=_Deezer(),
+            http=_http(**{fb.LISTENBRAINZ_TOP_RECORDINGS: fb.SourceError("503")}))
+        fb.fill_artist(db._get_connection, 1, fetcher)
+        assert fb.TRACKS_CHECK_KEY not in _enrichment(db)
+
+    def test_no_mbid_no_track_request(self, db):
+        with closing(db._get_connection()) as conn:
+            conn.execute("UPDATE lib2_artists SET musicbrainz_id = NULL")
+            conn.commit()
+            row = fb.load_artist(conn, 1)
+            assert fb.tracks_due(conn, row) is False
+
+    def test_the_album_flames_from_listenbrainz_after_the_fill(self, db):
+        from core.library2 import queries as Q
+        recordings = [{"recording_mbid": "", "recording_name": f"Song {i}",
+                       "total_listen_count": n} for i, n in enumerate([4000, 300, 280, 260, 250])]
+        for i in range(5):
+            _add_track(db, f"Song {i}")
+        fb.fill_artist(db._get_connection, 1, self._fetcher(recordings))
+        with closing(db._get_connection()) as conn:
+            tracks = Q.get_album(conn, 1)["tracks"]
+        flamed = [(t["title"], t["popular_source"]) for t in tracks if t.get("popular")]
+        assert flamed == [("Song 0", "listenbrainz")]
