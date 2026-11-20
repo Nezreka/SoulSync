@@ -301,6 +301,7 @@ import {
 import styles from './library-v2-page.module.css';
 import { LineIcon } from './line-icon';
 import { WatchlistIcon, WishlistIcon } from './list-icons';
+import { MediaServerRecognitionBadges } from './media-server-badges';
 import { AlbumUpgradeButton } from './owned-album-upgrade';
 import { useArtistBack } from './owned-artist-back';
 import {
@@ -580,60 +581,6 @@ function SvgIcon({
         strokeLinejoin={!isFillIcon ? 'round' : undefined}
       />
     </svg>
-  );
-}
-
-const MEDIA_SERVER_LABELS: Record<string, string> = {
-  emby: 'Emby',
-  jellyfin: 'Jellyfin',
-  navidrome: 'Navidrome',
-  plex: 'Plex',
-};
-
-function mediaServerLabel(source: string): string {
-  const normalized = source.trim().toLowerCase();
-  return (
-    MEDIA_SERVER_LABELS[normalized] ??
-    normalized
-      .split(/[_-]+/)
-      .filter(Boolean)
-      .map((part) => `${part[0]?.toUpperCase() ?? ''}${part.slice(1)}`)
-      .join(' ')
-  );
-}
-
-function naturalList(values: string[]): string {
-  if (values.length <= 1) return values[0] ?? '';
-  if (values.length === 2) return `${values[0]} and ${values[1]}`;
-  return `${values.slice(0, -1).join(', ')}, and ${values.at(-1)}`;
-}
-
-/** A single quiet signal for one or more positive media-server mappings.
- * Provider names stay out of the layout and are available on hover and to
- * assistive technology. The count only appears when more than one server
- * independently recognised the entity. */
-function MediaServerRecognitionBadge({ sources }: { sources: string[] | undefined }) {
-  const labels = Array.from(
-    new Set((sources ?? []).map(mediaServerLabel).filter((source) => source.length > 0)),
-  );
-  if (labels.length === 0) return null;
-  const description = `Recognised by ${naturalList(labels)}`;
-  return (
-    <span
-      className={styles.mediaServerRecognitionBadge}
-      aria-label={description}
-      title={description}
-    >
-      <SvgIcon name="server" />
-      <span className={styles.mediaServerRecognitionCheck} aria-hidden="true">
-        ✓
-      </span>
-      {labels.length > 1 ? (
-        <span className={styles.mediaServerRecognitionCount} aria-hidden="true">
-          {labels.length}
-        </span>
-      ) : null}
-    </span>
   );
 }
 
@@ -6465,11 +6412,8 @@ export function ArtistCard({
       <span className={`${styles.cardMonitor} ${classic.monitor}`}>
         <MonitorToggle entity="artists" id={artist.id} monitored={artist.monitored} />
       </span>
-      {artist.media_server_sources?.length ? (
-        <span className={`${styles.mediaServerBadges} ${classic.recognition}`}>
-          <MediaServerRecognitionBadge sources={artist.media_server_sources} />
-        </span>
-      ) : null}
+      {/* #2213: beside the toggle, its own logo per server */}
+      <MediaServerRecognitionBadges sources={artist.media_server_sources} variant="card" />
     </article>
   );
 }
@@ -6674,7 +6618,10 @@ function ArtistTable({
                       {artist.album_count} albums · {artist.single_count} singles
                     </span>
                   </span>
-                  <MediaServerRecognitionBadge sources={artist.media_server_sources} />
+                  <MediaServerRecognitionBadges
+                    sources={artist.media_server_sources}
+                    variant="compact"
+                  />
                 </span>
               </td>
               <td className={`${styles.colNum} ${styles.colReleaseCount}`}>{artist.album_count}</td>
@@ -9504,7 +9451,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
           {formatFileSize(artist.total_size_bytes)}
         </span>
       ) : null}
-      <MediaServerRecognitionBadge sources={artist.media_server_sources} />
+      <MediaServerRecognitionBadges sources={artist.media_server_sources} variant="header" />
       <ArtistQueueSummary tracks={queueStatusQuery.data?.tracks ?? {}} />
     </>
   ) : null;
@@ -13180,7 +13127,10 @@ function TrackRow(props: TrackRowProps) {
             style={widthStyle('media_server')}
           >
             {track.media_server_sources?.length ? (
-              <MediaServerRecognitionBadge sources={track.media_server_sources} />
+              <MediaServerRecognitionBadges
+                sources={track.media_server_sources}
+                variant="compact"
+              />
             ) : (
               <span className={styles.muted}>—</span>
             )}
