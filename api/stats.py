@@ -94,6 +94,77 @@ def stats_year_in_listening():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@bp.route('/api/stats/year/playlist', methods=['POST'])
+@requires("music.stats")
+def stats_year_playlist():
+    """Save your year as a playlist: the year's top 50 (or 100) songs into a
+    user playlist named "Your <year>". Saving again updates the same one."""
+    from core.playlists.user_playlists import UserPlaylistError
+    from core.stats import year_extras
+    try:
+        body = request.get_json(silent=True) or {}
+        size = year_extras.clamp_size(body.get('size'))
+        database = get_database()
+        pid = get_current_profile_id()
+        tracks = database.get_year_top_tracks(limit=size, profile_id=pid)
+        year = year_extras.story_year(datetime.now().strftime('%Y-%m-%d'))
+        saved = year_extras.save_year_playlist(database, pid, year, tracks)
+        return jsonify({'success': True, **saved})
+    except UserPlaylistError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+    except Exception as e:
+        logger.error("saving the year playlist failed: %s", e)
+        return jsonify({'success': False, 'error': 'Could not save the playlist'}), 500
+
+
+@bp.route('/api/stats/year/soundtrack', methods=['GET'])
+@requires("music.stats")
+def stats_year_soundtrack():
+    """The story's soundtrack: the year's most played songs you own, in the
+    player's queue shape, each with where to start it."""
+    from core.stats import year_extras
+    try:
+        database = get_database()
+        tracks = database.get_year_top_tracks(limit=25, profile_id=get_current_profile_id())
+        rows = year_extras.soundtrack_rows(database, tracks, fix_artist_image_url)
+        return jsonify({'success': True, 'tracks': rows})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@bp.route('/api/stats/year/banner', methods=['GET'])
+@requires("music.stats")
+def stats_year_banner():
+    """{show, year}: the dashboard's "Your <year> is ready", Dec 1 to Jan 15,
+    until this profile dismisses it. The first time it shows, the profile
+    also gets one bell note."""
+    from core.stats import year_extras
+    try:
+        database = get_database()
+        pid = get_current_profile_id()
+        state = year_extras.banner_state(database, pid, today=year_extras.today_local())
+        if state['show']:
+            has_plays = bool(database.get_year_top_tracks(limit=1, profile_id=pid))
+            state = year_extras.banner_state(database, pid, today=year_extras.today_local(),
+                                             has_plays=has_plays)
+        if state['show']:
+            from core.profile_notify import notify_profile
+            year_extras.notify_once(database, pid, state['year'], notify_profile)
+        return jsonify({'success': True, **state})
+    except Exception as e:
+        return jsonify({'success': False, 'show': False, 'error': str(e)}), 500
+
+
+@bp.route('/api/stats/year/banner/dismiss', methods=['POST'])
+@requires("music.stats")
+def stats_year_banner_dismiss():
+    from core.stats import year_extras
+    year = year_extras.season_year(year_extras.today_local())
+    if year is not None:
+        year_extras.dismiss_banner(get_database(), get_current_profile_id(), year)
+    return jsonify({'success': True})
+
+
 @bp.route('/api/stats/album-tracks/<album_id>', methods=['GET'])
 @requires("music.access")
 def stats_album_tracks(album_id):

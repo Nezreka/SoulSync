@@ -146,8 +146,10 @@ def test_an_empty_history_is_a_complete_empty_story(db):
     assert len(year['months']) == 12
     assert year['top_artists'] == []
     assert year['discoveries'] == []
-    assert year['peak_day'] == {'date': None, 'plays': 0}
+    assert year['peak_day'] == {'date': None, 'plays': 0, 'minutes': 0, 'top_artist': None}
     assert year['top_hour'] == {'hour': None, 'plays': 0}
+    assert year['days'] == [] and year['top_genres'] == []
+    assert year['streak'] == {'days': 0, 'start': None, 'end': None}
     assert year['period']['label'] == 'Sep 2025 — Aug 2026'
 
 

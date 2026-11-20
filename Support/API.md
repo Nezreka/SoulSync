@@ -167,6 +167,15 @@ A profile with fewer than five taste seeds (artists played at least twice, watch
 - `POST /api/discover/starter/picks` `{artists: [{name, deezer_id, image_url}]}`: keep them as this profile's picked artists and fetch their similar artists in the background (`build` reports progress). An empty list is a `400`.
 - While a profile is new and has no recommendations, `GET /api/discover/similar-artists` answers chart picks with `starter: true`, each with `explanation: {kind: "trending", seeds: [{name: "Deezer's Rock chart"}]}`, and the hero does the same. Recommendations from picked artists carry `explanation.kind: "picked"`.
 
+### Your Year extras (web UI routes)
+
+Everything reads the same twelve-month window and listening pile as `GET /api/stats/year`.
+
+- `GET /api/stats/year` now also has `days` (`[{date, plays, minutes}]`, every day with music), `streak` (`{days, start, end}`, the longest run), `top_genres` (`[{genre, plays, share}]`, from the library's artists) and `peak_day.minutes` / `peak_day.top_artist`. A year cached before these arrives without them until the worker rebuilds it.
+- `POST /api/stats/year/playlist` `{size: 50 | 100}`: the year's most played songs into this profile's user playlist "Your <year>". Saving again updates the same playlist. `{id, name, track_count, created}`; `400` when nothing was played.
+- `GET /api/stats/year/soundtrack`: `{tracks}`, up to three of the year's top songs that are in the library with a file, in the player's queue shape plus `start_ms` and `duration_ms`.
+- `GET /api/stats/year/banner`: `{show, year}`, true from Dec 1 to Jan 15 when there is a year to show and this profile hasn't hidden it. The first time it shows, the profile gets one notification. `POST /api/stats/year/banner/dismiss` hides it until next season.
+
 ### Update file locations (web UI routes, admins only)
 
 After the music library folder moves, these point the library's file records at where the files are now. Files are never touched, and the media server's own path for a file is never changed. One job runs at a time, in the background.

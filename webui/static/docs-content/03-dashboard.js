@@ -399,10 +399,24 @@ No data yet? You'll see 📊 **"No Listening Data Yet"** — enable Listening St
 5. **Top artists countdown** — ranked rows with art, name, plays.
 6. **The albums you lived in** — up to 4 album cards; click one to play it.
 7. **On repeat** — your top track with plays, first-played and most-recent dates.
-8. **Discoveries** — up to 8 artists whose very first play in your history landed inside this year.
-9. **When you listened** — your biggest day and most-likely hour.
-10. **Share card** — build a shareable year card: themes (midnight/ink/sunset/paper), layouts, up to 5 stats, toggleable runners-up and artwork.
+8. **Your sound** — your top genre and its share of what you played, with the next four under it. Genres come from your library's artists.
+9. **Discoveries** — up to 8 artists whose very first play in your history landed inside this year.
+10. **Your longest streak** — the most days in a row with music, and when it ran.
+11. **Your biggest day** — the day you played the most, how long, and who you played most that day.
+12. **Every day of it** — a calendar of the whole year, one square a day, darker the more you played.
+13. **When you listened** — the hour you press play most.
+14. **Share card** — build a shareable year card: themes (midnight/ink/sunset/paper), layouts, up to 5 stats, toggleable runners-up and artwork.
 :::
+
+**Your soundtrack.** The story plays your most played songs of the year that you own, in full through the player, each one starting a third of the way in and fading into the next after about 40 seconds. It starts by itself only when nothing else is playing; otherwise press **Play your soundtrack** at the top. **Mute** silences it without stopping, and closing the story fades it out (a song you started yourself is left playing).
+
+**Save your year as a playlist.** On the last slide, pick **Top 50** or **Top 100** and **Save as playlist**. It makes a playlist called **Your 2026** (the year of the story) under your playlists. Saving again updates the same playlist instead of making another one, and a renamed one keeps your name.
+
+**Save video.** Next to Save image, **Save video** records the story as a short video ending on your card, in the card's size and theme. It records in real time (about half a minute), as mp4 where your browser can and webm otherwise, with your soundtrack in it when it's playing.
+
+**December.** From 1 December to 15 January the dashboard shows **Your 2026 is ready** with a button into the story, and you get one note in your notifications. Hide the banner with **×**; it stays hidden until next year. Each profile has its own.
+
+The story counts the same plays as the rest of Stats: a private session never shows up in it.
 
 ## Library tab (not range-scoped)
 
