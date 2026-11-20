@@ -77,7 +77,7 @@ No media server at all: SoulSync itself is the player and library manager. Impor
 | **Qobuz** | Download from Qobuz at your chosen quality |
 | **HiFi** | Free lossless downloads via community-run hifi-api instances — no account needed |
 | **Deezer** | Download from Deezer (ARL token) |
-| **Lidarr** | Hand off to your Lidarr server |
+| **Lidarr** | Hand off to your Lidarr server. An album goes to Lidarr as one album: one lookup, one add, one search, then SoulSync imports the tracks |
 | **SoundCloud** | Download from SoundCloud, nothing to set up. Optional: paste a free account's oauth_token to get the original file when the uploader allows downloads |
 | **Torrent** | Search via Prowlarr indexers through your torrent client |
 | **Usenet** | Search via Prowlarr indexers through your usenet client |
@@ -88,6 +88,10 @@ For **Usenet**, SoulSync downloads each NZB from Prowlarr itself and hands SABnz
 **A shared qBittorrent.** If your qBittorrent is set to add torrents stopped, or to stop them once the metadata is in, everything SoulSync adds sits there and never downloads. Turn on **Start the torrents SoulSync adds** in the torrent client section and SoulSync's torrents start anyway, while what other apps add keeps your qBittorrent setting. It is off by default and only applies to qBittorrent.
 
 **Pacing indexer searches.** Prowlarr passes every search straight to your indexers, so SoulSync spaces them out: 2 seconds between searches and at most 20 a minute by default, one budget for music and video together. Both are in the Prowlarr section as **Seconds between searches** and **Searches per minute, at most**. Raise the first if a tracker answers 429 Too Many Requests or Prowlarr marks an indexer unhealthy; a tracker that asks for 11 seconds between requests wants 12 or more. 0 turns either one off. A manual search waits its turn behind background searches.
+
+**Lidarr in a hybrid chain.** When the chain has Lidarr and another source, the download dialogs and the wishlist's selection bar show **Whole album via Lidarr**. On, the album goes to Lidarr, which grabs the whole release. Off, Lidarr is skipped and the next source gets the tracks. **\"Whole album via Lidarr\" on by default** in the Lidarr settings sets where the switch starts, and it is what automatic wishlist runs use. If Lidarr finds nothing to grab within 10 minutes the album moves on to the next source; a grab that is running is waited on for up to 6 hours. In Lidarr Only mode a miss ends the album there.
+
+**Where Lidarr's tracks land.** Lidarr already keeps the whole album in its own root folder. If that folder is also your library, the copy SoulSync imports is a second one: set **Lidarr imports folder** in the Lidarr settings to send SoulSync's copies somewhere else. **Lidarr download folder** is where SoulSync copies a track out of Lidarr before importing it (empty uses the Soulseek download folder).
 
 The chain editor lives on the Downloads tab: drag sources from **Available** into your **Download chain**. One source in the chain means "that source only"; two or more means hybrid. Any source can be configured on the Sources tab first — it doesn't need to be in the chain yet.
 

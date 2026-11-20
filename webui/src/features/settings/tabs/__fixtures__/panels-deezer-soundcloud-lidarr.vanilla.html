@@ -95,6 +95,24 @@
                                                     </div>
                                                 </div>
                                                 <div class="form-group">
+                                                    <label>Lidarr imports folder:</label>
+                                                    <input type="text" id="lidarr-transfer-path"
+                                                        placeholder="empty: the music library folder">
+                                                    <div class="setting-help-text">
+                                                        Where tracks that came from Lidarr are imported. Lidarr already keeps the whole album in
+                                                        its own root folder; if that folder is your library, the copy SoulSync imports is a
+                                                        second one. Empty imports them like every other download.
+                                                    </div>
+                                                </div>
+                                                <div class="form-group">
+                                                    <label>Lidarr download folder:</label>
+                                                    <input type="text" id="lidarr-download-path"
+                                                        placeholder="empty: the Soulseek download folder">
+                                                    <div class="setting-help-text">
+                                                        Where SoulSync copies a track out of Lidarr before it imports it.
+                                                    </div>
+                                                </div>
+                                                <div class="form-group">
                                                     <label>Lidarr Status:</label>
                                                     <div class="form-actions" style="margin-top: 4px;">
                                                         <button class="test-button" id="lidarr-test-btn"
