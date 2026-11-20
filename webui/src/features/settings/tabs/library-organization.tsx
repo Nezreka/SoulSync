@@ -232,7 +232,8 @@ export function MusicNamingHero({ store }: { store: SettingsStore }) {
   const org = (settings.file_organization || {}) as Section;
   const on = org.enabled !== false;
   const templates = templatesOf(settings);
-  const count = Object.keys(templateFieldErrors(settings)).length;
+  const errors = templateFieldErrors(settings);
+  const count = Object.keys(errors).length;
   return (
     <LibHero
       stats={
@@ -246,9 +247,15 @@ export function MusicNamingHero({ store }: { store: SettingsStore }) {
           : undefined
       }
       parts={
-        loads
-          ? musicNamingSentence({ on, album, template: templates.album_path })
-          : [{ text: 'Loading your naming templates.' }]
+        !loads
+          ? [{ text: 'Loading your naming templates.' }]
+          : errors.album_path
+            ? [
+                { text: 'The album path template ' },
+                { text: 'would not work', kind: 'warn' },
+                { text: ', so nothing on this page saves until it is fixed below.' },
+              ]
+            : musicNamingSentence({ on, album, template: templates.album_path })
       }
     />
   );

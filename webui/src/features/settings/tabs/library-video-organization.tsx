@@ -616,21 +616,26 @@ function SubtitleChain() {
             mark: mark(id),
             line: id === 'embedded' ? 'Needs no key' : 'Needs its API key (Connections)',
           }))}
-          poolHead={<SectionLabel title="Not used" hint="Add one to try it after the others" />}
+          poolHead={
+            <>
+              {/* right under the order: it is tried after every one of them */}
+              {whisperOn ? (
+                <div className={s.pinned} data-pinned="whisper">
+                  {mark('whisper')}
+                  <span>
+                    <b>{name('whisper')}</b>
+                    <StatusWords tone="ok">Last resort, always tried last</StatusWords>
+                  </span>
+                </div>
+              ) : null}
+              <SectionLabel title="Not used" hint="Add one to try it after the others" />
+            </>
+          }
           poolEmpty="Every provider is in the chain."
           keepText="Keep at least one provider: subtitles need somewhere to come from"
           removeLabel="Stop using"
           menuBodyClass="stg-menu-open"
         />
-      ) : null}
-      {loads && whisperOn ? (
-        <div className={s.pinned} data-pinned="whisper">
-          {mark('whisper')}
-          <span>
-            <b>{name('whisper')}</b>
-            <StatusWords tone="ok">Last resort, always tried last</StatusWords>
-          </span>
-        </div>
       ) : null}
     </div>
   );

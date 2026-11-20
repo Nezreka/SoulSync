@@ -268,6 +268,10 @@ describe('the page', () => {
     expect(row('template-album-path').querySelector('[role="alert"]')!.textContent).toBe(
       'Album template must include at least one folder (use / separator)',
     );
+    // the hero says so instead of reading a broken path back
+    expect(document.body.textContent).toContain(
+      'The album path template would not work, so nothing on this page saves until it is fixed below.',
+    );
     expect(host.blockers()).toEqual([
       {
         message:

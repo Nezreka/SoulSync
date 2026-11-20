@@ -749,7 +749,9 @@ export function OrderList({
                   {item.status.text}
                 </StatusWords>
               ) : (
-                <span />
+                // the status column's place (it gives way on a phone, as a
+                // status does, so the row's own control keeps its column)
+                <span className={s.srcStatus} />
               )}
               <div className={s.srcActs}>
                 {item.action ? (
