@@ -24491,6 +24491,10 @@ app.register_blueprint(_bp_mc())
 from api.deleted_files import configure as _cfg_df, create_blueprint as _bp_df
 _cfg_df(config_manager_=config_manager, docker_resolve_path_=docker_resolve_path)
 app.register_blueprint(_bp_df())
+# Tools > Update File Locations: records follow a music library folder that moved (api/file_locations.py).
+from api.file_locations import configure as _cfg_fl, create_blueprint as _bp_fl
+_cfg_fl(get_database_=get_database)
+app.register_blueprint(_bp_fl())
 # Review-queue verification endpoints (api/verification.py).
 from api.verification import configure as _cfg_verif, create_blueprint as _bp_verif
 _cfg_verif(get_database_=get_database, config_manager_=config_manager,
