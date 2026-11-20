@@ -301,6 +301,14 @@ def _sync_single_mirrored_playlist(
                 # files a manual match under it, so the sync needs both (#1289)
                 'source_track_id': t.get('source_track_id') or '',
             }
+            # the playlist's own artist, which discovery's match can spell
+            # in another script ("Δέσποινα Βανδή" for "Despina Vandi"): the
+            # sync matches under both (#2222)
+            _mirror_artist = (t.get('artist_name') or '').strip()
+            if _mirror_artist:
+                _track_entry['source_artists'] = [_mirror_artist]
+            if md.get('isrc'):
+                _track_entry['isrc'] = md['isrc']
             if md.get('track_number'):
                 _track_entry['track_number'] = md['track_number']
             if md.get('disc_number'):

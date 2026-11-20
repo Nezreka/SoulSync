@@ -1229,7 +1229,13 @@ def _fresh_fold_index():
     # one test's library must not name the next test's download
     from core.imports import library_names as _library_names
     _library_names.clear_cache()
+    # the library's other names for an artist (#2222) are read into a map
+    # kept per database; one test's artists must not answer the next one's
+    from core.library2 import artist_equivalence as _artist_equivalence
+    _artist_equivalence.clear_cache()
+    saved_equivalence_ttl, _artist_equivalence.INDEX_TTL = _artist_equivalence.INDEX_TTL, 0.0
     yield
+    _artist_equivalence.INDEX_TTL = saved_equivalence_ttl
     fold_index.CHECK_SECONDS = saved
     worker_queue.PROGRESS_SNAPSHOT_TTL = saved_ttl
     MusicDatabase._QUARANTINE_NAME_MAPS_TTL = saved_quarantine_ttl

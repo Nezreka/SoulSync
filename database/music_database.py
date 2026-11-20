@@ -3906,6 +3906,11 @@ class MusicDatabase:
             # transaction; without this each one scanned the whole cache
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_sync_cache_server_track "
                            "ON sync_match_cache (server_source, server_track_id)")
+            # #2222: a pairing found under one provider's id (deezer) is
+            # looked up again by title + artist when a later sync carries
+            # another provider's id (itunes) for the same song
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_sync_cache_identity "
+                           "ON sync_match_cache (server_source, normalized_title, normalized_artist)")
 
             # pairings a user unmatched on the server playlist compare view.
             # the auto matcher may never pair this source track with this
@@ -12168,9 +12173,24 @@ class MusicDatabase:
         Library v2: with ``server_source`` a row's id is that server's id for
         the track -- the sync hands it to the server -- and a track the server
         does not know yet is not a row; without it, the catalogue id."""
+        return self._owned_tracks_by(
+            "t.spotify_id = ?", str(spotify_track_id or '').strip(), server_source, 'spotify id')
+
+    def get_tracks_by_isrc(self, isrc, server_source: str = None) -> List[DatabaseTrackWithMetadata]:
+        """every owned library track carrying this ISRC (#2222), in track id
+        order, the same rows and id rules as get_tracks_by_spotify_id. an isrc
+        names a recording on every provider, so a sync carrying the itunes id
+        still finds the track a deezer sync matched. not proof alone either
+        (a remaster can keep it, a compilation copy shares it):
+        core.sync.provider_match corroborates each row."""
+        return self._owned_tracks_by(
+            "t.isrc = ? COLLATE NOCASE", str(isrc or '').strip().upper(), server_source, 'isrc')
+
+    def _owned_tracks_by(self, where: str, value: str, server_source: str = None,
+                         label: str = 'id') -> List[DatabaseTrackWithMetadata]:
+        """owned library tracks matching one indexed ``where`` on lib2_tracks t."""
         try:
-            spotify_id_str = str(spotify_track_id or '').strip()
-            if not spotify_id_str:
+            if not value:
                 return []
             from core.library2.sql_util import owned_sql, owner_clause
             from core.library2.track_files import primary_order
@@ -12197,9 +12217,9 @@ class MusicDatabase:
                 FROM lib2_tracks t
                 JOIN lib2_albums al ON al.id = t.album_id
                 JOIN lib2_artists a ON a.id = al.primary_artist_id
-                WHERE t.spotify_id = ? AND {owned_sql('track', 't')}
+                WHERE {where} AND {owned_sql('track', 't')}
                 ORDER BY t.id
-            """, [*id_params, spotify_id_str])
+            """, [*id_params, value])
             return [
                 DatabaseTrackWithMetadata(
                     id=row['public_id'],
@@ -12220,7 +12240,7 @@ class MusicDatabase:
             ]
 
         except Exception as e:
-            logger.error(f"Error getting tracks by spotify id {spotify_track_id}: {e}")
+            logger.error(f"Error getting tracks by {label} {value}: {e}")
             return []
 
     def get_track_by_spotify_id(self, spotify_track_id, server_source: str = None) -> Optional[DatabaseTrackWithMetadata]:
@@ -13299,7 +13319,9 @@ class MusicDatabase:
         """The other names ``artist`` is linked under (§40 artist aliases,
         core/library2/artist_aliases.py): a kanji and a romaji row of one
         composer are one artist, and the library may hold the release under
-        the other one. Empty without links, or on any error."""
+        the other one. Also the artists the library holds under another
+        script or musicbrainz name (core/library2/artist_equivalence.py,
+        #2222). Empty without links, or on any error."""
         from core.library2.artist_aliases import resolve_alias_group
         from core.library2.importer import normalize_name
         key = normalize_name(artist or '')
@@ -13315,6 +13337,12 @@ class MusicDatabase:
                         names.extend(r[0] for r in conn.execute(
                             f"SELECT name FROM lib2_artists WHERE id IN ({','.join('?' * len(group))})",
                             group))
+                # the same artist under another script or musicbrainz name:
+                # itunes' "Δέσποινα Βανδή" is the library's "Despina Vandi"
+                # (#2222)
+                from core.library2.artist_equivalence import equivalent_artist_names
+                names.extend(equivalent_artist_names(
+                    conn, artist, cache_key=str(getattr(self, 'database_path', '') or '')))
         except Exception as e:
             logger.debug(f"alias names for '{artist}' skipped: {e}")
             return []
@@ -22365,6 +22393,42 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"find_manual_library_matches_bulk error: {e}")
             return out
+
+    def find_sync_match_cache_by_identity(self, normalized_titles, normalized_artists,
+                                          server_source: str) -> List[Dict]:
+        """Cached pairings for this song under ANY source id (#2222).
+
+        The cache is keyed by the provider's track id, and one song has a
+        different id on every provider: a pairing the sync made under the
+        deezer id was never found by a later sync carrying the itunes id.
+        This looks the song up by the title and artist forms the writers
+        store, on idx_sync_cache_identity. Best rows first: user-confirmed
+        (1.0) before auto, then the most recently used. Empty on any error.
+        """
+        titles = [t for t in dict.fromkeys(str(x or '').strip() for x in (normalized_titles or [])) if t]
+        artists = [a for a in dict.fromkeys(str(x or '').strip() for x in (normalized_artists or [])) if a]
+        if not titles or not artists or not server_source:
+            return []
+        try:
+            with self._get_connection() as conn:
+                rows = conn.execute(f"""
+                    SELECT spotify_track_id, server_track_id, server_track_title, confidence
+                    FROM sync_match_cache
+                    WHERE server_source = ?
+                      AND normalized_title IN ({','.join('?' * len(titles))})
+                      AND normalized_artist IN ({','.join('?' * len(artists))})
+                    ORDER BY confidence DESC, last_used_at DESC
+                    LIMIT 20
+                """, [server_source, *titles, *artists]).fetchall()
+            return [{
+                'spotify_track_id': row['spotify_track_id'],
+                'server_track_id': row['server_track_id'],
+                'server_track_title': row['server_track_title'],
+                'confidence': row['confidence'],
+            } for row in rows]
+        except Exception as e:
+            logger.debug(f"sync match cache identity lookup failed: {e}")
+            return []
 
     def save_sync_match_cache(self, spotify_track_id: str, normalized_title: str,
                                normalized_artist: str, server_source: str,

@@ -2406,6 +2406,26 @@ def evaluate_batch_album_distrust(original_search, track_info, album_ctx, explic
     }
 
 
+def album_artist_override(verdict: dict):
+    """``(name, artists)`` when the track's own album artist outranks the
+    explicit artist context (#1316): the two name different artists and the
+    album context is trusted. None otherwise.
+
+    The ALBUMARTIST tag and the folder both take it (#2222): the tag used to
+    follow this rule while the folder kept the explicit context, so a
+    wishlist download asked for as "Δέσποινα Βανδή" on an album credited to
+    "Despina Vandi" was tagged Despina Vandi and filed under a greek folder.
+    """
+    if not isinstance(verdict, dict):
+        return None
+    explicit = str(verdict.get("explicit_name") or "").strip()
+    own = str(verdict.get("own_album_artist") or "").strip()
+    if (explicit and own and own.casefold() != explicit.casefold()
+            and not verdict.get("ctx_artist_untrusted")):
+        return own, verdict.get("own_album_artists")
+    return None
+
+
 def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> dict:
     if album_info is None:
         album_info = {}
@@ -2590,16 +2610,17 @@ def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> di
         # unless the "track's own album artist" is itself an uncorroborated
         # stranger from the batch context (wire 3 above fired), in which
         # case the batch context is poisoned and gets quarantined below.
+        # The folder takes the same answer (core/imports/paths.py, #2222).
         if (own_album_artist
                 and own_album_artist.strip().casefold() != explicit_name.strip().casefold()):
-            if not _ctx_artist_untrusted:
+            _override = album_artist_override(_verdict)
+            if _override:
                 logger.warning(
                     "Metadata: explicit artist context '%s' disagrees with the track's "
                     "own album artist '%s' — trusting the track data (#1316)",
                     explicit_name, own_album_artist,
                 )
-                raw_album_artist = own_album_artist
-                album_artists_for_collab = own_album_artists
+                raw_album_artist, album_artists_for_collab = _override
             # (wire 3 fired: quarantine below overrides raw_album_artist)
         else:
             raw_album_artist = explicit_name

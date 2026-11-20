@@ -1446,6 +1446,27 @@ class PlaylistSyncService:
                 cached_match_is_stale, drop_stale_cached_match, match_lookup_ids)
             cache_db = MusicDatabase()
 
+            # every name the artist goes by: the matched source's, the
+            # playlist's own, and the library's other names for them (#2222)
+            from core.sync.identity_match import (
+                identity_cache_rows, known_artist_names, sync_artist_names)
+            _known_names: List[str] = []
+
+            def _known_artists() -> List[str]:
+                if not _known_names:
+                    _known_names.extend(known_artist_names(cache_db, spotify_track)
+                                        or [_artist_name(a) for a in spotify_track.artists])
+                return _known_names
+
+            def _cache_row_stale(**gate) -> bool:
+                # the source's own names first: the library's other names cost
+                # a lookup, so they're only asked when those call it stale
+                if not cached_match_is_stale(
+                        cache_db, artists=sync_artist_names(spotify_track)
+                        or [_artist_name(a) for a in spotify_track.artists], **gate):
+                    return False
+                return cached_match_is_stale(cache_db, artists=_known_artists(), **gate)
+
             def _materialize(server_track_id):
                 """Turn a stored library track id into the actual server item the
                 sync needs (DB row for Jellyfin/Navidrome/SoulSync, Plex fetchItem)."""
@@ -1487,10 +1508,8 @@ class PlaylistSyncService:
                             # today's matcher; a proven-stale row is dropped
                             # and matching falls through to the durable manual
                             # match and then the fresh matcher, like a miss.
-                            if cached_match_is_stale(
-                                cache_db,
+                            if _cache_row_stale(
                                 title=original_title,
-                                artists=[_artist_name(a) for a in spotify_track.artists],
                                 album=getattr(spotify_track, 'album', None),
                                 server_source=active_server,
                                 cached_track_id=cached['server_track_id'],
@@ -1562,6 +1581,37 @@ class PlaylistSyncService:
                     logger.debug(f"Durable manual match lookup error: {durable_err}")
             # --- End match fast-path ---
 
+            # the same song under another provider's id (#2222): a deezer sync
+            # cached the pairing, this sync carries the itunes id. looked up by
+            # title + every name of the artist, then held to the same checks
+            # as an id hit: still the track, not stale, not unmatched
+            if self._cancelled:
+                return None, 0.0
+            try:
+                _tried_ids = {str(i) for i in match_lookup_ids(spotify_track)}
+                for cached in identity_cache_rows(cache_db, original_title, _known_artists(), active_server):
+                    if str(cached.get('spotify_track_id')) in _tried_ids:
+                        continue
+                    actual_track = _materialize(cached['server_track_id'])
+                    if not actual_track:
+                        continue
+                    if _cache_row_stale(
+                            title=original_title,
+                            album=getattr(spotify_track, 'album', None),
+                            server_source=active_server,
+                            cached_track_id=cached['server_track_id'],
+                            cached_track_row=cache_db.get_track_by_server_id(
+                                cached['server_track_id'], active_server),
+                            threshold=0.7):
+                        continue
+                    if self._match_was_rejected(spotify_track, active_server, cached['server_track_id']):
+                        continue
+                    logger.info(f"Sync cache hit by title + artist for '{original_title}' → server track "
+                                f"{cached['server_track_id']} (saved under source id {cached.get('spotify_track_id')})")
+                    return actual_track, cached['confidence']
+            except Exception as identity_err:
+                logger.debug(f"Sync cache identity lookup error: {identity_err}")
+
             # exact spotify id (#1885). a library artist filed in another
             # script never matches by name below, so the track went missing
             # and the mirror's saved link got cleared. runs after the
@@ -1572,13 +1622,18 @@ class PlaylistSyncService:
                 return None, 0.0
             try:
                 from core.artists.map import get_current_profile_id
+                from itertools import chain
                 from core.sync.provider_match import (
-                    honorable_provider_rows, rescue_is_the_provider_row)
+                    honorable_isrc_rows, honorable_provider_rows, rescue_is_the_provider_row)
                 _provider_profile = _sync_profile_id.get() or get_current_profile_id()
                 # every row gets a turn, the first can be a duplicate whose
-                # key went stale while a sibling is the live one
-                for provider_row in honorable_provider_rows(
-                        cache_db, spotify_track, active_server, _provider_profile):
+                # key went stale while a sibling is the live one. the isrc
+                # rows come after the spotify id's: one recording id on every
+                # provider, so an itunes-matched track still finds what a
+                # deezer sync matched (#2222)
+                for provider_row in chain(
+                        honorable_provider_rows(cache_db, spotify_track, active_server, _provider_profile),
+                        honorable_isrc_rows(cache_db, spotify_track, active_server, _provider_profile)):
                     _provider_id = (provider_row.get("id") if isinstance(provider_row, dict)
                                     else provider_row.id)
                     actual_track = _materialize(_provider_id)
@@ -1603,8 +1658,10 @@ class PlaylistSyncService:
             except Exception as provider_err:
                 logger.debug(f"Provider-ID match lookup error: {provider_err}")
 
-            # Try each artist (same as modal logic)
-            for artist in spotify_track.artists:
+            # Try each artist (same as modal logic), then the playlist's own
+            # names for them (#2222). the library's other names for each are
+            # check_track_exists' own alias retry
+            for artist in (sync_artist_names(spotify_track) or spotify_track.artists):
                 if self._cancelled:
                     return None, 0.0
 
