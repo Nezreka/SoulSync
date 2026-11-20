@@ -4838,6 +4838,9 @@ a.dsc-now-artist:hover {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(124px, 1fr));
     align-content: start;
+    /* rows as tall as their tiles: a squeezed row turned the round art into
+       ellipses on a phone */
+    grid-auto-rows: max-content;
     gap: 20px 14px;
     padding: 12px 28px 22px;
 }
@@ -4869,6 +4872,7 @@ a.dsc-now-artist:hover {
 
 .dsc-picker-art {
     position: relative;
+    flex: none;
     display: block;
     width: 100%;
     aspect-ratio: 1;
@@ -4991,7 +4995,8 @@ a.dsc-now-artist:hover {
         flex-direction: row;
         align-items: center;
         justify-content: space-between;
-        padding-right: 0;
+        /* clear of the dismiss button in the corner */
+        padding-right: 40px;
     }
 
     .dsc-starter-faces img {
@@ -5004,12 +5009,31 @@ a.dsc-now-artist:hover {
         width: 110px;
     }
 
+    .dsc-starter-meter-label {
+        white-space: nowrap;
+    }
+}
+
+@media (max-width: 520px) {
+    /* three faces leave the seed meter room beside them */
+    .dsc-starter-faces img:nth-child(n + 4) {
+        display: none;
+    }
+
     .dsc-starter-offers {
         grid-template-columns: minmax(0, 1fr);
     }
 }
 
 @media (max-width: 600px) {
+    /* the picker is the whole screen on a phone: the floating buttons wait
+       for it, or they sit on Build my Discover */
+    body:has(.dsc-picker) .activity-float-btn,
+    body:has(.dsc-picker) .helper-float-btn,
+    body:has(.dsc-picker) .notif-bell-btn {
+        display: none;
+    }
+
     .dsc-picker-overlay {
         padding: 0;
     }

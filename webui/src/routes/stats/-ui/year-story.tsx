@@ -620,7 +620,7 @@ function YearSlide({
       return (
         <div className={styles.slide}>
           <p className={styles.kicker}>Your sound</p>
-          <h2 className={styles.hero}>{top.genre}</h2>
+          <h2 className={`${styles.hero} ${styles.genreHero}`}>{top.genre}</h2>
           <p className={styles.lede}>{sharePercent(top.share)} of what you played</p>
           {rest.length ? (
             <div className={styles.genreBars}>
@@ -766,12 +766,11 @@ function CalendarSlide({ year }: { year: YearInListening }) {
       <h2 className={styles.heroSmall}>
         <CountUp value={year.totals.active_days} /> days with music
       </h2>
-      <div className={styles.calendarScroll}>
+      <div className={styles.calendarScroll} style={{ ['--weeks' as string]: cal.weeks.length }}>
         <div
           className={styles.calendar}
           role="img"
           aria-label={`A calendar of your year: ${year.totals.active_days} days with music`}
-          style={{ ['--weeks' as string]: cal.weeks.length }}
         >
           <div className={styles.calendarMonths} aria-hidden="true">
             {cal.months.map((m) => (

@@ -1476,6 +1476,10 @@ button.soundtrack:hover {
 }
 
 /* --- Top genre --- */
+.genreHero {
+  text-transform: capitalize;
+}
+
 .genreBars {
   display: flex;
   flex-direction: column;
@@ -1537,9 +1541,13 @@ button.soundtrack:hover {
   display: none;
 }
 
-.calendar {
+.calendarScroll,
+.calendarLegend {
   --cell: 12px;
   --cell-gap: 3px;
+}
+
+.calendar {
   display: grid;
   grid-template-columns: 28px repeat(var(--weeks, 53), var(--cell));
   grid-template-rows: auto;
@@ -1718,10 +1726,28 @@ button.soundtrack:hover {
     gap: 10px;
   }
 
-  .calendar {
-    --cell: 9px;
+  /* the whole year fits the screen: the squares shrink rather than scroll */
+  .calendarScroll {
     --cell-gap: 2px;
-    padding: 12px;
+    --cell: max(4px, calc((100vw - 84px) / var(--weeks, 53) - var(--cell-gap)));
+  }
+
+  .calendar,
+  .calendarMonths {
+    grid-template-columns: 0 repeat(var(--weeks, 53), var(--cell));
+  }
+
+  .calendar {
+    padding: 12px 10px;
+  }
+
+  .calendarMonths {
+    font-size: 0.6rem;
+  }
+
+  /* no room for weekday names beside squares this small */
+  .calendarDays {
+    visibility: hidden;
   }
 
   .playlistSave {
