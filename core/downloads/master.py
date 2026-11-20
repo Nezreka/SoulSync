@@ -1649,6 +1649,7 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
                 batch_album_explicit = album_explicit_flag(
                     batch_album_context, [r.get('track') or {} for r in analysis_results])
 
+            _upgrade_pairs = []
             for res in missing_tracks:
                 task_id = str(uuid.uuid4())
                 track_info = res['track'].copy()
@@ -1901,7 +1902,14 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
                 }
                 if is_upgrade_intent(_upgrade_intent):
                     download_tasks[task_id][_UPGRADE_INTENT_KEY] = _upgrade_intent
+                    _upgrade_pairs.append((task_id, _upgrade_intent.track_id))
                 download_batches[batch_id]['queue'].append(task_id)
+
+        # what each upgrade replaces, for its Downloads row ("MP3 320 → FLAC")
+        # and the library's "upgrade queued" badge. read off tasks_lock
+        if _upgrade_pairs:
+            from core.downloads.upgrade_rows import stamp_tasks as _stamp_upgrade_rows
+            _stamp_upgrade_rows(db, _upgrade_pairs)
 
         deps.download_monitor.start_monitoring(batch_id)
         deps.start_next_batch_of_downloads(batch_id)

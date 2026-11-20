@@ -444,7 +444,7 @@ Downloads are grouped into **batches** — one triggered download job (album syn
 - Old rows collapse into **"Earlier (N)"**; same-album history folds to one line; past 12 items a "Show N more" fold appears.
 - **Recent History** fold with a **Download History** button for the full download+import history.
 
-Status chips filter the view: **All / Active / Completed / Queued / Failed**.
+Status chips filter the view: **All / Active / Completed / Queued / Failed / Upgrades**. A quality upgrade (a download that replaces a file you already have) says so on its row: "Replacing MP3 320" while it's being found, "MP3 320 → FLAC" once the new file is in. **Upgrades** shows just those, whatever their status. On the artist page, a track whose upgrade is already on its way shows **↑ queued**, and the album's Upgrade button counts how many are queued.
 
 ## Clients tab — download-client management
 

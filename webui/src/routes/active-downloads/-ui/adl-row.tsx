@@ -13,6 +13,7 @@ import {
   liveDetailLines,
   statusClass,
   statusLabel,
+  upgradeLine,
   verificationHistoryId,
 } from '../-adl.helpers';
 import { unverifiedAudit, unverifiedPlay } from '../-adl.verif-actions';
@@ -342,6 +343,7 @@ export function AdlRow({
   const speed = downloading ? formatSpeed(dl.live_detail?.speed) : '';
   const eta = downloading ? transferEta(dl) : '';
   const sub = subLine(dl, Boolean(compact));
+  const upgrade = upgradeLine(dl);
   const tag = dl.status === 'completed' ? formatTag(dl.quality) : '';
   const when =
     dl.status === 'completed'
@@ -436,6 +438,15 @@ export function AdlRow({
         </div>
 
         <div className="dlc-meta">
+          {upgrade ? (
+            <span
+              className="dlc-tag"
+              data-upgrade="true"
+              title="A quality upgrade: replaces the file you already have once this one verifies"
+            >
+              {upgrade}
+            </span>
+          ) : null}
           <RetryTag dl={dl} />
           {downloading ? (
             <>
