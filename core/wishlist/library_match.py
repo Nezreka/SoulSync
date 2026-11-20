@@ -154,8 +154,12 @@ def _same_title(requested: str, owned: str, album_context: str = '',
     return False
 
 
-def _same_artist(requested: str, db_track: Any) -> bool:
-    """Guard the database matcher's album fallback, which scores title alone."""
+def _same_artist(requested: str, db_track: Any, also_known_as: Any = ()) -> bool:
+    """Guard the database matcher's album fallback, which scores title alone.
+
+    ``also_known_as`` are the library's other names for the requested artist
+    (another script, a musicbrainz alias: #2222). The library's row for
+    "Δέσποινα Βανδή" is credited "Despina Vandi"."""
     # A per-track credit is more specific than the album artist. Checking both
     # would mistake a different performer's song on an artist compilation for
     # the requested artist's recording.
@@ -168,7 +172,8 @@ def _same_artist(requested: str, db_track: Any) -> bool:
         # check_track_exists already searches both leading-"The" spellings.
         return normalize_key(re.sub(r'^the\s+', '', name.strip(), flags=re.I))
 
-    target = artist_key(requested)
+    targets = {key for key in (artist_key(name) for name in (requested, *(also_known_as or ())))
+               if key}
     parts = re.split(
         r'\s*(?:[,;&]|\bfeat\.?\b|\bft\.?\b|\bfeaturing\b|\bvs\.?\b)\s*',
         credit, flags=re.I,
@@ -176,11 +181,12 @@ def _same_artist(requested: str, db_track: Any) -> bool:
     # Split explicit credits first, retaining "Lil Nas X" as a complete name
     # before considering the whitespace-delimited collaboration separator.
     collaborations = [name for part in parts for name in re.split(r'\s+x\s+', part.strip(), flags=re.I)]
-    return bool(target and any(artist_key(part) == target for part in [credit, *parts, *collaborations]))
+    return bool(targets and any(artist_key(part) in targets for part in [credit, *parts, *collaborations]))
 
 
 def _strict_identity_matches(db_track: Any, track_name: str, artist_name: str,
-                             album: Optional[str], require_album: bool) -> bool:
+                             album: Optional[str], require_album: bool,
+                             aliases_for: Any = None) -> bool:
     matched_title = getattr(db_track, 'title', None)
     matched_album = getattr(db_track, 'album_title', None)
     same_album = bool(album and matched_album and _same_title(album, matched_album))
@@ -189,7 +195,8 @@ def _strict_identity_matches(db_track: Any, track_name: str, artist_name: str,
     album_context = matched_album if same_album else ''
     return bool(matched_title and _same_title(track_name, matched_title, album_context,
                                               allow_subtitles=True)
-                and _same_artist(artist_name, db_track))
+                and (_same_artist(artist_name, db_track)
+                     or bool(aliases_for and _same_artist(artist_name, db_track, aliases_for(artist_name)))))
 
 
 def find_owned_match(music_database, track_name: str, artists: Any, album: Optional[str],
@@ -205,6 +212,19 @@ def find_owned_match(music_database, track_name: str, artists: Any, album: Optio
     log = log or logger
     names = artist_names(artists)
     rejected_match = False
+    alias_cache: dict = {}
+
+    def aliases_for(name):
+        # the library's other names for the artist (#2222), only asked when
+        # the plain credit check fails
+        lookup = getattr(music_database, '_cached_artist_alias_names', None)
+        if not callable(lookup):
+            return ()
+        try:
+            found = lookup(name, alias_cache)
+        except Exception:  # noqa: BLE001 - no aliases is the old behaviour
+            return ()
+        return [n for n in found if isinstance(n, str)] if isinstance(found, (list, tuple)) else ()
     for artist_name in names:
         try:
             db_track, confidence = music_database.check_track_exists(
@@ -227,7 +247,8 @@ def find_owned_match(music_database, track_name: str, artists: Any, album: Optio
             # That is useful for search suggestions, but is not proof that a
             # wishlist request has been fulfilled. Keep version words, too:
             # an acoustic/demo/live recording may be a distinct target.
-            if not _strict_identity_matches(db_track, track_name, artist_name, album, require_album):
+            if not _strict_identity_matches(db_track, track_name, artist_name, album, require_album,
+                                            aliases_for):
                 rejected_match = True
                 continue
 
@@ -262,7 +283,8 @@ def find_owned_match(music_database, track_name: str, artists: Any, album: Optio
                 path = getattr(candidate, 'file_path', None)
                 if not path or contains_staging_segment(path) or not os.path.isfile(path):
                     continue
-                if not _strict_identity_matches(candidate, track_name, artist_name, album, require_album):
+                if not _strict_identity_matches(candidate, track_name, artist_name, album, require_album,
+                                                aliases_for):
                     continue
                 log.info(f"{log_prefix} Already owns local file for '{track_name}' by {artist_name}: {path}")
                 return candidate, 1.0, artist_name
@@ -293,7 +315,8 @@ def find_owned_match(music_database, track_name: str, artists: Any, album: Optio
                     if contains_staging_segment(getattr(candidate, 'file_path', None) or ''):
                         continue
                     for artist_name in names:
-                        if _strict_identity_matches(candidate, track_name, artist_name, album, True):
+                        if _strict_identity_matches(candidate, track_name, artist_name, album, True,
+                                                    aliases_for):
                             log.info(f"{log_prefix} Track found on requested album: '{track_name}' by {artist_name}")
                             return candidate, 1.0, artist_name
         except Exception as exc:  # noqa: BLE001 - cleanup must leave the wish intact on lookup failure

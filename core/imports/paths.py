@@ -1443,6 +1443,29 @@ def _artist_identity(artist_context, source) -> dict:
     }
 
 
+def _explicit_artist_overruled(context, original_search, track_info, album_context, explicit):
+    """``(album artist, artists)`` when the track's own album artist outranks
+    the explicit artist context, the same answer the ALBUMARTIST tag takes
+    (core.metadata.source.album_artist_override). None otherwise, and when
+    there is no explicit context at all."""
+    if not ((isinstance(explicit, dict) and explicit.get("name"))
+            or (isinstance(explicit, str) and explicit)):
+        return None
+    try:
+        from core.metadata.source import album_artist_override, evaluate_batch_album_distrust
+        verdict = context.get("_batch_album_distrust_verdict") if isinstance(context, dict) else None
+        if not (isinstance(verdict, dict) and "distrusted" in verdict):
+            verdict = evaluate_batch_album_distrust(original_search, track_info, album_context, explicit)
+        override = album_artist_override(verdict)
+    except Exception as exc:  # noqa: BLE001 - the explicit context names the folder as before
+        logger.debug("album artist override check failed: %s", exc)
+        return None
+    if not override:
+        return None
+    name, artists = override
+    return name, (artists if isinstance(artists, list) and artists else None)
+
+
 def _with_library_names(template_context: dict, context, artist_context) -> None:
     """name the folder after the library artist the download belongs to
     (#2165): the source can call them "Machine Gun Kelly" while the library,
@@ -1704,6 +1727,13 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
             # R4F3: the explicit artist context is the stranger's — the
             # album-artist slot takes the track's own artist.
             _album_artist_name = _path_own_artist
+        elif _explicit_overruled := _explicit_artist_overruled(
+                context, original_search, track_info, album_context, _explicit_artist_ctx):
+            # #2222: the ALBUMARTIST tag takes the track's own album artist
+            # when the explicit context names someone else (#1316); the
+            # folder has to say the same, or the file lands in a second
+            # artist folder ("Δέσποινα Βανδή/" next to "Despina Vandi/")
+            _album_artist_name, _album_artists_for_collab = _explicit_overruled
         elif isinstance(_explicit_artist_ctx, dict) and _explicit_artist_ctx.get("name"):
             _album_artist_name = _explicit_artist_ctx["name"]
             _album_artists_for_collab = [_explicit_artist_ctx]

@@ -262,7 +262,7 @@ Live batches with speed and ETA, "download this next", and a step-by-step detail
 - **Release labels**: beets-compatible `$atypes`, so `[2017][EP][Live] Audiotree Live` and a plain `[2019] Tokyo` come out of the same template.
 - **Explicit and clean**: `$explicit` / `$contentrating` badges (`[E]`, `[C]`) so explicit and clean versions never share a filename.
 - **Artists that share a name**: `$albumartistclash` / `$albumartistinfo` / `$albumartistcomposite` (MusicBrainz disambiguation, else country and genre) so two artists called Nirvana get their own folders.
-- **One name per artist**: downloads are filed and tagged under the name your library uses, found by id, so a source that still says "Machine Gun Kelly" files into your `mgk/` folder. Set your own name per artist in **Artist Settings**.
+- **One name per artist**: downloads are filed and tagged under the name your library uses, found by id, so a source that still says "Machine Gun Kelly" files into your `mgk/` folder, and an iTunes "Δέσποινα Βανδή" into your `Despina Vandi/` one. Set your own name per artist in **Artist Settings**.
 - **Lookalike characters**: an opt-in mode keeps `AC∕DC` and `What's Going On？` instead of underscoring them.
 - **Live preview**: the path under each template updates as you type, for a plain, explicit or multi-disc release, or an artist that shares its name.
 

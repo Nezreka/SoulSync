@@ -968,15 +968,27 @@ def test_issue_1885_real_fuzzy_miss_is_caught_by_the_id(real_db):
     """#1885 (glebosotov): latin source artist, cyrillic library artist. the
     real check_track_exists misses "Mumiy Troll" against "Мумий Тролль"
     (unidecode says "mumii"), so before the fix the sync called it missing
-    and cleared the saved link. nothing is mocked on the matching side."""
+    and cleared the saved link. nothing is mocked on the matching side.
+
+    since #2222 the library answers "Mumiy Troll" for "Мумий Тролль" itself
+    (its latin spelling), so this uses a romanization that bridge doesn't
+    make ("Mumij"): the id still has to catch it."""
     _seed(real_db, artist="Мумий Тролль", title="Utekay", spotify_id="sp-utekay",
           duration=220_400)
-    miss, conf = real_db.check_track_exists("Utekay", "Mumiy Troll",
+    miss, conf = real_db.check_track_exists("Utekay", "Mumij Troll",
                                             confidence_threshold=0.7, server_source="jellyfin")
     assert miss is None  # the fuzzy matcher really can't see it
-    track = _track(name="Utekay", artists=["Mumiy Troll"], id="sp-utekay", duration_ms=220_000)
+    track = _track(name="Utekay", artists=["Mumij Troll"], id="sp-utekay", duration_ms=220_000)
     match, conf = _run_media_real(real_db, track)
     assert conf == 1.0 and str(match.ratingKey) == "lib-1"
+
+
+def test_issue_2222_the_library_bridges_the_latin_spelling_itself(real_db):
+    _seed(real_db, artist="Мумий Тролль", title="Utekay", spotify_id="sp-utekay",
+          duration=220_400)
+    hit, conf = real_db.check_track_exists("Utekay", "Mumiy Troll",
+                                           confidence_threshold=0.7, server_source="jellyfin")
+    assert hit is not None and conf >= 0.7
 
 
 def test_wrong_stamped_id_never_pins_another_bands_song(real_db):
