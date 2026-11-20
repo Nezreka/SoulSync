@@ -18,6 +18,7 @@ import type { SettingsTabProps } from '../../host';
 
 import { useNav } from '../../nav';
 import { Btn, Hero, SectionLabel, Sheet, SheetFootSay, StatusWords } from '../../ui';
+import s from '../../ui/settings.module.css';
 import { statusFrames } from '../connections';
 import { MetadataSourceGroup } from '../connections-metadata';
 import { MetaSyncSection } from '../connections-metasync';
@@ -37,10 +38,13 @@ import {
   useVideoServerState,
   videoServerName,
 } from '../connections-video-server';
+import { notificationsSentence } from '../discovery/words';
 import { ViewPanel } from '../downloads/downloads-page';
+import { LibHero } from '../library-card';
 import { SectionFlat } from '../parts';
-import { NotificationsSection } from '../video-row-lists';
+import { NotificationsCard, useNotifyLines } from '../video-row-lists';
 import { useVideoServer, videoServer } from '../video-server';
+import { markVideoShown, useVideoShown } from '../video-shown';
 
 const TAB = 'connections';
 
@@ -117,6 +121,24 @@ export function connectionsSentence(
   return `${host} and metadata comes from ${SOURCE_NAMES[source] || source}.${services}`;
 }
 
+function NotificationsHero() {
+  const lines = useNotifyLines();
+  const on = lines ? lines.filter((l) => l.enabled).length : 0;
+  return (
+    <LibHero
+      parts={notificationsSentence(lines)}
+      stats={
+        lines
+          ? [
+              { value: lines.length, label: lines.length === 1 ? 'Connection' : 'Connections' },
+              { value: on, label: 'Switched on' },
+            ]
+          : undefined
+      }
+    />
+  );
+}
+
 export function ConnectionsPage(props: SettingsTabProps) {
   const { store, opened } = props;
   const state = useNav();
@@ -130,6 +152,14 @@ export function ConnectionsPage(props: SettingsTabProps) {
   const [viewing, setViewing] = useState<Server | null>(null);
   const [videoSheet, setVideoSheet] = useState(false);
   const [host, setHost] = useState<HTMLElement | null>(null);
+
+  // the music side never showed the video settings page: load the
+  // connections the first time their pill opens (as Import lists does)
+  const shown = useVideoShown();
+  const notify = here && view === 'notifications';
+  useEffect(() => {
+    if (notify && side !== 'video' && shown === 0) markVideoShown();
+  }, [notify, side, shown]);
 
   // the server panels live in the server sheet's body (hidden while closed)
   useEffect(() => setHost(document.getElementById('server-sheet-body')), []);
@@ -146,7 +176,6 @@ export function ConnectionsPage(props: SettingsTabProps) {
       : typeof meta.fallback_source === 'string' && meta.fallback_source
         ? meta.fallback_source
         : 'deezer';
-  const serverNow = serverState(server, frame as never, tests.server);
   // the sheet's answer: its own Test, else Test Server's while it is the active one
   const viewingNow = viewing
     ? serverState(
@@ -288,9 +317,10 @@ export function ConnectionsPage(props: SettingsTabProps) {
       </ViewPanel>
 
       <ViewPanel tab={TAB} view="notifications" open={view === 'notifications'}>
-        <SectionFlat.Provider value>
-          <NotificationsSection />
-        </SectionFlat.Provider>
+        <NotificationsHero />
+        <div className={s.cards}>
+          <NotificationsCard />
+        </div>
       </ViewPanel>
     </div>
   );

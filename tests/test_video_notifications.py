@@ -145,4 +145,4 @@ def test_wiring_and_ui():
     assert 'data-stg-part="page"' in _INDEX and 'data-stg-react="connections"' in _INDEX
     page = (Path(__file__).resolve().parents[1] / "webui" / "src" / "features" / "settings" /
             "tabs" / "connections" / "connections-page.tsx").read_text(encoding="utf-8")
-    assert "<NotificationsSection />" in page
+    assert "<NotificationsCard />" in page

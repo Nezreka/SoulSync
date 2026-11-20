@@ -57,15 +57,21 @@ describe('where sections live', () => {
     expect(html).toContain('<div data-stg-react="appearance" data-stg-part="page"');
   });
 
-  it('NotificationsSection: Notifications is on connections (React, SETTINGS_PORT.md video pass V3c)', () => {
+  it('Notifications is a pill of Connections, on the parts (settings-bic phase 6)', () => {
+    const page = readFileSync(
+      resolve(process.cwd(), 'src/features/settings/tabs/connections/connections-page.tsx'),
+      'utf8',
+    );
+    expect(page).toMatch(
+      /<ViewPanel tab=\{TAB\} view="notifications"[^>]*>[\s\S]*<NotificationsCard \/>/,
+    );
     const lists = readFileSync(
       resolve(process.cwd(), 'src/features/settings/tabs/video-row-lists.tsx'),
       'utf8',
     );
-    const body = lists.split('export function NotificationsSection(')[1].split('</Section>')[0];
-    expect(body).toContain('tab="connections"');
+    const body = lists.split('export function NotificationsCard(')[1];
     expect(body).toContain('title="Notifications"');
-    // settings-bic: Notifications is a pill of the Connections page (one slot)
+    expect(body).toContain('id="video-notifications"');
     expect(html).toContain('<div data-stg-react="connections" data-stg-part="page"');
     expect(tabDef('connections').views.map((v) => v.key)).toContain('notifications');
   });

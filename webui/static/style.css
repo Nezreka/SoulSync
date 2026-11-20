@@ -61460,6 +61460,7 @@ select.ma-input { appearance: auto; }
 /* the admin's own oidc connection, last row of the block */
 .security-oidc-admin {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 12px;
 }
@@ -61480,7 +61481,7 @@ select.ma-input { appearance: auto; }
     object-fit: contain;
 }
 .security-oidc-admin-text {
-    flex: 1 1 auto;
+    flex: 1 1 200px;
     min-width: 0;
     font-size: 13px;
     color: rgba(255, 255, 255, 0.74);

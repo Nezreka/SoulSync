@@ -271,18 +271,15 @@ def test_the_downloads_tab_holds_only_download_settings():
     # on Discovery; neither belongs on Downloads
     # (both React: video-row-lists.tsx, SETTINGS_PORT.md video pass V3c)
     lists = (_WEBUI / "src" / "features" / "settings" / "tabs" / "video-row-lists.tsx").read_text(encoding="utf-8")
-    for stray, section, home in (("video-notifications", "NotificationsSection", "connections"),
-                                 ("video-import-lists", "ImportListsCard", "discovery")):
+    for stray, section, home, page_file in (
+            ("video-notifications", "NotificationsCard", "connections", ("connections", "connections-page.tsx")),
+            ("video-import-lists", "ImportListsCard", "discovery", ("discovery", "discovery-page.tsx"))):
         body = lists.split(f"export function {section}(", 1)[1].split("\nexport function", 1)[0]
         assert f'id="{stray}"' in body
-        # Notifications still sits in its old Section; Import lists is a
-        # pill of the Discovery page (settings-bic phase 5)
-        if section == "NotificationsSection":
-            assert f'tab="{home}"' in body, f"{stray} is not on the {home} tab"
-        else:
-            page = (_WEBUI / "src" / "features" / "settings" / "tabs" / "discovery" /
-                    "discovery-page.tsx").read_text(encoding="utf-8")
-            assert f"<{section} />" in page, f"{stray} is not on the {home} tab"
+        # each is a pill of its tab's page (settings-bic phases 5 and 6)
+        page = (_WEBUI / "src" / "features" / "settings" / "tabs" / page_file[0] /
+                page_file[1]).read_text(encoding="utf-8")
+        assert f"<{section} />" in page, f"{stray} is not on the {home} tab"
         assert f'data-stg-react="{home}" data-stg-part=' in markup
 
 

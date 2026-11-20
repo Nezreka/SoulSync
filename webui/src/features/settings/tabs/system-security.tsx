@@ -801,6 +801,7 @@ export function SecurityView({ store }: { store: SettingsStore }) {
           </div>
 
           <Row
+            field
             id="security-signup-template"
             label="New people start as"
             help="Everyone who signs in with Plex or OIDC for the first time follows this template: the sides, pages and downloads they get, and any request limit."

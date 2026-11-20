@@ -9,6 +9,7 @@ import {
   adventureWord,
   type HeroPart,
   importListsSentence,
+  notificationsSentence,
   playlistsSentence,
   recommendationsSentence,
 } from './words';
@@ -94,5 +95,22 @@ describe('the Discovery heroes', () => {
     const off = importListsSentence([{ name: 'Mine', enabled: false }]);
     expect(warned(off)).toEqual(['Every list is switched off']);
     expect(read(off)).toBe('Every list is switched off, so nothing is added from it.');
+  });
+
+  it('Notifications: who is told, a connection that hears nothing, the ones off', () => {
+    expect(read(notificationsSentence(null))).toBe('Loading your notification connections.');
+    expect(read(notificationsSentence([]))).toContain('No connections yet.');
+    expect(warned(notificationsSentence([{ name: 'D', enabled: false, events: 2 }]))).toEqual([
+      'Every connection is switched off',
+    ]);
+    const some = notificationsSentence([
+      { name: 'Discord', enabled: true, events: 2 },
+      { name: 'TG', enabled: true, events: 0 },
+      { name: 'Old', enabled: false, events: 1 },
+    ]);
+    expect(read(some)).toBe(
+      'SoulSync tells Discord and TG when things happen. 1 connection hears no events, so nothing goes there yet. 1 more is switched off.',
+    );
+    expect(warned(some)).toEqual(['1 connection hears no events']);
   });
 });

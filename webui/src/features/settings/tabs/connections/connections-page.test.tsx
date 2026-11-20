@@ -12,6 +12,7 @@ import { nav } from '../../nav';
 import { createSettingsStore, type SettingsStore } from '../../settings-store';
 import { testResults } from '../connections-servers';
 import { videoServer } from '../video-server';
+import { videoShown } from '../video-shown';
 import { ConnectionsPage } from './connections-page';
 
 let store: SettingsStore;
@@ -135,5 +136,20 @@ describe('the video server', () => {
     expect(document.getElementById('video-server-sheet-title')!.textContent).toBe('Plex');
     expect(sheet.querySelector('[data-video-conn="plex-url"]')).not.toBeNull();
     for (const l of sheet.querySelectorAll('label')) expect(l.textContent).not.toMatch(/:\s*$/);
+  });
+});
+
+describe('Notifications', () => {
+  it('its pill reads the connections back; opening it on the music side loads them', () => {
+    page();
+    act(() => nav.go('connections', 'notifications'));
+    const panel = document.getElementById('stg-view-connections-notifications')!;
+    expect(panel.hidden).toBe(false);
+    // loaded at least once (the music side never shows the video settings page)
+    expect(videoShown.get()).toBeGreaterThan(0);
+    expect(panel.querySelector('[data-card="Notifications"]')).not.toBeNull();
+    expect(panel.textContent).toContain('Loading your notification connections.');
+    // no folded section left on the pill
+    expect(panel.querySelector('.settings-section-header, .form-group')).toBeNull();
   });
 });

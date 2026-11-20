@@ -3684,3 +3684,47 @@ button.chip:hover:not(:disabled) {
     margin-left: 0;
   }
 }
+
+/* ── Connections > Notifications ── */
+
+/* one connection: its name, where it sends, on, Test, delete; then its
+   target; then the events it hears */
+.ntBlock {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--white-a06);
+  border-radius: var(--radius-md);
+  background: var(--white-a03);
+}
+
+.ntHead {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 150px) auto auto auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.ntHead > * {
+  min-width: 0;
+}
+
+.ntHead .field {
+  width: 100%;
+}
+
+.ntTarget {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+@media (max-width: 768px) {
+  .ntHead {
+    grid-template-columns: minmax(0, 1fr) auto auto auto;
+  }
+
+  .ntHead > :first-child {
+    grid-column: 1 / -1;
+  }
+}

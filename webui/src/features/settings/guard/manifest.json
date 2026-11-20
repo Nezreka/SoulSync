@@ -9293,6 +9293,27 @@
       "asked": "webhook",
       "showsEndpoint": "/api/video/notifications"
     },
+    "input[data-vq-nt-f=\"enabled\"][type=\"checkbox\"][role=\"switch\"][aria-label=\"Use Discord\"]": {
+      "sel": "input[data-vq-nt-f=\"enabled\"][type=\"checkbox\"][role=\"switch\"][aria-label=\"Use Discord\"]",
+      "weak": "context",
+      "kind": "checkbox",
+      "only": "video",
+      "sides": ["video"],
+      "scenario": "video",
+      "from": true,
+      "to": false,
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/video/notifications",
+            "body": "{\"id\":4,\"name\":\"Discord\",\"type\":\"discord\",\"url\":\"https://d/hook\",\"token\":\"\",\"chat_id\":\"\",\"enabled\":false,\"events\":[\"video_download_completed\"]}"
+          }
+        ]
+      },
+      "asked": false,
+      "showsEndpoint": "/api/video/notifications"
+    },
     "[data-vq-notify=\"4\"] input[data-vq-nt-f=\"url\"]": {
       "sel": "[data-vq-notify=\"4\"] input[data-vq-nt-f=\"url\"]",
       "weak": "row",
@@ -9354,27 +9375,6 @@
         ]
       },
       "asked": "guard-probe",
-      "showsEndpoint": "/api/video/notifications"
-    },
-    "[data-vq-notify=\"4\"] input[data-vq-nt-f=\"enabled\"]": {
-      "sel": "[data-vq-notify=\"4\"] input[data-vq-nt-f=\"enabled\"]",
-      "weak": "row",
-      "kind": "checkbox",
-      "only": "video",
-      "sides": ["video"],
-      "scenario": "video",
-      "from": true,
-      "to": false,
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/video/notifications",
-            "body": "{\"id\":4,\"name\":\"Discord\",\"type\":\"discord\",\"url\":\"https://d/hook\",\"token\":\"\",\"chat_id\":\"\",\"enabled\":false,\"events\":[\"video_download_completed\"]}"
-          }
-        ]
-      },
-      "asked": false,
       "showsEndpoint": "/api/video/notifications"
     },
     "[data-vq-notify=\"4\"] input[data-vq-nt-ev=\"video_download_completed\"]": {
@@ -9503,6 +9503,27 @@
       "asked": "discord",
       "showsEndpoint": "/api/video/notifications"
     },
+    "input[data-vq-nt-f=\"enabled\"][type=\"checkbox\"][role=\"switch\"][aria-label=\"Use TG\"]": {
+      "sel": "input[data-vq-nt-f=\"enabled\"][type=\"checkbox\"][role=\"switch\"][aria-label=\"Use TG\"]",
+      "weak": "context",
+      "kind": "checkbox",
+      "only": "video",
+      "sides": ["video"],
+      "scenario": "video",
+      "from": false,
+      "to": true,
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/video/notifications",
+            "body": "{\"id\":5,\"name\":\"TG\",\"type\":\"telegram\",\"url\":\"\",\"token\":\"tok\",\"chat_id\":\"42\",\"enabled\":true,\"events\":[]}"
+          }
+        ]
+      },
+      "asked": true,
+      "showsEndpoint": "/api/video/notifications"
+    },
     "[data-vq-notify=\"5\"] input[data-vq-nt-f=\"url\"]": {
       "sel": "[data-vq-notify=\"5\"] input[data-vq-nt-f=\"url\"]",
       "weak": "row",
@@ -9564,27 +9585,6 @@
         ]
       },
       "asked": "43",
-      "showsEndpoint": "/api/video/notifications"
-    },
-    "[data-vq-notify=\"5\"] input[data-vq-nt-f=\"enabled\"]": {
-      "sel": "[data-vq-notify=\"5\"] input[data-vq-nt-f=\"enabled\"]",
-      "weak": "row",
-      "kind": "checkbox",
-      "only": "video",
-      "sides": ["video"],
-      "scenario": "video",
-      "from": false,
-      "to": true,
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/video/notifications",
-            "body": "{\"id\":5,\"name\":\"TG\",\"type\":\"telegram\",\"url\":\"\",\"token\":\"tok\",\"chat_id\":\"42\",\"enabled\":true,\"events\":[]}"
-          }
-        ]
-      },
-      "asked": true,
       "showsEndpoint": "/api/video/notifications"
     },
     "[data-vq-notify=\"5\"] input[data-vq-nt-ev=\"video_download_completed\"]": {
@@ -11485,8 +11485,8 @@
       "sides": ["music", "video"],
       "scenario": "music"
     },
-    "#video-notifications \"+ Add connection\"": {
-      "label": "+ Add connection",
+    "#video-notifications \"Add connection\"": {
+      "label": "Add connection",
       "anchor": "video-notifications",
       "count": 1,
       "sides": ["music", "video"],
@@ -14057,17 +14057,31 @@
       "sides": ["video"],
       "scenario": "video"
     },
-    "#vq-notify-rows \"Test\"": {
-      "label": "Test",
+    "#vq-notify-rows \"Test Discord\"": {
+      "label": "Test Discord",
       "anchor": "vq-notify-rows",
-      "count": 2,
+      "count": 1,
       "sides": ["video"],
       "scenario": "video"
     },
-    "#vq-notify-rows \"✕\"": {
-      "label": "✕",
+    "#vq-notify-rows \"Delete Discord\"": {
+      "label": "Delete Discord",
       "anchor": "vq-notify-rows",
-      "count": 2,
+      "count": 1,
+      "sides": ["video"],
+      "scenario": "video"
+    },
+    "#vq-notify-rows \"Test TG\"": {
+      "label": "Test TG",
+      "anchor": "vq-notify-rows",
+      "count": 1,
+      "sides": ["video"],
+      "scenario": "video"
+    },
+    "#vq-notify-rows \"Delete TG\"": {
+      "label": "Delete TG",
+      "anchor": "vq-notify-rows",
+      "count": 1,
       "sides": ["video"],
       "scenario": "video"
     },

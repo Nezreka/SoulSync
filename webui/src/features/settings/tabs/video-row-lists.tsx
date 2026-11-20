@@ -1,7 +1,8 @@
 /**
  * The video side's two row editors (SETTINGS_PORT.md, video pass V3c):
  * Notifications on the Connections tab (a Discord / webhook / Telegram
- * connection per row, the events it hears, Test) and Import Lists on the
+ * connection per block, the events it hears as chips, Test, a delete that
+ * asks first; on the parts since settings-bic phase 6) and Import Lists on the
  * Discovery tab (a TMDB / IMDb / Plex list per row, on the parts since
  * settings-bic phase 5: column headers, a delete that asks first). Were
  * video-settings.js.
@@ -14,11 +15,10 @@
  * which is drawn again so its URL or token fields swap.
  */
 
-import { type ReactNode, useEffect, useRef, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useSyncExternalStore } from 'react';
 
-import { Btn, Card, Row as SettingRow, Select, Switch, TextField } from '../ui';
+import { Btn, Card, CheckChips, Row as SettingRow, Select, Switch, TextField } from '../ui';
 import s from '../ui/settings.module.css';
-import { Section } from './parts';
 import { videoShown } from './video-shown';
 
 type Row = Record<string, unknown> & { id: number };
@@ -132,18 +132,6 @@ function useRowChange(onChange: (row: HTMLElement, field: string | null) => void
     return () => el.removeEventListener('change', changed);
   }, []);
   return host;
-}
-
-function Options({ options }: { options: Array<[string, string]> }) {
-  return (
-    <>
-      {options.map(([v, label]) => (
-        <option key={v} value={v}>
-          {label}
-        </option>
-      ))}
-    </>
-  );
 }
 
 // ── import lists ──
@@ -422,7 +410,7 @@ function NotifyBlocks() {
         const r = await post(notifications.url, notifyBody(block));
         const res = r.ok ? ((await r.json()) as (Row & { success?: boolean }) | null) : null;
         if (!res || !res.success) {
-          toast('Connection needs a valid target (URL or token + chat id)', 'error');
+          toast('A connection needs a valid target: a URL, or a bot token and chat id', 'error');
           return;
         }
         notifications.saved(res);
@@ -435,6 +423,18 @@ function NotifyBlocks() {
   });
 
   async function remove(id: number) {
+    const name = str(fields[id]?.name).trim() || 'this connection';
+    const confirm = window.showConfirmDialog;
+    if (confirm) {
+      const ok = await confirm({
+        title: `Delete ${name}?`,
+        message: 'SoulSync stops sending to it. Nothing already sent is touched.',
+        confirmText: 'Delete',
+        cancelText: 'Keep it',
+        destructive: true,
+      });
+      if (!ok) return;
+    }
     try {
       const r = await fetch(`${notifications.url}/${id}`, { method: 'DELETE' });
       const res = r.ok ? ((await r.json()) as { success?: boolean } | null) : null;
@@ -453,7 +453,7 @@ function NotifyBlocks() {
       const r = await post(`${notifications.url}/test`, notifyBody(block));
       const j = (await r.json().catch(() => null)) as { success?: boolean; error?: string } | null;
       button.disabled = false;
-      if (r.ok && j && j.success) toast('Test sent — check the channel', 'success');
+      if (r.ok && j && j.success) toast('Test sent. Check the channel.', 'success');
       else toast((j && j.error) || 'Test failed', 'error');
     } catch {
       button.disabled = false;
@@ -464,121 +464,131 @@ function NotifyBlocks() {
   const field = (id: number, k: string) => str(fields[id]?.[k]);
   const edit = (id: number, k: string) => (event: { target: { value: string } }) =>
     notifications.edit(id, k, event.target.value);
-  const hide = (on: boolean) => (on ? undefined : { display: 'none' });
 
   return (
-    <div id="vq-notify-rows" ref={host}>
+    <div id="vq-notify-rows" className={s.cardPad} ref={host}>
       {rows === null ? null : drawn.length ? (
         drawn.map((c) => {
           // the target fields follow the type the row was drawn with
           const tg = c.type === 'telegram';
+          const name = field(c.id, 'name').trim() || 'this connection';
           const ticked = (fields[c.id]?.events as string[] | undefined) || [];
           return (
-            <div className="vq-nt-block" key={c.id} data-vq-notify={c.id}>
-              <div className="vq-fmt-row vq-nt-row">
-                <input
-                  className="vq-fmt-in"
+            <div className={s.ntBlock} key={c.id} data-vq-notify={c.id}>
+              <div className={s.ntHead}>
+                <TextField
+                  full
                   data-vq-nt-f="name"
+                  aria-label="Connection name"
                   placeholder="Name"
                   value={field(c.id, 'name')}
                   onChange={edit(c.id, 'name')}
                 />
-                <select
-                  className="vq-fmt-in"
+                <Select
                   data-vq-nt-f="type"
+                  aria-label="Sends to"
                   value={field(c.id, 'type')}
+                  options={NOTIFY_TYPES}
                   onChange={edit(c.id, 'type')}
-                >
-                  <Options
-                    options={[
-                      ['discord', 'Discord'],
-                      ['webhook', 'Webhook'],
-                      ['telegram', 'Telegram'],
-                    ]}
-                  />
-                </select>
-                <input
-                  className="vq-fmt-in"
-                  data-vq-nt-f="url"
-                  placeholder="Webhook URL"
-                  style={hide(!tg)}
-                  value={field(c.id, 'url')}
-                  onChange={edit(c.id, 'url')}
                 />
-                <input
-                  className="vq-fmt-in"
-                  data-vq-nt-f="token"
-                  placeholder="Bot token"
-                  style={hide(tg)}
-                  value={field(c.id, 'token')}
-                  onChange={edit(c.id, 'token')}
+                <Switch
+                  data-vq-nt-f="enabled"
+                  aria-label={`Use ${name}`}
+                  checked={!!fields[c.id]?.enabled}
+                  onChange={(event) => notifications.edit(c.id, 'enabled', event.target.checked)}
                 />
-                <input
-                  className="vq-fmt-in"
-                  data-vq-nt-f="chat_id"
-                  placeholder="Chat id"
-                  style={hide(tg)}
-                  value={field(c.id, 'chat_id')}
-                  onChange={edit(c.id, 'chat_id')}
-                />
-                <button
-                  className="test-button vq-nt-test"
-                  type="button"
+                <Btn
+                  small
                   data-vq-notify-test={c.id}
+                  aria-label={`Test ${name}`}
                   onClick={(event) => void test(event.currentTarget)}
                 >
                   Test
-                </button>
-                <label className="vq-il-on" title="Enabled">
-                  <input
-                    type="checkbox"
-                    data-vq-nt-f="enabled"
-                    checked={!!fields[c.id]?.enabled}
-                    onChange={(event) => notifications.edit(c.id, 'enabled', event.target.checked)}
-                  />
-                </label>
-                <button
-                  className="vq-fmt-del"
-                  type="button"
+                </Btn>
+                <Btn
+                  kind="ghost"
+                  small
+                  iconOnly
+                  icon="x"
                   data-vq-notify-del={c.id}
-                  title="Delete"
+                  aria-label={`Delete ${name}`}
                   onClick={() => void remove(c.id)}
-                >
-                  ✕
-                </button>
+                />
               </div>
-              <div className="vq-nt-events">
-                {events.map((ev) => (
-                  <label className="vq-nt-ev" key={ev}>
-                    <input
-                      type="checkbox"
-                      data-vq-nt-ev={ev}
-                      checked={ticked.includes(ev)}
-                      onChange={(event) =>
-                        notifications.edit(
-                          c.id,
-                          'events',
-                          // in the page's order, as the boxes were read
-                          events.filter((e) =>
-                            e === ev ? event.target.checked : ticked.includes(e),
-                          ),
-                        )
-                      }
-                    />
-                    {NOTIFY_EVENT_LABEL[ev] || ev}
-                  </label>
-                ))}
+              <div className={s.ntTarget}>
+                <span className={s.grow} hidden={tg}>
+                  <TextField
+                    full
+                    mono
+                    data-vq-nt-f="url"
+                    aria-label="Webhook URL"
+                    placeholder="Webhook URL"
+                    value={field(c.id, 'url')}
+                    onChange={edit(c.id, 'url')}
+                  />
+                </span>
+                <span className={s.grow} hidden={!tg}>
+                  <TextField
+                    full
+                    mono
+                    data-vq-nt-f="token"
+                    aria-label="Bot token"
+                    placeholder="Bot token"
+                    value={field(c.id, 'token')}
+                    onChange={edit(c.id, 'token')}
+                  />
+                </span>
+                <span className={s.grow} hidden={!tg}>
+                  <TextField
+                    full
+                    mono
+                    data-vq-nt-f="chat_id"
+                    aria-label="Chat id"
+                    placeholder="Chat id"
+                    value={field(c.id, 'chat_id')}
+                    onChange={edit(c.id, 'chat_id')}
+                  />
+                </span>
               </div>
+              <CheckChips
+                label={`What ${name} hears`}
+                options={events.map((ev) => ({ value: ev, label: NOTIFY_EVENT_LABEL[ev] || ev }))}
+                value={ticked}
+                inputAttrs={(ev) => ({ 'data-vq-nt-ev': ev })}
+                onToggle={(ev, on) =>
+                  notifications.edit(
+                    c.id,
+                    'events',
+                    // in the page's order, as the boxes were read
+                    events.filter((e) => (e === ev ? on : ticked.includes(e))),
+                  )
+                }
+              />
             </div>
           );
         })
       ) : (
-        <div className="settings-hint" style={{ padding: '6px 0' }}>
-          No connections yet.
-        </div>
+        <p className={s.listEmpty}>No connections yet.</p>
       )}
     </div>
   );
+}
+
+const NOTIFY_TYPES = [
+  { value: 'discord', label: 'Discord' },
+  { value: 'webhook', label: 'Webhook' },
+  { value: 'telegram', label: 'Telegram' },
+];
+
+/** the connections as the hero reads them: null until they loaded */
+export function useNotifyLines() {
+  const { rows, drawn, fields } = useRows(notifications);
+  if (rows === null) return null;
+  return drawn.map((c) => ({
+    name: str(fields[c.id]?.name),
+    enabled: !!fields[c.id]?.enabled,
+    events: ((fields[c.id]?.events as string[] | undefined) || []).length,
+  }));
 }
 
 async function addNotification() {
@@ -596,34 +606,23 @@ async function addNotification() {
   }
 }
 
-export function NotificationsSection(): ReactNode {
+/** Connections > Notifications (video side): each connection a block with its
+ *  name, where it sends, a switch, Test and a delete that asks first, then
+ *  its target and the events it hears as chips */
+export function NotificationsCard() {
   return (
-    <Section
-      tab="connections"
-      side="video"
-      title="Notifications"
-      hint="Discord, webhooks & Telegram"
-    >
-      <div className="settings-group" data-stg="connections" data-video-only="">
-        {/* the retired video source picker that rode along in here went in
-            SETTINGS_PORT.md video pass V3c: nothing read it */}
-        <div className="form-group" id="video-notifications">
-          <label>Notifications:</label>
-          <small className="settings-hint" style={{ display: 'block', marginBottom: '8px' }}>
-            Get told when things happen — a Discord webhook, any generic webhook (raw JSON), or a
-            Telegram bot. Each connection picks which events it cares about.
-          </small>
-          <NotifyBlocks />
-          <button
-            className="test-button"
-            type="button"
-            data-vq-notify-add=""
-            onClick={() => void addNotification()}
-          >
-            + Add connection
-          </button>
-        </div>
-      </div>
-    </Section>
+    <div id="video-notifications" data-video-only="">
+      <Card
+        title="Notifications"
+        hint="Get told when things happen: a Discord webhook, any webhook (raw JSON) or a Telegram bot. Each connection saves when you change it."
+        actions={
+          <Btn small icon="plus" data-vq-notify-add="" onClick={() => void addNotification()}>
+            Add connection
+          </Btn>
+        }
+      >
+        <NotifyBlocks />
+      </Card>
+    </div>
   );
 }

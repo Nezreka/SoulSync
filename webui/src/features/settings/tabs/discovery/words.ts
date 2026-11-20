@@ -152,3 +152,30 @@ export function importListsSentence(lists: ImportListLine[] | null): HeroPart[] 
     parts.push(say(` ${plural(off, 'more list')} ${off === 1 ? 'is' : 'are'} switched off.`));
   return parts;
 }
+
+/** Connections > Notifications (video): which connections send, and what */
+export function notificationsSentence(
+  conns: Array<{ name: string; enabled: boolean; events: number }> | null,
+): HeroPart[] {
+  if (conns === null) return [say('Loading your notification connections.')];
+  if (!conns.length)
+    return [say('No connections yet. Add a Discord webhook, any webhook or a Telegram bot.')];
+  const on = conns.filter((c) => c.enabled);
+  if (!on.length) return [warn('Every connection is switched off'), say(', so nothing is sent.')];
+  const parts: HeroPart[] = [say('SoulSync tells ')];
+  on.forEach((c, i) => {
+    if (i) parts.push(say(i === on.length - 1 ? ' and ' : ', '));
+    parts.push(name(c.name.trim() || 'an unnamed connection'));
+  });
+  parts.push(say(' when things happen.'));
+  const deaf = on.filter((c) => !c.events).length;
+  if (deaf)
+    parts.push(
+      say(' '),
+      warn(`${plural(deaf, 'connection')} ${deaf === 1 ? 'hears' : 'hear'} no events`),
+      say(', so nothing goes there yet.'),
+    );
+  const off = conns.length - on.length;
+  if (off) parts.push(say(` ${plural(off, 'more')} ${off === 1 ? 'is' : 'are'} switched off.`));
+  return parts;
+}
