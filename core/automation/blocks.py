@@ -721,7 +721,7 @@ _CATEGORY_RULES: list[tuple[str, tuple[str, ...]]] = [
     ("Playlists", ("playlist", "mirrored", "discover", "collections", "personalized",
                    # MetaSync's SIN charts arrive as playlists
                    "metasync")),
-    ("Downloads", ("download", "grab", "batch", "import", "rss", "seeding", "deezer_signin",
+    ("Downloads", ("download", "grab", "batch", "import", "rss", "seeding", "deezer_signin", "soulseek_logged",
                    "quarantine", "request", "search_and", "upgrade")),
     ("Library", ("scan", "database", "library", "enrich", "airing", "retag", "youtube", "issue",
                  # filling out albums you already own (#1711)

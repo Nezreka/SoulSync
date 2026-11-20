@@ -859,7 +859,8 @@ export function SecuritySection({ store }: SettingsTabProps) {
               rows={2}
               placeholder={'172.18.0.2\n172.18.0.0/16'}
               style={MONO}
-              {...proxyTrusted}
+              value={proxyTrusted.value}
+              onChange={proxyTrusted.onChange}
             />
             {help(
               <>
