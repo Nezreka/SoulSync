@@ -169,7 +169,8 @@ def test_wishlist_rows_are_matched_by_album_in_the_background(db, worker):
     assert item["type"] == "wishlist" and item["id"] == wid
     assert (item["album"], item["artist"]) == ("Album A", "The Testers")
     worker._process_item(item)
-    worker.mb_service.match_release.assert_called_once_with("Album A", "The Testers")
+    # one title cannot prove a track list, so none is checked
+    worker.mb_service.match_release.assert_called_once_with("Album A", "The Testers", track_titles=None)
     stored = db.get_wishlist_tracks(profile_id=1)[0]
     assert stored["musicbrainz_release_group_id"] == RG
     assert serialize_wishlist_track(stored)["musicbrainz_release_group_id"] == RG
@@ -203,3 +204,58 @@ def test_the_album_api_serves_the_group(db, worker):
     album_id = _album(db, release_id=REL, status="matched")
     worker.mb_service.update_album_release_group(album_id, RG)
     assert serialize_album(db.api_get_album(album_id))["musicbrainz_release_group_id"] == RG
+
+
+def _wishlist_album(db, album, artist, titles):
+    import json
+    with db._get_connection() as conn:
+        for n, title in enumerate(titles):
+            conn.execute(
+                "INSERT INTO wishlist_tracks (spotify_track_id, spotify_data, profile_id) VALUES (?, ?, 2)",
+                (f"{album}-{n}", json.dumps({"id": f"{album}-{n}", "name": title, "artists": [{"name": artist}],
+                                              "album": {"name": album, "artists": [{"name": artist}]}})))
+        conn.commit()
+
+
+def _release_with(*titles):
+    return {"id": REL, "media": [{"tracks": [{"title": t} for t in titles]}]}
+
+
+def _statuses(db):
+    with db._get_connection() as conn:
+        return {r[0] for r in conn.execute(
+            "SELECT musicbrainz_match_status || ':' || COALESCE(musicbrainz_release_group_id, '') FROM wishlist_tracks")}
+
+
+def _drain(worker):
+    while (item := worker._get_next_item()) is not None:
+        worker._process_item(item)
+
+
+def test_a_namesake_with_other_tracks_is_not_matched(db, worker):
+    # American Football's 2026 record is not in MusicBrainz yet; the 2016
+    # self-titled album shares title and artist but none of its tracks.
+    _wishlist_album(db, "American Football", "American Football", ["Man Overboard", "Desdemona", "Lullabye"])
+    worker.mb_service.match_release = MagicMock(return_value={"mbid": REL, "release_group_mbid": RG})
+    worker.mb_service.mb_client.get_release.return_value = _release_with(
+        "Where Are We Now?", "My Instincts Are the Enemy", "Born to Lose")
+    _drain(worker)
+    assert _statuses(db) == {"not_found:"}
+    # the album's rows share one track-list read
+    worker.mb_service.mb_client.get_release.assert_called_once_with(REL, includes=["recordings"])
+
+
+def test_a_release_carrying_the_tracks_is_matched(db, worker):
+    _wishlist_album(db, "Album A", "The Testers", ["One", "Two (feat. Guest)", "Bonus Demo"])
+    worker.mb_service.match_release = MagicMock(return_value={"mbid": REL, "release_group_mbid": RG})
+    worker.mb_service.mb_client.get_release.return_value = _release_with("One", "Two", "Three")
+    _drain(worker)
+    assert _statuses(db) == {f"matched:{RG}"}
+
+
+def test_an_unreadable_track_list_is_asked_again_later(db, worker):
+    _wishlist_album(db, "Album A", "The Testers", ["One", "Two"])
+    worker.mb_service.match_release = MagicMock(return_value={"mbid": REL, "release_group_mbid": RG})
+    worker.mb_service.mb_client.get_release.return_value = None
+    _drain(worker)
+    assert _statuses(db) == {"error:"}
