@@ -5535,6 +5535,7 @@ function AlbumIndexView() {
       monitored: search.monitored,
       letter: search.letter,
       source: search.source,
+      review: search.review,
     }),
   );
   const albums = albumsQuery.data?.albums ?? [];
@@ -5543,7 +5544,8 @@ function AlbumIndexView() {
     Boolean(search.q.trim()) ||
     search.monitored !== 'all' ||
     search.letter !== 'all' ||
-    Boolean(search.source);
+    Boolean(search.source) ||
+    Boolean(search.review);
 
   return (
     <div className={styles.page}>
