@@ -2,7 +2,9 @@
  * The video side's two row editors (SETTINGS_PORT.md, video pass V3c):
  * Notifications on the Connections tab (a Discord / webhook / Telegram
  * connection per row, the events it hears, Test) and Import Lists on the
- * Discovery tab (a TMDB / IMDb / Plex list per row). Were video-settings.js.
+ * Discovery tab (a TMDB / IMDb / Plex list per row, on the parts since
+ * settings-bic phase 5: column headers, a delete that asks first). Were
+ * video-settings.js.
  * Each loads each time the video settings page is shown; a row saves alone
  * when one of its fields changes (a text field when it is left), as before.
  *
@@ -14,6 +16,8 @@
 
 import { type ReactNode, useEffect, useRef, useSyncExternalStore } from 'react';
 
+import { Btn, Card, Row as SettingRow, Select, Switch, TextField } from '../ui';
+import s from '../ui/settings.module.css';
 import { Section } from './parts';
 import { videoShown } from './video-shown';
 
@@ -164,6 +168,47 @@ function listBody(row: HTMLElement) {
   };
 }
 
+export const IMPORT_SOURCES: Array<[string, string]> = [
+  ['tmdb_list', 'TMDB list'],
+  ['tmdb_chart', 'TMDB chart'],
+  ['imdb_list', 'IMDb list'],
+  ['plex_watchlist', 'Plex Watchlist'],
+];
+
+/** what goes in the List field, by where the list comes from */
+export const IMPORT_REF_HINT: Record<string, string> = {
+  tmdb_list: 'TMDB list id',
+  tmdb_chart: 'chart, like trending_movies',
+  imdb_list: 'IMDb ls id or link',
+  plex_watchlist: 'not needed',
+};
+
+const IMPORT_MEDIA: Array<[string, string]> = [
+  ['both', 'Both'],
+  ['movie', 'Movies'],
+  ['show', 'Shows'],
+];
+
+const IMPORT_MONITOR: Array<[string, string]> = [
+  ['future', 'Future episodes'],
+  ['all', 'All aired'],
+  ['latest_season', 'Latest season'],
+  ['first_season', 'First season'],
+  ['pilot', 'Pilot'],
+];
+
+const opts = (list: Array<[string, string]>) => list.map(([value, label]) => ({ value, label }));
+
+/** the lists as the hero reads them: null until they loaded */
+export function useImportListLines() {
+  const { rows, drawn, fields } = useRows(importLists);
+  if (rows === null) return null;
+  return drawn.map((l) => ({
+    name: str(fields[l.id]?.name),
+    enabled: !!fields[l.id]?.enabled,
+  }));
+}
+
 function ImportListRows() {
   const { rows, drawn, fields } = useRows(importLists);
   const host = useRowChange((row) => {
@@ -172,7 +217,7 @@ function ImportListRows() {
         const r = await post(importLists.url, listBody(row));
         const res = r.ok ? ((await r.json()) as (Row & { success?: boolean }) | null) : null;
         if (!res || !res.success) {
-          toast('A list needs a valid source + ref', 'error');
+          toast('A list needs a valid source and list', 'error');
           return;
         }
         importLists.saved(res);
@@ -183,6 +228,18 @@ function ImportListRows() {
   });
 
   async function remove(id: number) {
+    const name = str(fields[id]?.name).trim() || 'this list';
+    const confirm = window.showConfirmDialog;
+    if (confirm) {
+      const ok = await confirm({
+        title: `Delete ${name}?`,
+        message: 'SoulSync stops watching it. What it already added stays where it is.',
+        confirmText: 'Delete',
+        cancelText: 'Keep it',
+        destructive: true,
+      });
+      if (!ok) return;
+    }
     try {
       const r = await fetch(`${importLists.url}/${id}`, { method: 'DELETE' });
       const res = r.ok ? ((await r.json()) as { success?: boolean } | null) : null;
@@ -198,93 +255,85 @@ function ImportListRows() {
     importLists.edit(id, k, event.target.value);
 
   return (
-    <div id="vq-implist-rows" ref={host}>
+    <div id="vq-implist-rows" className={s.cardPad} ref={host}>
       {rows === null ? null : drawn.length ? (
-        drawn.map((l) => (
-          <div className="vq-fmt-row vq-implist-row" key={l.id} data-vq-implist={l.id}>
-            <input
-              className="vq-fmt-in"
-              data-vq-il-f="name"
-              placeholder="Name"
-              value={field(l.id, 'name')}
-              onChange={edit(l.id, 'name')}
-            />
-            <select
-              className="vq-fmt-in"
-              data-vq-il-f="source"
-              value={field(l.id, 'source')}
-              onChange={edit(l.id, 'source')}
-            >
-              <Options
-                options={[
-                  ['tmdb_list', 'TMDB list'],
-                  ['tmdb_chart', 'TMDB chart'],
-                  ['imdb_list', 'IMDb list'],
-                  ['plex_watchlist', 'Plex Watchlist'],
-                ]}
-              />
-            </select>
-            <input
-              className="vq-fmt-in"
-              data-vq-il-f="ref"
-              placeholder="list id / chart / ls…"
-              value={field(l.id, 'ref')}
-              onChange={edit(l.id, 'ref')}
-            />
-            <select
-              className="vq-fmt-in"
-              data-vq-il-f="media"
-              value={field(l.id, 'media')}
-              onChange={edit(l.id, 'media')}
-            >
-              <Options
-                options={[
-                  ['both', 'Both'],
-                  ['movie', 'Movies'],
-                  ['show', 'Shows'],
-                ]}
-              />
-            </select>
-            <select
-              className="vq-fmt-in"
-              data-vq-il-f="monitor"
-              title="Shows: what to wish when followed"
-              value={field(l.id, 'monitor')}
-              onChange={edit(l.id, 'monitor')}
-            >
-              <Options
-                options={[
-                  ['future', 'Future eps'],
-                  ['all', 'All aired'],
-                  ['latest_season', 'Latest season'],
-                  ['first_season', 'First season'],
-                  ['pilot', 'Pilot'],
-                ]}
-              />
-            </select>
-            <label className="vq-il-on" title="Enabled">
-              <input
-                type="checkbox"
-                data-vq-il-f="enabled"
-                checked={!!fields[l.id]?.enabled}
-                onChange={(event) => importLists.edit(l.id, 'enabled', event.target.checked)}
-              />
-            </label>
-            <button
-              className="vq-fmt-del"
-              type="button"
-              data-vq-implist-del={l.id}
-              title="Delete list"
-              onClick={() => void remove(l.id)}
-            >
-              ✕
-            </button>
+        <>
+          <div className={s.ilHead} aria-hidden="true">
+            <span>Name</span>
+            <span>From</span>
+            <span>List</span>
+            <span>Adds</span>
+            <span>A followed show gets</span>
+            <span>On</span>
+            <span />
           </div>
-        ))
+          {drawn.map((l) => {
+            const name = field(l.id, 'name').trim() || 'this list';
+            const source = field(l.id, 'source');
+            const movies = field(l.id, 'media') === 'movie';
+            return (
+              <div className={s.ilRow} key={l.id} data-vq-implist={l.id}>
+                <TextField
+                  full
+                  data-vq-il-f="name"
+                  aria-label="List name"
+                  placeholder="Name"
+                  value={field(l.id, 'name')}
+                  onChange={edit(l.id, 'name')}
+                />
+                <Select
+                  data-vq-il-f="source"
+                  aria-label="From"
+                  value={source}
+                  options={opts(IMPORT_SOURCES)}
+                  onChange={edit(l.id, 'source')}
+                />
+                <TextField
+                  full
+                  mono
+                  data-vq-il-f="ref"
+                  aria-label="List"
+                  placeholder={IMPORT_REF_HINT[source] ?? 'list id, chart or ls id'}
+                  value={field(l.id, 'ref')}
+                  onChange={edit(l.id, 'ref')}
+                />
+                <Select
+                  data-vq-il-f="media"
+                  aria-label="Adds"
+                  value={field(l.id, 'media')}
+                  options={opts(IMPORT_MEDIA)}
+                  onChange={edit(l.id, 'media')}
+                />
+                <Select
+                  data-vq-il-f="monitor"
+                  aria-label="What a followed show gets"
+                  title={movies ? 'Only used for shows' : undefined}
+                  className={movies ? s.ilDim : undefined}
+                  value={field(l.id, 'monitor')}
+                  options={opts(IMPORT_MONITOR)}
+                  onChange={edit(l.id, 'monitor')}
+                />
+                <Switch
+                  data-vq-il-f="enabled"
+                  aria-label="Use this list"
+                  checked={!!fields[l.id]?.enabled}
+                  onChange={(event) => importLists.edit(l.id, 'enabled', event.target.checked)}
+                />
+                <Btn
+                  kind="ghost"
+                  small
+                  iconOnly
+                  icon="x"
+                  data-vq-implist-del={l.id}
+                  aria-label={`Delete ${name}`}
+                  onClick={() => void remove(l.id)}
+                />
+              </div>
+            );
+          })}
+        </>
       ) : (
-        <div className="settings-hint" style={{ padding: '6px 0' }}>
-          No import lists yet.
-        </div>
+        <p className={s.listEmpty}>No import lists yet.</p>
       )}
     </div>
   );
@@ -305,36 +354,34 @@ async function addImportList() {
   }
 }
 
-export function ImportListsSection() {
+/** Discovery > Import Lists (video side): the lists, a row each, with
+ *  column headers; a delete asks first */
+export function ImportListsCard() {
   return (
-    <Section
-      tab="discovery"
-      side="video"
-      title="Import Lists"
-      hint="Auto-add movies & shows from a list"
-    >
-      <div className="settings-group" data-stg="discovery" data-video-only="">
-        <div className="form-group" id="video-import-lists">
-          <label>Import lists:</label>
-          <small className="settings-hint" style={{ display: 'block', marginBottom: '8px' }}>
-            Everything on a list enters acquisition automatically (movies → wishlist, shows → follow
-            with the chosen monitor policy). Only NEW list members are added, so removing something
-            never boomerangs back. Synced by the &quot;Sync Import Lists&quot; automation. Ref: a
-            TMDB list id, a chart key (trending_movies, top_shows, …), an IMDb ls-id/URL — Plex
-            Watchlist needs no ref.
-          </small>
-          <ImportListRows />
-          <button
-            className="test-button"
-            type="button"
-            data-vq-implist-add=""
-            onClick={() => void addImportList()}
-          >
-            + Add list
-          </button>
-        </div>
-      </div>
-    </Section>
+    <div id="video-import-lists">
+      <Card
+        title="Import lists"
+        hint="Anything new on a list is added on its own. Each row saves when you change it."
+        actions={
+          <Btn small icon="plus" data-vq-implist-add="" onClick={() => void addImportList()}>
+            Add list
+          </Btn>
+        }
+      >
+        <ImportListRows />
+        <SettingRow
+          label="How a list adds things"
+          help="Movies go to the wishlist and shows are followed, with what a followed show gets. Only new members of a list are added, so removing something never brings it back."
+          more={
+            <>
+              The <strong>Sync Import Lists</strong> automation checks them. List takes a TMDB list
+              id, a TMDB chart (trending_movies, top_shows and so on) or an IMDb ls id or link. Plex
+              Watchlist needs none.
+            </>
+          }
+        />
+      </Card>
+    </div>
   );
 }
 

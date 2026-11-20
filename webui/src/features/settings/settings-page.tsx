@@ -406,6 +406,7 @@ export function SettingsPage({
         {slot('downloads', 'page')}
         {slot('quality', 'page')}
         {slot('library', 'page')}
+        {slot('discovery', 'page')}
 
         {/* the tabs not rebuilt yet: the blocks they always rendered, in the
             order the old columns gave them */}
@@ -416,10 +417,8 @@ export function SettingsPage({
             {slot('connections', 'api-video')}
           </div>
           <div className="settings-right-column">
-            {slot('discovery', 'main')}
             {slot('advanced', 'saving')}
             {slot('advanced', 'security')}
-            {slot('discovery', 'pool')}
           </div>
           <div className="settings-third-column">
             {slot('appearance', 'ui')}
@@ -428,7 +427,6 @@ export function SettingsPage({
             {slot('advanced', 'tools')}
             {slot('appearance', 'weather')}
             {slot('advanced', 'developer')}
-            {slot('discovery', 'import-lists')}
             {slot('advanced', 'experimental')}
           </div>
         </div>

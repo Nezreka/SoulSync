@@ -51,22 +51,35 @@ describe('where sections live', () => {
     expect(html).toContain('<div data-stg-react="appearance" data-stg-part="video-pages"');
   });
 
-  it.each([
-    ['NotificationsSection', 'Notifications', 'connections', 'notifications'],
-    ['ImportListsSection', 'Import Lists', 'discovery', 'import-lists'],
-  ])('%s: %s is on %s (React, SETTINGS_PORT.md video pass V3c)', (fn, heading, tab, part) => {
+  it('NotificationsSection: Notifications is on connections (React, SETTINGS_PORT.md video pass V3c)', () => {
     const lists = readFileSync(
       resolve(process.cwd(), 'src/features/settings/tabs/video-row-lists.tsx'),
       'utf8',
     );
-    const body = lists.split(`export function ${fn}(`)[1].split('</Section>')[0];
-    expect(body).toContain(`tab="${tab}"`);
-    expect(body).toContain(`title="${heading}"`);
+    const body = lists.split('export function NotificationsSection(')[1].split('</Section>')[0];
+    expect(body).toContain('tab="connections"');
+    expect(body).toContain('title="Notifications"');
     // settings-bic: Notifications is a pill of the Connections page (one slot)
-    if (part === 'notifications') {
-      expect(html).toContain('<div data-stg-react="connections" data-stg-part="page"');
-      expect(tabDef('connections').views.map((v) => v.key)).toContain('notifications');
-    } else expect(html).toContain(`<div data-stg-react="${tab}" data-stg-part="${part}"`);
+    expect(html).toContain('<div data-stg-react="connections" data-stg-part="page"');
+    expect(tabDef('connections').views.map((v) => v.key)).toContain('notifications');
+  });
+
+  it('Import lists, playlists and recommendations are pills of Discovery (settings-bic phase 5)', () => {
+    const page = readFileSync(
+      resolve(process.cwd(), 'src/features/settings/tabs/discovery/discovery-page.tsx'),
+      'utf8',
+    );
+    expect(page).toMatch(
+      /<ViewPanel tab=\{TAB\} view="import-lists"[^>]*>[\s\S]*<ImportListsCard \/>/,
+    );
+    expect(page).toMatch(/<ViewPanel tab=\{TAB\} view="playlists"[^>]*>[\s\S]*<Playlists /);
+    expect(html).toContain('<div data-stg-react="discovery" data-stg-part="page"');
+    expect(tabDef('discovery').views.map((v) => v.key)).toEqual([
+      'recommendations',
+      'playlists',
+      'import-lists',
+    ]);
+    expect(tabDef('discovery').views.find((v) => v.key === 'import-lists')?.side).toBe('video');
   });
 
   it('Database Maintenance is on advanced (React, SETTINGS_PORT.md step 9a)', () => {

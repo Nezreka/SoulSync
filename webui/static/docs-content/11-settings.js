@@ -148,7 +148,7 @@ These live on other tabs, not Downloads:
 ## Performance
 
 - **Search timeout** — how long to spend searching per track before giving up
-- **Lookback Period** — how far back the discovery engine looks for new releases
+- **Lookback period** (Discovery → Recommendations): how far back the discovery engine looks for new releases
 `
         },
         {
@@ -186,7 +186,11 @@ Quality profiles are checked during downloads and auto-import. The Library evalu
 
 ## Appearance
 
-Accent color, theme, visualizer effects, and interface controls. Changes apply immediately — no restart needed.
+One page: the accent color (a preset or your own), the sidebar visualizer, the effects, and the sidebar weather. Changes apply at once, no restart needed. **Reduce visual effects** and **Max performance** are kept per device, so a slow machine can go light on its own.
+
+## Discovery
+
+Three pills. **Recommendations**: how adventurous they are, listening stats, and the discovery pool's lookback period and hemisphere. **Playlists**: the server playlist sync mode, missing tracks to the wishlist, and every M3U setting. **Import lists** (video side): the TMDB, IMDb and Plex lists that add movies and shows on their own.
 
 ## REST API keys
 

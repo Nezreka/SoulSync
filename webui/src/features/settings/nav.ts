@@ -108,7 +108,11 @@ export const TABS: TabDef[] = [
     icon: 'compass',
     title: 'Discovery',
     sub: 'Playlists, listening stats, recommendations and import lists',
-    views: ONE,
+    views: [
+      { key: 'recommendations', label: 'Recommendations' },
+      { key: 'playlists', label: 'Playlists' },
+      { key: 'import-lists', label: 'Import lists', side: 'video' },
+    ],
   },
   {
     key: 'people',

@@ -1045,9 +1045,9 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
     keywords: 'm3u export playlist file',
   },
   {
-    label: 'Listening Stats',
+    label: 'Listening stats',
     tab: 'discovery',
-    anchor: heading('Listening Stats'),
+    anchor: heading('Listening stats'),
     file: 'discovery-tab.tsx',
     hint: 'poll your server for plays',
     keywords: 'listening history plays stats scrobbles',
@@ -1081,7 +1081,7 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
   {
     label: 'Import lists',
     tab: 'discovery',
-    anchor: heading('Import Lists'),
+    anchor: heading('Import lists'),
     file: 'video-row-lists.tsx',
     hint: 'Trakt, IMDb, Letterboxd lists',
     keywords: 'lists trakt imdb letterboxd mdblist import',

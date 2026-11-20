@@ -6,6 +6,7 @@
  */
 
 import {
+  type ReactNode,
   type RefObject,
   useEffect,
   useLayoutEffect,
@@ -329,7 +330,7 @@ export function LibHero({
   stats,
 }: {
   parts: HeroPart[];
-  stats?: Array<{ value: string | number; label: string }>;
+  stats?: Array<{ value: ReactNode; label: string }>;
 }) {
   return (
     <Hero stats={stats}>

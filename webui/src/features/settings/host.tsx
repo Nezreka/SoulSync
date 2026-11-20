@@ -22,7 +22,7 @@ import { musicbrainzError, syncMetadataSourceSelection } from './tabs/connection
 import { testConnection } from './tabs/connections-servers';
 import { servicesModel } from './tabs/connections-services';
 import { ConnectionsTab } from './tabs/connections-tab';
-import { DiscoveryTab } from './tabs/discovery-tab';
+import { DiscoveryTab } from './tabs/discovery/discovery-page';
 import { DownloadsTab } from './tabs/downloads-tab';
 import { LibraryTab } from './tabs/library/library-page';
 import { LogsTab } from './tabs/logs-tab';

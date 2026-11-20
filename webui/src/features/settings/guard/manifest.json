@@ -6901,6 +6901,268 @@
       "asked": "11",
       "showsEndpoint": "/api/video/organization"
     },
+    "#discover-adventurousness": {
+      "sel": "#discover-adventurousness",
+      "kind": "range",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "0.6",
+      "to": "0.65",
+      "saves": {
+        "settings": {
+          "discover": {
+            "adventurousness": 0.65
+          }
+        }
+      },
+      "asked": "0.65",
+      "shows": ["discover.adventurousness"]
+    },
+    "#listening-stats-enabled": {
+      "sel": "#listening-stats-enabled",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": true,
+      "to": false,
+      "saves": {
+        "settings": {
+          "listening_stats": {
+            "enabled": false
+          }
+        }
+      },
+      "asked": false,
+      "shows": ["listening_stats.enabled"]
+    },
+    "#listening-stats-interval": {
+      "sel": "#listening-stats-interval",
+      "kind": "number",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "45",
+      "to": "46",
+      "saves": {
+        "settings": {
+          "listening_stats": {
+            "poll_interval": 46
+          }
+        }
+      },
+      "asked": "46",
+      "shows": ["listening_stats.poll_interval"]
+    },
+    "#discovery-lookback-period": {
+      "sel": "#discovery-lookback-period",
+      "kind": "select",
+      "only": "music",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "90",
+      "to": "7",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/discovery/lookback-period",
+            "body": "{\"period\":\"7\"}"
+          }
+        ]
+      },
+      "asked": "7",
+      "showsEndpoint": "/api/discovery/lookback-period"
+    },
+    "#discovery-hemisphere": {
+      "sel": "#discovery-hemisphere",
+      "kind": "radiogroup",
+      "only": "music",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "southern",
+      "to": "northern",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/discovery/hemisphere",
+            "body": "{\"hemisphere\":\"northern\"}"
+          }
+        ]
+      },
+      "asked": "northern",
+      "showsEndpoint": "/api/discovery/hemisphere"
+    },
+    "#playlist-sync-mode": {
+      "sel": "#playlist-sync-mode",
+      "kind": "radiogroup",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "append",
+      "to": "replace",
+      "saves": {
+        "settings": {
+          "playlist_sync": {
+            "mode": "replace"
+          }
+        }
+      },
+      "asked": "replace",
+      "shows": ["playlist_sync.mode"]
+    },
+    "#create-backup": {
+      "sel": "#create-backup",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": false,
+      "to": true,
+      "saves": {
+        "settings": {
+          "playlist_sync": {
+            "create_backup": true
+          }
+        }
+      },
+      "asked": true,
+      "shows": ["playlist_sync.create_backup"]
+    },
+    "#playlist-sync-wishlist-missing": {
+      "sel": "#playlist-sync-wishlist-missing",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": true,
+      "to": false,
+      "saves": {
+        "settings": {
+          "playlist_sync": {
+            "wishlist_missing_tracks": false
+          }
+        }
+      },
+      "asked": false,
+      "shows": ["playlist_sync.wishlist_missing_tracks"]
+    },
+    "#m3u-export-enabled": {
+      "sel": "#m3u-export-enabled",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": true,
+      "to": false,
+      "saves": {
+        "settings": {
+          "m3u_export": {
+            "enabled": false
+          }
+        }
+      },
+      "asked": false,
+      "shows": ["m3u_export.enabled"]
+    },
+    "#library-m3u-enabled": {
+      "sel": "#library-m3u-enabled",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": false,
+      "to": true,
+      "saves": {
+        "settings": {
+          "m3u_export": {
+            "library_enabled": true
+          }
+        }
+      },
+      "asked": true,
+      "shows": ["m3u_export.library_enabled"]
+    },
+    "#library-m3u-path": {
+      "sel": "#library-m3u-path",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "/m3u",
+      "to": "/m3u-guard",
+      "saves": {
+        "settings": {
+          "m3u_export": {
+            "library_path": "/m3u-guard"
+          }
+        }
+      },
+      "asked": "/m3u-guard",
+      "shows": ["m3u_export.library_path"]
+    },
+    "#m3u-relative-paths": {
+      "sel": "#m3u-relative-paths",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": false,
+      "to": true,
+      "saves": {
+        "settings": {
+          "m3u_export": {
+            "relative_paths": true
+          }
+        }
+      },
+      "asked": true,
+      "shows": ["m3u_export.relative_paths"]
+    },
+    "#m3u-entry-base-path": {
+      "sel": "#m3u-entry-base-path",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "guard-probe",
+      "saves": {
+        "settings": {
+          "m3u_export": {
+            "entry_base_path": "guard-probe"
+          }
+        }
+      },
+      "before": ["Unlock"],
+      "asked": "guard-probe",
+      "shows": ["m3u_export.entry_base_path"]
+    },
+    "#m3u-rewrite-from": {
+      "sel": "#m3u-rewrite-from",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "guard-probe",
+      "saves": {
+        "settings": {
+          "m3u_export": {
+            "rewrite_from": "guard-probe"
+          }
+        }
+      },
+      "asked": "guard-probe",
+      "shows": ["m3u_export.rewrite_from"]
+    },
+    "#m3u-rewrite-to": {
+      "sel": "#m3u-rewrite-to",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "guard-probe",
+      "saves": {
+        "settings": {
+          "m3u_export": {
+            "rewrite_to": "guard-probe"
+          }
+        }
+      },
+      "asked": "guard-probe",
+      "shows": ["m3u_export.rewrite_to"]
+    },
     "#spotify-client-id": {
       "sel": "#spotify-client-id",
       "kind": "text",
@@ -7610,228 +7872,6 @@
       "asked": false,
       "shows": ["hydrabase.auto_connect"]
     },
-    "#m3u-export-enabled": {
-      "sel": "#m3u-export-enabled",
-      "kind": "checkbox",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": true,
-      "to": false,
-      "saves": {
-        "settings": {
-          "m3u_export": {
-            "enabled": false
-          }
-        }
-      },
-      "asked": false,
-      "shows": ["m3u_export.enabled"]
-    },
-    "#library-m3u-enabled": {
-      "sel": "#library-m3u-enabled",
-      "kind": "checkbox",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": false,
-      "to": true,
-      "saves": {
-        "settings": {
-          "m3u_export": {
-            "library_enabled": true
-          }
-        }
-      },
-      "asked": true,
-      "shows": ["m3u_export.library_enabled"]
-    },
-    "#library-m3u-path": {
-      "sel": "#library-m3u-path",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "/m3u",
-      "to": "/m3u-guard",
-      "saves": {
-        "settings": {
-          "m3u_export": {
-            "library_path": "/m3u-guard"
-          }
-        }
-      },
-      "asked": "/m3u-guard",
-      "shows": ["m3u_export.library_path"]
-    },
-    "#playlist-sync-mode": {
-      "sel": "#playlist-sync-mode",
-      "kind": "select",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "append",
-      "to": "replace",
-      "saves": {
-        "settings": {
-          "playlist_sync": {
-            "mode": "replace"
-          }
-        }
-      },
-      "asked": "replace",
-      "shows": ["playlist_sync.mode"]
-    },
-    "#playlist-sync-wishlist-missing": {
-      "sel": "#playlist-sync-wishlist-missing",
-      "kind": "checkbox",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": true,
-      "to": false,
-      "saves": {
-        "settings": {
-          "playlist_sync": {
-            "wishlist_missing_tracks": false
-          }
-        }
-      },
-      "asked": false,
-      "shows": ["playlist_sync.wishlist_missing_tracks"]
-    },
-    "#create-backup": {
-      "sel": "#create-backup",
-      "kind": "checkbox",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": false,
-      "to": true,
-      "saves": {
-        "settings": {
-          "playlist_sync": {
-            "create_backup": true
-          }
-        }
-      },
-      "asked": true,
-      "shows": ["playlist_sync.create_backup"]
-    },
-    "#m3u-relative-paths": {
-      "sel": "#m3u-relative-paths",
-      "kind": "checkbox",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": false,
-      "to": true,
-      "saves": {
-        "settings": {
-          "m3u_export": {
-            "relative_paths": true
-          }
-        }
-      },
-      "asked": true,
-      "shows": ["m3u_export.relative_paths"]
-    },
-    "#m3u-entry-base-path": {
-      "sel": "#m3u-entry-base-path",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "",
-      "to": "guard-probe",
-      "saves": {
-        "settings": {
-          "m3u_export": {
-            "entry_base_path": "guard-probe"
-          }
-        }
-      },
-      "before": ["Unlock"],
-      "asked": "guard-probe",
-      "shows": ["m3u_export.entry_base_path"]
-    },
-    "#m3u-rewrite-from": {
-      "sel": "#m3u-rewrite-from",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "",
-      "to": "guard-probe",
-      "saves": {
-        "settings": {
-          "m3u_export": {
-            "rewrite_from": "guard-probe"
-          }
-        }
-      },
-      "asked": "guard-probe",
-      "shows": ["m3u_export.rewrite_from"]
-    },
-    "#m3u-rewrite-to": {
-      "sel": "#m3u-rewrite-to",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "",
-      "to": "guard-probe",
-      "saves": {
-        "settings": {
-          "m3u_export": {
-            "rewrite_to": "guard-probe"
-          }
-        }
-      },
-      "asked": "guard-probe",
-      "shows": ["m3u_export.rewrite_to"]
-    },
-    "#listening-stats-enabled": {
-      "sel": "#listening-stats-enabled",
-      "kind": "checkbox",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": true,
-      "to": false,
-      "saves": {
-        "settings": {
-          "listening_stats": {
-            "enabled": false
-          }
-        }
-      },
-      "asked": false,
-      "shows": ["listening_stats.enabled"]
-    },
-    "#listening-stats-interval": {
-      "sel": "#listening-stats-interval",
-      "kind": "number",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "45",
-      "to": "46",
-      "saves": {
-        "settings": {
-          "listening_stats": {
-            "poll_interval": 46
-          }
-        }
-      },
-      "asked": "46",
-      "shows": ["listening_stats.poll_interval"]
-    },
-    "#discover-adventurousness": {
-      "sel": "#discover-adventurousness",
-      "kind": "range",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "0.6",
-      "to": "0.65",
-      "saves": {
-        "settings": {
-          "discover": {
-            "adventurousness": 0.65
-          }
-        }
-      },
-      "asked": "0.65",
-      "shows": ["discover.adventurousness"]
-    },
     "#settings-autosave-enabled": {
       "sel": "#settings-autosave-enabled",
       "kind": "checkbox",
@@ -8326,46 +8366,6 @@
       },
       "asked": "http://guard.example:4321",
       "shows": ["security.cors_origins"]
-    },
-    "#discovery-lookback-period": {
-      "sel": "#discovery-lookback-period",
-      "kind": "select",
-      "only": "music",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "90",
-      "to": "7",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/discovery/lookback-period",
-            "body": "{\"period\":\"7\"}"
-          }
-        ]
-      },
-      "asked": "7",
-      "showsEndpoint": "/api/discovery/lookback-period"
-    },
-    "#discovery-hemisphere": {
-      "sel": "#discovery-hemisphere",
-      "kind": "select",
-      "only": "music",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "southern",
-      "to": "northern",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/discovery/hemisphere",
-            "body": "{\"hemisphere\":\"northern\"}"
-          }
-        ]
-      },
-      "asked": "northern",
-      "showsEndpoint": "/api/discovery/hemisphere"
     },
     "#accent-preset": {
       "sel": "#accent-preset",
@@ -9812,6 +9812,246 @@
       "asked": "51",
       "showsEndpoint": "/api/video/downloads/quality/profiles"
     },
+    "[data-vq-implist=\"1\"] input[data-vq-il-f=\"name\"]": {
+      "sel": "[data-vq-implist=\"1\"] input[data-vq-il-f=\"name\"]",
+      "weak": "row",
+      "kind": "text",
+      "sides": ["video"],
+      "scenario": "video",
+      "from": "Trending",
+      "to": "Trending-guard",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/video/downloads/config/import-lists",
+            "body": "{\"id\":1,\"name\":\"Trending-guard\",\"source\":\"tmdb_chart\",\"ref\":\"trending_movies\",\"media\":\"movie\",\"monitor\":\"future\",\"enabled\":true}"
+          }
+        ]
+      },
+      "asked": "Trending-guard",
+      "showsEndpoint": "/api/video/downloads/config/import-lists"
+    },
+    "[data-vq-implist=\"1\"] select[data-vq-il-f=\"source\"]": {
+      "sel": "[data-vq-implist=\"1\"] select[data-vq-il-f=\"source\"]",
+      "weak": "row",
+      "kind": "select",
+      "sides": ["video"],
+      "scenario": "video",
+      "from": "tmdb_chart",
+      "to": "tmdb_list",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/video/downloads/config/import-lists",
+            "body": "{\"id\":1,\"name\":\"Trending\",\"source\":\"tmdb_list\",\"ref\":\"trending_movies\",\"media\":\"movie\",\"monitor\":\"future\",\"enabled\":true}"
+          }
+        ]
+      },
+      "asked": "tmdb_list",
+      "showsEndpoint": "/api/video/downloads/config/import-lists"
+    },
+    "input[data-vq-il-f=\"ref\"][type=\"text\"][aria-label=\"List\"][placeholder=\"chart, like trending_movies\"]": {
+      "sel": "input[data-vq-il-f=\"ref\"][type=\"text\"][aria-label=\"List\"][placeholder=\"chart, like trending_movies\"]",
+      "weak": "context",
+      "kind": "text",
+      "sides": ["video"],
+      "scenario": "video",
+      "from": "trending_movies",
+      "to": "trending_movies-guard",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/video/downloads/config/import-lists",
+            "body": "{\"id\":1,\"name\":\"Trending\",\"source\":\"tmdb_chart\",\"ref\":\"trending_movies-guard\",\"media\":\"movie\",\"monitor\":\"future\",\"enabled\":true}"
+          }
+        ]
+      },
+      "asked": "trending_movies-guard",
+      "showsEndpoint": "/api/video/downloads/config/import-lists"
+    },
+    "[data-vq-implist=\"1\"] select[data-vq-il-f=\"media\"]": {
+      "sel": "[data-vq-implist=\"1\"] select[data-vq-il-f=\"media\"]",
+      "weak": "row",
+      "kind": "select",
+      "sides": ["video"],
+      "scenario": "video",
+      "from": "movie",
+      "to": "both",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/video/downloads/config/import-lists",
+            "body": "{\"id\":1,\"name\":\"Trending\",\"source\":\"tmdb_chart\",\"ref\":\"trending_movies\",\"media\":\"both\",\"monitor\":\"future\",\"enabled\":true}"
+          }
+        ]
+      },
+      "asked": "both",
+      "showsEndpoint": "/api/video/downloads/config/import-lists"
+    },
+    "[data-vq-implist=\"1\"] select[data-vq-il-f=\"monitor\"]": {
+      "sel": "[data-vq-implist=\"1\"] select[data-vq-il-f=\"monitor\"]",
+      "weak": "row",
+      "kind": "select",
+      "sides": ["video"],
+      "scenario": "video",
+      "from": "future",
+      "to": "all",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/video/downloads/config/import-lists",
+            "body": "{\"id\":1,\"name\":\"Trending\",\"source\":\"tmdb_chart\",\"ref\":\"trending_movies\",\"media\":\"movie\",\"monitor\":\"all\",\"enabled\":true}"
+          }
+        ]
+      },
+      "asked": "all",
+      "showsEndpoint": "/api/video/downloads/config/import-lists"
+    },
+    "[data-vq-implist=\"1\"] input[data-vq-il-f=\"enabled\"]": {
+      "sel": "[data-vq-implist=\"1\"] input[data-vq-il-f=\"enabled\"]",
+      "weak": "row",
+      "kind": "checkbox",
+      "sides": ["video"],
+      "scenario": "video",
+      "from": true,
+      "to": false,
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/video/downloads/config/import-lists",
+            "body": "{\"id\":1,\"name\":\"Trending\",\"source\":\"tmdb_chart\",\"ref\":\"trending_movies\",\"media\":\"movie\",\"monitor\":\"future\",\"enabled\":false}"
+          }
+        ]
+      },
+      "asked": false,
+      "showsEndpoint": "/api/video/downloads/config/import-lists"
+    },
+    "[data-vq-implist=\"2\"] input[data-vq-il-f=\"name\"]": {
+      "sel": "[data-vq-implist=\"2\"] input[data-vq-il-f=\"name\"]",
+      "weak": "row",
+      "kind": "text",
+      "sides": ["video"],
+      "scenario": "video",
+      "from": "Mine",
+      "to": "Mine-guard",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/video/downloads/config/import-lists",
+            "body": "{\"id\":2,\"name\":\"Mine-guard\",\"source\":\"imdb_list\",\"ref\":\"ls123\",\"media\":\"both\",\"monitor\":\"all\",\"enabled\":false}"
+          }
+        ]
+      },
+      "asked": "Mine-guard",
+      "showsEndpoint": "/api/video/downloads/config/import-lists"
+    },
+    "[data-vq-implist=\"2\"] select[data-vq-il-f=\"source\"]": {
+      "sel": "[data-vq-implist=\"2\"] select[data-vq-il-f=\"source\"]",
+      "weak": "row",
+      "kind": "select",
+      "sides": ["video"],
+      "scenario": "video",
+      "from": "imdb_list",
+      "to": "tmdb_list",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/video/downloads/config/import-lists",
+            "body": "{\"id\":2,\"name\":\"Mine\",\"source\":\"tmdb_list\",\"ref\":\"ls123\",\"media\":\"both\",\"monitor\":\"all\",\"enabled\":false}"
+          }
+        ]
+      },
+      "asked": "tmdb_list",
+      "showsEndpoint": "/api/video/downloads/config/import-lists"
+    },
+    "input[data-vq-il-f=\"ref\"][type=\"text\"][aria-label=\"List\"][placeholder=\"IMDb ls id or link\"]": {
+      "sel": "input[data-vq-il-f=\"ref\"][type=\"text\"][aria-label=\"List\"][placeholder=\"IMDb ls id or link\"]",
+      "weak": "context",
+      "kind": "text",
+      "sides": ["video"],
+      "scenario": "video",
+      "from": "ls123",
+      "to": "ls123-guard",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/video/downloads/config/import-lists",
+            "body": "{\"id\":2,\"name\":\"Mine\",\"source\":\"imdb_list\",\"ref\":\"ls123-guard\",\"media\":\"both\",\"monitor\":\"all\",\"enabled\":false}"
+          }
+        ]
+      },
+      "asked": "ls123-guard",
+      "showsEndpoint": "/api/video/downloads/config/import-lists"
+    },
+    "[data-vq-implist=\"2\"] select[data-vq-il-f=\"media\"]": {
+      "sel": "[data-vq-implist=\"2\"] select[data-vq-il-f=\"media\"]",
+      "weak": "row",
+      "kind": "select",
+      "sides": ["video"],
+      "scenario": "video",
+      "from": "both",
+      "to": "movie",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/video/downloads/config/import-lists",
+            "body": "{\"id\":2,\"name\":\"Mine\",\"source\":\"imdb_list\",\"ref\":\"ls123\",\"media\":\"movie\",\"monitor\":\"all\",\"enabled\":false}"
+          }
+        ]
+      },
+      "asked": "movie",
+      "showsEndpoint": "/api/video/downloads/config/import-lists"
+    },
+    "[data-vq-implist=\"2\"] select[data-vq-il-f=\"monitor\"]": {
+      "sel": "[data-vq-implist=\"2\"] select[data-vq-il-f=\"monitor\"]",
+      "weak": "row",
+      "kind": "select",
+      "sides": ["video"],
+      "scenario": "video",
+      "from": "all",
+      "to": "future",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/video/downloads/config/import-lists",
+            "body": "{\"id\":2,\"name\":\"Mine\",\"source\":\"imdb_list\",\"ref\":\"ls123\",\"media\":\"both\",\"monitor\":\"future\",\"enabled\":false}"
+          }
+        ]
+      },
+      "asked": "future",
+      "showsEndpoint": "/api/video/downloads/config/import-lists"
+    },
+    "[data-vq-implist=\"2\"] input[data-vq-il-f=\"enabled\"]": {
+      "sel": "[data-vq-implist=\"2\"] input[data-vq-il-f=\"enabled\"]",
+      "weak": "row",
+      "kind": "checkbox",
+      "sides": ["video"],
+      "scenario": "video",
+      "from": false,
+      "to": true,
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/video/downloads/config/import-lists",
+            "body": "{\"id\":2,\"name\":\"Mine\",\"source\":\"imdb_list\",\"ref\":\"ls123\",\"media\":\"both\",\"monitor\":\"all\",\"enabled\":true}"
+          }
+        ]
+      },
+      "asked": true,
+      "showsEndpoint": "/api/video/downloads/config/import-lists"
+    },
     "#tmdb-api-key": {
       "sel": "#tmdb-api-key",
       "kind": "text",
@@ -10151,258 +10391,6 @@
       },
       "asked": "US",
       "showsEndpoint": "/api/video/enrichment/config"
-    },
-    "[data-vq-implist=\"1\"] input[data-vq-il-f=\"name\"]": {
-      "sel": "[data-vq-implist=\"1\"] input[data-vq-il-f=\"name\"]",
-      "weak": "row",
-      "kind": "text",
-      "only": "video",
-      "sides": ["video"],
-      "scenario": "video",
-      "from": "Trending",
-      "to": "Trending-guard",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/video/downloads/config/import-lists",
-            "body": "{\"id\":1,\"name\":\"Trending-guard\",\"source\":\"tmdb_chart\",\"ref\":\"trending_movies\",\"media\":\"movie\",\"monitor\":\"future\",\"enabled\":true}"
-          }
-        ]
-      },
-      "asked": "Trending-guard",
-      "showsEndpoint": "/api/video/downloads/config/import-lists"
-    },
-    "[data-vq-implist=\"1\"] select[data-vq-il-f=\"source\"]": {
-      "sel": "[data-vq-implist=\"1\"] select[data-vq-il-f=\"source\"]",
-      "weak": "row",
-      "kind": "select",
-      "only": "video",
-      "sides": ["video"],
-      "scenario": "video",
-      "from": "tmdb_chart",
-      "to": "tmdb_list",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/video/downloads/config/import-lists",
-            "body": "{\"id\":1,\"name\":\"Trending\",\"source\":\"tmdb_list\",\"ref\":\"trending_movies\",\"media\":\"movie\",\"monitor\":\"future\",\"enabled\":true}"
-          }
-        ]
-      },
-      "asked": "tmdb_list",
-      "showsEndpoint": "/api/video/downloads/config/import-lists"
-    },
-    "[data-vq-implist=\"1\"] input[data-vq-il-f=\"ref\"]": {
-      "sel": "[data-vq-implist=\"1\"] input[data-vq-il-f=\"ref\"]",
-      "weak": "row",
-      "kind": "text",
-      "only": "video",
-      "sides": ["video"],
-      "scenario": "video",
-      "from": "trending_movies",
-      "to": "trending_movies-guard",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/video/downloads/config/import-lists",
-            "body": "{\"id\":1,\"name\":\"Trending\",\"source\":\"tmdb_chart\",\"ref\":\"trending_movies-guard\",\"media\":\"movie\",\"monitor\":\"future\",\"enabled\":true}"
-          }
-        ]
-      },
-      "asked": "trending_movies-guard",
-      "showsEndpoint": "/api/video/downloads/config/import-lists"
-    },
-    "[data-vq-implist=\"1\"] select[data-vq-il-f=\"media\"]": {
-      "sel": "[data-vq-implist=\"1\"] select[data-vq-il-f=\"media\"]",
-      "weak": "row",
-      "kind": "select",
-      "only": "video",
-      "sides": ["video"],
-      "scenario": "video",
-      "from": "movie",
-      "to": "both",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/video/downloads/config/import-lists",
-            "body": "{\"id\":1,\"name\":\"Trending\",\"source\":\"tmdb_chart\",\"ref\":\"trending_movies\",\"media\":\"both\",\"monitor\":\"future\",\"enabled\":true}"
-          }
-        ]
-      },
-      "asked": "both",
-      "showsEndpoint": "/api/video/downloads/config/import-lists"
-    },
-    "[data-vq-implist=\"1\"] select[data-vq-il-f=\"monitor\"]": {
-      "sel": "[data-vq-implist=\"1\"] select[data-vq-il-f=\"monitor\"]",
-      "weak": "row",
-      "kind": "select",
-      "only": "video",
-      "sides": ["video"],
-      "scenario": "video",
-      "from": "future",
-      "to": "all",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/video/downloads/config/import-lists",
-            "body": "{\"id\":1,\"name\":\"Trending\",\"source\":\"tmdb_chart\",\"ref\":\"trending_movies\",\"media\":\"movie\",\"monitor\":\"all\",\"enabled\":true}"
-          }
-        ]
-      },
-      "asked": "all",
-      "showsEndpoint": "/api/video/downloads/config/import-lists"
-    },
-    "[data-vq-implist=\"1\"] input[data-vq-il-f=\"enabled\"]": {
-      "sel": "[data-vq-implist=\"1\"] input[data-vq-il-f=\"enabled\"]",
-      "weak": "row",
-      "kind": "checkbox",
-      "only": "video",
-      "sides": ["video"],
-      "scenario": "video",
-      "from": true,
-      "to": false,
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/video/downloads/config/import-lists",
-            "body": "{\"id\":1,\"name\":\"Trending\",\"source\":\"tmdb_chart\",\"ref\":\"trending_movies\",\"media\":\"movie\",\"monitor\":\"future\",\"enabled\":false}"
-          }
-        ]
-      },
-      "asked": false,
-      "showsEndpoint": "/api/video/downloads/config/import-lists"
-    },
-    "[data-vq-implist=\"2\"] input[data-vq-il-f=\"name\"]": {
-      "sel": "[data-vq-implist=\"2\"] input[data-vq-il-f=\"name\"]",
-      "weak": "row",
-      "kind": "text",
-      "only": "video",
-      "sides": ["video"],
-      "scenario": "video",
-      "from": "Mine",
-      "to": "Mine-guard",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/video/downloads/config/import-lists",
-            "body": "{\"id\":2,\"name\":\"Mine-guard\",\"source\":\"imdb_list\",\"ref\":\"ls123\",\"media\":\"both\",\"monitor\":\"all\",\"enabled\":false}"
-          }
-        ]
-      },
-      "asked": "Mine-guard",
-      "showsEndpoint": "/api/video/downloads/config/import-lists"
-    },
-    "[data-vq-implist=\"2\"] select[data-vq-il-f=\"source\"]": {
-      "sel": "[data-vq-implist=\"2\"] select[data-vq-il-f=\"source\"]",
-      "weak": "row",
-      "kind": "select",
-      "only": "video",
-      "sides": ["video"],
-      "scenario": "video",
-      "from": "imdb_list",
-      "to": "tmdb_list",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/video/downloads/config/import-lists",
-            "body": "{\"id\":2,\"name\":\"Mine\",\"source\":\"tmdb_list\",\"ref\":\"ls123\",\"media\":\"both\",\"monitor\":\"all\",\"enabled\":false}"
-          }
-        ]
-      },
-      "asked": "tmdb_list",
-      "showsEndpoint": "/api/video/downloads/config/import-lists"
-    },
-    "[data-vq-implist=\"2\"] input[data-vq-il-f=\"ref\"]": {
-      "sel": "[data-vq-implist=\"2\"] input[data-vq-il-f=\"ref\"]",
-      "weak": "row",
-      "kind": "text",
-      "only": "video",
-      "sides": ["video"],
-      "scenario": "video",
-      "from": "ls123",
-      "to": "ls123-guard",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/video/downloads/config/import-lists",
-            "body": "{\"id\":2,\"name\":\"Mine\",\"source\":\"imdb_list\",\"ref\":\"ls123-guard\",\"media\":\"both\",\"monitor\":\"all\",\"enabled\":false}"
-          }
-        ]
-      },
-      "asked": "ls123-guard",
-      "showsEndpoint": "/api/video/downloads/config/import-lists"
-    },
-    "[data-vq-implist=\"2\"] select[data-vq-il-f=\"media\"]": {
-      "sel": "[data-vq-implist=\"2\"] select[data-vq-il-f=\"media\"]",
-      "weak": "row",
-      "kind": "select",
-      "only": "video",
-      "sides": ["video"],
-      "scenario": "video",
-      "from": "both",
-      "to": "movie",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/video/downloads/config/import-lists",
-            "body": "{\"id\":2,\"name\":\"Mine\",\"source\":\"imdb_list\",\"ref\":\"ls123\",\"media\":\"movie\",\"monitor\":\"all\",\"enabled\":false}"
-          }
-        ]
-      },
-      "asked": "movie",
-      "showsEndpoint": "/api/video/downloads/config/import-lists"
-    },
-    "[data-vq-implist=\"2\"] select[data-vq-il-f=\"monitor\"]": {
-      "sel": "[data-vq-implist=\"2\"] select[data-vq-il-f=\"monitor\"]",
-      "weak": "row",
-      "kind": "select",
-      "only": "video",
-      "sides": ["video"],
-      "scenario": "video",
-      "from": "all",
-      "to": "future",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/video/downloads/config/import-lists",
-            "body": "{\"id\":2,\"name\":\"Mine\",\"source\":\"imdb_list\",\"ref\":\"ls123\",\"media\":\"both\",\"monitor\":\"future\",\"enabled\":false}"
-          }
-        ]
-      },
-      "asked": "future",
-      "showsEndpoint": "/api/video/downloads/config/import-lists"
-    },
-    "[data-vq-implist=\"2\"] input[data-vq-il-f=\"enabled\"]": {
-      "sel": "[data-vq-implist=\"2\"] input[data-vq-il-f=\"enabled\"]",
-      "weak": "row",
-      "kind": "checkbox",
-      "only": "video",
-      "sides": ["video"],
-      "scenario": "video",
-      "from": false,
-      "to": true,
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/video/downloads/config/import-lists",
-            "body": "{\"id\":2,\"name\":\"Mine\",\"source\":\"imdb_list\",\"ref\":\"ls123\",\"media\":\"both\",\"monitor\":\"all\",\"enabled\":true}"
-          }
-        ]
-      },
-      "asked": true,
-      "showsEndpoint": "/api/video/downloads/config/import-lists"
     },
     "input[data-vseed-idx=\"3\"][data-vseed-field=\"ratio\"]": {
       "sel": "input[data-vseed-idx=\"3\"][data-vseed-field=\"ratio\"]",
@@ -13311,10 +13299,80 @@
       "sides": ["music", "video"],
       "scenario": "music"
     },
+    "#stg-view-discovery-recommendations \"More about this setting\"": {
+      "label": "More about this setting",
+      "anchor": "stg-view-discovery-recommendations",
+      "count": 3,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#discovery-hemisphere \"Northern\"": {
+      "label": "Northern",
+      "anchor": "discovery-hemisphere",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#discovery-hemisphere \"Southern\"": {
+      "label": "Southern",
+      "anchor": "discovery-hemisphere",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#stg-view-discovery-playlists \"More about this setting\"": {
+      "label": "More about this setting",
+      "anchor": "stg-view-discovery-playlists",
+      "count": 8,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#playlist-sync-mode \"Replace\"": {
+      "label": "Replace",
+      "anchor": "playlist-sync-mode",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#playlist-sync-mode \"Reconcile\"": {
+      "label": "Reconcile",
+      "anchor": "playlist-sync-mode",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#playlist-sync-mode \"Append\"": {
+      "label": "Append",
+      "anchor": "playlist-sync-mode",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#stg-view-discovery-playlists \"Unlock\"": {
+      "label": "Unlock",
+      "anchor": "stg-view-discovery-playlists",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#video-import-lists \"Add list\"": {
+      "label": "Add list",
+      "anchor": "video-import-lists",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#video-import-lists \"More about this setting\"": {
+      "label": "More about this setting",
+      "anchor": "video-import-lists",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
     "\"More about this setting\"": {
       "label": "More about this setting",
       "anchor": "",
-      "count": 24,
+      "count": 21,
       "sides": ["music", "video"],
       "scenario": "music"
     },
@@ -13407,13 +13465,6 @@
     },
     "#hydrabase-connect-btn": {
       "id": "hydrabase-connect-btn",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "\"Unlock\"": {
-      "label": "Unlock",
-      "anchor": "",
       "count": 1,
       "sides": ["music", "video"],
       "scenario": "music"
@@ -13550,13 +13601,6 @@
     },
     "#ob-preview-open": {
       "id": "ob-preview-open",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#video-import-lists \"+ Add list\"": {
-      "label": "+ Add list",
-      "anchor": "video-import-lists",
       "count": 1,
       "sides": ["music", "video"],
       "scenario": "music"
@@ -14073,10 +14117,17 @@
       "sides": ["video"],
       "scenario": "video"
     },
-    "#vq-implist-rows \"✕\"": {
-      "label": "✕",
+    "#vq-implist-rows \"Delete Trending\"": {
+      "label": "Delete Trending",
       "anchor": "vq-implist-rows",
-      "count": 2,
+      "count": 1,
+      "sides": ["video"],
+      "scenario": "video"
+    },
+    "#vq-implist-rows \"Delete Mine\"": {
+      "label": "Delete Mine",
+      "anchor": "vq-implist-rows",
+      "count": 1,
       "sides": ["video"],
       "scenario": "video"
     }
@@ -14574,7 +14625,7 @@
       "acoustid-require-verified-group": "not a form control: a <div> on the page",
       "qp-profile-new-btn": "a button, held in `buttons`",
       "qp-profile-new-input": "drawn by the New profile button and gone on blur; what it sends is pinned by the musicProfiles composite",
-      "discover-adventurousness-val": "not a form control: a <span> on the page",
+      "discover-adventurousness-val": "not a form control: a <b> on the page",
       "settings-open-feature-picker": "a button, held in `buttons`",
       "custom-color-group": "not a form control: a <div> on the page",
       "sw-status": "not a form control: a <span> on the page",

@@ -1,7 +1,9 @@
 /**
- * Notifications and Import Lists (SETTINGS_PORT.md, video pass V3c): the
- * markup they replaced (the retired source picker that rode along inside
- * Notifications aside), the load each time the video settings page is shown,
+ * Notifications and Import Lists (SETTINGS_PORT.md, video pass V3c):
+ * Notifications' markup as it was (the retired source picker that rode along
+ * inside it aside), Import Lists on the parts (settings-bic phase 5: column
+ * headers, named fields, a delete that asks first), the load each time the
+ * video settings page is shown,
  * a row saved alone when a field changes (read off the page), add, delete,
  * Test, and a new notification type drawing its row again.
  */
@@ -11,7 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { shape, vanilla } from './__fixtures__/shape';
 import {
-  ImportListsSection,
+  ImportListsCard,
   importLists,
   NotificationsSection,
   notifications,
@@ -123,19 +125,14 @@ describe('the markup they replaced', () => {
     for (const el of old.querySelectorAll('[data-video-legacy-source]')) el.remove();
     expect(shape(container)).toEqual(shape(old));
   });
-
-  it('Import Lists', () => {
-    const { container } = render(<ImportListsSection />);
-    expect(shape(container)).toEqual(shape(vanilla('video-import-lists.vanilla.html')));
-  });
 });
 
 describe('Import Lists', () => {
   it('loads each time the video settings page is shown', async () => {
-    render(<ImportListsSection />);
+    render(<ImportListsCard />);
     expect(q('#vq-implist-rows').children).toHaveLength(0);
     shown();
-    await waitFor(() => expect(document.querySelectorAll('.vq-implist-row')).toHaveLength(2));
+    await waitFor(() => expect(document.querySelectorAll('[data-vq-implist]')).toHaveLength(2));
     const row = q('[data-vq-implist="2"]');
     expect(q<HTMLSelectElement>('[data-vq-implist="2"] [data-vq-il-f="source"]').value).toBe(
       'imdb_list',
@@ -147,10 +144,43 @@ describe('Import Lists', () => {
     );
   });
 
-  it('a field saves its row alone, read off the page; a bad one says why', async () => {
-    render(<ImportListsSection />);
+  it('the rows have column headers, a named field each, and say what a List takes', async () => {
+    render(<ImportListsCard />);
     shown();
-    await waitFor(() => expect(document.querySelectorAll('.vq-implist-row')).toHaveLength(2));
+    await waitFor(() => expect(document.querySelectorAll('[data-vq-implist]')).toHaveLength(2));
+    const head = q('#vq-implist-rows').firstElementChild!;
+    expect([...head.children].map((c) => c.textContent)).toEqual([
+      'Name',
+      'From',
+      'List',
+      'Adds',
+      'A followed show gets',
+      'On',
+      '',
+    ]);
+    const row = q('[data-vq-implist="2"]');
+    for (const el of row.querySelectorAll('input, select, button'))
+      expect(el.getAttribute('aria-label'), el.outerHTML).toBeTruthy();
+    expect(q('[data-vq-implist="2"] [data-vq-il-f="enabled"]').getAttribute('aria-label')).toBe(
+      'Use this list',
+    );
+    expect(q('[data-vq-implist-del="2"]').getAttribute('aria-label')).toBe('Delete Mine');
+    // the List field says what goes in it, by where the list comes from
+    expect(q('[data-vq-implist="1"] [data-vq-il-f="ref"]').placeholder).toBe(
+      'chart, like trending_movies',
+    );
+    expect(q('[data-vq-implist="2"] [data-vq-il-f="ref"]').placeholder).toBe('IMDb ls id or link');
+    // a movie list does not use what a followed show gets: dimmed, not disabled
+    const monitor = q<HTMLSelectElement>('[data-vq-implist="1"] [data-vq-il-f="monitor"]');
+    expect(monitor.disabled).toBe(false);
+    expect(monitor.closest('[title="Only used for shows"]')).not.toBeNull();
+    expect(document.body.textContent).not.toContain('—');
+  });
+
+  it('a field saves its row alone, read off the page; a bad one says why', async () => {
+    render(<ImportListsCard />);
+    shown();
+    await waitFor(() => expect(document.querySelectorAll('[data-vq-implist]')).toHaveLength(2));
     // a pick: saved with the new value (heard before React's own change)
     fireEvent.change(q('[data-vq-implist="1"] [data-vq-il-f="media"]'), {
       target: { value: 'show' },
@@ -172,7 +202,7 @@ describe('Import Lists', () => {
     answers['POST /api/video/downloads/config/import-lists'] = { success: false };
     leave(ref);
     await waitFor(() =>
-      expect(shell.showToast).toHaveBeenCalledWith('A list needs a valid source + ref', 'error'),
+      expect(shell.showToast).toHaveBeenCalledWith('A list needs a valid source and list', 'error'),
     );
     expect(posts('/api/video/downloads/config/import-lists')[1].ref).toBe('nope');
     // what was typed stays
@@ -180,9 +210,9 @@ describe('Import Lists', () => {
   });
 
   it('add and delete draw the rows again', async () => {
-    render(<ImportListsSection />);
+    render(<ImportListsCard />);
     shown();
-    await waitFor(() => expect(document.querySelectorAll('.vq-implist-row')).toHaveLength(2));
+    await waitFor(() => expect(document.querySelectorAll('[data-vq-implist]')).toHaveLength(2));
     answers['POST /api/video/downloads/config/import-lists'] = {
       success: true,
       id: 9,
@@ -194,20 +224,35 @@ describe('Import Lists', () => {
       enabled: true,
     };
     fireEvent.click(q('[data-vq-implist-add]'));
-    await waitFor(() => expect(document.querySelectorAll('.vq-implist-row')).toHaveLength(3));
+    await waitFor(() => expect(document.querySelectorAll('[data-vq-implist]')).toHaveLength(3));
     expect(posts('/api/video/downloads/config/import-lists')[0]).toEqual({
       name: 'New list',
       source: 'tmdb_chart',
       ref: 'trending_movies',
     });
+    // a delete asks first: kept on Keep it, gone on Delete
+    let answer = false;
+    const asked: Array<Record<string, unknown>> = [];
+    shell.showConfirmDialog = vi.fn((o?: Record<string, unknown>) => {
+      asked.push(o ?? {});
+      return Promise.resolve(answer);
+    });
     fireEvent.click(q('[data-vq-implist-del="1"]'));
-    await waitFor(() => expect(document.querySelectorAll('.vq-implist-row')).toHaveLength(2));
+    await waitFor(() => expect(asked).toHaveLength(1));
+    expect(asked[0]).toMatchObject({ title: 'Delete Trending?', destructive: true });
+    await act(async () => {});
+    expect(calls.some((c) => c.method === 'DELETE')).toBe(false);
+    expect(document.querySelectorAll('[data-vq-implist]')).toHaveLength(3);
+    answer = true;
+    fireEvent.click(q('[data-vq-implist-del="1"]'));
+    await waitFor(() => expect(document.querySelectorAll('[data-vq-implist]')).toHaveLength(2));
     expect(calls.some((c) => c.method === 'DELETE' && c.url.endsWith('/import-lists/1'))).toBe(
       true,
     );
     fireEvent.click(q('[data-vq-implist-del="2"]'));
     fireEvent.click(q('[data-vq-implist-del="9"]'));
     await waitFor(() => expect(q('#vq-implist-rows').textContent).toBe('No import lists yet.'));
+    delete shell.showConfirmDialog;
   });
 });
 

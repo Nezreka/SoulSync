@@ -362,7 +362,7 @@ The **Stats** page has two tabs, **Listening** and **Library**, with the tab, ra
 
 ![Listening Stats page with play totals, activity chart, and top artists](dash-stats.jpg)
 
-Listening data requires **Listening Stats** to be enabled in Settings → Library ("Enable listening stats collection from media server") — it polls play history from your active media server (Plex, Jellyfin, or Navidrome).
+Listening data requires **Listening Stats** to be enabled in Settings → Discovery → Recommendations ("Collect listening stats from your media server") — it polls play history from your active media server (Plex, Jellyfin, or Navidrome).
 
 ## Header controls
 

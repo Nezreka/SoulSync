@@ -2079,6 +2079,53 @@ button.chip:hover:not(:disabled) {
   accent-color: var(--accent);
 }
 
+/* the words at a slider's two ends, and its value (adventurousness) */
+.rangeEnd {
+  color: var(--white-a55);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.rangeValue {
+  min-width: 36px;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* the import lists: one row of fields each, under column headers */
+.ilHead,
+.ilRow {
+  display: grid;
+  grid-template-columns:
+    minmax(0, 1.1fr) minmax(0, 1fr) minmax(0, 1.2fr) minmax(0, 0.8fr) minmax(0, 1fr)
+    42px 30px;
+  gap: 8px;
+  align-items: center;
+}
+
+.ilRow > * {
+  min-width: 0;
+}
+
+.ilRow .field {
+  width: 100%;
+  min-width: 0;
+}
+
+.ilHead {
+  color: var(--white-a45);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+/* a field the row does not use (what a followed show gets, on a movie list) */
+.ilDim {
+  opacity: 0.5;
+}
+
 /* the custom formats: one row of fields each */
 .fmtHead,
 .fmtRow {
@@ -2809,6 +2856,24 @@ button.chip:hover:not(:disabled) {
     grid-template-columns: 1fr 1fr;
     padding-bottom: 10px;
     border-bottom: 1px solid var(--white-a06);
+  }
+
+  .ilHead {
+    display: none;
+  }
+
+  .ilRow {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--white-a06);
+  }
+
+  .ilRow > :first-child {
+    grid-column: span 2;
+  }
+
+  .ilRow > :last-child {
+    justify-self: end;
   }
 
   .rangeLine {

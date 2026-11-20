@@ -181,9 +181,11 @@ def test_the_video_settings_live_with_their_subject_not_on_one_dumping_tab():
     assert "<MonitorSpecialsRow />" in behaviour
     # #1822: import lists add to what you discover (React, video pass V3c)
     lists = (tabs / "video-row-lists.tsx").read_text(encoding="utf-8")
-    section = lists.split("export function ImportListsSection(", 1)[1]
-    assert 'tab="discovery"' in section.split("</Section>", 1)[0]
-    assert 'id="video-import-lists"' in section
+    section = lists.split("export function ImportListsCard(", 1)[1]
+    assert 'id="video-import-lists"' in section.split("\nexport function", 1)[0]
+    # settings-bic phase 5: the Import lists pill of the Discovery page
+    discovery = (tabs / "discovery" / "discovery-page.tsx").read_text(encoding="utf-8")
+    assert "const TAB = 'discovery';" in discovery and "<ImportListsCard />" in discovery
 
     # seeding has to be INSIDE the torrent panel, not merely on the same tab
     panels = (tabs / "source-panels-more.tsx").read_text(encoding="utf-8")
@@ -270,10 +272,17 @@ def test_the_downloads_tab_holds_only_download_settings():
     # (both React: video-row-lists.tsx, SETTINGS_PORT.md video pass V3c)
     lists = (_WEBUI / "src" / "features" / "settings" / "tabs" / "video-row-lists.tsx").read_text(encoding="utf-8")
     for stray, section, home in (("video-notifications", "NotificationsSection", "connections"),
-                                 ("video-import-lists", "ImportListsSection", "discovery")):
+                                 ("video-import-lists", "ImportListsCard", "discovery")):
         body = lists.split(f"export function {section}(", 1)[1].split("\nexport function", 1)[0]
         assert f'id="{stray}"' in body
-        assert f'tab="{home}"' in body, f"{stray} is not on the {home} tab"
+        # Notifications still sits in its old Section; Import lists is a
+        # pill of the Discovery page (settings-bic phase 5)
+        if section == "NotificationsSection":
+            assert f'tab="{home}"' in body, f"{stray} is not on the {home} tab"
+        else:
+            page = (_WEBUI / "src" / "features" / "settings" / "tabs" / "discovery" /
+                    "discovery-page.tsx").read_text(encoding="utf-8")
+            assert f"<{section} />" in page, f"{stray} is not on the {home} tab"
         assert f'data-stg-react="{home}" data-stg-part=' in markup
 
 

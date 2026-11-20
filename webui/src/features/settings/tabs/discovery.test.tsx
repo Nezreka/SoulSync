@@ -1,17 +1,20 @@
 /**
- * The Discovery tab, ported from the vanilla Settings page (SETTINGS_PORT.md,
- * step 4): the same markup as the frozen fixtures (after settings.js's help
- * lines), and the same values, summaries and saves.
+ * The Discovery tab on the parts (settings-bic phase 5): Recommendations,
+ * Playlists and Import Lists, one pill each. Every control on its pill with
+ * its key, the dependent rows dimmed with their parent, the heroes read the
+ * settings back, and the same saves as the page it replaced.
  */
 
-import { act, fireEvent, render, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { nav } from '../nav';
 import { createSettingsStore, type SettingsPayload, type SettingsStore } from '../settings-store';
-import { shape, vanilla } from './__fixtures__/shape';
-import { discoverySummaries, resolveDiscovery } from './discovery';
-import { DiscoveryTab, saveLookback } from './discovery-tab';
+import { resolveDiscovery } from './discovery';
+import { saveLookback } from './discovery-tab';
+import { DiscoveryTab } from './discovery/discovery-page';
 import { helpFirstLine } from './parts';
+import { videoShown } from './video-shown';
 
 type Shell = Window & Record<string, unknown>;
 const shell = window as unknown as Shell;
@@ -22,6 +25,8 @@ let calls: Array<{ url: string; method: string; body: unknown }>;
 let replies: Record<string, unknown>;
 
 beforeEach(() => {
+  nav.reset();
+  act(() => nav.go('discovery', 'recommendations'));
   // each store saves into its own list: a save the last test left queued
   // must not land in this one's
   const sink: SettingsPayload[] = [];
@@ -47,50 +52,137 @@ beforeEach(() => {
         method,
         body: typeof init?.body === 'string' ? JSON.parse(init.body) : undefined,
       });
-      const reply = method === 'POST' ? { success: true } : replies[url];
-      return Promise.resolve({ json: () => Promise.resolve(reply) });
+      const reply = method === 'POST' ? { success: true } : (replies[url] ?? {});
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(reply) });
     }),
   );
   shell.showToast = vi.fn();
 });
 
 afterEach(() => {
+  cleanup();
   vi.unstubAllGlobals();
   delete shell._settingsAutosaveOff;
+  document.body.removeAttribute('data-side');
+  nav.reset();
 });
 
-const main = () => render(<DiscoveryTab store={store} part="main" opened={1} active />);
-const pool = () => render(<DiscoveryTab store={store} part="pool" opened={1} active />);
+const page = () => render(<DiscoveryTab store={store} part="page" opened={1} active />);
 const box = (id: string) => document.getElementById(id) as HTMLInputElement;
+const panel = (view: string) =>
+  document.querySelector<HTMLElement>(`[data-stg-tab="discovery"][data-stg-view="${view}"]`)!;
+const rowOf = (id: string) => document.getElementById(id)!.closest<HTMLElement>('[data-row]')!;
+const picked = (id: string) => document.getElementById(id)!.getAttribute('data-value');
+const pick = (id: string, value: string) =>
+  fireEvent.click(document.querySelector(`#${id} [data-value="${value}"]`)!);
+const hero = (view: string) => panel(view).querySelector('p')!.textContent;
+const dimmed = (id: string) => /rowOff/.test(rowOf(id).className);
 
-describe('the Discovery tab is the same page it replaced', () => {
-  it('main: the same elements, ids, classes, help lines and words', () => {
-    const { container } = main();
-    // the three M3U path options came from Library > Folders (settings-bic
-    // phase 4); the fixture is the Discovery tab before that, so they are
-    // checked on their own below and left out here
-    const m3u = container.querySelector('[data-m3u-paths]')!;
-    expect(m3u.querySelector('#m3u-relative-paths')).not.toBeNull();
-    expect(m3u.querySelector('#m3u-entry-base-path')).not.toBeNull();
-    expect(m3u.querySelector('#m3u-rewrite-from')).not.toBeNull();
-    expect(m3u.querySelector('#m3u-rewrite-to')).not.toBeNull();
-    m3u.remove();
-    const want = shape(vanilla('discovery-main.vanilla.html', { afterInit: true }));
-    const got = shape(container);
-    expect(got.elements).toEqual(want.elements);
-    expect(got.text).toBe(want.text);
+describe('the Discovery page', () => {
+  it('every control is drawn once, on its pill, named without a colon', () => {
+    page();
+    const where: Record<string, string> = {
+      'discover-adventurousness': 'recommendations',
+      'listening-stats-enabled': 'recommendations',
+      'listening-stats-interval': 'recommendations',
+      'discovery-lookback-period': 'recommendations',
+      'discovery-hemisphere': 'recommendations',
+      'playlist-sync-mode': 'playlists',
+      'create-backup': 'playlists',
+      'playlist-sync-wishlist-missing': 'playlists',
+      'm3u-export-enabled': 'playlists',
+      'library-m3u-enabled': 'playlists',
+      'library-m3u-path': 'playlists',
+      // all M3U settings on one pill: the three that were on Library too
+      'm3u-relative-paths': 'playlists',
+      'm3u-entry-base-path': 'playlists',
+      'm3u-rewrite-from': 'playlists',
+      'm3u-rewrite-to': 'playlists',
+      'video-import-lists': 'import-lists',
+    };
+    for (const [id, view] of Object.entries(where)) {
+      expect(document.querySelectorAll(`#${id}`), id).toHaveLength(1);
+      expect(panel(view).contains(document.getElementById(id)), id).toBe(true);
+    }
+    expect(panel('recommendations').hidden).toBe(false);
+    expect(panel('playlists').hidden).toBe(true);
+    // no old section headers, no colon after a label, no em dash
+    expect(document.querySelector('.settings-section-header, .form-group')).toBeNull();
+    for (const label of document.querySelectorAll('label'))
+      expect(label.textContent).not.toMatch(/:\s*$/);
+    expect(document.body.textContent).not.toContain('—');
+    // the discovery pool is the music side's own
+    expect(box('discovery-lookback-period').closest('[data-music-only]')).not.toBeNull();
   });
 
-  it('pool: the same elements, ids, classes, help lines and words', () => {
-    const { container } = pool();
-    const want = shape(vanilla('discovery-pool.vanilla.html', { afterInit: true }));
-    const got = shape(container);
-    expect(got.elements).toEqual(want.elements);
-    expect(got.text).toBe(want.text);
+  it('opening Import Lists on the music side loads the lists', () => {
+    page();
+    const before = videoShown.get();
+    act(() => nav.view('import-lists'));
+    expect(panel('import-lists').hidden).toBe(false);
+    expect(videoShown.get()).toBe(before + 1);
+  });
+
+  it('the heroes read each pill back', async () => {
+    store.hydrate({
+      discover: { adventurousness: 0.8 },
+      listening_stats: { enabled: true, poll_interval: 15 },
+      playlist_sync: { mode: 'replace', create_backup: true, wishlist_missing_tracks: false },
+      m3u_export: { enabled: true },
+    });
+    page();
+    await waitFor(() => expect(hero('recommendations')).toContain('southern hemisphere'));
+    expect(hero('recommendations')).toBe(
+      'Recommendations are adventurous, with more obscure picks. Play history is read from your media server every 15 minutes. New artists are scanned back over the last 90 days, and seasonal playlists follow the southern hemisphere.',
+    );
+    expect(panel('recommendations').textContent).toContain('90 days');
+    expect(hero('playlists')).toBe(
+      'A playlist sync replaces the playlist on your server and leaves missing tracks off the wishlist. A backup copy is kept on the server first. An M3U file is saved with each playlist download.',
+    );
+  });
+
+  it('the video side reads no lookback or hemisphere back', async () => {
+    document.body.setAttribute('data-side', 'video');
+    store.hydrate({});
+    page();
+    await waitFor(() => expect(calls.length).toBeGreaterThan(1));
+    await act(async () => {});
+    expect(hero('recommendations')).toBe(
+      'Recommendations are balanced between what you know and new finds. Play history is not collected.',
+    );
   });
 });
 
-describe('the values and summaries', () => {
+describe('dependent rows dim with their parent', () => {
+  it('the poll interval, the backup copy and the library M3U folder', () => {
+    store.hydrate({ playlist_sync: { mode: 'reconcile' } });
+    page();
+    expect(dimmed('listening-stats-interval')).toBe(true);
+    expect(dimmed('create-backup')).toBe(true);
+    expect(rowOf('create-backup').textContent).toContain('Only Replace uses this');
+    expect(dimmed('library-m3u-path')).toBe(true);
+    fireEvent.click(box('listening-stats-enabled'));
+    pick('playlist-sync-mode', 'replace');
+    fireEvent.click(box('library-m3u-enabled'));
+    expect(dimmed('listening-stats-interval')).toBe(false);
+    expect(dimmed('create-backup')).toBe(false);
+    expect(dimmed('library-m3u-path')).toBe(false);
+    // dimmed, never disabled: each still saves
+    expect(box('create-backup').disabled).toBe(false);
+  });
+
+  it('the sync mode says what the picked one does', () => {
+    store.hydrate({});
+    page();
+    expect(picked('playlist-sync-mode')).toBe('reconcile');
+    const row = rowOf('playlist-sync-mode');
+    expect(row.textContent).toContain('Edits the playlist in place');
+    pick('playlist-sync-mode', 'append');
+    expect(row.textContent).toContain('Only ever adds new tracks.');
+  });
+});
+
+describe('the values', () => {
   it('reads saved settings the way loadSettingsData did', () => {
     expect(resolveDiscovery({})).toEqual({
       m3uExport: false,
@@ -109,40 +201,7 @@ describe('the values and summaries', () => {
     ).toBe(false);
   });
 
-  it('summarises each section as settings.js did, the dial bug included', () => {
-    const base = resolveDiscovery({});
-    expect(discoverySummaries(base)).toEqual({
-      playlists: 'off',
-      stats: 'off',
-      discovery: 'plays it safe',
-    });
-    expect(
-      discoverySummaries({
-        ...base,
-        m3uExport: true,
-        libraryM3u: true,
-        statsEnabled: true,
-        adventurousness: 1,
-      }),
-    ).toEqual({
-      playlists: 'M3U export · library M3U',
-      stats: 'collecting play history',
-      discovery: 'plays it safe',
-    });
-  });
-
-  it('shows the fixed hints until the settings load, then the summaries', () => {
-    main();
-    const hint = (key: string) => document.querySelector(`[data-stg-summary="${key}"]`)!;
-    expect(hint('library-stats').textContent).toBe('Play history from your media server');
-    expect(hint('library-stats').classList.contains('is-live')).toBe(false);
-    act(() => store.hydrate({ listening_stats: { enabled: true }, m3u_export: { enabled: true } }));
-    expect(hint('library-stats').textContent).toBe('collecting play history');
-    expect(hint('library-stats').classList.contains('is-live')).toBe(true);
-    expect(hint('library-playlists').textContent).toBe('M3U export');
-  });
-
-  it('cuts the help to its first sentence as settings.js did', () => {
+  it('cuts the help to its first sentence', () => {
     expect(helpFirstLine('One. Two.')).toEqual({ line: 'One.', rest: true });
     expect(helpFirstLine('Only one.')).toEqual({ line: 'Only one.', rest: false });
     expect(helpFirstLine('')).toEqual({ line: '', rest: false });
@@ -152,15 +211,13 @@ describe('the values and summaries', () => {
 });
 
 describe('changing a setting saves only its own key', () => {
-  it('every control of the main part', async () => {
+  it('every store control of both pills', async () => {
     store.hydrate({ discover: { adventurousness: 0.3 } });
-    main();
+    page();
     fireEvent.click(box('m3u-export-enabled'));
     fireEvent.click(box('library-m3u-enabled'));
     fireEvent.change(box('library-m3u-path'), { target: { value: '/m3u' } });
-    fireEvent.change(document.getElementById('playlist-sync-mode')!, {
-      target: { value: 'append' },
-    });
+    pick('playlist-sync-mode', 'append');
     fireEvent.click(box('playlist-sync-wishlist-missing'));
     fireEvent.click(box('create-backup'));
     fireEvent.click(box('listening-stats-enabled'));
@@ -168,9 +225,6 @@ describe('changing a setting saves only its own key', () => {
     fireEvent.change(box('discover-adventurousness'), { target: { value: '0.75' } });
     expect(document.getElementById('discover-adventurousness-val')!.textContent).toBe('0.75');
     await waitFor(() => expect(store.hasPending()).toBe(false));
-    expect(
-      Object.assign({}, ...posted.flatMap((p) => Object.entries(p).map(([k, v]) => ({ [k]: v })))),
-    ).toBeTruthy();
     const merged: SettingsPayload = {};
     for (const body of posted)
       for (const [k, v] of Object.entries(body)) merged[k] = { ...merged[k], ...v };
@@ -184,7 +238,7 @@ describe('changing a setting saves only its own key', () => {
 
   it('an emptied poll interval keeps the empty field and saves 30', async () => {
     store.hydrate({ listening_stats: { poll_interval: 60 } });
-    main();
+    page();
     expect(box('listening-stats-interval').value).toBe('60');
     fireEvent.change(box('listening-stats-interval'), { target: { value: '' } });
     expect(box('listening-stats-interval').value).toBe('');
@@ -192,32 +246,28 @@ describe('changing a setting saves only its own key', () => {
   });
 
   it('an "i" opens the rest of its help, and only its own', () => {
-    main();
-    const group = box('create-backup').closest('.form-group')!;
-    // this one's help body is inside its form-group
-    const body = group.querySelector('.setting-help-body') as HTMLElement;
+    page();
+    const more = rowOf('create-backup').querySelector<HTMLElement>(
+      '[aria-label="More about this setting"]',
+    )!;
+    const body = document.getElementById(more.getAttribute('aria-controls')!)!;
     expect(body.hidden).toBe(true);
-    fireEvent.click(group.querySelector('.stg-help-line .info-icon')!);
+    fireEvent.click(more);
     expect(body.hidden).toBe(false);
-    expect(group.querySelector('.info-icon')!.classList.contains('open')).toBe(true);
-    const other = box('m3u-export-enabled').closest('.form-group')!
-      .nextElementSibling as HTMLElement;
-    expect(other.hidden).toBe(true);
-    fireEvent.keyDown(group.querySelector('.stg-help-line .info-icon')!, { key: 'Enter' });
-    expect(body.hidden).toBe(true);
+    expect(body.textContent).toContain('keeps its own copy of the source playlist');
+    const other = rowOf('library-m3u-enabled').querySelector<HTMLElement>(
+      '[aria-label="More about this setting"]',
+    )!;
+    expect(other.getAttribute('aria-expanded')).toBe('false');
   });
 });
 
-describe('Discovery Pool Settings', () => {
+describe('the discovery pool', () => {
   it('loads lookback and hemisphere with every settings load, not before', async () => {
-    pool();
+    page();
     expect(calls).toEqual([]);
     act(() => store.hydrate({}));
-    await waitFor(() =>
-      expect((document.getElementById('discovery-hemisphere') as HTMLSelectElement).value).toBe(
-        'southern',
-      ),
-    );
+    await waitFor(() => expect(picked('discovery-hemisphere')).toBe('southern'));
     expect((document.getElementById('discovery-lookback-period') as HTMLSelectElement).value).toBe(
       '90',
     );
@@ -227,13 +277,11 @@ describe('Discovery Pool Settings', () => {
 
   it('a change saves through its own endpoint, with the autosave rules', async () => {
     shell._settingsAutosaveOff = true;
-    pool();
+    page();
     fireEvent.change(document.getElementById('discovery-lookback-period')!, {
       target: { value: 'all' },
     });
-    fireEvent.change(document.getElementById('discovery-hemisphere')!, {
-      target: { value: 'southern' },
-    });
+    pick('discovery-hemisphere', 'southern');
     await act(async () => {});
     expect(calls.filter((c) => c.method === 'POST')).toEqual([]);
     expect(store.hasPending()).toBe(true);
@@ -247,19 +295,18 @@ describe('Discovery Pool Settings', () => {
 
   it('a pick not saved yet stays on screen when Settings is opened again', async () => {
     shell._settingsAutosaveOff = true;
-    const first = pool();
+    const first = page();
     act(() => store.hydrate({}));
     const lookback = () =>
       document.getElementById('discovery-lookback-period') as HTMLSelectElement;
-    const hemisphere = () => document.getElementById('discovery-hemisphere') as HTMLSelectElement;
     await waitFor(() => expect(lookback().value).toBe('90'));
     // not the server's, nor the field's own first value
     fireEvent.change(lookback(), { target: { value: 'all' } });
     // Settings is left and opened again: the page loads its settings again
     first.unmount();
-    pool();
+    page();
     act(() => store.hydrate({}));
-    await waitFor(() => expect(hemisphere().value).toBe('southern'));
+    await waitFor(() => expect(picked('discovery-hemisphere')).toBe('southern'));
     expect(lookback().value).toBe('all');
     // only the one with nothing queued was asked for again
     expect(

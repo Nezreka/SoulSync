@@ -109,7 +109,8 @@ LABELS: list[tuple[str, str]] = [
     # Quality
     ("Accept off-list quality when nothing in the list is available", "04-search.js"),
     # Discover
-    ("Enable listening stats collection from media server", "06-discover.js"),
+    # settings-bic phase 5: Discovery > Recommendations, plain words
+    ("Collect listening stats from your media server", "06-discover.js"),
     # Service rows on the Connections tab (Service Credentials page)
     ("Spotify", "11-settings.js"),
     ("slskd", "11-settings.js"),
