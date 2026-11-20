@@ -564,6 +564,11 @@ class ConfigManager:
                 # speed. Opt in explicitly; 0 also disables fallback.
                 "observed_speed_fallback_enabled": False,
                 "min_observed_download_speed_kbps": 250,
+                # slskd logged out of the Soulseek server (a ban, a reconnect):
+                # Soulseek downloads wait this long for the login without
+                # spending retries, then move on to the next source
+                # (core/soulseek_session.py). 0 = never wait.
+                "login_wait_minutes": 45,
                 "download_timeout": 600,
                 # Reddit report (YeloMelo95, Bell Canada): the existing
                 # 35-per-220s sliding-window cap allows all 35 searches in

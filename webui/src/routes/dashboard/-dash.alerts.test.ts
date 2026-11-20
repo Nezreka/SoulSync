@@ -31,6 +31,17 @@ describe('serviceAlerts', () => {
     expect(alerts.every((a) => a.severity === 'warn')).toBe(true);
   });
 
+  it('a logged-out Soulseek says the downloads are waiting, not just Disconnected', () => {
+    const alerts = serviceAlerts({
+      ...HEALTHY,
+      soulseek: { connected: false, logged_out: true, login_wait_minutes: 45 },
+    } as unknown as ServiceStatusPayload);
+    expect(alerts.map((a) => a.key)).toEqual(['soulseek-login']);
+    expect(alerts[0].label).toMatch(/^Soulseek logged out/);
+    expect(alerts[0].detail).toMatch(/wait for it/);
+    expect(alerts[0].detail).toMatch(/After 45 min/);
+  });
+
   it('a rate-limited Spotify is attention-worthy too, with the countdown', () => {
     const alerts = serviceAlerts({
       ...HEALTHY,

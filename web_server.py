@@ -3869,6 +3869,7 @@ def get_status():
             key: value for key, value in _status_cache['soulseek'].items()
             if key != 'source_cache_key'
         }
+        soulseek_data.update(_soulseek_login_fields())
 
         # Count active downloads for nav badge
         active_dl_count = 0
@@ -23211,6 +23212,18 @@ if automation_engine is not None and download_orchestrator is not None:
     except Exception as e:
         logger.debug(f"Deezer sign-in events not wired: {e}")
 
+# Soulseek login state: one poller asks slskd whether it is logged in to the
+# Soulseek server. Downloads wait on it, the Downloads page and dashboard show
+# a banner, and the 'Soulseek Logged Out' / 'Logged Back In' triggers fire.
+if download_orchestrator is not None:
+    try:
+        from core import soulseek_session as _soulseek_session
+        if automation_engine is not None:
+            _soulseek_session.set_event_emitter(automation_engine.emit)
+        _soulseek_session.start_poller(lambda: download_orchestrator.client('soulseek'), run_async)
+    except Exception as e:
+        logger.debug(f"Soulseek login poller not started: {e}")
+
 # --- Repair Worker API Endpoints: lifted to api/repair.py (wired near the
 # chat/labels/beatport blueprints below) ---
 # ================================================================================================
@@ -23255,11 +23268,29 @@ def _spotify_status_with_availability(spotify_status):
     return out
 
 
+def _soulseek_login_fields():
+    """slskd up but logged out of the Soulseek server (a ban, a reconnect):
+    what the Downloads and dashboard banner read, in both status payloads."""
+    try:
+        from core import soulseek_session as _slsk_session
+        snap = _slsk_session.snapshot()
+        out = bool(snap.get('logged_out'))
+        return {
+            'logged_out': out,
+            'logged_out_since': snap.get('since') if out else None,
+            'login_wait_minutes': round(_slsk_session.wait_seconds(config_manager) / 60),
+        }
+    except Exception as e:
+        logger.debug(f"soulseek login state unavailable: {e}")
+        return {}
+
+
 def _build_status_payload():
     """Build the same status payload used by GET /status, reading from the cache."""
     download_mode = config_manager.get('download_source.mode', 'hybrid')
     soulseek_data = dict(_status_cache.get('soulseek', {}))
     soulseek_data['source'] = download_mode
+    soulseek_data.update(_soulseek_login_fields())
     metadata_status = get_metadata_status_snapshot(spotify_client=spotify_client)
 
     # Count active downloads for nav badge

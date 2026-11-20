@@ -222,7 +222,7 @@ Use one, or build a **hybrid chain** in the order you prefer. If a source can't 
 
 | Source | Notes |
 |---|---|
-| **Soulseek** | via slskd. Whole-album grabs from one peer, peer quality scoring, search throttling, free-disk guard |
+| **Soulseek** | via slskd. Whole-album grabs from one peer, peer quality scoring, search throttling, free-disk guard. When slskd loses its Soulseek login (a ban, a reconnect), downloads wait for it with a banner and a **Soulseek Logged Out** automation trigger, then resume from the same peer |
 | **Tidal** | device-flow login, up to FLAC 24-bit Hi-Res |
 | **Qobuz** | up to Hi-Res Max (24-bit/192 kHz) |
 | **Deezer** | ARL token, FLAC → MP3 320 → MP3 128 fallback |

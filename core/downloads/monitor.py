@@ -78,6 +78,59 @@ MAX_TOTAL_QUARANTINE_RETRIES = 100
 _LIVE_TRANSFERS_FETCH_FAILED = object()
 
 
+def _transfer_broken(state_str) -> bool:
+    state_str = str(state_str or '')
+    return any(word in state_str for word in ('Errored', 'Failed', 'Rejected', 'TimedOut'))
+
+
+def _resume_same_candidate(task_id, task, username, filename, current_time, deferred_ops):
+    """After a Soulseek logout: ask the same peer for the same file again,
+    instead of marking it used and walking to the next candidate. Runs
+    under tasks_lock; the slskd calls are deferred."""
+    picked = task.get('picked_candidate') if isinstance(task.get('picked_candidate'), dict) else {}
+    size = int(picked.get('size') or 0)
+    old_id = task.get('download_id')
+    task['status'] = 'queued'
+    task['status_change_time'] = current_time
+    task['queued_start_time'] = current_time
+    task.pop('downloading_start_time', None)
+    task['retry_info'] = 'resumed after Soulseek login'
+    deferred_ops.append(('resume_soulseek_download', task_id, old_id, username, filename, size))
+    logger.info("Soulseek login back: asking %s for %s again", username, filename)
+
+
+def _resume_soulseek_download(task_id, old_id, username, filename, size):
+    """The deferred half: drop the broken transfer, enqueue it again. If the
+    enqueue fails the task goes back to its worker like any other retry."""
+    if old_id:
+        try:
+            run_async(download_orchestrator.cancel_download(old_id, username, remove=True))
+        except Exception as exc:  # noqa: BLE001 - a stale row is harmless
+            logger.debug("resume: could not clear the old transfer %s: %s", old_id, exc)
+    new_id = None
+    try:
+        new_id = run_async(download_orchestrator.download(username, filename, size))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("resume: could not enqueue %s from %s again: %s", filename, username, exc)
+    batch_id = None
+    with tasks_lock:
+        task = download_tasks.get(task_id)
+        if not task or task.get('status') == 'cancelled':
+            return
+        if new_id:
+            task['download_id'] = new_id
+            task['username'] = username
+            task['filename'] = filename
+            return
+        task['status'] = 'searching'
+        task.pop('download_id', None)
+        task.pop('username', None)
+        task.pop('filename', None)
+        batch_id = task.get('batch_id')
+    if batch_id:
+        missing_download_executor.submit(_download_track_worker, task_id, batch_id)
+
+
 def _resolve_download_source(username):
     """Map a download's username to its logical source for per-source budgeting.
 
@@ -802,6 +855,8 @@ class WebUIDownloadMonitor:
                     logger.debug(f"[Deferred] Successfully restarted worker for task {task_id}")
                 elif op[0] == 'replace_slow_download':
                     _replace_slow_download(*op[1:])
+                elif op[0] == 'resume_soulseek_download':
+                    _resume_soulseek_download(*op[1:])
             except Exception as e:
                 logger.error(f"[Deferred] Error executing deferred operation {op[0]}: {e}")
 
@@ -940,8 +995,33 @@ class WebUIDownloadMonitor:
         if not task_filename or not task_username:
             return False
 
+        # slskd logged out of Soulseek: nothing a transfer does now says
+        # anything about the peer or the file. Hold the task (no retry spent,
+        # no source marked used) until the login is back, or the deadline.
+        resume_same = False
+        if (_resolve_download_source(task_username) == 'soulseek'
+                and not task.get('_user_manual_pick')):
+            from core import soulseek_session
+            was_waiting = bool(task.get('waiting_for_login'))
+            if soulseek_session.should_wait(task, current_time):
+                return False
+            if was_waiting and not task.get('_soulseek_login_gave_up'):
+                # back in: the waiting time is not the transfer's fault, so
+                # its stall clocks start over, and a transfer the logout
+                # broke is asked for again from the same peer
+                resume_same = True
+                task['status_change_time'] = current_time
+                for _clock in ('queued_start_time', 'downloading_start_time'):
+                    if task.get(_clock):
+                        task[_clock] = current_time
+
         lookup_key = _make_context_key(task_username, task_filename)
         live_info = _lookup_live_info(task, live_transfers_lookup)
+
+        if resume_same and (not live_info or _transfer_broken(live_info.get('state', ''))):
+            _resume_same_candidate(task_id, task, task_username, task_filename,
+                                   current_time, deferred_ops)
+            return False
 
         if not live_info:
             # User-initiated manual pick — skip auto-retry. The status

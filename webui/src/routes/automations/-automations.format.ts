@@ -406,6 +406,8 @@ const TRIGGER_LABELS: Record<string, string> = {
   download_quarantined: 'File Quarantined',
   deezer_signin_failed: 'Deezer Sign-in Failed',
   deezer_signin_restored: 'Deezer Sign-in Restored',
+  soulseek_logged_out: 'Soulseek Logged Out',
+  soulseek_logged_in: 'Soulseek Logged Back In',
   wishlist_item_added: 'Wishlist Item Added',
   watchlist_artist_added: 'Artist Watched',
   watchlist_artist_removed: 'Artist Unwatched',
