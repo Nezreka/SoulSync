@@ -593,6 +593,8 @@ function isPageAllowed(pageId) {
     if (currentProfile.id === 1) return true;
     const normalizedPageId = normalizeProfilePageId(pageId);
     if (normalizedPageId === 'help' || normalizedPageId === 'issues') return true;
+    // the player app gates each section by its own media access
+    if (normalizedPageId === 'player') return true;
     // requests: admins answer them, profiles without download rights make them
     // (and moderators answer them, #2166: profile-nav.js holds the rule)
     if (normalizedPageId === 'requests') {
@@ -1767,6 +1769,8 @@ async function selectProfile(profileId) {
         const data = await res.json();
         _pfLastSelect = data;
         if (data.success) {
+            // the player app's who's-watching gate skips a pick made just now
+            try { sessionStorage.setItem('ss-profile-picked-at', String(Date.now())); } catch (e) { /* private mode */ }
             setCurrentProfile(data.profile);
             // New handshake for the switched profile's session (#1837);
             // the connect handler re-joins the profile room.
