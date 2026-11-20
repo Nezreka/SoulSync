@@ -535,6 +535,22 @@
                                                     </div>
                                                 </div>
 
+                                                <div class="post-processing-section">
+                                                    <div class="post-processing-section-title">Library Files</div>
+                                                    <div class="form-group">
+                                                        <label for="fill-empty-tags">Fill empty tags automatically:</label>
+                                                        <select id="fill-empty-tags" class="form-select">
+                                                            <option value="fill">Fill empty tags only</option>
+                                                            <option value="update">Fill and update</option>
+                                                            <option value="off">Off</option>
+                                                        </select>
+                                                        <span class="info-icon" role="button" tabindex="0"
+                                                            title="What's this?" onclick="toggleSettingHelp(this)"
+                                                            onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                        <small class="settings-hint setting-help-body" hidden>When the library learns something after a download (a genre, a year, a track total), SoulSync writes it into the tags the file left blank. Fill empty tags only never replaces a tag the file has. Fill and update also replaces tags that differ from the library, as applying a Library Re-tag finding does. Hand-tagged and locked albums, files still downloading or seeding, and read-only files are left alone. Every fill is listed on the Tools page under Filled Tags and can be undone. Off files them as Library Re-tag findings instead.</small>
+                                                    </div>
+                                                </div>
+
                                                 <div class="form-group">
                                                     <label>Supported Formats:</label>
                                                     <div class="supported-formats">MP3, FLAC, MP4/M4A, OGG</div>

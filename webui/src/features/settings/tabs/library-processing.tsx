@@ -436,6 +436,28 @@ export const IMPORT_SEARCH_SOURCE_OPTIONS = [
   { value: 'bandcamp', label: 'Bandcamp' },
 ] as const;
 
+/** "Fill empty tags automatically" (core/library2/tag_fill.py). unset is
+ *  Fill empty tags only: the import already fills blanks the same way */
+export const FILL_EMPTY_TAGS_OPTIONS = [
+  { value: 'fill', label: 'Fill empty tags only' },
+  { value: 'update', label: 'Fill and update' },
+  { value: 'off', label: 'Off' },
+] as const;
+
+export function fillEmptyTags(raw: unknown): string {
+  const value = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+  return FILL_EMPTY_TAGS_OPTIONS.some((o) => o.value === value) ? value : 'fill';
+}
+
+const FILL_EMPTY_TAGS_HELP =
+  'When the library learns something after a download (a genre, a year, a track total), ' +
+  'SoulSync writes it into the tags the file left blank. Fill empty tags only never ' +
+  'replaces a tag the file has. Fill and update also replaces tags that differ from the ' +
+  'library, as applying a Library Re-tag finding does. Hand-tagged and locked albums, ' +
+  'files still downloading or seeding, and read-only files are left alone. Every fill ' +
+  'is listed on the Tools page under Filled Tags and can be undone. Off files them as ' +
+  'Library Re-tag findings instead.';
+
 export function ProcessingCards({ store }: SettingsTabProps) {
   const settings = useSettings(store);
   const loads = useLoads(store);
@@ -608,6 +630,25 @@ export function ProcessingCards({ store }: SettingsTabProps) {
                   </>
                 }
               />
+            </div>
+
+            <div className="post-processing-section">
+              <div className="post-processing-section-title">Library Files</div>
+              <HintGroup help={FILL_EMPTY_TAGS_HELP}>
+                <label htmlFor="fill-empty-tags">Fill empty tags automatically:</label>
+                <select
+                  id="fill-empty-tags"
+                  className="form-select"
+                  value={loads ? fillEmptyTags(meta.fill_empty_tags) : 'fill'}
+                  onChange={(event) => setMeta('fill_empty_tags')(event.target.value)}
+                >
+                  {FILL_EMPTY_TAGS_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </HintGroup>
             </div>
 
             <div className="form-group">

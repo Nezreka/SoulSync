@@ -5,12 +5,17 @@
  * credentials the vanilla Connections tab saves).
  */
 
-import { act, fireEvent, render, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createSettingsStore, type SettingsPayload, type SettingsStore } from '../settings-store';
 import { shape, vanilla } from './__fixtures__/shape';
-import { artList, postProcessingSummary, ProcessingCards } from './library-processing';
+import {
+  artList,
+  fillEmptyTags,
+  postProcessingSummary,
+  ProcessingCards,
+} from './library-processing';
 
 let store: SettingsStore;
 let posted: SettingsPayload[];
@@ -196,5 +201,33 @@ describe('Post-Processing', () => {
         'No connected art sources available.',
       ),
     );
+  });
+});
+
+describe('Fill empty tags automatically', () => {
+  const select = () => document.getElementById('fill-empty-tags') as HTMLSelectElement;
+
+  it('shows Fill empty tags only when nothing is saved, and keeps a saved choice', () => {
+    act(() => store.hydrate({ metadata_enhancement: {} }));
+    cards();
+    expect(select().value).toBe('fill');
+    cleanup();
+    act(() => store.hydrate({ metadata_enhancement: { fill_empty_tags: 'update' } }));
+    cards();
+    expect(select().value).toBe('update');
+  });
+
+  it('reads junk as the default', () => {
+    expect(fillEmptyTags(undefined)).toBe('fill');
+    expect(fillEmptyTags('always')).toBe('fill');
+    expect(fillEmptyTags(' Off ')).toBe('off');
+  });
+
+  it('saves the choice under metadata_enhancement', async () => {
+    act(() => store.hydrate({ metadata_enhancement: {} }));
+    cards();
+    fireEvent.change(select(), { target: { value: 'off' } });
+    await act(() => store.flush());
+    expect(saved().metadata_enhancement).toEqual({ fill_empty_tags: 'off' });
   });
 });
