@@ -813,6 +813,20 @@ _EPISODE_ABSOLUTE_SQL = (
     "AND (ea.season_number < e.season_number OR (ea.season_number = e.season_number "
     "AND ea.episode_number <= e.episode_number))) END")
 
+def _episode_series_type_sql() -> str:
+    """the routing series type of an episode's show (anime picks the anime
+    episode template) for a query over ``episodes e JOIN shows s``: the same
+    rule routing_series_type answers -- set by hand, then an anime-marked
+    library -- never the genre. A show with no TMDB id is judged by its own
+    row. NULL = standard."""
+    tmdb = "(SELECT tmdb_id FROM shows WHERE id = e.show_id)"
+    own_lib = ("(SELECT 'anime' WHERE s.library_name IN (SELECT j.value FROM json_each(COALESCE("
+               "(SELECT CASE WHEN json_valid(vs.value) THEN vs.value END FROM video_settings vs "
+               "WHERE vs.key = s.server_source || '.anime_libraries'), '[]')) j))")
+    return ("CASE WHEN s.tmdb_id IS NOT NULL THEN " + _show_type_sql(tmdb, with_genre=False)
+            + " ELSE COALESCE(s.series_type, " + own_lib + ") END")
+
+
 _PLACEHOLDER_TITLE = re.compile(r"^(tba|tbd|to be announced|episode\s*#?\s*\d+(\.\d+)?)$", re.I)
 
 
@@ -9625,7 +9639,8 @@ class VideoDatabase:
                 "COALESCE(s.year, CAST(substr(NULLIF(s.first_air_date, ''), 1, 4) AS INTEGER)) AS show_year, "
                 "f.id AS file_id, f.relative_path, f.size_bytes, f.resolution, f.quality, "
                 "f.video_codec, f.audio_languages, f.subtitle_languages, f.release_source, "
-                + _EPISODE_ABSOLUTE_SQL + " AS absolute_number "
+                + _EPISODE_ABSOLUTE_SQL + " AS absolute_number, "
+                + _episode_series_type_sql() + " AS series_type "
                 "FROM episodes e JOIN shows s ON s.id = e.show_id "
                 "JOIN media_files f ON f.episode_id = e.id "
                 "WHERE e.has_file=1 AND s.hands_off=0 "
@@ -10290,7 +10305,7 @@ class VideoDatabase:
                 "SELECT 'movie' AS scope, m.id AS item_id, m.id AS title_id, f.id AS file_id, "
                 "m.title, m.year, m.tmdb_id, m.imdb_id, NULL AS tvdb_id, "
                 "NULL AS season, NULL AS episode, "
-                "NULL AS episode_title, NULL AS series, NULL AS absolute_number, "
+                "NULL AS episode_title, NULL AS series, NULL AS absolute_number, NULL AS series_type, "
                 "f.relative_path, f.size_bytes, f.quality, f.resolution, f.video_codec, f.audio_languages, f.subtitle_languages "
                 "FROM movies m JOIN media_files f ON f.movie_id = m.id "
                 "WHERE m.has_file = 1 AND m.hands_off = 0")]
@@ -10304,6 +10319,7 @@ class VideoDatabase:
                 "e.season_number AS season, e.episode_number AS episode, "
                 "e.title AS episode_title, s.title AS series, "
                 + _EPISODE_ABSOLUTE_SQL + " AS absolute_number, "
+                + _episode_series_type_sql() + " AS series_type, "
                 "f.relative_path, f.size_bytes, f.quality, f.resolution, f.video_codec, f.audio_languages, f.subtitle_languages "
                 "FROM episodes e JOIN shows s ON e.show_id = s.id "
                 "JOIN media_files f ON f.episode_id = e.id "
@@ -10332,7 +10348,7 @@ class VideoDatabase:
                 sql = ("SELECT 'movie' AS scope, m.id AS item_id, m.title, m.year, "
                        "m.tmdb_id, m.imdb_id, NULL AS tvdb_id, NULL AS season, NULL AS episode, "
                        "NULL AS episode_title, NULL AS series, NULL AS absolute_number, "
-                       + self._TITLE_FILE_COLS + " "
+                       "NULL AS series_type, " + self._TITLE_FILE_COLS + " "
                        "FROM movies m JOIN media_files f ON f.movie_id = m.id "
                        "WHERE m.id = ? ORDER BY f.size_bytes DESC")
             elif kind == "show":
@@ -10341,6 +10357,7 @@ class VideoDatabase:
                        "s.tmdb_id, s.imdb_id, s.tvdb_id, e.season_number AS season, "
                        "e.episode_number AS episode, e.title AS episode_title, s.title AS series, "
                        + _EPISODE_ABSOLUTE_SQL + " AS absolute_number, "
+                       + _episode_series_type_sql() + " AS series_type, "
                        + self._TITLE_FILE_COLS + " "
                        "FROM episodes e JOIN shows s ON e.show_id = s.id "
                        "JOIN media_files f ON f.episode_id = e.id "

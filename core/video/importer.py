@@ -306,7 +306,8 @@ def plan_import(dl: dict, src_path: str, *, list_dir: Callable, probe: dict | No
                 expected_duration_sec: float | None = None,
                 ids: dict | None = None, series_name: str | None = None,
                 locked: bool = False,
-                absolute_of: Callable[[Any, Any], Any] | None = None) -> dict:
+                absolute_of: Callable[[Any, Any], Any] | None = None,
+                series_type: str | None = None) -> dict:
     """Decide what to do with a finished download. Returns one of:
 
       {"action": "import",  "dest": {...}, "quality_label": str}
@@ -326,7 +327,9 @@ def plan_import(dl: dict, src_path: str, *, list_dir: Callable, probe: dict | No
     own yet, when its plain title's folder is already another show's
     (core.video.show_folder, #2052); None = the title. ``absolute_of(season,
     episode)`` gives an episode's absolute number for $absolute (None when
-    it isn't known); None = $absolute renders empty.
+    it isn't known); None = $absolute renders empty. ``series_type`` is the
+    show's routing type: 'anime' names the episode by the anime episode
+    template when one is set.
 
     MANUAL placement: ``force=True`` with an ``override`` ({scope, title, year, season,
     episode, episode_title, target_dir, media_id}) trusts the user's chosen identity —
@@ -334,7 +337,7 @@ def plan_import(dl: dict, src_path: str, *, list_dir: Callable, probe: dict | No
     files the file exactly where they said, replacing any worse copy. ffprobe is still
     used for the true resolution, but never to reject."""
     dl = dl or {}
-    settings = organization.normalize(settings)
+    settings = organization.for_series_type(organization.normalize(settings), series_type)
     override = override or {}
     scope = str(override.get("scope") or _scope_of(dl)).lower() if force else _scope_of(dl)
     name = basename_of(src_path)
@@ -588,7 +591,8 @@ def run_import(dl: dict, src_path: str, *, fs: Any, prober: Callable | None = No
                expected_duration_sec: float | None = None,
                plan: dict | None = None, ids: dict | None = None,
                series_name: str | None = None, locked: bool = False,
-               absolute_of: Callable[[Any, Any], Any] | None = None) -> dict:
+               absolute_of: Callable[[Any, Any], Any] | None = None,
+               series_type: str | None = None) -> dict:
     """Execute the import and return a DB patch dict for the download row.
 
     ``fs`` is an injected facade with: ``list_dir(dir)->iterable[name]``,
@@ -623,7 +627,7 @@ def run_import(dl: dict, src_path: str, *, fs: Any, prober: Callable | None = No
                            settings=settings, force=force, override=override,
                            library_dir=library_dir, expected_duration_sec=expected_duration_sec,
                            ids=ids, series_name=series_name, locked=locked,
-                           absolute_of=absolute_of)
+                           absolute_of=absolute_of, series_type=series_type)
     if plan["action"] == "reject":
         # Leave the file where it is; remember WHERE so manual import can find it.
         # _bad_release is transient (stripped by update_video_download): it tells

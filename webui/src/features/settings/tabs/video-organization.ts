@@ -102,6 +102,23 @@ export const EPISODE_EG = {
   tmdbid: '259909',
   imdbid: 'tt31846306',
 };
+// the anime template's preview: a second-season episode, so $absolute (026)
+// shows how it differs from $episode (01)
+export const ANIME_EG = {
+  ...EPISODE_EG,
+  series: 'Attack on Titan',
+  season: '02',
+  seasonraw: '2',
+  episode: '01',
+  episodetitle: 'Beast Titan',
+  absolute: '026',
+  year: '2013',
+  audiolangs: 'JA,EN',
+  sublangs: 'EN',
+  tvdbid: '267440',
+  tmdbid: '1429',
+  imdbid: 'tt2560140',
+};
 export const YOUTUBE_EG = {
   channel: 'Veritasium',
   title: 'How Electricity Actually Works',
@@ -214,6 +231,7 @@ export function fillForm(o: Org): Form {
   return {
     movie_template: text(o.movie_template),
     episode_template: text(o.episode_template),
+    anime_episode_template: text(o.anime_episode_template),
     youtube_template: text(o.youtube_template),
     transfer_mode: text(o.transfer_mode, 'copy'),
     colon_replacement: text(o.colon_replacement, 'delete'),
@@ -251,6 +269,7 @@ export function fillForm(o: Org): Form {
 const EMPTY_FORM: Form = {
   movie_template: '',
   episode_template: '',
+  anime_episode_template: '',
   youtube_template: '',
   transfer_mode: 'copy',
   colon_replacement: 'delete',
@@ -310,6 +329,7 @@ export function orgBody(f: Form, order: string[], echo: Echo) {
   return {
     movie_template: s('movie_template'),
     episode_template: s('episode_template'),
+    anime_episode_template: s('anime_episode_template'),
     youtube_template: s('youtube_template'),
     transfer_mode: s('transfer_mode'),
     colon_replacement: s('colon_replacement') || 'delete',
@@ -351,6 +371,7 @@ export function orgBody(f: Form, order: string[], echo: Echo) {
 export const RESET_BODY = {
   movie_template: '',
   episode_template: '',
+  anime_episode_template: '',
   youtube_template: '',
   transfer_mode: 'copy',
   verify_with_ffprobe: true,

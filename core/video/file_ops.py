@@ -57,6 +57,7 @@ def name_check(row: dict, real: str, roots: List[str], settings: dict) -> Dict[s
     root = containing_root(real, roots or [])
     if not root:
         return {"path": None, "why": "outside", "missing": []}
+    settings = organization.for_series_type(settings, row.get("series_type"))
     fields = naming_fields(row)
     if organization.languages_unknown(row.get("scope"), fields, settings):
         return {"path": None, "why": "languages", "missing": []}

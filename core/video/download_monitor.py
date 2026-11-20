@@ -417,15 +417,19 @@ def _make_organizer(db):
         except Exception:   # noqa: BLE001 - a probe crash must not block the import
             probe_info = None
         dl = _with_episode_title(db, dl)
-        owned_dir = _owned_library_dir(db, dl, settings)
-        ids = template_ids(db, dl, settings)
+        # an anime show's episode is named (and its show folder found) by the
+        # anime episode template when one is set
+        series_type = naming_series_type(db, dl, settings)
+        named = organization.for_series_type(settings, series_type)
+        owned_dir = _owned_library_dir(db, dl, named)
+        ids = template_ids(db, dl, named)
         plan = plan_import(dl, src, list_dir=fs.list_dir, probe=probe_info,
-                           settings=settings, library_dir=owned_dir,
+                           settings=named, library_dir=owned_dir,
                            expected_duration_sec=_expected_duration_sec(db, dl),
                            ids=ids,
-                           series_name=_series_name(db, dl, settings, ids, owned_dir),
+                           series_name=_series_name(db, dl, named, ids, owned_dir),
                            locked=title_locked(db, dl),
-                           absolute_of=absolute_lookup(db, ids, settings))
+                           absolute_of=absolute_lookup(db, ids, named))
         if _pre_persist_dest and plan["action"] in ("import", "upgrade") and plan.get("dest"):
             try:
                 db.update_video_download(dl["id"], dest_path=plan["dest"]["path"])
@@ -713,6 +717,26 @@ def template_ids(db, dl, settings, *, tmdb_lookup=None):
     except Exception:   # noqa: BLE001 - an id is a naming nicety, never a blocker
         logger.debug("template id resolution failed", exc_info=True)
     return out
+
+
+def naming_series_type(db, dl, settings):
+    """the routing series type of the show a download belongs to, when it
+    decides the name: only while an anime episode template is set, so a
+    library without one asks nothing. None for a movie or an unknown show."""
+    if not str((settings or {}).get("anime_episode_template") or "").strip():
+        return None
+    dl = dl or {}
+    if str(dl.get("kind") or "").lower() in ("movie", "youtube"):
+        return None
+    try:
+        tmdb_id, _imdb = _media_ids(db, dl)
+        if tmdb_id is not None:
+            return db.routing_series_type(tmdb_id=tmdb_id)
+        if str(dl.get("media_source") or "").lower() == "library" and dl.get("media_id"):
+            return db.routing_series_type(library_id=dl.get("media_id"))
+    except Exception:   # noqa: BLE001 - a name is never a reason to fail an import
+        logger.debug("naming series type failed", exc_info=True)
+    return None
 
 
 def absolute_lookup(db, ids, settings):

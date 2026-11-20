@@ -276,17 +276,18 @@ def move_plan(db, kind: str, item_id: int, library_id: int, folder=None) -> dict
                             "reason": "out of reach from here, on a drive only your media server sees"})
             continue
         fields = file_ops.naming_fields(row)
-        if organization.languages_unknown(row.get("scope"), fields, settings):
+        named = organization.for_series_type(settings, row.get("series_type"))
+        if organization.languages_unknown(row.get("scope"), fields, named):
             skipped.append({"file_id": row["file_id"], "filename": name,
                             "reason": "not read yet, so its name isn't known"})
             continue
         fields["quality"] = file_ops.file_quality(fields.get("quality"), real)
-        want = organization.render_path(row.get("scope"), root, fields, settings,
+        want = organization.render_path(row.get("scope"), root, fields, named,
                                         os.path.splitext(real)[1])["path"]
         if file_ops.same_path(real, want):
             continue
-        no_id = bool(organization.missing_ids(row.get("scope"), fields, settings))
-        if no_id or organization.absolute_unknown(row.get("scope"), fields, settings):
+        no_id = bool(organization.missing_ids(row.get("scope"), fields, named))
+        if no_id or organization.absolute_unknown(row.get("scope"), fields, named):
             # the template would drop an id this title has none stored for, or
             # an episode's absolute number not known yet: the file moves under
             # its own name, keeping the '{imdb-tt...}' or number it may carry,

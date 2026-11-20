@@ -38,6 +38,7 @@ import {
 import s from '../ui/settings.module.css';
 import { shell, useBusyGate } from './library-card';
 import {
+  ANIME_EG,
   EPISODE_EG,
   MISSING_SUBS_JOB,
   MOVIE_EG,
@@ -55,6 +56,7 @@ import {
 const SAVED_WHEN_LEFT: Record<string, true> = {
   'vo-movie-template': true,
   'vo-episode-template': true,
+  'vo-anime-episode-template': true,
   'vo-youtube-template': true,
   'vo-recycle-days': true,
   'vo-recycle-path': true,
@@ -73,6 +75,8 @@ const save = (key: string, value: string | boolean) =>
 const MOVIE_PH = '$title ($year)/$title ($year) $quality';
 const EPISODE_PH = '$series/Season $season/$series - S$seasonE$episode - $episodetitle $quality';
 const YOUTUBE_PH = '$channel/Season $year/$channel - $sxe - $title';
+const ANIME_PH =
+  '$series/Season $season/$series - S$seasonE$episode - $absolute - $episodetitle $quality';
 
 /**
  * A block of video organization settings: it loads them, says when they are
@@ -203,6 +207,17 @@ function useExamples() {
   return {
     movie: example('movie_template', MOVIE_PH, MOVIE_EG, '.mkv'),
     episode: example('episode_template', EPISODE_PH, EPISODE_EG, '.mkv'),
+    // an empty anime template means anime uses the episode template, so that
+    // is what it shows, drawn on an anime sample
+    anime: loads
+      ? renderTemplate(
+          String(form.anime_episode_template || '') ||
+            String(form.episode_template || '') ||
+            EPISODE_PH,
+          ANIME_EG,
+          colons,
+        ) + '.mkv'
+      : null,
     youtube: example('youtube_template', YOUTUBE_PH, YOUTUBE_EG, '.mp4'),
   };
 }
@@ -302,6 +317,15 @@ export function VideoNaming() {
           example={eg.episode}
           help="Filled in with Dexter: Resurrection, its first episode, as the example."
           more="Variables: $series, $season (01), $seasonraw (1), $episode (01), $episodetitle, $year, $quality, $resolution, $source, $codec, $audiolangs, $sublangs, $tmdbid, $imdbid, $tvdbid (the show's ids), $absolute (001, the episode's number counted across every season, for anime)."
+        />
+        <VideoTemplate
+          id="vo-anime-episode-template"
+          field="anime_episode_template"
+          label="Anime episode path template"
+          placeholder={ANIME_PH}
+          example={eg.anime}
+          help="Used for anime shows (set by hand, or in a library marked Anime) instead of the episode template. Leave it empty and anime is named like any other show."
+          more="Same variables as episodes. Add $absolute for the episode's number counted across every season (026 for S02E01 when season 1 has 25), the way anime releases are numbered, but keep S$seasonE$episode in it too: that's what your media server matches on."
         />
         <Row
           label="Colons in titles"

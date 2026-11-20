@@ -8,6 +8,8 @@ turn on and off.
 Settings (persisted as JSON in video.db ``video_settings['organization']``):
   - ``movie_template``      : path template for movies   (folders via '/', last = file)
   - ``episode_template``    : path template for episodes
+  - ``anime_episode_template`` : path template for an anime show's episodes
+                              ('' = the episode template; see for_series_type)
   - ``verify_with_ffprobe`` : probe the real file (true quality + reject junk)
   - ``replace_existing``    : upgrade-replace a worse copy already in the library
   - ``transfer_mode``       : 'copy' (reclaim source unless torrent) | 'move'
@@ -49,6 +51,9 @@ DEFAULTS = {
     "version": 1,
     "movie_template": "$title ($year)/$title ($year) $quality",
     "episode_template": "$series/Season $season/$series - S$seasonE$episode - $episodetitle $quality",
+    # anime shows (set by hand, or in an anime-marked library) name their
+    # episodes with this one instead; empty = the episode template above
+    "anime_episode_template": "",
     # YouTube channels organise as a TV show Plex/Jellyfin can index WITHOUT any
     # online agent: channel = series, season = upload YEAR, and the ytdl-sub-style
     # $sxe token (s2026e0711) in the FILENAME. Plex's Series Scanner parses that
@@ -135,6 +140,9 @@ def normalize(raw: Any) -> dict:
         v = raw.get(key)
         if isinstance(v, str) and v.strip():
             d[key] = v.strip()
+    # unlike the others, blank is a real value here: no anime template of its own
+    if isinstance(raw.get("anime_episode_template"), str):
+        d["anime_episode_template"] = raw["anime_episode_template"].strip()
     sb = str(raw.get("youtube_sponsorblock") or "").strip().lower()
     if sb in ("off", "mark", "remove"):
         d["youtube_sponsorblock"] = sb
@@ -300,6 +308,20 @@ def _langs(v) -> str:
     MediaInfo AudioLanguages shape). '' when it has none."""
     from core.video.mediainfo import language_list
     return "+".join(code.upper() for code in language_list(v))
+
+
+def for_series_type(settings: Any, series_type: Any) -> dict:
+    """the settings an episode of a show of this series type is named by: an
+    anime show's episodes take the anime episode template when one is set,
+    every other show (and an anime one with none set) the episode template.
+    Everything that renders or reads the episode template takes these, so
+    one swap covers the importer, mass rename and the naming check. Any
+    other show's settings come back as they were given, not copied."""
+    anime = str((settings or {}).get("anime_episode_template") or "").strip() \
+        if isinstance(settings, dict) else ""
+    if not anime or str(series_type or "").strip().lower() != "anime":
+        return settings
+    return dict(settings, episode_template=anime)
 
 
 def languages_unknown(scope: Any, fields: dict, settings: Any) -> bool:
@@ -536,6 +558,6 @@ def render_path(scope: Any, root: Any, fields: dict, settings: Any, ext: Any) ->
 
 __all__ = [
     "DEFAULTS", "default_settings", "normalize", "load", "save",
-    "render_template", "render_path", "episode_folders_below_series",
+    "render_template", "render_path", "episode_folders_below_series", "for_series_type",
     "COLON_MODES", "replace_colons",
 ]
