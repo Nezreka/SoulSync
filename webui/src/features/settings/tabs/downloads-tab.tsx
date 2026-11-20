@@ -273,6 +273,9 @@ function Retry({ store }: SettingsTabProps) {
   const minCount = useNumber(store, values.versionMinCount, (raw) =>
     store.set('post_processing', 'version_mismatch_min_count', Math.max(1, parseInt(raw, 10) || 2)),
   );
+  const rejectDays = useNumber(store, values.reviewRejectDays, (raw) =>
+    store.set('post_processing', 'review_auto_reject_days', Math.max(0, parseInt(raw, 10) || 0)),
+  );
   const check = (id: string, label: string, checked: boolean, onChange: (v: boolean) => void) => (
     <label className="checkbox-label">
       <input
@@ -387,6 +390,52 @@ function Retry({ store }: SettingsTabProps) {
                 How many quarantined candidates must have failed the <em>same</em> version mismatch
                 before the last-resort acceptance kicks in. Higher = more confirmation that no
                 correct version exists. Only used when the option above is on.
+              </>
+            }
+          />
+          <Row
+            control={check(
+              'clear-near-misses-on-success',
+              'Clear near-misses once the track downloads',
+              values.clearNearMisses,
+              set('clear_near_misses_on_success'),
+            )}
+            help={
+              <>
+                When a rejected file is followed by a candidate that imports fine, the rejected
+                files leave Review on their own. They go to the Downloads recycle bin, so you can
+                restore one to Review. Automatic quality upgrades never send anything to Review
+                either way: if nothing verifies, the file you already have stays.
+              </>
+            }
+          />
+          <Row
+            control={
+              <>
+                <label htmlFor="review-auto-reject-days">
+                  Auto-reject Review items older than (days)
+                </label>
+                <input
+                  type="number"
+                  id="review-auto-reject-days"
+                  min="0"
+                  max="365"
+                  step="1"
+                  style={{ width: '100px' }}
+                  autoComplete="off"
+                  data-bwignore=""
+                  data-1p-ignore=""
+                  data-lpignore="true"
+                  value={rejectDays.value}
+                  onChange={(event) => rejectDays.onChange(event.target.value)}
+                />
+              </>
+            }
+            help={
+              <>
+                Quarantined files nobody has looked at after this many days move to the Downloads
+                recycle bin, where you can still restore them. <strong>0</strong> keeps them until
+                you decide.
               </>
             }
           />

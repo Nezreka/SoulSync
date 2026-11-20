@@ -1,6 +1,8 @@
 import { useNavigate } from '@tanstack/react-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { SoulseekLoginBanner } from '@/features/downloads/soulseek-login';
+
 import type { AdlBatch, AdlDeletedEntry, AdlDownload, AdlQuarantineEntry } from '../-adl.types';
 import type { ReviewActionHandlers } from './adl-review';
 
@@ -450,6 +452,8 @@ export function ActiveDownloadsPage() {
             onClearEverything={() => void onClearEverything()}
             cancelAllPending={cancelAllPending}
           />
+
+          <SoulseekLoginBanner />
 
           {state.filterBatchId ? (
             <BatchFilterBanner

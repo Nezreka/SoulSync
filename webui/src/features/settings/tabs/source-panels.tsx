@@ -1310,6 +1310,24 @@ export function SoulseekPanel({ store }: { store: SettingsStore }) {
         {hint('Abandon stuck downloads after this many minutes')}
       </div>
       <div className="form-group">
+        <label>Wait for Soulseek login (minutes):</label>
+        <NumberField
+          store={store}
+          id="soulseek-login-wait-minutes"
+          placeholder="45"
+          min="0"
+          max="1440"
+          value={num(s.login_wait_minutes, 45, true)}
+          save={(raw) => {
+            const n = parseInt(raw, 10);
+            set('login_wait_minutes', Number.isFinite(n) && n >= 0 ? n : 45);
+          }}
+        />
+        {hint(
+          'When slskd loses its Soulseek login (a server ban, a reconnect), Soulseek downloads wait this long for it without using up their retries, then move on to your next source. 0 never waits.',
+        )}
+      </div>
+      <div className="form-group">
         <label className="checkbox-label">
           <input
             type="checkbox"

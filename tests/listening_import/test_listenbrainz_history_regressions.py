@@ -33,6 +33,9 @@ def listen(ts):
 @pytest.fixture
 def client(monkeypatch):
     monkeypatch.setattr(ListenBrainzClient, "_validate_and_get_username", lambda self: True)
+    # these roots are maloja: the koito probe already answered "no"
+    monkeypatch.setattr("core.listenbrainz_client._KOITO_SERVERS",
+                        {"http://maloja.local/music": False, "http://maloja.local": False})
     return ListenBrainzClient(token="private-token", base_url="https://example.test")
 
 

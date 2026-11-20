@@ -7,6 +7,9 @@ from urllib.parse import quote
 
 logger = get_logger("listenbrainz_client")
 
+# server root -> True when it is a Koito server (see _koito_root)
+_KOITO_SERVERS: Dict[str, bool] = {}
+
 class ListenBrainzClient:
     """Client for interacting with ListenBrainz API"""
 
@@ -171,6 +174,37 @@ class ListenBrainzClient:
                 return False
 
         return True
+
+    def submit_playing_now(self, artist: str, track: str, album: str = '',
+                           duration_seconds: int = 0) -> bool:
+        """Send a ``playing_now`` listen: what is playing right now.
+
+        ListenBrainz (and Koito, and Maloja through its ListenBrainz API)
+        show it until the track ends; it is never stored as a listen.
+        """
+        if not self.is_authenticated() or not artist or not track:
+            return False
+        metadata: Dict[str, Any] = {'artist_name': artist, 'track_name': track}
+        if album:
+            metadata['release_name'] = album
+        if duration_seconds and int(duration_seconds) > 0:
+            metadata['additional_info'] = {'duration': int(duration_seconds)}
+        try:
+            response = self._make_request_with_retry(
+                'POST', f"{self.base_url}/submit-listens", max_retries=1,
+                json={'listen_type': 'playing_now', 'payload': [{'track_metadata': metadata}]},
+                headers={'Authorization': f'Token {self.token}',
+                         'Content-Type': 'application/json'},
+                timeout=10,
+            )
+            ok = bool(response is not None and response.status_code == 200)
+            if not ok:
+                logger.debug("ListenBrainz now playing failed: %s",
+                             response.status_code if response is not None else 'no response')
+            return ok
+        except Exception as e:
+            logger.debug(f"ListenBrainz now playing error: {e}")
+            return False
 
     _MAX_TRACKS_PER_ADD = 100  # ListenBrainz MAX_RECORDINGS_PER_ADD
     _PLAYLIST_EXT = "https://musicbrainz.org/doc/jspf#playlist"
@@ -533,6 +567,9 @@ class ListenBrainzClient:
         if not username:
             return None
 
+        koito = self._koito_root()
+        if koito:
+            return self._get_koito_listens(koito, min_ts, max_ts, count)
         if self._maloja_base_url():
             return self._get_maloja_listens(min_ts, max_ts, count)
 
@@ -567,10 +604,76 @@ class ListenBrainzClient:
 
     def _maloja_base_url(self):
         # Preserve reverse-proxy prefixes; only recognize documented Maloja paths.
+        # Koito serves the same /apis/listenbrainz path, so it is told apart first.
+        if self._koito_root():
+            return None
         for suffix in ("/apis/listenbrainz/1", "/apis/lbrnz/1"):
             if self.base_url.endswith(suffix):
                 return self.base_url[:-len(suffix)] + "/apis/mlj_1"
         return None
+
+    def _koito_root(self):
+        """The Koito server behind this base URL, else None.
+
+        Koito and Maloja both answer ListenBrainz at ``/apis/listenbrainz/1``;
+        only Koito has ``/apis/web/v1/health``. Probed once per server.
+        """
+        suffix = "/apis/listenbrainz/1"
+        if not self.base_url.endswith(suffix):
+            return None
+        root = self.base_url[:-len(suffix)]
+        known = _KOITO_SERVERS.get(root)
+        if known is None:
+            try:
+                response = self.session.get(root + "/apis/web/v1/health", timeout=5)
+                known = response is not None and response.status_code == 200
+            except Exception as e:  # noqa: BLE001 - unreachable reads as "not koito"
+                logger.debug(f"Koito probe failed for {root}: {e}")
+                return None   # not cached: the next call may reach it
+            _KOITO_SERVERS[root] = known
+        return root if known else None
+
+    def _get_koito_listens(self, root, min_ts, max_ts, count):
+        """Koito's own listen history, as descending ListenBrainz listens.
+
+        ``/apis/web/v1/listens`` pages newest first between ``from`` and
+        ``to`` (unix, inclusive), up to 500 per page. Koito has no album on
+        a listen, so ``release_name`` stays empty.
+        """
+        count = max(1, min(500, count))
+        params = {"page": 1, "limit": count,
+                  "from": int(min_ts) + 1 if min_ts is not None else 1,
+                  "to": int(max_ts) - 1 if max_ts is not None else int(time.time())}
+        response = self._make_request_with_retry(
+            "get", root + "/apis/web/v1/listens",
+            headers={"Authorization": f"Token {self.token}"} if self.token else {},
+            params=params, timeout=20,
+        )
+        data = self._history_response(response)
+        rows = data.get("items")
+        if not isinstance(rows, list):
+            raise ValueError("Koito history response is missing its listen list")
+        listens = []
+        for row in rows:
+            from datetime import datetime
+            try:
+                stamp = int(datetime.fromisoformat(str(row["time"]).replace("Z", "+00:00")).timestamp())
+            except (KeyError, TypeError, ValueError):
+                continue
+            track = row.get("track") or {}
+            artists = [a.get("name", "") for a in (track.get("artists") or []) if isinstance(a, dict)]
+            if not track.get("title") or not artists:
+                continue
+            listens.append({
+                "listened_at": stamp,
+                "track_metadata": {
+                    "track_name": track["title"],
+                    "artist_name": ", ".join(a for a in artists if a),
+                    "release_name": "",
+                    "additional_info": {},
+                },
+            })
+        return {"payload": {"listens": listens, "count": len(listens)}}
 
     def _get_maloja_listens(self, min_ts, max_ts, count):
         """Adapt zero-based native pages to descending ListenBrainz listens.
@@ -626,7 +729,7 @@ class ListenBrainzClient:
         """Fetch total scrobble count for a user if supported by the server."""
         if not username:
             return None
-        if self._maloja_base_url():
+        if self._koito_root() or self._maloja_base_url():
             return None  # Native pagination does not need an estimated total.
         try:
             url = f"{self.base_url}/user/{quote(username, safe='')}/listen-count"

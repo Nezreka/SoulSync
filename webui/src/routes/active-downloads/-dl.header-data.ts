@@ -8,7 +8,7 @@ import type { AdlBatch, AdlDownload } from './-adl.types';
 import type { DlLive } from './-ui/dl-header';
 import type { VdlDownload } from './-vdl.types';
 
-import { formatSpeed, statusClass } from './-adl.helpers';
+import { formatSpeed, isUpgradeRow, statusClass } from './-adl.helpers';
 import { ADL_FILTER_STATUSES, ADL_FILTERS } from './-adl.types';
 import { clockTime, dayKey, parseStamp } from './-dl.format';
 import { quietLine } from './-ui/dl-header';
@@ -36,6 +36,10 @@ export function musicChipCounts(rows: AdlDownload[]): Record<string, number> {
   const out: Record<string, number> = { all: rows.length };
   for (const f of ADL_FILTERS) {
     if (f.value === 'all') continue;
+    if (f.value === 'upgrades') {
+      out[f.value] = rows.filter(isUpgradeRow).length;
+      continue;
+    }
     const statuses = ADL_FILTER_STATUSES[f.value] ?? [];
     out[f.value] = rows.filter((dl) => statuses.includes(dl.status)).length;
   }

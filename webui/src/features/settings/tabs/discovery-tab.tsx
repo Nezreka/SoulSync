@@ -291,7 +291,8 @@ function Main({ store }: SettingsTabProps) {
             <div className="help-text setting-help-body" style={{ marginTop: '10px' }}>
               Higher pushes globally-popular artists down so more obscure, non-obvious picks
               surface; lower keeps recommendations safe and close to what you already know. Affects{' '}
-              <strong>Based On Your Listening</strong>.
+              <strong>Based On Your Listening</strong>. This is the default for every profile:
+              anyone who turns the dial on their Discover page keeps their own setting.
             </div>
           </div>
         </div>

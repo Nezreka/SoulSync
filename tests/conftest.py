@@ -1153,6 +1153,19 @@ def _fresh_provider_cache_and_lastfm_key(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _fresh_soulseek_session_and_koito_probe():
+    """the soulseek login state and the koito probe answers live per process.
+    each test starts logged-in-unknown with nothing probed: a chat test that
+    saw "logged out" must not park the next test's downloads."""
+    from core import listenbrainz_client, soulseek_session
+    soulseek_session._reset_for_tests()
+    listenbrainz_client._KOITO_SERVERS.clear()
+    yield
+    soulseek_session._reset_for_tests()
+    listenbrainz_client._KOITO_SERVERS.clear()
+
+
+@pytest.fixture(autouse=True)
 def _fresh_reconciler_name_misses():
     """the reconciler believes a file-name miss for a few minutes; each test
     starts without one from another test"""

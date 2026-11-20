@@ -93,6 +93,8 @@ Automations can be organized into named **groups** (e.g. "Nightly Operations", "
 | **Download Failed** | A track permanently fails to download |
 | **File Quarantined** | AcoustID verification rejects a download |
 | **Batch Complete** | An album or playlist batch download finishes |
+| **Soulseek Logged Out** | slskd loses its Soulseek login (a server ban, a reconnect). Once per logout; pair it with a notification to hear about it on your phone |
+| **Soulseek Logged Back In** | slskd is logged in again; \`was_out_minutes\` says for how long |
 
 ## Library & maintenance
 

@@ -379,6 +379,8 @@ Your own plays can scrobble to your own accounts, from the moment you turn it on
 - **Last.fm**: **Sign in** under the Last.fm row. Writing scrobbles needs you to sign in to Last.fm once (reading them only needed your username). This needs the admin to have added a Last.fm API key and secret in Settings.
 
 Your plays never go to the admin's accounts, and the admin's never go to yours.
+
+When the web player starts a song, your accounts show it as **now playing**. A play is sent as soon as it counts as a scrobble (half the song or 4 minutes, whichever comes first) rather than in the next 5-minute batch; if a service is down, the batch tries again later.
 `
         },
         {

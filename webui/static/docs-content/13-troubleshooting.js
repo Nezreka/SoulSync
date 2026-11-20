@@ -218,6 +218,10 @@ Secrets show as \`***\` so you can see the redaction happened. API keys, tokens,
 
 A tab you left open while SoulSync was updated is still running the old version. It notices when it reconnects and offers a **Reload** button instead of breaking on the next page you open. Nothing reloads by itself, so finish what you're doing first. The same note shows if a page fails to load because its file went away with the update.
 
+## "Waiting for Soulseek login"
+
+slskd is running but logged out of the Soulseek server, often a temporary ban or a reconnect. A banner on Downloads and the dashboard says so. Soulseek downloads wait instead of failing: a search waits before it runs, and a transfer the logout broke is asked for again from the same peer once slskd is back, so no retries are used up and nothing falls back to a worse source. If Soulseek isn't first in your hybrid order, searches simply leave it out until it's back. After **Wait for Soulseek login** (Settings, Downloads, Soulseek; 45 minutes by default, 0 to never wait) a waiting track moves on to your next source. Add a **Soulseek Logged Out** automation with a notification to hear about it. The video side holds its Soulseek downloads the same way.
+
 ## Import folder not detected
 
 - Confirm the import path (Settings \u2192 Library \u2192 Folders \u2192 **Import Folder**) uses the **container path** (e.g. \`/app/Staging\` in Docker), not the host path.

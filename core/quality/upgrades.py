@@ -34,15 +34,31 @@ def annotate_enhanced_payload(database, payload: dict) -> dict:
     except Exception as exc:  # noqa: BLE001 - see docstring
         logger.warning('could-be-better badges unavailable for this artist: %s', exc)
         found = None
+    # an upgrade already on the Downloads page says so: "upgrade queued"
+    try:
+        from core.downloads.upgrade_rows import queued_upgrade_track_ids
+        queued = queued_upgrade_track_ids() if found else set()
+    except Exception as exc:  # noqa: BLE001 - decoration only
+        logger.debug('upgrade-queued badges unavailable: %s', exc)
+        queued = set()
     for album in albums:
         count = 0
+        queued_count = 0
         for track in album.get('tracks') or []:
             track.pop('quality_upgrade', None)
             hit = (found or {}).get(id(track))
             if hit:
+                hit = dict(hit)
+                try:
+                    if int(track.get('id')) in queued:
+                        hit['queued'] = True
+                        queued_count += 1
+                except (TypeError, ValueError):
+                    pass
                 track['quality_upgrade'] = hit
                 count += 1
         album['upgradable_count'] = count
+        album['upgrade_queued_count'] = queued_count
     return payload
 
 

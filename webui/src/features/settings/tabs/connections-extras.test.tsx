@@ -8,6 +8,7 @@ import { act, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createSettingsStore, type SettingsPayload, type SettingsStore } from '../settings-store';
+import { SCROBBLER_PRESETS, scrobblerPresetUrl } from './connections-extras';
 import { ConnectionsTab } from './connections-tab';
 
 type Shell = Window & Record<string, unknown>;
@@ -125,6 +126,33 @@ describe('the Scrobbling and Extras cards', () => {
       acoustid: { enabled: true },
       listenbrainz: { username: 'u', token: 't', scrobble_enabled: true },
     });
+  });
+
+  it('the Maloja and Koito buttons fill in the scrobbler address in one click', async () => {
+    group();
+    act(() => store.hydrate({ listenbrainz: { base_url: '' } }));
+    fireEvent.click(el('listenbrainz-preset-koito'));
+    expect(el('listenbrainz-base-url').value).toBe('http://localhost:4110/apis/listenbrainz');
+    fireEvent.change(el('listenbrainz-base-url'), {
+      target: { value: 'https://music.example/koito/apis/listenbrainz/1/' },
+    });
+    fireEvent.click(el('listenbrainz-preset-maloja'));
+    expect(el('listenbrainz-base-url').value).toBe('https://music.example/koito/apis/listenbrainz');
+    await waitFor(() => expect(store.hasPending()).toBe(false));
+    expect(saved().listenbrainz).toEqual({
+      base_url: 'https://music.example/koito/apis/listenbrainz',
+    });
+  });
+
+  it('a preset keeps the server typed, else localhost on its own port', () => {
+    const koito = SCROBBLER_PRESETS.find((p) => p.id === 'koito')!;
+    expect(scrobblerPresetUrl('', koito)).toBe('http://localhost:4110/apis/listenbrainz');
+    expect(scrobblerPresetUrl('koito.lan:4110', koito)).toBe(
+      'http://koito.lan:4110/apis/listenbrainz',
+    );
+    expect(scrobblerPresetUrl('https://api.listenbrainz.org', koito)).toBe(
+      'http://localhost:4110/apis/listenbrainz',
+    );
   });
 
   it('Authorize Scrobbling saves first, then opens Last.fm', async () => {

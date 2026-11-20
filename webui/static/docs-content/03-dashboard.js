@@ -444,7 +444,7 @@ Downloads are grouped into **batches** — one triggered download job (album syn
 - Old rows collapse into **"Earlier (N)"**; same-album history folds to one line; past 12 items a "Show N more" fold appears.
 - **Recent History** fold with a **Download History** button for the full download+import history.
 
-Status chips filter the view: **All / Active / Completed / Queued / Failed**.
+Status chips filter the view: **All / Active / Completed / Queued / Failed / Upgrades**. A quality upgrade (a download that replaces a file you already have) says so on its row: "Replacing MP3 320" while it's being found, "MP3 320 → FLAC" once the new file is in. **Upgrades** shows just those, whatever their status. On the artist page, a track whose upgrade is already on its way shows **↑ queued**, and the album's Upgrade button counts how many are queued.
 
 ## Clients tab — download-client management
 
@@ -478,6 +478,12 @@ Bulk: **✔ Approve all**, **🧹 Clean orphaned** (removes dead log rows whose 
 Files that **failed** verification and were **not** imported. Trigger badges: **DURATION / INTEGRITY**, **ACOUSTID MISMATCH**, **ACOUSTID UNVERIFIED**, **BIT DEPTH FILTER**. Alternative rejected candidates for the same track fold behind "▾ N more"; **🗑 Delete all N** clears a whole candidate group.
 
 Per-row: Play, Compare, Audit, **✔ Approve** (re-imports this exact file into the library, marked human-verified — nothing is renamed), **⤴ Recover** (legacy sidecars without embedded context go back to Staging for manual import), **🗑 Delete** (permanent).
+
+Quarantine clears itself of noise:
+
+- **Near-misses**: when a track's later candidate downloads fine, the files it quarantined on the way leave Review on their own. They go to the 🗑 Deleted recycle bin as "Near-miss, cleared from Review", so **↩ Restore** puts one back in Review. Turn it off with **Clear near-misses once the track downloads** in Settings > Downloads > Retry Logic.
+- **Automatic quality upgrades** never send anything to Review: if no candidate verifies, the file you already have stays and the rejected ones go to the recycle bin. An upgrade you start yourself still lands in Review like any download.
+- **Auto-reject old items** (off by default): set **Auto-reject Review items older than (days)** in the same place and older entries move to the recycle bin as "Review item expired".
 
 > [!TIP]
 > Lots of **DURATION** quarantines that turn out to be the right song? Raise **Duration tolerance** in Settings > Library > Post-Processing so future downloads with the same small drift go straight through.

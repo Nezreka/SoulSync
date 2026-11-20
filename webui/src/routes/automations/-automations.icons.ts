@@ -44,6 +44,8 @@ export const AUTOMATION_ICONS: Record<string, string> = {
   download_quarantined: '⚠️',
   deezer_signin_failed: '🚫',
   deezer_signin_restored: '✅',
+  soulseek_logged_out: '🔌',
+  soulseek_logged_in: '✅',
   wishlist_item_added: '➕',
   watchlist_artist_added: '👤',
   watchlist_artist_removed: '👤',

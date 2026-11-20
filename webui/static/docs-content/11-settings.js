@@ -28,7 +28,7 @@ Settings save themselves a moment after you change them. The status at the top r
 - **Deezer** — App ID, App Secret, and Redirect URI (OAuth), or an ARL token for playlist access and downloads. Powers favorites, playlists, and Deezer downloads.
 - **Discogs** — Personal access token for release metadata.
 - **AcoustID** — API key for audio fingerprinting and download verification.
-- **ListenBrainz** — User token (username optional) for listening-history import and scrobbling. The recommended scrobbler: free and open, no subscription.
+- **ListenBrainz** — User token (username optional) for listening-history import and scrobbling. The recommended scrobbler: free and open, no subscription. Self-hosted **Maloja** or **Koito**? Click its button under the card to fill in the address (it keeps the server you typed, else localhost on its usual port), then paste that server's API key as the token. History sync from Stats reads each one's own history.
 
 Each service card shows **configured** or **missing** in its header — the colored dot next to the service name is branding, not a live health light.
 `

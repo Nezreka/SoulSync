@@ -498,6 +498,24 @@ function AcoustidCard({ store }: { store: SettingsStore }) {
 
 // ── ListenBrainz ──
 
+/** self-hosted scrobblers that speak the ListenBrainz API, and the port
+ *  each listens on out of the box */
+export const SCROBBLER_PRESETS = [
+  { id: 'maloja', label: 'Maloja', port: 42010 },
+  { id: 'koito', label: 'Koito', port: 4110 },
+] as const;
+
+/** the ListenBrainz address on a self-hosted scrobbler: keeps the server
+ *  already typed (and any reverse-proxy path before its api), else
+ *  localhost on the scrobbler's own port */
+export function scrobblerPresetUrl(current: string, preset: { port: number }): string {
+  let root = (current || '').trim().replace(/\/+$/, '');
+  root = root.replace(/\/apis\/(listenbrainz|lbrnz)(\/1)?$/i, '').replace(/\/1$/, '');
+  if (!root || /api\.listenbrainz\.org/i.test(root)) root = `http://localhost:${preset.port}`;
+  if (!/^https?:\/\//i.test(root)) root = `http://${root}`;
+  return `${root}/apis/listenbrainz`;
+}
+
 function ListenbrainzCard({ store }: { store: SettingsStore }) {
   const base = useText(store, 'listenbrainz', 'base_url');
   const token = useText(store, 'listenbrainz', 'token');
@@ -544,6 +562,25 @@ function ListenbrainzCard({ store }: { store: SettingsStore }) {
         <div className="callback-help">
           Maloja: use http://your-server:42010/apis/listenbrainz and your Maloja API key. Start
           history sync from Stats.
+        </div>
+        <div className="callback-help">
+          Koito: use http://your-server:4110/apis/listenbrainz and a Koito API key. Start history
+          sync from Stats.
+        </div>
+        <div className="callback-help">
+          Fill in the address for:{' '}
+          {SCROBBLER_PRESETS.map((preset) => (
+            <button
+              key={preset.id}
+              type="button"
+              id={`listenbrainz-preset-${preset.id}`}
+              className="preset-reset-btn"
+              style={{ marginLeft: '6px' }}
+              onClick={() => base.onChange(scrobblerPresetUrl(base.value, preset))}
+            >
+              {preset.label}
+            </button>
+          ))}
         </div>
       </div>
       <div className="form-group" style={{ marginTop: '12px' }}>

@@ -48,7 +48,16 @@ describe('music header', () => {
       row({ status: 'cancelled' }),
       row({ status: 'not_found' }),
     ]);
-    expect(counts).toEqual({ all: 5, active: 1, queued: 1, completed: 1, failed: 2 });
+    expect(counts).toEqual({ all: 5, active: 1, queued: 1, completed: 1, failed: 2, upgrades: 0 });
+  });
+
+  it('counts the quality upgrades across every status', () => {
+    const counts = musicChipCounts([
+      row({ status: 'downloading', upgrade_of: { label: 'MP3 320' } }),
+      row({ status: 'completed', upgrade_of: { label: 'AAC 256' } }),
+      row({ status: 'completed' }),
+    ]);
+    expect(counts.upgrades).toBe(2);
   });
 
   it('has no live strip while nothing moves', () => {

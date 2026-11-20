@@ -91,6 +91,14 @@
                                                         minutes</small>
                                                 </div>
                                                 <div class="form-group">
+                                                    <label>Wait for Soulseek login (minutes):</label>
+                                                    <input type="number" id="soulseek-login-wait-minutes" placeholder="45"
+                                                        min="0" max="1440" value="45">
+                                                    <small class="settings-hint">When slskd loses its Soulseek login (a server ban, a
+                                                        reconnect), Soulseek downloads wait this long for it without using up their
+                                                        retries, then move on to your next source. 0 never waits.</small>
+                                                </div>
+                                                <div class="form-group">
                                                     <label class="checkbox-label">
                                                         <input type="checkbox" id="soulseek-auto-clear-searches"
                                                             checked>

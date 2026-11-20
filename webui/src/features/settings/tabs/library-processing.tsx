@@ -536,6 +536,12 @@ export function ProcessingCards({ store }: SettingsTabProps) {
                 setMeta('lrclib_enabled'),
                 'Generate .lrc lyrics files (LRClib)',
               )}
+              {plain(
+                'lrclib-cache-player',
+                loads ? meta.lrclib_cache_player !== false : true,
+                setMeta('lrclib_cache_player'),
+                'Save lyrics the player finds as .lrc files beside library songs',
+              )}
               <HintGroup help="Analyzes loudness and writes ReplayGain track gain/peak tags. Requires ffmpeg. Adds a few seconds per track.">
                 {check(
                   'replaygain-enabled',
