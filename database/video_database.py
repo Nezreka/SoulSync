@@ -7840,6 +7840,17 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def hands_off_ids(self) -> set:
+        """{(kind, library id)} of every padlocked movie and show, one read"""
+        conn = self._get_connection()
+        try:
+            return {(kind, int(r[0])) for kind, table in (("movie", "movies"), ("show", "shows"))
+                    for r in conn.execute(f"SELECT id FROM {table} WHERE hands_off=1")}
+        except sqlite3.Error:
+            return set()
+        finally:
+            conn.close()
+
     def hands_off_tmdb_ids(self) -> dict:
         """{'movie': {tmdb ids}, 'show': {tmdb ids}} of the padlocked titles"""
         out = {"movie": set(), "show": set()}
@@ -9431,7 +9442,7 @@ class VideoDatabase:
         conn = self._get_connection()
         try:
             return [dict(r) for r in conn.execute(
-                "SELECT m.id, m.tmdb_id, m.title, m.year, "
+                "SELECT m.id, m.tmdb_id, m.server_source, m.title, m.year, "
                 f"CASE WHEN {trusted} THEN m.server_added_at ELSE m.added_at END AS added_at, "
                 f"CASE WHEN {trusted} THEN 'server' ELSE 'first_seen' END AS added_from, "
                 "m.runtime_minutes, m.hands_off, "
@@ -9460,7 +9471,7 @@ class VideoDatabase:
         conn = self._get_connection()
         try:
             return [dict(r) for r in conn.execute(
-                "SELECT s.id, s.tmdb_id, s.title, s.year, s.status, s.series_type, s.hands_off, "
+                "SELECT s.id, s.tmdb_id, s.server_source, s.title, s.year, s.status, s.series_type, s.hands_off, "
                 f"COALESCE({trusted}, s.added_at) AS added_at, "
                 f"CASE WHEN {trusted} IS NULL THEN 'first_seen' ELSE 'server' END AS added_from, "
                 + cols + ", "
@@ -9585,7 +9596,9 @@ class VideoDatabase:
     def shelf_life_followed_airing(self, profile_ids) -> set:
         """tmdb ids of shows still airing that someone follows: an explicit
         follow, or the default follow an airing library show has for every
-        profile that hasn't muted it (the watchlist's own rule)."""
+        profile that hasn't muted it (the watchlist's own rule). airing is
+        the calendar's loose rule (_LOOSE_ACTIVE_SHOW_SQL): a show whose
+        status isn't known yet counts as airing, the safe side for a delete."""
         pids = sorted({int(p) for p in (profile_ids or [])}) or [1]
         conn = self._get_connection()
         try:
@@ -9597,8 +9610,11 @@ class VideoDatabase:
                     "(SELECT COUNT(DISTINCT w.profile_id) FROM video_watchlist w WHERE w.kind = 'show' "
                     " AND w.tmdb_id = s.tmdb_id AND w.state = 'mute' AND w.profile_id IN ("
                     + ",".join("?" * len(pids)) + ")) AS mutes "
-                    "FROM shows s WHERE s.tmdb_id IS NOT NULL AND " + self._ACTIVE_SHOW_SQL.replace(
-                        "status", "s.status"), pids):
+                    "FROM shows s WHERE s.tmdb_id IS NOT NULL AND "
+                    # the calendar's loose rule: a show with no status yet is
+                    # not assumed ended, so an enrichment gap never lets it go
+                    "(s.status IS NULL OR TRIM(s.status) = '' "
+                    " OR LOWER(s.status) NOT IN ('ended', 'canceled', 'cancelled'))", pids):
                 if r["follows"] or r["mutes"] < len(pids):
                     out.add(int(r["tmdb_id"]))
             return out

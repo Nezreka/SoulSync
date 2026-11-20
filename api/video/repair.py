@@ -322,11 +322,14 @@ def register_routes(bp):
         from core.video.repair import shelf_life
         from . import get_video_db
         body = request.get_json(silent=True) or {}
-        actions, error = shelf_life.batch_delete_actions(get_video_db(), body.get("ids"), body.get("phrase"))
+        db = get_video_db()
+        actions, error = shelf_life.batch_delete_actions(db, body.get("ids"), body.get("phrase"))
         if error:
             return jsonify({"started": False, "error": error}), 400
         res = _worker().start_bulk_fix(ids=list(actions), finding_type=shelf_life.FINDING_TYPE,
                                        fix_actions=actions)
+        if not res.get("started"):
+            shelf_life.forget_precheck(db, list(actions))
         return jsonify(res), (200 if res.get("started") or res.get("already_running") else 400)
 
     @bp.route("/repair/shelf-life/<kind>/<int:item_id>", methods=["GET"])

@@ -220,6 +220,11 @@ export interface ShelfLifePlan {
   recycling: boolean;
   keep_days: number;
   phrase: string;
+  /** open findings left out because they no longer hold now, and why */
+  skipped?: { id: number; title: string; year?: number | null; reason: string }[];
+  /** the line titles are judged against now */
+  threshold?: number;
+  enabled?: boolean;
   error?: string;
 }
 

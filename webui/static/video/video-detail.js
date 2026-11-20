@@ -1983,16 +1983,21 @@
         if (hr < 48) return 'scored ' + hr + ' hour' + (hr === 1 ? '' : 's') + ' ago';
         return 'scored ' + Math.round(hr / 24) + ' days ago';
     }
+    // the same shield the library manager's badge draws
+    function shelfShield() {
+        return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" aria-hidden="true">' +
+            '<path d="M12 3l7 3v5c0 4.5-3 8.2-7 10-4-1.8-7-5.5-7-10V6z" stroke-linejoin="round"/></svg>';
+    }
     function shelfPanelHtml(v) {
         var head, note = '';
         if (v.keep) {
-            head = '<span class="vd-shelf-chip vd-shelf-chip--gate">🛡 Kept</span>';
+            head = '<span class="vd-shelf-chip vd-shelf-chip--gate">' + shelfShield() + ' Kept</span>';
             note = 'Never flagged while it is kept.';
         } else if (!v.scored) {
             head = '<span class="vd-shelf-chip">Not scored yet</span>';
             note = 'It gets a score on the next Shelf Life run.';
         } else if (v.gate) {
-            head = '<span class="vd-shelf-chip vd-shelf-chip--gate">🛡 Protected</span>';
+            head = '<span class="vd-shelf-chip vd-shelf-chip--gate">' + shelfShield() + ' Protected</span>';
             note = v.gate_text || '';
         } else {
             var low = v.score < v.threshold;

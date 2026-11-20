@@ -168,7 +168,8 @@ def watch_signal(facts: Dict[str, Any], now: datetime):
             value = NEUTRAL * 0.5 ** (known / UNWATCHED_HALF_LIFE_DAYS)
             return value, "no plays on record since %s" % _month(w.get("history_since"))
         if tenure is None:
-            return 0.0, "never watched"
+            # no add date: how long it sat unwatched isn't known, so it doesn't count
+            return None, "never watched, add date unknown"
         value = NEUTRAL * 0.5 ** (tenure / UNWATCHED_HALF_LIFE_DAYS)
         if facts.get("added_from") == "first_seen":
             # the server's add date wasn't trusted: count from SoulSync's first sight

@@ -330,6 +330,19 @@ class VideoRepairWorker:
         status = "dismissed" if action == "dismiss" else "resolved"
         return self.db.repair_bulk_update_findings(ids, status)
 
+    def _per_finding_action_error(self, types, fix_action, fix_actions=None):
+        """an error when one fix_action would reach findings whose action is
+        meant for one finding only (Shelf Life's typed title), else None."""
+        if fix_action is None or fix_action == "":
+            return None
+        covered = fix_actions or {}
+        for fid, slug in types.items():
+            cls = self._job_for_finding_type(slug)
+            if cls and cls.fix_action_per_finding and fid not in covered:
+                return (f"'{cls.display_name}' findings each need their own confirmation. Use "
+                        "its own cleanup, or fix them one at a time. Nothing was changed.")
+        return None
+
     def bulk_fix_findings(self, job_id=None, severity=None, ids=None, fix_action=None) -> dict:
         if ids:
             targets = [self.db.repair_get_finding(i) for i in ids]
@@ -337,6 +350,10 @@ class VideoRepairWorker:
         else:
             targets = self.db.repair_get_findings(job_id=job_id, status="pending",
                                                   severity=severity, limit=200)["items"]
+        refused = self._per_finding_action_error({f["id"]: f["finding_type"] for f in targets}, fix_action)
+        if refused:
+            return {"success": False, "fixed": 0, "failed": 0, "total": len(targets),
+                    "errors": [refused], "error": refused}
         fixed, failed, errors = 0, 0, []
         for f in targets:
             res = self.fix_finding(f["id"], fix_action)
@@ -436,6 +453,9 @@ class VideoRepairWorker:
             if not target:
                 return {"started": False, "error": "No pending fixable findings match"}
             types = self.db.repair_types_for(target)
+            refused = self._per_finding_action_error(types, fix_action, fix_actions)
+            if refused:
+                return {"started": False, "invalid": True, "error": refused}
             if (fix_action or fix_actions) and len(set(types.values())) > 1:
                 return {"started": False, "invalid": True, "error": (
                     f"'{fix_action}' would be applied to {len(set(types.values()))} different "
