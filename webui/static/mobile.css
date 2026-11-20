@@ -158,6 +158,14 @@
         min-height: 0;
         overflow-y: auto;
         overflow-x: hidden;
+        /* #2218: opening the nav drawer locks this scroller with
+           overflow: hidden (below), which drops its scrollbar. where the
+           scrollbar takes space (the installed app, a narrow desktop window)
+           every page got 12px wider and slid sideways, then slid back on
+           close. a stable gutter keeps the scrollbar's space whether the
+           page scrolls, is locked or is short. phones with overlay
+           scrollbars have no gutter, so nothing changes there. */
+        scrollbar-gutter: stable;
     }
 
     /* --- Phase 1: Sidebar → Off-canvas --- */
