@@ -1160,6 +1160,36 @@ describe('import route', () => {
     expect(processCalls).toBe(1);
   });
 
+  it('leftovers of a partial import open on the release the rest went to, even unlisted (#2220)', async () => {
+    inbox = inboxPayload([
+      albumItem({
+        status: 'failed',
+        album_id: 'std-release',
+        guessed_name: 'Album A',
+        match: {
+          matched_count: 13,
+          total_tracks: 15,
+          source: 'deezer',
+          matches: [
+            {
+              track_name: 'Track One',
+              track_number: 1,
+              file: '01.flac',
+              file_path: '',
+              confidence: 1,
+              import_status: 'completed',
+            },
+          ],
+        },
+      }),
+    ]);
+    renderImportRoute(['/import/match/hash-1']);
+
+    // the search lists album-1 and album-2; the folder's release is neither
+    await waitFor(() => expect(albumMatchBodies).toHaveLength(1));
+    expect(albumMatchBodies[0]).toMatchObject({ album_id: 'std-release', source: 'deezer' });
+  });
+
   it('the matcher says so when the item is gone', async () => {
     renderImportRoute(['/import/match/nope']);
     expect(

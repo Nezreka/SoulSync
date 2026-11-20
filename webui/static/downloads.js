@@ -1553,6 +1553,7 @@ async function openDownloadMissingWishlistModal(category = null, selectedTrackId
                             <input type="checkbox" id="force-download-all-${playlistId}">
                             <span>Force Download All</span>
                         </label>
+                        ${typeof downloadModalLidarrWholeAlbumHtml === 'function' ? downloadModalLidarrWholeAlbumHtml(playlistId) : ''}
                     </div>
                     <button class="download-control-btn primary" id="begin-analysis-btn-${playlistId}" onclick="startWishlistMissingTracksProcess('${playlistId}')">
                         Begin Analysis
@@ -1575,6 +1576,9 @@ async function openDownloadMissingWishlistModal(category = null, selectedTrackId
     `;
 
     applyProgressiveTrackRendering(playlistId, tracks.length);
+    if (typeof hydrateDownloadModalLidarrWholeAlbum === 'function') {
+        hydrateDownloadModalLidarrWholeAlbum(playlistId);
+    }
     modal.style.display = 'flex';
     hideLoadingOverlay();
     WishlistModalState.setVisible(); // Track that new wishlist modal is now visible
@@ -1612,7 +1616,11 @@ async function startWishlistMissingTracksProcess(playlistId) {
             body: JSON.stringify({
                 force_download_all: forceDownloadAll,
                 category: window.currentWishlistCategory,  // Keep for backward compat
-                track_ids: trackIds  // NEW: Send exact tracks to process
+                track_ids: trackIds,  // NEW: Send exact tracks to process
+                // "Whole album via Lidarr"; undefined (toggle hidden) = server default
+                lidarr_whole_album: (typeof getDownloadModalLidarrWholeAlbum === 'function')
+                    ? getDownloadModalLidarrWholeAlbum(playlistId)
+                    : undefined,
             })
         });
 
@@ -1890,6 +1898,10 @@ async function startMissingTracksProcess(playlistId) {
             // server's own order: mirror assignment, then the global default —
             // i.e. exactly the pre-selector behaviour.
             quality_profile_id: getDownloadModalQualityProfileId(playlistId),
+            // "Whole album via Lidarr"; undefined (toggle hidden) = server default
+            lidarr_whole_album: (typeof getDownloadModalLidarrWholeAlbum === 'function')
+                ? getDownloadModalLidarrWholeAlbum(playlistId)
+                : undefined,
             // Provider hint so a mirror lookup can't be defeated by two providers
             // sharing an upstream playlist id (P2-01). Only sent when the ref
             // actually identifies a provider: the server treats an exact source

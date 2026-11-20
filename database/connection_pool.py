@@ -17,9 +17,11 @@ around one, so the callers' existing code (``conn.close()``, ``with conn:``,
   ``sqlite3.ProgrammingError`` like a closed connection does.
 - ``with conn:`` still only commits or rolls back; it never closed the connection.
 - A proxy that is garbage collected without close() returns its connection only
-  when no cursor made through it is still alive. A cursor that outlives the proxy
-  keeps its connection exactly as it did before, and that connection is not
-  reused. The finalizer never takes the pool lock: it rolls back an open
+  when no cursor made through it is still alive. Every cursor made through the
+  proxy holds the proxy, so a cursor that outlives the caller's ``conn`` keeps
+  its connection, and the connection goes back once the last cursor is gone
+  (#2221: before that, ``with conn: cursor = conn.cursor()`` dropped conn first
+  and lost the connection on every call). The finalizer never takes the pool lock: it rolls back an open
   transaction and queues the connection, and the next acquire or close puts it
   back. Garbage collection runs on whatever thread allocates, including one
   inside ``with _lock:``, and a finalizer that took the (non-reentrant) lock
@@ -225,6 +227,18 @@ class PooledConnection:
 
     def _track(self, cur: sqlite3.Cursor) -> sqlite3.Cursor:
         self._cursors.append(weakref.ref(cur))
+        # the cursor keeps its proxy alive. the common shape is
+        # `with self._get_connection() as conn: cursor = conn.cursor(); ...; return`,
+        # and a function's locals are dropped in order, conn before cursor: the
+        # proxy was finalized while its cursor was still alive, so the
+        # connection was never reused and every such call opened a fresh one
+        # with all its pragmas (#2221: hundreds of ms each on a big database).
+        # holding the proxy here means it is finalized after the cursor, with
+        # no live cursor left, and its connection goes back to the pool.
+        try:
+            cur._pool_proxy = self
+        except AttributeError:  # a caller's own cursor factory without a __dict__
+            pass
         if len(self._cursors) > 64:  # a long-lived connection must not grow this without bound
             self._cursors[:] = [r for r in self._cursors if r() is not None]
         return cur
@@ -241,7 +255,7 @@ class PooledConnection:
         return self._track(self._raw().cursor(_TimedCursor)).executemany(*args, **kwargs)
 
     def executescript(self, *args: Any, **kwargs: Any) -> sqlite3.Cursor:
-        return self._track(self._raw().executescript(*args, **kwargs))
+        return self._track(self._raw().cursor(_TimedCursor).executescript(*args, **kwargs))
 
     # `with conn:` commits or rolls back and never closed the connection; keep that,
     # and hand back the proxy, not the raw connection sqlite3 would return.

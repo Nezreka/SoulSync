@@ -549,6 +549,43 @@ def _find_owning_sibling(task_id: str, track: SpotifyTrack):
     return None, None
 
 
+LOGIN_WAIT_POLL_SECONDS = 5.0
+
+
+def _wait_for_soulseek_login(task_id: str, deps: Any, exclude: list) -> str:
+    """Hold a task while slskd is logged out of Soulseek.
+
+    Returns ``'search'`` (go ahead), ``'skip'`` (search without Soulseek:
+    another source comes first, or the wait ran past its deadline and a
+    next source exists) or ``'gone'`` (the task was cancelled or removed
+    while it waited). Waiting spends no query and no retry: the task sits
+    in ``searching`` with "Waiting for Soulseek login" and picks up where
+    it was once slskd is back.
+    """
+    import time as _time
+    from core import soulseek_session
+
+    orchestrator = getattr(deps, 'download_orchestrator', None)
+    while True:
+        plan = soulseek_session.search_plan(orchestrator, exclude)
+        with tasks_lock:
+            task = download_tasks.get(task_id)
+            if task is None or task.get('status') == 'cancelled':
+                return 'gone'
+            if plan != 'wait':
+                soulseek_session.should_wait(task)   # clears a finished wait's mark
+                if task.get('_soulseek_login_gave_up') and soulseek_session.is_logged_out():
+                    return 'skip'
+                return plan
+            waiting = soulseek_session.should_wait(task)
+            gave_up = bool(task.get('_soulseek_login_gave_up'))
+        if not waiting:
+            # past the deadline: the next source, when there is one
+            mode = str(getattr(orchestrator, 'mode', '') or '').lower()
+            return 'skip' if gave_up and mode == 'hybrid' else 'search'
+        _time.sleep(LOGIN_WAIT_POLL_SECONDS)
+
+
 def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorkerDeps) -> None:
     """Run one task under the library its batch fills (#1199).
 
@@ -872,20 +909,33 @@ def _download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWork
                 # torrent and rely on the auto-import sweep to clean up.
                 _exclude_for_hybrid_album = None
                 try:
-                    _batch_is_album = False
+                    _b = None
                     if batch_id:
                         from core.runtime_state import download_batches as _db
                         _b = _db.get(batch_id)
-                        if isinstance(_b, dict):
-                            _batch_is_album = bool(_b.get('is_album_download'))
-                    if _batch_is_album and getattr(deps.download_orchestrator, 'mode', '') == 'hybrid':
-                        _exclude_for_hybrid_album = ['torrent', 'usenet']
+                    from core.downloads.album_bundle_dispatch import per_track_exclusions
+                    from core.downloads.master import _resolve_album_bundle_sources
+                    from core.settings import config_manager as _cfg
+                    _exclude_for_hybrid_album = per_track_exclusions(
+                        _b, _cfg.get,
+                        hybrid=getattr(deps.download_orchestrator, 'mode', '') == 'hybrid',
+                        bundle_sources=_resolve_album_bundle_sources(_cfg),
+                    )
                 except Exception as _exc_filter_err:
                     logger.debug("[Modal Worker] album-source-exclusion check failed: %s", _exc_filter_err)
                 # Fold in budget-exhausted sources (per-source quarantine retry).
                 _exclude_sources = list(_exhausted_sources)
                 if _exclude_for_hybrid_album:
                     _exclude_sources.extend(_exclude_for_hybrid_album)
+                # slskd logged out of Soulseek (a server ban, a reconnect):
+                # wait for the login instead of spending this query, or leave
+                # Soulseek out when another source comes first. A task that
+                # waited past the deadline moves on to its next source.
+                _login = _wait_for_soulseek_login(task_id, deps, _exclude_sources)
+                if _login == 'gone':
+                    return
+                if _login == 'skip' and 'soulseek' not in _exclude_sources:
+                    _exclude_sources.append('soulseek')
                 # Live search ticker (#1156): slskd's poller fires this on every
                 # response tick — the hook existed through the whole plugin chain
                 # but the download path never passed one.

@@ -16,6 +16,7 @@ import type { SettingsStore } from '../settings-store';
 import {
   ActionRow,
   Btn,
+  FieldLine,
   More,
   Note,
   Row,
@@ -448,6 +449,24 @@ function AcoustidCard({ store }: { store: SettingsStore }) {
 
 // ── ListenBrainz ──
 
+/** self-hosted scrobblers that speak the ListenBrainz API, and the port
+ *  each listens on out of the box */
+export const SCROBBLER_PRESETS = [
+  { id: 'maloja', label: 'Maloja', port: 42010 },
+  { id: 'koito', label: 'Koito', port: 4110 },
+] as const;
+
+/** the ListenBrainz address on a self-hosted scrobbler: keeps the server
+ *  already typed (and any reverse-proxy path before its api), else
+ *  localhost on the scrobbler's own port */
+export function scrobblerPresetUrl(current: string, preset: { port: number }): string {
+  let root = (current || '').trim().replace(/\/+$/, '');
+  root = root.replace(/\/apis\/(listenbrainz|lbrnz)(\/1)?$/i, '').replace(/\/1$/, '');
+  if (!root || /api\.listenbrainz\.org/i.test(root)) root = `http://localhost:${preset.port}`;
+  if (!/^https?:\/\//i.test(root)) root = `http://${root}`;
+  return `${root}/apis/listenbrainz`;
+}
+
 function ListenbrainzCard({ store }: { store: SettingsStore }) {
   const base = useText(store, 'listenbrainz', 'base_url');
   const token = useText(store, 'listenbrainz', 'token');
@@ -501,21 +520,40 @@ function ListenbrainzCard({ store }: { store: SettingsStore }) {
       >
         <Switch id="listenbrainz-scrobble-enabled" {...scrobble} />
       </Row>
-      <More label="More options" count={1} names="your own server or Maloja">
+      <More label="More options" count={1} names="your own server, Maloja or Koito">
         <SheetField
           label="API base URL"
           htmlFor="listenbrainz-base-url"
           help="Self-hosted? Your server's address, for example http://localhost:8093. Leave it empty for the official one."
-          more="Maloja: use http://your-server:42010/apis/listenbrainz and your Maloja API key. Start the history sync from Stats."
+          more={
+            <>
+              Maloja: http://your-server:42010/apis/listenbrainz and your Maloja API key. Koito:
+              http://your-server:4110/apis/listenbrainz and a Koito API key. Start the history sync
+              from Stats.
+            </>
+          }
         >
-          <TextField
-            full
-            mono
-            id="listenbrainz-base-url"
-            placeholder="Leave empty for official (api.listenbrainz.org)"
-            value={base.value}
-            onChange={(event) => base.onChange(event.target.value)}
-          />
+          <FieldLine wrap>
+            <TextField
+              full
+              mono
+              id="listenbrainz-base-url"
+              placeholder="Leave empty for official (api.listenbrainz.org)"
+              value={base.value}
+              onChange={(event) => base.onChange(event.target.value)}
+            />
+            {SCROBBLER_PRESETS.map((preset) => (
+              <Btn
+                key={preset.id}
+                small
+                id={`listenbrainz-preset-${preset.id}`}
+                aria-label={`Fill in the address for ${preset.label}`}
+                onClick={() => base.onChange(scrobblerPresetUrl(base.value, preset))}
+              >
+                {preset.label}
+              </Btn>
+            ))}
+          </FieldLine>
         </SheetField>
       </More>
     </ServiceCard>

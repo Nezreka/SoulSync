@@ -5,6 +5,7 @@ import type { AdlBatch, AdlBatchHistoryEntry, AdlDownload, AdlFilter } from './-
 
 import { fetchBatchHistory, fetchDownloads } from './-adl.api';
 import { isTerminalPhase } from './-adl.batch';
+import { isUpgradeRow } from './-adl.helpers';
 import {
   ADL_BATCH_HISTORY_POLL_MS,
   ADL_FILTER_STATUSES,
@@ -183,6 +184,7 @@ export function useAdlDownloads({
           ADL_REVIEW_STATUSES.includes(String(d.verification_status)),
       );
     }
+    if (state.filter === 'upgrades') return rows.filter(isUpgradeRow);
     const statuses = ADL_FILTER_STATUSES[state.filter];
     return statuses ? rows.filter((d) => statuses.includes(d.status)) : rows;
   }, [state.downloads, state.filter, state.filterBatchId]);

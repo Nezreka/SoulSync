@@ -1416,6 +1416,13 @@ export const ACCOUNT_ENTRIES: AccountEntry[] = [
     keywords: 'weather location rain snow',
     anchor: 'ma-weather-h',
   },
+  {
+    id: 'account:listening',
+    label: 'Your listening',
+    hint: 'My Account · share listening, private session',
+    keywords: 'share listening blend private session privacy scrobble history',
+    anchor: 'ma-privacy-h',
+  },
 ];
 
 export function tabTitle(tab: SettingsTab): string {

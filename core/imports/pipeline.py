@@ -914,8 +914,10 @@ def _maybe_stage_album_track(context, final_path):
                 else:
                     # an own-library profile's batch stages under its folder (#1199)
                     from core.audiobook_routing import routed_root_for_context
-                    from core.imports.paths import import_owner_id, library_root_for_profile
+                    from core.imports.paths import (
+                        import_owner_id, library_root_for_profile, lidarr_root_for_context)
                     transfer_dir = (routed_root_for_context(context)
+                                    or lidarr_root_for_context(context)
                                     or library_root_for_profile(import_owner_id(batch))
                                     or docker_resolve_path(
                                         config_manager.get('soulseek.transfer_path', './Transfer')))
@@ -1046,7 +1048,7 @@ def _recover_moved_file_bookkeeping(context, artist_context=None, album_info=Non
     try:
         from core.library2.autolink import link_download_into_library_v2
         linked_lib2_file_id = link_download_into_library_v2(
-            context, raise_on_error=True)
+            context, raise_on_error=True, fill_known_tags=True)
         if linked_lib2_file_id is None:
             raise RuntimeError("The Library did not create a file row")
         from core.settings import config_manager

@@ -60,6 +60,7 @@ const HAD: Record<string, string[]> = {
     'soulseek-observed-speed-fallback-enabled',
     'soulseek-min-observed-download-speed',
     'soulseek-download-timeout',
+    'soulseek-login-wait-minutes',
     'soulseek-auto-clear-searches',
     'soulseek-cleanup-scope',
   ],
@@ -67,7 +68,13 @@ const HAD: Record<string, string[]> = {
   'qobuz-settings-container': ['qobuz-email', 'qobuz-password', 'qobuz-download-token'],
   'deezer-download-settings-container': ['deezer-download-arl'],
   'soundcloud-download-settings-container': ['soundcloud-download-oauth-token'],
-  'lidarr-download-settings-container': ['lidarr-url', 'lidarr-api-key'],
+  'lidarr-download-settings-container': [
+    'lidarr-url',
+    'lidarr-api-key',
+    'lidarr-whole-album-default',
+    'lidarr-transfer-path',
+    'lidarr-download-path',
+  ],
   'youtube-settings-container': [
     'youtube-cookies-browser',
     'youtube-cookies-paste',
@@ -285,6 +292,7 @@ describe('More options', () => {
       'soulseek-search-min-delay-seconds',
       'soulseek-min-observed-download-speed',
       'soulseek-download-timeout',
+      'soulseek-login-wait-minutes',
       'soulseek-auto-clear-searches',
       'soulseek-cleanup-scope',
     ]);

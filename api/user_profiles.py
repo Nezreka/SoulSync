@@ -1284,6 +1284,68 @@ def get_my_scrobbling():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+def _listening_privacy_payload(pid):
+    from core.listening_scope import listening_owners
+    from core.personalized.listening_privacy import get_privacy
+    db = get_database()
+    out = get_privacy(db, pid)
+    # asking only makes sense when there is someone to blend with
+    try:
+        conn = db._get_connection()
+        try:
+            others = conn.execute("SELECT COUNT(*) FROM profiles WHERE id != ?", (int(pid),)).fetchone()[0]
+        finally:
+            conn.close()
+    except Exception:  # noqa: BLE001 - can't tell: don't ask
+        others = 0
+    out['own_pile'] = int(pid) in listening_owners(db)
+    out['ask'] = bool(others) and not out['asked']
+    return out
+
+
+@bp.route('/api/profiles/me/listening-privacy', methods=['GET'])
+@self_only
+def get_my_listening_privacy():
+    """share listening (blends) and the private session, for the caller only"""
+    try:
+        pid = get_current_profile_id()
+        if not pid:
+            return jsonify({'success': False, 'error': 'No profile'}), 400
+        return jsonify({'success': True, **_listening_privacy_payload(pid)})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@bp.route('/api/profiles/me/listening-privacy', methods=['POST'])
+@self_only
+def set_my_listening_privacy():
+    """{share_listening: bool} / {private_session: bool} / {asked: true}.
+    only the caller's own profile: nobody, an admin included, can say yes
+    for someone else"""
+    try:
+        from core.personalized import listening_privacy as privacy
+        pid = get_current_profile_id()
+        if not pid:
+            return jsonify({'success': False, 'error': 'No profile'}), 400
+        body = request.get_json(silent=True) or {}
+        db = get_database()
+        if 'share_listening' in body:
+            privacy.set_share_listening(db, pid, bool(body['share_listening']))
+            # blends on everyone's shelf change with one person's answer
+            try:
+                from api.discover_routes import invalidate_discover_shelf_cache
+                invalidate_discover_shelf_cache('get_for_you_mixes')
+            except Exception as e:  # noqa: BLE001 - the cache runs out on its own
+                logger.debug(f"for-you cache drop failed: {e}")
+        elif body.get('asked'):
+            privacy.mark_asked(db, pid)
+        if 'private_session' in body:
+            privacy.set_private_session(db, pid, bool(body['private_session']))
+        return jsonify({'success': True, **_listening_privacy_payload(pid)})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @bp.route('/api/profiles/me/listenbrainz/scrobble', methods=['POST'])
 @self_only
 def set_my_listenbrainz_scrobble():

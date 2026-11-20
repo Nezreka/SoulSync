@@ -1758,6 +1758,14 @@ The pick is saved with `POST /api/profiles/me/server-library` and `{"server_type
 
 `GET /api/profiles` also returns `own_library_unsupported_reason` (null when own libraries work on the active server). Turning a profile to `library_mode: "own"` on Navidrome needs Navidrome 0.58+ and the shared library's music folder picked in Settings.
 
+#### Who sees your listening: `GET` / `POST /api/profiles/me/listening-privacy`
+
+Session route, the signed-in profile's own (an admin can't answer for anyone else). `GET` returns `share_listening` (blends may use your plays), `asked` (you've answered the one-time ask), `ask` (Discover should ask now: not answered yet and someone else is on the server), `private_session` and `private_until` (UTC, when it turns itself off), and `own_pile`.
+
+`POST` takes any of `{"share_listening": true|false}` (also counts as answered), `{"asked": true}` ("not now": stops the asking, changes nothing else) and `{"private_session": true|false}` (on for 6 hours). It answers with the same object.
+
+Both are off for every profile until that profile turns them on. A blend only exists when both sides' listening is shared, and the shared history (owner 1) only counts as shared when every profile playing into it has `share_listening` on. During a private session `POST /api/library/log-play` answers `{"success": true, "skipped": true, "private": true}` and records nothing, so there is no play to scrobble.
+
 #### What a profile shows: `GET` / `POST /api/profiles/me/features`
 
 Session routes (the signed-in browser, not an API key) behind **Customize** in the sidebar. Each profile hides the parts of SoulSync it doesn't use. This is a preference, not access: hidden pages still open from a link and their background jobs keep running. Page access stays with `allowed_pages`.

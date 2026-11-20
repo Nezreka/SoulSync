@@ -131,6 +131,14 @@ def real_months_for(active_months: List[int], hemisphere: str, holiday: bool) ->
     return list(active_months)
 
 
+def _shelf_piles(database) -> List[int]:
+    """the seasonal shelves are the whole install's, so they read the shared
+    pile plus the own piles of people who share their listening, never a
+    private one (core.personalized.listening_privacy)"""
+    from core.personalized.listening_privacy import global_shelf_piles
+    return global_shelf_piles(database)
+
+
 def rewind_tracks(database, months: List[int], limit: int = 60) -> List[Dict[str, Any]]:
     """the user's most-played tracks during these calendar months, any year.
     art and duration come from the library when the track is owned.
@@ -145,16 +153,18 @@ def rewind_tracks(database, months: List[int], limit: int = 60) -> List[Dict[str
             # fetch deep, then diversify: the raw top of the window is a
             # handful of heavy-rotation artists, and 60 tracks by 10 artists
             # collapses to 30 after the artist cap downstream
+            piles = _shelf_piles(database)
             cursor.execute(f"""
                 SELECT artist, title, album, COUNT(*) AS plays
                 FROM listening_history
                 WHERE CAST(strftime('%m', played_at, 'localtime') AS INTEGER) IN ({placeholders})
+                  AND +profile_id IN ({",".join("?" for _ in piles)})
                   AND artist IS NOT NULL AND artist != ''
                   AND title IS NOT NULL AND title != ''
                 GROUP BY LOWER(artist), LOWER(title)
                 ORDER BY plays DESC
                 LIMIT 400
-            """, months)
+            """, [*months, *piles])
             candidates = cursor.fetchall()
             per_artist_seen: Dict[str, int] = {}
             plays_rows = []
@@ -286,16 +296,18 @@ def vibe_library_albums(database, season_key: str, months: List[int], source: st
             # history first and join through the artist set in python - a
             # LOWER() join of history against albums is quadratic.
             placeholders = ",".join("?" for _ in months)
+            piles = _shelf_piles(database)
             cursor.execute(f"""
                 SELECT artist, album, COUNT(*) AS plays
                 FROM listening_history
                 WHERE CAST(strftime('%m', played_at, 'localtime') AS INTEGER) IN ({placeholders})
+                  AND +profile_id IN ({",".join("?" for _ in piles)})
                   AND album IS NOT NULL AND album != ''
                   AND artist IS NOT NULL AND artist != ''
                 GROUP BY LOWER(artist), LOWER(album)
                 ORDER BY plays DESC
                 LIMIT 300
-            """, months)
+            """, [*months, *piles])
             played = cursor.fetchall()
 
             # review 5 R5-A-1: the stored name_key fold, not sqlite's

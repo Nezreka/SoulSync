@@ -49,6 +49,9 @@ export function MusicBehaviour({ store }: { store: SettingsStore }) {
   const minCount = useNumber(store, values.versionMinCount, (raw) =>
     store.set('post_processing', 'version_mismatch_min_count', Math.max(1, parseInt(raw, 10) || 2)),
   );
+  const rejectDays = useNumber(store, values.reviewRejectDays, (raw) =>
+    store.set('post_processing', 'review_auto_reject_days', Math.max(0, parseInt(raw, 10) || 0)),
+  );
   const pp = (key: string) => (value: unknown) => store.set('post_processing', key, value);
   const ds = (...keys: string[]) => useChanged(store, 'download_source', ...keys); // eslint-disable-line react-hooks/rules-of-hooks
   const ppc = (...keys: string[]) => useChanged(store, 'post_processing', ...keys); // eslint-disable-line react-hooks/rules-of-hooks
@@ -228,6 +231,47 @@ export function MusicBehaviour({ store }: { store: SettingsStore }) {
             step="1"
             value={minCount.value}
             onChange={(event) => minCount.onChange(event.target.value)}
+          />
+        </Row>
+        <Row
+          label="Clear near-misses once the track downloads"
+          htmlFor="clear-near-misses-on-success"
+          changed={ppc('clear_near_misses_on_success')}
+          help="When a rejected file is followed by one that imports fine, the rejected files leave Review on their own."
+          more={
+            <>
+              They go to the Downloads recycle bin, so you can restore one to Review. Automatic
+              quality upgrades never send anything to Review either way: if nothing verifies, the
+              file you already have stays.
+            </>
+          }
+        >
+          <Switch
+            id="clear-near-misses-on-success"
+            checked={values.clearNearMisses}
+            onChange={(event) => pp('clear_near_misses_on_success')(event.target.checked)}
+          />
+        </Row>
+        <Row
+          field
+          label="Auto-reject Review items older than"
+          htmlFor="review-auto-reject-days"
+          changed={ppc('review_auto_reject_days')}
+          help="Quarantined files nobody looked at after this many days move to the Downloads recycle bin, where you can still restore them."
+          more={
+            <>
+              <strong>0</strong> keeps them until you decide.
+            </>
+          }
+        >
+          <NumberField
+            id="review-auto-reject-days"
+            min="0"
+            max="365"
+            step="1"
+            unit="days"
+            value={rejectDays.value}
+            onChange={(event) => rejectDays.onChange(event.target.value)}
           />
         </Row>
       </Card>

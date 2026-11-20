@@ -74,6 +74,8 @@ describe('the values', () => {
       retriesPerQuery: '5',
       versionFallback: false,
       versionMinCount: '2',
+      clearNearMisses: true,
+      reviewRejectDays: '0',
       atomicPublish: false,
       atomicRecover: true,
       allowExplicit: true,
@@ -232,6 +234,9 @@ describe('Retry Logic and Album Publishing', () => {
     fireEvent.change(box('retries-per-query'), { target: { value: '0' } });
     fireEvent.click(box('accept-version-mismatch-fallback'));
     fireEvent.change(box('version-mismatch-min-count'), { target: { value: 'x' } });
+    fireEvent.click(box('clear-near-misses-on-success'));
+    fireEvent.change(box('review-auto-reject-days'), { target: { value: '-3' } });
+    fireEvent.change(box('review-auto-reject-days'), { target: { value: '14' } });
     fireEvent.click(box('album-atomic-publish'));
     fireEvent.click(box('album-atomic-recover'));
     await waitFor(() => expect(store.hasPending()).toBe(false));
@@ -242,6 +247,8 @@ describe('Retry Logic and Album Publishing', () => {
         retries_per_query: 5,
         accept_version_mismatch_fallback: true,
         version_mismatch_min_count: 2,
+        clear_near_misses_on_success: false,
+        review_auto_reject_days: 14,
       },
       album_downloads: { atomic_publish: true, atomic_recover_orphans: false },
     });

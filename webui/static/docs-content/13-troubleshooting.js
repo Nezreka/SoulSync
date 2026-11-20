@@ -100,6 +100,7 @@ Each problem has a plain title, a line on why, a fix button when there is one, a
 | Workers | enrichment workers that are paused or stopped | Resume |
 | Downloads | downloads waiting in review | Open review |
 | Automations | an automation whose last run failed | open it |
+| Security | the auth proxy header is set but no trusted proxy address is, so the header is being ignored | open Security settings |
 | Setup | unfinished setup items | each item's own action |
 | Updates | an update is out, and how important it is | release notes |
 
@@ -212,6 +213,14 @@ Secrets show as \`***\` so you can see the redaction happened. API keys, tokens,
 2. Verify your download source credentials in Settings (Soulseek via slskd, Tidal, Qobuz, etc.).
 3. Check \`app.log\` and \`post_processing.log\` for the specific failure.
 4. Try the [track redownload wizard](#lib-redownload) to search a different source.
+
+## "SoulSync was updated. Reload this tab"
+
+A tab you left open while SoulSync was updated is still running the old version. It notices when it reconnects and offers a **Reload** button instead of breaking on the next page you open. Nothing reloads by itself, so finish what you're doing first. The same note shows if a page fails to load because its file went away with the update.
+
+## "Waiting for Soulseek login"
+
+slskd is running but logged out of the Soulseek server, often a temporary ban or a reconnect. A banner on Downloads and the dashboard says so. Soulseek downloads wait instead of failing: a search waits before it runs, and a transfer the logout broke is asked for again from the same peer once slskd is back, so no retries are used up and nothing falls back to a worse source. If Soulseek isn't first in your hybrid order, searches simply leave it out until it's back. After **Wait for Soulseek login** (Settings, Downloads, Soulseek; 45 minutes by default, 0 to never wait) a waiting track moves on to your next source. Add a **Soulseek Logged Out** automation with a notification to hear about it. The video side holds its Soulseek downloads the same way.
 
 ## Import folder not detected
 

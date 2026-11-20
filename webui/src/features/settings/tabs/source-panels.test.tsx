@@ -89,6 +89,7 @@ describe('Soulseek', () => {
     expect(input('soulseek-observed-speed-fallback-enabled').checked).toBe(false);
     expect(v('soulseek-min-observed-download-speed')).toBe('250');
     expect(v('soulseek-download-timeout')).toBe('10');
+    expect(v('soulseek-login-wait-minutes')).toBe('45');
     expect(input('soulseek-auto-clear-searches').checked).toBe(true);
     expect(v('soulseek-cleanup-scope')).toBe('own');
     act(() =>
@@ -113,6 +114,7 @@ describe('Soulseek', () => {
     fireEvent.change(input('soulseek-url'), { target: { value: 'http://slskd:5030' } });
     fireEvent.change(input('soulseek-search-timeout'), { target: { value: '' } });
     fireEvent.change(input('soulseek-download-timeout'), { target: { value: '12' } });
+    fireEvent.change(input('soulseek-login-wait-minutes'), { target: { value: '0' } });
     fireEvent.change(input('soulseek-min-observed-download-speed'), { target: { value: '' } });
     fireEvent.change(input('soulseek-min-peer-speed'), { target: { value: '5' } });
     fireEvent.click(input('soulseek-auto-clear-searches'));
@@ -123,6 +125,7 @@ describe('Soulseek', () => {
         slskd_url: 'http://slskd:5030',
         search_timeout: 60,
         download_timeout: 720,
+        login_wait_minutes: 0,
         min_observed_download_speed_kbps: 250,
         min_peer_upload_speed: 5,
         auto_clear_searches: false,
@@ -594,5 +597,22 @@ describe('Lidarr', () => {
     expect(document.getElementById('lidarr-test-btn')).toBeNull();
     // the stale "Use Lidarr Only" mode is gone from its words
     expect(document.body.textContent).not.toContain('Lidarr Only');
+  });
+
+  it('saves the whole album default and its two folders', async () => {
+    act(() => store.hydrate({ lidarr_download: { url: 'http://l:8686' } }));
+    render(<LidarrPanel store={store} />);
+    expect(input('lidarr-whole-album-default').checked).toBe(true);
+    fireEvent.click(input('lidarr-whole-album-default'));
+    fireEvent.change(input('lidarr-transfer-path'), { target: { value: '/lidarr-imports' } });
+    fireEvent.change(input('lidarr-download-path'), { target: { value: '/lidarr-dl' } });
+    await waitFor(() => expect(store.hasPending()).toBe(false));
+    expect(saved()).toEqual({
+      lidarr_download: {
+        whole_album_default: false,
+        transfer_path: '/lidarr-imports',
+        download_path: '/lidarr-dl',
+      },
+    });
   });
 });

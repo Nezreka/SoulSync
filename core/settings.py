@@ -564,6 +564,11 @@ class ConfigManager:
                 # speed. Opt in explicitly; 0 also disables fallback.
                 "observed_speed_fallback_enabled": False,
                 "min_observed_download_speed_kbps": 250,
+                # slskd logged out of the Soulseek server (a ban, a reconnect):
+                # Soulseek downloads wait this long for the login without
+                # spending retries, then move on to the next source
+                # (core/soulseek_session.py). 0 = never wait.
+                "login_wait_minutes": 45,
                 "download_timeout": 600,
                 # Reddit report (YeloMelo95, Bell Canada): the existing
                 # 35-per-220s sliding-window cap allows all 35 searches in
@@ -650,6 +655,11 @@ class ConfigManager:
                 # engine off while existing configs got it on. CI caught the
                 # split: its fresh default config failed all 7 requeue tests).
                 "retry_next_candidate_on_mismatch": True,
+                # a track that imports clears the near-misses it quarantined
+                # on the way (to the recycle bin, restorable); and Review
+                # items older than N days go there too (0 = keep them)
+                "clear_near_misses_on_success": True,
+                "review_auto_reject_days": 0,
                 # Opt-in exhaustive retry: budget retries PER SOURCE so every
                 # source (Soulseek, then HiFi/Tidal/…) gets its own attempts
                 # before the track gives up. Default off (single global cap).
@@ -718,6 +728,19 @@ class ConfigManager:
                 "root_folder": "",
                 "quality_profile": "Any",
                 "cleanup_after_import": True,
+                # The download dialogs' "Whole album via Lidarr" toggle starts
+                # on; automatic (wishlist) downloads use this value too. Off,
+                # Lidarr is skipped and the next hybrid source is used.
+                "whole_album_default": True,
+                # Where Lidarr-sourced tracks are imported. Lidarr already put
+                # the album in its own root folder, so a copy in the library
+                # would be a duplicate; empty = the shared transfer folder.
+                "transfer_path": "",
+                # Where the Lidarr source copies a track out of Lidarr's import;
+                # empty = soulseek.download_path.
+                "download_path": "",
+                # Seconds to wait for a grabbed album to finish importing.
+                "download_timeout": 21600,
             },
             # Prowlarr — indexer aggregator. Feeds the torrent / usenet
             # download plugins. Not a standalone source.
@@ -870,6 +893,9 @@ class ConfigManager:
             "metadata_enhancement": {
                 "enabled": True,
                 "embed_album_art": True,
+                # the player saves an LRClib hit beside a library song as a
+                # .lrc / .txt (core.lyrics_local), never over an existing one
+                "lrclib_cache_player": True,
                 "post_process_order": ["musicbrainz", "deezer", "audiodb", "tidal", "qobuz", "lastfm", "genius"],
                 # Ordered preferred cover-art sources (empty = use the
                 # download's own art, i.e. today's behavior). Resolved + walked

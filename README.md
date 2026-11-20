@@ -222,14 +222,14 @@ Use one, or build a **hybrid chain** in the order you prefer. If a source can't 
 
 | Source | Notes |
 |---|---|
-| **Soulseek** | via slskd. Whole-album grabs from one peer, peer quality scoring, search throttling, free-disk guard |
+| **Soulseek** | via slskd. Whole-album grabs from one peer, peer quality scoring, search throttling, free-disk guard. When slskd loses its Soulseek login (a ban, a reconnect), downloads wait for it with a banner and a **Soulseek Logged Out** automation trigger, then resume from the same peer |
 | **Tidal** | device-flow login, up to FLAC 24-bit Hi-Res |
 | **Qobuz** | up to Hi-Res Max (24-bit/192 kHz) |
 | **Deezer** | ARL token, FLAC → MP3 320 → MP3 128 fallback |
 | **HiFi** | free lossless via public instances, no account, automatic failover |
 | **YouTube** | yt-dlp, cookies supported |
 | **SoundCloud** | anonymous; a free account's token gets the original file when the uploader allows downloads |
-| **Lidarr** | hand an album to Lidarr's indexers, import only the tracks you need |
+| **Lidarr** | hand an album to Lidarr's indexers: an album request is one lookup (by MusicBrainz release group when known), one add and one search, then SoulSync imports the tracks. In a hybrid chain a "Whole album via Lidarr" switch in the download dialogs and the wishlist picks Lidarr or the next source |
 | **Torrent** | Prowlarr search; qBittorrent, Transmission, Deluge or aria2; seeding goals; archive extraction; an option to start SoulSync's torrents on a qBittorrent that adds them stopped |
 | **Usenet** | Prowlarr search; SABnzbd or NZBGet, sent the NZB file itself (no Prowlarr link or api key in their queue); remote path mappings |
 
@@ -249,7 +249,7 @@ Live batches with speed and ETA, "download this next", and a step-by-step detail
 
 - **Quality profiles**: named profiles built from a ranked ladder of formats, bit depths, sample rates and bitrates, with a cutoff. Start from *Audiophile*, *Balanced* or *Space Saver*, then assign profiles per playlist, artist or wishlist item. **Upgrade until cutoff** keeps chasing a better copy, and a file is only ever replaced by a measured upgrade.
 - **Verification**: AcoustID fingerprinting, real-audio checks with ffmpeg (catches padded previews), silence, duration (with an adjustable tolerance) and integrity guards, and a **fake-lossless** detector.
-- **Quarantine & review**: anything that fails is held with its reason and uploader. Approve it, recover it to staging, or delete it. Removed files go to a **recycle bin** with configurable retention. The trash icon at the top of the Library opens it.
+- **Quarantine & review**: anything that fails is held with its reason and uploader. Approve it, recover it to staging, or delete it. Removed files go to a **recycle bin** with configurable retention. The trash icon at the top of the Library opens it. Review stays quiet on its own: near-misses leave once a later candidate for the same track imports, automatic quality upgrades never send anything to Review (your current file stays), and old items can age out after N days (off by default). All of it lands in the recycle bin, restorable.
 - **Tagging**: Picard-style **MusicBrainz release preflight** pins one release per album so every track agrees. Tags are written with mutagen (ID3v2.4, FLAC, Vorbis, MP4), enriched in the order you choose.
 - **Extras**: preferred-source cover art with a minimum size, synced lyrics from LRClib, **ReplayGain 2.0** (track + album), optional lossy copies (MP3 / Opus / AAC), and **atomic album publishing** so half-downloaded albums never appear in your server.
 - **File organization**: templates for albums, singles, compilations, playlists, music videos, podcasts and audiobooks (`$albumartist/$album/$track - $title` and friends). Every template shows the path it makes right under it as you type.
@@ -262,7 +262,7 @@ Live batches with speed and ETA, "download this next", and a step-by-step detail
 - **Release labels**: beets-compatible `$atypes`, so `[2017][EP][Live] Audiotree Live` and a plain `[2019] Tokyo` come out of the same template.
 - **Explicit and clean**: `$explicit` / `$contentrating` badges (`[E]`, `[C]`) so explicit and clean versions never share a filename.
 - **Artists that share a name**: `$albumartistclash` / `$albumartistinfo` / `$albumartistcomposite` (MusicBrainz disambiguation, else country and genre) so two artists called Nirvana get their own folders.
-- **One name per artist**: downloads are filed and tagged under the name your library uses, found by id, so a source that still says "Machine Gun Kelly" files into your `mgk/` folder. Set your own name per artist in **Artist Settings**.
+- **One name per artist**: downloads are filed and tagged under the name your library uses, found by id, so a source that still says "Machine Gun Kelly" files into your `mgk/` folder, and an iTunes "Δέσποινα Βανδή" into your `Despina Vandi/` one. Set your own name per artist in **Artist Settings**.
 - **Lookalike characters**: an opt-in mode keeps `AC∕DC` and `What's Going On？` instead of underscoring them.
 - **Live preview**: the path under each template updates as you type, for a plain, explicit or multi-disc release, or an artist that shares its name.
 
@@ -274,7 +274,7 @@ A personal front page shaped by your library, your listening and your watchlist.
 
 - **Start Here**: a "next best move" card plus zones for *For You*, *New & Missing*, *Your Taste Map* and *Browse & Build*.
 - **Your Mixes**: *Fresh Tape* (new from artists you follow), *The Archives* (your Spotify Discover Weekly, refreshed weekly), *Hidden Gems*, *Popular Picks*, *Discovery Shuffle*, *Your Listening Mix*, and decade *Time Machine* mixes. Download or sync any of them to your server.
-- **Adventurousness dial**: drag from "safe" to "deep cuts" and the recommendations re-rank live.
+- **Adventurousness dial**: drag from "safe" to "deep cuts" and the recommendations re-rank live. Each profile has its own dial; one that never turned it follows the default set in Settings.
 - **Shelves**: Recommended artists, Because you listen to…, New releases for you, New in your genres, Albums you're missing, More from your labels, Deep cuts.
 - **Stations**: endless artist radio, or a stable 40-track snapshot you can download or sync.
 - **Outside picks**: **Deezer Curated** editorial playlists (no key needed), **ListenBrainz** recommendations, and **Last.fm Radio**.
@@ -299,7 +299,7 @@ A personal front page shaped by your library, your listening and your watchlist.
 
 - **Enhanced view**: inline tag editing, bulk BPM / mood / style edits, and writing tags to files with a diff preview. **Use File Tags** takes the Library's metadata from your files instead (fields, album year, and which album a track is on) and can release those values again later. Also ReplayGain, reorganize with a path preview (the artist page counts the files a rename would move, per album), move an album to another artist (the files move, nothing is left behind), move a track you have into an album's missing slot (**Move a track here**: the file moves and is retagged, no copy, no import), re-identify a track, remove a leftover row with no file that a retag left beside the song, redownload with source picking, and delete (database only, or files too).
 - **Fix matches**: change artwork from any source, inspect the database record, and forget wrong matches per source.
-- **Lock what you have reviewed**: the padlock on an album or artist marks it reviewed and keeps every automated job off it: scans, enrichment, repair jobs, retags, reorganize and upgrades. Switch off any part you still want handled. Missing tracks still download, a missing or damaged file is still reported, and anything you do by hand still works. The sheet shows what the lock kept away and whether a file changed since your review. Filter the library by **Reviewed** / **Not reviewed**.
+- **Lock what you have reviewed**: the padlock on an album or artist marks it reviewed and keeps every automated job off it: scans, enrichment, repair jobs, retags, reorganize and upgrades. Switch off any part you still want handled. Missing tracks still download, a missing or damaged file is still reported, and anything you do by hand still works. The sheet shows what the lock kept away and whether a file changed since your review. Filter artists by **Reviewed** / **Not reviewed**, and the Albums view by **Locked** / **Unlocked** (Filters button, alongside the Wishlist and metadata filters).
 
 </details>
 
@@ -354,10 +354,10 @@ An inbox for everything in your staging folder, with a Picard-style matcher.
 
 - **Listening stats**: plays, time, top artists / albums / tracks, genres, when you listen, streaks, and how much of what you own you actually play.
 - **Your Year**: a full-screen, Wrapped-style story of your year, ending in a card studio that exports shareable images using your real album art.
-- **Scrobbling** to Last.fm and ListenBrainz from Plex, Jellyfin or Navidrome. ListenBrainz is the recommended one: from 1 December 2026 Last.fm API keys need a Last.fm Pro subscription.
+- **Scrobbling** to Last.fm and ListenBrainz from Plex, Jellyfin, Navidrome and the web player. ListenBrainz is the recommended one: from 1 December 2026 Last.fm API keys need a Last.fm Pro subscription. The web player also sends **now playing** when a song starts, and a play is sent the moment it counts (half the song or 4 minutes) instead of in the next batch. Self-hosted **Maloja** and **Koito** work through the ListenBrainz card, with one-click address buttons.
 - **Last.fm is optional**: without a key, or with one Last.fm no longer accepts, top tracks, similar artists, Radio and Your Artists fill in from ListenBrainz, Deezer and your own plays, and earlier Last.fm answers stay cached.
 - **Per-profile**: a profile with its own Plex account, Jellyfin user, ListenBrainz or Last.fm gets its own stats and recommendations, and can scrobble its plays to its own account.
-- **History import** from Last.fm, ListenBrainz and Maloja.
+- **History import** from Last.fm, ListenBrainz, Maloja and Koito.
 
 ## Player & radio
 
@@ -879,6 +879,7 @@ Settings save as you change them. If you'd rather press save yourself, turn off 
 | `SOULSYNC_URL_BASE` | Serve under a sub-path. See [docs/REVERSE_PROXY_SUBPATH.md](docs/REVERSE_PROXY_SUBPATH.md). |
 | `SOULSYNC_LOG_LEVEL` | Log verbosity |
 | `SOULSYNC_GUNICORN_THREADS` | Request threads, default 32. Every open browser tab holds one for its websocket. |
+| `SOULSYNC_COMPRESSION` | `0` turns off SoulSync's own brotli/gzip compression of pages, JSON and web UI files (on by default). |
 
 ### 5. Sign in with OIDC (optional)
 

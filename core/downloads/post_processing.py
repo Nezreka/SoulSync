@@ -284,7 +284,9 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
 
         # A routed artist's files belong in the audiobook folder, not the music library.
         from core.audiobook_routing import routed_root_for_context
-        transfer_dir = routed_root_for_context(context) or transfer_dir
+        from core.imports.paths import lidarr_root_for_context
+        transfer_dir = (routed_root_for_context(context) or lidarr_root_for_context(context)
+                        or transfer_dir)
 
         expected_final_path = (context or {}).get('_final_processed_path')
 
@@ -623,7 +625,8 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
                 try:
                     from database.music_database import get_database
                     from core.library2.validation import refresh_imported_metadata
-                    metadata_status = refresh_imported_metadata(get_database(), [found_file])
+                    metadata_status = refresh_imported_metadata(get_database(), [found_file],
+                                                                fill_blanks=True)
                 except Exception as exc:
                     logger.warning('Final metadata read failed for %s: %s', found_file, exc)
             with tasks_lock:

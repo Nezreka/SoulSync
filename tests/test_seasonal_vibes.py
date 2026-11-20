@@ -35,7 +35,7 @@ class FakeDb:
             c.executescript("""
                 CREATE TABLE listening_history (
                     id INTEGER PRIMARY KEY, artist TEXT, title TEXT,
-                    album TEXT, played_at TEXT);
+                    album TEXT, played_at TEXT, profile_id INTEGER DEFAULT 1);
                 CREATE TABLE lib2_artists (
                     id INTEGER PRIMARY KEY, name TEXT, name_key TEXT,
                     image_url TEXT, spotify_id TEXT, musicbrainz_id TEXT,
@@ -117,13 +117,13 @@ def _owned_release(db, artist_id, album_id, title="Owned Album", **album_cols):
         conn.commit()
 
 
-def _seed_plays(db, artist, title, album, month, count, year=2025):
+def _seed_plays(db, artist, title, album, month, count, year=2025, pile=1):
     with db._get_connection() as conn:
         for _ in range(count):
             conn.execute(
-                "INSERT INTO listening_history (artist, title, album, played_at)"
-                " VALUES (?, ?, ?, ?)",
-                (artist, title, album, f"{year}-{month:02d}-15T12:00:00"))
+                "INSERT INTO listening_history (artist, title, album, played_at, profile_id)"
+                " VALUES (?, ?, ?, ?, ?)",
+                (artist, title, album, f"{year}-{month:02d}-15T12:00:00", pile))
         conn.commit()
 
 
@@ -146,6 +146,18 @@ class TestRewind:
         names = [r['track_name'] for r in rows]
         assert names == ['Praying']
         assert rows[0]['popularity'] == 65  # 60 + 5 plays
+
+    def test_a_pile_that_does_not_share_stays_out(self, db, monkeypatch):
+        # the shelf is everyone's: someone's own pile only joins it when they
+        # share their listening
+        _seed_plays(db, 'Kesha', 'Praying', 'Rainbow', month=7, count=5)
+        _seed_plays(db, 'Secret', 'Hidden', 'Mine', month=7, count=9, pile=2)
+        monkeypatch.setattr('core.personalized.listening_privacy.global_shelf_piles',
+                            lambda database: [1])
+        assert [r['track_name'] for r in sv.rewind_tracks(db, [7])] == ['Praying']
+        monkeypatch.setattr('core.personalized.listening_privacy.global_shelf_piles',
+                            lambda database: [1, 2])
+        assert [r['track_name'] for r in sv.rewind_tracks(db, [7])] == ['Hidden', 'Praying']
 
     def test_diversifies_past_heavy_rotation(self, db):
         # ten tracks by one artist, one track by another: the cap keeps
@@ -294,6 +306,26 @@ class TestVibeLibraryAlbums:
         # the played album maps plays into the popular tier
         played = next(a for a in albums if a['spotify_album_id'] == 'sp10')
         assert played['popularity'] == 63
+
+    def test_plays_in_a_pile_that_does_not_share_stay_out(self, db, monkeypatch):
+        monkeypatch.setattr(sv, '_normalize_art', lambda u: u)
+        _seed_artist(db, 1, 'Kesha')
+        with db._get_connection() as conn:
+            conn.execute("INSERT INTO lib2_albums (id, primary_artist_id, title,"
+                         " image_url, spotify_id)"
+                         " VALUES (10, 1, 'Rainbow', 'https://r.jpg', 'sp10')")
+            conn.execute("INSERT INTO lib2_tracks (id, album_id, title)"
+                         " VALUES (100, 10, 'Praying')")
+            _own(conn, 100)
+            conn.commit()
+        _seed_plays(db, 'Kesha', 'Praying', 'Rainbow', month=7, count=3, pile=2)
+        monkeypatch.setattr('core.personalized.listening_privacy.global_shelf_piles',
+                            lambda database: [1])
+        assert sv.vibe_library_albums(db, 'summer', [6, 7, 8], 'spotify') == []
+        monkeypatch.setattr('core.personalized.listening_privacy.global_shelf_piles',
+                            lambda database: [1, 2])
+        ids = {a['spotify_album_id'] for a in sv.vibe_library_albums(db, 'summer', [6, 7, 8], 'spotify')}
+        assert ids == {'sp10'}
 
     def test_itunes_source_uses_the_itunes_id(self, db, monkeypatch):
         monkeypatch.setattr(sv, '_normalize_art', lambda u: u)

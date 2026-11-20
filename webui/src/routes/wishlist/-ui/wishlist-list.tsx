@@ -178,6 +178,8 @@ export function WishlistList({
   filterActive = false,
   onBulkAction,
   bulkBusy = false,
+  lidarrWholeAlbum,
+  onLidarrWholeAlbumChange,
   onGrabArtist,
   zoned = false,
   onRetryIds,
@@ -193,6 +195,9 @@ export function WishlistList({
   onBulkAction?: (action: WishlistBulkAction, trackIds: string[]) => Promise<WishlistBulkResponse>;
   /** True while a bulk action is in flight — disables the bulk buttons. */
   bulkBusy?: boolean;
+  /** "Whole album via Lidarr" for every grab on the page; undefined hides it. */
+  lidarrWholeAlbum?: boolean;
+  onLidarrWholeAlbumChange?: (on: boolean) => void;
   /** Queue every wanted track by the artist, right now. */
   onGrabArtist?: (group: WishlistArtistGroup) => void;
   /** split the artists into the nebula's trouble zones, sort applying inside each. */
@@ -379,6 +384,20 @@ export function WishlistList({
           >
             Clear
           </button>
+          {lidarrWholeAlbum !== undefined ? (
+            <label
+              className="wl-chip wl-bulkbar-lidarr"
+              title="On: grabs go to Lidarr, which downloads whole albums. Off: they go to the next download source (e.g. Soulseek)."
+            >
+              <input
+                type="checkbox"
+                data-testid="wl-lidarr-whole-album"
+                checked={lidarrWholeAlbum}
+                onChange={(event) => onLidarrWholeAlbumChange?.(event.target.checked)}
+              />{' '}
+              Whole album via Lidarr
+            </label>
+          ) : null}
         </div>
       ) : null}
 

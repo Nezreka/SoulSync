@@ -58,12 +58,14 @@ def test_is_eligible_requires_album_flag() -> None:
 
 def test_is_eligible_requires_album_bundle_mode() -> None:
     for mode in ('youtube', 'tidal', 'qobuz', 'hifi',
-                 'deezer_dl', 'amazon', 'lidarr', 'soundcloud', 'hybrid'):
+                 'deezer_dl', 'amazon', 'soundcloud', 'hybrid'):
         assert is_eligible(mode=mode, is_album=True,
                            album_name='X', artist_name='Y') is False
 
 
-def test_is_eligible_accepts_torrent_usenet_and_soulseek() -> None:
+def test_is_eligible_accepts_torrent_usenet_soulseek_and_lidarr() -> None:
+    assert is_eligible(mode='lidarr', is_album=True,
+                       album_name='X', artist_name='Y') is True
     assert is_eligible(mode='torrent', is_album=True,
                        album_name='X', artist_name='Y') is True
     assert is_eligible(mode='usenet', is_album=True,

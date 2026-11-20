@@ -100,6 +100,13 @@ ENV SOULSYNC_COMMIT_SHA=${COMMIT_SHA}
 COPY --chown=soulsync:soulsync . .
 COPY --chown=soulsync:soulsync --from=webui-builder /app/webui/static/dist /app/webui/static/dist
 
+# .br and .gz copies of every web UI text file (js, css, svg, json...), at max
+# compression: the server sends them to browsers that take them, so the first
+# load is about a fifth of the bytes. it runs by path and imports nothing from
+# the app. the server ignores any copy older than its file, so a copy can't go
+# stale
+RUN python core/webui/precompress.py /app/webui/static
+
 # Create runtime mount-point directories the app expects to exist.
 # NOTE: /app/data is for database FILES, /app/database is the Python package
 # NOTE: /app/Staging is required even though most users bind-mount it —

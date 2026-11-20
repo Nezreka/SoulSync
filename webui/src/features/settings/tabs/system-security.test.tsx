@@ -282,6 +282,9 @@ describe('OIDC and the rest', () => {
     fireEvent.click(el('security-plex-signin'));
     fireEvent.click(el('security-trust-proxy'));
     fireEvent.change(el('security-auth-proxy-header'), { target: { value: ' Remote-User ' } });
+    fireEvent.change(el('security-auth-proxy-trusted'), {
+      target: { value: ' 172.18.0.2\n10.0.0.0/8 ' },
+    });
     await waitFor(() => expect(store.hasPending()).toBe(false));
     expect(saved().security).toEqual({
       oidc_issuer: 'https://id.example',
@@ -290,7 +293,24 @@ describe('OIDC and the rest', () => {
       plex_signin: true,
       trust_reverse_proxy: true,
       auth_proxy_header: 'Remote-User',
+      auth_proxy_trusted: '172.18.0.2\n10.0.0.0/8',
     });
+  });
+
+  it('a proxy header with no trusted address says it is being ignored', async () => {
+    section();
+    await loaded({ security: { auth_proxy_header: 'Remote-User' } });
+    expect(document.getElementById('security-auth-proxy-untrusted')?.textContent).toMatch(
+      /header is being ignored/,
+    );
+    fireEvent.change(el('security-auth-proxy-trusted'), { target: { value: '172.18.0.2' } });
+    expect(document.getElementById('security-auth-proxy-untrusted')).toBeNull();
+  });
+
+  it('no header, no warning', async () => {
+    section();
+    await loaded();
+    expect(document.getElementById('security-auth-proxy-untrusted')).toBeNull();
   });
 
   it('a malformed WebSocket origin is saved, with the warning once the typing stops', async () => {

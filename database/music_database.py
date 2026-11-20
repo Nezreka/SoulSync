@@ -12,7 +12,7 @@ import time
 from contextlib import closing
 from functools import lru_cache
 from datetime import datetime, timezone
-from typing import List, Optional, Dict, Any, Tuple, Union
+from typing import List, Optional, Dict, Any, Tuple, Union, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from utils.logging_config import get_logger
@@ -1677,6 +1677,9 @@ class MusicDatabase:
             self._add_profile_plex_home_user(cursor)
             self._add_profile_oidc_identity(cursor)
             self._add_profile_controls(cursor)
+            # share listening (blends) and private session, off for everyone
+            from core.personalized.listening_privacy import ensure_schema as _ensure_listening_privacy
+            _ensure_listening_privacy(cursor)
             self._add_device_oidc_session(cursor)
             # people and permissions (#2166): templates, policy, personal
             # changes. after every profile column above it reads
@@ -2240,6 +2243,7 @@ class MusicDatabase:
 
             self._ensure_wishlist_quality_columns(cursor)
             self._add_release_group_columns(cursor)
+            self._ensure_wishlist_owned_checked_column(cursor)
 
             # One-time: materialize the current global quality/AcoustID/downsample
             # settings into the `quality_profiles` default row and backfill
@@ -2683,6 +2687,22 @@ class MusicDatabase:
                         logger.debug("wishlist column removal %s: %s", dead_col, e)
         except Exception as e:
             logger.error("Error adding wishlist quality-profile column: %s", e)
+
+    def _ensure_wishlist_owned_checked_column(self, cursor):
+        """When the already-in-the-library check last looked at a wishlist row
+        (#2221). the auto-wishlist cycle used to check every row, every cycle,
+        before building a batch: hours on a 13k wishlist against a 1M track
+        library. with this it checks new and stale rows first, within a time
+        budget, and the batch checks the rest of its own tracks before it
+        downloads them. NULL means never checked."""
+        try:
+            cursor.execute("PRAGMA table_info(wishlist_tracks)")
+            cols = {c[1] for c in cursor.fetchall()}
+            if cols and 'owned_checked_at' not in cols:
+                cursor.execute("ALTER TABLE wishlist_tracks ADD COLUMN owned_checked_at TIMESTAMP DEFAULT NULL")
+                logger.info("Added owned_checked_at column to wishlist_tracks table")
+        except Exception as e:
+            logger.error("Error adding wishlist owned_checked_at column: %s", e)
 
     def _add_release_group_columns(self, cursor):
         """MusicBrainz release-GROUP ids for wishlist rows (upstream 9c06ffd5b).
@@ -3886,6 +3906,11 @@ class MusicDatabase:
             # transaction; without this each one scanned the whole cache
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_sync_cache_server_track "
                            "ON sync_match_cache (server_source, server_track_id)")
+            # #2222: a pairing found under one provider's id (deezer) is
+            # looked up again by title + artist when a later sync carries
+            # another provider's id (itunes) for the same song
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_sync_cache_identity "
+                           "ON sync_match_cache (server_source, normalized_title, normalized_artist)")
 
             # pairings a user unmatched on the server playlist compare view.
             # the auto matcher may never pair this source track with this
@@ -5805,6 +5830,7 @@ class MusicDatabase:
         ("max_rating", "TEXT DEFAULT NULL"),           # kids: highest movie/tv rating, NULL = any
         ("session_epoch", "INTEGER DEFAULT 0"),        # bump = every signed-in browser signs out
         ("disabled", "INTEGER DEFAULT 0"),             # turned off: kept, but nobody can open it
+        ("discover_adventurousness", "REAL DEFAULT NULL"),  # own Discover dial, NULL = the global default
     )
 
     def _add_profile_controls(self, cursor):
@@ -9594,6 +9620,34 @@ class MusicDatabase:
     _PERMISSION_CACHE_FIELDS = frozenset({'allowed_pages', 'can_download', 'allowed_sides', 'request_limit',
                                            'request_limit_days', 'hide_explicit', 'max_rating', 'is_admin'})
 
+    def get_profile_adventurousness(self, profile_id: int) -> Optional[float]:
+        """The profile's own Discover dial, or None when it follows the
+        global default (or the column isn't there yet)."""
+        try:
+            with self._get_connection() as conn:
+                row = conn.execute(
+                    "SELECT discover_adventurousness FROM profiles WHERE id = ?",
+                    (int(profile_id),)).fetchone()
+            if row is None or row[0] is None:
+                return None
+            return float(row[0])
+        except Exception as e:  # noqa: BLE001 - a read miss falls back to the global value
+            logger.debug("profile adventurousness read failed for %s: %s", profile_id, e)
+            return None
+
+    def set_profile_adventurousness(self, profile_id: int, value: Optional[float]) -> bool:
+        """Store the profile's own dial; None clears it back to the global default."""
+        try:
+            with self._get_connection() as conn:
+                cur = conn.execute(
+                    "UPDATE profiles SET discover_adventurousness = ? WHERE id = ?",
+                    (None if value is None else float(value), int(profile_id)))
+                conn.commit()
+                return cur.rowcount > 0
+        except Exception as e:  # noqa: BLE001
+            logger.error("profile adventurousness write failed for %s: %s", profile_id, e)
+            return False
+
     def update_profile(self, profile_id: int, **kwargs) -> bool:
         """Update profile fields. Accepts: name, avatar_color, avatar_url, pin_hash, is_admin, home_page, allowed_pages, can_download."""
         allowed = {'name', 'avatar_color', 'avatar_url', 'pin_hash', 'is_admin', 'home_page', 'allowed_pages', 'can_download', 'allowed_sides',
@@ -12119,9 +12173,24 @@ class MusicDatabase:
         Library v2: with ``server_source`` a row's id is that server's id for
         the track -- the sync hands it to the server -- and a track the server
         does not know yet is not a row; without it, the catalogue id."""
+        return self._owned_tracks_by(
+            "t.spotify_id = ?", str(spotify_track_id or '').strip(), server_source, 'spotify id')
+
+    def get_tracks_by_isrc(self, isrc, server_source: str = None) -> List[DatabaseTrackWithMetadata]:
+        """every owned library track carrying this ISRC (#2222), in track id
+        order, the same rows and id rules as get_tracks_by_spotify_id. an isrc
+        names a recording on every provider, so a sync carrying the itunes id
+        still finds the track a deezer sync matched. not proof alone either
+        (a remaster can keep it, a compilation copy shares it):
+        core.sync.provider_match corroborates each row."""
+        return self._owned_tracks_by(
+            "t.isrc = ? COLLATE NOCASE", str(isrc or '').strip().upper(), server_source, 'isrc')
+
+    def _owned_tracks_by(self, where: str, value: str, server_source: str = None,
+                         label: str = 'id') -> List[DatabaseTrackWithMetadata]:
+        """owned library tracks matching one indexed ``where`` on lib2_tracks t."""
         try:
-            spotify_id_str = str(spotify_track_id or '').strip()
-            if not spotify_id_str:
+            if not value:
                 return []
             from core.library2.sql_util import owned_sql, owner_clause
             from core.library2.track_files import primary_order
@@ -12148,9 +12217,9 @@ class MusicDatabase:
                 FROM lib2_tracks t
                 JOIN lib2_albums al ON al.id = t.album_id
                 JOIN lib2_artists a ON a.id = al.primary_artist_id
-                WHERE t.spotify_id = ? AND {owned_sql('track', 't')}
+                WHERE {where} AND {owned_sql('track', 't')}
                 ORDER BY t.id
-            """, [*id_params, spotify_id_str])
+            """, [*id_params, value])
             return [
                 DatabaseTrackWithMetadata(
                     id=row['public_id'],
@@ -12171,7 +12240,7 @@ class MusicDatabase:
             ]
 
         except Exception as e:
-            logger.error(f"Error getting tracks by spotify id {spotify_track_id}: {e}")
+            logger.error(f"Error getting tracks by {label} {value}: {e}")
             return []
 
     def get_track_by_spotify_id(self, spotify_track_id, server_source: str = None) -> Optional[DatabaseTrackWithMetadata]:
@@ -13250,7 +13319,9 @@ class MusicDatabase:
         """The other names ``artist`` is linked under (§40 artist aliases,
         core/library2/artist_aliases.py): a kanji and a romaji row of one
         composer are one artist, and the library may hold the release under
-        the other one. Empty without links, or on any error."""
+        the other one. Also the artists the library holds under another
+        script or musicbrainz name (core/library2/artist_equivalence.py,
+        #2222). Empty without links, or on any error."""
         from core.library2.artist_aliases import resolve_alias_group
         from core.library2.importer import normalize_name
         key = normalize_name(artist or '')
@@ -13266,6 +13337,12 @@ class MusicDatabase:
                         names.extend(r[0] for r in conn.execute(
                             f"SELECT name FROM lib2_artists WHERE id IN ({','.join('?' * len(group))})",
                             group))
+                # the same artist under another script or musicbrainz name:
+                # itunes' "Δέσποινα Βανδή" is the library's "Despina Vandi"
+                # (#2222)
+                from core.library2.artist_equivalence import equivalent_artist_names
+                names.extend(equivalent_artist_names(
+                    conn, artist, cache_key=str(getattr(self, 'database_path', '') or '')))
         except Exception as e:
             logger.debug(f"alias names for '{artist}' skipped: {e}")
             return []
@@ -18321,6 +18398,53 @@ class MusicDatabase:
             logger.error(f"Error resetting wishlist retry backoff: {e}")
             return 0
 
+    def get_wishlist_owned_checked(self, *, profile_id: Optional[int] = None,
+                                   row_ids: Optional[Iterable[Any]] = None) -> Dict[int, Optional[str]]:
+        """``{wishlist row id: owned_checked_at}`` (#2221): when the
+        already-in-the-library check last looked at each row, None for never.
+        one profile's rows, or the given row ids. empty on any error, which
+        reads as "never checked", so a failure checks more, never less."""
+        try:
+            with self._get_connection() as conn:
+                if row_ids is not None:
+                    ids = sorted({int(i) for i in row_ids if str(i).strip().lstrip('-').isdigit()})
+                    out: Dict[int, Optional[str]] = {}
+                    for start in range(0, len(ids), 500):
+                        chunk = ids[start:start + 500]
+                        rows = conn.execute(
+                            f"SELECT id, owned_checked_at FROM wishlist_tracks "
+                            f"WHERE id IN ({','.join('?' * len(chunk))})", chunk).fetchall()
+                        out.update({int(r[0]): r[1] for r in rows})
+                    return out
+                rows = conn.execute(
+                    "SELECT id, owned_checked_at FROM wishlist_tracks WHERE profile_id = ?",
+                    (profile_id if profile_id is not None else 1,)).fetchall()
+                return {int(r[0]): r[1] for r in rows}
+        except Exception as e:
+            logger.debug("owned_checked_at read failed: %s", e)
+            return {}
+
+    def stamp_wishlist_owned_checked(self, row_ids: Iterable[Any]) -> int:
+        """Record that the already-in-the-library check just looked at these
+        wishlist rows and kept them (#2221). one write for the lot."""
+        ids = sorted({int(i) for i in (row_ids or []) if str(i).strip().lstrip('-').isdigit()})
+        if not ids:
+            return 0
+        try:
+            changed = 0
+            with self._get_connection() as conn:
+                for start in range(0, len(ids), 500):
+                    chunk = ids[start:start + 500]
+                    cur = conn.execute(
+                        f"UPDATE wishlist_tracks SET owned_checked_at = CURRENT_TIMESTAMP "
+                        f"WHERE id IN ({','.join('?' * len(chunk))})", chunk)
+                    changed += cur.rowcount
+                conn.commit()
+            return changed
+        except Exception as e:
+            logger.warning("owned_checked_at stamp failed: %s", e)
+            return 0
+
     def get_wishlist_count(self, profile_id: int = 1, category: Optional[str] = None,
                            approved_only: bool = False) -> int:
         """Get the total number of tracks in the wishlist for the given profile,
@@ -22269,6 +22393,42 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"find_manual_library_matches_bulk error: {e}")
             return out
+
+    def find_sync_match_cache_by_identity(self, normalized_titles, normalized_artists,
+                                          server_source: str) -> List[Dict]:
+        """Cached pairings for this song under ANY source id (#2222).
+
+        The cache is keyed by the provider's track id, and one song has a
+        different id on every provider: a pairing the sync made under the
+        deezer id was never found by a later sync carrying the itunes id.
+        This looks the song up by the title and artist forms the writers
+        store, on idx_sync_cache_identity. Best rows first: user-confirmed
+        (1.0) before auto, then the most recently used. Empty on any error.
+        """
+        titles = [t for t in dict.fromkeys(str(x or '').strip() for x in (normalized_titles or [])) if t]
+        artists = [a for a in dict.fromkeys(str(x or '').strip() for x in (normalized_artists or [])) if a]
+        if not titles or not artists or not server_source:
+            return []
+        try:
+            with self._get_connection() as conn:
+                rows = conn.execute(f"""
+                    SELECT spotify_track_id, server_track_id, server_track_title, confidence
+                    FROM sync_match_cache
+                    WHERE server_source = ?
+                      AND normalized_title IN ({','.join('?' * len(titles))})
+                      AND normalized_artist IN ({','.join('?' * len(artists))})
+                    ORDER BY confidence DESC, last_used_at DESC
+                    LIMIT 20
+                """, [server_source, *titles, *artists]).fetchall()
+            return [{
+                'spotify_track_id': row['spotify_track_id'],
+                'server_track_id': row['server_track_id'],
+                'server_track_title': row['server_track_title'],
+                'confidence': row['confidence'],
+            } for row in rows]
+        except Exception as e:
+            logger.debug(f"sync match cache identity lookup failed: {e}")
+            return []
 
     def save_sync_match_cache(self, spotify_track_id: str, normalized_title: str,
                                normalized_artist: str, server_source: str,

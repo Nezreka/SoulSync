@@ -172,6 +172,9 @@ def review_queue_summary():
         from core.imports.quarantine import count_quarantine_entries
         from database.music_database import MusicDatabase
 
+        # "auto-reject Review items older than N days" (off by default)
+        from core.downloads.near_misses import auto_reject_old_throttled
+        auto_reject_old_throttled(config_manager, qdir=_get_quarantine_dir())
         quarantined = count_quarantine_entries(_get_quarantine_dir())
         # what the Downloads page shows, so the badge and the list agree
         unverified = MusicDatabase().count_library_history_unverified(

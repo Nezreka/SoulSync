@@ -187,6 +187,16 @@ const SERVER_META: Record<ServerModel['type'], { name: string; logo: string }> =
   none: { name: 'Media server', logo: '' },
 };
 
+/** GET /api/profiles/me/listening-privacy: share listening (blends) and the
+ * private session, the caller's own */
+export interface MaPrivacy {
+  share_listening?: boolean;
+  asked?: boolean;
+  ask?: boolean;
+  private_session?: boolean;
+  private_until?: string | null;
+}
+
 // init.js fires this when the signed-in profile is known or changes (the same
 // name as SHELL_PROFILE_CONTEXT_CHANGED_EVENT; the shell bundle keeps its own copy)
 const PROFILE_CONTEXT_CHANGED_EVENT = 'ss:webui-profile-context-changed';
@@ -198,6 +208,7 @@ const _ma: {
   imports: Partial<Record<'listenbrainz' | 'lastfm', ImportStatus>>;
   scrobbling: MaScrobbling | null;
   weather: MaWeather | null;
+  privacy: MaPrivacy | null;
   /** asks used in each limited kind's window, for "5 asks a week, 2 used" */
   asksUsed: Partial<Record<LimitKind, number>> | null;
   adminName: string;
@@ -210,6 +221,7 @@ const _ma: {
   imports: {},
   scrobbling: null,
   weather: null,
+  privacy: null,
   asksUsed: null,
   adminName: '',
   open: null,
@@ -336,12 +348,13 @@ async function _maJson<T>(url: string): Promise<T | null> {
 }
 
 async function _maLoad(): Promise<void> {
-  const [data, server, oidc, scrobbling, weather] = await Promise.all([
+  const [data, server, oidc, scrobbling, weather, privacy] = await Promise.all([
     _maJson<MaConnections>('/api/profiles/me/connections'),
     _maLoadServer(),
     _maJson<OidcStatus>('/api/profiles/me/oidc'),
     _maJson<MaScrobbling>('/api/profiles/me/scrobbling'),
     _maJson<MaWeather>('/api/weather'),
+    _maJson<MaPrivacy>('/api/profiles/me/listening-privacy'),
     _maLoadCanDo(),
   ]);
   _ma.data = data || { connections: {}, is_admin: false };
@@ -349,6 +362,7 @@ async function _maLoad(): Promise<void> {
   _ma.oidc = oidc;
   _ma.scrobbling = scrobbling;
   _ma.weather = weather;
+  _ma.privacy = privacy;
   _maRefreshHeader();
   _maRender();
   const last = oidc?.last;
@@ -520,7 +534,7 @@ function _maRender(): void {
   const body = document.getElementById('ma-body');
   if (!body || !_ma.data) return;
   if (_ma.data.is_admin) {
-    body.innerHTML = `<div class="ma-empty">Your accounts are the app's own. They're set up in Settings.</div>${_maSignInSection()}`;
+    body.innerHTML = `<div class="ma-empty">Your accounts are the app's own. They're set up in Settings.</div>${_maPrivacySection()}${_maSignInSection()}`;
     return;
   }
   body.innerHTML = `
@@ -534,6 +548,7 @@ function _maRender(): void {
       <h4 class="ma-section-title" id="ma-services-h">Music services</h4>
       <div class="ma-group">${_MA_SERVICES.map(_maServiceRow).join('')}</div>
     </section>
+    ${_maPrivacySection()}
     ${_maWeatherSection()}
     ${_maSignInSection()}
     <p class="ma-foot">The app's own accounts are set up by the admin in Settings. Anything you change here only affects you.</p>`;
@@ -641,6 +656,75 @@ export function _maWeatherLine(w: MaWeather | null): string {
   const unit = w?.units === 'celsius' ? 'C' : 'F';
   const sky = cur.condition ? `, ${cur.condition.toLowerCase()}` : '';
   return `${name}, ${Math.round(cur.temp)}°${unit}${sky}`;
+}
+
+/** "ends at 9:40 PM" for a private session's stamp (stored in utc) */
+export function _maPrivateUntil(until: string | null | undefined): string {
+  if (!until) return '';
+  const when = new Date(until.replace(' ', 'T') + 'Z');
+  if (Number.isNaN(when.getTime())) return '';
+  return when.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
+
+/** who sees your listening: blends only when you say yes, and a private
+ * session that keeps plays out of everything for a few hours */
+export function _maPrivacySection(): string {
+  const p = _ma.privacy;
+  if (!p) return '';
+  const row = (key: string, name: string, sub: string, on: boolean) => `
+        <div class="ma-row">
+          <div class="ma-row-main">
+            <span class="ma-logo ma-logo-key">${_PULSE}</span>
+            <div class="ma-row-text">
+              <div class="ma-row-name">${name}</div>
+              <div class="ma-row-sub" id="ma-sub-${key}">${escapeHtml(sub)}</div>
+            </div>
+            <label class="ma-switch">
+              <input type="checkbox" data-ma-privacy="${key}" aria-label="${name}"${on ? ' checked' : ''}>
+              <span></span>
+            </label>
+          </div>
+        </div>`;
+  const ends = _maPrivateUntil(p.private_until);
+  return `
+    <section class="ma-section" aria-labelledby="ma-privacy-h">
+      <h4 class="ma-section-title" id="ma-privacy-h">Your listening</h4>
+      <div class="ma-group">
+        ${row(
+          'share',
+          'Share my listening',
+          p.share_listening
+            ? 'On. Blends mix your plays with people here who also share theirs.'
+            : 'Off. Nobody else on this server gets a blend made from your plays.',
+          !!p.share_listening,
+        )}
+        ${row(
+          'private',
+          'Private session',
+          p.private_session
+            ? `On${ends ? ` until ${ends}` : ''}. What you play now isn't saved, scrobbled or used for your mixes.`
+            : "Plays in a private session aren't saved, scrobbled or used for your mixes. It turns itself off after 6 hours.",
+          !!p.private_session,
+        )}
+      </div>
+    </section>`;
+}
+
+async function _maPrivacyCall(body: Record<string, boolean>, said: (p: MaPrivacy) => string) {
+  try {
+    const res = await fetch('/api/profiles/me/listening-privacy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = (await res.json().catch(() => null)) as (MaPrivacy & { success?: boolean }) | null;
+    if (!res.ok || !data || data.success === false) throw new Error('save failed');
+    _ma.privacy = data;
+    toast(said(data), 'success');
+  } catch {
+    toast("Couldn't save that. Try again.", 'error');
+  }
+  _maRender();
 }
 
 /** your own sidebar weather (#2163). the admin's lives in Settings and is
@@ -1234,6 +1318,20 @@ function _maOnClick(e: Event): void {
 
 function _maOnChange(e: Event): void {
   const el = e.target as HTMLElement;
+  if (el instanceof HTMLInputElement && el.dataset.maPrivacy) {
+    const on = el.checked;
+    if (el.dataset.maPrivacy === 'share') {
+      void _maPrivacyCall({ share_listening: on }, () =>
+        on ? 'Sharing your listening for blends' : 'Your listening is just yours now',
+      );
+    } else {
+      void _maPrivacyCall({ private_session: on }, (p) => {
+        const ends = _maPrivateUntil(p.private_until);
+        return on ? `Private session on${ends ? ` until ${ends}` : ''}` : 'Private session off';
+      });
+    }
+    return;
+  }
   if (el instanceof HTMLInputElement && el.dataset.maWeather) {
     const on = el.checked;
     if (el.dataset.maWeather === 'celsius') {

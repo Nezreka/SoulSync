@@ -60,6 +60,8 @@ With the switch on, a watcher checks the folder on a timer, identifies each item
 - Between 70% and the confidence line, it **waits for review**
 - Below 70%, it **needs identifying**
 
+A folder imports as one album. When the release it picked is missing some of the folder's songs, the same album's other editions are tried first, and the one that holds the most of the folder wins. Files no edition holds stay in the import folder, and **What happened** on the row lists each one with the reason. **Retry** and **Fix match** keep what's left on the release the rest of the folder went to, so the album never ends up split over two releases in your library.
+
 The gear opens the settings: the confidence line, how often the folder is checked, whether matches import without asking, and which quality profile they are checked against.
 `
         },
@@ -143,6 +145,14 @@ Playback serves the **local file on SoulSync's disk**: the browser asks \`/api/l
 - **Navidrome fallback** — when the file isn't on SoulSync's disk (e.g. the library isn't mounted into the container) and Navidrome is the active media server, playback falls back to streaming via Navidrome's own Subsonic-compatible stream API — no disk mount needed. Plex and Jellyfin have no such fallback, so their files must be reachable on SoulSync's disk.
 
 The browser auto-detects which audio formats it can play. Album art, track metadata, and ambient colors are all pulled from your server in real time.
+
+**Lyrics** in Now Playing come from the first place that has them:
+
+1. the \`.lrc\` (synced) or \`.txt\` (plain) file beside the song
+2. lyrics embedded in the file's own tags: ID3 USLT and synced SYLT (MP3), LYRICS or UNSYNCEDLYRICS (FLAC, Ogg, Opus), and the lyrics atom (M4A). Files tagged by beets or Picard often carry these only
+3. LRClib
+
+An \`[offset:]\` line in LRC lyrics is honoured, so lyrics that run early or late line up. When LRClib finds lyrics for a song in your library, SoulSync saves them as a \`.lrc\` (or \`.txt\`) beside the file, so the next play needs no lookup. It never overwrites a sidecar you already have, skips locked albums and folders it can't write to, and never changes the audio file. Turn it off in Settings, Library, Post-Processing: **Save lyrics the player finds as .lrc files beside library songs** (it's also off whenever .lrc files are turned off for downloads).
 `
         },
         {

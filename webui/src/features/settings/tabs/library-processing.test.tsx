@@ -138,6 +138,7 @@ describe('Tags and artwork, and Import', () => {
     act(() => store.hydrate({ spotify: { client_id: 'abc', tags: { track_id: true } } }));
     cards();
     fireEvent.click(input('lrclib-enabled'));
+    fireEvent.click(input('lrclib-cache-player'));
     fireEvent.click(input('replaygain-enabled'));
     fireEvent.change(input('duration-tolerance-seconds'), { target: { value: 'x' } });
     fireEvent.click(input('embed-qobuz'));
@@ -149,7 +150,11 @@ describe('Tags and artwork, and Import', () => {
     fireEvent.click(input('import-transfer-permanent'));
     await waitFor(() => expect(store.hasPending()).toBe(false));
     expect(saved()).toEqual({
-      metadata_enhancement: { lrclib_enabled: false, 'tags.quality_tag': false },
+      metadata_enhancement: {
+        lrclib_enabled: false,
+        lrclib_cache_player: false,
+        'tags.quality_tag': false,
+      },
       post_processing: { replaygain_enabled: true, duration_tolerance_seconds: 0 },
       qobuz: { embed_tags: false },
       spotify: { 'tags.artist_id': false },

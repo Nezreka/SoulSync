@@ -24,6 +24,8 @@ _HISTORY_STATUS = {
     'pending_review': 'needs_review',
     'needs_identification': 'needs_identify',
     'approved': 'queued',
+    # a partial import the user retried: waiting for the next scan (#2220)
+    'retried': 'queued',
     'processing': 'importing',
     'completed': 'imported',
     'partial': 'partial',
@@ -99,12 +101,23 @@ def _parse_match(raw: Any) -> Optional[Dict[str, Any]]:
             'import_error': m.get('import_error') or None,
         })
     summary = data.get('summary') if isinstance(data.get('summary'), dict) else None
+    # #2220: the files the run left in Import and why, so nothing stays
+    # behind without a reason. rows written before the reasons existed still
+    # list the files.
+    left_behind = [
+        {'file': os.path.basename(str(e.get('file') or '')), 'why': str(e.get('why') or '')}
+        for e in data.get('left_behind') or [] if isinstance(e, dict) and e.get('file')
+    ]
+    if not left_behind:
+        left_behind = [{'file': os.path.basename(str(f)), 'why': ''}
+                       for f in data.get('unmatched_files') or [] if f]
     return {
         'matched_count': int(data.get('matched_count') or len([m for m in matches if m['file']])),
         'total_tracks': int(data.get('total_tracks') or 0),
         'matches': matches,
         'source': data.get('source') or None,
         'summary': summary,
+        'left_behind': left_behind,
     }
 
 

@@ -48,7 +48,13 @@ export interface ImportInboxFile {
 }
 
 /** what an import did with one track. 'completed' is a plain import. */
-export type ImportTrackOutcome = 'completed' | 'upgraded' | 'skipped_owned' | 'failed';
+export type ImportTrackOutcome =
+  | 'completed'
+  | 'upgraded'
+  | 'skipped_owned'
+  | 'failed'
+  /** a file the run did not take: it stays in Import (#2220) */
+  | 'left_behind';
 
 export interface ImportOutcomeSummary {
   imported: number;
@@ -74,6 +80,10 @@ export interface ImportInboxMatch {
   total_tracks: number;
   matches: ImportInboxMatchLine[];
   summary?: ImportOutcomeSummary | null;
+  /** the metadata source the release came from */
+  source?: string | null;
+  /** files the run left in Import, and why (#2220) */
+  left_behind?: { file: string; why: string }[];
 }
 
 /** One staging item: an album folder, a loose-file group, or a single file,

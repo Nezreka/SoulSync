@@ -306,6 +306,52 @@ export function LidarrPanel({ store }: { store: SettingsStore }) {
           onChange={(value) => store.set('lidarr_download', 'api_key', value)}
         />
       </SheetField>
+      <SheetGroup title="Albums and folders" />
+      <Row
+        label="Whole album via Lidarr, on by default"
+        htmlFor="lidarr-whole-album-default"
+        help={
+          'Where the download dialogs\' and the wishlist\'s "Whole album via Lidarr" toggle starts, and what automatic wishlist runs do.'
+        }
+        more="The toggle is there in hybrid mode, with Lidarr and another source. On, Lidarr downloads the whole album; off, the next source (Soulseek, say) gets the tracks."
+      >
+        <Switch
+          id="lidarr-whole-album-default"
+          checked={settings.lidarr_download?.whole_album_default !== false}
+          onChange={(event) =>
+            store.set('lidarr_download', 'whole_album_default', event.target.checked)
+          }
+        />
+      </Row>
+      <SheetField
+        label="Lidarr imports folder"
+        htmlFor="lidarr-transfer-path"
+        help="Where tracks that came from Lidarr are imported. Empty imports them like every other download."
+        more="Lidarr already keeps the whole album in its own root folder; if that folder is your library, the copy SoulSync imports is a second one."
+      >
+        <TextField
+          full
+          mono
+          id="lidarr-transfer-path"
+          placeholder="empty: the music library folder"
+          value={text(settings.lidarr_download?.transfer_path)}
+          onChange={(event) => store.set('lidarr_download', 'transfer_path', event.target.value)}
+        />
+      </SheetField>
+      <SheetField
+        label="Lidarr download folder"
+        htmlFor="lidarr-download-path"
+        help="Where SoulSync copies a track out of Lidarr before it imports it."
+      >
+        <TextField
+          full
+          mono
+          id="lidarr-download-path"
+          placeholder="empty: the Soulseek download folder"
+          value={text(settings.lidarr_download?.download_path)}
+          onChange={(event) => store.set('lidarr_download', 'download_path', event.target.value)}
+        />
+      </SheetField>
       <Note info>
         Lidarr downloads through its own indexers and download clients (usenet and torrent).{' '}
         <strong>Best for whole albums.</strong> Lidarr is album-first: a search by track name
@@ -1131,8 +1177,8 @@ export function SoulseekPanel({ store }: { store: SettingsStore }) {
         />
       </Row>
       <More
-        count={6}
-        names="timeout buffer, search delay, slow download speed, download timeout, cleanup"
+        count={7}
+        names="timeout buffer, search delay, slow download speed, download timeout, login wait, cleanup"
       >
         <Row
           field
@@ -1205,6 +1251,27 @@ export function SoulseekPanel({ store }: { store: SettingsStore }) {
             value={text(Math.round((Number(s.download_timeout) || 600) / 60))}
             // stored in seconds, shown in minutes
             save={(raw) => set('download_timeout', int(raw, 10) * 60)}
+          />
+        </Row>
+        <Row
+          field
+          label="Wait for the Soulseek login"
+          htmlFor="soulseek-login-wait-minutes"
+          help="When slskd loses its Soulseek login (a server ban, a reconnect), Soulseek downloads wait this long for it without using up their retries, then move on to your next source."
+          more="0 never waits."
+        >
+          <DraftNumber
+            store={store}
+            id="soulseek-login-wait-minutes"
+            unit="minutes"
+            placeholder="45"
+            min="0"
+            max="1440"
+            value={num(s.login_wait_minutes, 45, true)}
+            save={(raw) => {
+              const n = parseInt(raw, 10);
+              set('login_wait_minutes', Number.isFinite(n) && n >= 0 ? n : 45);
+            }}
           />
         </Row>
         <Row

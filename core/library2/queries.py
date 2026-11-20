@@ -433,12 +433,14 @@ def _album_page_ids(conn, members: set, frm: str, where: str, order: str,
 
 def list_albums(conn, *, search: str = "", sort: str = "title", monitored: str = "all",
                 page: int = 1, limit: int = 75, letter: str = "all",
-                source_filter: str = "") -> Tuple[List[Dict[str, Any]], int]:
+                source_filter: str = "",
+                review_filter: str = "") -> Tuple[List[Dict[str, Any]], int]:
     """The whole library by release (upstream's album browse, A07).
 
     The releases the artist list counts -- a library row, or one this library
     monitors -- in the caller's library, newest-first or by title or year.
-    Unknown years sort last either way.
+    Unknown years sort last either way. ``review_filter`` is the padlock
+    (#2223): 'reviewed' keeps the locked releases, 'unreviewed' the rest.
     """
     page = max(1, int(page))
     limit = max(1, min(int(limit), 500))
@@ -483,6 +485,15 @@ def list_albums(conn, *, search: str = "", sort: str = "title", monitored: str =
             parts.append(f"COALESCE(al.{source}_id,'') <> ''")
         predicate = "(" + " OR ".join(parts) + ")"
         filters.append(f"NOT {predicate}" if str(source_filter).startswith("!") else predicate)
+    # #2223: locked or not. a lock row is the lock (no scopes left deletes
+    # it). locked goes from the locks outward, there are few of them; not
+    # locked is one primary-key probe per release
+    if review_filter == "reviewed":
+        filters.append("al.id IN (SELECT rlk.entity_id FROM lib2_entity_locks rlk"
+                       " WHERE rlk.entity_type='album')")
+    elif review_filter == "unreviewed":
+        filters.append("NOT EXISTS (SELECT 1 FROM lib2_entity_locks rlk"
+                       " WHERE rlk.entity_type='album' AND rlk.entity_id=al.id)")
     order = _ALBUM_SORTS.get(sort, _ALBUM_SORTS["title"])
     offset = (page - 1) * limit
     joined = ("FROM lib2_albums al LEFT JOIN lib2_artists ar"

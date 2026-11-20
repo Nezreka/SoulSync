@@ -109,19 +109,15 @@ def _preferred_version_hit(r):
     return 1 if getattr(r, 'preferred_version_hit', False) else 0
 
 
-# Streaming plugins identify themselves via ``TrackResult.username``. Soulseek
-# peers use the sharing username, so they are everything else. Keep this list
-# in sync with ``core.downloads.validation._STREAMING_USERNAMES`` — imported
-# lazily would cycle (validation → candidates).
 # Soulseek candidates whose confidence is within this of the band leader are
 # equally likely to be the right file; a normal pathname's noise (a year, a
 # format tag) moves the score more than this.
 _CONFIDENCE_BAND_WIDTH = 0.08
 
-_STREAMING_USERNAMES = frozenset({
-    'youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'soundcloud',
-    'amazon', 'torrent', 'usenet', 'lidarr',
-})
+# Streaming plugins identify themselves via ``TrackResult.username``. Soulseek
+# peers use the sharing username, so they are everything else. The set is
+# source_policy's, shared with validation, so the two can't drift again.
+from core.downloads.source_policy import STREAMING_SOURCE_NAMES as _STREAMING_USERNAMES  # noqa: E402
 
 
 def _candidate_source_name(r) -> str:

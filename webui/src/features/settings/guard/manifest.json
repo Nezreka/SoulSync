@@ -693,6 +693,40 @@
       "asked": "4",
       "shows": ["post_processing.version_mismatch_min_count"]
     },
+    "#clear-near-misses-on-success": {
+      "sel": "#clear-near-misses-on-success",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": true,
+      "to": false,
+      "saves": {
+        "settings": {
+          "post_processing": {
+            "clear_near_misses_on_success": false
+          }
+        }
+      },
+      "asked": false,
+      "shows": ["post_processing.clear_near_misses_on_success"]
+    },
+    "#review-auto-reject-days": {
+      "sel": "#review-auto-reject-days",
+      "kind": "number",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "0",
+      "to": "1",
+      "saves": {
+        "settings": {
+          "post_processing": {
+            "review_auto_reject_days": 1
+          }
+        }
+      },
+      "asked": "1",
+      "shows": ["post_processing.review_auto_reject_days"]
+    },
     "#album-atomic-publish": {
       "sel": "#album-atomic-publish",
       "kind": "checkbox",
@@ -1090,6 +1124,23 @@
       "asked": "16",
       "shows": ["soulseek.download_timeout"]
     },
+    "#soulseek-login-wait-minutes": {
+      "sel": "#soulseek-login-wait-minutes",
+      "kind": "number",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "45",
+      "to": "46",
+      "saves": {
+        "settings": {
+          "soulseek": {
+            "login_wait_minutes": 46
+          }
+        }
+      },
+      "asked": "46",
+      "shows": ["soulseek.login_wait_minutes"]
+    },
     "#soulseek-auto-clear-searches": {
       "sel": "#soulseek-auto-clear-searches",
       "kind": "checkbox",
@@ -1273,6 +1324,57 @@
       },
       "asked": "guard-secret",
       "shows": ["lidarr_download.api_key"]
+    },
+    "#lidarr-whole-album-default": {
+      "sel": "#lidarr-whole-album-default",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": true,
+      "to": false,
+      "saves": {
+        "settings": {
+          "lidarr_download": {
+            "whole_album_default": false
+          }
+        }
+      },
+      "asked": false,
+      "shows": ["lidarr_download.whole_album_default"]
+    },
+    "#lidarr-transfer-path": {
+      "sel": "#lidarr-transfer-path",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "guard-probe",
+      "saves": {
+        "settings": {
+          "lidarr_download": {
+            "transfer_path": "guard-probe"
+          }
+        }
+      },
+      "asked": "guard-probe",
+      "shows": ["lidarr_download.transfer_path"]
+    },
+    "#lidarr-download-path": {
+      "sel": "#lidarr-download-path",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "guard-probe",
+      "saves": {
+        "settings": {
+          "lidarr_download": {
+            "download_path": "guard-probe"
+          }
+        }
+      },
+      "asked": "guard-probe",
+      "shows": ["lidarr_download.download_path"]
     },
     "#youtube-cookies-browser": {
       "sel": "#youtube-cookies-browser",
@@ -4692,6 +4794,23 @@
       "asked": false,
       "shows": ["metadata_enhancement.lrclib_enabled"]
     },
+    "#lrclib-cache-player": {
+      "sel": "#lrclib-cache-player",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": true,
+      "to": false,
+      "saves": {
+        "settings": {
+          "metadata_enhancement": {
+            "lrclib_cache_player": false
+          }
+        }
+      },
+      "asked": false,
+      "shows": ["metadata_enhancement.lrclib_cache_player"]
+    },
     "#replaygain-enabled": {
       "sel": "#replaygain-enabled",
       "kind": "checkbox",
@@ -7872,6 +7991,23 @@
       },
       "asked": "guard-probe",
       "shows": ["security.auth_proxy_header"]
+    },
+    "#security-auth-proxy-trusted": {
+      "sel": "#security-auth-proxy-trusted",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "guard-probe",
+      "saves": {
+        "settings": {
+          "security": {
+            "auth_proxy_trusted": "guard-probe"
+          }
+        }
+      },
+      "asked": "guard-probe",
+      "shows": ["security.auth_proxy_trusted"]
     },
     "#security-cors-origins": {
       "sel": "#security-cors-origins",
@@ -11718,7 +11854,7 @@
     "#stg-behaviour-music \"More about this setting\"": {
       "label": "More about this setting",
       "anchor": "stg-behaviour-music",
-      "count": 11,
+      "count": 13,
       "sides": ["music", "video"],
       "scenario": "music"
     },
@@ -11787,12 +11923,12 @@
     "#soulseek-settings-container \"More about this setting\"": {
       "label": "More about this setting",
       "anchor": "soulseek-settings-container",
-      "count": 6,
+      "count": 7,
       "sides": ["music", "video"],
       "scenario": "music"
     },
-    "#soulseek-settings-container \"More options· 6 · timeout buffer, search delay, slow download speed, download ti\"": {
-      "label": "More options· 6 · timeout buffer, search delay, slow download speed, download ti",
+    "#soulseek-settings-container \"More options· 7 · timeout buffer, search delay, slow download speed, download ti\"": {
+      "label": "More options· 7 · timeout buffer, search delay, slow download speed, download ti",
       "anchor": "soulseek-settings-container",
       "count": 1,
       "sides": ["music", "video"],
@@ -11941,6 +12077,13 @@
       "label": "More about this setting",
       "anchor": "soundcloud-download-settings-container",
       "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#lidarr-download-settings-container \"More about this setting\"": {
+      "label": "More about this setting",
+      "anchor": "lidarr-download-settings-container",
+      "count": 2,
       "sides": ["music", "video"],
       "scenario": "music"
     },
@@ -12965,7 +13108,7 @@
     "#post-processing-options \"More about this setting\"": {
       "label": "More about this setting",
       "anchor": "post-processing-options",
-      "count": 9,
+      "count": 10,
       "sides": ["music", "video"],
       "scenario": "music"
     },
@@ -13508,7 +13651,7 @@
     "#stg-view-advanced-security \"More about this setting\"": {
       "label": "More about this setting",
       "anchor": "stg-view-advanced-security",
-      "count": 7,
+      "count": 8,
       "sides": ["music", "video"],
       "scenario": "music"
     },
@@ -13882,9 +14025,21 @@
       "sides": ["music", "video"],
       "scenario": "music"
     },
-    "\"More options· 1 · your own server or Maloja\"": {
-      "label": "More options· 1 · your own server or Maloja",
+    "\"More options· 1 · your own server, Maloja or Koito\"": {
+      "label": "More options· 1 · your own server, Maloja or Koito",
       "anchor": "",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#listenbrainz-preset-maloja": {
+      "id": "listenbrainz-preset-maloja",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#listenbrainz-preset-koito": {
+      "id": "listenbrainz-preset-koito",
       "count": 1,
       "sides": ["music", "video"],
       "scenario": "music"

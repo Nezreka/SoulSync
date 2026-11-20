@@ -124,6 +124,8 @@ SoulSync includes two built-in system automations that cannot be deleted:
 | **Auto-Process Wishlist** | Every 30 minutes | 1 minute after startup |
 | **Auto-Scan Watchlist** | Every 24 hours | 5 minutes after startup |
 
+Before each Auto-Process Wishlist run builds its batch, it removes wishlist tracks your library already has. It checks tracks it has never checked first, then ones not checked for a day, for up to 60 seconds a run, and picks up where it stopped on the next run. Each batch also checks its own tracks against the library just before downloading them, so nothing you already own gets downloaded. Clean Up Wishlist and the cleanup after a library scan still check every track. Advanced config keys: `wishlist.owned_sweep_seconds` (default 60), `wishlist.owned_sweep_max_rows` (default 5000), `wishlist.owned_recheck_hours` (default 24).
+
 These appear with a "System" badge on their cards. You can:
 - Change the interval
 - Enable or disable them

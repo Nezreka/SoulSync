@@ -244,7 +244,7 @@ export interface RowProps {
   /** a folder or a template: the control gets a wide column, top aligned */
   wide?: boolean;
   /** what is wrong with it; the row is marked */
-  error?: string | null;
+  error?: ReactNode;
   /** changed and not saved yet */
   changed?: boolean;
   /** saved just now through its own endpoint */

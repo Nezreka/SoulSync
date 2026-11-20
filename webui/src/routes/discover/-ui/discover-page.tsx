@@ -125,6 +125,7 @@ import { LastfmRadioSection, ListenBrainzSection } from './radio-sections';
 import { RecipeEditor } from './recipe-editor';
 import { RecommendedModal } from './recommended-modal';
 import { RecommendedShelf } from './recommended-shelf';
+import { ShareListeningAsk } from './share-listening-ask';
 import { SinChartsShelf } from './sin-charts-shelf';
 import { YourAlbumsSourcesModal, YourArtistsSourcesModal } from './sources-modals';
 import { StationModal } from './station-modal';
@@ -1062,6 +1063,7 @@ export function DiscoverPage() {
             mixes={mixes.mixes}
             loaded={true}
             gridId="your-mixes-grid"
+            notice={<ShareListeningAsk />}
             actions={
               <button
                 type="button"

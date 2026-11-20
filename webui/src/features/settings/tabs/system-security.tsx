@@ -311,6 +311,7 @@ export function SecurityView({ store }: { store: SettingsStore }) {
   const scopes = useTrimmedField(store, 'oidc_scopes');
   const redirect = useTrimmedField(store, 'oidc_redirect_uri');
   const authHeader = useTrimmedField(store, 'auth_proxy_header');
+  const proxyTrusted = useTrimmedField(store, 'auth_proxy_trusted');
 
   // cors: saved trimmed; a malformed entry gets saveSettings' warning once the
   // typing stops, as it did on the save that followed
@@ -847,7 +848,7 @@ export function SecurityView({ store }: { store: SettingsStore }) {
             field
             label="Auth proxy user header"
             htmlFor="security-auth-proxy-header"
-            help="If an auth proxy (Authelia, Authentik, oauth2-proxy) signs people in in front of SoulSync, the header it sets. Empty is off."
+            help="If an auth proxy (Authelia, Authentik, oauth2-proxy) signs people in in front of SoulSync, the header it sets. SoulSync trusts it from the addresses below. Empty is off."
             more="Only set this behind a proxy that strips any copy of the header a client sends, or anyone could sign in as anyone."
           >
             <TextField
@@ -857,6 +858,31 @@ export function SecurityView({ store }: { store: SettingsStore }) {
               placeholder="Remote-User"
               autoComplete="off"
               {...authHeader}
+            />
+          </Row>
+          <Row
+            sub
+            stack
+            label="Trusted proxy addresses"
+            htmlFor="security-auth-proxy-trusted"
+            help="Your proxy's IP or range, one per line or comma separated. Empty means the header is ignored."
+            more="The header only counts on requests that really come from one of these, never from a forwarded address."
+            error={
+              authHeader.value && !proxyTrusted.value ? (
+                <span id="security-auth-proxy-untrusted">
+                  The header is being ignored until you add your proxy&apos;s address here, so
+                  people get the PIN screen instead.
+                </span>
+              ) : null
+            }
+          >
+            <TextArea
+              mono
+              id="security-auth-proxy-trusted"
+              rows={2}
+              invalid={!!authHeader.value && !proxyTrusted.value}
+              placeholder={'172.18.0.2\n172.18.0.0/16'}
+              {...proxyTrusted}
             />
           </Row>
           <Row

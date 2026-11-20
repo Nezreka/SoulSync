@@ -509,3 +509,30 @@ export function liveDetailLines(dl: AdlDownload): Array<[string, string]> {
   if (d.held_reason) lines.push(['Held', d.held_reason]);
   return lines;
 }
+
+// ── quality upgrades ──────────────────────────────────────────────────────
+
+/** a row started by a quality upgrade (it names the file it replaces) */
+export function isUpgradeRow(dl: AdlDownload): boolean {
+  return Boolean(dl.upgrade_of && (dl.upgrade_of.label || dl.upgrade_of.format));
+}
+
+/** the format word of a probed quality, "FLAC 24/96" -> "FLAC" */
+function formatWord(quality: string | null | undefined): string {
+  const word =
+    String(quality || '')
+      .trim()
+      .split(/[\s/]+/)[0] || '';
+  return word.toUpperCase();
+}
+
+/**
+ * The upgrade on one line: "MP3 320 → FLAC" once the new file is in,
+ * "Replacing MP3 320" while it is still being found. null for other rows.
+ */
+export function upgradeLine(dl: AdlDownload): string | null {
+  if (!isUpgradeRow(dl)) return null;
+  const from = dl.upgrade_of?.label || String(dl.upgrade_of?.format || '').toUpperCase();
+  const to = dl.status === 'completed' ? formatWord(dl.quality) : '';
+  return to ? `${from} → ${to}` : `Replacing ${from}`;
+}

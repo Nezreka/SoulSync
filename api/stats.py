@@ -340,6 +340,27 @@ def stats_listening_events():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
+def _lyrics_local_path(file_path):
+    """The library file the player sent, as a path on this machine.
+
+    The stored path can be a media server's view of the file (another
+    mount, another OS); the shared resolver maps it the same way playback
+    does. None when it can't be found.
+    """
+    if not file_path or not isinstance(file_path, str):
+        return None
+    import os as _os
+    if _os.path.isfile(file_path):
+        return file_path
+    try:
+        from core.library.path_resolver import resolve_library_file_path
+        return resolve_library_file_path(file_path, config_manager=config_manager,
+                                         allow_fuzzy=False)
+    except Exception as e:  # noqa: BLE001 - a miss falls through to LRCLib
+        logger.debug("lyrics path resolve skipped: %s", e)
+        return None
+
+
 @bp.route('/api/lyrics/fetch', methods=['POST'])
 @requires("music.access")
 def fetch_lyrics_endpoint():
@@ -349,16 +370,18 @@ def fetch_lyrics_endpoint():
     ``{success, synced, plain, source}`` where ``synced`` is an LRC
     string with ``[mm:ss.xx] line`` timestamps (or None) and ``plain``
     is the untimestamped text (or None). ``source`` is ``sidecar`` for
-    a local lyrics file or ``lrclib`` for a network hit (else None).
+    a local lyrics file, ``embedded`` for lyrics in the file's tags, or
+    ``lrclib`` for a network hit (else None). An LRC ``[offset:]`` tag is
+    folded into the stamps. An LRCLib hit for a library file is saved as
+    a sidecar when the setting allows (``cached: true``).
     A transient LRCLib failure from the lookup returns
     ``success: False`` with the real reason in ``error`` and
     ``retryable: True`` for transient kinds (#1879) — it is NOT the
     same response as a definitive ``no lyrics found``.
 
-    Tries the local ``.lrc`` / ``.txt`` sidecar first when a
-    ``file_path`` is supplied — already-downloaded tracks should not
-    bounce LRClib on every play. Falls through to the shared
-    LyricsClient's exact-match then search lookup.
+    Tries the local sidecar, then the embedded tags, when a ``file_path``
+    is supplied. Falls through to the shared LyricsClient's exact-match
+    then search lookup.
     """
     try:
         data = request.get_json() or {}
@@ -375,29 +398,16 @@ def fetch_lyrics_endpoint():
             return jsonify({'success': False, 'error': 'title and artist required',
                             'synced': None, 'plain': None, 'source': None}), 400
 
-        # 1. Sidecar — fastest, no network. The post-processing flow
-        #    drops .lrc / .txt next to the audio for every successful
-        #    enrichment, so existing downloads almost always have one.
-        if file_path:
-            try:
-                import os as _os
-                stem, _ = _os.path.splitext(file_path)
-                lrc_path = stem + '.lrc'
-                txt_path = stem + '.txt'
-                if _os.path.exists(lrc_path):
-                    with open(lrc_path, 'r', encoding='utf-8') as fh:
-                        body = fh.read().strip()
-                    if body:
-                        return jsonify({'success': True, 'synced': body,
-                                        'plain': None, 'source': 'sidecar'})
-                if _os.path.exists(txt_path):
-                    with open(txt_path, 'r', encoding='utf-8') as fh:
-                        body = fh.read().strip()
-                    if body:
-                        return jsonify({'success': True, 'synced': None,
-                                        'plain': body, 'source': 'sidecar'})
-            except Exception as sidecar_err:
-                logger.debug("lyrics sidecar read skipped: %s", sidecar_err)
+        # 1. Local lyrics: the .lrc / .txt sidecar, then the lyrics in the
+        #    file's own tags (USLT/SYLT, Vorbis LYRICS, MP4 lyr). Already
+        #    downloaded tracks should not bounce LRCLib on every play, and
+        #    libraries tagged elsewhere often carry embedded lyrics only.
+        from core import lyrics_local
+        local_path = _lyrics_local_path(file_path)
+        synced, plain, source = lyrics_local.read_local(local_path)
+        if synced or plain:
+            return jsonify({'success': True, 'synced': synced,
+                            'plain': plain, 'source': source})
 
         # 2. LRClib network lookup via the shared client instance.
         # Go through the client's tri-state lookup (#1879) instead of
@@ -449,8 +459,14 @@ def fetch_lyrics_endpoint():
             # success flag with no error and no lyrics.
             return jsonify({'success': False, 'error': 'no lyrics found',
                             'synced': None, 'plain': None, 'source': None})
-        return jsonify({'success': True, 'synced': synced,
-                        'plain': plain, 'source': 'lrclib'})
+        cached = False
+        if local_path:
+            try:
+                cached = lyrics_local.cache_sidecar(local_path, synced, plain, config_manager)
+            except Exception as cache_err:  # noqa: BLE001 - caching never fails playback
+                logger.debug("lyrics sidecar cache skipped: %s", cache_err)
+        return jsonify({'success': True, 'synced': lyrics_local.apply_lrc_offset(synced),
+                        'plain': plain, 'source': 'lrclib', 'cached': cached})
     except Exception as e:
         logger.error("lyrics fetch failed: %s", e)
         return jsonify({'success': False, 'error': str(e),

@@ -347,7 +347,7 @@ function TrackRow({
   onReidentify: () => void;
 }) {
   const [rgBusy, setRgBusy] = useState(false);
-  const couldBeBetter = track.quality_upgrade as { current?: string } | undefined;
+  const couldBeBetter = track.quality_upgrade as { current?: string; queued?: boolean } | undefined;
   const [mobileOpen, setMobileOpen] = useState(false);
   /** the source-info popover anchors beside the row's menu button. */
   const moreRef = useRef<HTMLElement | null>(null);
@@ -455,11 +455,16 @@ function TrackRow({
           <button
             type="button"
             className="enhanced-upgrade-badge"
-            title={`Could be better${couldBeBetter.current ? ` (now ${couldBeBetter.current})` : ''}. Find a copy that reaches your quality profile.`}
-            aria-label={`Upgrade ${typeof track.title === 'string' && track.title ? track.title : 'this track'}`}
+            data-queued={couldBeBetter.queued ? 'true' : undefined}
+            title={
+              couldBeBetter.queued
+                ? `Upgrade queued${couldBeBetter.current ? ` (now ${couldBeBetter.current})` : ''}. It's on the Downloads page now.`
+                : `Could be better${couldBeBetter.current ? ` (now ${couldBeBetter.current})` : ''}. Find a copy that reaches your quality profile.`
+            }
+            aria-label={`${couldBeBetter.queued ? 'Upgrade queued for' : 'Upgrade'} ${typeof track.title === 'string' && track.title ? track.title : 'this track'}`}
             onClick={act(() => onUpgrade())}
           >
-            ↑
+            {couldBeBetter.queued ? '↑ queued' : '↑'}
           </button>
         ) : null}
         <span className="lib-track-title">{trackTitle}</span>

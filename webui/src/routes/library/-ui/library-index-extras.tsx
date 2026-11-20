@@ -292,6 +292,24 @@ function listLabels(albums: boolean) {
 }
 type MonitoringValue = 'all' | 'monitored' | 'unmonitored';
 
+/** #2046 / #2223: one filter, the padlock. an artist is reviewed when every
+ *  album is locked; an album is just locked or not */
+function reviewLabels(albums: boolean) {
+  return albums
+    ? ({
+        heading: 'Locked',
+        group: 'Filter by lock',
+        unreviewed: 'Unlocked',
+        reviewed: 'Locked',
+      } as const)
+    : ({
+        heading: 'Reviewed',
+        group: 'Filter by review',
+        unreviewed: 'Not reviewed',
+        reviewed: 'Reviewed',
+      } as const);
+}
+
 function sourceFilterLabel(value: string): string {
   const missing = value.startsWith('!');
   const label = SOURCE_LABELS[value.replace(/^!/, '')] ?? value.replace(/^!/, '');
@@ -318,7 +336,7 @@ export function LibraryFilterMenu({ albums = false }: { albums?: boolean }) {
     (search.monitored !== 'all' ? 1 : 0) +
     (search.source ? 1 : 0) +
     (!albums && search.quality === 'upgradable' ? 1 : 0) +
-    (!albums && search.review ? 1 : 0) +
+    (search.review ? 1 : 0) +
     (!albums && search.completion ? 1 : 0) +
     (!albums && (search.missingMin !== undefined || search.missingMax !== undefined) ? 1 : 0) +
     (!albums && (search.pctMin !== undefined || search.pctMax !== undefined) ? 1 : 0) +
@@ -449,29 +467,27 @@ export function LibraryFilterMenu({ albums = false }: { albums?: boolean }) {
               </button>
             </section>
           )}
-          {albums ? null : (
-            <section>
-              <h4>Reviewed</h4>
-              <div className={extras.segmented} role="group" aria-label="Filter by review">
-                {(
-                  [
-                    ['', 'All'],
-                    ['unreviewed', 'Not reviewed'],
-                    ['reviewed', 'Reviewed'],
-                  ] as const
-                ).map(([value, label]) => (
-                  <button
-                    key={value || 'all'}
-                    type="button"
-                    aria-pressed={search.review === value}
-                    onClick={() => set({ review: value })}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </section>
-          )}
+          <section>
+            <h4>{reviewLabels(albums).heading}</h4>
+            <div className={extras.segmented} role="group" aria-label={reviewLabels(albums).group}>
+              {(
+                [
+                  ['', 'All'],
+                  ['unreviewed', reviewLabels(albums).unreviewed],
+                  ['reviewed', reviewLabels(albums).reviewed],
+                ] as const
+              ).map(([value, label]) => (
+                <button
+                  key={value || 'all'}
+                  type="button"
+                  aria-pressed={search.review === value}
+                  onClick={() => set({ review: value })}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </section>
           <section>
             <h4>Metadata match</h4>
             <select
@@ -529,10 +545,10 @@ export function LibraryActiveFilters({
   if (search.source) {
     chips.push({ key: 'source', label: sourceFilterLabel(search.source), clear: { source: '' } });
   }
-  if (!albums && search.review) {
+  if (search.review) {
     chips.push({
       key: 'review',
-      label: search.review === 'reviewed' ? 'Reviewed' : 'Not reviewed',
+      label: reviewLabels(albums)[search.review],
       clear: { review: '' },
     });
   }

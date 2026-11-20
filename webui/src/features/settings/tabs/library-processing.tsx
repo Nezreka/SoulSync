@@ -566,6 +566,17 @@ export function MusicTags({ store }: { store: SettingsStore }) {
             />
           </Row>
           <Row
+            label="Save lyrics the player finds beside library songs"
+            htmlFor="lrclib-cache-player"
+            help="When the player finds lyrics on LRClib for a library song, it saves them next to the file as .lrc or .txt. An existing lyrics file is never overwritten."
+          >
+            <Switch
+              id="lrclib-cache-player"
+              checked={loads ? meta.lrclib_cache_player !== false : true}
+              onChange={(event) => setMeta('lrclib_cache_player')(event.target.checked)}
+            />
+          </Row>
+          <Row
             label="Apply ReplayGain tags after download"
             htmlFor="replaygain-enabled"
             help="Measures loudness and writes ReplayGain track gain and peak tags. Needs ffmpeg; adds a few seconds per track."

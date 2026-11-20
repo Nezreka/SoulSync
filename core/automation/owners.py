@@ -29,6 +29,7 @@ INSTALL_EVENTS = frozenset({
     "database_update_completed", "library_scan_completed", "duplicate_scan_completed",
     "quality_scan_completed", "music_repair_scan_completed", "music_repair_finding_created",
     "deezer_signin_failed", "deezer_signin_restored", "webhook_received",
+    "soulseek_logged_out", "soulseek_logged_in",
     "audiobook_library_scan_completed",
     "video_library_scan_completed", "video_database_update_completed", "video_collections_synced",
     "video_overlays_applied", "video_repair_finding_created", "video_repair_scan_completed",

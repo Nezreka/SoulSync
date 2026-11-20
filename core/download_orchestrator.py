@@ -139,10 +139,15 @@ class DownloadOrchestrator:
         # other source mirrors that path so files all land in one
         # tree. Sources without a `download_path` attribute (e.g.
         # Lidarr — pulls into Lidarr's own tree) silently skip.
-        new_path = Path(config_manager.get('soulseek.download_path', './downloads'))
+        soulseek_path = Path(config_manager.get('soulseek.download_path', './downloads'))
         for name, client in self.registry.all_plugins():
             if name == 'soulseek':
                 continue
+            # A source with a folder of its own (Lidarr's
+            # lidarr_download.download_path) keeps it.
+            own = getattr(client, 'own_download_path', None)
+            own_path = own() if callable(own) else None
+            new_path = Path(own_path) if own_path else soulseek_path
             if hasattr(client, 'download_path') and client.download_path != new_path:
                 client.download_path = new_path
                 try:

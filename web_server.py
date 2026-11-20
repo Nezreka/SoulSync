@@ -327,6 +327,13 @@ app.jinja_env.auto_reload = DEV_STATIC_NO_CACHE
 # / CSS doesn't require a server restart between edits.
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0 if DEV_STATIC_NO_CACHE else 31536000
 
+# brotli/gzip for pages, JSON and static text; never for streams, media,
+# downloads or ranges. registered first, so it runs after every other
+# after_request hook and sees the final body (core/http_compression.py).
+# SOULSYNC_COMPRESSION=0 turns it off.
+from core.http_compression import install as _install_compression
+_install_compression(app)
+
 _MIGRATION_BLOCKED_ENDPOINTS = frozenset({
     'start_download', 'start_matched_download', 'process_wishlist_api',
     'enriched_start', 'manual_start',
@@ -573,6 +580,13 @@ def _inject_static_cache_bust():
     return {'static_v': _get_static_v(), **_initial_appearance_context()}
 
 
+def _server_build_id():
+    """what this server serves: the version (with its commit) and the static
+    files' bust value. a tab whose page says something else is running old
+    JS, and the socket connect tells it so (webui/src/shell/build-check.ts)"""
+    return f"{SOULSYNC_VERSION}/{_get_static_v()}"
+
+
 @app.context_processor
 def _inject_soulsync_version():
     """Expose the version string to every Jinja template so the sidebar
@@ -580,7 +594,8 @@ def _inject_soulsync_version():
     edited at every release. The base version is the source of truth at
     `_SOULSYNC_BASE_VERSION`; bumping that single constant updates the UI
     everywhere it's rendered."""
-    return {'soulsync_version': SOULSYNC_VERSION, 'soulsync_base_version': _SOULSYNC_BASE_VERSION}
+    return {'soulsync_version': SOULSYNC_VERSION, 'soulsync_base_version': _SOULSYNC_BASE_VERSION,
+            'soulsync_build': _server_build_id()}
 
 
 @app.context_processor
@@ -632,6 +647,15 @@ app.config["SESSION_COOKIE_NAME"] = "soulsync_session"
 from core.security.reverse_proxy import apply_reverse_proxy_mode as _apply_reverse_proxy_mode
 if _apply_reverse_proxy_mode(app, config_manager.get):
     logger.info("[Security] Reverse-proxy mode ON: trusting X-Forwarded-* and Secure session cookie")
+# the auth proxy header only counts from security.auth_proxy_trusted; say so
+# loudly when the header is set without that list (it is ignored then)
+try:
+    from core.security.auth_proxy import setup_problem as _auth_proxy_problem
+    _proxy_problem = _auth_proxy_problem(config_manager.get)
+    if _proxy_problem:
+        logger.warning(f"[Security] {_proxy_problem}")
+except Exception as _proxy_exc:  # noqa: BLE001 - a log line never blocks startup
+    logger.debug(f"[Security] auth proxy setup check failed: {_proxy_exc}")
 
 # --- WebSocket (Socket.IO) Setup ---
 from core.socketio_cors import (
@@ -857,13 +881,10 @@ def _enforce_launch_pin():
     # An auth proxy (Authelia/Authentik/oauth2-proxy) that already authenticated the
     # user counts as verified — opt-in via security.auth_proxy_header, OFF (empty)
     # by default so a direct install is unaffected.
-    from core.security.auth_proxy import trusted_proxy_user
-    try:
-        _proxy_header = config_manager.get('security.auth_proxy_header', '') or ''
-    except Exception:
-        _proxy_header = ''
+    # only from an address in security.auth_proxy_trusted
+    from core.security.auth_proxy import request_proxy_user
     _verified = bool(session.get('launch_pin_verified', False)) or bool(
-        trusted_proxy_user(request.headers.get, _proxy_header)
+        request_proxy_user(request, config_manager.get if config_manager else None)
     )
     if request_is_locked(
         request.path, request.method,
@@ -939,9 +960,8 @@ def _set_profile_context():
     except Exception:
         require_pin = False
     if require_pin and not _require_login_enabled():
-        _proxy_header = (config_manager.get('security.auth_proxy_header', '') or '') if config_manager else ''
-        from core.security.auth_proxy import trusted_proxy_user
-        _proxy_authed = bool(trusted_proxy_user(request.headers.get, _proxy_header))
+        from core.security.auth_proxy import request_proxy_user
+        _proxy_authed = bool(request_proxy_user(request, config_manager.get if config_manager else None))
         if not session.get('launch_pin_verified', False) and not _proxy_authed:
             g.profile_id = None
             g.is_admin = False
@@ -3869,6 +3889,7 @@ def get_status():
             key: value for key, value in _status_cache['soulseek'].items()
             if key != 'source_cache_key'
         }
+        soulseek_data.update(_soulseek_login_fields())
 
         # Count active downloads for nav badge
         active_dl_count = 0
@@ -11029,6 +11050,11 @@ def library_log_play():
         # means the shared one, same as before.
         from core.listening_scope import listening_owner
         db = get_database()
+        # a private session keeps the play out of everything: taste, blends,
+        # stats and scrobbles. checked here, not trusted to the page
+        from core.personalized.listening_privacy import in_private_session
+        if in_private_session(db, get_current_profile_id()):
+            return jsonify({"success": True, "skipped": True, "private": True}), 200
         event['profile_id'] = listening_owner(db, get_current_profile_id())
         play_id = db.record_web_player_play(event)
         return jsonify({"success": True, "play_id": play_id})
@@ -11055,9 +11081,45 @@ def library_log_play_eligible():
         # flip another pile's row.
         owner = listening_owner(db, get_current_profile_id())
         ok = db.mark_play_scrobble_eligible(data.get('play_id'), profile_id=owner)
+        if ok and listening_stats_worker is not None:
+            # send it now instead of at the next 5-minute batch; the batch
+            # stays as the retry for a send that fails
+            listening_stats_worker.request_scrobble_flush()
         return jsonify({"success": ok})
     except Exception as e:
         logger.debug(f"log-play/eligible failed (non-fatal): {e}")
+        return jsonify({"success": False, "error": str(e)}), 200
+
+
+@app.route('/api/library/now-playing', methods=['POST'])
+@requires("music.access")
+def library_now_playing():
+    """Tell this listener's scrobble accounts what the web player just
+    started (Last.fm track.updateNowPlaying, ListenBrainz playing_now).
+
+    Body: ``{track: {title, artist, album}, duration_ms}``. Fire-and-forget
+    from the player; the send runs in the background, so this answers at
+    once with how many account sets were queued. Never a scrobble.
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        track = data.get('track') or data
+        if not isinstance(track, dict):
+            return jsonify({"success": False, "queued": 0}), 200
+        try:
+            duration_seconds = int(data.get('duration_ms') or 0) / 1000.0
+        except (TypeError, ValueError):
+            duration_seconds = 0
+        from core.playback.now_playing import queue_now_playing
+        queued = queue_now_playing(get_database(), config_manager, get_current_profile_id(), {
+            'title': str(track.get('title') or ''),
+            'artist': str(track.get('artist') or ''),
+            'album': str(track.get('album') or ''),
+            'duration_seconds': duration_seconds,
+        })
+        return jsonify({"success": True, "queued": queued})
+    except Exception as e:
+        logger.debug(f"now-playing failed (non-fatal): {e}")
         return jsonify({"success": False, "error": str(e)}), 200
 
 _enrichment_locks = {svc: threading.Lock() for svc in ('audiodb', 'deezer', 'musicbrainz', 'spotify', 'itunes', 'lastfm', 'genius', 'tidal', 'qobuz', 'discogs', 'bandcamp', 'jiosaavn')}
@@ -19392,6 +19454,23 @@ def playlist_ownership_preview(playlist_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@app.route('/api/downloads/lidarr-whole-album', methods=['GET'])
+@requires("music.access")
+def lidarr_whole_album_option():
+    """Whether the download dialogs show "Whole album via Lidarr", and its
+    starting state. Shown only in hybrid mode with Lidarr and another source in
+    the chain: otherwise there is nothing to choose between."""
+    mode = (config_manager.get('download_source.mode', '') or '').lower()
+    order = [str(s).lower() for s in (config_manager.get('download_source.hybrid_order', []) or [])]
+    available = (mode == 'hybrid' and 'lidarr' in order and any(s != 'lidarr' for s in order)
+                 and bool(config_manager.get('lidarr_download.url', ''))
+                 and bool(config_manager.get('lidarr_download.api_key', '')))
+    return jsonify({
+        'available': available,
+        'default': bool(config_manager.get('lidarr_download.whole_album_default', True)),
+    })
+
+
 @app.route('/api/playlists/<playlist_id>/start-missing-process', methods=['POST'])
 @requires("music.access")
 def start_missing_tracks_process(playlist_id):
@@ -19424,6 +19503,10 @@ def start_missing_tracks_process(playlist_id):
     skip_acoustid = bool(data.get('skip_acoustid', False))
     # Blocklist override (Phase 2b): set by the modal's "download anyway" confirm.
     ignore_blocklist = bool(data.get('ignore_blocklist', False))
+    # "Whole album via Lidarr" (download dialog). None = the configured default.
+    lidarr_whole_album = data.get('lidarr_whole_album')
+    if lidarr_whole_album is not None:
+        lidarr_whole_album = bool(lidarr_whole_album)
     # Quality Profile chosen in the shared acquisition dialog. Search, Discover,
     # Library, album, single, discography and playlist-explorer all POST here, so
     # this one field gives every manual path the same explicit choice (P1-01).
@@ -19584,6 +19667,7 @@ def start_missing_tracks_process(playlist_id):
             'playlist_folder_mode': playlist_folder_mode,  # Organize downloads by playlist folder
             # Album context for artist album downloads (explicit folder structure)
             'is_album_download': is_album_download,
+            'lidarr_whole_album': lidarr_whole_album,
             'album_context': album_context,
             'artist_context': artist_context,
             'wing_it': wing_it,
@@ -23175,6 +23259,18 @@ if automation_engine is not None and download_orchestrator is not None:
     except Exception as e:
         logger.debug(f"Deezer sign-in events not wired: {e}")
 
+# Soulseek login state: one poller asks slskd whether it is logged in to the
+# Soulseek server. Downloads wait on it, the Downloads page and dashboard show
+# a banner, and the 'Soulseek Logged Out' / 'Logged Back In' triggers fire.
+if download_orchestrator is not None:
+    try:
+        from core import soulseek_session as _soulseek_session
+        if automation_engine is not None:
+            _soulseek_session.set_event_emitter(automation_engine.emit)
+        _soulseek_session.start_poller(lambda: download_orchestrator.client('soulseek'), run_async)
+    except Exception as e:
+        logger.debug(f"Soulseek login poller not started: {e}")
+
 # --- Repair Worker API Endpoints: lifted to api/repair.py (wired near the
 # chat/labels/beatport blueprints below) ---
 # ================================================================================================
@@ -23219,11 +23315,29 @@ def _spotify_status_with_availability(spotify_status):
     return out
 
 
+def _soulseek_login_fields():
+    """slskd up but logged out of the Soulseek server (a ban, a reconnect):
+    what the Downloads and dashboard banner read, in both status payloads."""
+    try:
+        from core import soulseek_session as _slsk_session
+        snap = _slsk_session.snapshot()
+        out = bool(snap.get('logged_out'))
+        return {
+            'logged_out': out,
+            'logged_out_since': snap.get('since') if out else None,
+            'login_wait_minutes': round(_slsk_session.wait_seconds(config_manager) / 60),
+        }
+    except Exception as e:
+        logger.debug(f"soulseek login state unavailable: {e}")
+        return {}
+
+
 def _build_status_payload():
     """Build the same status payload used by GET /status, reading from the cache."""
     download_mode = config_manager.get('download_source.mode', 'hybrid')
     soulseek_data = dict(_status_cache.get('soulseek', {}))
     soulseek_data['source'] = download_mode
+    soulseek_data.update(_soulseek_login_fields())
     metadata_status = get_metadata_status_snapshot(spotify_client=spotify_client)
 
     # Count active downloads for nav badge
@@ -23859,9 +23973,8 @@ def _ws_connection_blocked():
         require_pin = bool(config_manager.get('security.require_pin_on_launch', False)) if config_manager else False
         if not require_login and not require_pin and not revoked:
             return False
-        proxy_header = (config_manager.get('security.auth_proxy_header', '') or '') if config_manager else ''
-        from core.security.auth_proxy import trusted_proxy_user
-        proxy_authed = bool(trusted_proxy_user(request.headers.get, proxy_header))
+        from core.security.auth_proxy import request_proxy_user
+        proxy_authed = bool(request_proxy_user(request, config_manager.get if config_manager else None))
         from core.security.ws_gate import is_ws_connection_blocked
         return is_ws_connection_blocked(
             require_login=require_login,
@@ -23890,6 +24003,12 @@ def handle_connect():
     # revocation sweep can drop it if that session is later revoked.
     _ws_store_snapshot()
     _ws_join_role_room()
+    # which build this server runs: an open tab from before an update offers
+    # a reload (never forces one)
+    try:
+        emit('server:build', {'build': _server_build_id()})
+    except Exception as e:  # noqa: BLE001 - the check is a nicety
+        logger.debug(f"server build emit failed: {e}")
     logger.info("WebSocket client connected")
 
 @socketio.on('disconnect')

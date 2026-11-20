@@ -313,7 +313,12 @@ def _credited_artists(conn, track_id: int) -> List[str]:
     from core.library2.metadata_overrides import effective_artist_names
 
     names = effective_artist_names(conn, [r["id"] for r in rows])
-    return [n for n in (names.get(int(r["id"]), r["name"]) for r in rows) if n]
+    # one credit per artist, spelling aside: a track credited to "Chamber
+    # Orchestra of London" and to a second row "The Chamber Orchestra Of
+    # London" wrote both into ARTIST, and every scan filed the file for the
+    # duplicate (#2217)
+    from core.text.normalize import dedupe_credit_names
+    return dedupe_credit_names(n for n in (names.get(int(r["id"]), r["name"]) for r in rows) if n)
 
 
 def _album_cover_source(

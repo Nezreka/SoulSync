@@ -1089,10 +1089,40 @@ def on_download_completed(batch_id: str, task_id: str, success: bool, deps: Life
     `finally`, not a trailing call: the lock is released by the time the inner
     function has returned, and a slot may have freed even if it raised.
     """
+    near_misses = _take_near_misses(batch_id, task_id, success)
     try:
         _on_download_completed(batch_id, task_id, success, deps)
     finally:
         _wake_waiting_batches(batch_id, deps)
+        if near_misses:
+            _clear_near_misses(near_misses)
+
+
+def _take_near_misses(batch_id: str, task_id: str, success: bool) -> list:
+    """The quarantined near-misses a finished task leaves for clearing:
+    its earlier candidates when it imported, everything when an automatic
+    upgrade gave up (the current file stays). Taken off the task under the
+    lock; the files move after it, outside the lock."""
+    try:
+        from core.downloads import near_misses
+        with tasks_lock:
+            task = download_tasks.get(task_id)
+            if task is None:
+                return []
+            imported = bool(success) and task.get('status') in ('completed', 'post_processing')
+            return near_misses.take_entries_to_clear(
+                task, download_batches.get(batch_id), imported)
+    except Exception as exc:  # noqa: BLE001 - review cleanup never blocks a completion
+        logger.debug("near-miss lookup for %s failed: %s", task_id, exc)
+        return []
+
+
+def _clear_near_misses(entry_ids: list) -> None:
+    try:
+        from core.downloads import near_misses
+        near_misses.clear_after_task(entry_ids)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Could not clear near-misses %s: %s", entry_ids, exc)
 
 
 def _on_download_completed(batch_id: str, task_id: str, success: bool, deps: LifecycleDeps) -> None:

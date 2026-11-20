@@ -28,7 +28,7 @@ Settings save themselves a moment after you change them. The status at the top r
 - **Deezer** — App ID, App Secret, and Redirect URI (OAuth), or an ARL token for playlist access and downloads. Powers favorites, playlists, and Deezer downloads.
 - **Discogs** — Personal access token for release metadata.
 - **AcoustID** — API key for audio fingerprinting and download verification.
-- **ListenBrainz** — User token (username optional) for listening-history import and scrobbling. The recommended scrobbler: free and open, no subscription.
+- **ListenBrainz** — User token (username optional) for listening-history import and scrobbling. The recommended scrobbler: free and open, no subscription. Self-hosted **Maloja** or **Koito**? Click its button under the card to fill in the address (it keeps the server you typed, else localhost on its usual port), then paste that server's API key as the token. History sync from Stats reads each one's own history.
 
 Each service card shows **configured** or **missing** in its header — the colored dot next to the service name is branding, not a live health light.
 `
@@ -77,7 +77,7 @@ No media server at all: SoulSync itself is the player and library manager. Impor
 | **Qobuz** | Download from Qobuz at your chosen quality |
 | **HiFi** | Free lossless downloads via community-run hifi-api instances — no account needed |
 | **Deezer** | Download from Deezer (ARL token) |
-| **Lidarr** | Hand off to your Lidarr server |
+| **Lidarr** | Hand off to your Lidarr server. An album goes to Lidarr as one album: one lookup, one add, one search, then SoulSync imports the tracks |
 | **SoundCloud** | Download from SoundCloud, nothing to set up. Optional: paste a free account's oauth_token to get the original file when the uploader allows downloads |
 | **Torrent** | Search via Prowlarr indexers through your torrent client |
 | **Usenet** | Search via Prowlarr indexers through your usenet client |
@@ -88,6 +88,10 @@ For **Usenet**, SoulSync downloads each NZB from Prowlarr itself and hands SABnz
 **A shared qBittorrent.** If your qBittorrent is set to add torrents stopped, or to stop them once the metadata is in, everything SoulSync adds sits there and never downloads. Turn on **Start the torrents SoulSync adds** in the torrent client section and SoulSync's torrents start anyway, while what other apps add keeps your qBittorrent setting. It is off by default and only applies to qBittorrent.
 
 **Pacing indexer searches.** Prowlarr passes every search straight to your indexers, so SoulSync spaces them out: 2 seconds between searches and at most 20 a minute by default, one budget for music and video together. Both are in the Prowlarr section as **Seconds between searches** and **Searches per minute, at most**. Raise the first if a tracker answers 429 Too Many Requests or Prowlarr marks an indexer unhealthy; a tracker that asks for 11 seconds between requests wants 12 or more. 0 turns either one off. A manual search waits its turn behind background searches.
+
+**Lidarr in a hybrid chain.** When the chain has Lidarr and another source, the download dialogs and the wishlist's selection bar show **Whole album via Lidarr**. On, the album goes to Lidarr, which grabs the whole release. Off, Lidarr is skipped and the next source gets the tracks. **\"Whole album via Lidarr\" on by default** in the Lidarr settings sets where the switch starts, and it is what automatic wishlist runs use. If Lidarr finds nothing to grab within 10 minutes the album moves on to the next source; a grab that is running is waited on for up to 6 hours. In Lidarr Only mode a miss ends the album there.
+
+**Where Lidarr's tracks land.** Lidarr already keeps the whole album in its own root folder. If that folder is also your library, the copy SoulSync imports is a second one: set **Lidarr imports folder** in the Lidarr settings to send SoulSync's copies somewhere else. **Lidarr download folder** is where SoulSync copies a track out of Lidarr before importing it (empty uses the Soulseek download folder).
 
 The chain editor lives on the Downloads tab: drag sources from **Available** into your **Download chain**. One source in the chain means "that source only"; two or more means hybrid. Any source can be configured on the Sources tab first — it doesn't need to be in the chain yet.
 
@@ -137,7 +141,7 @@ These live on other tabs, not Downloads:
 ## Organization
 
 - **Path templates** — customize how artists, albums, and tracks are named and nested (e.g. \`$albumartist/$album/$track - $title\`). Variables use \`$name\` syntax: \`$albumartist\`, \`$artist\`, \`$album\`, \`$track\`, \`$title\`, \`$year\`, \`$discnum\`, \`$explicit\` (\`[E]\` on explicit tracks), \`$contentrating\` (\`[E]\` or \`[C]\`), \`$albumartistinfo\` / \`$albumartistcomposite\` / \`$albumartistclash\` (MusicBrainz's note, country or genre, to keep same-named artists apart), and more
-- **Artist names**: \`$artist\` and \`$albumartist\` use the name your library has for the artist, found by id, so a source that spells them differently (Deezer's "Machine Gun Kelly" for a library's "mgk") doesn't start a second folder. Set your own name in the artist's **Artist Settings > Folder and tag name**
+- **Artist names**: \`$artist\` and \`$albumartist\` use the name your library has for the artist, found by id, so a source that spells them differently (Deezer's "Machine Gun Kelly" for a library's "mgk") doesn't start a second folder. The same goes for a name in another script: iTunes' "Δέσποινα Βανδή" files under a library's "Despina Vandi" (its usual Latin spelling, or a MusicBrainz alias your library stored). Set your own name in the artist's **Artist Settings > Folder and tag name**
 - **Live preview** — under each template is the path it makes for an example release, updated as you type and before you save. Switch the example between **Standard**, **Explicit**, **Multi-disc** and **Shared artist name** to see the content rating badges, the disc folder and the artist notes come out. It runs through the same code a real download does, so what it shows is what you get
 - **Singles with several tracks**: a release your source calls a single can hold more than one track. On a customized Single Path Template each one keeps its own \`$track\` and \`$disc\`.
 - **Explicit and clean versions** (Filtering): **Prefer explicit versions when matching** ranks explicit files above clean ones and never skips anything. **Never download clean versions** goes further: a file marked Clean, Censored, Edited or Radio Edit is not picked at all unless the track is that cut itself, and the track waits on your Wishlist until a real one turns up.

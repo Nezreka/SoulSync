@@ -187,7 +187,9 @@ export function Recommendations({ store, pool }: { store: SettingsStore; pool: P
           help="Higher pushes globally popular artists down, so more obscure picks surface. Lower keeps recommendations close to what you already know."
           more={
             <>
-              It shapes <strong>Based On Your Listening</strong> on the Discover page.
+              It shapes <strong>Based On Your Listening</strong> on the Discover page. This is the
+              default for every profile: anyone who turns the dial on their Discover page keeps
+              their own setting.
             </>
           }
         >

@@ -255,7 +255,7 @@ The background repair worker runs automated jobs on configurable schedules, incl
 |-----|--------------|
 | Track Number Repair | Fixes missing/incorrect track numbers against official tracklists |
 | Orphan File Detector | Finds audio files in your music library folder not tracked in the database |
-| Dead File Cleaner | Finds library entries whose file no longer exists. Each one has **Re-download** and **Remove**: Remove takes the track out of your library and downloads nothing, for files you moved away on purpose (select several and use Fix Selected to remove them together). When most of the library is missing at once it stops and marks nothing, because that is usually a disconnected drive. If you deleted the files yourself, answer the **Unreachable Library** finding with **They are gone** and each file is listed under Dead Files |
+| Dead File Cleaner | Finds library entries whose file no longer exists. Each one has **Re-download** and **Remove**: Remove takes the track out of your library and downloads nothing, for files you moved away on purpose (select several and use Fix Selected to remove them together). When most of the library is missing at once it stops and marks nothing, because that is usually a disconnected drive; the log then shows one path it can't reach and where those paths point (a folder that is there means deleted files, an old folder outside your library points at Tools > Update File Locations). A smaller group of missing files is marked even when they sit together (one artist, one import), as long as their library folder is there. If you deleted the files yourself, answer the **Unreachable Library** finding with **They are gone** and each file is listed under Dead Files |
 | AcoustID Scanner | Batch audio fingerprint verification across your library. Needs an AcoustID key. With **Enable Download Verification** off in Settings, new downloads are not checked and the scheduled scan is skipped, but **Run Now** still scans, so you can check your library when you choose |
 | Cover Art Filler | Checks the three places an album's cover lives: saved in the library, inside the audio files (when embedding art is on) and as cover.jpg in the album folder (when cover.jpg downloads are on). A cover file counts by any of its usual names in any case (cover, folder, front, album, albumart as jpg, jpeg, png or webp), and a Disc 1 / CD2 folder counts the one in the release folder above it. A saved library cover that no longer loads counts as missing. Each finding shows all three plus the cover a source found and which source, an empty box where there is none. Every box with a picture can be picked: the best one there is starts picked (the library's, then the folder's, then the one inside the files, then the found one), and the finding lists what **Apply Art** writes in each place with that pick. Apply Art puts the picked cover where one is missing; a cover you have is kept, except that picking the found cover over the library's replaces the library one. A finding for an album that has every cover closes on the next scan. **Change cover** on a finding opens the album page's picker to choose any cover instead. An artist photo is only suggested for an artist with none, and only applied with **Use for artist** |
 | Metadata Gap Filler | Completes missing fields (genre, year, …) from connected services |
@@ -274,7 +274,7 @@ The background repair worker runs automated jobs on configurable schedules, incl
 | Expired Download Cleaner | Proposes deleting watchlist/playlist-sourced downloads past their per-origin retention window; always keeps actively-mirrored playlists, watched artists, and tracks you've played more than once (optional auto-delete). Also cleans up after **Rotating** playlists: a song the playlist downloaded goes once it has left the playlist, with no retention window |
 | Genre Tag Cleanup | Re-applies the strict genre whitelist to genres stored before it was enabled — one finding per artist/album with off-whitelist genres |
 | Genre Enrichment | Adds conservatively translated genres from stored metadata and caches |
-| Library Re-tag | Rewrites tags + cover art from a fresh metadata-source pull, in place (no moves, renames, or re-matching) — dry-run findings show old → new for every track |
+| Library Re-tag | Rewrites tags + cover art from a fresh metadata-source pull, in place (no moves, renames, or re-matching) — dry-run findings show old → new for every track. An import fills the tags it left blank from what the library knows (genre, disc total) before it checks the file, so a fresh import doesn't file blanks as findings. Two spellings of one artist ("The" and case aside) are one credit |
 | Live/Commentary Cleaner | Finds live performances, commentary, interviews, and spoken-word content in the library |
 | Lossy Converter | Finds lossless files with no lossy copy alongside and converts them with ffmpeg using your configured codec/bitrate |
 | Lyrics Filler | Finds tracks with no \`.lrc\` sidecar, checks LRClib so instrumentals are never flagged, then fetches synced lyrics — writes the \`.lrc\` and embeds them |
@@ -444,7 +444,7 @@ Downloads are grouped into **batches** — one triggered download job (album syn
 - Old rows collapse into **"Earlier (N)"**; same-album history folds to one line; past 12 items a "Show N more" fold appears.
 - **Recent History** fold with a **Download History** button for the full download+import history.
 
-Status chips filter the view: **All / Active / Completed / Queued / Failed**.
+Status chips filter the view: **All / Active / Completed / Queued / Failed / Upgrades**. A quality upgrade (a download that replaces a file you already have) says so on its row: "Replacing MP3 320" while it's being found, "MP3 320 → FLAC" once the new file is in. **Upgrades** shows just those, whatever their status. On the artist page, a track whose upgrade is already on its way shows **↑ queued**, and the album's Upgrade button counts how many are queued.
 
 ## Clients tab — download-client management
 
@@ -478,6 +478,12 @@ Bulk: **✔ Approve all**, **🧹 Clean orphaned** (removes dead log rows whose 
 Files that **failed** verification and were **not** imported. Trigger badges: **DURATION / INTEGRITY**, **ACOUSTID MISMATCH**, **ACOUSTID UNVERIFIED**, **BIT DEPTH FILTER**. Alternative rejected candidates for the same track fold behind "▾ N more"; **🗑 Delete all N** clears a whole candidate group.
 
 Per-row: Play, Compare, Audit, **✔ Approve** (re-imports this exact file into the library, marked human-verified — nothing is renamed), **⤴ Recover** (legacy sidecars without embedded context go back to Staging for manual import), **🗑 Delete** (permanent).
+
+Quarantine clears itself of noise:
+
+- **Near-misses**: when a track's later candidate downloads fine, the files it quarantined on the way leave Review on their own. They go to the 🗑 Deleted recycle bin as "Near-miss, cleared from Review", so **↩ Restore** puts one back in Review. Turn it off with **Clear near-misses once the track downloads** in Settings > Downloads > Retry Logic.
+- **Automatic quality upgrades** never send anything to Review: if no candidate verifies, the file you already have stays and the rejected ones go to the recycle bin. An upgrade you start yourself still lands in Review like any download.
+- **Auto-reject old items** (off by default): set **Auto-reject Review items older than (days)** in the same place and older entries move to the recycle bin as "Review item expired".
 
 > [!TIP]
 > Lots of **DURATION** quarantines that turn out to be the right song? Raise **Duration tolerance** in Settings > Library > Post-Processing so future downloads with the same small drift go straight through.
