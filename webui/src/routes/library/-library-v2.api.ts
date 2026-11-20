@@ -123,7 +123,7 @@ export interface LibraryV2ListFilters {
   letter?: string;
   source?: string;
   quality?: string;
-  /** #2046: 'reviewed' | 'unreviewed' (artists) */
+  /** #2046: 'reviewed' | 'unreviewed' (artists); #2223: locked or not (albums) */
   review?: string;
   /** ask for each artist card's "could be better" count */
   includeUpgradable?: boolean;
@@ -203,14 +203,14 @@ interface AlbumsResponse extends Ok {
 /** The library by release (A07). */
 export async function fetchLibraryV2Albums(
   search: Pick<LibraryV2Search, 'q' | 'albumSort' | 'page' | 'monitored'> &
-    Pick<LibraryV2ListFilters, 'letter' | 'source'>,
+    Pick<LibraryV2ListFilters, 'letter' | 'source' | 'review'>,
 ): Promise<AlbumsResponse> {
   const params = new URLSearchParams();
   if (search.q) params.set('search', search.q);
   params.set('sort', search.albumSort);
   params.set('monitored', search.monitored);
   params.set('page', String(search.page));
-  setListFilters(params, { letter: search.letter, source: search.source });
+  setListFilters(params, { letter: search.letter, source: search.source, review: search.review });
   return lib2Json<AlbumsResponse>(
     apiClient.get('library/v2/albums', { searchParams: params }),
     'Failed to load albums',
@@ -2412,7 +2412,7 @@ export function libraryV2ArtistsQueryOptions(
 
 export function libraryV2AlbumsQueryOptions(
   search: Pick<LibraryV2Search, 'q' | 'albumSort' | 'page' | 'monitored'> &
-    Pick<LibraryV2ListFilters, 'letter' | 'source'>,
+    Pick<LibraryV2ListFilters, 'letter' | 'source' | 'review'>,
 ) {
   return queryOptions({
     queryKey: [
@@ -2424,6 +2424,7 @@ export function libraryV2AlbumsQueryOptions(
       search.page,
       search.letter ?? 'all',
       search.source ?? '',
+      search.review ?? '',
     ],
     queryFn: () => fetchLibraryV2Albums(search),
   });
