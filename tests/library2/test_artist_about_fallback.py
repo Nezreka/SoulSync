@@ -559,6 +559,21 @@ class TestTrackPopularityWithoutAToken:
         assert fb.fill_artist(db._get_connection, 1, self._fetcher(http))
         assert _tracks(db)["Angel"]["listenbrainz"]["listen_count"] == 5400
 
+    def test_fill_artist_never_asks_for_the_tracks_without_a_token(self, db):
+        """the fill's own gate, apart from the fetcher's"""
+        asked = []
+
+        class _Fetcher(fb.ArtistAboutFallback):
+            def top_recordings(self, mbid):
+                asked.append(mbid)
+                return []
+
+        _set_enrichment(db, {"lastfm": FULL_LASTFM})
+        fb.fill_artist(db._get_connection, 1, _Fetcher(
+            mb_client=_MB(MB_ARTIST), audiodb_client=_AudioDB(), deezer_client=_Deezer(), http=_http()))
+        assert asked == []
+        assert fb.TRACKS_CHECK_KEY not in _enrichment(db)
+
     def test_top_recordings_raise_without_a_token(self):
         http = _http()
         with pytest.raises(fb.SourceError):
