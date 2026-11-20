@@ -14,6 +14,7 @@ import { useLayoutEffect, useRef, useState } from 'react';
 import type { ToolsMedia } from '../-tools.media';
 
 import { setToolsMedia, ToolsMediaContext } from '../-tools.media';
+import { FileLocationsCard } from './file-locations-card';
 import {
   BlacklistCard,
   ConfigMigrationCard,
@@ -245,6 +246,7 @@ function MusicToolSections({ isAdmin }: { isAdmin: boolean }) {
         <ReconcileIdsCard />
         <DuplicateCleanerCard />
         <MediaScanCard />
+        <FileLocationsCard />
       </ToolsSection>
 
       <ToolsSection
