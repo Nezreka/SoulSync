@@ -30,6 +30,8 @@ export const statsSearchSchema = z.object({
   range: z.enum(STATS_RANGE_VALUES).default('7d').catch('7d'),
   tab: z.enum(STATS_TAB_VALUES).default('listening').catch('listening'),
   story: z.enum(STATS_STORY_VALUES).optional().catch(undefined),
+  /** `spotify` opens the Spotify history import (the new-profile Discover banner links here) */
+  import: z.enum(['spotify']).optional().catch(undefined),
 });
 
 export type StatsSearch = z.infer<typeof statsSearchSchema>;

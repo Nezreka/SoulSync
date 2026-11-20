@@ -816,7 +816,7 @@ def get_discover_listening_recommendations():
 
         level = _profile_dial()
 
-        # Quality re-rank (aurral parity, always-on): the adventurousness dial BLENDS the weights —
+        # Quality re-rank (always on): the adventurousness dial BLENDS the weights —
         # genre/tag affinity boosts on-taste candidates (leash loosens as you get adventurous); novelty
         # penalises recs you've already heard (pull tightens). Additive — no genre match / no plays
         # leaves the score untouched, and at the default dial the weights equal the old constants.
@@ -4008,9 +4008,10 @@ def get_discover_genre_playlist(genre_name):
 
 # ── a filled discover for new profiles (core/discovery/cold_start.py) ────────
 
-# where the spotify history import lives once it exists. the banner offers it
-# only when a route for it is registered, so this ships before the import does.
-SPOTIFY_IMPORT_HREF = '/stats'
+# where the spotify history import lives: the stats page opens its dialog on
+# ?import=spotify. the banner offers it only while that import's route exists.
+SPOTIFY_IMPORT_HREF = '/stats?import=spotify'
+SPOTIFY_IMPORT_ROUTE = '/api/listening-import/spotify'
 
 
 def _spotify_import_offer():
@@ -4019,7 +4020,7 @@ def _spotify_import_offer():
         from flask import current_app
         for rule in current_app.url_map.iter_rules():
             text = str(rule.rule).lower()
-            if 'spotify' in text and ('history' in text or 'export' in text) and 'import' in text:
+            if text == SPOTIFY_IMPORT_ROUTE:
                 return {'available': True, 'href': SPOTIFY_IMPORT_HREF}
     except Exception as e:  # noqa: BLE001
         logger.debug("spotify import route check failed: %s", e)

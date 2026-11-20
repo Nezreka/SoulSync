@@ -91,10 +91,10 @@ export function StatsPage() {
 
   const navigate = useNavigate({ from: Route.fullPath });
   const queryClient = useQueryClient();
-  const { range, tab, story } = Route.useSearch();
+  const { range, tab, story, import: importParam } = Route.useSearch();
   const syncTimeoutRef = useRef<number | null>(null);
   const [syncing, setSyncing] = useState(false);
-  const [spotifyImportOpen, setSpotifyImportOpen] = useState(false);
+  const [spotifyImportOpen, setSpotifyImportOpen] = useState(importParam === 'spotify');
   const [listeningDetailFilter, setListeningDetailFilter] =
     useState<StatsListeningEventsFilter | null>(null);
 

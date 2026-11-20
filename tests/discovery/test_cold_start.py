@@ -268,9 +268,11 @@ def test_the_spotify_import_is_offered_once_its_route_exists(env):
     _db, _deezer, _who, _http = env
     app = Flask(__name__)
     app.register_blueprint(routes.bp)
-    app.add_url_rule('/api/listening/import/spotify-history', 'x', lambda: 'ok', methods=['POST'])
     with app.test_request_context():
-        assert routes._spotify_import_offer() == {'available': True, 'href': routes.SPOTIFY_IMPORT_HREF}
+        assert routes._spotify_import_offer() == {'available': False, 'href': None}
+    app.add_url_rule('/api/listening-import/spotify', 'x', lambda: 'ok', methods=['GET'])
+    with app.test_request_context():
+        assert routes._spotify_import_offer() == {'available': True, 'href': '/stats?import=spotify'}
 
 
 def test_admin_connections_come_from_settings(env):
