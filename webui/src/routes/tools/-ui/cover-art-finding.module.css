@@ -21,6 +21,7 @@
 }
 
 .frame {
+  position: relative;
   aspect-ratio: 1;
   width: 100%;
   border-radius: var(--radius-lg);
@@ -54,6 +55,77 @@
 .frame:has(.empty) {
   background: transparent;
   border: 1px dashed var(--white-a20);
+}
+
+/* #2202: a tile with a picture is a pick. the pick wears the accent ring
+   and says so; the others lift a little on hover */
+.pick {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  transition:
+    transform 0.16s ease,
+    box-shadow 0.16s ease;
+}
+
+.pick .frame {
+  transition: opacity 0.16s ease;
+}
+
+.pickable:not(.picked) .pick .frame {
+  opacity: 0.72;
+}
+
+.pickable:not(.picked) .pick:hover {
+  transform: translateY(-2px);
+}
+
+.pickable:not(.picked) .pick:hover .frame {
+  opacity: 1;
+}
+
+.pick:focus-visible {
+  outline: 2px solid rgba(var(--accent-rgb), 0.65);
+  outline-offset: 3px;
+}
+
+.picked .pick {
+  box-shadow:
+    0 0 0 2px var(--accent),
+    0 8px 24px rgba(var(--accent-rgb), 0.22);
+}
+
+.pickedMark {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  padding: 3px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  color: var(--black-a90);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  pointer-events: none;
+}
+
+.picked .place {
+  color: var(--accent-light);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pick,
+  .pick .frame {
+    transition: none;
+  }
+
+  .pickable:not(.picked) .pick:hover {
+    transform: none;
+  }
 }
 
 .tile figcaption {

@@ -11,9 +11,13 @@ import {
   deleteMusicRequest,
   fetchMusicRequestCounts,
   fetchMusicRequestQuota,
+  fetchAwaitingQueue,
   fetchMusicRequests,
+  markMediaRequestPicked,
   markMusicRequestsSeen,
   normalizeCounts,
+  normalizeModes,
+  saveAcquisitionModes,
   normalizeQuota,
   withdrawMusicRequest,
 } from './-requests.api';
@@ -72,9 +76,13 @@ describe('music requests api', () => {
       history: [row],
       pendingVideos: [],
       videoHistory: [],
+      pendingMedia: [],
+      mediaHistory: [],
       counts: { pending: 1, approved: 1, available: 0, declined: 0, removed: 0 },
       asksFirst: true,
       quota: null,
+      acquisition: { music: 'auto', movie: 'auto', tv: 'auto', audiobook: 'auto' },
+      awaiting: 0,
     });
   });
 
@@ -241,5 +249,57 @@ describe('music requests api', () => {
       declined: 0,
       removed: 0,
     });
+  });
+
+  // ── #2199: approved requests waiting for a release pick ──
+
+  it('reads every kind as automatic unless it says manual', () => {
+    expect(normalizeModes({ tv: 'manual', music: 'sometimes' as never })).toEqual({
+      music: 'auto',
+      movie: 'auto',
+      tv: 'manual',
+      audiobook: 'auto',
+    });
+  });
+
+  it('saves only the kinds that changed', async () => {
+    const bodies: unknown[] = [];
+    server.use(
+      http.put('/api/requests/acquisition', async ({ request }) => {
+        bodies.push(await request.json());
+        return HttpResponse.json({ success: true, modes: { audiobook: 'manual' } });
+      }),
+    );
+    await expect(saveAcquisitionModes(1, { audiobook: 'manual' })).resolves.toMatchObject({
+      audiobook: 'manual',
+      music: 'auto',
+    });
+    expect(bodies).toEqual([{ modes: { audiobook: 'manual' } }]);
+  });
+
+  it('builds the pick queue from both sides, a refusing side adds nothing', async () => {
+    server.use(
+      http.get('/api/requests/awaiting', () =>
+        HttpResponse.json({ success: true, music: [{ key: 'track:1' }], media: [] }),
+      ),
+      http.get('/api/video/requests/awaiting', () =>
+        HttpResponse.json({ success: false, error: 'Admin only.' }, { status: 403 }),
+      ),
+    );
+    const queue = await fetchAwaitingQueue(7);
+    expect(queue.music).toHaveLength(1);
+    expect(queue.video).toEqual([]);
+  });
+
+  it('tells the server a book had its release picked', async () => {
+    let hit = '';
+    server.use(
+      http.post('/api/requests/media/:id/picked', ({ params }) => {
+        hit = String(params.id);
+        return HttpResponse.json({ success: true });
+      }),
+    );
+    await markMediaRequestPicked(1, 52);
+    expect(hit).toBe('52');
   });
 });

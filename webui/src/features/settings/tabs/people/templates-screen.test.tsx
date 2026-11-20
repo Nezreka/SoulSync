@@ -63,12 +63,12 @@ describe('templates', () => {
     const { calls } = servePeople();
     await openTemplates();
     fireEvent.click(card('Teen'));
-    const seg = within(pane()).getByRole('group', { name: 'Getting movies' });
-    expect(within(seg).getByText('Ask first')).toHaveAttribute('aria-pressed', 'true');
-    fireEvent.click(within(seg).getByText('Download right away'));
+    const seg = within(pane()).getByRole('group', { name: 'Movie requests' });
+    expect(within(seg).getByText('Require approval')).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(within(seg).getByText('Auto-approve'));
     await waitFor(() =>
       expect(pane()).toHaveTextContent(
-        'Saving reaches one person now. Maya: Getting movies goes from Ask first to Download right away.',
+        'Saving reaches one person now. Maya: Movie requests goes from Require approval to Auto-approve.',
       ),
     );
     expect(screen.getByRole('tab', { name: /^Movies/ })).toHaveTextContent('Not saved yet');
@@ -82,11 +82,18 @@ describe('templates', () => {
   it('locks what the global policy holds down', async () => {
     servePeople({ policy: { 'movies.get': 'ask', 'movies.quality': [0, 2], 'chat.use': false } });
     await openTemplates();
-    // Adult downloads movies, but the policy keeps it at Ask first
+    // Adult downloads movies, but the policy keeps it at Require approval: the
+    // control shows Require approval, the value in force, and says apart what the
+    // template itself is set to (#2189)
     const rows = pane();
-    const seg = within(rows).getByRole('group', { name: 'Getting movies' });
-    expect(within(seg).getByText('Download right away')).not.toBeDisabled();
-    expect(rows).toHaveTextContent('Global policy keeps this at Ask first. Change it there.');
+    const seg = within(rows).getByRole('group', { name: 'Movie requests' });
+    expect(within(seg).getByText('Require approval')).toHaveAttribute('aria-pressed', 'true');
+    expect(within(seg).getByText('Auto-approve')).toHaveAttribute('aria-pressed', 'false');
+    expect(within(seg).getByText('Auto-approve')).toBeDisabled();
+    expect(rows).toHaveTextContent(
+      'Global policy keeps this at Require approval. The template is set to Auto-approve, which comes back if the policy allows it. Change it there.',
+    );
+    expect(rows).toHaveTextContent('Require approval: what they pick lands in your Requests.');
     expect(within(rows).getByRole('checkbox', { name: 'Movie 4K Quality' })).toBeDisabled();
     expect(rows).toHaveTextContent('Global policy: admins only');
     fireEvent.click(screen.getByRole('tab', { name: /General & account/ }));
@@ -101,7 +108,7 @@ describe('templates', () => {
     fireEvent.click(card('Guest'));
     expect(pane()).toHaveTextContent('Turn on Movies first.');
     expect(
-      within(pane()).getByRole('group', { name: 'Getting movies' }).querySelector('button'),
+      within(pane()).getByRole('group', { name: 'Movie requests' }).querySelector('button'),
     ).toBeDisabled();
   });
 
@@ -243,7 +250,9 @@ describe('templates', () => {
     window.showConfirmDialog = vi.fn(async () => false);
     await openTemplates();
     fireEvent.click(
-      within(within(pane()).getByRole('group', { name: 'Getting movies' })).getByText('Ask first'),
+      within(within(pane()).getByRole('group', { name: 'Movie requests' })).getByText(
+        'Require approval',
+      ),
     );
     fireEvent.click(card('Kids'));
     await waitFor(() => expect(window.showConfirmDialog).toHaveBeenCalled());

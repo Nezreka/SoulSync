@@ -285,10 +285,29 @@ def build_runner(
             # The catalogue is the source for a destination path -- no provider
             # call, no source-id requirement, and the filename matches what the
             # Library page shows because both read the same override layer.
-            preview_fn=catalogue_preview_fn,
+            preview_fn=_only_tracks(catalogue_preview_fn, getattr(item, 'track_ids', None)),
         )
 
     return runner
+
+
+def _only_tracks(preview_fn, track_ids):
+    """The plan for the tracks an item names (#2193: one track moved into a
+    missing slot moves, the rest of its album stays where it is). The whole
+    album is still planned, so a collision with a file that stays is seen."""
+    if not isinstance(track_ids, (list, tuple)) or not track_ids:
+        return preview_fn
+    wanted = {int(t) for t in track_ids}
+
+    def _preview(**kwargs):
+        plan = preview_fn(**kwargs)
+        if plan.get('success'):
+            plan = {**plan, 'track_subset': True,
+                    'tracks': [t for t in plan.get('tracks') or []
+                               if int(t.get('track_id') or 0) in wanted]}
+        return plan
+
+    return _preview
 
 
 def _libraries_for(db, item):

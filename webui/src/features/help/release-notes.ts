@@ -65,168 +65,110 @@ export interface Release {
 
 export const RELEASES: Release[] = [
   {
-    version: '3.6.7',
+    version: '3.6.8',
     month: 'November 2026',
-    headline: 'People and permissions, Settings in React and Seerr',
+    headline: 'A phone pass, Last.fm without Pro and request fixes',
     summary:
-      'Settings, People is one place for who can do what, the Settings page is rebuilt in React, SoulSync can answer as a Seerr server for Litefin and other Seerr apps, Server Activity is rebuilt with its own history and stats, albums can switch to another edition, and popular tracks get a flame. Plus band names with an ampersand stay one artist, numbered releases stop crossing, and a long list of reported fixes.',
+      'Last.fm API keys need a Pro subscription from 1 December 2026, so everything Last.fm did now falls back to free sources and keeps what it already knew. Phones get a pass over the worker status, menus, dialogs and pages, audiobooks and podcast episodes can ask first, and the permission screens show what is really in force. Plus a track you own can move into an album’s missing slot, track numbers stop beating titles, and the transfer folder is called the music library folder everywhere.',
     features: [
-      'Settings, People: templates, personal changes, a global policy, moderators, separate movie and TV access, request quality and a request limit per kind (thanks SeadogsBooty, #2166 to #2168).',
-      'Members see only their own things: their notifications, the download actions they may use, and the help guides for what they can open (thanks SeadogsBooty, #2170, #2173, #2174).',
-      'Settings rebuilt in React: it looks and works the same, loads its tabs once and saves only what you changed.',
-      'A Seerr compatible API at /seerr, so Litefin and other Seerr apps can discover and request through the video side (thanks Thibs, #2151).',
-      'Server Activity rebuilt for Plex and Jellyfin: now playing and why it converts, stop with a message, and SoulSync’s own play history and stats.',
-      'Other versions on the album menu: pick another edition with a preview first, and an album split over two rows merges back into one (thanks wolf39us, #2145, #2178).',
-      'A MusicBrainz release status filter: keep bootlegs, promos and the like off the wishlist, library wide or per artist (thanks Ericsson, #2175).',
-      'Missing episodes count only the seasons you monitor, and torrent imports wait for qBittorrent to finish moving the file (thanks hilburn, #2176, #2177).',
-      'A flame on an album’s most played tracks, and “N to rename” on the artist page (thanks wolf39us, #2144, #2141).',
-      'Collection completeness on the Library cards and table, with sorts and filters (thanks SeadogsBooty, #2106 to #2109).',
-      'Band names like Above & Beyond and K/DA stay one artist, compilations stay under their album artist, and numbered releases never cross (#2131, #2133 to #2136, #2150).',
-      'Release types go by length, so Wish You Were Here is an album again.',
-      'artist.nfo in the artist folder with poster.jpg and background.jpg (#2138), private Jellyfin playlists (#2148), and Apple Music mirrors that refresh (#2147).',
-      'Contributions from nstrelow (#2140), PapaBearDoes (#2152) and ginevra-70 (#2115): AcoustID scans past an unreadable file, a video table that keeps its columns in view, and Music Assistant scans that follow their task.',
+      'Last.fm keeps working with a Pro key and falls back to ListenBrainz, Deezer, MusicBrainz, TheAudioDB and Wikipedia without one. Answers are cached, so a lapsed key keeps what it knew.',
+      'Phones: worker status opens on a tap, the menu button stays, every page reaches its end, menus and dialogs fit the screen, and Re-identify is a full-screen sheet (thanks Thibs, c5pie and wolf39us, #2180 to #2187, #2197).',
+      'Require approval for audiobook and podcast episode requests, controls that show the setting in force, and one set of words for requests everywhere (thanks SeadogsBooty, #2188 to #2192).',
+      'Members see only what is theirs: no worker, server or Spotify status, a read-only library, and following artists needs the Watchlist (thanks SeadogsBooty, #2191, #2196, #2207 to #2210).',
+      'Titles beat track numbers when lining up a tracklist, a song’s number heals from its file, and a deleted file stops borrowing another album’s (thanks wolf39us).',
+      'Rename / Organize keeps $quality in the name (thanks Maegfea, #2195) and skips a removed album instead of failing (thanks wolf39us, #2194).',
+      'Move a track you own into an album’s missing slot, and Reassign moves instead of leaving a copy behind (#2193).',
+      'Pick the release yourself for approved requests: per media type, or per request when you approve, with a Pick a release queue on the Requests page (thanks SeadogsBooty, #2199).',
+      'Audiobook search, file details, matching and deleting follow permissions, and a member’s audiobook library is just the shelf (thanks SeadogsBooty, #2198, #2201).',
+      'Removing many artists from the Watchlist takes about a second, not a minute (thanks SeadogsBooty, #2200).',
+      'Shelf Life: a Library Maintenance job that scores every movie and show for how much it has earned its space and offers the lowest for Delete Title, with Free up space and Keep. Off by default (thanks PapaBearDoes, #2211).',
+      'Big libraries: library search stops piling threads onto one rebuild, and the database tidies itself: old caches prune, the write-ahead log is trimmed, and Settings, System shows the biggest tables (thanks xcrittpm, #2205).',
+      'Cover art findings use the cover you pick, any of the four, and only appear when something is really missing (thanks Vidariondr, #2202).',
+      'Re-identify keeps the song you picked (thanks wolf39us, #2206), Import matches a pasted release link or MusicBrainz id with a default search source (thanks Ericsson, #2203), and an album title links to its page (thanks Ktzenjammer, #2204).',
+      'The admin menu no longer flashes for a member after signing back in (thanks SeadogsBooty, #2156).',
+      'The transfer folder is called the music library folder everywhere you read it. In Docker it is still the /app/Transfer mount.',
     ],
     items: [
       {
-        title: 'People and permissions',
-        desc: 'Settings, People holds everyone, a global policy, templates and invites. Each person follows a template with their own changes on top, getting things is set per media type, movies and TV are separate, quality and a request limit are set per kind, and moderators answer requests. Nothing changes on upgrade (thanks SeadogsBooty, #2166 to #2168).',
+        title: 'Last.fm without Pro',
+        desc: 'From 1 December 2026 a Last.fm API key needs Last.fm Pro. With a working key nothing changes. Without one, top tracks, similar artists and tracks, radio and Your Artists come from ListenBrainz and Deezer, artist bios from TheAudioDB or Wikipedia and tags from MusicBrainz, with a note saying where. Answers are cached, scrobbles wait for a working key, and ListenBrainz is the recommended scrobbler.',
         page: 'settings',
       },
       {
-        title: 'Members see their own',
-        desc: 'A member’s notifications show their own notes, downloads and automations, search and Enhance Quality only show for profiles that may download, and Help & Docs shows only the guides for what they can use (thanks SeadogsBooty, #2170, #2173, #2174).',
+        title: 'A phone pass',
+        desc: 'A tap on a worker shows its status with Pause or Resume (#2180), the menu button stays on an open playlist (#2181), every page scrolls to its end (#2182), the album menu (#2183), import cards (#2185) and long confirm boxes (#2186) fit the screen, Get Show draws its arrow (#2184), Settings says Saved only after a save (#2187), and Re-identify opens as a full-screen sheet with the search and results first (#2197). Thanks Thibs, c5pie and wolf39us.',
       },
       {
-        title: 'Cover art findings explain themselves',
-        desc: 'A Missing Cover Art finding shows the library, the audio files, the album folder and the cover found side by side, says what Apply Art writes, and Change cover lets you pick your own (thanks Vidariondr, #2169).',
+        title: 'Require approval for books and episodes',
+        desc: 'Audiobook and podcast episode requests can Require approval like movies, TV and music. Requests land on the Requests page, and approving one gets the book or episode (thanks SeadogsBooty, #2188).',
+        page: 'settings',
+      },
+      {
+        title: 'Pick the release yourself',
+        desc: 'Approval settings on the Requests page sets each media type to Download automatically or I pick the release, and a request’s ⋯ menu can go the other way. Held requests wait on a Pick a release tab, automatic searches leave them alone, and the requester sees it is waiting for a pick (thanks SeadogsBooty, #2199).',
+      },
+      {
+        title: 'Audiobooks follow permissions',
+        desc: 'Search now, Find releases and grabbing need the right to get books, file details, matching, deleting and scans are the admin’s, and a member’s audiobook library shows cover, title, author, narrator, series and length (thanks SeadogsBooty, #2198, #2201).',
+      },
+      {
+        title: 'Shelf Life',
+        desc: 'A Library Maintenance job, off by default, scores every movie and show from 0 to 100 on watching, how replaceable it is, ratings and following, size and requests. Anything under the line becomes a finding: Keep it, or delete it through Delete Title to the recycle bin. Free up space picks the lowest scores for a GB target. Playing, in progress, recently watched, padlocked, requested and airing titles are never offered, and all of it is checked again the moment you delete (thanks PapaBearDoes, #2211).',
+        page: 'video-tools',
+      },
+      {
+        title: 'Big libraries stay quick',
+        desc: 'Library search no longer has every request rebuild the same index at once, old MusicBrainz cache rows and long-resolved findings prune themselves, the write-ahead log is trimmed, and Settings, System, Database Maintenance shows the biggest tables with a safe Tidy Up (thanks xcrittpm, #2205).',
+        page: 'settings',
+      },
+      {
+        title: 'Cover art findings, again',
+        desc: 'Apply Art uses the cover you pick (library, folder, the files’ or the one found), Change cover is always there, and an album with a cover in its disc folder’s parent or a cover.JPG no longer shows up (thanks Vidariondr, #2202).',
         page: 'tools',
       },
       {
-        title: 'Keep Best and playlists',
-        desc: 'Duplicates in the same playlists can go, playlists you name never protect a copy, and an option moves a removed copy’s playlist entries to the kept one. Keep Best on the whole list says which findings need you and why, and can move playlist entries too (thanks Storm, #2172, #2179).',
-        page: 'tools',
+        title: 'Match by link',
+        desc: 'Paste a MusicBrainz release or release group link, or a Spotify, Deezer, Apple Music or Discogs album link, into Import’s search to match it directly. Import can also start on your favourite source (thanks Ericsson, #2203).',
       },
       {
-        title: 'Release status filter',
-        desc: 'Pick which MusicBrainz release statuses the watchlist wants, like Official only, for the whole library or one artist in Artist Settings. Everything stays allowed until you pick (thanks Ericsson, #2175).',
-        page: 'library',
-      },
-      {
-        title: 'Two albums that are one',
-        desc: 'When one album sits on two rows, Other versions offers to merge them into one, and switching an edition brings its title, type and date along, so an album stops sitting under EPs (thanks wolf39us, #2178).',
-        page: 'library',
-      },
-      {
-        title: 'Missing means monitored',
-        desc: 'A show’s missing count and Get missing cover the episodes you monitor; gaps in unmonitored seasons are shown apart and left alone (thanks hilburn, #2177).',
-        page: 'video-library',
-      },
-      {
-        title: 'Imports find the moved file',
-        desc: 'A torrent import waits while qBittorrent moves the file out of its incomplete folder, and Retry on a failed import asks the client where the file is now. Show-page grabs no longer show the wrong show on the downloads card (thanks hilburn, #2176).',
-      },
-      {
-        title: 'Settings, rebuilt',
-        desc: 'The Settings page is React now, every tab on the music and video side. It looks and works the same, loads its tabs once and saves only what you changed.',
+        title: 'Permissions say what is in force',
+        desc: 'A control held by the global policy shows the value in force and says what the template has, Back to template only shows when there are changes, and requests read Auto-approve, Require approval or Requests off everywhere (thanks SeadogsBooty, #2189, #2190, #2192).',
         page: 'settings',
       },
       {
-        title: 'SoulSync as a Seerr server',
-        desc: 'Turn on the Seerr Compatible API under Settings, System, SoulSync API and point Litefin’s Seerr plugin, or another Seerr app, at /seerr with an admin key. Discover, search and requests go through the video side (thanks Thibs, #2151).',
+        title: 'A member’s notifications',
+        desc: 'Chat messages only reach people allowed to chat, refusals and progress notes no longer pile up in a member’s notifications, and the enrichment workers, server status, Spotify limits and library management are for admins only. Following artists needs the Watchlist, and a member’s library is read-only (thanks SeadogsBooty, #2191, #2196, #2207 to #2210).',
+      },
+      {
+        title: 'Titles before track numbers',
+        desc: 'Other versions, reassign and tracklist refresh match a file by its title first, a song sitting on another song’s number moves to its own, and a file deleted from its album is no longer found in another album’s folder. Same-named albums from different years, like Weezer’s, split apart on every start and scan and stay apart (thanks wolf39us, #2110).',
+        page: 'library',
+      },
+      {
+        title: 'Move a track here',
+        desc: 'A missing track’s ⋯ menu has Move a track here: pick a track you already own, see where its file goes and which tags change, and it moves into the slot with its plays and history. Nothing is copied. Reassign to another artist now moves too, so it no longer leaves the old album behind (#2193).',
+        page: 'library',
+      },
+      {
+        title: 'Rename / Organize',
+        desc: '$quality stays in the name when renaming files already in the library (thanks Maegfea, #2195), and Preview rename skips an album you removed instead of failing (thanks wolf39us, #2194).',
+        page: 'library',
+      },
+      {
+        title: 'No admin menu flash',
+        desc: 'A member’s menu starts hidden until their own profile trims it, so the admin menu never shows for a moment after signing back in (thanks SeadogsBooty, #2156).',
+      },
+      {
+        title: 'Music library folder',
+        desc: 'What used to be called the transfer folder reads as the music library folder everywhere. In Docker it is still the /app/Transfer mount, so nothing about your setup changes.',
         page: 'settings',
-      },
-      {
-        title: 'Server Activity, rebuilt',
-        desc: 'The activity button opens one drawer for Plex and Jellyfin: what is playing and how, the reason a stream converts in plain words, stop with a message, and SoulSync’s own play history and stats. Admin only, set up under Settings, Connections, Server Activity.',
-        anchor: 'shell.activity',
-      },
-      {
-        title: 'Help, rebuilt',
-        desc: 'The ? opens help beside the page: answers for what is happening there, Ctrl K to search help, settings and actions from anywhere, Health with a fix for each problem, a bug report with secrets removed, log downloads and three short tours.',
-        anchor: 'shell.help',
-      },
-      {
-        title: 'Other versions',
-        desc: 'An album’s ⋯ menu lists the release’s other editions with track count, year, country and label, plus a search for that artist. It shows what changes before it switches (thanks wolf39us, #2145).',
-        page: 'library',
-      },
-      {
-        title: 'Popular tracks',
-        desc: 'A flame marks up to three of an album’s most played tracks on Last.fm that clearly stand out, like Plexamp, from the play counts SoulSync already has (thanks wolf39us, #2144).',
-        page: 'library',
-      },
-      {
-        title: 'What a rename would move',
-        desc: 'The artist page shows “N to rename” on albums whose files don’t match your naming template, and a click opens Preview rename (thanks wolf39us, #2141). Locking an album there keeps you on the artist page (#2143).',
-        page: 'library',
-      },
-      {
-        title: 'Collection completeness',
-        desc: 'Cards and table rows show owned over expected tracks with sorts, a featured filter, card size and multi-select (thanks SeadogsBooty, #2106 to #2109). For an artist you don’t watch it counts every track of the releases you own something of.',
-        page: 'library',
-      },
-      {
-        title: 'Band names stay whole',
-        desc: 'Above & Beyond, Kyau & Albert and K/DA stay one artist in tags, credits, folders and Split Artists, and a Split Artists finding can be corrected by hand (thanks SeadogsBooty, wolf39us and Vidariondr, #2131, #2136, #2150).',
-      },
-      {
-        title: 'Releases stay together',
-        desc: 'A compilation stays under its album artist on reorganize and download (#2133, #2135), and numbered releases like Group Therapy 696 and 699 never cross (thanks SeadogsBooty, #2134).',
-      },
-      {
-        title: 'Release types by length',
-        desc: 'An EP or single now has to run under 30 minutes, so Wish You Were Here is an album again, and a provider’s own type wins (thanks wolf39us).',
-      },
-      {
-        title: 'Artist art for your server',
-        desc: 'artist.nfo lands in the artist folder, and the same switch saves poster.jpg and background.jpg where the folder has none yet (thanks Ericsson, #2138). Guest artists no longer fill the Library list (#2142).',
-        page: 'settings',
-      },
-      {
-        title: 'Review and AcoustID',
-        desc: 'Asked for and Got are the right way round in review, and one file with no usable audio no longer stops every AcoustID scan (thanks nstrelow, #2140).',
-      },
-      {
-        title: 'Playlists and servers',
-        desc: 'Jellyfin playlists are private to their account (#2148), Apple Music mirrors refresh again and copy mode playlists stay owned after a remount (thanks NeskireDK, #2147, #2137), and Music Assistant scans follow their own task (thanks ginevra-70, #2115).',
-      },
-      {
-        title: 'Video',
-        desc: 'An import folder like the music side’s (#2129), manual search with an editable query on a movie’s menu (#2121, #2122), release languages on download rows (#2120), and long titles that no longer push the library table’s columns out of view (thanks PapaBearDoes, #2152).',
-      },
-      {
-        title: 'Where a title stands',
-        desc: 'Every video poster shows In Library, Partial, Requested, Approved, Searching, Downloading or Failed, and the detail page shows progress, each season and who asked. A request for something already on its way is refused (thanks SeadogsBooty, #2160).',
-      },
-      {
-        title: 'Discover',
-        desc: 'Every row fills, hides when empty or offers Try again, the Top 10 numbers sit beside the posters, and the page has one even layout (thanks SeadogsBooty, #2158, #2159).',
-        page: 'video-discover',
-      },
-      {
-        title: 'Profiles',
-        desc: 'Members land on a page they can open and never see the admin menu, admins can set, lock and reset what each profile shows, and a lock hides Customize and shows only what the admin set. Members see only their own profile with login on, and set their own sidebar weather under Profile & account (thanks SeadogsBooty, #2154 to #2157, #2162 to #2164).',
-      },
-      {
-        title: 'Security',
-        desc: 'Only the admin can make the first API key, and members can only do what their profile allows: no downloads with downloads off, no shared library edits, tools, other people’s downloads or install accounts. Worth updating soon.',
-      },
-      {
-        title: 'Artist folder names',
-        desc: 'A download takes the name your library has for an artist, so Machine Gun Kelly from Deezer lands in mgk. Artist Settings can set your own spelling (thanks nstrelow, #2165).',
-        page: 'library',
-      },
-      {
-        title: 'Library fixes',
-        desc: 'Leftover rows fold on every scan (#2094), reorganize takes the cover along (#2010), a pair that can’t be merged says why (#2146), and the library upgrade no longer stops at an old track with no id.',
-        page: 'library',
       },
     ],
     earlier: {
-      desc: '3.6.6 turned the video Library into a manager with bulk operations, history with undo and a padlock. 3.6.5 rebuilt both dashboards, Tools, Automations and Stats. 3.6.2 brought the new Library, built by @nick2000713.',
-      version: '3.6.6',
+      desc: '3.6.7 brought People and permissions, Settings in React, a Seerr compatible API and a rebuilt Server Activity. 3.6.6 turned the video Library into a manager. 3.6.2 brought the new Library, built by @nick2000713.',
+      version: '3.6.7',
       summary:
-        'The video Library became a manager with tables, bulk operations, history with undo and a padlock, and movie and show pages manage their own seasons, episodes and files.',
+        'Settings, People became one place for who can do what, Settings moved to React, SoulSync could answer as a Seerr server, and Server Activity got its own history and stats.',
     },
   },
 ];

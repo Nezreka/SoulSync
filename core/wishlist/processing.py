@@ -15,7 +15,7 @@ from core.downloads.history import ALBUM_PREFIXES
 from core.downloads.origin import HAND_PICKED_ID_PREFIXES
 from core.wishlist.payloads import build_failed_track_wishlist_context
 from core.wishlist.selection import filter_wishlist_tracks_by_category, sanitize_and_dedupe_wishlist_tracks
-from core.wishlist.service import get_wishlist_service
+from core.wishlist.service import get_wishlist_service, wishlist_rows_for_sweep as _rows_for_sweep
 from core.wishlist.state import get_wishlist_cycle, set_wishlist_cycle
 from utils.logging_config import get_logger
 
@@ -1081,7 +1081,7 @@ def remove_tracks_already_in_library(
     cleanup_tracks: list[tuple[int, dict]] = []
     for profile in all_profiles:
         pid = profile["id"]
-        for t in wishlist_service.get_wishlist_tracks_for_download(profile_id=pid):
+        for t in _rows_for_sweep(wishlist_service, pid):
             cleanup_tracks.append((pid, t))
 
     from core.library_scope import library_scope_for_profile, reset_library_scope, set_library_scope
@@ -1440,7 +1440,7 @@ def cleanup_wishlist_against_library(
     try:
         logger.info("[Wishlist Cleanup] Starting wishlist cleanup process...")
 
-        wishlist_tracks = wishlist_service.get_wishlist_tracks_for_download(profile_id=profile_id)
+        wishlist_tracks = _rows_for_sweep(wishlist_service, profile_id)
         if not wishlist_tracks:
             return {"success": True, "message": "No tracks in wishlist to clean up", "removed_count": 0}, 200
 
@@ -1989,7 +1989,7 @@ def _automatic_wishlist_cleanup_inner(
         all_profiles = profiles_database.get_all_profiles()
         wishlist_tracks = []
         for profile in all_profiles:
-            wishlist_tracks.extend(wishlist_service.get_wishlist_tracks_for_download(profile_id=profile["id"]))
+            wishlist_tracks.extend(_rows_for_sweep(wishlist_service, profile["id"]))
 
         if not wishlist_tracks:
             logger.warning("[Auto Cleanup] No tracks in wishlist to clean up")

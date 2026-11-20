@@ -364,6 +364,8 @@
     function requestStatus(r) {
         if (!r || r.status === 'pending') return { text: 'Waiting', tone: 'pending' };
         if (r.status === 'denied') return { text: 'Declined', tone: 'denied' };
+        // approved and held until an admin picks the release (#2199)
+        if (r.awaiting_selection) return { text: 'Approved, waiting for a release to be picked', tone: 'held' };
         var st = r.state;
         if (!st) {
             return (r.in_library || r.available_at)
@@ -462,6 +464,8 @@
             g.rows.push(r);
             // every row of a title shares its progress; keep one that carries it
             if (!g.lead.state && r.state) g.lead = r;
+            // held for a release pick (#2199): any asker's row says so
+            if (r.awaiting_selection) g.held = true;
             if (!g.quality_profile_id && r.quality_profile_id) g.quality_profile_id = r.quality_profile_id;
             if (!g.poster_url && r.poster_url) g.poster_url = r.poster_url;
             if (!g.admin_response && r.admin_response) g.admin_response = r.admin_response;
@@ -488,6 +492,37 @@
         return g.rows.some(function (r) { return me != null && Number(r.profile_id) === Number(me); });
     }
     function decider() { return isAdmin() || state.moderator; }
+
+    // ── a release picked by hand (#2199) ───────────────────────────────────
+    // the kind's setting: 'auto' | 'manual' (Requests → Approval settings)
+    function holdsByDefault(kind) {
+        var a = state.acquisition || {};
+        if (kind === 'movie') return a.movie === 'manual';
+        if (kind === 'show' || kind === 'episode') return a.tv === 'manual';
+        return false;
+    }
+    // may this viewer pick the release for a held title? admins any, a
+    // moderator anyone's but their own (the same people who answer)
+    function picks(g) {
+        return !!g.held && g.kind !== 'youtube' && (isAdmin() || (state.moderator && !mineIn(g)));
+    }
+    // the video release picker for a held movie or episode. a show has a
+    // season or more waiting: those are picked on Requests → Pick a release
+    function pickRelease(g) {
+        var vd = window.VideoDownload;
+        if (!vd || !vd.manualSearch) { toast('The release picker isn’t loaded. Reload the page.', 'error'); return; }
+        var ep = g.kind === 'episode';
+        vd.manualSearch({
+            title: ep ? String(g.title || '').replace(/ S\d+E\d+$/, '') : g.title,
+            scope: ep ? 'episode' : 'movie',
+            season: ep ? g.season_number : null, episode: ep ? g.episode_number : null,
+            year: g.year || null, poster: g.poster_url || null,
+            mediaId: g.tmdb_id, mediaSource: 'tmdb', tmdbId: g.tmdb_id
+        });
+    }
+    function releaseToAuto(g) {
+        act('/api/video/requests/' + g.rows[0].id + '/auto', 'POST', {}, 'It downloads automatically now');
+    }
 
     function whoAsked(g) {
         if (!isAdmin() && !state.seeAll) return 'You asked';
@@ -544,8 +579,14 @@
         }).join('');
         var first = g.rows[0];
         var approve = decides(g)
-            ? '<button class="vreq-btn vreq-btn--primary" type="button" data-vreq-approve="' + first.id + '">Approve</button>'
+            ? '<button class="vreq-btn vreq-btn--primary" type="button" data-vreq-approve="' + first.id + '"' +
+              (holdsByDefault(g.kind) ? ' title="Approve, then pick its release"' : '') + '>Approve</button>'
             : '';
+        if (!approve && picks(g)) {
+            approve = g.kind === 'show'
+                ? '<a class="vreq-btn vreq-btn--primary" href="/requests?tab=pick" data-vreq-pick-tab>Pick releases</a>'
+                : '<button class="vreq-btn vreq-btn--primary" type="button" data-vreq-pick="' + esc(g.key) + '">Pick release</button>';
+        }
         return '<div class="vreq-row" data-vreq-row="' + esc(g.key) + '">' + poster +
             '<div class="vreq-main">' +
                 '<div class="vreq-title"><span class="vreq-title-t">' + esc(g.title) + '</span>' +
@@ -696,6 +737,7 @@
                 state.quotas = d.quotas || null;
                 state.moderator = !!d.moderator;
                 state.seeAll = !!d.see_all;
+                state.acquisition = d.acquisition || null;
                 setBadge(d.pending || 0);
                 remember(d);
                 render();
@@ -729,7 +771,10 @@
         if (opts.monitor) body.monitor = opts.monitor;
         if (Number(opts.quality_profile_id) > 0) body.quality_profile_id = Number(opts.quality_profile_id);
         if (opts.series_type) body.series_type = opts.series_type;
+        // the approver's choice for this one (#2199); left out, the setting decides
+        if (opts.acquisition) body.acquisition = opts.acquisition;
         return act('/api/video/requests/' + g.rows[0].id + '/approve', 'POST', body, function (j) {
+            if (j.acquisition === 'manual') return 'Approved. Pick its release when you’re ready';
             var who = (j.approved || 0) > 1 ? 'Everyone who asked' : (isAdmin() && g.rows[0].requester_name) || 'They';
             if (j.kind === 'movie') return 'Approved. ' + who + ' will hear when it lands';
             return 'Approved. Following the show' + (j.wished ? ', ' + j.wished + ' episodes wanted' : '');
@@ -835,11 +880,18 @@
         // approves at the quality the request was filed with
         var named = admin && (profilesCache.list || []).length > 1;
         if (decides(g)) {
+            // the other way than the setting, for this one (#2199)
+            if (g.kind !== 'youtube') {
+                items.push(holdsByDefault(g.kind)
+                    ? { id: 'approve-auto', label: 'Approve & auto-download' }
+                    : { id: 'approve-pick', label: 'Approve & pick release' });
+            }
             if (g.kind === 'show') items.push({ id: 'seasons', label: named ? 'Approve with seasons and quality…' : 'Approve with seasons…' });
             else if (g.kind !== 'youtube' && named) items.push({ id: 'seasons', label: 'Approve with quality…' });
             items.push({ id: 'decline', label: 'Decline…', danger: true });
         }
         if (admin && canSearchAgain(g.lead)) items.push({ id: 'retry', label: 'Search again' });
+        if (picks(g)) items.push({ id: 'pick-auto', label: 'Download automatically instead' });
         if (g.bucket === 'pending' && !admin && mineIn(g)) items.push({ id: 'withdraw', label: 'Withdraw', danger: true });
         if (g.kind === 'youtube') {
             items.push({ id: 'ytopen', label: 'Open on YouTube' });
@@ -883,6 +935,9 @@
             else if (which === 'withdraw') withdraw(g);
             else if (which === 'remove') removeGroup(g);
             else if (which === 'retry') searchAgain(g);
+            else if (which === 'approve-pick') approve(g, { acquisition: 'manual' });
+            else if (which === 'approve-auto') approve(g, { acquisition: 'auto' });
+            else if (which === 'pick-auto') releaseToAuto(g);
             else if (which === 'seasons') {
                 pickRequest({ kind: g.kind, title: g.title, current: g.monitor || 'all',
                     heading: g.kind === 'show' ? 'Approve which seasons?' : 'Approve at which quality?',
@@ -904,6 +959,10 @@
         var page = $('.vreq-page');
         if (!page || page._wired) return;
         page._wired = true;
+        // a release picked here (#2199) started downloading: the row moves on
+        document.addEventListener('soulsync:video-download-started', function () {
+            if (state.loaded) load();
+        });
         page.addEventListener('click', function (e) {
             var tab = e.target.closest('[data-vreq-tab]');
             if (tab) {
@@ -919,6 +978,12 @@
                 var rowEl = ap.closest('[data-vreq-row]');
                 var g = rowEl && findGroup(rowEl.getAttribute('data-vreq-row'));
                 if (g) approve(g, null, ap);
+                return;
+            }
+            var pk = e.target.closest('[data-vreq-pick]');
+            if (pk) {
+                var pg = findGroup(pk.getAttribute('data-vreq-pick'));
+                if (pg) pickRelease(pg);
                 return;
             }
             var more = e.target.closest('[data-vreq-more]');

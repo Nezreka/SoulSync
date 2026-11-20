@@ -1,5 +1,7 @@
 """Metadata Cache Maintenance Job — cleans expired, junk, and orphaned cache entries."""
 
+import time
+
 from core.repair_jobs import register_job
 from core.repair_jobs.base import JobContext, JobResult, RepairJob
 from utils.logging_config import get_logger
@@ -19,7 +21,11 @@ class CacheEvictorJob(RepairJob):
         '1. TTL eviction — removes entries past their expiration date\n'
         '2. Junk cleanup — removes entries with empty or placeholder names (Unknown Artist, etc.)\n'
         '3. Orphan cleanup — removes search results pointing to deleted entities\n'
-        '4. MusicBrainz cleanup — removes stale "not found" entries older than 30 days\n\n'
+        '4. MusicBrainz cleanup — removes stale "not found" entries older than 30 days\n'
+        '5. Capacity cap — trims a still-oversized cache to its row ceiling\n'
+        '6. Database housekeeping — drops old rows from logs and caches that keep their own '
+        'retention (never listening history or library rows), merges the search indexes once '
+        'a day, and folds the write-ahead log back in\n\n'
         'Fully automatic — runs silently without creating findings. Safe to leave enabled.'
     )
     icon = 'repair-icon-cache'
@@ -106,4 +112,45 @@ class CacheEvictorJob(RepairJob):
             logger.error("Capacity eviction failed: %s", e, exc_info=True)
             result.errors += 1
 
+        if context.check_stop():
+            return result
+
+        # Phase 6 (#2205): the database's own logs and caches, the search
+        # indexes, and the wal. a big library's db grew to 47 GB with a 2.3 GB
+        # wal and nothing here trimmed it
+        try:
+            self._housekeeping(context, result)
+        except Exception as e:
+            logger.error("Database housekeeping failed: %s", e, exc_info=True)
+            result.errors += 1
+
         return result
+
+    # the prune and the fts merge go over big tables and rewrite each search
+    # index; once a day is plenty. the wal checkpoint runs every time
+    HOUSEKEEPING_EVERY_SECONDS = 24 * 3600
+    _last_housekeeping: dict = {}
+
+    def _housekeeping(self, context: JobContext, result: JobResult) -> None:
+        from core import db_housekeeping
+        db = context.db
+        db_path = str(getattr(db, 'database_path', '') or '')
+        if not db_path:
+            return
+        now = time.time()
+        due = now - self._last_housekeeping.get(db_path, 0.0) >= self.HOUSEKEEPING_EVERY_SECONDS
+        if due or context.manual:
+            CacheEvictorJob._last_housekeeping[db_path] = now
+            conn = db._get_connection()
+            try:
+                pruned = db_housekeeping.prune(conn, should_stop=context.check_stop)
+                removed = sum(pruned.values())
+                result.auto_fixed += removed
+                result.scanned += removed
+                if pruned:
+                    logger.info("Phase 6 — database housekeeping: pruned %s", pruned)
+                if not context.check_stop():
+                    db_housekeeping.optimize(conn)
+            finally:
+                conn.close()
+        db_housekeeping.checkpoint(db_path)

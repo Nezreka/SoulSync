@@ -207,14 +207,17 @@ export function FindingsInbox({
                 className={`repair-inbox-btn${destructive ? ' destructive' : ''}`}
                 disabled={busy}
                 title={
-                  destructive
-                    ? `${info?.verb || 'Fix'} all ${group.pending.toLocaleString()} — asks before touching any file`
-                    : `${info?.verb || 'Fix'} all ${group.pending.toLocaleString()}`
+                  group.finding_type === 'shelf_life'
+                    ? 'Pick which titles to delete, lowest Shelf Life first'
+                    : destructive
+                      ? `${info?.verb || 'Fix'} all ${group.pending.toLocaleString()} — asks before touching any file`
+                      : `${info?.verb || 'Fix'} all ${group.pending.toLocaleString()}`
                 }
                 onClick={() => onFixGroup(group, info)}
               >
-                {info?.verb || 'Fix'}
-                {` all (${group.pending.toLocaleString()})`}
+                {group.finding_type === 'shelf_life'
+                  ? 'Free up space…'
+                  : `${info?.verb || 'Fix'} all (${group.pending.toLocaleString()})`}
               </button>
             ) : null}
             {group.pending > 0 && showsPending ? (

@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { AudiobookRouteToggle } from '@/features/audiobook-routes/audiobook-route-toggle';
 import { getShellProfileContext } from '@/platform/shell/bridge';
 import { useMusicGet } from '@/platform/shell/download-rights';
+import { usePermNotOff } from '@/platform/shell/my-permissions';
 
 import type { StreamCounts } from '../-artist-detail.completion';
 import type { ArtistInfo, Discography, DiscographyBucket } from '../-artist-detail.types';
@@ -15,15 +16,17 @@ import {
 import { buildHeroBadges } from '../-artist-detail.hero';
 import {
   artistFormatTags,
+  artistTags,
   buildGenreChips,
   categoryStats,
   type CategoryStats,
-  cleanArtistBio,
   formatHeroNumber,
   heroImage,
   type HeroImageStage,
   heroImageSrc,
+  heroNumbers,
   nextHeroImageStage,
+  pickArtistBio,
   resolvedCategoryStats,
   streamCategoryStats,
   totalReleaseCount,
@@ -31,6 +34,7 @@ import {
 import { bucketCounts } from '../-artist-detail.use-completion';
 import { checkWatchlistRequest, toggleWatchlistRequest } from '../-artist-detail.watchlist-button';
 import { ReportIssueButton } from '../../issues/-ui/report-issue-button';
+import { AboutSourceNote } from './about-source-note';
 import { ArtPicker } from './art-picker';
 import { ArtistDbRecord } from './artist-db-record';
 import { ArtistFixMatch } from './artist-matches-modal';
@@ -198,7 +202,11 @@ export function ArtistHero({
   const image = heroImage(artist, discography);
   const badges = buildHeroBadges(artist);
   const chips = buildGenreChips(artist);
-  const bio = cleanArtistBio(artist.lastfm_bio);
+  // last.fm first, then the media server's summary, then the free sources
+  const pickedBio = pickArtistBio(artist);
+  const bio = pickedBio?.text ?? '';
+  const tagsSource = artistTags(artist).source;
+  const numbers = heroNumbers(artist);
   const [bioExpanded, setBioExpanded] = useState(false);
   const bioRef = useRef<HTMLDivElement | null>(null);
   /**
@@ -222,6 +230,7 @@ export function ArtistHero({
   /** null = unknown (check pending/failed); the vanilla left the default label. */
   const [watching, setWatching] = useState<boolean | null>(null);
   const [watchlistBusy, setWatchlistBusy] = useState(false);
+  const mayWatch = usePermNotOff('music.watchlist');
   const [watchlistAddOpen, setWatchlistAddOpen] = useState(false);
   const [downloadingDiscog, setDownloadingDiscog] = useState(false);
   // download, ask first, or can't request at all (#2166): the last has no
@@ -280,7 +289,7 @@ export function ArtistHero({
    *  long as the stream ran. That's the "watched/unwatched over and over"
    *  flapping, and it also swallowed toggles — an in-flight check that resolved
    *  after a toggle overwrote the new state with the old one. */
-  const watchlistId = watchlist?.id ?? null;
+  const watchlistId = mayWatch ? (watchlist?.id ?? null) : null;
   const watchlistSource = watchlist?.source;
   useEffect(() => {
     setWatching(null);
@@ -452,18 +461,21 @@ export function ArtistHero({
               React: checkArtistEnhanceEligibility unhides it and rewrites
               `.enhance-text` with the count, so it has no React state.
             */}
-            <button
-              type="button"
-              className={`library-artist-watchlist-btn${watching ? ' watching' : ''}`}
-              id="library-artist-watchlist-btn"
-              disabled={watchlistBusy}
-              onClick={() => void toggleWatchlist()}
-            >
-              <span className="watchlist-icon">👁️</span>
-              <span className="watchlist-text">
-                {watchlistBusy ? 'Loading...' : watching ? 'Watching...' : 'Add to Watchlist'}
-              </span>
-            </button>
+            {/* #2209: no Watchlist in the profile, no button (the server refuses it) */}
+            {mayWatch ? (
+              <button
+                type="button"
+                className={`library-artist-watchlist-btn${watching ? ' watching' : ''}`}
+                id="library-artist-watchlist-btn"
+                disabled={watchlistBusy}
+                onClick={() => void toggleWatchlist()}
+              >
+                <span className="watchlist-icon">👁️</span>
+                <span className="watchlist-text">
+                  {watchlistBusy ? 'Loading...' : watching ? 'Watching...' : 'Add to Watchlist'}
+                </span>
+              </button>
+            ) : null}
             {artist.name ? (
               <AudiobookRouteToggle
                 name={String(artist.name)}
@@ -530,10 +542,11 @@ export function ArtistHero({
           <div className="artist-genres-container" id="artist-genres">
             {chips.map((chip) => (
               <span
-                key={`${chip.fromLastfm ? 'lfm' : 'genre'}-${chip.label}`}
+                key={`${chip.source}-${chip.label}`}
                 className="genre-tag"
-                // Last.fm tags are dimmed so they read as secondary.
-                style={chip.fromLastfm ? { opacity: 0.6 } : undefined}
+                // tags (last.fm, or musicbrainz without it) are dimmed so they
+                // read as secondary.
+                style={chip.source !== 'genre' ? { opacity: 0.6 } : undefined}
               >
                 {chip.label}
               </span>
@@ -572,19 +585,19 @@ export function ArtistHero({
             </div>
           ) : null}
 
+          <AboutSourceNote
+            bioSource={pickedBio?.source}
+            bioUrl={pickedBio?.url}
+            tagsSource={chips.some((chip) => chip.source !== 'genre') ? tagsSource : null}
+          />
+
           <div className="artist-hero-numbers">
-            {artist.lastfm_listeners ? (
-              <div className="artist-hero-stat" id="artist-hero-listeners">
-                <span className="hero-stat-value">{formatHeroNumber(artist.lastfm_listeners)}</span>
-                <span className="hero-stat-label">listeners</span>
+            {numbers.map((stat) => (
+              <div className="artist-hero-stat" id={`artist-hero-${stat.id}`} key={stat.id}>
+                <span className="hero-stat-value">{formatHeroNumber(stat.value)}</span>
+                <span className="hero-stat-label">{stat.label}</span>
               </div>
-            ) : null}
-            {artist.lastfm_playcount ? (
-              <div className="artist-hero-stat" id="artist-hero-playcount">
-                <span className="hero-stat-value">{formatHeroNumber(artist.lastfm_playcount)}</span>
-                <span className="hero-stat-label">plays</span>
-              </div>
-            ) : null}
+            ))}
           </div>
 
           {/* Completion bars are library-only: a source artist owns nothing, so

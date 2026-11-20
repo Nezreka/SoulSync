@@ -26,7 +26,8 @@ from datetime import datetime
 from flask import Blueprint, jsonify, request, send_file
 
 from core.database_update_worker import DatabaseUpdateWorker
-from core.profile_context import admin_only
+from core.permissions import requires
+from core.profile_context import admin_only, is_admin_request
 from core.runtime_state import add_activity_item
 from utils.logging_config import get_logger
 
@@ -437,13 +438,13 @@ def _run_soulsync_full_refresh(incremental=False):
     try:
         transfer_path = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
         if not os.path.isdir(transfer_path):
-            _db_update_error_callback(f"Output folder not found: {transfer_path}")
+            _db_update_error_callback(f"Music library folder not found: {transfer_path}")
             return
 
         logger.info("[%s] Indexing local files: %s", label, transfer_path)
         db = get_database()
 
-        _db_update_phase_callback('Scanning output folder...')
+        _db_update_phase_callback('Scanning music library folder...')
         audio_exts = {'.mp3', '.flac', '.ogg', '.opus', '.m4a', '.aac', '.wav', '.wma', '.aiff', '.aif', '.ape'}
         audio_files = []
         for root, _dirs, files in os.walk(transfer_path):
@@ -597,10 +598,10 @@ def _run_soulsync_deep_scan():
         staging_path = docker_resolve_path(config_manager.get('import.staging_path', './Staging'))
 
         if not os.path.isdir(transfer_path):
-            _db_update_error_callback(f"Output folder not found: {transfer_path}")
+            _db_update_error_callback(f"Music library folder not found: {transfer_path}")
             return
 
-        logger.info(f"[SoulSync Deep Scan] Starting — Transfer: {transfer_path}")
+        logger.info(f"[SoulSync Deep Scan] Starting — music library folder: {transfer_path}")
         _db_update_phase_callback('scanning')
 
         # Phase 1: Collect all audio files in Transfer
@@ -611,7 +612,7 @@ def _run_soulsync_deep_scan():
                 if os.path.splitext(filename)[1].lower() in audio_extensions:
                     transfer_files.add(os.path.realpath(os.path.join(root, filename)))
 
-        logger.info(f"[SoulSync Deep Scan] Found {len(transfer_files)} audio files in Transfer")
+        logger.info(f"[SoulSync Deep Scan] Found {len(transfer_files)} audio files in the music library folder")
 
         # Phase 2: Get all imported file rows that resolve inside Transfer.
         # Entity server_source is deliberately irrelevant: standalone/import
@@ -912,6 +913,9 @@ def _post_scan_hook_with_own_libraries(server_type, deep):
             _db_update_phase_callback("Finishing up: folding leftover track rows...")
             from core.library2.dedup_repair import fold_leftovers_after_scan
             fold_leftovers_after_scan(worker.database)
+            # albums of one name a scan merged into one row (#2110)
+            from core.library2.release_split import split_same_named_after_scan
+            split_same_named_after_scan(worker.database)
     return hook
 
 
@@ -1047,14 +1051,24 @@ def _run_deep_scan_task(server_type, run_epoch=None):
     db_update_worker.run_deep_scan()
 
 
+# what a member gets from /api/database/stats (#2207): how big their
+# library is. the database's size and path, the server and the scan times
+# are the admin's
+MEMBER_DB_STATS_KEYS = ('artists', 'albums', 'tracks')
+
+
 @bp.route('/api/database/stats', methods=['GET'])
-@admin_only
+@requires("music.access")
 def get_database_stats():
     """Endpoint to get current database statistics."""
     try:
         # This endpoint returns the same stats shape the UI expects.
         db = get_database()
+        # read in the caller's library scope, so a member's counts are the
+        # library they browse
         stats = db.get_database_info_for_server()
+        if not is_admin_request():
+            stats = {k: stats.get(k, 0) for k in MEMBER_DB_STATS_KEYS}
         return jsonify(stats)
     except Exception as e:
         logger.error(f"Error getting database stats: {e}")
@@ -1396,8 +1410,25 @@ def database_maintenance_info():
         free_bytes = free_pages * page_size
         auto_vacuum_labels = {0: 'None', 1: 'Full', 2: 'Incremental'}
 
+        from core import db_housekeeping
+        from database.music_database import DB_CACHE_MB, DB_JOURNAL_SIZE_LIMIT_MB, DB_MMAP_MB
+        wal_bytes = db_housekeeping.wal_size(db_path)
+        try:
+            free_disk = shutil.disk_usage(os.path.dirname(os.path.abspath(db_path))).free
+        except OSError:
+            free_disk = None
+
         return jsonify({
             'success': True,
+            'wal_size': wal_bytes,
+            'wal_size_display': f'{wal_bytes / 1024 / 1024:.1f} MB',
+            'free_disk': free_disk,
+            # VACUUM writes a whole new copy before it swaps it in
+            'vacuum_needs': total_bytes,
+            'vacuum_has_room': free_disk is None or free_disk > total_bytes * 1.1,
+            'tuning': {'cache_mb': DB_CACHE_MB, 'wal_limit_mb': DB_JOURNAL_SIZE_LIMIT_MB,
+                       'mmap_mb': DB_MMAP_MB,
+                       'checkpoint_minutes': db_housekeeping.CHECKPOINT_MINUTES},
             'total_size': total_bytes,
             'total_size_display': f'{total_bytes / 1024 / 1024:.1f} MB',
             'free_pages': free_pages,
@@ -1434,6 +1465,21 @@ def database_vacuum():
 
         # Get size before
         size_before = os.path.getsize(db_path)
+
+        # VACUUM builds a full copy of the database before it replaces the
+        # original: without room for it, it fails part way after a long wait
+        body = request.get_json(silent=True) or {}
+        try:
+            free_disk = shutil.disk_usage(os.path.dirname(os.path.abspath(db_path))).free
+        except OSError:
+            free_disk = None
+        if free_disk is not None and free_disk < size_before * 1.1 and not body.get('force'):
+            return jsonify({
+                'success': False,
+                'error': (f'not enough free disk space to compact: VACUUM needs about '
+                          f'{size_before / 1024 / 1024 / 1024:.1f} GB free next to the database, '
+                          f'there is {free_disk / 1024 / 1024 / 1024:.1f} GB'),
+            }), 409
 
         conn = sqlite3.connect(db_path)
         start = time.time()
@@ -1498,4 +1544,60 @@ def enable_incremental_vacuum():
         })
     except Exception as e:
         logger.error(f"Failed to enable incremental vacuum: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@bp.route('/api/database/maintenance/tables', methods=['GET'])
+@admin_only
+def database_table_sizes():
+    """what is taking the room (#2205). sizes come from a measuring pass that
+    reads every page, so it runs on its own thread: ``?measure=1`` starts it,
+    and this returns the last result plus the planner's row estimates now."""
+    try:
+        from core import db_housekeeping
+        db_path = os.environ.get('DATABASE_PATH', 'database/music_library.db')
+        started = False
+        if request.args.get('measure') in ('1', 'true', 'yes'):
+            started = db_housekeeping.start_measure(db_path)
+        conn = sqlite3.connect(db_path, timeout=10)
+        try:
+            # row estimates only: dbstat here would read the whole file inline
+            estimates = db_housekeeping.table_sizes(conn, use_dbstat=False)
+        finally:
+            conn.close()
+        state = db_housekeeping.measure_state()
+        return jsonify({'success': True, 'started': started, 'measure': state,
+                        'estimates': estimates.get('tables', [])})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@bp.route('/api/database/maintenance/optimize', methods=['POST'])
+@admin_only
+def database_optimize():
+    """the safe tidy-up, no VACUUM: prune the caches and logs that keep their
+    own retention, merge the search indexes, refresh planner stats, and fold
+    the wal back in. it never deletes listening history or library rows."""
+    try:
+        from core import db_housekeeping
+        db_path = os.environ.get('DATABASE_PATH', 'database/music_library.db')
+        start = time.time()
+        conn = sqlite3.connect(db_path, timeout=30)
+        try:
+            conn.execute('PRAGMA busy_timeout = 30000')
+            pruned = db_housekeeping.prune(conn)
+            optimized = db_housekeeping.optimize(conn)
+        finally:
+            conn.close()
+        wal = db_housekeeping.checkpoint(db_path, truncate_over=0)
+        elapsed = time.time() - start
+        logger.info("database optimize: pruned %s, fts %s, wal %.1f -> %.1f MB in %.1fs",
+                    pruned, optimized.get('fts_optimized'), wal['wal_before'] / 1e6,
+                    wal['wal_after'] / 1e6, elapsed)
+        return jsonify({'success': True, 'pruned': pruned, 'elapsed_seconds': round(elapsed, 1),
+                        'fts_optimized': optimized.get('fts_optimized', []),
+                        'wal_before': wal['wal_before'], 'wal_after': wal['wal_after'],
+                        'wal_busy': bool(wal.get('busy'))})
+    except Exception as e:
+        logger.error(f"Database optimize failed: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500

@@ -2,6 +2,7 @@ import { Link } from '@tanstack/react-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { EmptyState } from '@/components/primitives';
+import { useMyPermissions } from '@/platform/shell/my-permissions';
 
 import type { AudiobookLibraryEntry, AudiobookLibraryScan } from '../-audiobooks.types';
 
@@ -36,7 +37,10 @@ const MATCHES: Record<string, string> = {
   error: 'Match lookup failed',
 };
 function matchedAsin(book: AudiobookLibraryEntry): string {
-  return ['identifier', 'automatic', 'confirmed'].includes(book.match_status || '')
+  // a member's read has no match_status: the server only sends the asin once
+  // the match is settled (#2201)
+  if (book.match_status === undefined) return book.catalog_asin || '';
+  return ['identifier', 'automatic', 'confirmed'].includes(book.match_status)
     ? book.catalog_asin || ''
     : '';
 }
@@ -44,7 +48,7 @@ function needsReview(book: AudiobookLibraryEntry): boolean {
   return !matchedAsin(book) && book.match_status !== 'ignored';
 }
 
-function Cover({ book }: { book: AudiobookLibraryEntry }) {
+function Cover({ book, admin }: { book: AudiobookLibraryEntry; admin: boolean }) {
   const [failed, setFailed] = useState(false);
   return (
     <div className={styles.art}>
@@ -59,7 +63,9 @@ function Cover({ book }: { book: AudiobookLibraryEntry }) {
           <small>{book.author || 'AUDIOBOOK'}</small>
         </div>
       )}
-      <span className={styles.format}>{book.audio_format.toUpperCase() || 'AUDIO'}</span>
+      {admin && (
+        <span className={styles.format}>{(book.audio_format || '').toUpperCase() || 'AUDIO'}</span>
+      )}
     </div>
   );
 }
@@ -95,6 +101,10 @@ export function AudiobookLibraryPanel({
   const [revision, setRevision] = useState(0);
   const [queuedAt, setQueuedAt] = useState(0);
   const scanBaseline = useRef(0);
+  // the files, where they came from, matching, delete and the scan are the
+  // admin's (#2201): the server sends a member the shelf only and refuses
+  // the rest, so a member is never offered any of it
+  const admin = useMyPermissions().isAdmin;
 
   useEffect(() => {
     let active = true;
@@ -136,7 +146,7 @@ export function AudiobookLibraryPanel({
   }, [revision, queuedAt, scan.status]);
 
   const reviewCount = books.filter(needsReview).length;
-  const totalBytes = books.reduce((sum, book) => sum + book.size_bytes, 0);
+  const totalBytes = books.reduce((sum, book) => sum + (book.size_bytes || 0), 0);
   const shown = useMemo(() => {
     const needle = filter.trim().toLowerCase();
     return books
@@ -215,7 +225,7 @@ export function AudiobookLibraryPanel({
           <p>
             {loading
               ? 'Reading your library…'
-              : `${books.length} ${books.length === 1 ? 'book' : 'books'} · ${size(totalBytes)} on disk`}
+              : `${books.length} ${books.length === 1 ? 'book' : 'books'}${admin ? ` · ${size(totalBytes)} on disk` : ''}`}
           </p>
         </div>
         {!embedded && (
@@ -232,41 +242,43 @@ export function AudiobookLibraryPanel({
 
       {!reviewBook && (
         <>
-          <div className={styles.scanPanel}>
-            <div className={styles.scanInfo}>
-              <strong>
-                <span className={scanning ? styles.activeDot : styles.dot} />
-                {scanText}
-              </strong>
-              <span className={styles.root} title={root}>
-                {root || 'Set your audiobook folder in Settings → Library'}
-              </span>
-              {scan.status === 'completed' && (
-                <small>
-                  {scan.adopted || 0} added · {scan.updated || 0} refreshed · {scan.removed || 0}{' '}
-                  missing
-                </small>
-              )}
+          {admin && (
+            <div className={styles.scanPanel}>
+              <div className={styles.scanInfo}>
+                <strong>
+                  <span className={scanning ? styles.activeDot : styles.dot} />
+                  {scanText}
+                </strong>
+                <span className={styles.root} title={root}>
+                  {root || 'Set your audiobook folder in Settings → Library'}
+                </span>
+                {scan.status === 'completed' && (
+                  <small>
+                    {scan.adopted || 0} added · {scan.updated || 0} refreshed · {scan.removed || 0}{' '}
+                    missing
+                  </small>
+                )}
+              </div>
+              <div className={styles.scanActions}>
+                <button
+                  type="button"
+                  className={styles.primary}
+                  onClick={() => void startScan()}
+                  disabled={scanning || loading}
+                >
+                  {scanning ? 'Scanning…' : 'Scan folder'}
+                </button>
+                <Link
+                  to="/automations"
+                  search={{ action: 'audiobook_scan_library' }}
+                  onClick={embedded ? undefined : onClose}
+                >
+                  Schedule & history ↗
+                </Link>
+              </div>
             </div>
-            <div className={styles.scanActions}>
-              <button
-                type="button"
-                className={styles.primary}
-                onClick={() => void startScan()}
-                disabled={scanning || loading}
-              >
-                {scanning ? 'Scanning…' : 'Scan folder'}
-              </button>
-              <Link
-                to="/automations"
-                search={{ action: 'audiobook_scan_library' }}
-                onClick={embedded ? undefined : onClose}
-              >
-                Schedule & history ↗
-              </Link>
-            </div>
-          </div>
-          {scan.error && (
+          )}
+          {admin && scan.error && (
             <p className={styles.notice} role="status">
               {scan.error}
             </p>
@@ -301,49 +313,51 @@ export function AudiobookLibraryPanel({
               <option value="title">Title A–Z</option>
               <option value="author">Author A–Z</option>
               <option value="recent">Recently added</option>
-              <option value="size">Largest first</option>
+              {admin && <option value="size">Largest first</option>}
             </select>
           </div>
-          <div className={styles.filters}>
-            <button
-              type="button"
-              aria-pressed={matchFilter === 'all'}
-              onClick={() => setMatchFilter('all')}
-            >
-              All books <span>{books.length}</span>
-            </button>
-            <button
-              type="button"
-              aria-pressed={matchFilter === 'review'}
-              onClick={() => setMatchFilter('review')}
-            >
-              Needs review <span>{reviewCount}</span>
-            </button>
-            <button
-              type="button"
-              aria-pressed={matchFilter === 'matched'}
-              onClick={() => setMatchFilter('matched')}
-            >
-              Matched
-            </button>
-            <select
-              aria-label="Filter by download origin"
-              value={originFilter}
-              onChange={(e) => setOriginFilter(e.target.value)}
-            >
-              <option value="all">All origins</option>
-              <option value="soulsync">SoulSync downloads</option>
-              <option value="disk">Found on disk</option>
-              <option value="unknown">Origin unknown</option>
-            </select>
-          </div>
-          {Boolean(scan.match_pending) && (
+          {admin && (
+            <div className={styles.filters}>
+              <button
+                type="button"
+                aria-pressed={matchFilter === 'all'}
+                onClick={() => setMatchFilter('all')}
+              >
+                All books <span>{books.length}</span>
+              </button>
+              <button
+                type="button"
+                aria-pressed={matchFilter === 'review'}
+                onClick={() => setMatchFilter('review')}
+              >
+                Needs review <span>{reviewCount}</span>
+              </button>
+              <button
+                type="button"
+                aria-pressed={matchFilter === 'matched'}
+                onClick={() => setMatchFilter('matched')}
+              >
+                Matched
+              </button>
+              <select
+                aria-label="Filter by download origin"
+                value={originFilter}
+                onChange={(e) => setOriginFilter(e.target.value)}
+              >
+                <option value="all">All origins</option>
+                <option value="soulsync">SoulSync downloads</option>
+                <option value="disk">Found on disk</option>
+                <option value="unknown">Origin unknown</option>
+              </select>
+            </div>
+          )}
+          {admin && Boolean(scan.match_pending) && (
             <p className={styles.notice}>
               {scan.match_pending} books waiting for catalogue lookup. The automation processes a
               limited batch each run.
             </p>
           )}
-          {Boolean(scan.match_errors) && (
+          {admin && Boolean(scan.match_errors) && (
             <p className={styles.notice}>
               {scan.match_errors} catalogue lookups failed. Your files are indexed; matching will
               retry later.
@@ -352,7 +366,7 @@ export function AudiobookLibraryPanel({
         </>
       )}
       <div className={styles.body} aria-busy={loading}>
-        {reviewBook ? (
+        {reviewBook && admin ? (
           <AudiobookLibraryMatch
             book={reviewBook}
             onBack={() => setReviewBook(null)}
@@ -369,20 +383,26 @@ export function AudiobookLibraryPanel({
             className={styles.empty}
             title="Your books belong here"
             description={
-              <>
-                Scan your audiobook folder to find the books you already own, including those added
-                outside SoulSync. Your files stay where they are.
-              </>
+              admin ? (
+                <>
+                  Scan your audiobook folder to find the books you already own, including those
+                  added outside SoulSync. Your files stay where they are.
+                </>
+              ) : (
+                <>Nothing on the shelves yet.</>
+              )
             }
           >
-            <button
-              type="button"
-              className={styles.primary}
-              disabled={scanning}
-              onClick={() => void startScan()}
-            >
-              {scanning ? 'Scanning…' : 'Scan my folder'}
-            </button>
+            {admin && (
+              <button
+                type="button"
+                className={styles.primary}
+                disabled={scanning}
+                onClick={() => void startScan()}
+              >
+                {scanning ? 'Scanning…' : 'Scan my folder'}
+              </button>
+            )}
           </EmptyState>
         ) : shown.length === 0 && !loadError ? (
           <p className={styles.empty}>No books match these filters.</p>
@@ -391,7 +411,7 @@ export function AudiobookLibraryPanel({
             {shown.map((book) => (
               <li className={styles.card} key={book.asin}>
                 {!matchedAsin(book) ? (
-                  <Cover book={book} />
+                  <Cover book={book} admin={admin} />
                 ) : (
                   <Link
                     to="/audiobooks/$asin"
@@ -399,7 +419,7 @@ export function AudiobookLibraryPanel({
                     onClick={embedded ? undefined : onClose}
                     aria-label={`View ${book.title}`}
                   >
-                    <Cover book={book} />
+                    <Cover book={book} admin={admin} />
                   </Link>
                 )}
                 <h3 title={book.title}>{book.title}</h3>
@@ -413,80 +433,87 @@ export function AudiobookLibraryPanel({
                   </p>
                 )}
                 <p className={styles.facts}>
-                  {book.runtime_minutes > 0 ? `${duration(book.runtime_minutes)} · ` : ''}
-                  {size(book.size_bytes)}
+                  {admin
+                    ? `${book.runtime_minutes > 0 ? `${duration(book.runtime_minutes)} · ` : ''}${size(book.size_bytes)}`
+                    : book.runtime_minutes > 0
+                      ? duration(book.runtime_minutes)
+                      : ''}
                 </p>
-                <div className={styles.badges}>
-                  <span data-origin={book.origin || 'unknown'}>
-                    {ORIGINS[book.origin || 'unknown']}
-                  </span>
-                  <button type="button" onClick={() => setReviewBook(book)}>
-                    {MATCHES[book.match_status || 'unmatched']}
-                  </button>
-                </div>
-                <details className={styles.details}>
-                  <summary>File details</summary>
-                  <p>
-                    {book.file_count} {book.file_count === 1 ? 'audio file' : 'audio files'}
-                  </p>
-                  {book.narrator && <p>Narrated by {book.narrator}</p>}
-                  <p className={styles.path}>{book.path}</p>
-                  {book.grouping && <p>{book.grouping}</p>}
-                  {book.file_paths && book.file_paths.length > 1 && (
-                    <details>
-                      <summary>Show {book.file_paths.length} audio files</summary>
-                      <ul className={styles.fileList}>
-                        {book.file_paths.map((path) => (
-                          <li key={path}>{path}</li>
-                        ))}
-                      </ul>
-                    </details>
-                  )}
-                  {book.download && (
-                    <div className={styles.downloadInfo}>
-                      <strong>Downloaded by SoulSync</strong>
-                      <p>{book.download.release_title}</p>
-                      <p>
-                        {book.download.indexer || book.download.source}
-                        {book.download.completed_at
-                          ? ` · ${new Date(book.download.completed_at * 1000).toLocaleDateString()}`
-                          : ''}
-                      </p>
-                    </div>
-                  )}
-                  <button type="button" onClick={() => setReviewBook(book)}>
-                    Change catalogue match
-                  </button>
-                  {confirm === book.asin ? (
-                    <div className={styles.confirm}>
-                      <p>Delete this book from disk? Your recycle bin settings apply.</p>
-                      <button
-                        type="button"
-                        disabled={scanning || !!busy}
-                        className={styles.danger}
-                        onClick={() => void remove(book)}
-                      >
-                        {busy === book.asin ? 'Deleting…' : 'Confirm delete'}
-                      </button>
-                      <button
-                        type="button"
-                        disabled={scanning || !!busy}
-                        onClick={() => setConfirm('')}
-                      >
-                        Keep book
-                      </button>
-                    </div>
-                  ) : (
-                    <button
-                      type="button"
-                      className={styles.danger}
-                      disabled={scanning || !!busy}
-                      onClick={() => setConfirm(book.asin)}
-                    >
-                      Delete from disk
+                {admin && (
+                  <div className={styles.badges}>
+                    <span data-origin={book.origin || 'unknown'}>
+                      {ORIGINS[book.origin || 'unknown']}
+                    </span>
+                    <button type="button" onClick={() => setReviewBook(book)}>
+                      {MATCHES[book.match_status || 'unmatched']}
                     </button>
-                  )}
-                </details>
+                  </div>
+                )}
+                {admin && (
+                  <details className={styles.details}>
+                    <summary>File details</summary>
+                    <p>
+                      {book.file_count} {book.file_count === 1 ? 'audio file' : 'audio files'}
+                    </p>
+                    {book.narrator && <p>Narrated by {book.narrator}</p>}
+                    <p className={styles.path}>{book.path}</p>
+                    {book.grouping && <p>{book.grouping}</p>}
+                    {book.file_paths && book.file_paths.length > 1 && (
+                      <details>
+                        <summary>Show {book.file_paths.length} audio files</summary>
+                        <ul className={styles.fileList}>
+                          {book.file_paths.map((path) => (
+                            <li key={path}>{path}</li>
+                          ))}
+                        </ul>
+                      </details>
+                    )}
+                    {book.download && (
+                      <div className={styles.downloadInfo}>
+                        <strong>Downloaded by SoulSync</strong>
+                        <p>{book.download.release_title}</p>
+                        <p>
+                          {book.download.indexer || book.download.source}
+                          {book.download.completed_at
+                            ? ` · ${new Date(book.download.completed_at * 1000).toLocaleDateString()}`
+                            : ''}
+                        </p>
+                      </div>
+                    )}
+                    <button type="button" onClick={() => setReviewBook(book)}>
+                      Change catalogue match
+                    </button>
+                    {confirm === book.asin ? (
+                      <div className={styles.confirm}>
+                        <p>Delete this book from disk? Your recycle bin settings apply.</p>
+                        <button
+                          type="button"
+                          disabled={scanning || !!busy}
+                          className={styles.danger}
+                          onClick={() => void remove(book)}
+                        >
+                          {busy === book.asin ? 'Deleting…' : 'Confirm delete'}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={scanning || !!busy}
+                          onClick={() => setConfirm('')}
+                        >
+                          Keep book
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        className={styles.danger}
+                        disabled={scanning || !!busy}
+                        onClick={() => setConfirm(book.asin)}
+                      >
+                        Delete from disk
+                      </button>
+                    )}
+                  </details>
+                )}
               </li>
             ))}
           </ul>

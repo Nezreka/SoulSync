@@ -15,6 +15,14 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 logger = get_logger("listenbrainz_manager")
 
+# a radio playlist names who picked its tracks: last.fm, or deezer's artist
+# radio when last.fm refused the key (pro only from 1 december 2026)
+RADIO_SOURCE_NAMES = {'lastfm': 'Last.fm', 'deezer': 'Deezer'}
+
+
+def radio_playlist_title(seed_track: str, seed_artist: str, source: str = 'lastfm') -> str:
+    return f"{RADIO_SOURCE_NAMES.get(source, 'Last.fm')} Radio: {seed_track} by {seed_artist}"
+
 class ListenBrainzManager:
     """Manages caching of ListenBrainz data in local database"""
 
@@ -732,7 +740,8 @@ class ListenBrainzManager:
         except Exception as exc:
             logger.warning(f"Cascade delete of mirrored {source} rows failed: {exc}")
 
-    def save_lastfm_radio_playlist(self, seed_track: str, seed_artist: str, similar_tracks: List[Dict]) -> str:
+    def save_lastfm_radio_playlist(self, seed_track: str, seed_artist: str, similar_tracks: List[Dict],
+                                   source: str = 'lastfm') -> str:
         """
         Persist a Last.fm similar-tracks playlist to the DB under playlist_type='lastfm_radio'.
 
@@ -743,6 +752,8 @@ class ListenBrainzManager:
             seed_track:     The seed track title.
             seed_artist:    The seed artist name.
             similar_tracks: List of dicts with {name, artist, match, mbid} from LastFMClient.get_similar_tracks().
+            source:         who gave the similar tracks ('lastfm', or 'deezer' when Last.fm
+                            refused the key); the title and creator name it.
 
         Returns:
             The playlist_mbid string.
@@ -750,7 +761,8 @@ class ListenBrainzManager:
         import hashlib
         mbid_hash = hashlib.md5(f"{seed_artist.lower()}:{seed_track.lower()}".encode()).hexdigest()[:12]
         playlist_mbid = f"lastfm_radio_{mbid_hash}"
-        title = f"Last.fm Radio: {seed_track} by {seed_artist}"
+        creator = RADIO_SOURCE_NAMES.get(source, 'Last.fm')
+        title = radio_playlist_title(seed_track, seed_artist, source)
         track_count = len(similar_tracks)
 
         conn = self._get_db_connection()
@@ -769,16 +781,16 @@ class ListenBrainzManager:
                 cursor.execute("DELETE FROM listenbrainz_tracks WHERE playlist_id = ?", (playlist_id,))
                 cursor.execute("""
                     UPDATE listenbrainz_playlists
-                    SET title = ?, track_count = ?, last_updated = CURRENT_TIMESTAMP
+                    SET title = ?, creator = ?, track_count = ?, last_updated = CURRENT_TIMESTAMP
                     WHERE id = ?
-                """, (title, track_count, playlist_id))
+                """, (title, creator, track_count, playlist_id))
                 logger.info(f"Updated Last.fm radio playlist '{title}' ({track_count} tracks)")
             else:
                 cursor.execute("""
                     INSERT INTO listenbrainz_playlists
                     (playlist_mbid, title, creator, playlist_type, track_count, annotation_data, profile_id)
                     VALUES (?, ?, ?, ?, ?, ?, ?)
-                """, (playlist_mbid, title, 'Last.fm', 'lastfm_radio', track_count,
+                """, (playlist_mbid, title, creator, 'lastfm_radio', track_count,
                       json.dumps({'track_count': track_count}), self.profile_id))
                 playlist_id = cursor.lastrowid
                 logger.info(f"Saved new Last.fm radio playlist '{title}' ({track_count} tracks)")

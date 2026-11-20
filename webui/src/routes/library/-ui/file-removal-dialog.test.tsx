@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { HttpResponse, http, server } from '@/test/msw';
 import { createTestQueryClient } from '@/test/query-client';
 
+import { RENAME_CHECK_QUERY_KEY } from '../-library-v2.api';
 import { UnifiedFileRemovalDialog } from './library-v2-page';
 
 /** A preview whose only row points at a file that is no longer on disk. */
@@ -232,5 +233,48 @@ describe('unified Library v2 file-removal dialog', () => {
     ).toBeInTheDocument();
     expect(screen.getByRole('radio', { name: /Delete files/ })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Remove from library database' })).toBeEnabled();
+  });
+
+  it('refreshes the "to rename" count once an album is removed (#2194)', async () => {
+    server.use(
+      http.get('/api/library/v2/albums/42/file-delete-preview', () => HttpResponse.json(preview())),
+      http.post('/api/library/v2/albums/42/file-remove', () =>
+        HttpResponse.json({
+          success: true,
+          operation: {
+            id: 'db-only',
+            status: 'completed',
+            mode: 'database_only',
+            actor: 'user',
+            actor_profile_id: 1,
+            file_count: 1,
+            total_size: 0,
+            items: [],
+          },
+        }),
+      ),
+      http.delete('/api/library/v2/albums/42', () => HttpResponse.json({ success: true })),
+    );
+    const client = createTestQueryClient();
+    // the count is kept apart from the library key, so it outlived the delete
+    client.setQueryData([...RENAME_CHECK_QUERY_KEY, 7], { enabled: true, albums: { 42: 3 } });
+    const onDone = vi.fn();
+    render(
+      <QueryClientProvider client={client}>
+        <UnifiedFileRemovalDialog
+          entity="albums"
+          eid={42}
+          removeWholeEntity
+          title="Views"
+          onDone={onDone}
+          onCancel={vi.fn()}
+        />
+      </QueryClientProvider>,
+    );
+    const submit = await screen.findByRole('button', { name: 'Remove from library database' });
+    await waitFor(() => expect(submit).toBeEnabled());
+    fireEvent.click(submit);
+    await waitFor(() => expect(onDone).toHaveBeenCalledTimes(1));
+    expect(client.getQueryState([...RENAME_CHECK_QUERY_KEY, 7])?.isInvalidated).toBe(true);
   });
 });

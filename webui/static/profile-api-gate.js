@@ -31,7 +31,7 @@
         '/api/video/overlays', '/api/video/import', '/api/video/collections',
         '/api/video/repair', '/api/video/server-config', '/api/video/jellyfin',
         '/api/video/libraries', '/api/video/organization', '/api/video/downloads/slskd',
-        '/api/video/enrichment/config', '/api/video/enrichment/priority',
+        '/api/video/enrichment',
         '/api/video/notifications', '/api/video/backups',
     ];
 

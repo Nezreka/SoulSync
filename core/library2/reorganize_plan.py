@@ -299,6 +299,17 @@ def _credited_artists(conn, track_id: int) -> List[str]:
     return [n for n in (names.get(int(r["id"]), r["name"]) for r in rows) if n]
 
 
+def _templates_use_quality() -> bool:
+    """any naming template uses $quality (#2195). True when the templates
+    can't be read: a slower plan beats a name without its quality."""
+    try:
+        from core.imports.paths import _get_config_manager
+        templates = _get_config_manager().get("file_organization.templates", {}) or {}
+        return any("$quality" in str(t or "") for t in templates.values())
+    except Exception:  # noqa: BLE001 - see docstring
+        return True
+
+
 def _flag(value: Any) -> Optional[bool]:
     if value is None or value == "":
         return None
@@ -360,6 +371,7 @@ def plan_album_reorganize(
         _is_in_deleted_quarantine, _same_physical_file, _trim_to_transfer,
     )
 
+    wants_quality = _templates_use_quality()
     album_row = _album_row(conn, album_id)
     if album_row is None:
         return {"success": False, "status": "no_album", "source": None,
@@ -559,6 +571,12 @@ def plan_album_reorganize(
             record_type=filing["type"],
             type_source=filing["source"],
         )
+        if wants_quality and resolved and os.path.isfile(resolved):
+            # #2195: $quality comes from the file itself, as a download fills
+            # it. the planner never set it, so a rename dropped it from the
+            # name. read only when a template uses it: it opens every file
+            from core.imports.file_ops import get_audio_quality_string
+            context["_audio_quality"] = get_audio_quality_string(resolved)
         if filing["locked"] is not None:
             # reproduce the download's decision exactly: its source and its
             # lock, not the context builder's own guess from the source name

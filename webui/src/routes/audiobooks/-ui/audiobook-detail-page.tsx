@@ -151,9 +151,15 @@ export function AudiobookDetailPage() {
 
           {/* getting books isn't part of the profile (#2166): one calm line
               where the wishlist and releases buttons would be */}
-          {booksGet !== 'download' && (
+          {booksGet === 'none' && (
             <p className={styles.detailCalm} role="note">
               {offTitle(perms, 'books')}. Ask {admin || 'your admin'} if you’d like it.
+            </p>
+          )}
+          {/* Ask first (#2188): Request sends it to the admin's Requests */}
+          {booksGet === 'ask' && book.source === 'audible' && (
+            <p className={styles.detailCalm} role="note">
+              Books need approval: Request sends it to {admin || 'your admin'} first.
             </p>
           )}
 

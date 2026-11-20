@@ -128,8 +128,9 @@ describe('describeFinding: plain words per type', () => {
     expect(copy.problem).toBe(
       'No cover in the audio files and the album folder. The library has a cover to copy.',
     );
+    // #2202: the cover is picked on the finding, the line names none
     expect(copy.fix).toBe(
-      "Apply Art copies the library's cover into the audio files without one and a cover.jpg in the album folder. A cover you already have is kept.",
+      'Apply Art puts the cover picked below in each place without one. A cover you already have is kept.',
     );
   });
 
@@ -149,9 +150,50 @@ describe('describeFinding: plain words per type', () => {
       'Apply Art',
     );
     expect(copy.problem).toBe('No cover in the library and the album folder. Deezer has one.');
-    expect(copy.fix).toBe(
-      'Apply Art saves the Deezer cover to the library. It also writes a cover.jpg into the album folder from the cover inside the audio files. A cover you already have is kept.',
+  });
+
+  it('missing cover art says a saved cover that no longer loads (#2202)', () => {
+    const copy = describeFinding(
+      {
+        finding_type: 'missing_cover_art',
+        title: 'Artwork storage gaps: Listen',
+        details: {
+          db_missing: true,
+          embed_missing: false,
+          sidecar_missing: true,
+          library_cover_broken: true,
+          found_artwork_url: 'https://x/front',
+          artwork_source: 'deezer',
+        },
+      },
+      'Apply Art',
     );
+    expect(copy.problem).toBe(
+      "No cover in the library and the album folder. The library's saved cover no longer loads. Deezer has one.",
+    );
+    expect(copy.problem).not.toContain('The library has a cover');
+  });
+
+  it('missing cover art never says the files give a cover they do not have (#2202)', () => {
+    // the reporter's Dua Lipa: a library cover, nothing in the files, no
+    // cover.jpg. the line said apply wrote cover.jpg "from the cover inside
+    // the audio files"
+    const copy = describeFinding(
+      {
+        finding_type: 'missing_cover_art',
+        title: 'Artwork storage gaps: Dua Lipa',
+        details: {
+          db_missing: false,
+          embed_missing: false,
+          sidecar_missing: true,
+          found_artwork_url: null,
+          artwork_source: 'library',
+        },
+      },
+      'Apply Art',
+    );
+    expect(copy.problem).toBe('No cover in the album folder. The library has a cover to copy.');
+    expect(copy.fix).not.toContain('inside the audio files');
   });
 
   it('missing cover art with nothing found copies the files cover to the folder (#2169)', () => {
@@ -173,7 +215,6 @@ describe('describeFinding: plain words per type', () => {
     expect(copy.problem).toBe(
       'No cover in the library and the album folder. The audio files have one to copy.',
     );
-    expect(copy.fix).toContain('from the cover inside the audio files');
   });
 
   it('an edition finding names the closest release without row ids or ratios', () => {

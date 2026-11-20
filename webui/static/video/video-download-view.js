@@ -328,11 +328,12 @@
             var label = p.id === 0 && !info.member
                 ? (kindDefault && kindDefault.id !== 0 ? 'Default (' + kindDefault.name + ')' : 'Default')
                 : p.name;
-            if (p.asks) label += ' (asks first)';
+            // the same words as the people settings (#2192)
+            if (p.asks) label += ' (needs approval)';
             return '<option value="' + p.id + '"' + (p.id === cur ? ' selected' : '') + '>' + esc(label) + '</option>';
         }).join('');
         return '<label class="vdl-prof" title="The quality profile this title is searched, grabbed and upgraded by">' +
-            '<span class="vdl-prof-lab">Profile</span>' +
+            '<span class="vdl-prof-lab">Quality profile</span>' +
             '<select class="vdl-prof-sel" data-vdl-profile>' + opts + '</select></label>';
     }
     // the title's video library (#2029): where a grab of it files. only shown

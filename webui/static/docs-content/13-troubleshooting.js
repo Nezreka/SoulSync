@@ -93,7 +93,7 @@ Each problem has a plain title, a line on why, a fix button when there is one, a
 | Services | your media server answers | Test again, or open Connections |
 | Services | which metadata source you use, and whether Spotify is rate limited and for how long | nothing to do: it resumes on its own |
 | Services | each download source answers, and recent download client failures | Test again, or open Downloads settings |
-| Folders | the download, transfer, import and music library folders exist and SoulSync can write to them. In Docker it says when a path is probably not mounted | open that folder's setting |
+| Folders | the download, music library, import and additional library folders exist and SoulSync can write to them. In Docker it says when a path is probably not mounted | open that folder's setting |
 | Folders | the path mapping between your download client and SoulSync, so finished files are where SoulSync looks | open the path mapping setting |
 | Disk | free space on the music and download folders, and the video folders | open the folder settings |
 | Video | library folders, recycle folder, maintenance errors, sources, indexers, download clients, import lists, YouTube cookies | a link to the right setting or page for each |
@@ -252,6 +252,16 @@ This gives you an \`https://your-device.tailnet.ts.net\` address that satisfies 
 2. Click **N runs** on the automation card to open its run-history modal.
 3. For signal chains, check that the upstream automation actually fired its signal — and remember the 10-second cooldown and 5-level depth limit.
 4. Look in \`app.log\` for the automation name around the expected fire time.
+
+## Last.fm: "your key was not accepted"
+
+From 1 December 2026 Last.fm only accepts API keys from accounts with a **Last.fm Pro** subscription. Without one:
+
+- Top tracks, similar artists, Radio and the seasonal mixes keep working from ListenBrainz and Deezer, and what Last.fm already told SoulSync stays cached.
+- Scrobbles to Last.fm wait in the queue rather than being lost. Turn on **Scrobble plays to ListenBrainz** in Settings to keep scrobbling now.
+- Last.fm history import stops. Import from ListenBrainz instead.
+
+Subscribe to Pro and click **Test** on the Last.fm card, and everything goes back to Last.fm.
 
 ## Spotify: redirect URI rejected (INVALID_CLIENT / mismatch)
 

@@ -768,7 +768,7 @@ function ActionPlaceholder({
   minWidth?: number;
 }) {
   return (
-    <span aria-hidden="true" style={{ visibility: 'hidden', display: 'inline-flex' }}>
+    <span aria-hidden="true" className={styles.actionPlaceholder}>
       <Button
         variant={variant}
         size="sm"

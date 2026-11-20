@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 
 import { Spinner } from '@/components/primitives';
+import { usePermMode } from '@/platform/shell/my-permissions';
 
 import type { PodcastDownloadItem, PodcastEpisodeItem } from '../-podcasts.types';
 
@@ -52,6 +53,8 @@ export function PodcastEpisodeList({
   downloads,
 }: PodcastEpisodeListProps) {
   const [visibleCount, setVisibleCount] = useState(CHUNK_SIZE);
+  // Ask first for episodes (#2188): the button asks an admin instead
+  const asks = usePermMode('podcasts') === 'ask';
 
   // Reset pagination when episodes filter/sort changes
   useEffect(() => {
@@ -226,6 +229,7 @@ export function PodcastEpisodeList({
                     type="button"
                     className={`${styles.downloadBtn} ${isDownloaded ? styles.downloadBtnCompleted : ''} ${isDownloading ? styles.downloadBtnLoading : ''}`}
                     data-podcasts-action=""
+                    data-podcasts-asks=""
                     onClick={() => {
                       if (!isDownloaded && !isDownloading && ep.enclosure_url) {
                         onDownloadEpisode(ep);
@@ -239,7 +243,9 @@ export function PodcastEpisodeList({
                           ? 'Already downloaded'
                           : isDownloading
                             ? `Downloading (${dlRecord?.percent || 0}%)`
-                            : 'Download episode'
+                            : asks
+                              ? 'Ask for this episode'
+                              : 'Download episode'
                     }
                   >
                     {isDownloaded ? (
@@ -268,7 +274,7 @@ export function PodcastEpisodeList({
                           <polyline points="7 10 12 15 17 10" />
                           <line x1="12" y1="15" x2="12" y2="3" />
                         </svg>
-                        <span>Download</span>
+                        <span>{asks ? 'Request' : 'Download'}</span>
                       </>
                     )}
                   </button>

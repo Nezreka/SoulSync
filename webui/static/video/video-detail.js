@@ -23,6 +23,14 @@
         Plex: '/static/img/brands/plex.png',
         Jellyfin: '/static/img/brands/jellyfin.png',
     };
+    // the download arrow, drawn: the arrow glyph U+2B73 is missing from android's
+    // fonts and showed as an empty box on Get Show (#2184). sized to the text
+    // around it and coloured by it. DownloadGlyph in components/primitives is
+    // the react twin
+    var DL_IC = '<svg class="vd-dl-ic" viewBox="0 0 24 24" width="1em" height="1em" fill="none" ' +
+        'stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" ' +
+        'aria-hidden="true" focusable="false" style="vertical-align:-0.125em">' +
+        '<path d="M12 4v11M7 10.5l5 5 5-5M5 20h14"/></svg>';
     var VIEW_KEY = 'soulsync_vd_season_view';
     var VIEWS = [
         { id: 'rail', label: 'Rail', ic: '▦' },
@@ -1075,10 +1083,10 @@
         if (d.kind === 'show' && window.VideoGet && _canDl) {
             var showGetLabel = haveShow ? 'Get Missing' : 'Get Show';
             var getShow = '<button class="discog-download-btn discog-btn-compact vd-action-main" type="button" data-vd-act="missing">' +
-                '<span class="discog-btn-icon">⭳</span><span class="discog-btn-text">' + showGetLabel + '</span>' +
+                '<span class="discog-btn-icon">' + DL_IC + '</span><span class="discog-btn-text">' + showGetLabel + '</span>' +
                 '<span class="discog-btn-shimmer"></span></button>';
             if (!primary && (!haveShow || missingEps > 0)) primary = getShow;
-            else getMore += moreItem('missing', '⭳', haveShow
+            else getMore += moreItem('missing', DL_IC, haveShow
                 ? (missingEps ? 'Get ' + missingEps + ' missing episode' + (missingEps === 1 ? '' : 's') + '…' : 'Get episodes…')
                 : 'Get show…');
         }
@@ -1955,6 +1963,104 @@
             .catch(function () { section.hidden = true; });
     }
 
+    // ── Shelf Life (admins only) ───────────────────────────────────────────────
+    // The score the Shelf Life job gave this title, its top reasons, when it
+    // was scored, and Keep. Members never fetch it (the route is admin-only
+    // too). The page reads the stored result; it never scores.
+    function _isAdmin() {
+        try {
+            if (typeof getCurrentProfileContext !== 'function') return false;
+            var ctx = getCurrentProfileContext();
+            return !!(ctx && ctx.isAdmin);
+        } catch (e) { return false; }
+    }
+    function shelfAgo(stamp) {
+        if (!stamp) return '';
+        var t = Date.parse(String(stamp).replace(' ', 'T') + (/[zZ]|[+-]\d\d:?\d\d$/.test(stamp) ? '' : 'Z'));
+        if (isNaN(t)) return '';
+        var hr = Math.max(0, Math.round((Date.now() - t) / 3600000));
+        if (hr < 1) return 'scored just now';
+        if (hr < 48) return 'scored ' + hr + ' hour' + (hr === 1 ? '' : 's') + ' ago';
+        return 'scored ' + Math.round(hr / 24) + ' days ago';
+    }
+    // the same shield the library manager's badge draws
+    function shelfShield() {
+        return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" aria-hidden="true">' +
+            '<path d="M12 3l7 3v5c0 4.5-3 8.2-7 10-4-1.8-7-5.5-7-10V6z" stroke-linejoin="round"/></svg>';
+    }
+    function shelfPanelHtml(v) {
+        var head, note = '';
+        if (v.keep) {
+            head = '<span class="vd-shelf-chip vd-shelf-chip--gate">' + shelfShield() + ' Kept</span>';
+            note = 'Never flagged while it is kept.';
+        } else if (!v.scored) {
+            head = '<span class="vd-shelf-chip">Not scored yet</span>';
+            note = 'It gets a score on the next Shelf Life run.';
+        } else if (v.gate) {
+            head = '<span class="vd-shelf-chip vd-shelf-chip--gate">' + shelfShield() + ' Protected</span>';
+            note = v.gate_text || '';
+        } else {
+            var low = v.score < v.threshold;
+            var band = low ? 'low' : (v.score < v.threshold + 15 ? 'mid' : 'ok');
+            head = '<span class="vd-shelf-chip vd-shelf-chip--' + band + '">' + esc(v.score) + '</span>' +
+                (low ? '<span class="vd-shelf-flag">Flagged for cleanup (under ' + esc(v.threshold) + ')</span>' : '');
+        }
+        var reasons = (!v.keep && v.scored && !v.gate) ? (v.reasons || []) : [];
+        var when = v.scored ? shelfAgo(v.scored_at) : '';
+        var btn = v.can_keep
+            ? '<button type="button" class="vd-shelf-keep' + (v.keep ? ' vd-shelf-keep--on' : '') + '" ' +
+              'data-vd-shelf-keep="' + (v.keep ? '0' : '1') + '" aria-pressed="' + (v.keep ? 'true' : 'false') + '" title="' +
+              (v.keep ? 'Stop keeping it: the next run can flag it again' : 'Keep it: Shelf Life never flags it') + '">' +
+              (v.keep ? 'Kept' : 'Keep') + '</button>'
+            : '';
+        return '<div class="vd-shelf-head"><span class="vd-shelf-label">Shelf Life</span>' + head +
+            (when ? '<span class="vd-shelf-when">' + esc(when) + '</span>' : '') + btn + '</div>' +
+            (note ? '<div class="vd-shelf-note">' + esc(note) + '</div>' : '') +
+            (reasons.length ? '<ul class="vd-shelf-reasons">' + reasons.map(function (r) {
+                return '<li>' + esc(r.text) + '</li>';
+            }).join('') + '</ul>' : '');
+    }
+    function renderShelf(v) {
+        var host = q('[data-vd-shelf]');
+        if (!host) return;
+        if (!v) { host.hidden = true; host.innerHTML = ''; return; }
+        host.innerHTML = shelfPanelHtml(v);
+        host.setAttribute('data-vd-shelf-for', v.kind + ':' + v.item_id);
+        host.hidden = false;
+    }
+    function loadShelfLife(kind, id) {
+        renderShelf(null);
+        if (!_isAdmin()) return;
+        fetch('/api/video/repair/shelf-life/' + kind + '/' + encodeURIComponent(id),
+              { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (v) {
+                // a late answer for a title the page has since left is dropped
+                if (String(currentId) !== String(id) || currentKind !== kind) return;
+                // the job switched off shows nothing: a stale score would read as live
+                renderShelf(v && v.success && v.enabled ? v : null);
+            })
+            .catch(function () { renderShelf(null); });
+    }
+    function toggleShelfKeep(btn) {
+        var host = btn.closest('[data-vd-shelf]');
+        var key = host && (host.getAttribute('data-vd-shelf-for') || '').split(':');
+        if (!key || key.length !== 2) return;
+        var keep = btn.getAttribute('data-vd-shelf-keep') === '1';
+        btn.disabled = true;
+        fetch('/api/video/repair/shelf-life/' + key[0] + '/' + encodeURIComponent(key[1]) + '/keep', {
+            method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify({ keep: keep })
+        })
+            .then(function (r) { return r.json().catch(function () { return null; }); })
+            .then(function (v) {
+                if (!v || !v.success) { btn.disabled = false; toast((v && v.error) || 'Couldn\u2019t save Keep', 'error'); return; }
+                if (String(currentId) === String(key[1]) && currentKind === key[0]) renderShelf(v);
+                toast(keep ? 'Kept: Shelf Life will never flag it' : 'No longer kept', 'success');
+            })
+            .catch(function () { btn.disabled = false; toast('Couldn\u2019t reach the server', 'error'); });
+    }
+
     function loadTitleHistory(kind, id) {
         var section = q('[data-vd-history-section]'), host = q('[data-vd-history]');
         if (!section || !host) return;
@@ -1992,7 +2098,7 @@
          '[data-vd-next-ep]', '[data-vd-crew-line]', '[data-vd-season-overview]',
          '[data-vd-facts-section]', '[data-vd-videos-section]', '[data-vd-gallery-section]',
          '[data-vd-review-section]', '[data-vd-cast-all]', '[data-vd-history-section]', '[data-vd-health]',
-         '[data-vd-acq-section]', '[data-vd-essentials]'].forEach(function (s) {
+         '[data-vd-acq-section]', '[data-vd-essentials]', '[data-vd-shelf]'].forEach(function (s) {
             var n = q(s); if (n) n.hidden = true;
         });
         // Clear any YouTube-channel playlists from the show DOM so they don't leak
@@ -2837,13 +2943,13 @@
                             '<span class="vd-ep-dl" data-vd-ep-dl></span>' +
                             '<div class="vd-ep-badge">Downloaded</div>' +
                             '<button class="vd-ep-getbtn vd-ep-grab" type="button" data-vd-yt-grab="' + esc(ep.youtube_id) +
-                                '" title="Download again (e.g. after deleting it on the server)" aria-label="Download again">⭳</button>' +
+                                '" title="Download again (e.g. after deleting it on the server)" aria-label="Download again">' + DL_IC + '</button>' +
                         '</div>'
                       : '<div class="vd-ep-get" data-vd-ep-get="' + esc(ep.youtube_id) + '">' +
                             '<span class="vd-ep-dl" data-vd-ep-dl></span>' +
                             (reqBtn ||
                             '<button class="vd-ep-getbtn vd-ep-grab" type="button" data-vd-yt-grab="' + esc(ep.youtube_id) +
-                                '" title="Download this video now" aria-label="Download video">⭳</button>' +
+                                '" title="Download this video now" aria-label="Download video">' + DL_IC + '</button>' +
                             '<button class="vd-ep-getbtn vd-ep-wish' + (wished ? ' vd-ep-wish--done' : '') +
                                 '" type="button" data-vd-yt-wish="' + esc(ep.youtube_id) +
                                 '" title="' + (wished ? 'Remove from wishlist' : 'Add this video to the wishlist') +
@@ -2892,7 +2998,7 @@
         } else {
             actions = (!ep.owned
                     ? '<button class="vd-ep-getbtn vd-ep-grab vd-ytc-get" type="button" data-vd-yt-grab="' + esc(id) +
-                        '" title="Download this video now" aria-label="Download video">⭳</button>'
+                        '" title="Download this video now" aria-label="Download video">' + DL_IC + '</button>'
                     : '') +
                 '<span class="vd-pop">' +
                 '<button class="vd-ep-getbtn vd-pop-btn" type="button" data-vd-pop aria-haspopup="menu" aria-expanded="false" ' +
@@ -2900,7 +3006,7 @@
                 '<div class="vd-pop-menu" data-vd-pop-menu role="menu" hidden>' +
                 (ep.owned
                     ? '<button class="vd-manage-btn vd-ep-grab" type="button" role="menuitem" data-vd-yt-grab="' + esc(id) +
-                        '" title="Download again (e.g. after deleting it on the server)">⭳ Download again</button>'
+                        '" title="Download again (e.g. after deleting it on the server)">' + DL_IC + ' Download again</button>'
                     : '<button class="vd-manage-btn vd-ytc-wish' + (ep.wished ? ' watching' : '') + '" type="button" role="menuitem" ' +
                         'data-vd-yt-wish="' + esc(id) + '"><span class="watchlist-icon">' + (ep.wished ? '✓' : '＋') + '</span> ' +
                         '<span class="watchlist-text">' + (ep.wished ? 'In Wishlist' : 'Wishlist') + '</span></button>') +
@@ -3040,7 +3146,7 @@
             '<span class="vd-season-actions-count">' + seasonMissing.length + ' missing</span>' +
             '<button class="discog-download-btn discog-btn-compact" type="button" data-vd-season-grab ' +
                 'title="Download every missing video ' + scope.what + '">' +
-                '<span class="discog-btn-icon">⭳</span><span class="discog-btn-text">Grab ' + scope.word + '</span>' +
+                '<span class="discog-btn-icon">' + DL_IC + '</span><span class="discog-btn-text">Grab ' + scope.word + '</span>' +
                 '<span class="discog-btn-shimmer"></span></button>' +
             '<span class="vd-pop">' +
                 '<button class="vd-pop-btn" type="button" data-vd-pop aria-haspopup="menu" aria-expanded="false" ' +
@@ -3283,6 +3389,7 @@
                     loadExtras('movie', id);
                     loadTitleHistory('movie', id);    // acquisition history (P9)
                     loadAcquisition('movie', id);        // ...and where it stands now
+                    loadShelfLife('movie', id);          // admins: score, reasons, Keep
                     watchMovieDownload(id);           // live download progress chip (if any)
                 }
             })
@@ -3373,6 +3480,7 @@
                     loadExtras('show', id);
                     loadTitleHistory('show', id);     // acquisition history (P9)
                     loadAcquisition('show', id);        // ...and where it stands now
+                    loadShelfLife('show', id);          // admins: score, reasons, Keep
                 }
             })
             .catch(function () { showLoading(false); showLoadError('show', 'offline'); });
@@ -4177,6 +4285,8 @@
         if (shot && r.contains(shot)) { openLightbox(parseInt(shot.getAttribute('data-vd-shot'), 10) || 0); return; }
         var vid = e.target.closest('[data-vd-video]');
         if (vid && r.contains(vid)) { openTrailer(vid.getAttribute('data-vd-video')); return; }
+        var shelfKeep = e.target.closest('[data-vd-shelf-keep]');
+        if (shelfKeep && r.contains(shelfKeep)) { e.preventDefault(); toggleShelfKeep(shelfKeep); return; }
         var healthFix = e.target.closest('[data-vd-health-fix]');
         if (healthFix && r.contains(healthFix)) {
             e.preventDefault();

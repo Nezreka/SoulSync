@@ -82,7 +82,7 @@ The floating **"Search everything…"** bar that used to sit above the media pla
             body: `
 ## Worker orbs
 
-The dashboard header shows a **worker orb** for each of 17 background workers. Hover any orb to see its current status, what item it's processing, and progress counts (e.g. "142/500 matched"). Enrichment workers run automatically in the background, enriching your library with:
+The dashboard header shows a **worker orb** for each of 17 background workers. The orbs, **Manage Workers** and everything behind them are the admin's: a member's dashboard has no orbs, and the server refuses them the workers' status and controls. Hover any orb to see its current status, what item it's processing, and progress counts (e.g. "142/500 matched"). Enrichment workers run automatically in the background, enriching your library with:
 
 ::: cards
 ### 🟣 MusicBrainz
@@ -98,7 +98,7 @@ Artist genres, follower counts, images, album release dates, track previews.
 ### 🌸 iTunes
 Apple Music IDs and preview links.
 ### 🔴 Last.fm
-Listener and play counts, bios, tags, similar artists.
+Listener and play counts, bios, tags, similar artists. For an artist Last.fm has nothing for, or with no working key, it fills the bio from TheAudioDB or Wikipedia, tags from MusicBrainz, and ListenBrainz listeners and Deezer fans instead, asked again every 30 days. Last.fm's own data always comes first and is never overwritten.
 ### 🟡 Genius
 Lyrics, descriptions, alternate names, song artwork.
 ### 🌊 Bandcamp
@@ -254,10 +254,10 @@ The background repair worker runs automated jobs on configurable schedules, incl
 | Job | What it does |
 |-----|--------------|
 | Track Number Repair | Fixes missing/incorrect track numbers against official tracklists |
-| Orphan File Detector | Finds audio files in your output folder not tracked in the database |
+| Orphan File Detector | Finds audio files in your music library folder not tracked in the database |
 | Dead File Cleaner | Finds library entries whose file no longer exists. Each one has **Re-download** and **Remove**: Remove takes the track out of your library and downloads nothing, for files you moved away on purpose (select several and use Fix Selected to remove them together). When most of the library is missing at once it stops and marks nothing, because that is usually a disconnected drive. If you deleted the files yourself, answer the **Unreachable Library** finding with **They are gone** and each file is listed under Dead Files |
 | AcoustID Scanner | Batch audio fingerprint verification across your library. Needs an AcoustID key. With **Enable Download Verification** off in Settings, new downloads are not checked and the scheduled scan is skipped, but **Run Now** still scans, so you can check your library when you choose |
-| Cover Art Filler | Checks the three places an album's cover lives: saved in the library, inside the audio files (when embedding art is on) and as cover.jpg in the album folder (when cover.jpg downloads are on). Each finding shows all three plus the cover a source found and which source, an empty box where there is none, and lists what **Apply Art** writes in each place. A library cover is copied to the files and folder; with none, the found cover is saved; a missing cover.jpg comes from the cover inside the files when they have one. A cover you have is never replaced. **Change cover** on a finding opens the album page's picker to choose any cover instead. An artist photo is only suggested for an artist with none, and only applied with **Use for artist** |
+| Cover Art Filler | Checks the three places an album's cover lives: saved in the library, inside the audio files (when embedding art is on) and as cover.jpg in the album folder (when cover.jpg downloads are on). A cover file counts by any of its usual names in any case (cover, folder, front, album, albumart as jpg, jpeg, png or webp), and a Disc 1 / CD2 folder counts the one in the release folder above it. A saved library cover that no longer loads counts as missing. Each finding shows all three plus the cover a source found and which source, an empty box where there is none. Every box with a picture can be picked: the best one there is starts picked (the library's, then the folder's, then the one inside the files, then the found one), and the finding lists what **Apply Art** writes in each place with that pick. Apply Art puts the picked cover where one is missing; a cover you have is kept, except that picking the found cover over the library's replaces the library one. A finding for an album that has every cover closes on the next scan. **Change cover** on a finding opens the album page's picker to choose any cover instead. An artist photo is only suggested for an artist with none, and only applied with **Use for artist** |
 | Metadata Gap Filler | Completes missing fields (genre, year, …) from connected services |
 | Fake Lossless Detector | Flags suspected lossy transcodes for review; findings have no automatic repair or re-download action |
 | Library Reorganize | Restructures folders to match your path templates |
@@ -266,7 +266,7 @@ The background repair worker runs automated jobs on configurable schedules, incl
 | Artist Merge Review | Shows every artist merge SoulSync made by itself, with the reason and how many albums moved: approve one to undo it. Asks about pairs that share one catalogue id and nothing else (approve to merge, dismiss to keep two). Finds artists merged by mistake, where albums under one artist are filed and tagged under another name, and splits them. An undone merge or a split is never merged again; nothing on disk is changed |
 | Compilation Songs to Original Albums | For players that filter by an album's year: finds where each song on an artist's greatest hits or best-of first came out (the studio album when the same recording is on one, otherwise the single) and, once approved, retags it and files it under that album. Off by default; it breaks compilations up, needs a MusicBrainz release id on the compilation, and leaves various-artists compilations alone |
 | Use File Tags | For tags you fixed outside SoulSync: finds every album whose files say something the Library does not (titles, track numbers, year, genre, which album a track is on) and, once approved, makes the Library follow the files. Off by default; nothing on disk is changed |
-| Cache Maintenance | Cleans expired metadata cache entries |
+| Cache Maintenance | Cleans expired metadata cache entries, prunes old cache and log rows, merges the search indexes and folds the write-ahead log back in |
 | Corrupt File Detector | Decode-tests every library FLAC (\`flac -t\`, falling back to ffmpeg) and flags physically damaged files — the only cure is a fresh download |
 | Comma Artist Splitter | Finds dummy artists that are really several artists joined by separators ("Camellia, Toby Fox") and splits their tags — verifies against metadata APIs first so real separator-named acts like "Tyler, The Creator" are never split. A name the library or a provider knows as one artist ("K/DA") stays whole inside a longer credit. A wrong split is fixed on the finding: Edit split or One artist, and the name goes on the job's Keep Whole Names list so no scan or import splits it again |
 | Watchlist & Wishlist Reconcile | Reconciles monitored artists with the Watchlist and monitored tracks that have no file with the Wishlist, and asks for better copies of tracks below their quality profile, a few each run |
@@ -340,6 +340,8 @@ The bell sits bottom right on every page. The red count is notes you have not se
 ## What a member sees
 
 The panel is everyone's, but what the server is doing is the admin's. A member's panel holds their own notes, their own downloads, their own automations and their listening imports. Health, the footer (downloads across the server, uptime, memory), library scans, repair jobs, the wishlist run and the video jobs are not there, and the server refuses those feeds to a member too.
+
+The dashboards follow the same line. A member's hero shows the size of their own library, and under it a **Browse library** button when they may open the Library page (and **Repair** when an admin gave them Tools). The media server's name and state, when it was last scanned, the database's size, the disk the video library takes, the scans, **Review downloads**, **Poster manager** and the alerts band (a server down, a Spotify ban) are the admin's. So is the **Spotify Rate Limited** window and the toasts around it: a member's searches fall back on their own, there is nothing for them to do about it.
 
 ## Toasts
 
@@ -651,16 +653,16 @@ After the scan, SoulSync updates its own database automatically via the **Auto-U
             title: 'Duplicate Cleaner',
             lede: 'One-click automatic duplicate removal — best copy wins, losers go to the recycle bin.',
             body: `
-The **Duplicate Cleaner** card ("Detect and remove duplicate tracks in output folder") is fully automatic — **there are no review or keep options on the card; removal happens on click**. Card stats: **Files Scanned** / **Duplicates Found** / **Deleted** / **Space Freed**.
+The **Duplicate Cleaner** card ("Detect and remove duplicate tracks in your music library folder") is fully automatic — **there are no review or keep options on the card; removal happens on click**. Card stats: **Files Scanned** / **Duplicates Found** / **Deleted** / **Space Freed**.
 
 ![Duplicate Cleaner card with files scanned, duplicates found, and space freed](dash-duplicates.jpg)
 
 ## How it decides
 
-It scans the Transfer/output folder and groups audio files (FLAC, MP3, M4A, AAC, Opus, OGG, WAV, APE, WMA, ALAC, AIFF, DSF, DFF) by **same directory + same filename ignoring extension**.
+It scans your music library folder and groups audio files (FLAC, MP3, M4A, AAC, Opus, OGG, WAV, APE, WMA, ALAC, AIFF, DSF, DFF) by **same directory + same filename ignoring extension**.
 
 - **Keep rule:** best format wins — FLAC/lossless tier > OPUS/OGG > M4A/AAC > MP3/WMA; same-format ties broken by **larger file size**.
-- **Losers are moved, not deleted** — into \`Transfer/.deleted/\` with relative paths preserved, recorded in the deleted-files quarantine so they can be restored and aged by your retention policy (see the 🗑 Deleted view on [Active Downloads](#dash-downloads-deep)).
+- **Losers are moved, not deleted** — into a \`.deleted/\` folder inside your music library folder with relative paths preserved, recorded in the deleted-files quarantine so they can be restored and aged by your retention policy (see the 🗑 Deleted view on [Active Downloads](#dash-downloads-deep)).
 
 Protected from ever being flagged: intentionally created **lossy companions** (the lossy-copy feature's same-stem MP3/Opus/M4A next to a lossless source), the \`.deleted\` quarantine itself, and the atomic-publish staging tree (which holds half-downloaded albums — a textbook false duplicate).
 

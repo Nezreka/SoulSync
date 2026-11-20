@@ -1,7 +1,13 @@
 import { z } from 'zod';
 
 export type MusicRequestKind = 'album' | 'track';
-export type MusicRequestHistoryStatus = 'approved' | 'available' | 'declined' | 'removed';
+/** awaiting_selection: approved, held until an admin picks the release (#2199). */
+export type MusicRequestHistoryStatus =
+  | 'awaiting_selection'
+  | 'approved'
+  | 'available'
+  | 'declined'
+  | 'removed';
 export type MusicRequestStatus = 'pending' | MusicRequestHistoryStatus;
 
 export interface MusicRequestTrack {
@@ -71,6 +77,69 @@ export interface MusicVideoRequest {
   created_at?: string | null;
 }
 
+export type MediaRequestKind = 'audiobook' | 'podcast';
+
+/**
+ * An audiobook or podcast episode ask (#2188), from a profile that asks
+ * first for books or episodes. Stored like a video ask: the row is the queue
+ * and the history.
+ */
+export interface MediaRequest {
+  id: number;
+  profile_id: number;
+  requester_name?: string | null;
+  kind: MediaRequestKind;
+  item_key: string;
+  title: string;
+  /** the author, or the show an episode is from */
+  subtitle?: string | null;
+  image_url?: string | null;
+  status: MusicVideoRequestStatus | 'awaiting_selection';
+  admin_response?: string | null;
+  resolved_at?: string | null;
+  created_at?: string | null;
+  seen_at?: string | null;
+}
+
+/** how an approved request gets its release, per kind (#2199). */
+export type AcquisitionMode = 'auto' | 'manual';
+export type AcquisitionKind = 'music' | 'movie' | 'tv' | 'audiobook';
+export type AcquisitionModes = Record<AcquisitionKind, AcquisitionMode>;
+
+/** a music ask approved on hold: its wishlist rows wait for a pick. */
+export interface AwaitingMusicGroup extends Omit<MusicRequestGroup, 'status'> {
+  status: 'awaiting_selection';
+  approved_at?: string | null;
+}
+
+/** a book ask approved on hold. */
+export interface AwaitingMedia extends MediaRequest {
+  asin?: string;
+}
+
+/** a movie, show or episode approved on hold (the video side's queue). */
+export interface AwaitingVideoTitle {
+  id: number;
+  kind: 'movie' | 'show' | 'episode';
+  tmdb_id: number;
+  title: string;
+  year?: number | null;
+  poster_url?: string | null;
+  season_number?: number | null;
+  episode_number?: number | null;
+  approved_at?: string | null;
+  requesters: string[];
+  request_ids: number[];
+  seasons: Array<{ season_number: number; episodes: number[] }>;
+  downloading: boolean;
+}
+
+export interface AwaitingQueue {
+  music: AwaitingMusicGroup[];
+  media: AwaitingMedia[];
+  video: AwaitingVideoTitle[];
+}
+
 export interface MusicRequestCounts {
   pending: number;
   approved: number;
@@ -94,9 +163,14 @@ export interface MusicRequestListResponse {
   history: MusicRequestRow[];
   pending_videos: MusicVideoRequest[];
   video_history: MusicVideoRequest[];
+  pending_media?: MediaRequest[];
+  media_history?: MediaRequest[];
   counts: Partial<MusicRequestCounts>;
   asks_first: boolean;
   quota?: Partial<RequestQuota> | null;
+  acquisition?: Partial<AcquisitionModes>;
+  /** asks waiting for this viewer to pick a release */
+  awaiting?: number;
 }
 
 export interface MusicRequestList {
@@ -104,9 +178,14 @@ export interface MusicRequestList {
   history: MusicRequestRow[];
   pendingVideos: MusicVideoRequest[];
   videoHistory: MusicVideoRequest[];
+  pendingMedia?: MediaRequest[];
+  mediaHistory?: MediaRequest[];
   counts: MusicRequestCounts;
   asksFirst: boolean;
   quota: RequestQuota | null;
+  /** how approved requests download, per kind (#2199); every kind automatic when absent */
+  acquisition?: AcquisitionModes;
+  awaiting?: number;
 }
 
 export interface MusicRequestBadgeCounts {
@@ -115,6 +194,7 @@ export interface MusicRequestBadgeCounts {
 }
 
 export const REQUEST_TAB_VALUES = [
+  'pick',
   'waiting',
   'on-the-way',
   'available',
@@ -138,4 +218,6 @@ export type RequestItem =
       source: 'video-history';
       status: MusicRequestHistoryStatus;
       video: MusicVideoRequest;
-    };
+    }
+  | { source: 'media-pending'; status: 'pending'; media: MediaRequest }
+  | { source: 'media-history'; status: MusicRequestHistoryStatus; media: MediaRequest };

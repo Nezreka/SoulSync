@@ -148,9 +148,9 @@ describe('where each value comes from', () => {
     const music = row('music.get');
     expect(music).toHaveAttribute('data-changed');
     expect(within(music).getByText('Changed for Maya')).toBeInTheDocument();
-    expect(within(music).getByText('Teen: Ask first')).toBeInTheDocument();
+    expect(within(music).getByText('Teen: Require approval')).toBeInTheDocument();
     expect(
-      within(music).getByRole('button', { name: 'Reset Getting music to Teen' }),
+      within(music).getByRole('button', { name: 'Reset Music requests to Teen' }),
     ).toBeInTheDocument();
     expect(within(row('music.hide_explicit')).getByText('From Teen')).toBeInTheDocument();
   });
@@ -186,12 +186,12 @@ describe('where each value comes from', () => {
     useApi(maya);
     await open(7, { category: 'tv' });
     const tv = row('tv.get');
-    expect(within(tv).getByRole('button', { name: 'Download right away' })).toBeDisabled();
-    expect(within(tv).getByRole('button', { name: 'Ask first' })).toHaveAttribute(
+    expect(within(tv).getByRole('button', { name: 'Auto-approve' })).toBeDisabled();
+    expect(within(tv).getByRole('button', { name: 'Require approval' })).toHaveAttribute(
       'aria-pressed',
       'true',
     );
-    expect(within(tv).getByText(/Global policy: up to Ask first\./)).toBeInTheDocument();
+    expect(within(tv).getByText(/Global policy: up to Require approval\./)).toBeInTheDocument();
   });
 });
 
@@ -204,9 +204,9 @@ describe('editing', () => {
       /Asks you for movies and shows, up to PG-13\. Up to 5 movie asks a week and 20 TV asks a week\./,
     );
     const tv = row('tv.get');
-    fireEvent.click(within(tv).getByRole('button', { name: 'Download right away' }));
+    fireEvent.click(within(tv).getByRole('button', { name: 'Auto-approve' }));
     expect(tv).toHaveAttribute('data-changed');
-    expect(within(tv).getByText('Teen: Ask first')).toBeInTheDocument();
+    expect(within(tv).getByText('Teen: Require approval')).toBeInTheDocument();
     expect(count()).toBe('5 changes from Teen');
     expect(document.querySelector('[data-dot="tv"]')).not.toBeNull();
     expect(sentence()).toMatch(/Movies: asks first, shows: downloads/);
@@ -215,10 +215,10 @@ describe('editing', () => {
     const tvLine = document.querySelector('[data-sum="tv"]') as HTMLElement;
     expect(tvLine).toHaveTextContent('Downloads');
     expect(screen.getByTestId('announce')).toHaveTextContent(
-      'Getting shows: Download right away. 5 changes from Teen.',
+      'TV show requests: Auto-approve. 5 changes from Teen.',
     );
     // setting it back to the template value is no change at all
-    fireEvent.click(within(tv).getByRole('button', { name: 'Ask first' }));
+    fireEvent.click(within(tv).getByRole('button', { name: 'Require approval' }));
     expect(tv).not.toHaveAttribute('data-changed');
     expect(count()).toBe('4 changes from Teen');
   });
@@ -234,21 +234,44 @@ describe('editing', () => {
 
     // row
     fireEvent.click(tab(/^Music/));
-    fireEvent.click(screen.getByRole('button', { name: 'Reset Getting music to Teen' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Reset Music requests to Teen' }));
     expect(count()).toBe('Follows Teen exactly');
-    expect(within(row('music.get')).getByRole('button', { name: 'Ask first' })).toHaveAttribute(
-      'aria-pressed',
-      'true',
-    );
+    expect(
+      within(row('music.get')).getByRole('button', { name: 'Require approval' }),
+    ).toHaveAttribute('aria-pressed', 'true');
 
     // all: a fresh change, then everything back
     fireEvent.click(tab(/^TV shows/));
-    fireEvent.click(within(row('tv.get')).getByRole('button', { name: 'Download right away' }));
+    fireEvent.click(within(row('tv.get')).getByRole('button', { name: 'Auto-approve' }));
     expect(count()).toBe('1 change from Teen');
     fireEvent.click(screen.getByRole('button', { name: /Back to Teen/ }));
     expect(count()).toBe('Follows Teen exactly');
     expect(document.querySelector('[data-dot]')).toBeNull();
-    expect(screen.getByRole('button', { name: /Back to Teen/ })).toBeDisabled();
+    // following Teen exactly: nothing to go back to, so no Back to Teen (#2190)
+    expect(screen.queryByRole('button', { name: /Back to Teen/ })).toBeNull();
+  });
+
+  it('shows the value the policy enforces, and what the template says apart (#2189)', async () => {
+    const maya = FIX.maya as unknown as ProfilePermissions;
+    useApi({
+      ...maya,
+      rows: maya.rows.map((r) =>
+        r.id === 'movies.get' ? { ...r, ceiling: 'none', value: 'none', capped: true } : r,
+      ),
+    });
+    await open(7, { category: 'movies' });
+    const movies = row('movies.get');
+    expect(within(movies).getByRole('button', { name: 'Requests off' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(within(movies).getByRole('button', { name: 'Require approval' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+    expect(movies).toHaveTextContent(
+      'Teen says Require approval. The policy holds it back for now.',
+    );
   });
 
   it('explains a dependent row instead of hiding it', async () => {
@@ -337,14 +360,14 @@ describe('editing', () => {
 describe('saving', () => {
   it('sends exactly the differences and says what changed', async () => {
     await open(7, { category: 'movies' });
-    fireEvent.click(within(row('movies.get')).getByRole('button', { name: 'Download right away' }));
+    fireEvent.click(within(row('movies.get')).getByRole('button', { name: 'Auto-approve' }));
     fireEvent.click(tab(/^Music/));
-    fireEvent.click(screen.getByRole('button', { name: 'Reset Getting music to Teen' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Reset Music requests to Teen' }));
     expect(screen.getByText(/2 unsaved changes/)).toBeInTheDocument();
     await save();
     expect(puts).toEqual([{ set: { 'movies.get': 'download' }, reset: ['music.get'] }]);
     expect(footStatus()).toHaveTextContent(
-      'Saved. Getting movies: Ask first to Download right away.',
+      'Saved. Movie requests: Require approval to Auto-approve.',
     );
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
   });
@@ -388,7 +411,7 @@ describe('saving', () => {
 
   it('asks before throwing away unsaved changes', async () => {
     await open(7, { category: 'tv' });
-    fireEvent.click(within(row('tv.get')).getByRole('button', { name: 'Download right away' }));
+    fireEvent.click(within(row('tv.get')).getByRole('button', { name: 'Auto-approve' }));
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(screen.getByRole('alert')).toHaveTextContent('Leave without saving 1 change?');
     fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }));

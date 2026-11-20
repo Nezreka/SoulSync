@@ -5493,13 +5493,17 @@ body:has(#mix-modal-overlay) .hamburger-btn {
 
 /* and the mirrored playlist modal (#1691): on a phone the hamburger sat on
    its cover and the bell, activity and helper buttons on its bottom row of
-   actions, right where Close and Identify land once the action bar stacks */
+   actions, right where Close and Identify land once the action bar stacks.
+   #2181: opened from the Playlists page it is a page (.mm-as-page) that
+   covers the whole screen, not a modal, and hiding the hamburger there left
+   a phone with no menu at all. only the modal form hides it; the page's
+   hero makes room for it (mobile.css) */
 body:has(#mirrored-track-modal) #gsearch-bar,
 body:has(#mirrored-track-modal) #gsearch-aura,
 body:has(#mirrored-track-modal) #notif-bell-btn,
 body:has(#mirrored-track-modal) #helper-float-btn,
 body:has(#mirrored-track-modal) #activity-float-btn,
-body:has(#mirrored-track-modal) .hamburger-btn {
+body:has(#mirrored-track-modal:not(.mm-as-page)) .hamburger-btn {
     display: none !important;
 }
 
@@ -6560,8 +6564,21 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     transform: scale(1.1);
 }
 
+/* the box is capped at 80dvh with overflow hidden, so a long message (fix all
+   safe findings lists every type) pushed the buttons out of the box on a phone
+   with nothing to scroll (#2186). the message scrolls, the header and buttons
+   always stay */
+.confirm-modal-header,
+.confirm-modal-actions {
+    flex-shrink: 0;
+}
+
 .confirm-modal-content {
     padding: 20px 24px;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
 }
 
 #confirm-modal-message {
@@ -26632,6 +26649,21 @@ div.artist-hero-badge {
     text-decoration: underline;
 }
 
+/* where the bio or tags came from when it is not last.fm: one quiet line */
+.artist-about-source {
+    font-size: 0.72em;
+    color: var(--white-a35);
+    margin: -8px 0 12px;
+}
+.artist-about-source a {
+    color: inherit;
+    text-decoration: underline;
+    text-decoration-color: var(--white-a20);
+}
+.artist-about-source a:hover {
+    color: var(--white-a60);
+}
+
 /* Stats — listener/play count boxes */
 .artist-hero-stat {
     display: flex;
@@ -40902,7 +40934,12 @@ body.downloads-disabled [data-download-action],
 body[data-music-get="none"] [data-request-action],
 /* books and podcasts follow their own permission, not the music one */
 body[data-books-get="none"] [data-books-action],
-body[data-podcasts-get="none"] [data-podcasts-action] {
+body[data-podcasts-get="none"] [data-podcasts-action],
+/* asking first for them (#2188) keeps only the controls that ask
+   (data-*-asks: the wishlist heart, an episode's download); grabbing a
+   release or following an author stays a download */
+body[data-books-get="ask"] [data-books-action]:not([data-books-asks]),
+body[data-podcasts-get="ask"] [data-podcasts-action]:not([data-podcasts-asks]) {
     display: none !important;
 }
 
@@ -61898,6 +61935,9 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
 
 .reid-modal {
     position: relative;
+    /* never inherit the opener's alignment (it used to mount in a
+       right-aligned table cell, #2197) */
+    text-align: left;
     width: min(760px, 94vw);
     max-height: 88vh;
     max-height: 88dvh;
@@ -62090,6 +62130,111 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
 .reid-replace-text em { color: #7f879e; font-style: normal; font-size: 11.5px; }
 .reid-footer-actions { display: flex; gap: 10px; }
 #reid-confirm-btn:disabled { opacity: 0.4; cursor: not-allowed; filter: grayscale(0.4); }
+/* ── Phone: a full-screen sheet (#2197) ──
+   squeezed into the centred box, the result's badge and year column took the
+   whole row and the title and release shrank to "L..", "Search" broke over
+   two lines, the close sat on the eyebrow and the buttons fell out of the
+   box. on a phone it fills the screen: the header (title + close) pins to the
+   top, Cancel / Re-identify pin to the bottom, everything between scrolls as
+   one page, and each result is a card with the title and release on top and
+   the type and year under them. the reassign modal rides the same chassis. */
+@media (max-width: 768px) {
+    .modal-overlay:has(> .reid-modal) {
+        padding: 0;
+        align-items: stretch;
+        overflow: hidden;
+    }
+    .reid-modal {
+        width: 100%;
+        height: 100vh;
+        height: 100dvh;
+        max-height: 100vh;
+        max-height: 100dvh;
+        border: none;
+        border-radius: 0;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+    }
+    .reid-modal > * { flex-shrink: 0; }
+
+    .reid-hero {
+        position: sticky; top: 0; z-index: 3;
+        padding: 12px 60px 12px 16px;
+        background: var(--bg-primary);
+        border-bottom: 1px solid var(--white-a06);
+    }
+    .reid-hero-decor { border-radius: 0; }
+    .reid-hero-content { gap: 12px; }
+    .reid-hero-art { width: 44px; height: 44px; flex-basis: 44px; border-radius: var(--radius-md); }
+    .reid-hero-art.empty::after { font-size: 20px; }
+    .reid-hero-eyebrow { font-size: 10px; margin-bottom: 4px; }
+    .reid-hero-title { font-size: 17px; }
+    .reid-hero-sub { font-size: 12px; margin-top: 2px; }
+    .reid-close { top: 50%; right: 8px; width: 44px; height: 44px; margin-top: -22px; }
+    .reid-close:hover { transform: none; }
+
+    .reid-tabs { padding: 12px 16px 0; gap: 6px; }
+    .reid-tab { display: inline-flex; align-items: center; height: 40px; padding: 0 14px; font-size: 13px; }
+
+    .reid-search { padding: 12px 16px 6px; gap: 8px; }
+    .reid-search-icon { left: 28px; }
+    .reid-search-input { min-width: 0; height: 44px; padding-top: 0; padding-bottom: 0; font-size: 16px; }
+    .reid-search-btn { flex: 0 0 auto; height: 44px; padding: 0 16px; white-space: nowrap; }
+
+    .reid-results { flex: 1 0 auto; min-height: 0; overflow: visible; padding: 4px 12px 12px; }
+    .reid-result {
+        position: relative;
+        display: grid;
+        grid-template-columns: 52px minmax(0, 1fr);
+        grid-template-areas: 'art info' 'art meta';
+        column-gap: 12px;
+        row-gap: 6px;
+        padding: 12px 46px 12px 12px;
+    }
+    .reid-result:hover { transform: none; }
+    .reid-result-art { grid-area: art; align-self: center; }
+    .reid-result-info { grid-area: info; }
+    .reid-result-title,
+    .reid-result-release {
+        white-space: normal;
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+        overflow-wrap: anywhere;
+    }
+    .reid-result-title { font-size: 14px; }
+    .reid-result-meta { grid-area: meta; flex-wrap: wrap; gap: 6px 8px; }
+    .reid-result-detail { text-align: left; }
+    .reid-result-check { position: absolute; right: 12px; top: 50%; margin-top: -11px; }
+    .reid-state { min-height: 160px; }
+
+    .reid-footer {
+        position: sticky; bottom: 0; z-index: 3;
+        margin-top: auto;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10px;
+        padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
+        background: var(--bg-primary);
+    }
+    .reid-replace { display: flex; align-items: flex-start; }
+    .reid-replace-text { font-size: 12.5px; }
+    .reid-footer-actions { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; }
+    .reid-footer-actions .btn { width: 100%; height: 44px; justify-content: center; }
+
+    .reassign-steps { flex-wrap: wrap; padding: 12px 16px 2px; }
+
+    /* the floating buttons sit above every modal and landed on the sheet's
+       buttons */
+    body:has(.reid-modal) #activity-float-btn,
+    body:has(.reid-modal) #helper-float-btn,
+    body:has(.reid-modal) #notif-bell-btn,
+    body:has(.reid-modal) #gsearch-bar,
+    body:has(.reid-modal) #gsearch-aura,
+    body:has(.reid-modal) #media-player {
+        display: none;
+    }
+}
 
 /* Settings cleanup: source settings uses the same inner-card spacing as Retry Logic. */
 
@@ -62346,10 +62491,13 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
    rule on nav items and the side toggle without another !important. */
 html[data-features-off] .nav-feature-hidden.nav-feature-hidden { display: none; }
 
-/* no profile known yet (#2156, profile-nav.js): the nav keeps its space but
-   shows nothing until init.js knows whose pages these are */
+/* a member's nav before their profile has cut it down, or nobody known yet
+   (#2156, profile-nav.js): the nav keeps its space but shows nothing until a
+   real profile says whose pages these are. the side switch too, a one-side
+   member never gets it. */
 html.nav-pending .sidebar-nav .nav-button,
-html.nav-pending .sidebar-nav .nav-section-label { visibility: hidden; }
+html.nav-pending .sidebar-nav .nav-section-label,
+html.nav-pending .side-toggle { visibility: hidden; }
 
 /* the way into the picker. quiet on purpose, it's not a page. */
 .sidebar-customize {
@@ -72548,6 +72696,23 @@ body.src-modal-open { overflow: hidden; }
 #tools-page .repair-finding-actions .repair-finding-btn.fix,
 #tools-page .repair-finding-actions .repair-finding-btn.alt,
 #tools-page .repair-finding-actions .repair-finding-btn.reopen { margin-right: 6px; }
+/* Shelf Life's Keep: the other answer to a delete, so it reads first and green */
+#tools-page .repair-finding-actions .repair-finding-btn.keep {
+    height: 32px;
+    padding: 0 14px;
+    margin-right: 6px;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: rgba(var(--success-strong-rgb), 0.16);
+    color: rgb(var(--success-strong-rgb));
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+#tools-page .repair-finding-actions .repair-finding-btn.keep:hover { background: rgba(var(--success-strong-rgb), 0.26); }
 #tools-page .repair-finding-detail { display: none; }
 #tools-page .repair-finding-detail.open { display: block; max-height: none; overflow: visible; }
 #tools-page .repair-finding-detail-inner {

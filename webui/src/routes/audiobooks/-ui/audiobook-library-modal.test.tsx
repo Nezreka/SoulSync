@@ -1,5 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { ADULT, clearPerms, stubPerms } from '@/test/perms';
 
 import {
   deleteLibraryBook,
@@ -54,6 +56,12 @@ const response = {
 beforeEach(() => {
   vi.resetAllMocks();
   vi.mocked(fetchLibrary).mockResolvedValue(response);
+  // the admin's view unless a test says otherwise (#2201)
+  stubPerms(ADULT, { isAdmin: true });
+});
+
+afterEach(() => {
+  clearPerms();
 });
 
 describe('audiobook library', () => {
@@ -181,5 +189,77 @@ describe('the library as a page', () => {
     await screen.findByRole('heading', { name: 'A Local Book' });
     fireEvent.click(screen.getByRole('button', { name: 'Close library' }));
     expect(onClose).toHaveBeenCalledOnce();
+  });
+});
+
+describe('a member (#2201)', () => {
+  // what the server sends a member: the shelf, no paths, files, origin or match
+  const memberBook = {
+    asin: 'B08G9PRS1K',
+    title: 'Project Hail Mary',
+    author: 'Andy Weir',
+    narrator: 'Ray Porter',
+    series_title: '',
+    series_sequence: '',
+    runtime_minutes: 970,
+    imported_at: 1,
+    catalog_asin: 'B08G9PRS1K',
+    cover_url: '/api/audiobooks/library/B08G9PRS1K/cover',
+  } as unknown as typeof book;
+
+  beforeEach(() => {
+    vi.mocked(fetchLibrary).mockResolvedValue({
+      books: [memberBook],
+      totalBytes: 0,
+      root: '',
+      scan: { status: 'never' },
+    });
+    stubPerms({ ...ADULT, 'books.get': 'ask' });
+  });
+
+  it('sees the book and none of the file, match, delete or scan controls', async () => {
+    const { AudiobookLibraryPanel } = await import('./audiobook-library-modal');
+    const view = render(<AudiobookLibraryPanel embedded />);
+    await screen.findByRole('heading', { name: 'Project Hail Mary' });
+    expect(screen.getByText('Andy Weir')).toBeInTheDocument();
+    expect(screen.getByText('16h 10m')).toBeInTheDocument();
+    expect(screen.getByText('1 book')).toBeInTheDocument();
+    for (const gone of [
+      'Scan folder',
+      'Schedule & history ↗',
+      'File details',
+      'Change catalogue match',
+      'Delete from disk',
+      'Needs review',
+      'Set your audiobook folder in Settings → Library',
+    ]) {
+      expect(screen.queryByText(gone, { exact: false })).toBeNull();
+    }
+    expect(screen.queryByLabelText('Filter by download origin')).toBeNull();
+    expect(screen.queryByRole('option', { name: 'Largest first' })).toBeNull();
+    expect(view.container.textContent).not.toMatch(/Identified by|SoulSync download|on disk/);
+    expect(scanLibrary).not.toHaveBeenCalled();
+    expect(fetchLibraryMatches).not.toHaveBeenCalled();
+    expect(deleteLibraryBook).not.toHaveBeenCalled();
+  });
+
+  it('an empty shelf offers no scan', async () => {
+    vi.mocked(fetchLibrary).mockResolvedValue({
+      books: [],
+      totalBytes: 0,
+      root: '',
+      scan: { status: 'never' },
+    });
+    render(<AudiobookLibraryModal onClose={() => {}} />);
+    await screen.findByText('Nothing on the shelves yet.');
+    expect(screen.queryByRole('button', { name: 'Scan my folder' })).toBeNull();
+  });
+
+  it('a member who gets books right away is still not the admin', async () => {
+    stubPerms(ADULT);
+    render(<AudiobookLibraryModal onClose={() => {}} />);
+    await screen.findByRole('heading', { name: 'Project Hail Mary' });
+    expect(screen.queryByRole('button', { name: 'Scan folder' })).toBeNull();
+    expect(screen.queryByText('File details')).toBeNull();
   });
 });

@@ -93,7 +93,38 @@ export interface ArtistInfo {
   lastfm_listeners?: number | null;
   lastfm_playcount?: number | null;
   lastfm_tags?: string | string[] | null;
+  /** the media server's summary, when last.fm has no bio */
+  bio?: string | null;
+  /** bio, tags and numbers from whichever source has them, last.fm first */
+  about?: ArtistAbout | null;
   [key: string]: unknown;
+}
+
+/** where an artist's bio, tags or numbers came from (core/library2/artist_about.py) */
+export type ArtistAboutSource =
+  | 'lastfm'
+  | 'audiodb'
+  | 'wikipedia'
+  | 'musicbrainz'
+  | 'listenbrainz'
+  | 'deezer';
+
+/**
+ * last.fm first, then the free sources, per field. listeners/plays are
+ * last.fm listeners and scrobbles, or listenbrainz users and listens
+ * (`popularity_source` says which). deezer fans are their own number.
+ */
+export interface ArtistAbout {
+  bio: string | null;
+  bio_source: ArtistAboutSource | null;
+  bio_url: string | null;
+  tags: string[];
+  tags_source: ArtistAboutSource | null;
+  listeners: number | null;
+  plays: number | null;
+  popularity_source: ArtistAboutSource | null;
+  fans: number | null;
+  fans_source: ArtistAboutSource | null;
 }
 
 /** Non-fatal: the page still renders, but the vanilla page toasted a warning. */

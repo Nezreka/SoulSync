@@ -19,7 +19,15 @@ interface SoulSyncNavProfile {
 
 declare global {
   interface Window {
-    showToast?: (message: string, type?: string, durationOrContext?: number | string) => void;
+    /** static/downloads.js. opts.history false shows the toast but keeps it
+     *  out of the notification panel and its journal: a refusal or a
+     *  progress line isn't something to come back to (#2191) */
+    showToast?: (
+      message: string,
+      type?: string,
+      durationOrContext?: number | string | null,
+      opts?: { history?: boolean; journal?: boolean },
+    ) => void;
     /** index.html: the signed-in profile the server rendered in, null when it knows none (#2156) */
     SOULSYNC_BOOT_PROFILE?: SoulSyncNavProfile | null;
     /** static/profile-nav.js: the sidebar's permission rule and the landing page (#2154, #2156) */
@@ -693,6 +701,8 @@ declare global {
     };
     SoulSyncVideo?: {
       openDetail?: (args: { kind: string; id: number | string; source?: string }) => void;
+      /** video-side.js videoPageAllowed: may this profile open a video page */
+      pageAllowed?: (pageId: string) => boolean;
     };
     /** video-download-view.js: the shared release-picker modal (manual search). */
     VideoDownload?: {
@@ -703,6 +713,10 @@ declare global {
         episode?: number | null;
         year?: number | string | null;
         poster?: string | null;
+        /** the title's id for the grab: a tmdb id with mediaSource 'tmdb' */
+        mediaId?: number | string | null;
+        mediaSource?: string | null;
+        tmdbId?: number | string | null;
       }) => void;
     };
     /** video-poster-modal.js: the poster manager (search, then pick art). */

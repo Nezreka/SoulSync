@@ -169,7 +169,7 @@ def test_a_cover_saved_since_the_scan_is_kept(tmp_path, monkeypatch):
     must not be overwritten by the found one"""
     db = _DB(tmp_path / 'm.db', image_url='https://picked/since')
     w = _worker(db)
-    monkeypatch.setattr(w, '_cover_bytes_for_apply', lambda *a: None)
+    monkeypatch.setattr(w, '_cover_for_apply', lambda *a: ('library', b'LIB'))
     w._fix_missing_cover_art('album', 'lib2:1', None, {
         'album_id': 'lib2:1', 'db_missing': True, 'found_artwork_url': 'https://found/x'})
     conn = db._get_connection()
@@ -184,8 +184,8 @@ def test_apply_hands_the_library_cover_to_the_files(tmp_path, monkeypatch):
     db.add_file(1, song, False)
     w = _worker(db)
     asked = []
-    monkeypatch.setattr(w, '_cover_bytes_for_apply',
-                        lambda album_id, found, library_has: asked.append((found, library_has)) or b'LIB')
+    monkeypatch.setattr(w, '_cover_for_apply',
+                        lambda album_id, wanted, found: asked.append((wanted, found)) or ('library', b'LIB'))
     monkeypatch.setattr('core.library2.paths.resolve_lib2_path', lambda p, **k: p)
     got = {}
     import core.metadata.art_apply as aa
@@ -194,7 +194,7 @@ def test_apply_hands_the_library_cover_to_the_files(tmp_path, monkeypatch):
                         got.update(image_bytes=image_bytes) or {'embedded': 1})
     w._fix_missing_cover_art('album', 'lib2:1', None, {
         'album_id': 'lib2:1', 'db_missing': False, 'found_artwork_url': 'https://found/x'})
-    assert asked == [(None, True)]
+    assert asked == [('', 'https://found/x')]
     assert got['image_bytes'] == b'LIB'
 
 
@@ -216,15 +216,22 @@ def test_state_reads_each_place_and_plans_from_the_found_cover(tmp_path, monkeyp
     state = cas.cover_state(db, _cfg(), 7, {
         'album_id': 'lib2:1', 'found_artwork_url': 'https://deezer/x', 'artwork_source': 'deezer'})
 
-    assert state['library'] == {'has': False, 'locked': False, 'url': None}
+    assert state['library'] == {'has': False, 'locked': False, 'broken': False, 'url': None}
     assert (state['files']['with'], state['files']['without']) == (1, 1)
     assert state['files']['url'] == '/api/repair/findings/7/cover-image?place=files'
     assert state['folder']['file'] is None and state['folder']['exists'] is True
     assert state['found'] == {'url': 'https://deezer/x', 'source': 'deezer'}
+    # #2202: the cover the album already has comes first, the found one is
+    # a pick away
+    assert state['choices'] == ['files', 'found'] and state['pick'] == 'files'
     plan = {step['place']: step for step in state['plan']}
-    assert plan['library'] == {'place': 'library', 'action': 'write', 'why': 'found'}
-    assert plan['files'] == {'place': 'files', 'action': 'write', 'why': 'found', 'count': 1}
+    assert plan['library'] == {'place': 'library', 'action': 'skip', 'why': 'local'}
+    assert plan['files'] == {'place': 'files', 'action': 'write', 'why': 'files', 'count': 1}
     assert plan['folder'] == {'place': 'folder', 'action': 'write', 'why': 'files'}
+    found = {step['place']: step for step in state['plans']['found']}
+    assert found['library'] == {'place': 'library', 'action': 'write', 'why': 'found'}
+    assert found['files'] == {'place': 'files', 'action': 'write', 'why': 'found', 'count': 1}
+    assert found['folder'] == {'place': 'folder', 'action': 'write', 'why': 'found'}
 
 
 def test_state_names_the_folder_cover_and_honours_settings(tmp_path, monkeypatch):

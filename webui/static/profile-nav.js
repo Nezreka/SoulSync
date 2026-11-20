@@ -62,7 +62,8 @@
         if (!p) return !canDownload(profile);
         if (p.on('requests.moderate') || p.on('requests.see_all')) return true;
         if (side === 'video') return p.mode('movies') === 'ask' || p.mode('tv') === 'ask';
-        return p.mode('music') === 'ask';
+        // audiobook and episode asks land on the music side's page too (#2188)
+        return p.mode('music') === 'ask' || p.mode('books') === 'ask' || p.mode('podcasts') === 'ask';
     }
 
     function allowedSides(profile) {

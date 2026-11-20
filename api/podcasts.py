@@ -45,6 +45,7 @@ from core.podcast_download_client import PodcastDownloadClient
 from core.runtime_state import download_batches, download_tasks, tasks_lock
 from utils.logging_config import get_logger
 from core.permissions import requires
+from core.profile_context import admin_only, is_admin_request
 
 logger = get_logger("podcasts.api")
 
@@ -171,6 +172,34 @@ def show_to_dict(show: PodcastShow, include_episodes: bool = True) -> Dict[str, 
     return d
 
 
+def _request_episode(data: Dict[str, Any]):
+    """file an Ask first profile's episode as a request for an admin (#2188)."""
+    from core.profile_context import get_current_profile_id
+    from core.requests.media import PODCAST, episode_key, episode_on_disk, episode_payload
+
+    db = _db()
+    if db is None:
+        return jsonify({"success": False, "error": "database unavailable"}), 500
+    payload = episode_payload(data)
+    key = episode_key(payload)
+    if episode_on_disk(db, payload):
+        return jsonify({"success": False, "in_library": True,
+                        "error": "That episode is already downloaded."}), 409
+    pid = get_current_profile_id()
+    me = db.get_profile(pid) or {}
+    rid = db.add_media_request(
+        profile_id=pid, requester_name=me.get("name") or "", kind=PODCAST, item_key=key,
+        title=payload.get("title") or "Episode", subtitle=payload.get("show_title") or None,
+        image_url=payload.get("artwork_url") or None, payload=payload)
+    if not rid:
+        waiting = db.list_media_requests(profile_id=pid, status="pending", kind=PODCAST)
+        if any(r.get("item_key") == key for r in waiting):
+            return jsonify({"success": True, "requested": True, "already": True}), 200
+        return jsonify({"success": False, "error": "Couldn't save the request"}), 500
+    logger.info("podcast episode request %s filed by profile %s: %s", rid, pid, payload.get("title"))
+    return jsonify({"success": True, "requested": True, "id": rid}), 200
+
+
 def _with_downloaded_flags(show_data: Dict[str, Any], feed_url: str) -> Dict[str, Any]:
     """the show with each episode saying whether it is on disk.
 
@@ -200,7 +229,12 @@ def _with_downloaded_flags(show_data: Dict[str, Any], feed_url: str) -> Dict[str
     episodes = []
     for ep in show_data.get("episodes") or []:
         path = on_disk.get(str(ep.get("enclosure_url") or "")) or on_disk.get(str(ep.get("guid") or ""))
-        episodes.append({**ep, "downloaded": True, "file_path": path} if path else ep)
+        # where it sits on disk is the admin's (#2201): a member's page only
+        # needs to know it's there
+        if path and not is_admin_request():
+            episodes.append({**ep, "downloaded": True})
+        else:
+            episodes.append({**ep, "downloaded": True, "file_path": path} if path else ep)
     return {**show_data, "episodes": episodes}
 
 
@@ -866,15 +900,19 @@ def create_podcasts_blueprint() -> Blueprint:
         """Trigger background download of a podcast episode."""
         # Same switch music and video answer to. Nothing here had ever asked,
         # so a profile with downloads off could still fill the podcast folder.
-        from .helpers import media_download_error
+        from .helpers import media_asks_first, media_download_error
 
-        denied = media_download_error("podcasts.get")
+        # a profile that asks first asks for the episode instead (#2188)
+        asks = media_asks_first("podcasts.get")
+        denied = None if asks else media_download_error("podcasts.get")
         if denied is not None:
             return denied
 
         data = request.get_json(silent=True) or {}
         if not (data.get("enclosure_url") or "").strip():
             return jsonify({"success": False, "error": "enclosure_url is required"}), 400
+        if asks:
+            return _request_episode(data)
         res = queue_podcast_download(data)
         return jsonify(res), 200
 
@@ -885,6 +923,9 @@ def create_podcasts_blueprint() -> Blueprint:
         with _download_lock:
             # Sort newest started first
             items = sorted(_downloads.values(), key=lambda x: x.get("started_at", 0), reverse=True)
+            # the file's path is the admin's (#2201)
+            if not is_admin_request():
+                items = [{k: v for k, v in rec.items() if k != "file_path"} for rec in items]
             return jsonify({"success": True, "downloads": items})
 
     @bp.route("/audio-proxy", methods=["GET"])
@@ -1150,9 +1191,11 @@ def create_podcasts_blueprint() -> Blueprint:
             return jsonify({"success": False, "error": str(exc)}), 500
 
     @bp.route("/downloads/cancel-queued", methods=["POST"])
-    @requires("podcasts.access")
+    @admin_only
     def cancel_queued_downloads():
-        """Cancel all pending/queued podcast downloads in memory."""
+        """Cancel all pending/queued podcast downloads in memory.
+
+        everyone's queue, not the caller's, so it's the admin's (#2201)."""
         cancelled_count = 0
         with tasks_lock:
             batch = download_batches.get("podcasts", {})

@@ -84,6 +84,14 @@ const VTYPES: FindingTypeInfo[] = [
     confirm: 'Each file is renamed to its template name.',
   },
   {
+    type: 'shelf_life',
+    label: 'Shelf Life',
+    verb: 'Delete Title',
+    fixable: true,
+    destructive: true,
+    confirm: 'Delete Title runs on it.',
+  },
+  {
     type: 'youtube_ghost',
     label: 'YouTube Ghosts',
     verb: 'Mark Deleted',
@@ -326,6 +334,261 @@ describe('video findings', () => {
     expect(urls().some((url) => url.includes('/fix'))).toBe(false);
   });
 
+  const shelf = () =>
+    vfinding({
+      finding_type: 'shelf_life',
+      job_id: 'shelf_life',
+      title: 'Heat (1995): Shelf Life 21, 60.0 GB',
+      details: { kind: 'movie', item_id: 12, title: 'Heat', year: 1995, score: 21 },
+    });
+
+  it('a shelf life delete asks for the title typed, not a plain confirm', async () => {
+    renderVideoSurface([shelf()]);
+    await showList();
+    fireEvent.click(screen.getByText('Delete Title'));
+    await flush();
+    expect(confirmSpy).not.toHaveBeenCalled();
+    const input = document.getElementById('type-to-confirm-input') as HTMLInputElement;
+    expect(input).not.toBeNull();
+    expect(urls().some((url) => url.includes('/fix'))).toBe(false);
+    fireEvent.change(input, { target: { value: 'Heat' } });
+    fireEvent.click(document.getElementById('type-to-confirm-confirm') as HTMLElement);
+    await flush();
+    const call = fetchMock.mock.calls.find(([url]) =>
+      String(url).includes('/api/video/repair/findings/7/fix'),
+    );
+    expect(JSON.parse((call?.[1] as RequestInit).body as string)).toEqual({ fix_action: 'Heat' });
+  });
+
+  it('cancelling the typed title sends nothing', async () => {
+    renderVideoSurface([shelf()]);
+    await showList();
+    fireEvent.click(screen.getByText('Delete Title'));
+    await flush();
+    fireEvent.click(document.getElementById('type-to-confirm-cancel') as HTMLElement);
+    await flush();
+    expect(urls().some((url) => url.includes('/fix'))).toBe(false);
+  });
+
+  it('a shelf life row keeps the title instead of deleting it', async () => {
+    renderVideoSurface([shelf()]);
+    await showList();
+    fireEvent.click(screen.getByRole('button', { name: /^Keep Heat/ }));
+    await flush();
+    const call = fetchMock.mock.calls.find(([url]) =>
+      String(url).includes('/api/video/repair/shelf-life/movie/12/keep'),
+    );
+    expect(call).toBeDefined();
+    expect(JSON.parse((call?.[1] as RequestInit).body as string)).toEqual({ keep: true });
+    expect(urls().some((url) => url.includes('/fix'))).toBe(false);
+  });
+
+  it('only shelf life rows offer keep', async () => {
+    renderVideoSurface([vfinding({ id: 8, title: 'Ronin — 720p' })]);
+    await showList();
+    expect(screen.queryByRole('button', { name: /^Keep / })).toBeNull();
+  });
+
+  const shelfPlan = {
+    items: [
+      {
+        id: 8,
+        kind: 'movie',
+        item_id: 2,
+        title: 'Cats',
+        year: 2019,
+        score: 9,
+        size_bytes: 30 * 1024 ** 3,
+      },
+      {
+        id: 7,
+        kind: 'movie',
+        item_id: 1,
+        title: 'Heat',
+        year: 1995,
+        score: 21,
+        size_bytes: 10 * 1024 ** 3,
+      },
+    ],
+    total_bytes: 40 * 1024 ** 3,
+    target_bytes: null,
+    short_bytes: 0,
+    candidates: 2,
+    recycling: true,
+    keep_days: 7,
+    phrase: 'delete 2 titles',
+  };
+
+  function renderShelfLifeInbox(plan: unknown = shelfPlan) {
+    setToolsMedia('video');
+    routes({
+      '/api/video/repair/finding-types': { types: VTYPES },
+      '/api/video/repair/findings/groups': {
+        groups: [
+          {
+            finding_type: 'shelf_life',
+            pending: 2,
+            resolved: 0,
+            dismissed: 0,
+            total: 2,
+            severity_max: 'info',
+            job_ids: ['shelf_life'],
+          },
+        ],
+      },
+      '/api/video/repair/findings/counts': { pending: 2, total: 2 },
+      '/api/video/repair/shelf-life/plan': plan,
+      '/api/video/repair/shelf-life/delete': { started: true, total: 2 },
+      '/api/video/repair/bulk-fix/status': { running: false },
+    });
+    return render(
+      <ToolsMediaContext.Provider value="video">
+        <FindingsSurface jobs={VJOBS} runs={[]} trackCount={100000} onStatusChanged={vi.fn()} />
+      </ToolsMediaContext.Provider>,
+    );
+  }
+
+  it('shelf life fix-all opens the picker, then one typed phrase deletes the batch', async () => {
+    renderShelfLifeInbox();
+    await flush();
+    await flush();
+    fireEvent.click(await screen.findByText('Free up space…'));
+    await flush();
+    expect(await screen.findByText(/Cats/)).not.toBeNull();
+    expect(document.getElementById('shelf-life-total')?.textContent).toContain('2 titles');
+    expect(confirmSpy).not.toHaveBeenCalled();
+    fireEvent.click(document.getElementById('shelf-life-delete') as HTMLElement);
+    await flush();
+    const input = document.getElementById('type-to-confirm-input') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: 'delete 2 titles' } });
+    fireEvent.click(document.getElementById('type-to-confirm-confirm') as HTMLElement);
+    await flush();
+    const call = fetchMock.mock.calls.find(([url]) => String(url).includes('/shelf-life/delete'));
+    expect(JSON.parse((call?.[1] as RequestInit).body as string)).toEqual({
+      ids: [8, 7],
+      phrase: 'delete 2 titles',
+    });
+  });
+
+  it('a title ticked off leaves the batch and changes the phrase', async () => {
+    renderShelfLifeInbox();
+    await flush();
+    await flush();
+    fireEvent.click(await screen.findByText('Free up space…'));
+    await flush();
+    const boxes = await screen.findAllByRole('checkbox');
+    fireEvent.click(boxes[1]); // Heat
+    expect(document.getElementById('shelf-life-total')?.textContent).toContain('1 title');
+    fireEvent.click(document.getElementById('shelf-life-delete') as HTMLElement);
+    await flush();
+    expect(screen.getByText('delete 1 title')).not.toBeNull();
+    fireEvent.change(document.getElementById('type-to-confirm-input') as HTMLElement, {
+      target: { value: 'delete 1 title' },
+    });
+    fireEvent.click(document.getElementById('type-to-confirm-confirm') as HTMLElement);
+    await flush();
+    const call = fetchMock.mock.calls.find(([url]) => String(url).includes('/shelf-life/delete'));
+    expect(JSON.parse((call?.[1] as RequestInit).body as string)).toEqual({
+      ids: [8],
+      phrase: 'delete 1 title',
+    });
+  });
+
+  it('a GB target re-plans, and a target out of reach says how short it falls', async () => {
+    renderShelfLifeInbox({
+      ...shelfPlan,
+      target_bytes: 500 * 1024 ** 3,
+      short_bytes: 460 * 1024 ** 3,
+    });
+    await flush();
+    await flush();
+    fireEvent.click(await screen.findByText('Free up space…'));
+    await flush();
+    fireEvent.change(document.getElementById('shelf-life-target') as HTMLElement, {
+      target: { value: '500' },
+    });
+    fireEvent.click(document.getElementById('shelf-life-plan') as HTMLElement);
+    await flush();
+    const plans = fetchMock.mock.calls.filter(([url]) => String(url).includes('/shelf-life/plan'));
+    expect(JSON.parse((plans.at(-1)?.[1] as RequestInit).body as string)).toEqual({
+      target_gb: 500,
+    });
+    expect(document.getElementById('shelf-life-short')?.textContent).toContain('short of');
+  });
+
+  it('titles the server left out on its fresh check are named with why', async () => {
+    renderShelfLifeInbox({
+      ...shelfPlan,
+      skipped: [{ id: 9, title: 'Dune', year: 1984, reason: 'someone is part-way through it' }],
+    });
+    await flush();
+    await flush();
+    fireEvent.click(await screen.findByText('Free up space…'));
+    await flush();
+    expect(document.getElementById('shelf-life-skipped')?.textContent).toContain(
+      'Dune (1984): someone is part-way through it',
+    );
+  });
+
+  it('a switched-off job says so instead of listing anything', async () => {
+    renderShelfLifeInbox({
+      ...shelfPlan,
+      items: [],
+      enabled: false,
+      error: 'Shelf Life is switched off, so nothing it flagged can be deleted.',
+    });
+    await flush();
+    await flush();
+    fireEvent.click(await screen.findByText('Free up space…'));
+    await flush();
+    expect(screen.getByRole('alert').textContent).toContain('switched off');
+    expect(document.getElementById('shelf-life-items')).toBeNull();
+  });
+
+  it('cancelling the picker deletes nothing', async () => {
+    renderShelfLifeInbox();
+    await flush();
+    await flush();
+    fireEvent.click(await screen.findByText('Free up space…'));
+    await flush();
+    fireEvent.click(document.getElementById('shelf-life-cancel') as HTMLElement);
+    await flush();
+    expect(urls().some((url) => url.includes('/shelf-life/delete'))).toBe(false);
+  });
+
+  it('picking shelf life findings in the list opens the picker on just those', async () => {
+    renderVideoSurface([shelf()]);
+    routes({
+      '/api/video/repair/finding-types': { types: VTYPES },
+      '/api/video/repair/findings/groups': { groups: [] },
+      '/api/video/repair/findings/counts': { pending: 1, total: 1 },
+      '/api/video/repair/findings?': { items: [shelf()], total: 1, page: 0 },
+      '/api/video/repair/shelf-life/plan': { ...shelfPlan, items: [shelfPlan.items[1]] },
+    });
+    await showList();
+    fireEvent.click(screen.getByLabelText(/Select Heat/));
+    fireEvent.click(screen.getByText('Fix Selected'));
+    await flush();
+    const plans = fetchMock.mock.calls.filter(([url]) => String(url).includes('/shelf-life/plan'));
+    expect(JSON.parse((plans.at(-1)?.[1] as RequestInit).body as string)).toEqual({ ids: [7] });
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(urls().some((url) => url.includes('/findings/bulk-fix'))).toBe(false);
+  });
+
+  it('shelf life findings are never fixed alongside other types', async () => {
+    const other = vfinding({ id: 8, title: 'Ronin — 720p' });
+    renderVideoSurface([shelf(), other]);
+    await showList();
+    fireEvent.click(screen.getByLabelText(/Select Heat/));
+    fireEvent.click(screen.getByLabelText(/Select Ronin/));
+    fireEvent.click(screen.getByText('Fix Selected'));
+    await flush();
+    expect(
+      urls().some((url) => url.includes('/shelf-life') || url.includes('/findings/bulk-fix')),
+    ).toBe(false);
+    expect(document.getElementById('shelf-life-items')).toBeNull();
+  });
+
   it('a metadata-only video fix just goes', async () => {
     renderVideoSurface([
       vfinding({ id: 9, finding_type: 'stale_wishlist', job_id: 'wishlist_audit' }),
@@ -390,6 +653,42 @@ describe('video finding detail', () => {
     expect(screen.getByText('now: 720p')).not.toBeNull();
     expect(screen.getByText('cutoff: 1080p')).not.toBeNull();
     // no live fetch for an episode-only finding
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('a shelf life finding shows its score, its reasons and every signal', () => {
+    render(
+      <VideoFindingDetail
+        finding={vfinding({
+          finding_type: 'shelf_life',
+          job_id: 'shelf_life',
+          details: {
+            kind: 'show',
+            item_id: 5,
+            title: 'Cops',
+            year: 1989,
+            score: 18,
+            size_bytes: 300 * 1024 ** 3,
+            reasons: [
+              { signal: 'watch', text: 'never watched in 900 days' },
+              { signal: 'size', text: 'no size or runtime data' },
+            ],
+            signals: { watch: 3.2, replaceability: 88, cultural: 51, size: null, requests: 66.6 },
+          },
+        })}
+      />,
+    );
+    expect(screen.getByText('Shelf Life 18')).not.toBeNull();
+    expect(screen.getByText('never watched in 900 days')).not.toBeNull();
+    expect(screen.getByText('Watching: 3')).not.toBeNull();
+    expect(screen.getByText('Size for its runtime: no data')).not.toBeNull();
+    // coloured the way the score reads: red argues for cutting, green for keeping
+    expect(screen.getByText('Watching: 3').className).toContain('vrf-chip--sl-low');
+    expect(screen.getByText('Cultural value: 51').className).toContain('vrf-chip--sl-mid');
+    expect(screen.getByText('Hard to replace: 88').className).toContain('vrf-chip--sl-high');
+    expect(screen.getByText('Requests: 67').className).toContain('vrf-chip--sl-high');
+    expect(screen.getByText('Size for its runtime: no data').className).toBe('vrf-chip');
+    expect(screen.getByText('View show →')).not.toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

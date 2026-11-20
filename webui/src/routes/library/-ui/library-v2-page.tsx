@@ -47,12 +47,17 @@ import { thumb } from '@/platform/artwork-thumb';
 import { getShellBridge } from '@/platform/shell/bridge';
 import { useMusicGet } from '@/platform/shell/download-rights';
 import { artistNavigationOrigin } from '@/platform/shell/last-navigation';
+import { usePermNotOff } from '@/platform/shell/my-permissions';
 import { useProfile, useReactPageShell } from '@/platform/shell/route-controllers';
 
-import type { ArtistDetailResponse } from '../../artist-detail/-artist-detail.types';
+import type {
+  ArtistAboutSource,
+  ArtistDetailResponse,
+} from '../../artist-detail/-artist-detail.types';
 
 import { playLibraryV2ArtistRadio } from '../-artist-radio';
 import { bitrateKbps, formatBitrate, formatQuality, qualityParts } from '../-bitrate';
+import { catalogueAbout } from '../-library-v2.about';
 import {
   analyzeLibraryV2TrackReplayGain,
   blacklistLibraryV2Source,
@@ -87,6 +92,7 @@ import {
   fetchLibraryV2TrackVersions,
   LIBRARY_V2_ALBUM_TYPES,
   LIBRARY_V2_QUERY_KEY,
+  RENAME_CHECK_QUERY_KEY,
   libraryScopesQueryOptions,
   libraryV2EnhanceQueryOptions,
   invalidateLibraryV2,
@@ -202,10 +208,12 @@ import { ensurePageOrigin, pushArtistOrigin } from '../../artist-detail/-artist-
 import { announceWatchlistFollow } from '../../artist-detail/-artist-detail.enrich-match';
 import { gapSameRelease, gapSourceLabel } from '../../artist-detail/-artist-detail.gap-fill';
 import { syncResultMessage } from '../../artist-detail/-artist-detail.meta';
+import { popularTracksTitle } from '../../artist-detail/-artist-detail.top-tracks';
 import {
   checkWatchlistRequest,
   toggleWatchlistRequest,
 } from '../../artist-detail/-artist-detail.watchlist-button';
+import { AboutSourceNote } from '../../artist-detail/-ui/about-source-note';
 import { ActionMenu } from '../../artist-detail/-ui/action-menu';
 import { AppearsOnSection } from '../../artist-detail/-ui/appears-on-section';
 import { ArtistVideosSection } from '../../artist-detail/-ui/artist-videos-section';
@@ -238,6 +246,7 @@ import {
 import { EnhanceQualityModal } from './enhance-quality-modal';
 import { ExportArtistsModal } from './export-modal';
 import { FilePathCellBody } from './file-path-cell';
+import { floatingMenuPlacement } from './floating-menu-placement';
 import { HistoryEventList, HistorySteps, HistoryTree } from './history-event-list';
 import {
   groupHistoryEvents,
@@ -837,6 +846,7 @@ export function Artwork({
 function useMonitorMutation() {
   const queryClient = useQueryClient();
   const canWrite = useLibraryV2CanWish();
+  const canWatch = useLibraryV2CanWatch();
   return useMutation({
     mutationFn: async (v: {
       entity: 'artists' | 'albums' | 'tracks';
@@ -848,6 +858,9 @@ function useMonitorMutation() {
       title?: string;
     }) => {
       if (!canWrite) throw new Error('Library changes require the admin profile');
+      if (v.entity === 'artists' && !canWatch) {
+        throw new Error("The Watchlist isn't part of your profile");
+      }
       let targetId = v.id;
       if (targetId == null && v.entity === 'tracks') {
         if (v.albumId == null || v.trackNumber == null) {
@@ -924,7 +937,12 @@ export function MonitorToggle({
   prominent?: boolean;
 }) {
   const mutation = useMonitorMutation();
-  const canWrite = useLibraryV2CanWish();
+  const canWish = useLibraryV2CanWish();
+  // #2209: an artist's toggle is the Watchlist's. a profile without one
+  // never sees it: its eye would show a list it can't open
+  const canWatch = useLibraryV2CanWatch();
+  const canWrite = entity === 'artists' ? canWatch : canWish;
+  if (entity === 'artists' && !canWatch) return null;
   const nextMonitored = !monitored;
   return (
     <span className={styles.monitorControl} onClick={(e) => e.stopPropagation()}>
@@ -1001,6 +1019,33 @@ export function useLibraryV2CanWish(): boolean {
   return useContext(LibraryV2CanWishContext) || useContext(LibraryV2CanWriteContext);
 }
 
+/** #2209: the server's can_watch: may follow artists on its own Watchlist */
+export const LibraryV2CanWatchContext = createContext(false);
+
+/**
+ * #2209: following an artist is the Watchlist's. a member whose profile has
+ * no Watchlist page gets no Add to / Remove from Watchlist here either (the
+ * server refuses them). the live permission map follows an admin's change
+ * without a reload. the admin always may.
+ */
+export function useLibraryV2CanWatch(): boolean {
+  const canWrite = useContext(LibraryV2CanWriteContext);
+  const canWish = useLibraryV2CanWish();
+  const server = useContext(LibraryV2CanWatchContext);
+  const live = usePermNotOff('music.watchlist');
+  return canWrite || (canWish && server && live);
+}
+
+/** #2210: the server's can_tag: tags and ReplayGain into files of its own */
+export const LibraryV2CanTagContext = createContext(false);
+
+/** #2210: write tags / ReplayGain into files. the admin, or a profile in a
+ *  library of its own (the server checks each file is its own). a member of
+ *  the shared library may wish there but never touches its files. */
+export function useLibraryV2CanTag(): boolean {
+  return useContext(LibraryV2CanWriteContext) || useContext(LibraryV2CanTagContext);
+}
+
 /** the server's can_download: a wish that downloads right away is allowed */
 export const LibraryV2CanDownloadContext = createContext(false);
 /** the server's can_grab: a pick from Interactive Search may name a library row */
@@ -1072,18 +1117,18 @@ export function ActionButton({
   const canWish = useLibraryV2CanWish();
   const mayDownload = useMayDownload(requiresDownload);
   const writeBlocked = requiresWish ? !canWish : requiresWrite && !canWrite;
-  if (!mayDownload) return null;
+  // #2210: a profile is never offered what it may not do (it read as a
+  // control that answered "require the admin profile" on click)
+  if (!mayDownload || writeBlocked) return null;
   return (
     <button
       type="button"
       className={`${styles.toolButton} ${tone === 'danger' ? styles.toolDanger : ''} ${primary ? styles.toolPrimary : ''}`}
       data-requires-write={requiresWrite && !requiresWish ? '' : undefined}
       data-requires-wish={requiresWish ? '' : undefined}
-      disabled={busy || disabled || writeBlocked}
-      title={writeBlocked ? 'Library changes require the admin profile' : title}
-      onClick={() => {
-        if (!writeBlocked) onClick();
-      }}
+      disabled={busy || disabled}
+      title={title}
+      onClick={onClick}
     >
       <SvgIcon name={busy ? 'refresh' : icon} />
       <span>{label}</span>
@@ -1167,19 +1212,21 @@ function IconActionButton({
   const canWish = useLibraryV2CanWish();
   const mayDownload = useMayDownload(requiresDownload);
   const writeBlocked = requiresWish ? !canWish : requiresWrite && !canWrite;
-  if (!mayDownload) return null;
+  // #2210: a profile is never offered what it may not do (it read as a
+  // control that answered "require the admin profile" on click)
+  if (!mayDownload || writeBlocked) return null;
   return (
     <button
       type="button"
       className={`${styles.iconAction} ${tone === 'danger' ? styles.toolDanger : ''}`}
       aria-label={title}
-      title={writeBlocked ? 'Library changes require the admin profile' : title}
+      title={title}
       data-requires-write={requiresWrite && !requiresWish ? '' : undefined}
       data-requires-wish={requiresWish ? '' : undefined}
-      disabled={disabled || writeBlocked}
+      disabled={disabled}
       onClick={(e) => {
         e.stopPropagation();
-        if (!writeBlocked) onClick();
+        onClick();
       }}
     >
       <SvgIcon name={icon} />
@@ -1209,6 +1256,10 @@ function refreshSummary(result: LibraryV2JobState['result']): string {
   if (count('leftover_tracks_folded'))
     parts.push(
       `${count('leftover_tracks_folded')} leftover row${count('leftover_tracks_folded') === 1 ? '' : 's'} with no file folded`,
+    );
+  if (count('tracks_renumbered'))
+    parts.push(
+      `${count('tracks_renumbered')} track number${count('tracks_renumbered') === 1 ? '' : 's'} fixed from the file`,
     );
   const drifting = count('path_drift') - count('path_repointed');
   if (drifting > 0) parts.push(`${drifting} needing review in Stale Index Paths`);
@@ -2084,18 +2135,17 @@ export function ArtistAliases({ artistId, artistName }: { artistId: number; arti
       {aliases.map((m) => (
         <span key={m.id} className={styles.aliasChip}>
           {m.name}
-          <button
-            type="button"
-            className={styles.aliasChipRemove}
-            title={`Unlink ${m.name} (it becomes a standalone artist again)`}
-            data-requires-write=""
-            disabled={unlink.isPending || !canWrite}
-            onClick={() => {
-              if (canWrite) unlink.mutate(m.id);
-            }}
-          >
-            ✕
-          </button>
+          {canWrite ? (
+            <button
+              type="button"
+              className={styles.aliasChipRemove}
+              title={`Unlink ${m.name} (it becomes a standalone artist again)`}
+              disabled={unlink.isPending}
+              onClick={() => unlink.mutate(m.id)}
+            >
+              ✕
+            </button>
+          ) : null}
         </span>
       ))}
       {unlink.isError ? (
@@ -2114,18 +2164,17 @@ export function ArtistAliases({ artistId, artistName }: { artistId: number; arti
           </button>
         </span>
       ) : null}
-      <button
-        type="button"
-        className={styles.aliasLinkButton}
-        data-requires-write=""
-        disabled={!canWrite}
-        title="Link another artist row in your library as an alias of this one (same real artist, different provider identity)"
-        onClick={() => {
-          if (canWrite) setLinking(true);
-        }}
-      >
-        + Link alias
-      </button>
+      {/* #2210: linking is the admin's; a member reads the aliases */}
+      {canWrite ? (
+        <button
+          type="button"
+          className={styles.aliasLinkButton}
+          title="Link another artist row in your library as an alias of this one (same real artist, different provider identity)"
+          onClick={() => setLinking(true)}
+        >
+          + Link alias
+        </button>
+      ) : null}
       {linking ? (
         <LinkArtistAliasModal
           artistId={artistId}
@@ -2246,9 +2295,10 @@ export function ArtistSettingsModal({
 }) {
   const queryClient = useQueryClient();
   const canWrite = useLibraryV2CanWrite();
-  // the watchlist part is the profile's own row: anyone who may wish here
-  // saves it (3.6.1's watchlist config); the rest of the sheet is the admin's
-  const canSaveWatchlist = useLibraryV2CanWish() === true;
+  // the watchlist part is the profile's own row: anyone who has the
+  // Watchlist saves it (3.6.1's watchlist config, #2209); the rest of the
+  // sheet is the admin's
+  const canSaveWatchlist = useLibraryV2CanWatch();
   const settingsQuery = useQuery({
     queryKey: [...LIBRARY_V2_QUERY_KEY, 'artist-settings', artist.id],
     queryFn: () => fetchLibraryV2ArtistSettings(artist.id),
@@ -2342,11 +2392,11 @@ export function ArtistSettingsModal({
           <button type="button" className={styles.btnGhost} onClick={onClose}>
             Close
           </button>
-          {watchlist ? (
+          {watchlist && canSaveWatchlist ? (
             <button
               type="button"
               className={styles.btnPrimary}
-              disabled={save.isPending || !canSaveWatchlist}
+              disabled={save.isPending}
               onClick={() => {
                 if (canSaveWatchlist) save.mutate(watchlist);
               }}
@@ -2376,15 +2426,18 @@ export function ArtistSettingsModal({
                   currentProfileId={artist.quality_profile?.id ?? 1}
                   currentProfileSource={artist.quality_profile_source}
                   currentProfileExplicit={artist.quality_profile_explicit}
+                  readOnly={!canWrite}
                 />
               </fieldset>
             </SettingsGroup>
 
-            {!artist.monitored ? (
+            {/* #2209: the future-release part is the Watchlist's */}
+            {!canSaveWatchlist ? null : !artist.monitored ? (
               <SettingsGroup title="Future releases">
                 <div className={ls.empty}>
-                  Add the artist to the Watchlist: then new releases are discovered here, with
-                  release types, lookback and auto-download set in this dialog.
+                  Add the artist to {canWrite ? 'the' : 'your'} Watchlist: then new releases are
+                  discovered here, with release types, lookback and auto-download set in this
+                  dialog.
                 </div>
               </SettingsGroup>
             ) : settingsQuery.isError ? (
@@ -2523,79 +2576,90 @@ export function ArtistSettingsModal({
                         ))}
                       </select>
                     </label>
-                    <label className={ls.field}>
-                      <span>Discography rule</span>
-                      <select
-                        className={styles.select}
-                        disabled={!canWrite}
-                        value={watchlist.monitor_new_items}
-                        onChange={(event) =>
-                          setDraft((current) =>
-                            current
-                              ? {
-                                  ...current,
-                                  monitor_new_items: event.target.value as 'all' | 'new' | 'none',
-                                }
-                              : current,
-                          )
-                        }
-                      >
-                        <option value="all">Add newly found releases to Wishlist</option>
-                        <option value="new">Only releases newer than the last sync</option>
-                        <option value="none">Don't add newly found releases to Wishlist</option>
-                      </select>
-                    </label>
+                    {/* the discography rule is the artist row's, which every
+                        library shares: the admin's (#2210) */}
+                    {canWrite ? (
+                      <label className={ls.field}>
+                        <span>Discography rule</span>
+                        <select
+                          className={styles.select}
+                          value={watchlist.monitor_new_items}
+                          onChange={(event) =>
+                            setDraft((current) =>
+                              current
+                                ? {
+                                    ...current,
+                                    monitor_new_items: event.target.value as 'all' | 'new' | 'none',
+                                  }
+                                : current,
+                            )
+                          }
+                        >
+                          <option value="all">Add newly found releases to Wishlist</option>
+                          <option value="new">Only releases newer than the last sync</option>
+                          <option value="none">Don't add newly found releases to Wishlist</option>
+                        </select>
+                      </label>
+                    ) : null}
                   </div>
                 </SettingsGroup>
 
-                <SettingsGroup
-                  title="Existing releases and tracks"
-                  hint="Change Wanted for what the Library already shows. Applies at once; the Watchlist and the quality profile stay as they are."
-                >
-                  <div className={ls.chips}>
-                    {(
-                      [
-                        ['all', true, 'Add all existing releases to Wishlist', 'Wishlist all', ''],
+                {canWrite ? (
+                  <SettingsGroup
+                    title="Existing releases and tracks"
+                    hint="Change Wanted for what the Library already shows. Applies at once; the Watchlist and the quality profile stay as they are."
+                  >
+                    <div className={ls.chips}>
+                      {(
                         [
-                          'missing',
-                          true,
-                          'Add missing releases to Wishlist',
-                          'Wishlist missing only',
-                          '',
-                        ],
-                        [
-                          'all',
-                          false,
-                          'Remove existing releases from Wishlist',
-                          'Remove all from Wishlist',
-                          ls.capsuleDanger,
-                        ],
-                      ] as const
-                    ).map(([scope, monitored, label, text, tone]) => (
-                      <button
-                        key={label}
-                        type="button"
-                        className={`${ls.capsule} ${tone}`}
-                        title={label}
-                        data-requires-write=""
-                        disabled={bulkBusy !== null || !canWrite}
-                        onClick={() => void applyExistingReleaseStrategy(scope, monitored, label)}
-                      >
-                        {bulkBusy === label ? 'Applying…' : text}
-                      </button>
-                    ))}
-                  </div>
-                  {bulkMessage ? (
-                    <div
-                      className={
-                        bulkMessage.tone === 'ok' ? styles.mutationSuccess : styles.mutationError
-                      }
-                      role={bulkMessage.tone === 'ok' ? 'status' : 'alert'}
-                    >
-                      {bulkMessage.text}
+                          [
+                            'all',
+                            true,
+                            'Add all existing releases to Wishlist',
+                            'Wishlist all',
+                            '',
+                          ],
+                          [
+                            'missing',
+                            true,
+                            'Add missing releases to Wishlist',
+                            'Wishlist missing only',
+                            '',
+                          ],
+                          [
+                            'all',
+                            false,
+                            'Remove existing releases from Wishlist',
+                            'Remove all from Wishlist',
+                            ls.capsuleDanger,
+                          ],
+                        ] as const
+                      ).map(([scope, monitored, label, text, tone]) => (
+                        <button
+                          key={label}
+                          type="button"
+                          className={`${ls.capsule} ${tone}`}
+                          title={label}
+                          data-requires-write=""
+                          disabled={bulkBusy !== null || !canWrite}
+                          onClick={() => void applyExistingReleaseStrategy(scope, monitored, label)}
+                        >
+                          {bulkBusy === label ? 'Applying…' : text}
+                        </button>
+                      ))}
                     </div>
-                  ) : null}
-                </SettingsGroup>
+                    {bulkMessage ? (
+                      <div
+                        className={
+                          bulkMessage.tone === 'ok' ? styles.mutationSuccess : styles.mutationError
+                        }
+                        role={bulkMessage.tone === 'ok' ? 'status' : 'alert'}
+                      >
+                        {bulkMessage.text}
+                      </div>
+                    ) : null}
+                  </SettingsGroup>
+                ) : null}
               </>
             )}
           </div>
@@ -2708,7 +2772,7 @@ function ArtistSettingsIdentity({
     <>
       <SettingsGroup
         title={watchlist ? 'Watchlist identity' : 'Artist'}
-        hint={watchlist ? 'Linked to the admin Watchlist.' : 'Not on the Watchlist.'}
+        hint={watchlist ? 'Linked to your Watchlist.' : 'Not on your Watchlist.'}
       >
         <ArtistMatchChips
           artist={artist}
@@ -2932,6 +2996,8 @@ type AlbumDetailTab = 'quality' | 'metadata';
 
 function AlbumDetailModal({ album, onClose }: { album: AlbumDetailTarget; onClose: () => void }) {
   const [tab, setTab] = useState<AlbumDetailTab>('quality');
+  // #2210: a member reads the album's details; changing them is the admin's
+  const canWrite = useLibraryV2CanWrite();
   return (
     <ModalShell
       title={album.title}
@@ -2962,11 +3028,54 @@ function AlbumDetailModal({ album, onClose }: { album: AlbumDetailTarget; onClos
             currentProfileSource={album.quality_profile_source}
             currentProfileExplicit={album.quality_profile_explicit}
             onSaved={onClose}
+            readOnly={!canWrite}
           />
         ) : null}
-        {tab === 'metadata' ? <AlbumMetadataForm album={album} onSaved={onClose} /> : null}
+        {tab === 'metadata' ? (
+          canWrite ? (
+            <AlbumMetadataForm album={album} onSaved={onClose} />
+          ) : (
+            <ReadOnlyFields
+              fields={[
+                ['Title', album.title],
+                ['Label', album.label],
+                ['Year', album.year],
+                ['Release date', album.release_date],
+                ['Release type', album.album_type],
+                ['Explicit', explicitText(album.explicit)],
+                ['Style', album.style],
+                ['Mood', album.mood],
+              ]}
+            />
+          )
+        ) : null}
       </div>
     </ModalShell>
+  );
+}
+
+function explicitText(value: boolean | null | undefined): string | null {
+  return value === true ? 'Explicit' : value === false ? 'Clean' : null;
+}
+
+/** #2210: a row's metadata for a profile that may not change it: the values
+ *  as text, no inputs, nothing to save. */
+function ReadOnlyFields({
+  fields,
+}: {
+  fields: ReadonlyArray<readonly [string, string | number | null | undefined]>;
+}) {
+  return (
+    <div className={styles.sourceInfoBody} data-testid="read-only-metadata">
+      {fields.map(([label, value]) => (
+        <SourceInfoRow
+          key={label}
+          label={label}
+          value={value === null || value === undefined || value === '' ? '—' : String(value)}
+        />
+      ))}
+      <p className={styles.muted}>Library changes are up to the admin.</p>
+    </div>
   );
 }
 
@@ -3221,31 +3330,48 @@ function AlbumMetadataForm({
  *  nothing. `onDeleted` lets the deep-link view navigate back to the artist
  *  after a successful delete; the row doesn't need it (it just disappears
  *  once the query invalidates). */
-/** where a floating menu sits: under its button, right edges lined up, and
- *  above the button when there isn't room below. it closes on scroll and
- *  resize instead of drifting away from the button it belongs to */
+/** where a floating menu sits (floatingMenuPlacement: under its button, right
+ *  edges lined up, kept on the screen). it closes on scroll and resize instead
+ *  of drifting away from the button it belongs to */
+// measured at the top left corner with right let go (.overflowMenu pins
+// right: 0, which with left: 0 stretches it across the screen), so its width
+// is its natural width
+const MENU_MEASURE: CSSProperties = { visibility: 'hidden', top: 0, left: 0, right: 'auto' };
+
 function useFloatingMenuPosition(
   anchorRef: { current: HTMLElement | null },
   menuRef: { current: HTMLElement | null },
   open: boolean,
   close: () => void,
-): CSSProperties {
-  const [position, setPosition] = useState<CSSProperties>({ visibility: 'hidden' });
+): { style: CSSProperties; inlineSubmenu: boolean } {
+  const [position, setPosition] = useState<{ style: CSSProperties; inlineSubmenu: boolean }>({
+    style: MENU_MEASURE,
+    inlineSubmenu: false,
+  });
   useLayoutEffect(() => {
     if (!open) {
-      setPosition({ visibility: 'hidden' });
+      setPosition({ style: MENU_MEASURE, inlineSubmenu: false });
       return;
     }
     const anchor = anchorRef.current?.getBoundingClientRect();
-    if (!anchor) return;
-    const height = menuRef.current?.offsetHeight ?? 0;
-    const gap = 8;
-    const below = anchor.bottom + gap;
-    const top =
-      below + height > window.innerHeight - 12 && anchor.top - gap - height > 12
-        ? anchor.top - gap - height
-        : below;
-    setPosition({ top, right: Math.max(12, window.innerWidth - anchor.right) });
+    const menu = menuRef.current;
+    if (!anchor || !menu) return;
+    const place = floatingMenuPlacement(
+      anchor,
+      { width: menu.offsetWidth, height: menu.offsetHeight },
+      { width: window.innerWidth, height: window.innerHeight },
+    );
+    setPosition({
+      style: {
+        top: place.top,
+        left: place.left,
+        right: 'auto',
+        maxWidth: place.maxWidth,
+        maxHeight: place.maxHeight,
+        overflowY: place.maxHeight !== undefined ? 'auto' : undefined,
+      },
+      inlineSubmenu: place.inlineSubmenu,
+    });
   }, [open, anchorRef, menuRef]);
   useEffect(() => {
     if (!open) return;
@@ -3294,8 +3420,8 @@ export function AlbumOverflowMenu({
   };
   const canWrite = useLibraryV2CanWrite();
   // tags and loudness touch files only: a profile may in a library of its own
-  // (the server checks every file is its own)
-  const canTag = useLibraryV2CanWish();
+  // (the server checks every file is its own); never a shared-library member
+  const canTag = useLibraryV2CanTag();
   const [open, setOpen] = useState(false);
   const [showSubmenu, setShowSubmenu] = useState(false);
   const [showRetag, setShowRetag] = useState(false);
@@ -3310,7 +3436,8 @@ export function AlbumOverflowMenu({
   const wrapRef = useRef<HTMLSpanElement>(null);
   const replaygain = useMutation({
     mutationFn: async () => {
-      if (!canWrite) throw new Error('Library changes require the admin profile');
+      // own-library files are their owner's to analyze, like the menu says
+      if (!canTag) throw new Error('Library changes require the admin profile');
       const jobId = await startLibraryV2AlbumReplayGain(album.id);
       const jobError = await awaitBulkJob(queryClient, jobId);
       if (jobError) throw new Error(jobError);
@@ -3324,7 +3451,16 @@ export function AlbumOverflowMenu({
   });
 
   const menuRef = useRef<HTMLDivElement>(null);
-  const menuPosition = useFloatingMenuPosition(wrapRef, menuRef, open, () => setOpen(false));
+  const menuPlace = useFloatingMenuPosition(wrapRef, menuRef, open, () => setOpen(false));
+  // the provider list opening in place inside a scrolling menu starts below
+  // the fold: bring Enrich to the top of the menu so the list shows
+  const enrichRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const menu = menuRef.current;
+    const at = enrichRef.current;
+    if (!showSubmenu || !menuPlace.inlineSubmenu || !menu || !at) return;
+    if (menu.scrollHeight > menu.clientHeight) menu.scrollTop = at.offsetTop;
+  }, [showSubmenu, menuPlace.inlineSubmenu]);
 
   useEffect(() => {
     if (!open) return;
@@ -3346,8 +3482,10 @@ export function AlbumOverflowMenu({
             // their overflow, half the menu cut off
             <div
               ref={menuRef}
-              className={`${styles.overflowMenu} ${styles.overflowMenuFloating}`}
-              style={menuPosition}
+              className={`${styles.overflowMenu} ${styles.overflowMenuFloating}${
+                menuPlace.inlineSubmenu ? ` ${styles.overflowMenuInlineSub}` : ''
+              }`}
+              style={menuPlace.style}
               onClick={(e) => e.stopPropagation()}
             >
               {onOpenPage ? (
@@ -3389,105 +3527,108 @@ export function AlbumOverflowMenu({
                   onDone={() => setOpen(false)}
                 />
               ) : null}
-              <button
-                type="button"
-                className={styles.overflowMenuItem}
-                data-requires-write=""
-                disabled={!canTag}
-                onClick={() => {
-                  if (!canTag) return;
-                  setShowRetag(true);
-                  setOpen(false);
-                }}
-              >
-                Preview Retag
-              </button>
-              {/* #2070: the other direction, the Library takes what the files say */}
-              <button
-                type="button"
-                className={styles.overflowMenuItem}
-                data-requires-write=""
-                disabled={!canTag}
-                onClick={() => {
-                  if (!canTag) return;
-                  setShowUseFileTags(true);
-                  setOpen(false);
-                }}
-              >
-                Use File Tags
-              </button>
-              <button
-                type="button"
-                className={styles.overflowMenuItem}
-                data-requires-write=""
-                disabled={replaygain.isPending || !canTag}
-                onClick={() => {
-                  if (!canTag) return;
-                  replaygain.mutate();
-                  setOpen(false);
-                }}
-              >
-                {replaygain.isPending ? 'Analyzing ReplayGain…' : 'Analyze ReplayGain'}
-              </button>
-              <button
-                type="button"
-                className={styles.overflowMenuItem}
-                data-requires-write=""
-                disabled={!canWrite}
-                onClick={() => {
-                  if (!canWrite) return;
-                  setShowReorganize(true);
-                  setOpen(false);
-                }}
-              >
-                Preview Rename / Organize
-              </button>
-              <button
-                type="button"
-                className={styles.overflowMenuItem}
-                data-requires-write=""
-                disabled={!canWrite || album.owns_files === false}
-                title={
-                  album.owns_files === false
-                    ? 'Nothing to reassign — this release has no files in your library'
-                    : 'Move this album\u2019s files to a different artist'
-                }
-                onClick={() => {
-                  if (!canWrite || album.owns_files === false) return;
-                  setShowReassign(true);
-                  setOpen(false);
-                }}
-              >
-                Reassign to another artist…
-              </button>
+              {canTag ? (
+                <button
+                  type="button"
+                  className={styles.overflowMenuItem}
+                  onClick={() => {
+                    if (!canTag) return;
+                    setShowRetag(true);
+                    setOpen(false);
+                  }}
+                >
+                  Preview Retag
+                </button>
+              ) : null}
+              {/* #2070: the other direction, the Library takes what the files say.
+                  that changes the catalogue every library shares: the admin's */}
+              {canWrite ? (
+                <button
+                  type="button"
+                  className={styles.overflowMenuItem}
+                  onClick={() => {
+                    if (!canWrite) return;
+                    setShowUseFileTags(true);
+                    setOpen(false);
+                  }}
+                >
+                  Use File Tags
+                </button>
+              ) : null}
+              {canTag ? (
+                <button
+                  type="button"
+                  className={styles.overflowMenuItem}
+                  disabled={replaygain.isPending}
+                  onClick={() => {
+                    if (!canTag) return;
+                    replaygain.mutate();
+                    setOpen(false);
+                  }}
+                >
+                  {replaygain.isPending ? 'Analyzing ReplayGain…' : 'Analyze ReplayGain'}
+                </button>
+              ) : null}
+              {canWrite ? (
+                <button
+                  type="button"
+                  className={styles.overflowMenuItem}
+                  onClick={() => {
+                    if (!canWrite) return;
+                    setShowReorganize(true);
+                    setOpen(false);
+                  }}
+                >
+                  Preview Rename / Organize
+                </button>
+              ) : null}
+              {canWrite ? (
+                <button
+                  type="button"
+                  className={styles.overflowMenuItem}
+                  disabled={album.owns_files === false}
+                  title={
+                    album.owns_files === false
+                      ? 'Nothing to reassign — this release has no files in your library'
+                      : 'Move this album\u2019s files to a different artist'
+                  }
+                  onClick={() => {
+                    if (!canWrite || album.owns_files === false) return;
+                    setShowReassign(true);
+                    setOpen(false);
+                  }}
+                >
+                  Reassign to another artist…
+                </button>
+              ) : null}
               {/* #2145: picard's "other versions": point the album at the right edition */}
-              <button
-                type="button"
-                className={styles.overflowMenuItem}
-                data-requires-write=""
-                disabled={!canWrite}
-                title="Pick which edition this album is (deluxe, remaster, a release with more tracks)"
-                onClick={() => {
-                  if (!canWrite) return;
-                  setShowVersions(true);
-                  setOpen(false);
-                }}
-              >
-                Other versions…
-              </button>
-              <button
-                type="button"
-                className={styles.overflowMenuItem}
-                data-requires-write=""
-                disabled={!canWrite}
-                onClick={() => {
-                  if (!canWrite) return;
-                  setShowArtPicker(true);
-                  setOpen(false);
-                }}
-              >
-                Change Cover
-              </button>
+              {canWrite ? (
+                <button
+                  type="button"
+                  className={styles.overflowMenuItem}
+                  title="Pick which edition this album is (deluxe, remaster, a release with more tracks)"
+                  onClick={() => {
+                    if (!canWrite) return;
+                    setShowVersions(true);
+                    setOpen(false);
+                  }}
+                >
+                  Other versions…
+                </button>
+              ) : null}
+              {canWrite ? (
+                <button
+                  type="button"
+                  className={styles.overflowMenuItem}
+                  onClick={() => {
+                    if (!canWrite) return;
+                    setShowArtPicker(true);
+                    setOpen(false);
+                  }}
+                >
+                  Change Cover
+                </button>
+              ) : null}
               <button
                 type="button"
                 className={styles.overflowMenuItem}
@@ -3514,25 +3655,31 @@ export function AlbumOverflowMenu({
                 Report a Problem…
               </button>
               <div
+                ref={enrichRef}
                 className={styles.submenuContainer}
-                onMouseEnter={() => {
-                  if (canWrite) setShowSubmenu(true);
+                // hover opens it for a mouse only: a tap sends a mouseenter
+                // just before its click, so the list opened and the click's
+                // toggle shut it again, Enrich did nothing on a phone (#2183)
+                onPointerEnter={(e) => {
+                  if (e.pointerType === 'mouse' && canWrite) setShowSubmenu(true);
                 }}
-                onMouseLeave={() => setShowSubmenu(false)}
+                onPointerLeave={(e) => {
+                  if (e.pointerType === 'mouse') setShowSubmenu(false);
+                }}
               >
-                <button
-                  type="button"
-                  className={styles.overflowMenuItem}
-                  data-requires-write=""
-                  disabled={!canWrite}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (!canWrite) return;
-                    setShowSubmenu((v) => !v);
-                  }}
-                >
-                  Enrich… <span className={styles.submenuChevron}>›</span>
-                </button>
+                {canWrite ? (
+                  <button
+                    type="button"
+                    className={styles.overflowMenuItem}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (!canWrite) return;
+                      setShowSubmenu((v) => !v);
+                    }}
+                  >
+                    Enrich… <span className={styles.submenuChevron}>›</span>
+                  </button>
+                ) : null}
                 {showSubmenu ? (
                   <EnrichDropdown
                     entity="albums"
@@ -3548,19 +3695,19 @@ export function AlbumOverflowMenu({
                   />
                 ) : null}
               </div>
-              <button
-                type="button"
-                className={`${styles.overflowMenuItem} ${styles.overflowMenuItemDanger}`}
-                data-requires-write=""
-                disabled={!canWrite}
-                onClick={() => {
-                  if (!canWrite) return;
-                  setShowDelete(true);
-                  setOpen(false);
-                }}
-              >
-                Delete
-              </button>
+              {canWrite ? (
+                <button
+                  type="button"
+                  className={`${styles.overflowMenuItem} ${styles.overflowMenuItemDanger}`}
+                  onClick={() => {
+                    if (!canWrite) return;
+                    setShowDelete(true);
+                    setOpen(false);
+                  }}
+                >
+                  Delete
+                </button>
+              ) : null}
             </div>,
             document.body,
           )
@@ -4620,6 +4767,9 @@ export function UnifiedFileRemovalDialog({
         }
       }
       await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
+      // #2194: kept apart from the key above, so a removal has to say so: the
+      // "to rename" count still held the removed files
+      void queryClient.invalidateQueries({ queryKey: RENAME_CHECK_QUERY_KEY });
       onDone();
     } catch (caught) {
       setError(mutationErrorMessage(caught, 'File removal failed'));
@@ -4882,37 +5032,46 @@ export function LibraryV2Page() {
   const canWish = enabledQuery.data?.canWish === true;
   const canDownload = enabledQuery.data?.canDownload === true;
   const canGrab = enabledQuery.data?.canGrab === true;
+  const canWatch = enabledQuery.data?.canWatch === true;
+  const canTag = enabledQuery.data?.canTag === true;
 
   return (
     <LibraryV2CanWriteContext.Provider value={canWrite}>
       <LibraryV2CanWishContext.Provider value={canWish}>
-        <LibraryV2CanDownloadContext.Provider value={canDownload}>
-          <LibraryV2CanGrabContext.Provider value={canGrab}>
-            {/* no box of its own: it only tells mobile.css this page sizes its own buttons */}
-            <div className={styles.libraryRoot} data-library-v2="">
-              <MirrorStatusBanner />
-              {!canWrite ? <LibraryAccessNote canWish={canWish} /> : null}
-              {search.album ? (
-                <AlbumDetailView albumId={search.album} />
-              ) : search.artist ? (
-                <ArtistDetailView artistId={search.artist} />
-              ) : providerArtist(search.discover) ? (
-                <ProviderArtistView
-                  {...(providerArtist(search.discover) as { source: string; providerId: string })}
-                  name={search.discoverName ?? ''}
-                />
-              ) : search.section === 'wanted' ? (
-                <WantedIndexView />
-              ) : search.section === 'songs' ? (
-                <SongIndexView />
-              ) : search.section === 'albums' ? (
-                <AlbumIndexView />
-              ) : (
-                <ArtistIndexView />
-              )}
-            </div>
-          </LibraryV2CanGrabContext.Provider>
-        </LibraryV2CanDownloadContext.Provider>
+        <LibraryV2CanWatchContext.Provider value={canWatch}>
+          <LibraryV2CanTagContext.Provider value={canTag}>
+            <LibraryV2CanDownloadContext.Provider value={canDownload}>
+              <LibraryV2CanGrabContext.Provider value={canGrab}>
+                {/* no box of its own: it only tells mobile.css this page sizes its own buttons */}
+                <div className={styles.libraryRoot} data-library-v2="">
+                  <MirrorStatusBanner />
+                  {!canWrite ? <LibraryAccessNote canWish={canWish} /> : null}
+                  {search.album ? (
+                    <AlbumDetailView albumId={search.album} />
+                  ) : search.artist ? (
+                    <ArtistDetailView artistId={search.artist} />
+                  ) : providerArtist(search.discover) ? (
+                    <ProviderArtistView
+                      {...(providerArtist(search.discover) as {
+                        source: string;
+                        providerId: string;
+                      })}
+                      name={search.discoverName ?? ''}
+                    />
+                  ) : search.section === 'wanted' ? (
+                    <WantedIndexView />
+                  ) : search.section === 'songs' ? (
+                    <SongIndexView />
+                  ) : search.section === 'albums' ? (
+                    <AlbumIndexView />
+                  ) : (
+                    <ArtistIndexView />
+                  )}
+                </div>
+              </LibraryV2CanGrabContext.Provider>
+            </LibraryV2CanDownloadContext.Provider>
+          </LibraryV2CanTagContext.Provider>
+        </LibraryV2CanWatchContext.Provider>
       </LibraryV2CanWishContext.Provider>
     </LibraryV2CanWriteContext.Provider>
   );
@@ -4964,15 +5123,16 @@ export function MirrorStatusBanner() {
           {mutationErrorMessage(retry.error, 'Mirror retry failed')}
         </span>
       ) : null}
-      <button
-        type="button"
-        className={styles.grabBannerClose}
-        data-requires-write=""
-        disabled={retry.isPending || !canWrite}
-        onClick={() => retry.mutate()}
-      >
-        {retry.isPending ? 'Retrying…' : retry.isError ? 'Retry again' : 'Retry'}
-      </button>
+      {canWrite ? (
+        <button
+          type="button"
+          className={styles.grabBannerClose}
+          disabled={retry.isPending}
+          onClick={() => retry.mutate()}
+        >
+          {retry.isPending ? 'Retrying…' : retry.isError ? 'Retry again' : 'Retry'}
+        </button>
+      ) : null}
     </StatusNotice>
   );
 }
@@ -5085,6 +5245,10 @@ function ArtistIndexView() {
   const canWrite = useLibraryV2CanWrite();
   const canWish = useLibraryV2CanWish();
   const canSearch = useLibraryV2CanSearch();
+  const canWatch = useLibraryV2CanWatch();
+  // #2209: picking artists is for the bar's actions; with none of them
+  // there is nothing to pick for
+  const canPick = canWrite || canWatch || canSearch;
   // Debounce the filter box: navigating per keystroke fires a request each key.
   const artistFilter = useUrlSyncedFilter(
     search.q,
@@ -5282,6 +5446,7 @@ function ArtistIndexView() {
         totalMatching={pagination?.total_count ?? 0}
         canWrite={canWrite}
         canWish={canWish}
+        canWatch={canWatch}
         canSearch={canSearch}
         filters={{
           q: search.q,
@@ -5371,10 +5536,14 @@ function ArtistIndexView() {
               columns={artistTableColumns}
               columnOrder={artistColumnOrder}
               profileNameById={profileNameById}
-              selection={selection}
+              selection={canPick ? selection : undefined}
             />
           ) : (
-            <ArtistCards artists={artists} cardSize={cardSize} selection={selection} />
+            <ArtistCards
+              artists={artists}
+              cardSize={cardSize}
+              selection={canPick ? selection : undefined}
+            />
           )}
         </ShowMissingProvider>
       )}
@@ -6605,6 +6774,7 @@ function AlbumDetailView({ albumId }: { albumId: number }) {
             <StatusNotice
               tone={grabBanner.tone}
               text={grabBanner.text}
+              transient={grabBanner.transient}
               onDismiss={() => setGrabBanner(null)}
             />
           ) : null}
@@ -7076,21 +7246,23 @@ function ArtistToolsMenu({
     write = true,
     danger = false,
     busy = false,
-  ) => (
-    <button
-      type="button"
-      className={`${styles.overflowMenuItem} ${danger ? styles.overflowMenuItemDanger : ''}`}
-      disabled={(write && !canWrite) || busy}
-      onClick={() => {
-        action();
-        setOpen(false);
-        setShowSubmenu(false);
-      }}
-    >
-      <SvgIcon name={icon} />
-      {label}
-    </button>
-  );
+  ) =>
+    // #2210: what a member can't do isn't offered to them
+    write && !canWrite ? null : (
+      <button
+        type="button"
+        className={`${styles.overflowMenuItem} ${danger ? styles.overflowMenuItemDanger : ''}`}
+        disabled={busy}
+        onClick={() => {
+          action();
+          setOpen(false);
+          setShowSubmenu(false);
+        }}
+      >
+        <SvgIcon name={icon} />
+        {label}
+      </button>
+    );
   return (
     <span
       ref={wrapRef}
@@ -7125,14 +7297,15 @@ function ArtistToolsMenu({
           className={`${styles.overflowMenu} ${styles.artistToolsPanel} ${styles.alignRight}`}
           onScroll={() => setShowSubmenu(false)}
         >
-          <div className={styles.toolMenuHeading}>Files</div>
-          {item('Manage Tracks', 'tracks', onManageTracks, false)}
+          {canWrite ? <div className={styles.toolMenuHeading}>Files</div> : null}
+          {/* #2210: managing an artist's files and duplicates is the admin's */}
+          {item('Manage Tracks', 'tracks', onManageTracks)}
           {item('Preview Retag', 'edit', onRetag)}
           {item('Use File Tags', 'edit', onUseFileTags)}
           {item('Preview Rename / Organize', 'organize', onReorganizeAll)}
           {item('Manual Import', 'download', onManualImport)}
           {onServerSync ? item('Sync from media server', 'refresh', onServerSync) : null}
-          <div className={styles.toolMenuHeading}>Metadata</div>
+          {canWrite ? <div className={styles.toolMenuHeading}>Metadata</div> : null}
           {item('Edit Metadata', 'edit', onEditMetadata)}
           {item('Change Photo', 'cover', onPhoto)}
           {item(
@@ -7143,21 +7316,22 @@ function ArtistToolsMenu({
             false,
             discographyBusy,
           )}
-          <div className={styles.submenuContainer}>
-            <button
-              ref={enrichRef}
-              type="button"
-              className={styles.overflowMenuItem}
-              disabled={!canWrite}
-              aria-expanded={showSubmenu}
-              onClick={() => setShowSubmenu((v) => !v)}
-            >
-              <SvgIcon name="refresh" />
-              Enrich…{' '}
-              <span className={styles.submenuChevron}>{flyoutAt === 'inline' ? '⌄' : '‹'}</span>
-            </button>
-            {showSubmenu && flyoutAt === 'inline' ? enrich : null}
-          </div>
+          {canWrite ? (
+            <div className={styles.submenuContainer}>
+              <button
+                ref={enrichRef}
+                type="button"
+                className={styles.overflowMenuItem}
+                aria-expanded={showSubmenu}
+                onClick={() => setShowSubmenu((v) => !v)}
+              >
+                <SvgIcon name="refresh" />
+                Enrich…{' '}
+                <span className={styles.submenuChevron}>{flyoutAt === 'inline' ? '⌄' : '‹'}</span>
+              </button>
+              {showSubmenu && flyoutAt === 'inline' ? enrich : null}
+            </div>
+          ) : null}
           <div className={styles.toolMenuHeading}>Maintenance</div>
           {item('Library Health & Repair', 'settings', onMaintenance)}
           {item('Export Artists…', 'download', () => setShowExport(true), false)}
@@ -7171,7 +7345,7 @@ function ArtistToolsMenu({
           )}
           <div className={styles.toolMenuHeading}>Page</div>
           {item('View Settings…', 'settings', onViewSettings, false)}
-          <div className={styles.toolMenuDivider} />
+          {canWrite ? <div className={styles.toolMenuDivider} /> : null}
           {item('Delete Artist…', 'delete', onDelete, true, true)}
         </div>
       ) : null}
@@ -7673,7 +7847,9 @@ function TopTracksSidebar({
   return (
     <div className="artist-hero-right">
       <div className="hero-sidebar-title">
-        {topTracks.data?.kind === 'lastfm' ? 'Popular on Last.fm' : 'Top Tracks'}
+        {topTracks.data?.kind === 'lastfm'
+          ? popularTracksTitle(topTracks.data.source)
+          : 'Top Tracks'}
       </div>
       <div className="hero-top-tracks">
         {tracks.map((track, index) => {
@@ -7854,9 +8030,13 @@ function LegacyArtistHero({
   remoteImageUrl,
   genres,
   bio,
+  bioSource,
+  bioUrl,
   listeners,
   playcount,
+  numbersSource,
   followers,
+  fans,
   sections,
   providerId,
   source,
@@ -7884,12 +8064,21 @@ function LegacyArtistHero({
   remoteImageUrl?: string | null;
   genres: string[];
   bio: string | null;
+  /** a free source the bio came from (wikipedia, theaudiodb): a quiet note
+   *  under it says so. null for last.fm and the media server's summary */
+  bioSource?: ArtistAboutSource | null;
+  bioUrl?: string | null;
   listeners: number | null;
   playcount: number | null;
+  /** whose listeners/plays these are. listenbrainz numbers say so in their
+   *  labels; last.fm's keep the plain ones */
+  numbersSource?: ArtistAboutSource | null;
   /** Provider follower count — the one figure that still resolves on an
    *  instance with no Last.fm key. Shares the existing stat row, so the
    *  header does not grow vertically. */
   followers?: number | null;
+  /** deezer fans stored by enrichment, when no live follower count came */
+  fans?: number | null;
   sections: Array<{ label: string; owned: number; total: number }>;
   providerId: string | null;
   source: string;
@@ -7955,7 +8144,8 @@ function LegacyArtistHero({
     return () => observer.disconnect();
   }, [cleanBio]);
   const backdrop = imageUrl || remoteImageUrl || '';
-  const hasNumbers = Boolean(listeners || playcount || followers);
+  const hasNumbers = Boolean(listeners || playcount || followers || fans);
+  const fromListenBrainz = numbersSource === 'listenbrainz';
   return (
     <>
       <section className={`artist-hero-section ${styles.premierHero}`}>
@@ -8028,6 +8218,7 @@ function LegacyArtistHero({
                 )}
               </div>
             ) : null}
+            {cleanBio ? <AboutSourceNote bioSource={bioSource} bioUrl={bioUrl} /> : null}
           </div>
         </div>
       </section>
@@ -8063,19 +8254,28 @@ function LegacyArtistHero({
               {listeners ? (
                 <div className="artist-hero-stat">
                   <span className="hero-stat-value">{formatCompactNumber(listeners)}</span>
-                  <span className="hero-stat-label">listeners</span>
+                  <span className="hero-stat-label">
+                    {fromListenBrainz ? 'ListenBrainz listeners' : 'listeners'}
+                  </span>
                 </div>
               ) : null}
               {playcount ? (
                 <div className="artist-hero-stat">
                   <span className="hero-stat-value">{formatCompactNumber(playcount)}</span>
-                  <span className="hero-stat-label">plays</span>
+                  <span className="hero-stat-label">
+                    {fromListenBrainz ? 'ListenBrainz listens' : 'plays'}
+                  </span>
                 </div>
               ) : null}
               {followers ? (
                 <div className="artist-hero-stat">
                   <span className="hero-stat-value">{formatCompactNumber(followers)}</span>
                   <span className="hero-stat-label">followers</span>
+                </div>
+              ) : fans ? (
+                <div className="artist-hero-stat">
+                  <span className="hero-stat-value">{formatCompactNumber(fans)}</span>
+                  <span className="hero-stat-label">Deezer fans</span>
                 </div>
               ) : null}
             </div>
@@ -8212,10 +8412,7 @@ function CatalogueArtistHero({
       imageUrl={artist.image_url ?? ''}
       remoteImageUrl={artist.remote_image_url}
       genres={artist.genres}
-      bio={artist.summary || info.data?.bio || null}
-      listeners={info.data?.listeners ?? null}
-      playcount={info.data?.playcount ?? null}
-      followers={info.data?.followers ?? null}
+      {...catalogueAbout(artist, info.data)}
       sections={[
         countOwned('Albums', artist.albums, otherSourceCounts?.album),
         countOwned('EPs', artist.eps ?? [], otherSourceCounts?.ep),
@@ -8271,6 +8468,7 @@ function CatalogueArtistHero({
             artistId={artist.id}
             artistName={artist.name}
             genres={artist.genres}
+            about={artist.about}
           />
         </>
       }
@@ -8324,6 +8522,14 @@ function AudiobookRouteSetting({ name }: { name: string }) {
   const routed = (query.data ?? []).includes(name);
   // switching off always works; switching on needs a folder to file into
   const noFolder = !useAudiobookFolderConfigured() && !routed;
+  // #2210: a member reads where it is filed; the switch is the admin's
+  if (!canWrite) {
+    return routed ? (
+      <SettingsGroup title="Audiobook library">
+        <p className={styles.muted}>Filed in the audiobook library.</p>
+      </SettingsGroup>
+    ) : null;
+  }
   return (
     <SettingsGroup title="Audiobook library">
       <div className={ls.rows}>
@@ -8763,7 +8969,9 @@ function ProfileWatchlistButton({
   const [watching, setWatching] = useState<boolean | null>(null);
   const [busy, setBusy] = useState(false);
   const [adding, setAdding] = useState(false);
-  const watchlistId = watchlist?.id ?? null;
+  // #2209: no Watchlist in the profile, no button (the server refuses it)
+  const mayWatch = usePermNotOff('music.watchlist');
+  const watchlistId = mayWatch ? (watchlist?.id ?? null) : null;
   const watchlistSource = watchlist?.source;
   useEffect(() => {
     setWatching(null);
@@ -8776,7 +8984,7 @@ function ProfileWatchlistButton({
       cancelled = true;
     };
   }, [watchlistId, watchlistSource]);
-  if (!watchlist) return null;
+  if (!watchlist || !mayWatch) return null;
   const toggle = async () => {
     if (busy) return;
     if (!watching) {
@@ -8833,7 +9041,9 @@ function ProviderArtistActions({
   const [downloading, setDownloading] = useState(false);
   // ask first says Request; can't request (#2166) has no button at all
   const musicGet = useMusicGet();
-  const watchlistId = watchlist?.id ?? null;
+  // #2209: no Watchlist in the profile, no Watchlist button
+  const mayWatch = usePermNotOff('music.watchlist');
+  const watchlistId = mayWatch ? (watchlist?.id ?? null) : null;
   const watchlistSource = watchlist?.source;
   useEffect(() => {
     setWatching(null);
@@ -8870,7 +9080,7 @@ function ProviderArtistActions({
   };
   return (
     <>
-      {watchlist ? (
+      {watchlist && mayWatch ? (
         <button
           type="button"
           className={`${watching ? 'library-artist-watchlist-btn watching' : 'library-artist-watchlist-btn'} ${styles.heroSecondary}`}
@@ -8921,6 +9131,9 @@ function ProviderArtistActions({
 function ArtistDetailView({ artistId }: { artistId: number }) {
   const navigate = useNavigate();
   const canWish = useLibraryV2CanWish();
+  // a member's discography refresh is upkeep the page does for them, not
+  // something they asked for: said, never kept in their notifications (#2191)
+  const upkeepIsTransient = !useLibraryV2CanWrite();
   const canSearch = useLibraryV2CanSearch();
   const canGrab = useLibraryV2CanGrab();
   const search = Route.useSearch();
@@ -9086,11 +9299,13 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
         publishBanner(sequence, {
           tone: 'ok',
           text: `Discography updated from ${stats.source ?? 'provider'}: ${stats.added ?? 0} new, ${stats.enriched ?? 0} matched.`,
+          transient: upkeepIsTransient,
         });
       } catch (e) {
         publishBanner(sequence, {
           tone: 'err',
           text: e instanceof Error ? e.message : 'Discography refresh failed',
+          transient: upkeepIsTransient,
         });
       }
     });
@@ -9463,6 +9678,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
             <StatusNotice
               tone={grabBanner.tone}
               text={grabBanner.text}
+              transient={grabBanner.transient}
               onDismiss={() => setGrabBanner(null)}
             />
           ) : null}
@@ -9887,7 +10103,12 @@ async function runScopedSearch(
   }
 }
 
-type ScopedSearchBanner = { tone: 'busy' | 'ok' | 'err'; text: string } | null;
+type ScopedSearchBanner = {
+  tone: 'busy' | 'ok' | 'err';
+  text: string;
+  /** not kept in the notification panel (#2191) */
+  transient?: boolean;
+} | null;
 
 /** Shared owner of the scoped-search banner (dd28-16).
  *
@@ -10142,6 +10363,8 @@ function AlbumBlock({
   queueStatusTracks: Record<number, LibraryV2QueueStatusEntry>;
 }) {
   const navigate = useNavigate();
+  const router = useRouter();
+  const pageSearch = Route.useSearch();
   const openTrackArtist = useOpenTrackArtist();
   const lockedIds = useLockedIds();
   const rename = useRenameCheck(artistId);
@@ -10160,6 +10383,12 @@ function AlbumBlock({
       search: (previous) => ({ ...previous, album: album.id }),
     });
   };
+  // #2204: the title is a real link to the album page, so a middle click or
+  // "open in new tab" works; the rest of the row still expands
+  const albumHref = router.buildLocation({
+    to: '/library',
+    search: { ...pageSearch, album: album.id },
+  }).href;
   const handleAlbumClick = () => {
     const now = Date.now();
     const previous = lastAlbumClickAt.current;
@@ -10187,18 +10416,28 @@ function AlbumBlock({
           thumb
         />
         <div className={styles.albumHeadMeta}>
-          <button
-            type="button"
+          <a
+            href={albumHref}
             className={styles.albumHeadTitleButton}
-            title="Click to expand or collapse · Double-click to open the album page"
-            aria-expanded={open}
+            title="Open the album page"
             onClick={(event) => {
               event.stopPropagation();
-              handleAlbumClick();
+              // a modified or non-primary click is the browser's: new tab, new window
+              if (
+                event.button !== 0 ||
+                event.metaKey ||
+                event.ctrlKey ||
+                event.shiftKey ||
+                event.altKey
+              ) {
+                return;
+              }
+              event.preventDefault();
+              openAlbumDetail();
             }}
           >
             {album.title}
-          </button>
+          </a>
           <AlbumQueuePill rollup={queueRollup} />
           <div className={styles.albumHeadFacts}>
             <AlbumSizeBadge bytes={album.total_size_bytes} />
@@ -10219,9 +10458,21 @@ function AlbumBlock({
         </div>
         {/* Sonarr's season toggle: in the middle of the row, out of the way of
             the wishlist heart at its start */}
-        <span className={`${styles.albumExpand} ${open ? styles.albumExpandOpen : ''}`}>
+        <button
+          type="button"
+          className={`${styles.albumExpand} ${open ? styles.albumExpandOpen : ''}`}
+          aria-expanded={open}
+          aria-label={
+            open ? `Hide the tracks of ${album.title}` : `Show the tracks of ${album.title}`
+          }
+          title={open ? 'Hide tracks' : 'Show tracks'}
+          onClick={(event) => {
+            event.stopPropagation();
+            setOpen((current) => !current);
+          }}
+        >
           <SvgIcon name="chevronDown" />
-        </span>
+        </button>
         <TrackPresence
           className={styles.albumTrackCount}
           present={album.tracks_present}
@@ -11383,6 +11634,9 @@ export function TrackTableBulkBar({
   const queryClient = useQueryClient();
   const canWrite = useLibraryV2CanWrite();
   const canWish = useLibraryV2CanWish();
+  // #2210: tags and ReplayGain go into files: a shared-library member's
+  // aren't theirs, so they never see those
+  const canTag = useLibraryV2CanTag();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [retry, setRetry] = useState<{
@@ -11496,15 +11750,16 @@ export function TrackTableBulkBar({
       >
         {busy === 'Remove from Wishlist' ? 'Removing…' : 'Remove from Wishlist'}
       </button>
-      <button
-        type="button"
-        className={styles.bulkBarButton}
-        data-requires-write=""
-        disabled={busy !== null || trackIds.length === 0 || !canWish}
-        onClick={() => setShowTagPreview(true)}
-      >
-        Write Tags
-      </button>
+      {canTag ? (
+        <button
+          type="button"
+          className={styles.bulkBarButton}
+          disabled={busy !== null || trackIds.length === 0}
+          onClick={() => setShowTagPreview(true)}
+        >
+          Write Tags
+        </button>
+      ) : null}
       {showTagPreview ? (
         <RetagModal
           entity="albums"
@@ -11514,72 +11769,78 @@ export function TrackTableBulkBar({
           onClose={() => setShowTagPreview(false)}
         />
       ) : null}
-      <button
-        type="button"
-        className={styles.bulkBarButton}
-        data-requires-write=""
-        disabled={busy !== null || trackIds.length === 0 || !canWish}
-        onClick={() =>
-          void run('ReplayGain', () =>
-            fanOut('ReplayGain', trackIds, (id) => analyzeLibraryV2TrackReplayGain(id)),
-          )
-        }
-      >
-        {busy === 'ReplayGain' ? 'Analyzing…' : 'ReplayGain'}
-      </button>
+      {canTag ? (
+        <button
+          type="button"
+          className={styles.bulkBarButton}
+          disabled={busy !== null || trackIds.length === 0}
+          onClick={() =>
+            void run('ReplayGain', () =>
+              fanOut('ReplayGain', trackIds, (id) => analyzeLibraryV2TrackReplayGain(id)),
+            )
+          }
+        >
+          {busy === 'ReplayGain' ? 'Analyzing…' : 'ReplayGain'}
+        </button>
+      ) : null}
       {/* UI-04 / iss29-C08: bulk quality-profile assignment. The backend and
           the single-track path both existed; the bulk bar was simply missing
           the control, so assigning a profile to 40 selected tracks meant 40
           trips through the per-row picker. "Inherit" posts `inherit: true`,
           the same payload the picker's inherit option sends. */}
-      <label className={styles.bulkBarSelect}>
-        <span className={styles.srOnly}>Quality profile</span>
-        <select
-          aria-label="Quality profile for the selected tracks"
-          data-requires-write=""
-          disabled={busy !== null || trackIds.length === 0 || !canWrite}
-          value=""
-          onChange={(event) => {
-            const raw = event.target.value;
-            event.target.value = '';
-            if (!raw) return;
-            const profileId = raw === 'inherit' ? null : Number(raw);
-            void run('Quality profile', () =>
-              // A track has no children to cascade to, and §52.3 keeps the
-              // profile choice orthogonal to wanted/monitoring intent.
-              fanOut('Quality profile', trackIds, (id) =>
-                setLibraryV2QualityProfile('tracks', id, profileId, false, false),
-              ),
-            );
-          }}
-        >
-          <option value="">{busy === 'Quality profile' ? 'Applying…' : 'Quality profile…'}</option>
-          <option value="inherit">Inherit from album</option>
-          {(bulkProfilesQuery.data ?? []).map((profile) => (
-            <option key={profile.id} value={profile.id}>
-              {profile.name}
+      {canWrite ? (
+        <label className={styles.bulkBarSelect}>
+          <span className={styles.srOnly}>Quality profile</span>
+          <select
+            aria-label="Quality profile for the selected tracks"
+            disabled={busy !== null || trackIds.length === 0}
+            value=""
+            onChange={(event) => {
+              const raw = event.target.value;
+              event.target.value = '';
+              if (!raw) return;
+              const profileId = raw === 'inherit' ? null : Number(raw);
+              void run('Quality profile', () =>
+                // A track has no children to cascade to, and §52.3 keeps the
+                // profile choice orthogonal to wanted/monitoring intent.
+                fanOut('Quality profile', trackIds, (id) =>
+                  setLibraryV2QualityProfile('tracks', id, profileId, false, false),
+                ),
+              );
+            }}
+          >
+            <option value="">
+              {busy === 'Quality profile' ? 'Applying…' : 'Quality profile…'}
             </option>
-          ))}
-        </select>
-      </label>
-      <button
-        type="button"
-        className={styles.bulkBarButton}
-        data-requires-write=""
-        disabled={busy !== null || trackIds.length === 0 || !canWrite}
-        onClick={() => setShowBulkEdit(true)}
-      >
-        Bulk edit…
-      </button>
-      <button
-        type="button"
-        className={`${styles.bulkBarButton} ${styles.bulkBarButtonDanger}`}
-        data-requires-write=""
-        disabled={busy !== null || fileIds.length === 0 || !canWrite}
-        onClick={() => setConfirmingDelete(true)}
-      >
-        Delete files…
-      </button>
+            <option value="inherit">Inherit from album</option>
+            {(bulkProfilesQuery.data ?? []).map((profile) => (
+              <option key={profile.id} value={profile.id}>
+                {profile.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
+      {canWrite ? (
+        <>
+          <button
+            type="button"
+            className={styles.bulkBarButton}
+            disabled={busy !== null || trackIds.length === 0}
+            onClick={() => setShowBulkEdit(true)}
+          >
+            Bulk edit…
+          </button>
+          <button
+            type="button"
+            className={`${styles.bulkBarButton} ${styles.bulkBarButtonDanger}`}
+            disabled={busy !== null || fileIds.length === 0}
+            onClick={() => setConfirmingDelete(true)}
+          >
+            Delete files…
+          </button>
+        </>
+      ) : null}
       <button type="button" className={styles.bulkBarClear} onClick={onClear}>
         Clear
       </button>
@@ -11593,7 +11854,11 @@ export function TrackTableBulkBar({
               // a retry needs what the action it retries needed
               disabled={
                 busy !== null ||
-                !(/^(Add to|Remove from) Wishlist$/.test(retry.label) ? canWish : canWrite)
+                !(/^(Add to|Remove from) Wishlist$/.test(retry.label)
+                  ? canWish
+                  : retry.label === 'ReplayGain'
+                    ? canTag
+                    : canWrite)
               }
               onClick={() =>
                 void run(`Retry ${retry.label}`, () => fanOut(retry.label, retry.ids, retry.apply))
@@ -12724,6 +12989,8 @@ const TRACK_LEVEL_COLUMNS = new Set<keyof LibraryV2TrackTableColumns>([
 ]);
 
 function TrackRow(props: TrackRowProps) {
+  // #2210: a member opens the track to read it, not to edit it
+  const canWrite = useLibraryV2CanWrite();
   const {
     track,
     albumTitle,
@@ -12792,7 +13059,11 @@ function TrackRow(props: TrackRowProps) {
                 <button
                   type="button"
                   className={`${styles.linkButton} ${styles.titleEditLink} ${missing ? styles.muted : ''}`}
-                  title="Edit track — overview, metadata & tags, lyrics and history"
+                  title={
+                    canWrite
+                      ? 'Edit track — overview, metadata & tags, lyrics and history'
+                      : 'Track details — overview, metadata & tags, lyrics and history'
+                  }
                   onClick={() => setDetailTab('overview')}
                 >
                   {label}
@@ -13260,12 +13531,11 @@ function TrackVersionLabel({ track }: { track: LibraryV2Track }) {
         <span className={styles.filePrimaryBadge}>
           {file.primary_manual ? 'primary · manual' : 'primary'}
         </span>
-      ) : file.file_state === 'active' ? (
+      ) : file.file_state === 'active' && canWrite ? (
         <button
           type="button"
           className={styles.fileMakePrimary}
-          data-requires-write=""
-          disabled={!canWrite || primary.isPending}
+          disabled={primary.isPending}
           title="Use this file for playback, the quality profile and the track editor"
           onClick={() => primary.mutate()}
         >
@@ -13478,12 +13748,22 @@ export function TrackReplayGainBadge({ track }: { track: LibraryV2Track }) {
       </span>
     );
   }
+  // #2210: a member sees that it's missing, with nothing to run
+  if (!canWrite) {
+    return (
+      <span
+        className={`${styles.featureTag} ${styles.featureMissing}`}
+        title="No ReplayGain in this track"
+      >
+        RG
+      </span>
+    );
+  }
   return (
     <button
       type="button"
       className={`${styles.featureTag} ${styles.featureMissing}`}
-      data-requires-write=""
-      disabled={mutation.isPending || !track.id || !canWrite}
+      disabled={mutation.isPending || !track.id}
       title={
         mutation.isError
           ? mutationErrorMessage(mutation.error, 'ReplayGain analysis failed')
@@ -13536,12 +13816,21 @@ export function TrackLyricsBadge({
       </button>
     );
   }
+  if (!canWrite) {
+    return (
+      <span
+        className={`${styles.featureTag} ${styles.featureMissing}`}
+        title="No lyrics in this track"
+      >
+        LR
+      </span>
+    );
+  }
   return (
     <button
       type="button"
       className={`${styles.featureTag} ${styles.featureMissing}`}
-      data-requires-write=""
-      disabled={mutation.isPending || !track.id || !canWrite}
+      disabled={mutation.isPending || !track.id}
       title={
         mutation.isError
           ? mutationErrorMessage(mutation.error, 'Lyrics fetch failed')
@@ -13771,13 +14060,18 @@ function TrackDetailButton({
   onClose: () => void;
   showButton?: boolean;
 }) {
+  const canWrite = useLibraryV2CanWrite();
   if (!track.id) return null;
   return (
     <>
       {showButton ? (
         <IconActionButton
-          icon="edit"
-          title="Edit track — overview, metadata & tags, lyrics and history"
+          icon={canWrite ? 'edit' : 'info'}
+          title={
+            canWrite
+              ? 'Edit track — overview, metadata & tags, lyrics and history'
+              : 'Track details — overview, metadata & tags, lyrics and history'
+          }
           onClick={() => onOpenTab('overview')}
         />
       ) : null}
@@ -13821,6 +14115,8 @@ function TrackDetailModal({
   onClose: () => void;
 }) {
   const [tab, setTab] = useState<TrackDetailTab>(initialTab);
+  // #2210: a member reads the track; editing it is the admin's
+  const canWrite = useLibraryV2CanWrite();
   const trackId = track.id as number; // TrackDetailButton only renders when track.id is set
   // Tags + Lyrics share one live file read; fetch once, lazily, on first visit
   // to either tab (avoids a mutagen file read for every track detail open).
@@ -13831,7 +14127,7 @@ function TrackDetailModal({
     fileId != null ? ` · ${(track.file?.format ?? '').toUpperCase() || 'this'} version` : '';
   return (
     <ModalShell
-      title={`Edit Track — ${track.title ?? albumTitle}`}
+      title={`${canWrite ? 'Edit Track' : 'Track'} — ${track.title ?? albumTitle}`}
       description={`${track.artists.map((artist) => artist.name).join(', ')} · ${albumTitle}${versionNote}`}
       className={styles.metadataEditorDialog}
       detail
@@ -13884,8 +14180,24 @@ function TrackDetailModal({
             {/* the library's values are what a retag writes; the file's are
                 what is in it now -- one page, so the two can be compared */}
             <section>
-              <h4 className={styles.fileTagGroupTitle}>Library metadata — written into the file</h4>
-              <TrackMetadataForm track={track} onSaved={onClose} />
+              <h4 className={styles.fileTagGroupTitle}>
+                {canWrite ? 'Library metadata — written into the file' : 'Library metadata'}
+              </h4>
+              {canWrite ? (
+                <TrackMetadataForm track={track} onSaved={onClose} />
+              ) : (
+                <ReadOnlyFields
+                  fields={[
+                    ['Title', track.title],
+                    ['Track number', track.track_number],
+                    ['Disc number', track.disc_number],
+                    ['BPM', track.bpm],
+                    ['Explicit', explicitText(track.explicit)],
+                    ['Style', track.style],
+                    ['Mood', track.mood],
+                  ]}
+                />
+              )}
             </section>
             <section>
               <h4 className={styles.fileTagGroupTitle}>File tags — in the file now</h4>
@@ -14641,6 +14953,7 @@ function TrackOverviewPanel({
 }) {
   const trackId = track.id as number;
   const deleteFileId = track.file?.file_id;
+  const canWrite = useLibraryV2CanWrite();
   return (
     <div className={styles.trackOverview}>
       <section className={styles.fileTagGroup}>
@@ -14671,6 +14984,7 @@ function TrackOverviewPanel({
               currentProfileSource={track.quality_profile_source}
               currentProfileExplicit={track.quality_profile_explicit}
               onSaved={onClose}
+              readOnly={!canWrite}
             />
           </div>
         </section>
@@ -15169,7 +15483,8 @@ export function LibraryMoreMenu() {
   const search = useGlobalAutomaticSearch();
   // Watch All adds to the caller's own watchlist: anyone who may wish, not
   // only the admin (a household member watches in the shared library)
-  const canWatch = useLibraryV2CanWish();
+  // #2209: a profile without the Watchlist gets no Watch All
+  const canWatch = useLibraryV2CanWatch();
   const moreQueryClient = useQueryClient();
   const [exporting, setExporting] = useState(false);
   const [watching, setWatching] = useState(false);
@@ -15230,16 +15545,19 @@ export function LibraryMoreMenu() {
                 },
               ]
             : []),
-          {
-            key: 'watch-all',
-            label: item(
-              'watch-all',
-              'Watch All',
-              'Add every artist in your library to your Watchlist.',
-            ),
-            disabled: !canWatch,
-            onSelect: () => setWatching(true),
-          },
+          ...(canWatch
+            ? [
+                {
+                  key: 'watch-all',
+                  label: item(
+                    'watch-all',
+                    'Watch All',
+                    'Add every artist in your library to your Watchlist.',
+                  ),
+                  onSelect: () => setWatching(true),
+                },
+              ]
+            : []),
           {
             key: 'export',
             label: item('export', 'Export artists', 'Save your artist list as JSON, CSV or text.'),

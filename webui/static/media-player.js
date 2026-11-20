@@ -634,6 +634,8 @@ function updateMediaScanFromData(data) {
     // On the tools page the React card announces it; everywhere else this is
     // the only messenger.
     if (typeof currentPage !== 'undefined' && currentPage === 'tools') return;
+    // the media server's scan is the admin's operational news (#2208)
+    if (typeof _statusViewerIsAdmin === 'function' && !_statusViewerIsAdmin()) return;
     showToast('✅ Media scan completed', 'success', 3000);
 }
 

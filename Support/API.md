@@ -130,11 +130,32 @@ What the server is doing is the admin's. A member's session is refused (`403`) t
 
 - `GET /api/system/stats` (downloads across the server, speed, uptime, memory) and its push, `dashboard:stats`, which only the admins' sockets get
 - `GET /api/repair/progress`, `GET /api/video/health`, `GET /api/video/bulk/status`
+- the enrichment workers, music and video: every `/api/enrichment/*` and `/api/video/enrichment/*` route (status, breakdown, unmatched, priority, pause, resume, retry), `GET /api/soulid/status`, `GET /api/hydrabase-worker/status`, and the `enrichment:<worker>` pushes, which only the admins' sockets get (`enrichment:repair` stays everyone's, the Tools page reads it)
 - the diagnostics: `GET /api/debug-info`, `GET /api/logs/tail`, `/api/settings/log-level`, `/api/help/health`, `/api/help/bundle`, `/api/help/logs*`
+- the spotify ban and the api rates: `GET /api/spotify/rate-limit-status`, `GET /api/rate-monitor/history/<service>`, and the `rate-monitor:update` push, which only the admins' sockets get
+
+Some answer a member with less instead of a `403`:
+
+- `GET /status` and the `status:update` push: a member's copy has no spotify ban (`rate_limited` false, `rate_limit` null, `post_ban_cooldown` 0) and no `enrichment`. The admins' sockets get the whole push, every member socket the trimmed one
+- `GET /api/database/stats` gives a member `artists`, `albums` and `tracks` of the library they browse, nothing else; the `dashboard:db_stats` push (size, path, scan times) only the admins' sockets get
+- `GET /api/video/dashboard` leaves `library.size_bytes` out for a member
 
 `GET /api/automations/progress` and the `automation:progress` push give a member the runs of their own automations only, never a system one.
 
 In the music library, `POST /api/library/v2/<entity>/<id>/search` (Automatic Search) and `/enhance` (Enhance Quality, Upgrade) download right away, so a profile that asks first is refused them; its way in is the Wishlist. `GET /api/library/v2/enabled` says what the caller may do: `can_wish`, `can_download`, and `can_grab` (an Interactive Search pick for a library row).
+
+### Approved requests that wait for a release pick (web UI routes)
+
+Each kind (music, movies, TV, audiobooks) can be set to have an admin pick the release instead of grabbing the best match. Everything starts on automatic. Music videos, YouTube videos and podcast episodes always download right away.
+
+- `GET /api/requests/acquisition`: `{modes: {music, movie, tv, audiobook}}`, each `auto` or `manual`, plus `may_change`. `PUT` (admin only) with `{modes: {movie: "manual"}}` changes the kinds it names; an unknown kind or mode is a `400`.
+- Every approve route takes `{"acquisition": "auto" | "manual"}` for that one request: `POST /api/requests/music/approve`, `POST /api/requests/media/<id>/approve` (books only, an episode is never held), `POST /api/video/requests/<id>/approve`. Approve all always uses the settings.
+- A held music request keeps its wishlist rows with `request_status = 'awaiting_selection'` and its history row in that status. A held book is a `media_requests` row in `awaiting_selection` and isn't on the wishlist yet. A held movie or episode is on the requester's wishlist with `awaiting_selection = 1`, its request row says `acquisition: "manual"`, and a held show doesn't join their watchlist. No automatic path takes a held row: the wishlist runs, retries, rss, search all and the download monitor's retries all leave it alone.
+- `GET /api/requests/awaiting` (admins, moderators): `{music: [groups], media: [books]}`, what the caller may pick (a moderator never their own). `GET /api/video/requests/awaiting`: `{titles: [{id, kind, tmdb_id, title, requesters, approved_at, seasons, downloading}]}`.
+- Music picks: `POST /api/requests/music/pick/inspect` `{profile_id, track_id}` streams every source's hits for one held track (searched as the requester), and `POST /api/requests/music/pick/download` `{profile_id, track_id, candidate, override?}` downloads that file into their library. The row stays held until the file lands, so a failed pick can be picked again.
+- Books: the release picker grabs with `POST /api/audiobooks/grab`, then `POST /api/requests/media/<id>/picked` moves the request on. Movies and TV: the video release picker's own `POST /api/video/downloads/grab`.
+- Download automatically instead: `POST /api/requests/music/awaiting/auto` `{profile_id, key}`, `POST /api/requests/media/<id>/auto`, `POST /api/video/requests/<id>/auto` (a show joins the watchlist then).
+- The requester's list says it too: music and book rows in status `awaiting_selection`, video rows with `awaiting_selection: true` (nothing picked yet) or `picking: true` (a picked release is downloading).
 
 ---
 
@@ -2539,6 +2560,14 @@ Which library a new title files into: a library picked for the grab (`video_libr
 - `GET /api/video/library/video-libraries`: `{libraries: [{id, name, kind}]}`, the usable ones, readable by any profile with video access (for the filters). `GET /api/video/library?kind=movies|shows&video_library=<id>` lists only titles whose files sit in that library. `GET /api/video/wishlist?kind=movie|show&video_library=<id>` lists only wishes that file there (a copy's library, else the title's pick, else where its last search filed it). `GET /api/video/downloads/active` rows carry `video_library_id` / `video_library_name` (by target folder).
 - `POST /api/video/downloads/quality/library` (admin): pick a title's library. Body: `{kind, media_id, media_source, tmdb_id, library_id}`, `library_id: 0` clears the pick. Answers with the same three fields.
 
+**Shelf Life** (admin only, every route under `/api/video/repair` is):
+
+- `POST /api/video/repair/shelf-life/plan` body `{target_gb?, ids?}`: the titles a cleanup would delete, lowest score first. With `target_gb` it stops once the total reaches it and never reaches over the line to make the number; with `ids` (finding ids) it plans exactly those. Every open finding is checked again as it plans (gathered and scored with the job's settings as they are now), and one that a gate holds or that no longer scores under today's threshold is left out. Answers `{items: [{id, kind, item_id, title, year, score, size_bytes}], total_bytes, target_bytes, short_bytes, candidates, skipped: [{id, title, year, reason}], threshold, enabled, recycling, keep_days, phrase}`. `score` is the fresh one and `size_bytes` is every copy the delete takes. While the job is switched off, `items` is empty and `error` says so. `400` for a `target_gb` that isn't a number over 0, or `ids` that isn't a list.
+- `POST /api/video/repair/shelf-life/delete` body `{ids, phrase}`: delete a batch in the background, each title through Delete Title (to the recycle bin). `phrase` must be exactly `delete N titles` (`delete 1 title` for one) with N the number of ids. Every id must be an open Shelf Life finding, the job must be on, and every title is checked again first: if any no longer holds, nothing starts and the `400` names each one and why. Answers `{started, total}`; follow it on `GET /api/video/repair/bulk-fix/status`. Right before each delete the server is asked again whether anyone is playing it.
+- `GET /api/video/repair/shelf-life/<movie|show>/<id>`: one title's stored result for its page: `{scored, score, gate, gate_text, reasons: [{signal, text}], scored_at, threshold, enabled, keep, can_keep}`. `404` when it isn't in the library.
+- `POST /api/video/repair/shelf-life/<movie|show>/<id>/keep` body `{keep: true|false}`: mark the title Keep (held by its TMDB id, so it survives a rescan) or take it off. Keep retires its open finding at once. `400` when `keep` isn't a boolean or the title has no TMDB match yet.
+- A single finding is approved with `POST /api/video/repair/findings/<id>/fix` body `{fix_action: "<the title, typed exactly>"}`. The generic bulk fix routes refuse a single `fix_action` for Shelf Life findings: one typed title never confirms more than one title.
+
 #### `GET /api/v1/video/calendar`
 
 Upcoming and recent episodes and releases. `start` and `end` as ISO dates.
@@ -2552,6 +2581,8 @@ For a calendar app, use the iCal feed instead: `GET /api/video/calendar/feed/<to
 File a request for an admin to approve. Body: `{"kind": "movie|show", "tmdb_id": 27205, "title": "Inception", "year"?: 2010, "note"?: "..."}`.
 
 #### `POST /api/v1/video/requests/<id>/approve`
+
+Optional body: `{"acquisition": "auto" | "manual"}` decides how this one gets its release. Left out, the kind's setting decides (see below). `manual` holds the request until someone picks a release. The answer says which way it went: `"acquisition": "auto" | "manual"`.
 
 #### `POST /api/v1/video/requests/<id>/deny`
 

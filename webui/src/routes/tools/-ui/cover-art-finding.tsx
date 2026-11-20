@@ -3,15 +3,17 @@
  *
  * Four tiles side by side: the cover saved in the library, the cover inside
  * the audio files, the cover file in the album folder, and the cover a source
- * found, each named, each an empty box when there is none. Under them, what
- * Apply Art does in each place with the user's settings, read live from the
- * server so it matches the fix. Change cover opens the album page's own
- * picker for a cover of your choosing. An artist photo, only suggested when
- * the artist has none, sits apart and is never part of Apply Art.
+ * found, each named, each an empty box when there is none. Every tile with a
+ * picture can be picked (#2202): Apply Art writes the picked cover where one
+ * is missing, the best one there is picked to start with. Under them, what
+ * Apply Art does in each place with that pick and the user's settings, read
+ * live from the server so it matches the fix. Change cover opens the album
+ * page's own picker for any other cover. An artist photo, only suggested
+ * when the artist has none, sits apart and is never part of Apply Art.
  */
 import { useEffect, useState } from 'react';
 
-import type { CoverFindingState, CoverPlanStep } from '../-tools.api';
+import type { CoverFindingState, CoverPick, CoverPlanStep } from '../-tools.api';
 import type { RepairFinding } from '../-tools.types';
 
 import { fetchCoverFindingState, resolveFinding } from '../-tools.api';
@@ -35,8 +37,12 @@ function coverWords(why: string, source: string): string {
   if (why === 'chosen') return 'the cover you picked';
   if (why === 'library') return "the library's cover";
   if (why === 'files') return 'the cover inside the files';
+  if (why === 'folder') return "the album folder's cover";
   return `the ${source || 'found'} cover`;
 }
+
+/** an apply target for one tile: 'album:folder' (#2202) */
+export type CoverApplyTarget = 'album' | 'artist' | `album:${CoverPick}`;
 
 const ACTION_CLASS: Record<CoverPlanStep['action'], string | undefined> = {
   write: styles.write,
@@ -56,7 +62,14 @@ export function coverPlanLine(step: CoverPlanStep, source: string): string {
   if (place === 'library') {
     if (why === 'chosen') return 'Keeps the cover you picked.';
     if (action === 'keep') return 'Already has a cover. Kept as it is.';
+    if (action === 'write' && step.broken)
+      return `Its saved cover no longer loads. Saves the ${source || 'found'} cover in its place.`;
+    if (action === 'write' && step.replace)
+      return `Replaces its cover with the ${source || 'found'} cover, the same as Change cover.`;
     if (action === 'write') return `Saves the ${source || 'found'} cover.`;
+    if (why === 'broken')
+      return 'Its saved cover no longer loads. Change cover lets you pick a new one.';
+    if (why === 'local') return 'Stays without a saved cover. Change cover saves one.';
     return 'Stays without a saved cover: no source had one. Change cover lets you pick one.';
   }
   if (place === 'files') {
@@ -82,29 +95,69 @@ function CoverTile({
   note,
   empty,
   round,
+  picked,
+  onPick,
+  onBroken,
 }: {
   label: string;
   url: string | null;
   note: string;
   empty: string;
   round?: boolean;
+  /** set on a tile that can be picked: whether it is the pick */
+  picked?: boolean;
+  onPick?: () => void;
+  onBroken?: () => void;
 }) {
   const [broken, setBroken] = useState(false);
   useEffect(() => setBroken(false), [url]);
   const shown = url && !broken;
+  const pickable = Boolean(shown && onPick);
+  const frame = (
+    <div className={`${styles.frame}${round ? ` ${styles.round}` : ''}`}>
+      {shown ? (
+        <img
+          src={url}
+          alt={`${label}: ${note}`}
+          loading="lazy"
+          onError={() => {
+            setBroken(true);
+            onBroken?.();
+          }}
+        />
+      ) : (
+        <span className={styles.empty}>{empty}</span>
+      )}
+      {pickable && picked ? <span className={styles.pickedMark}>Using this</span> : null}
+    </div>
+  );
+  const caption = (
+    <figcaption>
+      <span className={styles.place}>{label}</span>
+      <span className={styles.note}>{shown ? note : ' '}</span>
+    </figcaption>
+  );
+  if (pickable) {
+    return (
+      <figure className={`${styles.tile} ${styles.pickable}${picked ? ` ${styles.picked}` : ''}`}>
+        <button
+          type="button"
+          role="radio"
+          aria-checked={Boolean(picked)}
+          aria-label={`Use the cover ${label.charAt(0).toLowerCase()}${label.slice(1)}`}
+          className={styles.pick}
+          onClick={onPick}
+        >
+          {frame}
+        </button>
+        {caption}
+      </figure>
+    );
+  }
   return (
     <figure className={styles.tile}>
-      <div className={`${styles.frame}${round ? ` ${styles.round}` : ''}`}>
-        {shown ? (
-          <img src={url} alt={`${label}: ${note}`} loading="lazy" onError={() => setBroken(true)} />
-        ) : (
-          <span className={styles.empty}>{empty}</span>
-        )}
-      </div>
-      <figcaption>
-        <span className={styles.place}>{label}</span>
-        <span className={styles.note}>{shown ? note : ' '}</span>
-      </figcaption>
+      {frame}
+      {caption}
     </figure>
   );
 }
@@ -113,7 +166,12 @@ function CoverTile({
 function stateFromDetails(details: Details): CoverFindingState {
   return {
     album_id: lib2AlbumId(details) ?? 0,
-    library: { has: details.db_missing === false, locked: false, url: null },
+    library: {
+      has: details.db_missing === false,
+      locked: false,
+      broken: details.library_cover_broken === true,
+      url: null,
+    },
     files: {
       with: details.embed_missing === false ? 1 : 0,
       without: details.embed_missing === true ? 1 : 0,
@@ -127,6 +185,9 @@ function stateFromDetails(details: Details): CoverFindingState {
     },
     settings: { embed: true, sidecar: true },
     plan: [],
+    choices: [],
+    pick: null,
+    plans: {},
   };
 }
 
@@ -136,7 +197,7 @@ export function CoverArtFinding({
   onChanged,
 }: {
   finding: RepairFinding;
-  onApplyCoverArt: (findingId: number, target: 'album' | 'artist') => void;
+  onApplyCoverArt: (findingId: number, target: CoverApplyTarget) => void;
   /** after Change cover applied a pick: the finding is done, reload the list */
   onChanged?: () => void;
 }) {
@@ -160,8 +221,33 @@ export function CoverArtFinding({
     };
   }, [finding.id]);
 
+  const [chosen, setChosen] = useState<CoverPick | null>(null);
+  const [unloaded, setUnloaded] = useState<CoverPick[]>([]);
+  useEffect(() => {
+    setChosen(null);
+    setUnloaded([]);
+  }, [finding.id]);
+
   const state = live ?? stateFromDetails(details);
   const source = providerName(state.found.source || details.artwork_source);
+  // #2202: every tile with a picture is a pick; one that fails to load is not
+  const choices = state.choices.filter((pick) => !unloaded.includes(pick));
+  const pick: CoverPick | null =
+    chosen && choices.includes(chosen)
+      ? chosen
+      : state.pick && choices.includes(state.pick)
+        ? state.pick
+        : (choices[0] ?? null);
+  const plan = (pick && state.plans[pick]) || state.plan;
+  const nothingToApply = Boolean(live) && choices.length === 0;
+  const tile = (place: CoverPick) =>
+    pending && choices.includes(place)
+      ? {
+          picked: pick === place,
+          onPick: () => setChosen(place),
+          onBroken: () => setUnloaded((gone) => (gone.includes(place) ? gone : [...gone, place])),
+        }
+      : {};
   const fileTotal = state.files.with + state.files.without;
   const foundLabel = state.found.url && source ? `Found on ${source}` : 'Found by a source';
 
@@ -171,12 +257,23 @@ export function CoverArtFinding({
 
   return (
     <div className={styles.panel}>
-      <div className={styles.tiles}>
+      <div
+        className={styles.tiles}
+        role={choices.length && pending ? 'radiogroup' : undefined}
+        aria-label={choices.length && pending ? 'Cover Apply Art uses' : undefined}
+      >
         <CoverTile
           label="In the library"
           url={state.library.url}
           note={state.library.locked ? 'The cover you picked' : 'Saved cover'}
-          empty={state.library.has && !live ? 'Has a cover' : 'No saved cover'}
+          empty={
+            state.library.broken
+              ? 'Saved cover no longer loads'
+              : state.library.has && !live
+                ? 'Has a cover'
+                : 'No saved cover'
+          }
+          {...tile('library')}
         />
         <CoverTile
           label="In the audio files"
@@ -187,27 +284,30 @@ export function CoverArtFinding({
               : 'Embedded cover'
           }
           empty={state.files.with && !live ? 'Has a cover' : 'No cover inside'}
+          {...tile('files')}
         />
         <CoverTile
           label="In the album folder"
           url={state.folder.url}
           note={state.folder.file || 'Cover file'}
           empty={state.folder.exists ? 'No cover file' : 'Folder not reachable'}
+          {...tile('folder')}
         />
         <CoverTile
           label={foundLabel}
           url={state.found.url}
           note={source ? `From ${source}` : 'Found cover'}
           empty={state.library.has ? 'Not searched: the library has one' : 'Nothing found'}
+          {...tile('found')}
         />
       </div>
 
       {pending ? (
         <section className={styles.plan} aria-label="What Apply Art does">
           <h4>What Apply Art does</h4>
-          {state.plan.length ? (
+          {plan.length ? (
             <ul>
-              {state.plan.map((step) => (
+              {plan.map((step) => (
                 <li key={step.place} className={ACTION_CLASS[step.action]}>
                   <span className={styles.planPlace}>{PLACE_NAMES[step.place]}</span>
                   <span>{coverPlanLine(step, source)}</span>
@@ -225,7 +325,8 @@ export function CoverArtFinding({
             <button
               className="repair-art-apply-btn"
               type="button"
-              onClick={() => onApplyCoverArt(finding.id, 'album')}
+              disabled={nothingToApply}
+              onClick={() => onApplyCoverArt(finding.id, pick ? `album:${pick}` : 'album')}
             >
               Apply Art
             </button>
@@ -239,8 +340,13 @@ export function CoverArtFinding({
               </button>
             ) : null}
             <span className={styles.actionsNote}>
-              Change cover picks any cover, the same as on the album page. It replaces the library
-              cover and is written to the files and the folder too.
+              {nothingToApply
+                ? 'There is no cover here to apply. '
+                : choices.length > 1
+                  ? 'Click a cover above to use it instead. '
+                  : ''}
+              Change cover picks any other cover, the same as on the album page. It replaces the
+              library cover and is written to the files and the folder too.
             </span>
           </div>
         </section>

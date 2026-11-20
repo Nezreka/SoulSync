@@ -40,7 +40,7 @@ function offline() {
 let state: DashboardHeaderState;
 
 function Probe() {
-  state = useDashboardHeader();
+  state = useDashboardHeader({ workers: true });
   return null;
 }
 
@@ -419,5 +419,37 @@ describe('fallback polling', () => {
       await vi.advanceTimersByTimeAsync(30000);
     });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+// #2196: a member's header never asks the worker routes (they refuse a
+// member) or dev mode for the Hydrabase orb; the counts are still theirs.
+describe('a member (#2196)', () => {
+  function MemberProbe() {
+    state = useDashboardHeader({ workers: false });
+    return null;
+  }
+
+  it('asks no worker route, now or on the fallback poll', async () => {
+    routes({});
+    vi.useFakeTimers();
+    try {
+      await act(async () => {
+        render(<MemberProbe />);
+      });
+      await act(async () => {
+        vi.advanceTimersByTime(25000);
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+    const asked = fetchMock.mock.calls.map((call) => String(call[0]));
+    expect(
+      asked.filter((url) =>
+        /\/api\/(enrichment|hydrabase-worker|soulid|dev-mode|repair)/.test(url),
+      ),
+    ).toEqual([]);
+    // the watchlist and wishlist counts are everyone's
+    expect(asked.some((url) => url.includes('wishlist'))).toBe(true);
   });
 });

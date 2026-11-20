@@ -10,6 +10,13 @@
   min-width: 0;
 }
 
+.headActions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 /* a member's request limit, quiet under the subtitle */
 .quota {
   margin: 4px 0 0;
@@ -151,6 +158,16 @@
   color: rgba(147, 197, 253, 0.85);
 }
 
+/* approved, held until someone picks the release (#2199): it reads as a
+   sentence for the requester, so it may wrap */
+.status[data-status='awaiting_selection'] {
+  color: rgb(var(--gold-rgb));
+  white-space: normal;
+  max-width: 190px;
+  text-align: right;
+  line-height: 1.35;
+}
+
 .status[data-status='available'] {
   color: rgb(var(--accent-light-rgb));
 }
@@ -226,7 +243,112 @@
   cursor: pointer;
 }
 
+/* ── the pick queue (#2199) ── */
+.pickIntro {
+  margin: 0 0 16px;
+  max-width: 640px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--white-a55);
+}
+
+.pickTargets {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  max-width: 320px;
+}
+
+.pickTracks {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-top: 1px solid var(--white-a06);
+}
+
+.pickTrack {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--white-a04);
+  font-size: 13px;
+  color: var(--white-a75);
+}
+
+.pickTrackTitle {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── approval settings ── */
+.modeList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.modeRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--white-a06);
+}
+
+.modeRow:last-child {
+  border-bottom: 0;
+}
+
+.modeText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.modeLabel {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--white-a90);
+}
+
+.modeHint {
+  font-size: 12.5px;
+  color: var(--white-a45);
+}
+
+.modeNote {
+  margin: 14px 0 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--white-a50);
+}
+
 @media (max-width: 640px) {
+  .head {
+    flex-wrap: wrap;
+  }
+
+  .modeRow {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .pickTargets {
+    max-width: none;
+  }
+
   .row {
     flex-wrap: wrap;
   }

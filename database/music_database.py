@@ -9,6 +9,7 @@ import re
 import sys
 import threading
 import time
+from contextlib import closing
 from functools import lru_cache
 from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any, Tuple, Union
@@ -74,6 +75,34 @@ _PLANNER_ANALYSIS_LIMIT = 1000
 _PLANNER_STATS_MIN_ROWS = 1000
 _planner_stats_lock = threading.Lock()
 _planner_stats_threads = {}
+
+
+def _env_mb(name: str, default: int) -> int:
+    try:
+        return max(0, int(os.environ.get(name, default)))
+    except (TypeError, ValueError):
+        return default
+
+
+# per-connection tuning (#2205, a 47 GB library with a 2.3 GB wal).
+# journal_size_limit: after a checkpoint resets the wal, the file is cut back
+# to this size. without it the wal keeps whatever size its busiest moment
+# grew it to, forever, and every reader maps that index.
+DB_JOURNAL_SIZE_LIMIT_MB = _env_mb("SOULSYNC_DB_WAL_LIMIT_MB", 64)
+# page cache per connection. sqlite's default is 2 MB; a big library's indexes
+# don't fit. kept modest: the pool holds up to 16 idle connections on a NAS
+DB_CACHE_MB = _env_mb("SOULSYNC_DB_CACHE_MB", 8)
+# memory-mapped reads, off unless asked: some docker/NAS volumes (network
+# shares, some fuse mounts) don't map safely
+DB_MMAP_MB = _env_mb("SOULSYNC_DB_MMAP_MB", 0)
+
+
+def _apply_tuning_pragmas(connection) -> None:
+    connection.execute(f"PRAGMA journal_size_limit = {DB_JOURNAL_SIZE_LIMIT_MB * 1024 * 1024}")
+    if DB_CACHE_MB:
+        connection.execute(f"PRAGMA cache_size = -{DB_CACHE_MB * 1024}")
+    if DB_MMAP_MB:
+        connection.execute(f"PRAGMA mmap_size = {DB_MMAP_MB * 1024 * 1024}")
 
 
 _CONNECTION_PLUMBING = frozenset({'_open_connection', '_get_connection', 'acquire'})
@@ -939,6 +968,7 @@ class MusicDatabase:
                 journal_mode = connection.execute("PRAGMA journal_mode").fetchone()
                 if journal_mode and str(journal_mode[0]).lower() == "wal":
                     connection.execute("PRAGMA synchronous = NORMAL")
+                _apply_tuning_pragmas(connection)
                 # NOT `PRAGMA journal_mode = WAL` here. wal mode is persistent in
                 # the file and is set once per process in _ensure_wal_mode; the
                 # pragma takes a lock, and on an install with enrichment
@@ -1651,6 +1681,8 @@ class MusicDatabase:
             # people and permissions (#2166): templates, policy, personal
             # changes. after every profile column above it reads
             self._add_permission_layers(cursor)
+            # audiobook and podcast episode asks (#2188)
+            self._ensure_media_request_schema(cursor)
             self._revoke_stale_device_rows(cursor)
             self._add_own_library_columns(cursor)
             self._repair_own_jellyfin_artist_ids(cursor)
@@ -1681,6 +1713,14 @@ class MusicDatabase:
             # Universal metadata cache (Spotify + iTunes API responses)
             self._add_metadata_cache_tables(cursor)
             self._ensure_metadata_cache_indexes(cursor)
+
+            # remembered last.fm / listenbrainz / deezer answers, so a lapsed
+            # last.fm key does not empty the features that read them
+            try:
+                from core.provider_cache import ensure_schema as _ensure_provider_cache
+                _ensure_provider_cache(cursor)
+            except Exception as e:
+                logger.error(f"Error creating provider_response_cache: {e}")
 
             # Repair worker v2 tables (findings + job runs)
             self._add_repair_worker_tables(cursor)
@@ -4991,6 +5031,10 @@ class MusicDatabase:
             """)
             
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_mb_cache_entity ON musicbrainz_cache (entity_type, entity_name)")
+            # the housekeeping prune of stale lookups (#2205, core/db_housekeeping):
+            # without it each pass read the whole table, json and all
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_mb_cache_stale ON musicbrainz_cache (last_updated) "
+                           "WHERE entity_type IN ('recording', 'release')")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_mb_cache_mbid ON musicbrainz_cache (musicbrainz_id)")
             # Partial index for failed lookups — speeds up the management modal queries
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_mb_cache_failed ON musicbrainz_cache (entity_type, last_updated) WHERE musicbrainz_id IS NULL")
@@ -9128,6 +9172,10 @@ class MusicDatabase:
             cursor.execute(
                 "CREATE INDEX IF NOT EXISTS idx_rf_open_counts "
                 "ON repair_findings (status, job_id, finding_type, severity)")
+            # the housekeeping prune of old resolved findings (#2205)
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_rf_resolved_age "
+                "ON repair_findings (resolved_at) WHERE status = 'resolved'")
             cursor.execute(
                 "CREATE INDEX IF NOT EXISTS idx_rf_manual_conflict "
                 "ON repair_findings (finding_type) WHERE status = 'pending' "
@@ -16984,49 +17032,72 @@ class MusicDatabase:
         by writers outside Library v2 look. Anything that names a *different*
         album is left alone.
         """
+        removed = self.remove_releases_from_wishlist(
+            [(spotify_track_id, album_id)], profile_id=profile_id,
+            raise_on_error=raise_on_error)
+        return bool(removed and removed[0])
+
+    def remove_releases_from_wishlist(self, releases, profile_id: int = 1,
+                                      raise_on_error: bool = False) -> List[bool]:
+        """:meth:`remove_release_from_wishlist` for many ``(track, album)``
+        releases on one connection and one commit, in order.
+
+        a watchlist removal of many artists withdraws thousands of releases;
+        one connection and one commit each was most of its 70 s (#2200).
+        Returns one removed-or-not per release; on an error nothing is
+        committed and ``[]`` comes back (or the error, with raise_on_error).
+        """
         try:
             from core.wishlist.identity import wishlist_row_key
+            from core.library2.catalogue_identity import merged_wishlist_key
 
-            track = str(spotify_track_id or "").strip()
-            if not track:
-                return False
-            album = str(album_id or "").strip()
-            release_key = wishlist_row_key(track, album)
-            with self._get_connection() as conn:
+            results: List[bool] = []
+            with closing(self._get_connection()) as conn:
                 cursor = conn.cursor()
-                doomed = [release_key]
-                if release_key != track:
-                    row = cursor.execute(
-                        "SELECT id, spotify_data FROM wishlist_tracks "
-                        "WHERE spotify_track_id=? AND profile_id=?",
-                        (track, profile_id)).fetchone()
-                    if row is not None:
-                        try:
-                            stored = json.loads(row['spotify_data'] or '{}')
-                            stored_album = str(
-                                (stored.get('album') or {}).get('id') or '').strip()
-                        except Exception:
-                            stored_album = ''
-                        if stored_album in ('', album):
-                            doomed.append(track)
-                from core.library2.catalogue_identity import merged_wishlist_key
-                doomed.append(merged_wishlist_key(conn, release_key, profile_id) or release_key)
-                marks = ",".join("?" for _ in doomed)
-                cursor.execute(
-                    f"DELETE FROM wishlist_tracks WHERE profile_id=? "
-                    f"AND spotify_track_id IN ({marks})",
-                    (profile_id, *doomed))
+                for spotify_track_id, album_id in releases:
+                    track = str(spotify_track_id or "").strip()
+                    if not track:
+                        results.append(False)
+                        continue
+                    album = str(album_id or "").strip()
+                    release_key = wishlist_row_key(track, album)
+                    doomed = [release_key]
+                    if release_key != track:
+                        row = cursor.execute(
+                            "SELECT id, spotify_data FROM wishlist_tracks "
+                            "WHERE spotify_track_id=? AND profile_id=?",
+                            (track, profile_id)).fetchone()
+                        if row is not None:
+                            try:
+                                stored = json.loads(row['spotify_data'] or '{}')
+                                stored_album = str(
+                                    (stored.get('album') or {}).get('id') or '').strip()
+                            except Exception:
+                                stored_album = ''
+                            if stored_album in ('', album):
+                                doomed.append(track)
+                    doomed.append(merged_wishlist_key(conn, release_key, profile_id) or release_key)
+                    marks = ",".join("?" for _ in doomed)
+                    cursor.execute(
+                        f"DELETE FROM wishlist_tracks WHERE profile_id=? "
+                        f"AND spotify_track_id IN ({marks})",
+                        (profile_id, *doomed))
+                    if cursor.rowcount > 0:
+                        logger.info("Removed wishlist release: %s", release_key)
+                        results.append(True)
+                    else:
+                        logger.debug("Wishlist release not found: %s", release_key)
+                        results.append(False)
+                    if len(results) % 200 == 0:
+                        # a long write transaction slows every read in it
+                        conn.commit()
                 conn.commit()
-                if cursor.rowcount > 0:
-                    logger.info("Removed wishlist release: %s", release_key)
-                    return True
-                logger.debug("Wishlist release not found: %s", release_key)
-                return False
+            return results
         except Exception as e:
             logger.error(f"Error removing wishlist release: {e}")
             if raise_on_error:
                 raise
-            return False
+            return []
 
     def purge_podcast_tracks_from_wishlist(self) -> int:
         """Purge any podcast tracks that leaked into wishlist_tracks."""
@@ -17920,13 +17991,18 @@ class MusicDatabase:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
 
-                explicit_col = ('quality_profile_explicit' if 'quality_profile_explicit' in {
-                    c[1] for c in cursor.execute("PRAGMA table_info(wishlist_tracks)").fetchall()}
-                    else '0 AS quality_profile_explicit')
+                wl_cols = {c[1] for c in cursor.execute("PRAGMA table_info(wishlist_tracks)").fetchall()}
+                explicit_col = ('quality_profile_explicit' if 'quality_profile_explicit' in wl_cols
+                                else '0 AS quality_profile_explicit')
+                # a request held for a release pick (#2199) says so: the
+                # download feeds leave it out (core/wishlist/service.py)
+                request_col = ('request_status' if 'request_status' in wl_cols
+                               else 'NULL AS request_status')
                 query = f"""
                     SELECT id, spotify_track_id, spotify_data, failure_reason, retry_count,
                            last_attempted, date_added, source_type, source_info,
-                           quality_profile_id, {explicit_col}, musicbrainz_release_group_id
+                           quality_profile_id, {explicit_col}, musicbrainz_release_group_id,
+                           {request_col}
                     FROM wishlist_tracks
                     WHERE profile_id = ?
                 """
@@ -17990,6 +18066,7 @@ class MusicDatabase:
                             'quality_profile_explicit': bool(row['quality_profile_explicit']),
                             # filled in the background by the MusicBrainz worker
                             'musicbrainz_release_group_id': row['musicbrainz_release_group_id'],
+                            'request_status': row['request_status'],
                         })
                     except json.JSONDecodeError as e:
                         # Naming the row matters: a skipped row still counts in
@@ -18597,7 +18674,7 @@ class MusicDatabase:
                                      raise_on_error: bool = False, source: str = None) -> bool:
         """Remove an artist from the watchlist (checks cross-provider artist IDs)"""
         try:
-            with self._get_connection() as conn:
+            with closing(self._get_connection()) as conn:
                 cursor = conn.cursor()
 
                 # Get artist name for logging (check all ID columns)
@@ -18650,7 +18727,7 @@ class MusicDatabase:
         or name. Returns ``None`` when the id is not on the watchlist.
         """
         try:
-            with self._get_connection() as conn:
+            with closing(self._get_connection()) as conn:
                 cursor = conn.cursor()
                 cursor.execute("PRAGMA table_info(watchlist_artists)")
                 cols = {c[1] for c in cursor.fetchall()}
@@ -28950,7 +29027,7 @@ class MusicDatabase:
                 artist TEXT,
                 image_url TEXT,
                 tracks TEXT NOT NULL DEFAULT '[]',  -- [{id, title, artist}]
-                status TEXT NOT NULL,               -- approved | available | declined | removed
+                status TEXT NOT NULL,               -- awaiting_selection | approved | available | declined | removed
                 admin_response TEXT,
                 resolved_by INTEGER,
                 resolved_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -29078,11 +29155,14 @@ class MusicDatabase:
             logger.error("Error reading pending music requests: %s", e)
             return []
 
-    def approve_request_rows(self, profile_id: int, track_ids: List[str]) -> int:
+    def approve_request_rows(self, profile_id: int, track_ids: List[str],
+                             status: str = 'approved') -> int:
         """flip pending rows to approved; the scheduled run picks them up.
-        only rows still pending change, so a second approve is a no-op."""
+        only rows still pending change, so a second approve is a no-op.
+        ``status='awaiting_selection'`` approves them on hold for a release
+        pick (#2199): no automatic pass downloads a held row."""
         ids = [str(t) for t in track_ids or [] if t]
-        if not ids:
+        if not ids or status not in ('approved', 'awaiting_selection'):
             return 0
         try:
             with self._get_connection() as conn:
@@ -29092,15 +29172,79 @@ class MusicDatabase:
                 ids = [merged_wishlist_key(conn, tid, int(profile_id)) or tid for tid in ids]
                 ph = ','.join('?' * len(ids))
                 cursor.execute(
-                    f"UPDATE wishlist_tracks SET request_status = 'approved', "
+                    f"UPDATE wishlist_tracks SET request_status = ?, "
                     f"request_resolved_at = CURRENT_TIMESTAMP "
                     f"WHERE profile_id = ? AND request_status IS NULL AND spotify_track_id IN ({ph})",
-                    [int(profile_id)] + ids)
+                    [status, int(profile_id)] + ids)
                 conn.commit()
                 return cursor.rowcount
         except Exception as e:
             logger.error("Error approving music request rows: %s", e)
             return 0
+
+    def get_awaiting_request_rows(self, profile_id: int) -> List[Dict[str, Any]]:
+        """the approved rows of one profile still waiting for a release pick
+        (#2199), newest first. same shape as get_pending_request_rows."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                self._ensure_music_request_schema(cursor)
+                cursor.execute(
+                    "SELECT spotify_track_id, spotify_data, source_type, date_added, request_resolved_at "
+                    "FROM wishlist_tracks WHERE profile_id = ? AND request_status = 'awaiting_selection' "
+                    "ORDER BY date_added DESC", (int(profile_id),))
+                out = []
+                for row in cursor.fetchall():
+                    try:
+                        data = json.loads(row['spotify_data'])
+                    except (ValueError, TypeError):
+                        data = {}
+                    out.append({'spotify_track_id': row['spotify_track_id'], 'spotify_data': data,
+                                'source_type': row['source_type'], 'date_added': row['date_added'],
+                                'approved_at': row['request_resolved_at']})
+                return out
+        except Exception as e:
+            logger.error("Error reading music requests waiting for a pick: %s", e)
+            return []
+
+    def release_awaiting_request_rows(self, profile_id: int, track_ids: List[str]) -> int:
+        """held rows go to the automatic pass after all ("download it
+        automatically instead"): awaiting_selection -> approved."""
+        ids = [str(t) for t in track_ids or [] if t]
+        if not ids:
+            return 0
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                self._ensure_music_request_schema(cursor)
+                ph = ','.join('?' * len(ids))
+                cursor.execute(
+                    f"UPDATE wishlist_tracks SET request_status = 'approved' WHERE profile_id = ? "
+                    f"AND request_status = 'awaiting_selection' AND spotify_track_id IN ({ph})",
+                    [int(profile_id)] + ids)
+                conn.commit()
+                return cursor.rowcount
+        except Exception as e:
+            logger.error("Error releasing held music request rows: %s", e)
+            return 0
+
+    def music_request_picked(self, profile_id: int, group_key: str) -> bool:
+        """a held request's history row moves on once a release was picked:
+        awaiting_selection -> approved, and the requester's badge lights up.
+        False when it had moved already (a second pick from the same album)."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                self._ensure_music_request_schema(cursor)
+                cursor.execute(
+                    "UPDATE music_requests SET status = 'approved', seen_at = NULL "
+                    "WHERE profile_id = ? AND group_key = ? AND status = 'awaiting_selection'",
+                    (int(profile_id), str(group_key)))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error("Error moving held music request %s on: %s", group_key, e)
+            return False
 
     def wishlist_has_track(self, profile_id: int, track_id: str) -> bool:
         try:
@@ -29165,8 +29309,8 @@ class MusicDatabase:
             return []
 
     def set_music_request_status(self, request_id: int, status: str) -> bool:
-        """approved -> available | removed, stamping available_at and clearing
-        seen_at so the requester's badge lights up."""
+        """approved (or held for a pick) -> available | removed, stamping
+        available_at and clearing seen_at so the requester's badge lights up."""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -29174,7 +29318,8 @@ class MusicDatabase:
                 cursor.execute(
                     "UPDATE music_requests SET status = ?, seen_at = NULL, "
                     "available_at = CASE WHEN ? = 'available' THEN CURRENT_TIMESTAMP ELSE available_at END "
-                    "WHERE id = ? AND status = 'approved'", (status, status, int(request_id)))
+                    "WHERE id = ? AND status IN ('approved', 'awaiting_selection')",
+                    (status, status, int(request_id)))
                 conn.commit()
                 return cursor.rowcount > 0
         except Exception as e:
@@ -29427,6 +29572,194 @@ class MusicDatabase:
             (int(profile_id), window, int(profile_id), window))
         row = cursor.fetchone()
         return int(row[0]) if row else 0
+
+    # ── audiobook and podcast episode requests (#2188) ──────────────────
+    # a profile on Ask first for books or episodes files one of these; an
+    # admin's approval puts the book on their wishlist (or starts the
+    # episode). the row is both the queue and the history, like videos.
+
+    def _ensure_media_request_schema(self, cursor) -> None:
+        """idempotent: create media_requests if it isn't there yet."""
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS media_requests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                profile_id INTEGER NOT NULL,
+                requester_name TEXT,
+                kind TEXT NOT NULL,
+                item_key TEXT NOT NULL,
+                title TEXT NOT NULL,
+                subtitle TEXT,
+                image_url TEXT,
+                payload TEXT,
+                status TEXT NOT NULL DEFAULT 'pending',
+                admin_response TEXT,
+                resolved_by INTEGER,
+                resolved_at TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                seen_at TIMESTAMP
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_mreq_profile ON media_requests(profile_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_mreq_status ON media_requests(status)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_mreq_item ON media_requests(kind, item_key)")
+
+    @staticmethod
+    def _media_request_row(row) -> Dict[str, Any]:
+        out = dict(row)
+        try:
+            out["payload"] = json.loads(out.get("payload") or "{}")
+        except (TypeError, ValueError):
+            out["payload"] = {}
+        return out
+
+    def add_media_request(self, *, profile_id: int, requester_name: str, kind: str, item_key: str,
+                          title: str, subtitle: Optional[str] = None, image_url: Optional[str] = None,
+                          payload: Optional[Dict[str, Any]] = None) -> Optional[int]:
+        """a new pending request, or None when one for the same thing is
+        already waiting for this profile (or the insert failed)."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                self._ensure_media_request_schema(cursor)
+                # waiting for an answer, or approved and waiting for a
+                # release pick (#2199): asked already either way
+                cursor.execute("SELECT 1 FROM media_requests WHERE profile_id = ? AND kind = ? "
+                               "AND item_key = ? AND status IN ('pending', 'awaiting_selection') LIMIT 1",
+                               (int(profile_id), kind, item_key))
+                if cursor.fetchone():
+                    return None
+                cursor.execute(
+                    "INSERT INTO media_requests (profile_id, requester_name, kind, item_key, title, "
+                    "subtitle, image_url, payload, status) VALUES (?,?,?,?,?,?,?,?, 'pending')",
+                    (int(profile_id), requester_name, kind, item_key, title, subtitle, image_url,
+                     json.dumps(payload or {}, sort_keys=True)))
+                conn.commit()
+                return cursor.lastrowid
+        except Exception as e:
+            logger.error("Error recording a %s request: %s", kind, e)
+            return None
+
+    def list_media_requests(self, profile_id: Optional[int] = None, status: Optional[str] = None,
+                            kind: Optional[str] = None, limit: int = 200) -> List[Dict[str, Any]]:
+        """requests, newest first. profile_id None = everyone's."""
+        where, args = [], []
+        if profile_id is not None:
+            where.append("profile_id = ?")
+            args.append(int(profile_id))
+        if status:
+            where.append("status = ?")
+            args.append(status)
+        if kind:
+            where.append("kind = ?")
+            args.append(kind)
+        sql = ("SELECT * FROM media_requests" + (" WHERE " + " AND ".join(where) if where else "") +
+               " ORDER BY created_at DESC, id DESC LIMIT ?")
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                self._ensure_media_request_schema(cursor)
+                cursor.execute(sql, args + [max(1, int(limit))])
+                return [self._media_request_row(r) for r in cursor.fetchall()]
+        except Exception as e:
+            logger.error("Error listing media requests: %s", e)
+            return []
+
+    def get_media_request(self, request_id: int) -> Optional[Dict[str, Any]]:
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                self._ensure_media_request_schema(cursor)
+                cursor.execute("SELECT * FROM media_requests WHERE id = ?", (int(request_id),))
+                row = cursor.fetchone()
+                return self._media_request_row(row) if row else None
+        except Exception as e:
+            logger.error("Error getting media request %s: %s", request_id, e)
+            return None
+
+    def set_media_request_status(self, request_id: int, status: str, resolved_by: Optional[int] = None,
+                                 admin_response: Optional[str] = None) -> bool:
+        """answer a request; only a pending one moves (two admins can't both)."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                self._ensure_media_request_schema(cursor)
+                cursor.execute(
+                    "UPDATE media_requests SET status = ?, resolved_by = ?, admin_response = ?, "
+                    "resolved_at = CURRENT_TIMESTAMP, seen_at = NULL WHERE id = ? AND status = 'pending'",
+                    (status, resolved_by, admin_response, int(request_id)))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error("Error answering media request %s: %s", request_id, e)
+            return False
+
+    def media_request_picked(self, request_id: int) -> bool:
+        """a book held for a release pick (#2199) had one picked (or was
+        handed to the wishlist pass): awaiting_selection -> approved, and the
+        requester's badge lights up. only a held one moves."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                self._ensure_media_request_schema(cursor)
+                cursor.execute("UPDATE media_requests SET status = 'approved', seen_at = NULL "
+                               "WHERE id = ? AND status = 'awaiting_selection'", (int(request_id),))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error("Error moving held media request %s on: %s", request_id, e)
+            return False
+
+    def mark_media_request_available(self, request_id: int) -> bool:
+        """approved -> available, and the requester's badge lights up."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                self._ensure_media_request_schema(cursor)
+                cursor.execute("UPDATE media_requests SET status = 'available', seen_at = NULL "
+                               "WHERE id = ? AND status = 'approved'", (int(request_id),))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error("Error marking media request %s available: %s", request_id, e)
+            return False
+
+    def mark_media_requests_seen(self, profile_id: int) -> int:
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                self._ensure_media_request_schema(cursor)
+                cursor.execute("UPDATE media_requests SET seen_at = CURRENT_TIMESTAMP "
+                               "WHERE profile_id = ? AND seen_at IS NULL AND status != 'pending'",
+                               (int(profile_id),))
+                conn.commit()
+                return cursor.rowcount
+        except Exception as e:
+            logger.debug("mark_media_requests_seen failed: %s", e)
+            return 0
+
+    def delete_media_request(self, request_id: int) -> bool:
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                self._ensure_media_request_schema(cursor)
+                cursor.execute("DELETE FROM media_requests WHERE id = ?", (int(request_id),))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error("Error deleting media request %s: %s", request_id, e)
+            return False
+
+    def media_request_approved(self, profile_id: int, kind: str, item_key: str) -> bool:
+        """has an admin approved this profile's ask for this item? (the
+        audiobook pass grabs an approved book for an Ask first owner.)
+        raises on a db error: the caller fails closed."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            self._ensure_media_request_schema(cursor)
+            cursor.execute("SELECT 1 FROM media_requests WHERE profile_id = ? AND kind = ? "
+                           "AND item_key = ? AND status IN ('approved', 'available') LIMIT 1",
+                           (int(profile_id), kind, str(item_key)))
+            return cursor.fetchone() is not None
 
     def get_all_hifi_instances(self) -> List[Dict[str, Any]]:
         """Get all HiFi instances (including disabled) ordered by priority."""

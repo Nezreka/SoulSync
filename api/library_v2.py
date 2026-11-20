@@ -351,6 +351,11 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             # the admin's. Everything that changes files or shared metadata
             # stays with the admin.
             if request.endpoint in _OWN_LIBRARY_WISH_ENDPOINTS and _can_wish():
+                # #2209: an artist on the watchlist is the Watchlist's, so a
+                # profile without that part gets no follow from here either
+                if _is_watchlist_write() and not _may_watch():
+                    from core.permissions import refusal
+                    return refusal("music.watchlist")
                 # a search downloads: a household member who asks first
                 # wishes (their wishlist becomes requests) but never grabs
                 if request.endpoint in _DOWNLOADING_ENDPOINTS and not _may_download():
@@ -479,6 +484,30 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             return True
         from core.library2.sql_util import shared_library_member
         return shared_library_member() is not None
+
+    def _is_watchlist_write() -> bool:
+        """#2209: does this write follow or unfollow an artist (their watchlist
+        row), rather than wish for releases or tracks?"""
+        endpoint = request.endpoint
+        if endpoint == "lib2_set_monitored":
+            return (request.view_args or {}).get("entity") == "artists"
+        if endpoint == "lib2_artist_settings":
+            return request.method != "GET"
+        if endpoint == "lib2_discovery_artist":
+            body = request.get_json(silent=True)
+            return request.method == "POST" and isinstance(body, dict) and bool(body.get("monitored"))
+        return False
+
+    def _may_watch() -> bool:
+        """may the caller use the Watchlist (music.watchlist)? the admin always;
+        a member when their permissions give them the Watchlist page (#2209)"""
+        if _is_admin():
+            return True
+        try:
+            from core.permissions import can, enforcing
+            return can(None, "music.watchlist") if enforcing() and has_request_context() else True
+        except Exception:  # noqa: BLE001 - unreadable map: no watchlist
+            return False
 
     def _may_download() -> bool:
         """may the caller start a download (not just a request)?"""
@@ -753,12 +782,18 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             "can_write": _is_admin(),
             # E-13: monitor/search in a library of one's own
             "can_wish": _can_wish(),
+            # #2209: following artists is the Watchlist's (music.watchlist)
+            "can_watch": _can_wish() and _may_watch(),
             # a wish that downloads right away (Automatic Search) needs this
             "can_download": _may_download(),
             # a grab for a library track straight from its Interactive Search
             # (the server's profile_may_grab: the admin, or a profile in a
             # library of its own); everyone else grabs through the inspector
             "can_grab": _is_admin() or _wishes_in_own(),
+            # #2210: writing tags and ReplayGain into files: the admin, or a
+            # profile in a library of its own on its own files (the routes
+            # check every file); a member of the shared library never
+            "can_tag": _is_admin() or _wishes_in_own(),
         })
 
     # -- acquisition requests / decisions (Phase 4) -------------------------
@@ -5342,6 +5377,47 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             conn.close()
         return jsonify({"success": True, **result})
 
+    def _slot_move_source(body) -> Optional[int]:
+        try:
+            value = int((body or {}).get("source_track_id") or 0)
+        except (TypeError, ValueError, AttributeError):
+            return None
+        return value if value > 0 else None
+
+    @_route("/api/library/v2/tracks/<int:track_id>/move-into/preview", methods=["POST"])
+    def lib2_slot_move_preview(track_id):
+        """#2193: what moving a track you have into this missing slot would
+        do (library rows, tags, folder), before anything changes."""
+        source_id = _slot_move_source(request.get_json(silent=True))
+        if not source_id:
+            return _fail("source_track_id required")
+        from core.library2.track_slot_move import SlotMoveError, preview_slot_move
+        try:
+            return jsonify(preview_slot_move(get_database(), source_id, track_id,
+                                             config_manager=config_manager))
+        except SlotMoveError as e:
+            return _fail(str(e), e.status)
+
+    @_route("/api/library/v2/tracks/<int:track_id>/move-into", methods=["POST"])
+    def lib2_slot_move_apply(track_id):
+        """#2193: move a track you have into this missing slot. The file
+        moves (never a copy), the old row and its emptied album go, the tags
+        are rewritten and the file is filed into this album's folder."""
+        source_id = _slot_move_source(request.get_json(silent=True))
+        if not source_id:
+            return _fail("source_track_id required")
+        from core.library2.track_slot_move import SlotMoveError, apply_slot_move
+        try:
+            result = apply_slot_move(get_database(), source_id, track_id,
+                                     config_manager=config_manager,
+                                     profile_id=_intent_profile())
+        except SlotMoveError as e:
+            return _fail(str(e), e.status)
+        except Exception as e:  # noqa: BLE001
+            logger.error("slot move failed (%s → %s): %s", source_id, track_id, e, exc_info=True)
+            return _fail(str(e), 500)
+        return jsonify(result)
+
     @_route("/api/library/v2/artists/<int:artist_id>/history")
     def lib2_artist_history(artist_id):
         """Merged history for this artist (Lidarr's History tab): grabs,
@@ -6259,6 +6335,27 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                     if folded:
                         conn.commit()
                         scan_stats["leftover_tracks_folded"] = folded
+                    # albums of one name merged into one row (weezer's three
+                    # "weezer"s) split back out, now the tags were just read
+                    # (#2110). before the renumbering: three track 1s of
+                    # three albums are not a numbering problem
+                    from core.library2.release_split import split_same_named_releases
+                    split = split_same_named_releases(conn, album_ids)
+                    if split["albums_made"]:
+                        conn.commit()
+                        scan_stats["same_named_albums_split"] = split["albums_made"]
+                        try:  # a provider listing a split album took over
+                            from core.library2.mirror_outbox import drain
+                            drain(db)
+                        except Exception as drain_err:  # noqa: BLE001
+                            logger.debug("post-split outbox drain failed: %s", drain_err)
+                    # a song on another song's number goes to the one its
+                    # file says, now the tags were just read (wolf39us)
+                    from core.library2.track_numbers import heal_colliding_numbers
+                    renumbered = heal_colliding_numbers(conn, album_ids)
+                    if renumbered:
+                        conn.commit()
+                        scan_stats["tracks_renumbered"] = renumbered
                 # A scan is the moment we learn a file is gone or back, and
                 # acquisition is the consumer of exactly that. Handing it over
                 # here — scoped to the tracks that actually changed — is what

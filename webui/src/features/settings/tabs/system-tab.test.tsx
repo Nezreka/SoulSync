@@ -209,6 +209,58 @@ describe('Database and Logging', () => {
     confirm.mockRestore();
   });
 
+  it('tidy up runs without asking, and the biggest tables measure off the page (#2205)', async () => {
+    routes['GET /api/database/maintenance/info'] = () => ({
+      success: true,
+      wal_size_display: '2355.0 MB',
+      vacuum_has_room: false,
+    });
+    routes['POST /api/database/maintenance/optimize'] = () => ({
+      success: true,
+      elapsed_seconds: 3,
+      pruned: { lib2_provider_attempts: 1200, sync_history: 34 },
+      wal_after: 0,
+    });
+    let measured = false;
+    const tables = () =>
+      measured
+        ? {
+            success: true,
+            estimates: [],
+            measure: {
+              state: 'done',
+              result: { tables: [{ name: 'lib2_tracks', bytes: 2 * 1024 ** 3 }] },
+            },
+          }
+        : {
+            success: true,
+            estimates: [{ name: 'lib2_tracks', rows: 312000 }],
+            measure: { state: 'running' },
+          };
+    routes['GET /api/database/maintenance/tables'] = tables;
+    routes['GET /api/database/maintenance/tables?measure=1'] = tables;
+    const confirm = vi.spyOn(window, 'confirm');
+    part('database', { opened: 1, active: true });
+    await waitFor(() => expect(input('db-wal-display').textContent).toBe('2355.0 MB'));
+    expect(input('db-vacuum-room')).toBeTruthy();
+    fireEvent.click(input('db-optimize-btn'));
+    await waitFor(() =>
+      expect(input('db-vacuum-status').textContent).toBe(
+        `Done in 3s. ${(1234).toLocaleString()} old cache/log rows removed, search indexes merged, write-ahead log now 0.0 MB.`,
+      ),
+    );
+    expect(confirm).not.toHaveBeenCalled();
+    fireEvent.click(input('db-measure-btn'));
+    await waitFor(() => expect(input('db-measure-btn').textContent).toBe('Measuring...'));
+    expect(calls.some((c) => c.url.endsWith('/tables?measure=1'))).toBe(true);
+    expect(input('db-tables').textContent).toContain(`~${(312000).toLocaleString()} rows`);
+    measured = true;
+    await waitFor(() => expect(input('db-tables').textContent).toContain('lib2_tracks: 2.0 GB'), {
+      timeout: 5000,
+    });
+    confirm.mockRestore();
+  });
+
   it('an incremental database says so on its button', async () => {
     routes['GET /api/database/maintenance/info'] = () => ({ success: true, auto_vacuum: 2 });
     part('database', { opened: 1, active: true });

@@ -493,3 +493,140 @@ describe('the card styles the bands reuse', () => {
     expect(body).toContain('min-width: 0');
   });
 });
+
+// #2196: the video workers are the admins'. a member's hero has no orb stage,
+// no Manage Workers, and the page never primes the worker buttons (the
+// status routes refuse a member).
+describe('the workers are the admins (#2196)', () => {
+  afterEach(() => {
+    delete window.videoWorkerOrbs;
+    delete window.videoEnrichmentPrime;
+  });
+
+  function spyVanilla() {
+    const refresh = vi.fn();
+    const prime = vi.fn();
+    window.videoWorkerOrbs = { refresh } as never;
+    window.videoEnrichmentPrime = prime;
+    return { refresh, prime };
+  }
+
+  it('a member gets no orbs, no Manage Workers and no worker calls', async () => {
+    stub();
+    const asked: string[] = [];
+    const listen = ({ request }: { request: Request }) => {
+      asked.push(new URL(request.url).pathname);
+    };
+    server.events.on('request:start', listen);
+    const { refresh, prime } = spyVanilla();
+    const { container } = mount({ isAdmin: false });
+    expect(await screen.findByText('8,873')).toBeTruthy();
+    const hero = container.querySelector('[data-video-hero]')!;
+    expect(hero.classList.contains('dash-hero--solo')).toBe(true);
+    expect(container.querySelector('[data-video-orb-stage]')).toBeNull();
+    expect(container.querySelector('[data-video-enrich]')).toBeNull();
+    expect(container.querySelector('[data-video-manage-workers]')).toBeNull();
+    expect(screen.queryByText('Workers resting')).toBeNull();
+    expect(refresh).not.toHaveBeenCalled();
+    expect(prime).not.toHaveBeenCalled();
+    server.events.removeListener('request:start', listen);
+    // the listener heard the page (so an empty list below means something)
+    expect(asked).toContain('/api/video/dashboard');
+    expect(asked.filter((path) => path.startsWith('/api/video/enrichment'))).toEqual([]);
+  });
+
+  it('an admin keeps the stage and primes it', async () => {
+    stub();
+    const { refresh, prime } = spyVanilla();
+    const { container } = mount();
+    expect(
+      container.querySelector('[data-video-hero]')!.classList.contains('dash-hero--solo'),
+    ).toBe(false);
+    expect(
+      container.querySelector('[data-video-orb-stage] [data-video-manage-workers]'),
+    ).not.toBeNull();
+    expect(refresh).toHaveBeenCalled();
+    expect(prime).toHaveBeenCalled();
+  });
+});
+
+// #2207: the server's name and state, when it was scanned, the scans, the
+// poster manager and how much disk the library takes are the admin's. the
+// server leaves size_bytes out of a member's payload; a member's strip is a
+// way into the library page, when they may open it.
+describe("the library strip is the admin's (#2207)", () => {
+  function stubMember() {
+    stub();
+    server.use(
+      http.get('/api/video/dashboard', () =>
+        HttpResponse.json({
+          library: { movies: 8873, shows: 3470, episodes: 105674 },
+          downloads: { active: 0, finished: 0, speed_bps: 0 },
+          watchlist: 978,
+          wishlist: 382,
+          server: 'plex',
+          recent: [],
+        }),
+      ),
+    );
+  }
+
+  afterEach(() => {
+    delete window.SoulSyncVideo;
+  });
+
+  it('a member gets Browse library, no server, no scan, no poster manager, no disk size', async () => {
+    stubMember();
+    window.SoulSyncVideo = { pageAllowed: (id: string) => id === 'video-library' };
+    const asked: string[] = [];
+    const listen = ({ request }: { request: Request }) => {
+      asked.push(new URL(request.url).pathname);
+    };
+    server.events.on('request:start', listen);
+    const { container } = mount({ isAdmin: false });
+    expect(await screen.findByText('8,873')).toBeTruthy();
+    server.events.removeListener('request:start', listen);
+    const strip = container.querySelector('[data-card="library"]')!;
+    expect(within(strip as HTMLElement).getByText('Browse library')).toBeTruthy();
+    expect(strip.textContent).not.toMatch(/plex|scan|poster|repair/i);
+    expect(strip.querySelector('.library-status-more')).toBeNull();
+    expect(screen.queryByText('On disk')).toBeNull();
+    // when the library was scanned is the admin's: never asked
+    expect(asked).not.toContain('/api/video/scan/status');
+  });
+
+  it('Browse library opens the video library', async () => {
+    stubMember();
+    window.SoulSyncVideo = { pageAllowed: () => true };
+    const go = vi.fn();
+    document.addEventListener('soulsync:video-navigate', go);
+    try {
+      const { container } = mount({ isAdmin: false });
+      await screen.findByText('8,873');
+      const strip = container.querySelector('[data-card="library"]') as HTMLElement;
+      fireEvent.click(within(strip).getByText('Browse library'));
+      expect(go).toHaveBeenCalled();
+      expect((go.mock.calls[0][0] as CustomEvent).detail).toEqual({ page: 'video-library' });
+    } finally {
+      document.removeEventListener('soulsync:video-navigate', go);
+    }
+  });
+
+  it('a member who may not open the library has no strip at all', async () => {
+    stubMember();
+    window.SoulSyncVideo = { pageAllowed: () => false };
+    const { container } = mount({ isAdmin: false });
+    await screen.findByText('8,873');
+    expect(container.querySelector('[data-card="library"]')).toBeNull();
+  });
+
+  it('an admin keeps the server, the size, the scan and the poster manager', async () => {
+    stub();
+    const { container } = mount();
+    expect(await screen.findByText('Plex library')).toBeTruthy();
+    expect(screen.getByText('On disk')).toBeTruthy();
+    const strip = container.querySelector('[data-card="library"]') as HTMLElement;
+    expect(within(strip).getByText('Poster manager')).toBeTruthy();
+    expect(within(strip).getByText('Scan')).toBeTruthy();
+  });
+});

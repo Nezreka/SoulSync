@@ -212,7 +212,7 @@ One search box with three modes.
 
 | Mode | What happens |
 |---|---|
-| **Download as-is** | Untouched, into Transfer |
+| **Download as-is** | Untouched, into your music library folder |
 | **Enriched download** *(recommended)* | Each file is matched to a real release, tagged, given cover art and filed |
 | **Tag it yourself** | For bootlegs, live sets and mixtapes |
 
@@ -288,7 +288,7 @@ A personal front page shaped by your library, your listening and your watchlist.
 - **Library**: every artist, filterable by letter, watch state, and which metadata sources each one is (or isn't) matched to. Export as JSON / CSV / text / M3U.
 - **Songs**: every song you own, searchable by title from any library view. Each one shows its album and file quality so copies are easy to tell apart. Play it, add it to a playlist, and (admins) delete it.
 - **Fix a wrong match** by pasting the artist's link or ID from Spotify, Apple Music, Deezer, Discogs, Tidal, Qobuz and more. The watchlist follows the fix.
-- **Artist pages**: full discography with ownership, and live records, compilations, soundtracks, remixes and spoken word in sections of their own. Live completion bars for albums / EPs / singles, top tracks, a flame on each album's most played tracks (Last.fm), similar artists, a **music video player**, and **concerts** (Ticketmaster dates and Setlist.fm setlists you can play from your own library).
+- **Artist pages**: full discography with ownership, and live records, compilations, soundtracks, remixes and spoken word in sections of their own. Live completion bars for albums / EPs / singles, a bio, tags and listener numbers (Last.fm first; without a working key, TheAudioDB or Wikipedia, MusicBrainz, ListenBrainz and Deezer fill in and say so), top tracks, a flame on each album's most played tracks (Last.fm), similar artists, a **music video player**, and **concerts** (Ticketmaster dates and Setlist.fm setlists you can play from your own library).
 - **Gap-fill** pulls in releases your other metadata sources know about.
 - **Label pages**: a label's full catalog with owned / missing filters. Follow a label for new releases or its whole backlog.
 
@@ -297,7 +297,7 @@ A personal front page shaped by your library, your listening and your watchlist.
 
 <br>
 
-- **Enhanced view**: inline tag editing, bulk BPM / mood / style edits, and writing tags to files with a diff preview. **Use File Tags** takes the Library's metadata from your files instead (fields, album year, and which album a track is on) and can release those values again later. Also ReplayGain, reorganize with a path preview (the artist page counts the files a rename would move, per album), move an album to another artist, re-identify a track, remove a leftover row with no file that a retag left beside the song, redownload with source picking, and delete (database only, or files too).
+- **Enhanced view**: inline tag editing, bulk BPM / mood / style edits, and writing tags to files with a diff preview. **Use File Tags** takes the Library's metadata from your files instead (fields, album year, and which album a track is on) and can release those values again later. Also ReplayGain, reorganize with a path preview (the artist page counts the files a rename would move, per album), move an album to another artist (the files move, nothing is left behind), move a track you have into an album's missing slot (**Move a track here**: the file moves and is retagged, no copy, no import), re-identify a track, remove a leftover row with no file that a retag left beside the song, redownload with source picking, and delete (database only, or files too).
 - **Fix matches**: change artwork from any source, inspect the database record, and forget wrong matches per source.
 - **Lock what you have reviewed**: the padlock on an album or artist marks it reviewed and keeps every automated job off it: scans, enrichment, repair jobs, retags, reorganize and upgrades. Switch off any part you still want handled. Missing tracks still download, a missing or damaged file is still reported, and anything you do by hand still works. The sheet shows what the lock kept away and whether a file changed since your review. Filter the library by **Reviewed** / **Not reviewed**.
 
@@ -315,7 +315,7 @@ A personal front page shaped by your library, your listening and your watchlist.
   - Browse it as a **Nebula** (an orb per artist, grouped by what's stuck: no match found, or downloaded then rejected) or a dense list.
   - Open an artist to see why each track failed in plain words, retry it, or pick a source by hand.
   - Export it as CSV or JSON (the video wishlist too: everything, movies or TV shows).
-- **Requests**: Overseerr-style, for music too. Profiles without download rights add to their wishlist like anyone else, and the scheduled run only downloads what an admin or a moderator approved.
+- **Requests**: Overseerr-style, for music too. Profiles without download rights add to their wishlist like anyone else, and the scheduled run only downloads what an admin or a moderator approved. Per kind (music, movies, TV, audiobooks), approved requests can wait for you to pick the exact release instead of grabbing the best match.
 
 ## Import
 
@@ -353,7 +353,8 @@ An inbox for everything in your staging folder, with a Picard-style matcher.
 
 - **Listening stats**: plays, time, top artists / albums / tracks, genres, when you listen, streaks, and how much of what you own you actually play.
 - **Your Year**: a full-screen, Wrapped-style story of your year, ending in a card studio that exports shareable images using your real album art.
-- **Scrobbling** to Last.fm and ListenBrainz from Plex, Jellyfin or Navidrome.
+- **Scrobbling** to Last.fm and ListenBrainz from Plex, Jellyfin or Navidrome. ListenBrainz is the recommended one: from 1 December 2026 Last.fm API keys need a Last.fm Pro subscription.
+- **Last.fm is optional**: without a key, or with one Last.fm no longer accepts, top tracks, similar artists, Radio and Your Artists fill in from ListenBrainz, Deezer and your own plays, and earlier Last.fm answers stay cached.
 - **Per-profile**: a profile with its own Plex account, Jellyfin user, ListenBrainz or Last.fm gets its own stats and recommendations, and can scrobble its plays to its own account.
 - **History import** from Last.fm, ListenBrainz and Maloja.
 
@@ -447,7 +448,7 @@ Plus a background YouTube upload-date enricher.
 
 - **Watchlist → wishlist → download**: follow shows, people, studios and YouTube channels, with back-catalog policies.
 - **Wishlist**: Movies, TV and YouTube tabs, the same design as the music one. It retries with backoff and groups what's stuck by cause: found but refused by your rules, nothing found, couldn't search, or not posted yet. Open a title to see every release the last search judged and why each was refused.
-- **Requests**: Overseerr-style. Members ask, admins and moderators approve, with the quality each person may pick. Every poster and detail page shows where a title stands (in library, partial, requested, on the way, downloading, failed), and asking twice for the same thing is refused.
+- **Requests**: Overseerr-style. Members ask, admins and moderators approve, with the quality each person may pick, and can pick the release themselves for movies and TV (Approval settings on the Requests page). Every poster and detail page shows where a title stands (in library, partial, requested, on the way, downloading, failed), and asking twice for the same thing is refused.
 - **Import lists**: TMDB, IMDb and Plex Watchlist.
 - **Indexers**: Prowlarr (structured and text queries, a TV query ladder including anime and daily shows) and **RSS sync**.
 - **Clients**: qBittorrent, Transmission, Deluge, SABnzbd, NZBGet and slskd, with seeding goals, **season packs** and stall detection.
@@ -491,6 +492,7 @@ The Library page is your movies and shows three ways: posters, a sortable table 
 - **An editor for every title**: details with per-field locks, poster, quality profile, series type, and for a show an **Episodes** tab that files a run of episode files under the right season and episode (specials are season 0) and renames them to match.
 - **History and undo**: every rename, move, delete and re-file made by hand is listed, and one click puts it back, a whole bulk run at once. A deleted file comes back owned while the recycle folder still holds it.
 - **The padlock**: lock a title once it is the way you want it, and maintenance jobs, mass rename and automatic upgrades leave it and its files alone.
+- **Shelf Life**: a 0 to 100 keep-or-cut score for every movie and show, from who watches it, how hard it is to replace, how well regarded it is, its size for its runtime and whether someone asked for it. Titles under your line show up for review, **Free up space** picks the lowest until you get the space you asked for, and every title is checked again right before it goes to the recycle bin. Off until you turn it on.
 
 <details>
 <summary><b>Bulk operations, self-refreshing pages and managing a title from its own page</b></summary>
@@ -557,7 +559,7 @@ A visual **WHEN → DO → THEN** builder shared by music and video.
   - **Request quality**: which quality profiles each person can ask for, per movies and TV, which ones always need your OK (4K always asks), and what they start on. One allowed means no menu.
   - **Moderators**: a member who approves and declines other people's requests and manages issues, never settings, people or tools.
   - **A request limit per kind**: music, movies and TV each have their own (YouTube counts with TV), and the People list shows asks used per person, per kind.
-  - **Members see only what they can use**, with a "What you can do" card on their own account page. That covers help too: Help & Docs and the help search show a member only the guides for what they can use, the notification panel holds their own notes, downloads and automations (the server's health, numbers and jobs are the admin's), and library actions that download right away (Automatic Search, Enhance Quality) are there only for a profile that may download.
+  - **Members see only what they can use**, with a "What you can do" card on their own account page. That covers help too: Help & Docs and the help search show a member only the guides for what they can use, the notification panel holds their own notes, downloads and automations (the server's health, numbers and jobs are the admin's, and so are the enrichment workers and Manage Workers on both dashboards), and library actions that download right away (Automatic Search, Enhance Quality) are there only for a profile that may download.
   - Add person, invites and Plex / OIDC sign-ups start from a template. Every route on the server checks the same rules, and so do automations, scans, Seerr apps and other background adds.
 - **Per-profile everything**: watchlists, wishlists, playlists, queues and listening history.
 - **My Account** for non-admins: their own Spotify, Tidal, ListenBrainz and Last.fm, and their own media-server identity (Plex Home user, Jellyfin / Navidrome login).
@@ -860,7 +862,7 @@ Settings save as you change them. If you'd rather press save yourself, turn off 
 | Logs | `/app/logs` | |
 | Databases | `/app/data` | Use a **named volume** (`soulsync_database:/app/data`). Bind-mounting a host path here can hide files the app needs. |
 | Downloads | `/app/downloads` | The same folder slskd and your clients download to |
-| Library output | `/app/Transfer` | Where organized music is filed |
+| Music library folder | `/app/Transfer` | Where organized music is filed. Set Settings → Library → Folders → Music Library Folder to this path |
 | Import | `/app/Staging` | Optional, for importing music you already have |
 | Music videos | `/app/MusicVideos` | Optional |
 | Podcasts / audiobooks | `/app/podcasts`, `/app/audiobooks` | Optional |

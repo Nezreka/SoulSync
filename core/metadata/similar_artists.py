@@ -433,6 +433,18 @@ def _fallback_similar_artist_names(artist_name: str,
     except Exception as exc:  # noqa: BLE001 - the next source still runs
         logger.debug("Last.fm similar artists for %s failed: %s", artist_name, exc)
 
+    # nothing from last.fm (not set up, or the key refused without pro from
+    # 1 december 2026): listenbrainz's similar artists, when the lookup above
+    # already found the musicbrainz id (no extra musicbrainz call here)
+    mbid = searched_source_ids.get('musicbrainz')
+    if not names and mbid:
+        try:
+            from core import listenbrainz_public
+            for row in listenbrainz_public.similar_artists(str(mbid), limit=30):
+                add(row.get('name'))
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("ListenBrainz similar artists for %s failed: %s", artist_name, exc)
+
     try:
         deezer_id = searched_source_ids.get('deezer')
         client = metadata_registry.get_client_for_source('deezer')

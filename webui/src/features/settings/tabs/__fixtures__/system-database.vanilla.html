@@ -52,12 +52,18 @@
                                                 <span id="db-freepages-display" class="readonly-field">Loading...</span>
                                             </div>
                                             <div class="form-group">
+                                                <label>Write-Ahead Log:</label>
+                                                <span id="db-wal-display" class="readonly-field">Loading...</span>
+                                            </div>
+                                            <div class="form-group">
                                                 <label>Auto-Vacuum Mode:</label>
                                                 <span id="db-autovacuum-display"
                                                     class="readonly-field">Loading...</span>
                                             </div>
 
                                             <div class="form-actions" style="flex-wrap: wrap;">
+                                                <button class="test-button" id="db-optimize-btn">Tidy Up (safe)</button>
+                                                <button class="test-button" id="db-measure-btn">Show Biggest Tables</button>
                                                 <button class="test-button" id="db-vacuum-btn"
                                                     onclick="runDatabaseVacuum()">Compact Database (VACUUM)</button>
                                                 <button class="test-button" id="db-incvacuum-btn"
@@ -65,9 +71,14 @@
                                                     Vacuum</button>
                                             </div>
                                             <div class="help-text">
+                                                <strong>Tidy Up</strong> is safe to run any time: it drops old rows from
+                                                caches and logs that keep their own retention (never listening history
+                                                or library data), merges the search indexes and folds the write-ahead
+                                                log back in. It also runs on its own with Cache Maintenance.<br>
                                                 <strong>Compact Database</strong> rewrites the entire DB to reclaim
-                                                unused space. Locks the database briefly — may take a minute on large
-                                                databases.<br>
+                                                unused space. Back up first. It needs free disk space about the size of
+                                                the database and locks it while it runs, which on a very large library
+                                                can take a long time.<br>
                                                 <strong>Incremental Vacuum</strong> enables automatic page reclamation.
                                                 Requires a one-time full compact to activate. After that, freed pages
                                                 are reclaimed in small batches automatically.

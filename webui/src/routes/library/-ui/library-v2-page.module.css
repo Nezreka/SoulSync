@@ -662,6 +662,24 @@ button.featureTag:disabled {
   color: var(--text-1);
 }
 
+/* #2204: the title is a link to the album page */
+a.albumHeadTitleButton {
+  display: inline-block;
+  text-decoration: none;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+}
+
+a.albumHeadTitleButton:hover {
+  text-decoration: underline;
+}
+
+a.albumHeadTitleButton:focus-visible {
+  outline: 2px solid rgba(var(--accent-rgb), 0.6);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
 .albumDateBadge,
 .albumSizeBadge,
 .albumRenameBadge,
@@ -818,10 +836,19 @@ button.albumRenameBadge:focus-visible {
   justify-self: start;
   display: inline-flex;
   color: var(--white-a35);
+  background: none;
+  border: none;
+  padding: 2px;
+  border-radius: 6px;
+  cursor: pointer;
   transition:
     transform 0.15s ease,
     color 0.15s ease;
-  pointer-events: none;
+}
+
+.albumExpand:focus-visible {
+  outline: 2px solid rgba(var(--accent-rgb), 0.6);
+  outline-offset: 1px;
 }
 
 .albumExpand svg {
@@ -3648,6 +3675,13 @@ button.statusWarn:disabled {
   background: rgba(var(--accent-rgb), 0.1);
 }
 
+/* #2210: the profile in use, shown to a member: nothing to click */
+.qpOptionStatic,
+.qpOptionStatic:hover {
+  cursor: default;
+  border-color: rgb(var(--accent-rgb));
+}
+
 .qpName {
   font-weight: 600;
   font-size: 14px;
@@ -3936,6 +3970,15 @@ button.statusWarn:disabled {
 .overflowMenuFloating {
   position: fixed;
   left: auto;
+}
+
+/* no room on the left for Enrich to fly out (a phone), or the menu scrolls and
+   would clip it: the provider list opens in place under Enrich (#2183) */
+.overflowMenuInlineSub .enrichDropdownSubmenu {
+  position: static;
+  min-width: 0;
+  margin: 0 8px 6px;
+  box-shadow: none;
 }
 
 .overflowMenuItem {

@@ -1,8 +1,8 @@
-# Docker Transfer Folder Setup Guide
+# Docker Music Library Folder Setup Guide
 
-## Problem: Files Download but Don't Transfer to Music Library
+## Problem: Files Download but Never Reach Your Music Library
 
-This happens when the transfer path isn't properly configured in Docker.
+This happens when the music library folder isn't properly configured in Docker. Your music library folder is where SoulSync files finished music. In Docker this is the `/app/Transfer` mount.
 
 ## Solution
 
@@ -29,7 +29,7 @@ services:
       # Downloads from slskd
       - /mnt/data/slskd/downloads:/app/downloads
 
-      # Your Plex music library (transfer destination)
+      # Your Plex music library (the music library folder)
       - /mnt/data/media/music:/app/Transfer:rw
 
       # Database - USE NAMED VOLUME (critical!)
@@ -55,7 +55,7 @@ volumes:
 In SoulSync Web UI → Settings:
 
 1. **Download Path**: `/app/downloads`
-2. **Transfer Path**: `/app/Transfer`
+2. **Music Library Folder**: `/app/Transfer`
 
 **DO NOT use host paths** like `/mnt/data/...` in settings. Use the **container paths** (`/app/...`).
 
@@ -67,7 +67,7 @@ In SoulSync Web UI → Settings:
 2. Scroll to **"Log Level"** dropdown
 3. Change from **INFO** to **DEBUG**
 4. Click Save Settings
-5. Check logs at `logs/app.log` for detailed transfer information
+5. Check logs at `logs/app.log` for detailed post-processing information
 
 ### 4. HTTP 429 (Too Many Requests) Fix
 
@@ -108,7 +108,7 @@ In SoulSync settings → `config.json`:
 ### 6. Troubleshooting
 
 **Files stay in downloads folder:**
-- Check transfer path is `/app/Transfer` (not host path)
+- Check the Music Library Folder is `/app/Transfer` (not host path)
 - Enable DEBUG logging and check for errors
 - Verify permissions: `chmod -R 755 /mnt/data/media/music`
 
@@ -189,7 +189,7 @@ volumes:
 **SoulSync Settings**:
 - slskd URL: `http://host.docker.internal:5030`
 - Download Path: `/app/downloads`
-- Transfer Path: `/app/Transfer`
+- Music Library Folder: `/app/Transfer`
 - Log Level: `DEBUG` (for troubleshooting)
 
 ---
@@ -201,4 +201,4 @@ volumes:
 3. Check `logs/app.log` for the complete flow
 4. Post relevant log excerpts in the GitHub issue
 
-The logs will show exactly where the transfer is failing.
+The logs will show exactly where the move into your music library folder is failing.

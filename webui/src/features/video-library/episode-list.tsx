@@ -20,6 +20,7 @@ import {
   useSyncExternalStore,
 } from 'react';
 
+import { DownloadGlyph } from '@/components/primitives';
 import { ActionMenu, type ActionMenuItem } from '@/routes/artist-detail/-ui/action-menu';
 
 import type {
@@ -523,7 +524,7 @@ function EpisodeRow({
             disabled={busy}
             onClick={() => b.grabEpisode?.(ep.episode_number)}
           >
-            ⭳
+            <DownloadGlyph />
           </button>
         ) : null}
         <span className="vd-pop">
@@ -853,7 +854,9 @@ export function EpisodeList(props: EpisodeListProps) {
               disabled={busy === 'grab'}
               onClick={() => void run('grab', () => b.grabSeason?.(n))}
             >
-              <span className="discog-btn-icon">⭳</span>
+              <span className="discog-btn-icon">
+                <DownloadGlyph />
+              </span>
               <span className="discog-btn-text">
                 {busy === 'grab' ? 'Searching…' : 'Grab season'}
               </span>

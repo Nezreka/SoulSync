@@ -1117,14 +1117,14 @@ export function ServerConnections({ store }: { store: SettingsStore }) {
             <h4>Standalone Mode</h4>
             <p>
               SoulSync manages your library directly without an external media server. Import your
-              existing music first: move files into the import folder, then use a separate
-              music/output folder for the processed library SoulSync creates.
+              existing music first: move files into the import folder, then use a separate music
+              library folder for the processed library SoulSync creates.
             </p>
           </div>
         </div>
         <div className="form-actions">
           <button className="test-button" onClick={() => void testConnection('soulsync', store)}>
-            Verify Output Folder
+            Verify Music Library Folder
           </button>
         </div>
       </div>

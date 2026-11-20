@@ -2,6 +2,8 @@ import { z } from 'zod';
 
 import type { ReleaseStatus } from '@/components/release-statuses';
 
+import type { ArtistAbout } from '../artist-detail/-artist-detail.types';
+
 // Single route `/library` with the current view driven by search params:
 //   - artist set -> artist detail (albums expand inline)
 //   - album set  -> directly addressable album detail
@@ -337,6 +339,9 @@ export interface LibraryV2AlbumSummary {
   mood: string | null;
   track_count: number;
   tracks_present: number;
+  /** #2194: tracks with a file on this release itself. tracks_present also
+   *  counts audio held under another release, which a rename here can't move. */
+  own_files_present?: number;
   tracks_missing: number;
   /** I8: sum of each present track's primary file size, in bytes. */
   total_size_bytes: number;
@@ -359,6 +364,8 @@ export interface LibraryV2ArtistDetail {
   /** Independent recognition mappings; never Library ownership. */
   media_server_sources?: string[];
   summary: string | null;
+  /** bio, tags and numbers from whichever source has them, last.fm first */
+  about?: ArtistAbout | null;
   /** §48 rich-metadata-edit fields — provider baseline overlaid with any admin override. */
   style: string | null;
   mood: string | null;

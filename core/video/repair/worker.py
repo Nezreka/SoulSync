@@ -330,6 +330,19 @@ class VideoRepairWorker:
         status = "dismissed" if action == "dismiss" else "resolved"
         return self.db.repair_bulk_update_findings(ids, status)
 
+    def _per_finding_action_error(self, types, fix_action, fix_actions=None):
+        """an error when one fix_action would reach findings whose action is
+        meant for one finding only (Shelf Life's typed title), else None."""
+        if fix_action is None or fix_action == "":
+            return None
+        covered = fix_actions or {}
+        for fid, slug in types.items():
+            cls = self._job_for_finding_type(slug)
+            if cls and cls.fix_action_per_finding and fid not in covered:
+                return (f"'{cls.display_name}' findings each need their own confirmation. Use "
+                        "its own cleanup, or fix them one at a time. Nothing was changed.")
+        return None
+
     def bulk_fix_findings(self, job_id=None, severity=None, ids=None, fix_action=None) -> dict:
         if ids:
             targets = [self.db.repair_get_finding(i) for i in ids]
@@ -337,6 +350,10 @@ class VideoRepairWorker:
         else:
             targets = self.db.repair_get_findings(job_id=job_id, status="pending",
                                                   severity=severity, limit=200)["items"]
+        refused = self._per_finding_action_error({f["id"]: f["finding_type"] for f in targets}, fix_action)
+        if refused:
+            return {"success": False, "fixed": 0, "failed": 0, "total": len(targets),
+                    "errors": [refused], "error": refused}
         fixed, failed, errors = 0, 0, []
         for f in targets:
             res = self.fix_finding(f["id"], fix_action)
@@ -418,12 +435,15 @@ class VideoRepairWorker:
                                           finding_types=types)
 
     def start_bulk_fix(self, job_id=None, severity=None, ids=None, fix_action=None,
-                       finding_type=None, safe_only=False) -> dict:
+                       finding_type=None, safe_only=False, fix_actions=None) -> dict:
         """start a background fix run. one at a time.
 
         fix_action may only reach ONE finding type per run: youtube ghosts read
         'forget' as "wipe the memory", another fixer could read the same word
-        as something else entirely. checked on the resolved selection."""
+        as something else entirely. checked on the resolved selection.
+
+        fix_actions ({finding id: action}) gives one finding its own action
+        over fix_action -- Shelf Life hands each title its own typed name."""
         with self._bulk_lock:
             if self._bulk_thread is not None and self._bulk_thread.is_alive():
                 return {"started": False, "already_running": True,
@@ -433,7 +453,10 @@ class VideoRepairWorker:
             if not target:
                 return {"started": False, "error": "No pending fixable findings match"}
             types = self.db.repair_types_for(target)
-            if fix_action and len(set(types.values())) > 1:
+            refused = self._per_finding_action_error(types, fix_action, fix_actions)
+            if refused:
+                return {"started": False, "invalid": True, "error": refused}
+            if (fix_action or fix_actions) and len(set(types.values())) > 1:
                 return {"started": False, "invalid": True, "error": (
                     f"'{fix_action}' would be applied to {len(set(types.values()))} different "
                     "finding types, and it means something different to each. Narrow the "
@@ -447,12 +470,13 @@ class VideoRepairWorker:
                                 "errors": [], "error": None, "note": None,
                                 "per_type": {}}
             self._bulk_thread = threading.Thread(
-                target=self._run_bulk_fix, args=(list(target), types, fix_action),
+                target=self._run_bulk_fix, args=(list(target), types, fix_action, fix_actions or {}),
                 daemon=True, name="video-repair-bulk-fix")
             self._bulk_thread.start()
             return {"started": True, "total": len(target)}
 
-    def _run_bulk_fix(self, ids, types, fix_action) -> None:
+    def _run_bulk_fix(self, ids, types, fix_action, fix_actions=None) -> None:
+        fix_actions = fix_actions or {}
         state = self._bulk_state
         try:
             for fid in ids:
@@ -460,7 +484,7 @@ class VideoRepairWorker:
                     state["stopped"] = True
                     break
                 try:
-                    res = self.fix_finding(fid, fix_action)
+                    res = self.fix_finding(fid, fix_actions.get(fid, fix_action))
                 except Exception as e:   # noqa: BLE001 - one bad row never ends the run
                     res = {"success": False, "error": str(e)}
                 state["done"] += 1

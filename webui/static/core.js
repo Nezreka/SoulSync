@@ -855,7 +855,7 @@ async function checkMusicRequestQuota() {
     // there at all (a stale page after an admin's change); say so calmly
     const perms = window.SoulSyncPerms;
     if (perms && perms.mode('music') === 'none') {
-        if (typeof showToast === 'function') showToast("Getting music isn't part of your profile. Ask your admin if you'd like it.", 'info');
+        if (typeof showToast === 'function') showToast("Getting music isn't part of your profile. Ask your admin if you'd like it.", 'info', null, { history: false });
         return false;
     }
     if (typeof canDownload !== 'function' || canDownload()) return true;
@@ -1197,6 +1197,14 @@ function handleServiceStatusUpdate(data) {
     // The ban itself is untouched — it still suppresses calls and still
     // protects against hammering. This only stops it interrupting people it
     // does not apply to.
+    // and only the admin (#2208): the ban is the server's operational state.
+    // the server already sends a member a payload without it, this is the
+    // second guard. a modal raised before a profile switch goes with it.
+    if (!_statusViewerIsAdmin()) {
+        if (_spotifyRateLimitShown) { _spotifyRateLimitShown = false; closeRateLimitModal(); }
+        _spotifyInCooldown = false;
+        return;
+    }
     const _spotifyMattersHere = (data.metadata_source?.source || 'spotify') === 'spotify';
     if (data.spotify?.rate_limited && data.spotify.rate_limit && _spotifyMattersHere) {
         handleSpotifyRateLimit(data.spotify.rate_limit);
@@ -1223,6 +1231,14 @@ function handleServiceStatusUpdate(data) {
             handleSpotifyRateLimit(null);
         }
     }
+}
+
+// is the profile on this page an admin? the server's room and payload rules
+// are the real gate; this keeps backend notices off a member's screen if one
+// slips through. nobody loaded yet counts as admin, like the rest of the shell
+function _statusViewerIsAdmin() {
+    if (typeof currentProfile === 'undefined' || !currentProfile) return true;
+    return !!currentProfile.is_admin || currentProfile.id === 1;
 }
 
 function handleWatchlistCountUpdate(data) {

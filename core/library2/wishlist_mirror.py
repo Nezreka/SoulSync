@@ -98,6 +98,76 @@ def library_album_artist_names(conn, album_id: int, primary_artist_id: int) -> L
     return names
 
 
+def _wishlist_source_ids(conn, t) -> tuple:
+    """The provider ids and the wishlist's track and album ids for one track
+    row: ``(track_provider_ids, album_provider_ids, source_provider,
+    source_track_id, source_album_id)``. ``t`` carries the track's and its
+    album's id columns."""
+    from core.library2.provider_ids import (
+        preferred_provider_identity,
+        provider_only,
+        source_ids_from_values,
+    )
+    from core.metadata.registry import get_primary_source, get_source_priority
+    source_order = tuple(get_source_priority(get_primary_source()))
+
+    track_provider_ids = provider_only(source_ids_from_values(
+        spotify_id=t["spotify_id"],
+        musicbrainz_id=t["musicbrainz_id"],
+        external_ids=t["external_ids"],
+        isrc=t["isrc"],
+    ))
+    album_provider_ids = provider_only(source_ids_from_values(
+        spotify_id=t["album_spotify"],
+        musicbrainz_id=t["album_musicbrainz"],
+        external_ids=t["album_external_ids"],
+    ))
+    source_provider, provider_track_id = preferred_provider_identity(
+        track_provider_ids, source_order,
+    )
+    # Provider-less rows use the persisted stable_id, never the rowid: a
+    # library reset + reimport reproduces the same stable_id, so existing
+    # wishlist rows keep matching instead of orphaning or double-queueing
+    # against fresh rowids (audit P1-12).
+    from core.library2.stable_ids import ensure_album_stable_id, ensure_track_stable_id
+    source_track_id = provider_track_id or (
+        f"lib2-track:{ensure_track_stable_id(conn, t['track_id'])}"
+    )
+    _album_provider, preferred_album_id = preferred_provider_identity(
+        album_provider_ids, source_order,
+    )
+    source_album_id = (
+        album_provider_ids.get(source_provider or "")
+        or preferred_album_id
+        or f"lib2-album:{ensure_album_stable_id(conn, t['album_id'])}"
+    )
+    return (track_provider_ids, album_provider_ids, source_provider,
+            source_track_id, source_album_id)
+
+
+def track_wishlist_release(conn, track_id: int) -> Optional[Dict[str, Any]]:
+    """Only the ids of :func:`track_wishlist_payload`: ``{"id", "album": {"id"}}``.
+
+    a withdrawal needs nothing else, and the full payload (files, quality,
+    artwork, artists) was most of the cost of unwatching many artists at
+    once (#2200). None when the track is unknown."""
+    t = conn.execute(
+        """SELECT t.id AS track_id, t.spotify_id, t.musicbrainz_id,
+                  t.external_ids, t.isrc,
+                  al.id AS album_id,
+                  al.spotify_id album_spotify,
+                  al.musicbrainz_id album_musicbrainz,
+                  al.external_ids album_external_ids
+           FROM lib2_tracks t JOIN lib2_albums al ON al.id = t.album_id
+           WHERE t.id = ?""",
+        (track_id,),
+    ).fetchone()
+    if not t:
+        return None
+    _tp, _ap, _source, source_track_id, source_album_id = _wishlist_source_ids(conn, t)
+    return {"id": source_track_id, "album": {"id": source_album_id}}
+
+
 def track_wishlist_payload(conn, track_id: int) -> Optional[Dict[str, Any]]:
     """Build the wishlist payload for a lib2 track (or None when unknown).
 
@@ -142,28 +212,9 @@ def track_wishlist_payload(conn, track_id: int) -> Optional[Dict[str, Any]]:
     ).fetchall()
     album_artist_names = library_album_artist_names(
         conn, t["album_id"], t["album_primary_artist_id"])
-    from core.library2.provider_ids import (
-        preferred_provider_identity,
-        provider_only,
-        source_ids_from_values,
-    )
-    from core.metadata.registry import get_primary_source, get_source_priority
-    source_order = tuple(get_source_priority(get_primary_source()))
-
-    track_provider_ids = provider_only(source_ids_from_values(
-        spotify_id=t["spotify_id"],
-        musicbrainz_id=t["musicbrainz_id"],
-        external_ids=t["external_ids"],
-        isrc=t["isrc"],
-    ))
-    album_provider_ids = provider_only(source_ids_from_values(
-        spotify_id=t["album_spotify"],
-        musicbrainz_id=t["album_musicbrainz"],
-        external_ids=t["album_external_ids"],
-    ))
-    source_provider, provider_track_id = preferred_provider_identity(
-        track_provider_ids, source_order,
-    )
+    from core.library2.provider_ids import provider_only, source_ids_from_values
+    (track_provider_ids, album_provider_ids, source_provider,
+     source_track_id, source_album_id) = _wishlist_source_ids(conn, t)
     artists = []
     for row in artist_rows:
         ids = provider_only(source_ids_from_values(
@@ -172,23 +223,7 @@ def track_wishlist_payload(conn, track_id: int) -> Optional[Dict[str, Any]]:
             external_ids=row["external_ids"],
         ))
         artists.append({"name": row["name"], "provider_ids": ids})
-    # Provider-less rows use the persisted stable_id, never the rowid: a
-    # library reset + reimport reproduces the same stable_id, so existing
-    # wishlist rows keep matching instead of orphaning or double-queueing
-    # against fresh rowids (audit P1-12).
     from core.library2.wishlist_art import album_images
-    from core.library2.stable_ids import ensure_album_stable_id, ensure_track_stable_id
-    source_track_id = provider_track_id or (
-        f"lib2-track:{ensure_track_stable_id(conn, t['track_id'])}"
-    )
-    _album_provider, preferred_album_id = preferred_provider_identity(
-        album_provider_ids, source_order,
-    )
-    source_album_id = (
-        album_provider_ids.get(source_provider or "")
-        or preferred_album_id
-        or f"lib2-album:{ensure_album_stable_id(conn, t['album_id'])}"
-    )
     # The PRIMARY file (ADR-03) is what upgrade decisions are made against —
     # never an arbitrary sibling copy of the recording.
     from core.library2.track_files import primary_file_row

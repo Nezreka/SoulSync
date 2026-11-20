@@ -74,8 +74,10 @@ const t = async () => {
     assert((await w.fetch('/api/video/dashboard')).status === 200, 'video member reads the dashboard');
     assert((await w.fetch('/api/video/collections/sync/status')).status === 403, 'collections are admin-only');
     assert((await w.fetch('/api/video/enrichment/config')).status === 403, 'enrichment config is admin-only');
-    assert((await w.fetch('/api/video/enrichment/status')).status === 200, 'enrichment status stays open');
-    assert(wire.length === 2, `only the allowed two hit the wire, sent ${wire.join(', ')}`);
+    // the workers are the admins' (#2196): their status too
+    assert((await w.fetch('/api/video/enrichment/status-all')).status === 403, 'enrichment status is admin-only');
+    assert((await w.fetch('/api/video/enrichment/tmdb/pause', { method: 'POST' })).status === 403, 'worker controls are admin-only');
+    assert(wire.length === 1, `only the allowed one hits the wire, sent ${wire.join(', ')}`);
 
     // 4) admin: nothing gated
     w = bootAs(ADMIN);

@@ -1487,6 +1487,11 @@ body.max-performance #dashboard-page .listen-hero-play::after {
     background: none;
     box-shadow: none;
 }
+/* a member's hero has no orb stage (the workers are the admins', #2196):
+   the greeting and the library take the whole row, music and video */
+#dashboard-page .dashboard-header.dash-hero--solo > .dash-hero-main {
+    grid-column: 1 / -1;
+}
 /* the old card's accent lines along its bottom edge */
 #dashboard-page.dash-room .dashboard-header.dash-hero .dashboard-header-sweep,
 #dashboard-page.dash-room .dashboard-header.dash-hero::after {

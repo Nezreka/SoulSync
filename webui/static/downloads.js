@@ -4986,6 +4986,41 @@ function _notifSysHTML() {
     return bits.join('');
 }
 
+// ── whose panel this is ──────────────────────────────────────────────────────
+// the panel's memory (notes, the system numbers) belongs to the profile it was
+// filled for. switching profile without a reload used to leave the last
+// profile's notes and an admin's uptime/memory footer standing in a member's
+// panel (#2191): a new profile starts it over, from its own journal.
+let _notifProfileId;
+window.addEventListener('ss:webui-profile-context-changed', function () {
+    let ctx = null;
+    try {
+        ctx = typeof getCurrentProfileContext === 'function' ? getCurrentProfileContext() : null;
+    } catch (e) { ctx = null; }
+    const id = ctx ? ctx.profileId : null;
+    if (_notifProfileId === undefined) { _notifProfileId = id; return; }
+    if (id === _notifProfileId) return;
+    _notifProfileId = id;
+    _notifResetForProfile();
+});
+
+function _notifResetForProfile() {
+    _notifState.history = [];
+    _notifState.unreadCount = 0;
+    _notifState.pending = [];
+    _notifState.sysStats = null;
+    _notifState.seeded = false;
+    _notifState.openFamilies = {};
+    try { _notifHealth = null; } catch (e) { /* not set up yet */ }
+    _updateNotifBadge();
+    _updateNotifDlBadge();
+    const host = document.querySelector('[data-notif-sys]');
+    if (host) host.innerHTML = _notifSysHTML();
+    if (_notifState.panelOpen) _renderNotifFeed();
+    _seedNotifPanelFromJournal();
+    _seedNotifSys();
+}
+
 function _seedNotifSys() {
     if (!_notifViewerIsAdmin()) return;
     fetch('/api/system/stats').then(r => r.ok ? r.json() : null).then(data => {
@@ -5900,6 +5935,9 @@ function _patchOverlayActive() {
 
 // opts.journal === false skips the server journal: for notes the server
 // already logged itself (profile:notify)
+// opts.history === false keeps the note out of the panel and the journal
+// altogether: a refusal ("isn't part of your profile") or a progress line
+// ("Fetching full discography...") is said once, not kept (#2191)
 // opts.action = { label, page } or { label, run } gives the note one thing to
 // do, on the toast and in the panel
 const _TOAST_MAX = 3;                       // more than this and the bell counts, the screen does not fill
@@ -5914,16 +5952,20 @@ function showToast(message, type = 'success', helpSection = null, opts = null) {
     _recentToastKeys.set(toastKey, now);
     for (const [k, t] of _recentToastKeys) { if (now - t > 10000) _recentToastKeys.delete(k); }
 
-    // Add to notification history
+    // Add to notification history. opts.history === false is a toast that
+    // passes (a refusal, a progress line): shown, never kept, never journaled
+    // (#2191)
     const action = opts && opts.action && opts.action.label ? opts.action : null;
-    const entry = { id: now + Math.random(), message, type, helpSection, action, timestamp: now, read: false };
-    _notifState.history.unshift(entry);
-    if (_notifState.history.length > _notifState.maxHistory) _notifState.history.pop();
-    _notifState.unreadCount++;
-    _updateNotifBadge();
-    if (!opts || opts.journal !== false) _queueNotifJournal(type, message);
-    // the panel is open: the note joins it, new, without a reopen
-    if (_notifState.panelOpen) _renderNotifFeed();
+    if (!opts || opts.history !== false) {
+        const entry = { id: now + Math.random(), message, type, helpSection, action, timestamp: now, read: false };
+        _notifState.history.unshift(entry);
+        if (_notifState.history.length > _notifState.maxHistory) _notifState.history.pop();
+        _notifState.unreadCount++;
+        _updateNotifBadge();
+        if (!opts || opts.journal !== false) _queueNotifJournal(type, message);
+        // the panel is open: the note joins it, new, without a reopen
+        if (_notifState.panelOpen) _renderNotifFeed();
+    }
 
     const container = document.getElementById('toast-container');
     if (!container) return;

@@ -870,26 +870,27 @@ def _fold_artist_twins_once(database: Any, conn: Any, *,
     return stats
 
 
-def _split_same_named_releases_once(database: Any, conn: Any) -> Dict[str, int]:
-    """#2110: albums of one name (weezer's three "weezer"s) a tag-only import
-    merged into one row get their own rows back, once per finished import.
-    the fix keeps new files apart, this heals the rows made before it."""
-    state = get_state(database)
-    if state.get("status") != "done":
-        return {}
-    key = f"{state.get('finished_at') or ''}|same-named-releases"
-    conn.execute(f"CREATE TABLE IF NOT EXISTS {_SHARED_FILES_MARKER} "
-                 "(import_finished_at TEXT PRIMARY KEY, "
-                 "applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, folded INTEGER)")
-    if conn.execute(f"SELECT 1 FROM {_SHARED_FILES_MARKER} WHERE import_finished_at=?",
-                    (key,)).fetchone():
+def _split_same_named_releases(database: Any, conn: Any) -> Dict[str, int]:
+    """#2110: albums of one name (weezer's three "weezer"s) merged into one row
+    get their own rows back. every start, not once: the proof is read off the
+    files' tag snapshots, which fill in and change as files are scanned, and
+    the once-per-import marker this used to keep was spent on the first start
+    whether or not the row could be proven yet (wolf's never split). one pass
+    over the album/position index, then only the albums holding a position
+    twice are read. commits."""
+    if get_state(database).get("status") != "done":
         return {}
     from core.library2.release_split import split_same_named_releases
     stats = split_same_named_releases(conn)
-    conn.execute(f"INSERT OR REPLACE INTO {_SHARED_FILES_MARKER}(import_finished_at, folded) "
-                 "VALUES(?, ?)", (key, int(stats.get("albums_made") or 0)))
     conn.commit()
-    return stats
+    if stats.get("albums_made"):
+        # wishlist un-mirrors of a provider listing a split album took over
+        try:
+            from core.library2.mirror_outbox import drain
+            drain(database)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("post-split outbox drain failed: %s", exc)
+    return {key: value for key, value in stats.items() if value}
 
 
 def run_deferred_backfills(database: Any, *,
@@ -933,7 +934,7 @@ def run_deferred_backfills(database: Any, *,
             stats["artist_twins"] = _fold_artist_twins_once(
                 database, conn, should_stop=should_stop)
             try:
-                stats["same_named_releases"] = _split_same_named_releases_once(database, conn)
+                stats["same_named_releases"] = _split_same_named_releases(database, conn)
             except sqlite3.Error as exc:
                 logger.warning("same-named releases not split yet: %s", exc)
             # guests an older twin merge dropped from the kept album, once

@@ -650,6 +650,13 @@ class ListeningStatsWorker:
             api_secret = self.config_manager.get('lastfm.api_secret', '')
             if not (api_key and api_secret):
                 return
+            from core.lastfm_client import LASTFM_PRO_MESSAGE, key_rejection
+            if key_rejection(api_key):
+                # pro only from 1 december 2026. the plays stay unscrobbled
+                # (queued) and go out once the key works again; nothing is
+                # posted until the remembered refusal runs out
+                self._note_lastfm_scrobble('key_rejected', LASTFM_PRO_MESSAGE)
+                return
             rows = self._unscrobbled('scrobbled_lastfm', scope, lastfm_since, 200)
             if rows:
                 try:
@@ -662,11 +669,21 @@ class ListeningStatsWorker:
                         batch = rows[i:i + 50]
                         if lfm_client.scrobble_tracks(self._as_listens(batch)):
                             done.extend(r[0] for r in batch)
+                        elif key_rejection(api_key):
+                            # refused mid-run: stop, the rest stay queued
+                            self._note_lastfm_scrobble('key_rejected', LASTFM_PRO_MESSAGE)
+                            break
                     self._mark_scrobbled('scrobbled_lastfm', done)
                     if done:
+                        self._note_lastfm_scrobble('ok', '')
                         logger.info(f"Scrobbled {len(done)} events to Last.fm ({label})")
                 except Exception as e:
                     logger.debug(f"Last.fm scrobble failed ({label}): {e}")
+
+    def _note_lastfm_scrobble(self, status, message):
+        """the last.fm scrobble state get_stats shows ('ok', 'key_rejected')."""
+        self.stats['lastfm_scrobble_status'] = status
+        self.stats['lastfm_scrobble_message'] = message
 
     def _resolve_db_track_id(self, title, artist):
         """Try to match a server track to a local DB track by title+artist."""

@@ -133,9 +133,10 @@ def process_one(row: Dict[str, Any], db: Any = None, auto_grab: bool = True) -> 
     # the pass runs as the system, so it asks about the row's owner, now:
     # downloads switched off after the add mean no grab. the row stays wanted
     # (untouched, no backoff) for when they're switched back on. "getting
-    # books" is its own permission (books.get), apart from music (#2166)
-    from core.permissions import owner_may_get
-    if not owner_may_get(profile_id, "books.get"):
+    # books" is its own permission (books.get), apart from music (#2166). an
+    # owner who asks first gets the books an admin approved (#2188)
+    from core.requests.media import may_get_book
+    if not may_get_book(profile_id, asin):
         outcome["error"] = "Downloads are disabled for this profile."
         outcome["skipped"] = True
         return outcome

@@ -970,7 +970,7 @@ def _maybe_stage_album_track(context, final_path):
             transfer_dir = batch.get('_atomic_transfer_dir')
         staged = to_staging_path(final_path, transfer_dir, staging_root)
         if not staged:
-            logger.warning("[Atomic Publish] Batch %s: %r is not under the transfer dir %r "
+            logger.warning("[Atomic Publish] Batch %s: %r is not under the music library folder %r "
                            "— publishing directly (check soulseek.transfer_path)",
                            batch_id, final_path, transfer_dir)
             return final_path
@@ -1924,7 +1924,7 @@ def _post_process_matched_download(context_key, context, file_path, runtime, met
             if album_name:
                 logger.info(f"Moving to album folder: {album_name}")
             else:
-                logger.info("Moving to Transfer root (single track)")
+                logger.info("Moving to music library folder root (single track)")
 
             safe_move_file(file_path, destination)
             logger.info(f"Moved simple download to: {destination}")

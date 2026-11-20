@@ -1,5 +1,7 @@
 import { useEffect, useRef } from 'react';
 
+import { usePermNotOff } from '@/platform/shell/my-permissions';
+
 import type { ArtMapNode } from '../-discover.artist-map';
 import type { ArtMapArtistCard, ArtMapPanelModel, MiniStat } from '../-discover.artist-map.panel';
 
@@ -97,6 +99,8 @@ export function ArtMapPanel({
   buildArtistDetailPath,
 }: ArtMapPanelProps) {
   const [from, to] = artMapCoverageGradient(model.hue);
+  // no watchlist part, no watch button on the card (#2209)
+  const mayWatch = usePermNotOff('music.watchlist');
 
   return (
     <div
@@ -229,18 +233,20 @@ export function ArtMapPanel({
                 >
                   Details
                 </button>
-                <button
-                  type="button"
-                  id="artmap-card-watch"
-                  className="artmap-card-watch"
-                  style={{
-                    background: card.watch.background,
-                    borderColor: card.watch.borderColor,
-                  }}
-                  onClick={() => onToggleWatch(card.id)}
-                >
-                  {card.watch.label}
-                </button>
+                {mayWatch ? (
+                  <button
+                    type="button"
+                    id="artmap-card-watch"
+                    className="artmap-card-watch"
+                    style={{
+                      background: card.watch.background,
+                      borderColor: card.watch.borderColor,
+                    }}
+                    onClick={() => onToggleWatch(card.id)}
+                  >
+                    {card.watch.label}
+                  </button>
+                ) : null}
               </div>
               {card.best.id && (
                 <a

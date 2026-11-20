@@ -30,6 +30,10 @@ import os
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
+from utils.logging_config import get_logger
+
+logger = get_logger("imports.rematch_hints")
+
 # Columns in INSERT/SELECT order — single source of truth so the dataclass, the
 # write, and the read can't drift apart.
 _FIELDS = (
@@ -258,6 +262,10 @@ def build_identification_from_hint(hint: RematchHint) -> dict:
         "image_url": "",
         "release_date": "",
         "track_number": hint.track_number or 1,
+        # the pick's own position, unset when the hint has none: the
+        # track_number above defaults to 1, and position 1 is a real track
+        "hint_track_number": hint.track_number,
+        "hint_disc_number": hint.disc_number,
         "total_tracks": 1,
         "source": hint.source,
         "method": "rematch_hint",
@@ -270,6 +278,97 @@ def build_identification_from_hint(hint: RematchHint) -> dict:
         "force_album_match": True,
         "album_type": hint.album_type,
     }
+
+
+def _track_field(track: Any, key: str) -> Any:
+    if isinstance(track, dict):
+        return track.get(key)
+    return getattr(track, key, None)
+
+
+def _track_length_ms(track: Any) -> int:
+    if isinstance(track, dict):
+        from core.imports.album_matching import _track_duration_ms
+        return _track_duration_ms(track)
+    try:
+        return int(getattr(track, "duration_ms", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _as_int(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def pick_hinted_track(
+    tracks: list,
+    *,
+    track_id: Any = None,
+    title: Any = None,
+    track_number: Any = None,
+    disc_number: Any = None,
+    file_title: Any = None,
+    file_duration_ms: Any = None,
+) -> Optional[Any]:
+    """the track a re-identify names on the release it picked, or None.
+
+    the id the user picked wins outright. when the tracklist spells ids
+    another way, the pick's title decides (the file's title when the hint
+    has none): the same song first, the closest title next, the file's
+    length breaking a tie and position last. position alone only counts
+    when there's no title to read. "Let It Be" from "1" sits at 26, and
+    neither that nor a stale number may pick "Dig a Pony" over the song the
+    title names (#2206)."""
+    from core.imports.reassign_album import (
+        _song_similarity,
+        is_placeholder_title,
+        song_key,
+        titles_conflict,
+    )
+
+    tracks = list(tracks or [])
+    chosen = str(track_id or "").strip()
+    if chosen:
+        for track in tracks:
+            if str(_track_field(track, "id") or "") == chosen:
+                return track
+
+    want_number = _as_int(track_number)
+    want_disc = _as_int(disc_number) or 1
+
+    def _at_position(track: Any) -> bool:
+        return (want_number > 0 and _as_int(_track_field(track, "track_number")) == want_number
+                and (_as_int(_track_field(track, "disc_number")) or 1) == want_disc)
+
+    def _name(track: Any) -> str:
+        return str(_track_field(track, "name") or _track_field(track, "title") or "")
+
+    anchor = title if not is_placeholder_title(title) else file_title
+    if is_placeholder_title(anchor):
+        # no title on either side: the pick's position is all there is
+        at = [t for t in tracks if _at_position(t)]
+        return at[0] if len(at) == 1 else None
+
+    agreeing = [t for t in tracks if _name(t) and not titles_conflict(anchor, _name(t))]
+    if not agreeing:
+        return None
+    anchor_key = song_key(anchor)
+    file_ms = _as_int(file_duration_ms)
+
+    def _rank(track: Any):
+        length = _track_length_ms(track)
+        gap = abs(length - file_ms) if file_ms > 0 and length > 0 else float("inf")
+        return (
+            song_key(_name(track)) == anchor_key,
+            round(_song_similarity(anchor, _name(track)), 3),
+            -gap,
+            _at_position(track),
+        )
+
+    return max(agreeing, key=_rank)
 
 
 def _canonical(path: Optional[str]) -> str:
@@ -357,6 +456,12 @@ def delete_replaced_track(
 
     from core.library2.track_files import set_file_state
     set_file_state(cursor.connection, file_id, "deleted")
+    # #2193: the replace is a move. the old row, left with no file, folds into
+    # the track the re-import made (plays, history, playlist and wishlist
+    # links go with it) and an album it leaves empty is taken out the way
+    # removing it does. it used to stay behind as a missing track on a
+    # release nobody had any more, still wanted, so it was searched again
+    fold_replaced_track(cursor, replace_track_id, new_paths)
     # Only unlink if no surviving row still points at this file (rows store the
     # stored path, so compare against the stored path, not the resolved one).
     cursor.execute(
@@ -371,6 +476,49 @@ def delete_replaced_track(
     except OSError:
         pass
     return None
+
+
+def fold_replaced_track(cursor: Any, old_track_id: Any, new_paths: Optional[list]) -> Optional[int]:
+    """Fold a replaced track with no live file left into the track its file
+    was re-imported as. Returns that track's id, or None when it kept a file,
+    the re-import's track can't be told, or the fold failed (then nothing of
+    it is kept). Does not commit."""
+    conn = cursor.connection
+    try:
+        old_id = int(old_track_id)
+    except (TypeError, ValueError):
+        return None
+    if conn.execute(
+            "SELECT 1 FROM lib2_track_files WHERE track_id=? AND path IS NOT NULL AND path<>''"
+            " AND COALESCE(file_state,'active') NOT IN ('deleted','missing_confirmed') LIMIT 1",
+            (old_id,)).fetchone():
+        return None
+    from core.library2.track_files import track_id_for_path
+    found = {track_id_for_path(conn, p, basename=False) for p in (new_paths or []) if p}
+    found.discard(None)
+    found.discard(old_id)
+    if len(found) != 1:
+        return None
+    new_id = int(found.pop())
+    row = conn.execute("SELECT album_id FROM lib2_tracks WHERE id=?", (old_id,)).fetchone()
+    if row is None:
+        return None
+    old_album = row[0]
+    conn.execute("SAVEPOINT replaced_track_fold")
+    try:
+        from core.library2.track_slot_move import fold_track_into, retire_emptied_album
+        fold_track_into(conn, old_id, new_id)
+        new_album = conn.execute("SELECT album_id FROM lib2_tracks WHERE id=?", (new_id,)).fetchone()
+        if old_album is not None and (new_album is None or new_album[0] != old_album):
+            retire_emptied_album(conn, old_album)
+        conn.execute("RELEASE SAVEPOINT replaced_track_fold")
+    except Exception as exc:  # noqa: BLE001 - the replace itself stands
+        conn.execute("ROLLBACK TO SAVEPOINT replaced_track_fold")
+        conn.execute("RELEASE SAVEPOINT replaced_track_fold")
+        logger.warning("Could not fold replaced track %s into %s: %s", old_id, new_id, exc)
+        return None
+    logger.info("Re-identify folded the replaced track %s into %s", old_id, new_id)
+    return new_id
 
 
 def _copies_span_libraries(cursor: Any, track_id: Any) -> bool:
@@ -415,7 +563,9 @@ __all__ = [
     "consume_hint",
     "list_pending_hints",
     "build_identification_from_hint",
+    "pick_hinted_track",
     "delete_replaced_track",
+    "fold_replaced_track",
     "quick_file_signature",
 ]
 

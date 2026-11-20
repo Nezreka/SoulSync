@@ -2029,6 +2029,17 @@ def create_blueprint() -> Blueprint:
                             return jsonify({"query": ca, "why": "%s" % vibe})
                 except Exception:   # noqa: BLE001
                     logger.debug("chat radio: tag lookup failed", exc_info=True)
+            # no last.fm (not set up, or the key refused without pro): the
+            # artists on deezer's playlists for the tag
+            try:
+                from core import lastfm_fallback
+                cands, _src = lastfm_fallback.tag_top_artists(vibe, limit=40, lastfm=None)
+                for cand in cands:
+                    ca = str(cand.get("name") or "")
+                    if _fresh(ca):
+                        return jsonify({"query": ca, "why": "%s" % vibe})
+            except Exception:   # noqa: BLE001
+                logger.debug("chat radio: free tag lookup failed", exc_info=True)
             # Unknown tag (or no Last.fm): stay in the same lane by searching
             # for more of the same KIND of thing rather than the same video.
             return jsonify({"query": "%s mix" % vibe, "why": vibe})
@@ -2101,6 +2112,27 @@ def create_blueprint() -> Blueprint:
             finally:
                 if conn:
                     conn.close()
+
+        # 4) free sources, for when last.fm is not set up or refused the key
+        # (pro only from 1 december 2026): deezer's artist radio for a track,
+        # then listenbrainz / deezer similar artists
+        if artist:
+            try:
+                from core import lastfm_fallback
+                if track:
+                    cands, _src = lastfm_fallback.similar_tracks(artist, track, limit=30, lastfm=None)
+                    for cand in cands:
+                        ca, ct = str(cand.get("artist") or ""), str(cand.get("name") or "")
+                        if _fresh(ca, ct):
+                            return jsonify({"query": ("%s %s" % (ca, ct)).strip(),
+                                            "why": "similar to %s" % (track or artist)})
+                cands, _src = lastfm_fallback.similar_artists(artist, limit=30, lastfm=None)
+                for cand in cands:
+                    ca = str(cand.get("name") or "")
+                    if _fresh(ca):
+                        return jsonify({"query": ca, "why": "similar to %s" % artist})
+            except Exception:   # noqa: BLE001
+                logger.debug("chat radio: free similar lookup failed", exc_info=True)
 
         return jsonify({"query": None, "why": "no similar data"})
 

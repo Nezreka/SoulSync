@@ -133,7 +133,7 @@ For each matched track, SoulSync:
 1. Enriches the file with full Spotify metadata (artist, album, track number, disc number, genres)
 2. Embeds album artwork
 3. Fetches synchronized lyrics (LRC) when available
-4. Renames and moves the file to your transfer folder using your configured path template
+4. Renames and moves the file to your music library folder using your configured path template
 5. Triggers a media server library scan (if connected)
 
 ---
@@ -156,8 +156,8 @@ For each matched track, SoulSync:
 | No files showing up | Check that your staging path is correct in Settings and the folder isn't empty. Click Refresh. |
 | No album suggestions | Files may lack metadata tags. Try searching manually by album name. |
 | Wrong track matched | Drag the correct file from the unmatched pool onto the track, or click X to unmatch and try again. |
-| Processing fails | Check that your transfer path is writable. Enable DEBUG logging in Settings and check `logs/app.log`. |
-| Files not disappearing after import | Successfully processed files are moved to your transfer folder. Check there. Failed files remain in staging. |
+| Processing fails | Check that your music library folder is writable. Enable DEBUG logging in Settings and check `logs/app.log`. |
+| Files not disappearing after import | Successfully processed files are moved to your music library folder. Check there. Failed files remain in staging. |
 | Docker: staging folder empty | Verify your volume mapping points to the right host folder and the container path matches your Settings value. |
 
 ---
@@ -169,13 +169,13 @@ volumes:
   # Your staging folder for imports
   - /mnt/user/Music/Staging:/app/Staging
 
-  # Where processed files end up
+  # Your music library folder: where processed files end up
   - /mnt/user/Music/Library:/app/Transfer:rw
 ```
 
 **SoulSync Settings:**
 - Import Staging Dir: `/app/Staging`
-- Transfer Path: `/app/Transfer`
+- Music Library Folder: `/app/Transfer`
 
 **Workflow:**
 ```

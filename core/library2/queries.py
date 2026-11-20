@@ -123,6 +123,12 @@ def _json_list(raw: Any) -> List[str]:
         return []
 
 
+def _artist_about(row: Any) -> Dict[str, Any]:
+    """the artist page's bio/tags/numbers with their sources (artist_about)."""
+    from .artist_about import resolve_artist_about
+    return resolve_artist_about(row["enrichment"] if "enrichment" in row.keys() else None)
+
+
 def _artist_provider_ids(row: Any) -> Dict[str, str]:
     """Every qualified provider id stored on an artist row (guide §2.5): the
     dedicated ``spotify_id`` column plus the ``external_ids`` namespaces."""
@@ -1084,6 +1090,14 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
                              NOT IN ('missing_confirmed','deleted'))
                      OR ({owned_elsewhere})
                    THEN t.id END) AS files_present,
+               -- #2194: tracks with a file of this release's own. files_present
+               -- also counts audio held under another release, which a rename
+               -- of this release can't move: Preview rename scopes by this
+               COUNT(DISTINCT CASE
+                   WHEN tf.id IS NOT NULL AND tf.path IS NOT NULL AND tf.path <> ''
+                    AND COALESCE(tf.file_state, 'active')
+                        NOT IN ('missing_confirmed','deleted')
+                   THEN t.id END) AS own_files_present,
                -- Guide §5: "My Library" means `origin='library' OR monitored`.
                -- A wanted TRACK on an otherwise unowned release satisfies that
                -- just as much as a monitored album does — without this count
@@ -1173,6 +1187,8 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
             "mood": effective["mood"],
             "track_count": total,
             "tracks_present": present,
+            # #2194: of those, the ones with a file here (not borrowed)
+            "own_files_present": r["own_files_present"] or 0,
             # Rows the provider promised but that do not exist yet always
             # count: a slot with no row is not a track anyone said no to, and
             # `lib2_albums.monitored` cannot stand in for intent here — the
@@ -1223,6 +1239,8 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
         # (those workers still write legacy rows — Stufe 2). Say which, instead
         # of letting the chips imply parity.
         "enrichment_depth": "full" if a["legacy_artist_id"] is not None else "native",
+        # bio, tags and numbers from whichever source has them, last.fm first
+        "about": _artist_about(a),
         "monitored": _scoped_flag(conn, "artist", a),
         "monitor_new_items": a["monitor_new_items"],
         "quality_profile": _quality_profile_dict(qp),

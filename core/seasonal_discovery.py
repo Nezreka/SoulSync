@@ -416,13 +416,14 @@ class SeasonalDiscoveryService:
                 tracks_found += 1
         logger.info(f"{season_key}: {len(pool_picks)} vibe-tagged pool tracks")
 
+        # last.fm when it works, the free sources when it does not (a client
+        # of None still reaches them)
         lastfm_client = self._get_lastfm_client()
-        if lastfm_client:
-            tag_rows = lastfm_tag_tracks(self.database, lastfm_client, season_key, limit=20)
-            for track in tag_rows:
-                if self._add_seasonal_track(season_key, track, source):
-                    tracks_found += 1
-            logger.info(f"{season_key}: {len(tag_rows)} lastfm tag-chain tracks")
+        tag_rows = lastfm_tag_tracks(self.database, lastfm_client, season_key, limit=20)
+        for track in tag_rows:
+            if self._add_seasonal_track(season_key, track, source):
+                tracks_found += 1
+        logger.info(f"{season_key}: {len(tag_rows)} tag-chain tracks")
 
         albums = vibe_library_albums(self.database, season_key, months, source, limit=40)
         for album in albums:

@@ -820,11 +820,11 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
     keywords: 'download folder input slskd downloads path docker',
   },
   {
-    label: 'Transfer path',
+    label: 'Music library folder',
     tab: 'library',
     anchor: id('transfer-path'),
     file: 'library-folders.tsx',
-    hint: 'your music library folder (output)',
+    hint: 'where finished music is filed (output)',
     keywords: 'transfer library folder output music path destination',
   },
   {
@@ -994,6 +994,14 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
     file: 'library-processing.tsx',
     hint: 'auto-import and matching',
     keywords: 'auto import match',
+  },
+  {
+    label: 'Import default search source',
+    tab: 'library',
+    anchor: id('import-default-search-source'),
+    file: 'library-processing.tsx',
+    hint: 'where Import searches first',
+    keywords: 'import search source musicbrainz default identify match any source',
   },
   {
     label: 'Duration tolerance',

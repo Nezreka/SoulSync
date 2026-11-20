@@ -49,7 +49,7 @@
 #settings-page .stg-detail-pane { width: 100%; min-width: 0; }
 #settings-page .settings-nav-row {
     display: flex !important; flex-direction: row !important; align-items: center; justify-content: space-between;
-    gap: 24px; margin-bottom: 24px; border: 0 !important; box-shadow: none !important; flex-wrap: nowrap !important;
+    gap: 24px; margin-bottom: 24px; border: 0 !important; box-shadow: none !important; flex-wrap: nowrap;
 }
 #settings-page .stg-active-section-title { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 #settings-page .stg-active-title-text { font-size: 20px; font-weight: 650; letter-spacing: -.02em; }
@@ -63,13 +63,16 @@
 #settings-page .save-button:disabled { opacity: .5; cursor: wait; }
 /* settings save as you go (#1909): at rest the button is a quiet status,
    it only asks for attention while a change is waiting or a save failed */
+#settings-page .save-button[data-state="rest"],
 #settings-page .save-button[data-state="idle"],
 #settings-page .save-button[data-state="saved"],
 #settings-page .save-button[data-state="saving"] {
     background: transparent; border-color: var(--white-a10); color: var(--white-a65); font-weight: 600;
 }
+#settings-page .save-button[data-state="rest"]:hover,
 #settings-page .save-button[data-state="idle"]:hover,
 #settings-page .save-button[data-state="saved"]:hover { border-color: var(--white-a20); color: var(--white-a90); }
+#settings-page .save-button[data-state="rest"] .save-state-icon,
 #settings-page .save-button[data-state="idle"] .save-state-icon,
 #settings-page .save-button[data-state="saved"] .save-state-icon { color: var(--accent); }
 #settings-page .save-button[data-state="saving"] { cursor: progress; }
@@ -79,6 +82,9 @@
     background: transparent; border-color: rgba(var(--danger-rgb), .6); color: var(--danger-light);
 }
 #settings-page .save-button[data-state="error"] .save-state-icon { display: none; }
+/* #2187: at rest nothing changed or saved yet, so there is no status to show.
+   the video side keeps it: its sections save on that click */
+body:not([data-side="video"]) #settings-page .save-button[data-state="rest"] { display: none; }
 #settings-page .settings-columns {
     display: flex !important; flex-direction: column !important; gap: 18px !important;
     width: 100%; margin: 0; padding: 0;
@@ -177,7 +183,10 @@
     #settings-page .stg-navigation-heading { align-items: stretch; flex-direction: column; gap: 16px; margin-bottom: 12px; }
     #settings-page .stg-nav-search-wrap { width: 100%; }
     #settings-page .stg-navigation-heading h2 { font-size: 24px; }
-    #settings-page .settings-nav-row { align-items: flex-start; gap: 12px; }
+    /* #2187: the title takes the row and the status wraps under it; side by
+       side the status squeezed the title and a one-word title ran under it */
+    #settings-page .settings-nav-row { align-items: flex-start; justify-content: flex-end; gap: 12px; flex-wrap: wrap; }
+    #settings-page .stg-active-section-title { flex: 1 1 100%; }
     #settings-page .save-button { padding: 10px 12px; font-size: 12px; }
     #settings-page .save-button svg { display: none; }
     #settings-page .stg-active-sub-text { font-size: 12px; }

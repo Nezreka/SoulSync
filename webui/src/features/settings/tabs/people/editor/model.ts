@@ -398,9 +398,9 @@ export function lockWords(model: Model, row: CatalogueRow): string {
     case 'restrict':
       return c ? 'Global policy keeps this on for everyone.' : '';
     case 'mode':
-      return c === 'none'
-        ? "Global policy: can't request."
-        : `Global policy: up to ${row.value_labels?.[str(c)] ?? str(c)}.`;
+      return c === row.values[0]
+        ? `Global policy: ${modeLabel(row, str(c)).toLowerCase()}.`
+        : `Global policy: up to ${modeLabel(row, str(c))}.`;
     case 'rating':
       return c === 'any' || c === FOLLOW ? '' : `Global policy: up to ${ratingWord(row, c)}.`;
     case 'count':
@@ -456,25 +456,28 @@ export function softLabel(label: string): string {
 /** what the picked mode means, in the row's own words */
 export function modeHelp(row: CatalogueRow, v: Value): string {
   const verb = row.id.startsWith('movies.') || row.id.startsWith('tv.') ? 'watch' : 'listen to';
+  const podcast = row.id.startsWith('podcasts.');
   if (v === 'download') {
-    const tail =
-      row.id.startsWith('books.') || row.id.startsWith('podcasts.')
-        ? ''
-        : ' Never counts toward their limit.';
-    return row.id.startsWith('podcasts.')
-      ? 'Right away: new episodes download as they come out.'
-      : `Right away: it downloads the moment they add it.${tail}`;
+    const tail = row.id.startsWith('books.') || podcast ? '' : ' Never counts toward their limit.';
+    return podcast
+      ? 'Auto-approve: new episodes download as they come out.'
+      : `Auto-approve: it downloads the moment they add it.${tail}`;
   }
   if (v === 'ask') {
-    return `Ask first: what they pick lands in your Requests.${row.id === 'tv.get' ? ' A season or a whole series is one ask.' : ''}`;
+    if (podcast)
+      return "Require approval: they ask for episodes, and each one lands in your Requests. New episodes don't download on their own.";
+    return `Require approval: what they pick lands in your Requests.${row.id === 'tv.get' ? ' A season or a whole series is one request.' : ''}`;
   }
-  if (row.id.startsWith('podcasts.'))
-    return 'Follow only: they see new episodes, nothing downloads for them.';
-  return `Can't request: they ${verb} what's here, nothing new comes in.`;
+  if (podcast) return 'Follow only: they see new episodes, nothing downloads for them.';
+  return `Requests off: they ${verb} what's here, nothing new comes in.`;
 }
 
-/** the segmented control's words; podcasts never request, they follow */
+/** the segmented control's words (#2192); a podcast's none is Follow only */
 export function modeLabel(row: CatalogueRow, v: string): string {
   if (row.id === 'podcasts.get' && v === 'none') return 'Follow only';
-  return row.value_labels?.[v] ?? v;
+  return (
+    row.value_labels?.[v] ??
+    { download: 'Auto-approve', ask: 'Require approval', none: 'Requests off' }[v] ??
+    v
+  );
 }

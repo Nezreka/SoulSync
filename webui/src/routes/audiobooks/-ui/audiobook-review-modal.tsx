@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 
 import { EmptyState, Spinner } from '@/components/primitives';
+import { useMyPermissions } from '@/platform/shell/my-permissions';
 
 import type { AudiobookBlockedRelease, AudiobookRecycledBook } from '../-audiobooks.types';
 
@@ -41,7 +42,10 @@ export function AudiobookReviewModal({
   onClose: () => void;
   initialPane?: Pane;
 }) {
-  const [pane, setPane] = useState<Pane>(initialPane);
+  // the recycle bin is books deleted from shared storage: the admin's
+  // (#2201). a member who gets books keeps their own blocklist
+  const admin = useMyPermissions().isAdmin;
+  const [pane, setPane] = useState<Pane>(admin ? initialPane : 'blocklist');
   const [bin, setBin] = useState<AudiobookRecycledBook[]>([]);
   const [keepDays, setKeepDays] = useState(7);
   const [blocked, setBlocked] = useState<AudiobookBlockedRelease[]>([]);
@@ -50,7 +54,10 @@ export function AudiobookReviewModal({
   const [message, setMessage] = useState('');
 
   const load = async () => {
-    const [recycle, blocklist] = await Promise.all([fetchRecycleBin(), fetchBlocklist()]);
+    const [recycle, blocklist] = await Promise.all([
+      admin ? fetchRecycleBin() : Promise.resolve({ entries: [], keepDays: 0 }),
+      fetchBlocklist(),
+    ]);
     setBin(recycle.entries);
     setKeepDays(recycle.keepDays);
     setBlocked(blocklist);
@@ -137,13 +144,15 @@ export function AudiobookReviewModal({
         </header>
 
         <div className={styles.reviewPills}>
-          <button
-            type="button"
-            className={`${styles.reviewPill} ${pane === 'recycle' ? styles.reviewPillActive : ''}`}
-            onClick={() => setPane('recycle')}
-          >
-            🗑 Recycle bin ({bin.length})
-          </button>
+          {admin && (
+            <button
+              type="button"
+              className={`${styles.reviewPill} ${pane === 'recycle' ? styles.reviewPillActive : ''}`}
+              onClick={() => setPane('recycle')}
+            >
+              🗑 Recycle bin ({bin.length})
+            </button>
+          )}
           <button
             type="button"
             className={`${styles.reviewPill} ${pane === 'blocklist' ? styles.reviewPillActive : ''}`}

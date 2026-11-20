@@ -83,7 +83,7 @@ def _scan_roots(context: JobContext) -> list:
     if transfer and os.path.isdir(transfer):
         roots.append(os.path.realpath(transfer))
     else:
-        logger.warning("Transfer folder does not exist: %s", transfer)
+        logger.warning("Music library folder does not exist: %s", transfer)
 
     # Upstream #1504: every own-library root is walked as well.
     from core.repair_jobs.base import all_library_roots
@@ -222,13 +222,13 @@ class OrphanFileDetectorJob(RepairJob):
     display_name = 'Orphan File Detector'
     description = 'Finds audio files not tracked in the database'
     help_text = (
-        'Walks your transfer folder looking for audio files (FLAC, MP3, M4A, OGG, WAV, etc.) '
+        'Walks your music library folder looking for audio files (FLAC, MP3, M4A, OGG, WAV, etc.) '
         'that exist on disk but have no matching entry in the SoulSync database. Each finding '
         "also carries the file's real measured quality (format/bitrate/sample rate/bit depth), "
         'so you know what you have before deciding.\n\n'
         "Optional setting 'scan_library_folder' (off by default) also walks every folder "
         'configured under Settings → Music Library Paths (library.music_paths), not just the '
-        'transfer/staging area — catches a failed or partial import, or a file placed there '
+        'music library folder — catches a failed or partial import, or a file placed there '
         'outside SoulSync entirely. A no-op until at least one library path is configured '
         'there.\n\n'
         'Orphan files can appear after manual folder edits, interrupted downloads, or database '

@@ -104,7 +104,7 @@ def test_legacy_finding_without_abs_outside_transfer_is_guarded(tmp_path):
     details = {'from': '/abs/outside/song.flac', 'to': '/abs/outside/new.flac'}
     res = w._fix_path_mismatch('track', 'lib2:11', '/abs/outside/song.flac', details)
     assert res['success'] is False
-    assert 'escapes transfer folder' in res['error']
+    assert 'escapes the music library folder' in res['error']
 
 
 def test_legacy_finding_under_transfer_still_works(tmp_path):

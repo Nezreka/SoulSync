@@ -60,6 +60,15 @@ export interface TitleRow extends FileFacts {
   series_type?: string | null;
   // movies
   studio?: string | null;
+  /** the Shelf Life job's last verdict, while the job is on and has scored */
+  shelf_life?: ShelfLife;
+}
+
+/** a score 0-100 (higher means keep), or the gate protecting the title */
+export interface ShelfLife {
+  score: number | null;
+  gate: string | null;
+  gate_text: string | null;
 }
 
 export interface FileRow {
@@ -106,6 +115,8 @@ export interface TitlesPage {
   kind: Side;
   totals: { titles: number; size_bytes: number; files: number };
   pagination: Pagination;
+  /** only while the Shelf Life job is on and has scored this side */
+  shelf_life_threshold?: number;
 }
 
 export interface FilesPage {

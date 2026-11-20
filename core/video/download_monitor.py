@@ -1718,6 +1718,13 @@ def _fail_or_retry(db, dl, error_msg, *, allow_retry: bool = True,
     the item searched again at once, so the next release the profile ranks is
     grabbed instead of the item waiting hours for the wishlist's next pass."""
     from core.video.retry import plan_retry
+    if allow_retry and _held_for_pick(db, dl):
+        # a release picked for a request held for a pick (#2199): trying the
+        # next candidate, a requery or the next ranked release would be the
+        # automatic choice the admin turned off. it fails, the row stays
+        # held, and the Requests page offers the pick again
+        logger.info("video download %s: held for a release pick, no automatic retry", dl.get("id"))
+        allow_retry = False
     plan = plan_retry(dl, blocked=_blocked_pairs(db), blocked_users=_blocked_users(db)) \
         if allow_retry else {"action": "fail"}
     if plan["action"] == "candidate" and _apply_candidate(db, dl["id"], dl, plan["candidate"], plan["rest"]):
@@ -1750,6 +1757,18 @@ def _fail_or_retry(db, dl, error_msg, *, allow_retry: bool = True,
         _spawn_next_release(db, dl, err)
         return
     _publish_failed(dl, err, _owners(db, dl))
+
+
+def _held_for_pick(db, dl) -> bool:
+    """is this download's item held for a release pick on someone's wishlist?"""
+    try:
+        kind, tmdb_id, sn, en, _ctx = _wishlist_ids(db, dl)
+        if kind == "youtube" or not tmdb_id or not hasattr(db, "wishlist_held"):
+            return False
+        return bool(db.wishlist_held(kind, int(tmdb_id), season_number=sn, episode_number=en))
+    except Exception:  # noqa: BLE001 - unknown: retry as before
+        logger.debug("video download %s: held check failed", dl.get("id"), exc_info=True)
+        return False
 
 
 def _publish_failed(dl, err, owners=None) -> None:

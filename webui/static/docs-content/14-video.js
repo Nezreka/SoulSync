@@ -198,7 +198,7 @@ The Video **Dashboard** uses the same layout as the music one.
 ![The video dashboard: a featured title up top, your watching and rails below](vdash-overview.jpg)
 
 - **Hero**: a greeting, your movies, shows, episodes and disk size (click one for the library), and the scan strip. **Scan** picks up what changed on your server; the **⋯** menu has a deep scan, the library, the poster manager and repair.
-- **Worker orbs**: every video enrichment worker on its own stage, the same animation as music. Hover to open them into a grid; click one to pause or resume it, or **Manage Workers** for the full view.
+- **Worker orbs**: every video enrichment worker on its own stage, the same animation as music. Hover to open them into a grid; click one to pause or resume it, or **Manage Workers** for the full view. Admins only: a member's hero has no orbs.
 - **Next up**: the calendar's billboard for the next episodes on your watchlist, each with its state. Click one to open it on the calendar.
 - **Make it yours** (admins): Overlay Studio and Collection Studio, with how much of your library has the metadata they draw on.
 
@@ -1444,6 +1444,36 @@ On the video side, **Fix all safe** only runs fixes that change SoulSync's own d
 | **Watched Cleanup** | Movies watched at least once whose last watch is older than your \`watched_days\` (optionally also never-watched movies sitting \`unwatched_days\`, off by default). Watch-state changes ride the incremental scan, so candidates appear without a deep scan. Movies with no watch date are skipped, not guessed. With profiles linked to their own Plex accounts, a movie waits until every viewer who watched anything in the last \`active_days\` (default 90; the owner counts too) has seen it, the age runs from the last of those watches, anyone part-way through holds it back, and the finding names who watched and who wasn't counted. | Moves the file to the **recycle bin** (never a hard delete) and marks the row file-less. |
 | **Naming Conformance** | Renders the **current** organization template for every owned movie/episode file and flags paths that differ — the Sonarr/Radarr "preview rename" gap, since templates only ever applied to new imports. The findings list *is* the preview (current → new); bulk select = mass rename. Safety: unlocatable files are skipped, occupied destinations are per-finding errors (never overwritten), and DB paths aren't rewritten here — the next scan reconciles them after the server notices. | Renames the file (plus same-stem sidecars and subtitles) into place. |
 | **Missing Subtitles** | Every library movie and episode, checked for your subtitle languages (per-title overrides and the forced toggle included) the same way new imports are: any sidecar next to the video counts whatever it's named, and so do embedded tracks. Weekly by default. With **Dry Run** off (the default) it queues what's missing straight away and the run's *Fixed* count is how many it queued; with Dry Run on it raises one finding per movie or show instead. Needs Download subtitles on. | Queues the still-missing subtitles (re-checked at approve time); the subtitle worker fetches them within the daily quota. |
+| **Shelf Life** | Every movie and show, scored 0 to 100 for how much it has earned its space (see [Shelf Life](#vtool-repair) below). Off by default. | Deletes the whole title the way Delete Title does, to the recycle bin, only with the title typed; checked again first. |
+
+### Shelf Life
+
+**Shelf Life** scores every movie and show from 0 to 100 for how much it has earned its space on disk. Higher means keep. A title under the **Threshold** is flagged for you to look at. Nothing is deleted until you say so. The job is **off until you turn it on**, and its scores show as a badge in the Library manager and on each title's page (admins only).
+
+The score mixes five signals, each also 0 to 100. A signal with no data counts as 50, so missing data never drags a title down.
+
+| Signal | What it reads |
+|---|---|
+| **Watching** | How many people watched it, how recently and how often: everyone on your Plex and Jellyfin servers, from the play log, not only SoulSync's profiles. A title nobody has watched starts at 50 and halves for every year it sits. |
+| **Hard to replace** | How few streaming services carry it in your region, and how many grabs failed before it landed. |
+| **Cultural value** | Critic and audience ratings, weighed by how many votes stand behind them, awards, a lift for a well rated old title, and a lift for a devoted following on Trakt lists. |
+| **Size for its runtime** | Gigabytes per hour against your library's median. |
+| **Requests** | Asked for and watched by whoever asked keeps it; asked for and never watched counts against it once the grace runs out. |
+
+**Presets** decide how many of the 100 points each signal carries: **Balanced** (Watching 40, Hard to replace 20, Cultural value 20, Size 10, Requests 10), **Space First** (oversized copies sink faster) and **Collector** (rare and well regarded titles hold on even when nobody watches them).
+
+**Never flagged, whatever the score**: anything playing or paused on any server, anything someone left part-way within Active Days, a show with an episode watched within Active Days, anything with the padlock, anything marked **Keep**, a request its requester hasn't watched yet, a followed show still airing (a show whose status isn't known yet counts as airing), and anything newer than New Arrival Days.
+
+**A title is all its copies.** Two rows for one film on the same server (a Movies and a Movies 4K library, say) are one title: a watch or a padlock on either copy holds both, and the size shown is every copy, because deleting the title takes them all.
+
+**Keep** a title from its page and it is never flagged while kept, even after a rescan or a re-add.
+
+**Free up space** opens on the open findings, lowest score first. Type how many GB you want back and it picks the fewest titles that reach it; it never reaches over the line to make the number, it says how short it falls. One typed phrase (\`delete 14 titles\`) confirms the batch. Each title goes the way Delete Title does it: acquisition stopped, the folder to the **recycle bin**, and the title hidden from Discover. **Fix all** never deletes anything.
+
+**Checked again right before a delete.** Findings come from a daily scan, so when you plan or delete, every title is gathered and scored again with the settings as they are now. Anything watched, kept, locked or requested since, or no longer under today's line, is left out and the cleanup says why. While the job is switched off, its findings stay in the list but nothing can be deleted from them.
+
+> [!NOTE]
+> The first start after upgrading re-queues every already-enriched title once for the Trakt and streaming data Shelf Life reads. The enrichment page shows those titles as pending for a few hours on a big library. That is expected; nothing broke.
 
 > [!TIP]
 > Run maintenance after big imports or server migrations. It's the fastest way to reconcile the database with what's actually on disk.

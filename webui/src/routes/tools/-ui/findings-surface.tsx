@@ -42,6 +42,7 @@ import type {
   RepairJob,
   RepairJobRun,
 } from '../-tools.types';
+import type { CoverApplyTarget } from './cover-art-finding';
 
 import {
   bulkFindingAction,
@@ -94,6 +95,7 @@ import {
   tallySummary,
 } from '../-tools.keep-best-bulk';
 import { useToolsMedia } from '../-tools.media';
+import { keepShelfLifeTitle, shelfLifePhrase, startShelfLifeDelete } from '../-video-tools.api';
 import { RedownloadModal } from '../../artist-detail/-ui/redownload-modal';
 import { AlbumInspectionTray, groupIdentity } from './album-inspection-tray';
 import { FindingArt } from './finding-art';
@@ -107,12 +109,14 @@ import {
   TYPE_ORPHAN,
   TYPE_QUALITY,
   TYPE_RETAG,
+  TYPE_SHELF_LIFE,
   useFindingFix,
 } from './finding-fix';
 import { useFindingPrompts } from './finding-prompts';
 import { FindingsAlbumGrid } from './findings-album-grid';
 import { FindingsInbox } from './findings-inbox';
 import { HealthHero } from './health-hero';
+import { ShelfLifeCleanupDialog } from './shelf-life-cleanup';
 import { VideoFindingDetail } from './video-finding-detail';
 
 function toast(message: string, type = 'info') {
@@ -353,6 +357,9 @@ export function FindingsSurface({
    *  raise this again", which is only fair to make one click if it's one
    *  click to take back. */
   const [undo, setUndo] = useState<{ ids: number[]; label: string; token: number } | null>(null);
+  /** the Shelf Life cleanup picker: undefined = closed, null = every open
+   *  finding, a list = the findings picked in the list */
+  const [shelfLifePick, setShelfLifePick] = useState<number[] | null | undefined>(undefined);
   const offerUndo = useCallback((ids: number[], label: string) => {
     setUndo((previous) => ({ ids, label, token: (previous?.token || 0) + 1 }));
   }, []);
@@ -723,6 +730,32 @@ export function FindingsSurface({
     [offerUndo, refreshAll],
   );
 
+  // Shelf Life's Keep: the title is kept for good (by TMDB id), its finding
+  // leaves the open list, and the job never flags it while it is kept
+  const keepShelfLife = useCallback(
+    async (finding: RepairFinding) => {
+      const details = finding.details || {};
+      const kind = typeof details.kind === 'string' ? details.kind : '';
+      const itemId = Number(details.item_id);
+      if (!kind || !Number.isFinite(itemId)) return;
+      let result: { success?: boolean; error?: string };
+      try {
+        result = await keepShelfLifeTitle(kind, itemId);
+      } catch (error) {
+        toast(`Could not keep it: ${(error as Error).message}`, 'error');
+        return;
+      }
+      if (!result.success) {
+        toast(result.error || 'Could not keep it', 'error');
+        return;
+      }
+      const name = typeof details.title === 'string' ? details.title : finding.title;
+      toast(`Kept "${name}". Shelf Life won't flag it while it's kept.`, 'success');
+      refreshAll();
+    },
+    [refreshAll],
+  );
+
   const runUndo = useCallback(async () => {
     const current = undo;
     if (!current) return;
@@ -859,13 +892,14 @@ export function FindingsSurface({
 
   /** `applyCoverArtTarget` — per-image apply, no confirm. */
   const applyCoverArt = useCallback(
-    async (findingId: number, target: 'album' | 'artist') => {
+    async (findingId: number, target: CoverApplyTarget) => {
+      const kind = target === 'artist' ? 'artist' : 'album';
       try {
         const result = await fixFinding(findingId, target);
         toast(
           result.success
-            ? result.message || `Applied ${target} art`
-            : result.error || `Failed to apply ${target} art`,
+            ? result.message || `Applied ${kind} art`
+            : result.error || `Failed to apply ${kind} art`,
           result.success ? 'success' : 'error',
         );
         refreshAll();
@@ -917,6 +951,15 @@ export function FindingsSurface({
     let backfillAction: string | null = null;
     let qualityAction: string | null = null;
     if (video) {
+      const shelfIds = withType(TYPE_SHELF_LIFE);
+      if (shelfIds.length) {
+        if (shelfIds.length !== ids.length) {
+          toast('Shelf Life findings delete whole titles: approve them on their own.', 'info');
+          return;
+        }
+        setShelfLifePick(shelfIds);
+        return;
+      }
       // one question for the whole selection, only when something in it
       // changes a file on disk
       const risky = [...new Set(ids.map(typeOf).filter(Boolean) as string[])].filter(
@@ -1096,6 +1139,11 @@ export function FindingsSurface({
         toast('Review each duplicate release and select the release group to keep.', 'info');
         return;
       }
+      if (video && group.finding_type === TYPE_SHELF_LIFE) {
+        // whole titles go: the picker shows them, then one typed phrase
+        setShelfLifePick(null);
+        return;
+      }
       const label = info?.label || group.finding_type.replace(/_/g, ' ');
       const count = group.pending;
       let fixAction: string | null = null;
@@ -1261,6 +1309,39 @@ export function FindingsSurface({
       }
     },
     [groupFilters, prompts, refreshAll, video, watchBulkFixRun],
+  );
+
+  /** one typed phrase for the whole batch ('delete 14 titles'); the server
+   *  checks it again, then each title goes through Delete Title in the
+   *  ordinary background run. */
+  const deleteShelfLife = useCallback(
+    async (chosen: number[]) => {
+      const phrase = shelfLifePhrase(chosen.length);
+      const typed = await prompts.promptTypeToConfirm({
+        title: `Delete ${chosen.length.toLocaleString()} title${chosen.length === 1 ? '' : 's'}?`,
+        message:
+          'Each goes the way Delete Title does it: no profile gets it again, the folder goes to the recycle bin, and it is hidden from Discover.',
+        phrase,
+        confirmText: 'Delete',
+      });
+      if (!typed) return;
+      try {
+        const result = await startShelfLifeDelete(chosen, typed);
+        if (result.started) {
+          toast(`Deleting ${result.total} titles in the background…`, 'info');
+          watchBulkFixRun();
+        } else if (result.already_running) {
+          toast('A bulk fix is already running — showing its progress', 'info');
+          watchBulkFixRun();
+        } else {
+          toast(result.error || 'Delete failed to start', 'error');
+        }
+      } catch {
+        toast('Error starting the delete', 'error');
+      }
+      refreshAll();
+    },
+    [prompts, refreshAll, watchBulkFixRun],
   );
 
   const dismissGroup = useCallback(
@@ -1768,6 +1849,7 @@ export function FindingsSurface({
                   jobLabel={jobLabel}
                   onFix={fixOne}
                   onDismiss={dismissOne}
+                  onKeep={keepShelfLife}
                   onReopen={reopenOne}
                   onUndo={(target) => void undoOne(target)}
                   onReidentify={setReidentifyingFinding}
@@ -2103,6 +2185,16 @@ export function FindingsSurface({
 
       {prompts.promptNode}
 
+      {shelfLifePick !== undefined ? (
+        <ShelfLifeCleanupDialog
+          ids={shelfLifePick}
+          resolve={(chosen) => {
+            setShelfLifePick(undefined);
+            if (chosen?.length) void deleteShelfLife(chosen);
+          }}
+        />
+      ) : null}
+
       {reidentifyingFinding ? (
         <ReidentifyFindingModal
           finding={reidentifyingFinding}
@@ -2231,6 +2323,7 @@ function FindingCard({
   jobLabel,
   onFix,
   onDismiss,
+  onKeep,
   onReopen,
   onKeepDuplicate,
   onApplyCoverArt,
@@ -2255,9 +2348,11 @@ function FindingCard({
   jobLabel: (jobId: string) => string;
   onFix: (finding: RepairFinding, override?: string) => Promise<void>;
   onDismiss: (id: number) => Promise<void>;
+  /** Shelf Life only: keep the title instead of deleting it */
+  onKeep?: (finding: RepairFinding) => Promise<void>;
   onReopen: (id: number) => Promise<void>;
   onKeepDuplicate: (findingId: number, trackId: string, message?: string) => void;
-  onApplyCoverArt: (findingId: number, target: 'album' | 'artist') => void;
+  onApplyCoverArt: (findingId: number, target: CoverApplyTarget) => void;
   onUndo: (finding: RepairFinding) => void;
   onReidentify: (finding: RepairFinding) => void;
   onInspectRedownload?: (finding: RepairFinding) => void;
@@ -2335,6 +2430,17 @@ function FindingCard({
         <div className="repair-finding-actions" onClick={(event) => event.stopPropagation()}>
           {finding.status === 'pending' ? (
             <>
+              {video && finding.finding_type === 'shelf_life' && onKeep ? (
+                <button
+                  className="repair-finding-btn keep"
+                  type="button"
+                  title="Keep it. Shelf Life won't flag it again while it's kept"
+                  aria-label={`Keep ${finding.title}`}
+                  onClick={() => void onKeep(finding)}
+                >
+                  Keep
+                </button>
+              ) : null}
               {fixLabel ? (
                 <button
                   className={`repair-finding-btn fix${info?.destructive ? ' destructive' : ''}`}

@@ -52,7 +52,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "3.6.7"
+_SOULSYNC_BASE_VERSION = "3.6.8"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -363,7 +363,7 @@ _MIGRATION_BLOCKED_ENDPOINTS = frozenset({
     'auto_import_approve_all',
     'auto_import_toggle', 'hydrabase_worker_resume',
     'cleanup_wishlist', 'backup_database_endpoint', 'restore_backup_endpoint',
-    'database_vacuum', 'enable_incremental_vacuum', 'metadata_cache_evict',
+    'database_vacuum', 'enable_incremental_vacuum', 'database_optimize', 'metadata_cache_evict',
     'metadata_cache_save_mb_match', 'server_playlist_align',
     'server_playlist_replace_track', 'server_playlist_add_track',
     'server_playlist_remove_track', 'start_playlist_export_listenbrainz',
@@ -661,6 +661,15 @@ def _emit_activity_toast(event, item):
 # sockets of admin profiles sit in this room, every other profile's in
 # member:<id>; a socket is in exactly one of them (see _ws_join_role_room)
 ADMIN_SOCKET_ROOM = 'role:admin'
+# and every member socket is in this one too: a push every member hears in
+# the same trimmed form (the service status, #2208) goes here once instead
+# of once per member room
+MEMBER_SOCKET_ROOM = 'role:member'
+# sockets of profiles that have Chat & Arcade (chat.use). the room chat's
+# live push goes to: a member without it never got the messages' content
+# on the wire, and the page it can't open stopped asking /api/chat for its
+# name on every room message and toasting the refusal (#2191)
+CHAT_SOCKET_ROOM = 'perm:chat'
 set_activity_toast_emitter(_emit_activity_toast)
 # Live overlay-apply progress → 'overlay:progress' socket events (bell + panel).
 from core.video.overlays.service import set_overlay_progress_emitter as _set_overlay_emit
@@ -3882,6 +3891,9 @@ def get_status():
             status_data['_experimental'] = experimental_status()
         except Exception:
             status_data['_experimental'] = {}
+        if not is_admin_request():
+            # the spotify ban and the workers are the admin's (#2208)
+            status_data = _status_payload_for_member(status_data)
         return jsonify(status_data)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -6495,7 +6507,7 @@ def spotify_disconnect():
 
 
 @app.route('/api/spotify/rate-limit-status', methods=['GET'])
-@signed_in
+@admin_only  # the ban's details are the admin's (#2208)
 def spotify_rate_limit_status():
     """Get Spotify rate limit ban details"""
     try:
@@ -8269,7 +8281,7 @@ def _find_completed_file_robust_legacy(download_dir, api_filename, transfer_dir=
         if transfer_similarity > 0.85:
             location = 'transfer'
             if transfer_similarity < 1.0:
-                logger.info(f"Found fuzzy match in transfer ({transfer_similarity:.2f}): {best_transfer_path}")
+                logger.info(f"Found fuzzy match in music library folder ({transfer_similarity:.2f}): {best_transfer_path}")
             return (best_transfer_path, location)
 
     # Don't spam logs - file not found is common for completed/processed downloads
@@ -10191,7 +10203,7 @@ def reidentify_apply():
                 _plex = None
             _, attempt = resolve_library_file_path_with_diagnostic(
                 stored_path, config_manager=config_manager, plex_client=_plex)
-            searched = ", ".join(attempt.base_dirs_tried) or "(no library/transfer/download dirs configured)"
+            searched = ", ".join(attempt.base_dirs_tried) or "(no library or download folders configured)"
             logger.warning("[Re-identify] could not locate track %s file — stored=%s raw_exists=%s searched=[%s]",
                            library_track_id, stored_path, attempt.raw_path_existed, searched)
             return jsonify({"success": False, "error": (
@@ -11696,7 +11708,14 @@ def _inspect_sources_stream(track_obj, quality_profile_id, *, log_tag='Inspector
     # refused. captured here, while the request is still the context.
     from contextlib import nullcontext
     from core.download_plugins.candidate_store import candidate_binding
-    _bind_to = get_current_profile_id() if bind_profile else None
+    # True binds to the caller; a profile id binds to that profile (an admin
+    # picking a release for someone's request searches as them, #2199)
+    if bind_profile is True:
+        _bind_to = get_current_profile_id()
+    elif bind_profile:
+        _bind_to = int(bind_profile)
+    else:
+        _bind_to = None
 
     def _search_one_source(source_name, client):
         evaluated = []
@@ -11953,6 +11972,97 @@ def download_wishlist_pick():
         return jsonify({"success": True, "batch_id": batch_id, "task_id": task_ids[0]})
     except Exception as e:
         logger.error(f"Error starting wishlist pick: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ── a release picked for an approved request held for one (#2199) ──────
+# the same inspector and pinned one-file batch as the wishlist's own "search
+# manually", for the requester's held row: the search binds to them and the
+# batch downloads into their library, so a success takes their row off the
+# wishlist and the request settles the usual way.
+
+def _held_request_pick(data):
+    """(owner, formatted track, None) for a held track the caller may pick,
+    else (None, None, response)."""
+    from api.music_requests import held_music_track, may_pick
+    try:
+        owner = int(data.get('profile_id'))
+    except (TypeError, ValueError):
+        return None, None, (jsonify({"success": False, "error": "profile_id required"}), 400)
+    if not may_pick(owner):
+        from core.permissions import refusal
+        return None, None, refusal("requests.moderate")
+    row = held_music_track(get_database(), owner, data.get('track_id'))
+    if not row:
+        return None, None, (jsonify({"success": False,
+                                     "error": "That track isn't waiting for a pick any more"}), 404)
+    from core.wishlist.service import WishlistService
+    track = _wishlist_search_override(WishlistService.format_track_for_download(row), data)
+    return owner, track, None
+
+
+@app.route('/api/requests/music/pick/inspect', methods=['POST'])
+@signed_in
+def inspect_request_pick_sources():
+    """every source's hits for one held request track, with the verdicts."""
+    try:
+        data = request.get_json() or {}
+        owner, track, refused = _held_request_pick(data)
+        if refused:
+            return refused
+        return _inspect_sources_stream(
+            _pinned_batch.track_object(track), track.get('quality_profile_id'),
+            log_tag='RequestPick', bind_profile=owner,
+        )
+    except Exception as e:
+        logger.error(f"Error in request pick inspection: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/requests/music/pick/download', methods=['POST'])
+@signed_in
+def download_request_pick():
+    """download the file picked for a held request track, into the
+    requester's library. the row stays held until the file lands (a failed
+    pick can be picked again, nothing automatic reaches for it)."""
+    try:
+        data = request.get_json() or {}
+        candidate = data.get('candidate') or {}
+        if not candidate.get('username') or not candidate.get('filename'):
+            return jsonify({"success": False, "error": "candidate with username and filename required"}), 400
+        if not _pinned_batch.is_pinnable(candidate.get('username')):
+            return jsonify({"success": False, "error": (
+                "Torrent and Usenet hits are whole releases and can't be picked one track at a time. "
+                "Pick a Soulseek or streaming file, or let it download automatically.")}), 400
+        owner, track, refused = _held_request_pick(data)
+        if refused:
+            return refused
+
+        from core.downloads.decisions import is_quality_override
+        name = f"Request: {track.get('artist_name') or 'Unknown'} - {track.get('name') or 'Unknown'}"
+        batch_id, task_ids = _pinned_batch.create_pinned_batch(
+            [_pinned_batch.PinnedFile(
+                candidate=_pinned_batch.candidate_from_result(candidate),
+                track_info=dict(track),
+            )],
+            name=name, profile_id=owner,
+            source_page='Requests', playlist_prefix='request_pick',
+        )
+        if is_quality_override(data.get('override')):
+            with tasks_lock:
+                for task_id in task_ids:
+                    if task_id in download_tasks:
+                        download_tasks[task_id]['_override_quality'] = True
+        _pinned_batch.dispatch_pinned_batch(batch_id, task_ids, _pinned_batch_deps())
+        try:
+            from api.music_requests import music_pick_started
+            music_pick_started(get_database(), owner, data.get('track_id'))
+        except Exception:  # noqa: BLE001 - the download is the action, the note a follow-up
+            logger.debug("request pick: history update failed", exc_info=True)
+        add_activity_item("", "Request Download Started", name, "Now")
+        return jsonify({"success": True, "batch_id": batch_id, "task_id": task_ids[0]})
+    except Exception as e:
+        logger.error(f"Error starting request pick: {e}", exc_info=True)
         return jsonify({"success": False, "error": str(e)}), 500
 
 
@@ -15621,7 +15731,7 @@ def start_duplicate_cleaner():
         # Submit worker
         duplicate_cleaner_executor.submit(_run_duplicate_cleaner)
 
-        add_activity_item("", "Duplicate Cleaner Started", "Scanning Transfer folder", "Now")
+        add_activity_item("", "Duplicate Cleaner Started", "Scanning music library folder", "Now")
 
         return jsonify({"success": True, "message": "Duplicate cleaner started"})
 
@@ -22246,7 +22356,7 @@ except Exception as e:
 # --- API Rate Monitor Endpoints ---
 
 @app.route('/api/rate-monitor/history/<service_key>', methods=['GET'])
-@requires("music.dashboard")
+@admin_only  # the API graph lives in the admins' Manage Workers (#2196, #2208)
 def get_rate_monitor_history(service_key):
     """Get 24-hour minute-bucketed call history for a service. Used by the detail modal graph."""
     try:
@@ -22398,21 +22508,27 @@ def get_artist_hero_stats():
 @app.route('/api/artist/<artist_id>/lastfm-top-tracks', methods=['GET'])
 @requires("music.access")
 def get_artist_lastfm_top_tracks(artist_id):
-    """Get top tracks for an artist from Last.fm (lazy-loaded by frontend)."""
+    """An artist's most played tracks by name (lazy-loaded by frontend).
+
+    Last.fm first; ListenBrainz popularity then Deezer when Last.fm is not set
+    up, refused the key (Pro only from 1 December 2026) or had nothing.
+    ``source`` names who answered so the heading reads right.
+    """
     try:
         artist_name = request.args.get('name', '')
         if not artist_name:
             return jsonify({'success': False, 'error': 'Artist name required'}), 400
 
-        if not lastfm_worker or not lastfm_worker.client:
-            return jsonify({'success': True, 'tracks': []})
-
-        limit = int(request.args.get('limit', 100))
-        tracks = lastfm_worker.client.get_artist_top_tracks(artist_name, limit=min(limit, 100))
-        return jsonify({'success': True, 'tracks': tracks})
+        limit = min(int(request.args.get('limit', 100)), 100)
+        from core import lastfm_fallback
+        client = lastfm_worker.client if lastfm_worker and lastfm_worker.client else None
+        if client is None or not client.api_key:
+            client = lastfm_fallback.configured_client()
+        tracks, source = lastfm_fallback.artist_top_tracks(artist_name, limit=limit, lastfm=client)
+        return jsonify({'success': True, 'tracks': tracks, 'source': source})
     except Exception as e:
-        logger.error(f"Error fetching Last.fm top tracks: {e}")
-        return jsonify({'success': True, 'tracks': []})
+        logger.error(f"Error fetching artist top tracks by name: {e}")
+        return jsonify({'success': True, 'tracks': [], 'source': ''})
 
 # ================================================================================================
 @app.route('/api/lastfm/auth-url', methods=['GET'])
@@ -22872,7 +22988,7 @@ except Exception as e:
 # --- Hydrabase Worker API Endpoints ---
 
 @app.route('/api/hydrabase-worker/status', methods=['GET'])
-@signed_in
+@admin_only   # a worker's status is the admins' (#2196)
 def hydrabase_worker_status():
     """Get Hydrabase P2P mirror worker status for UI polling"""
     try:
@@ -22948,7 +23064,7 @@ except Exception as e:
     soulid_worker = None
 
 @app.route('/api/soulid/status', methods=['GET'])
-@signed_in
+@admin_only   # a worker's status is the admins' (#2196)
 def soulid_status():
     """Get SoulID worker status for UI polling."""
     try:
@@ -23219,6 +23335,33 @@ def _build_status_payload():
         'quarantined': quarantined,
     }
 
+def _status_payload_for_member(payload):
+    """the service status a member gets (#2208): the same payload without
+    the spotify ban. the ban, its countdown, the endpoint that tripped it and
+    the cooldown after are the server's operational state, the admin's to
+    hear about. a member's search and pages already fall back on their own,
+    so the modal only told them about a backend they can't act on. the
+    workers' states go the same way."""
+    out = dict(payload or {})
+    sp = out.get('spotify')
+    if isinstance(sp, dict):
+        sp = dict(sp)
+        sp['rate_limited'] = False
+        sp['rate_limit'] = None
+        sp['post_ban_cooldown'] = 0
+        out['spotify'] = sp
+    # the enrichment workers' states and errors are the admins' (#2196)
+    if 'enrichment' in out:
+        out['enrichment'] = {}
+    return out
+
+
+def _emit_status_update(payload):
+    """status:update to the admins whole, to every member trimmed (#2208)"""
+    socketio.emit('status:update', payload, to=ADMIN_SOCKET_ROOM)
+    socketio.emit('status:update', _status_payload_for_member(payload), to=MEMBER_SOCKET_ROOM)
+
+
 def _build_watchlist_count_payload(profile_id=1):
     """Build the same payload used by GET /api/watchlist/count."""
     try:
@@ -23309,7 +23452,7 @@ def _emit_service_status_loop():
         if not _has_connected_clients():
             continue
         try:
-            socketio.emit('status:update', _build_status_payload())
+            _emit_status_update(_build_status_payload())
         except Exception as e:
             logger.debug(f"Error emitting service status: {e}")
 
@@ -23465,7 +23608,7 @@ def _emit_chat_push_loop():
                         except Exception:
                             logger.debug("chat: loop game-carrier archive failed", exc_info=True)
                         socketio.emit('chat:room_protocol', {
-                            'room': room, 'events': proto_events[-40:]})
+                            'room': room, 'events': proto_events[-40:]}, to=CHAT_SOCKET_ROOM)
                     if decoded:      # a reaction-only tick still tracks PMs below
                         try:
                             get_database().add_chat_messages(room, decoded)
@@ -23474,7 +23617,7 @@ def _emit_chat_push_loop():
                         socketio.emit('chat:room_message', {
                             'room': room,
                             'messages': decoded[-20:],
-                        })
+                        }, to=CHAT_SOCKET_ROOM)
             convos = run_async(_slsk.get_conversations()) or []
             unread_users = [str(c.get('username') or '') for c in convos
                             if c.get('hasUnAcknowledgedMessages')
@@ -23489,7 +23632,7 @@ def _emit_chat_push_loop():
                     # 'grew' gates the toast: only a RISING count notifies (a read
                     # clearing the flag must not), and never the boot baseline
                     'grew': prev >= 0 and unread > prev,
-                })
+                }, to=CHAT_SOCKET_ROOM)
             # Chat-archive retention: once a day at most, best-effort. The
             # archive only grows while this loop runs (it does the archiving),
             # so gating the sweep on the loop is no loss — and a setting
@@ -23930,6 +24073,8 @@ def _ws_join_role_room():
         logger.debug("role room: %s", e)
         return
     leave_room(ADMIN_SOCKET_ROOM)
+    leave_room(MEMBER_SOCKET_ROOM)
+    leave_room(CHAT_SOCKET_ROOM)
     if pid is None:
         return
     if is_admin:
@@ -23937,6 +24082,21 @@ def _ws_join_role_room():
         join_room(ADMIN_SOCKET_ROOM)
     else:
         join_room(f'member:{pid}')
+        join_room(MEMBER_SOCKET_ROOM)
+    if is_admin or _ws_profile_may_chat(pid):
+        join_room(CHAT_SOCKET_ROOM)
+
+
+def _ws_profile_may_chat(pid) -> bool:
+    """chat.use for this profile under the global policy. fails closed: a
+    map that can't be read keeps the socket out of chat's room."""
+    try:
+        from core import permission_store as _PS
+        from core.permissions import can as _can
+        return bool(_can(_PS.context_for(get_database(), pid), 'chat.use'))
+    except Exception as e:  # noqa: BLE001 - no room is the safe answer
+        logger.debug("chat room: %s", e)
+        return False
 
 
 def _ws_session_profile():
@@ -24021,7 +24181,10 @@ def _emit_db_stats_loop():
         try:
             db = get_database()
             stats = db.get_database_info_for_server()
-            socketio.emit('dashboard:db_stats', stats)
+            # the database's size and path and the scan times are the
+            # admins' (#2207). its http twin, /api/database/stats, gives a
+            # member the counts of their own library instead
+            socketio.emit('dashboard:db_stats', stats, to=ADMIN_SOCKET_ROOM)
         except Exception as e:
             logger.debug(f"Error emitting db stats: {e}")
 
@@ -25281,7 +25444,9 @@ def _emit_rate_monitor_loop():
             except Exception as e:
                 logger.debug("spotify rate-limit status read failed: %s", e)
 
-            socketio.emit('rate-monitor:update', payload)
+            # api call rates, worker states and the spotify ban: the
+            # admins' Manage Workers reads it, nobody else (#2208)
+            socketio.emit('rate-monitor:update', payload, to=ADMIN_SOCKET_ROOM)
         except Exception as e:
             logger.debug(f"Error emitting rate monitor: {e}")
 
@@ -25291,6 +25456,15 @@ def _emit_rate_monitor_loop():
 # only spaces out the DATABASE reads behind them for workers that are idle.
 from core.enrichment.status_cache import WorkerStatsCache as _WorkerStatsCache  # noqa: E402
 _enrich_stats = _WorkerStatsCache()
+
+
+def _enrichment_status_room(name):
+    """who hears a worker's status push (#2196): the admins, they run the
+    workers. repair is the one every socket still gets: the Tools page can be
+    granted to a member and its maintenance header reads that frame (its
+    /api/repair/status twin is music.access). the jobs and their progress
+    stay admin only."""
+    return None if name == 'repair' else ADMIN_SOCKET_ROOM
 
 
 def _emit_enrichment_status_loop():
@@ -25389,7 +25563,7 @@ def _emit_enrichment_status_loop():
                     status['yield_reason'] = _auto_yield_cause.get(name, 'downloads')
                 else:
                     status.pop('yield_reason', None)
-                socketio.emit(f'enrichment:{name}', status)
+                socketio.emit(f'enrichment:{name}', status, to=_enrichment_status_room(name))
             except Exception as e:
                 logger.debug(f"Error emitting {name} status: {e}")
 
@@ -25416,7 +25590,8 @@ def _emit_video_enrichment_status_loop():
         # wiring here.
         for svc, w in (eng.workers or {}).items():
             try:
-                socketio.emit(f'enrichment:{svc}', stats_cache.get(svc, w))
+                # the workers are the admins' (#2196)
+                socketio.emit(f'enrichment:{svc}', stats_cache.get(svc, w), to=ADMIN_SOCKET_ROOM)
             except Exception as e:
                 logger.debug(f"Error emitting video {svc} status: {e}")
         # The YouTube date enricher is a standalone daemon (not an engine worker),
@@ -25424,7 +25599,7 @@ def _emit_video_enrichment_status_loop():
         # dashboard orb listens like the others (no /enrichment/youtube/status poll).
         try:
             from core.video.youtube_enrichment import get_youtube_date_enricher
-            socketio.emit('enrichment:youtube', get_youtube_date_enricher().stats())
+            socketio.emit('enrichment:youtube', get_youtube_date_enricher().stats(), to=ADMIN_SOCKET_ROOM)
         except Exception as e:
             logger.debug(f"Error emitting video youtube status: {e}")
 
@@ -25938,6 +26113,15 @@ def start_runtime_services():
         # to fire at module import, which started the 30s loop in every
         # importer — tests, workers, CLI tools.)
         start_batch_healing_timer()
+
+        # #2205: fold the wal back in every few minutes, so a busy install
+        # can't sit on a multi-GB wal file (SOULSYNC_DB_CHECKPOINT_MINUTES=0
+        # turns it off)
+        try:
+            from core.db_housekeeping import start_checkpoint_thread
+            start_checkpoint_thread(str(get_database().database_path))
+        except Exception as _ckpt_err:
+            logger.debug(f"could not start the wal checkpoint thread: {_ckpt_err}")
 
         # One-time repair: purge artist album-list cache entries poisoned by
         # partial watchlist probes (limit=5/max_pages=1 results stored in the

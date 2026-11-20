@@ -99,6 +99,28 @@ def owner_may_get(pid, permission: str, db=None) -> bool:
     return can(ctx, permission, "download")
 
 
+def owner_mode(pid, permission: str, db=None) -> str:
+    """download | ask | none for ``permission`` (books.get, podcasts.get) of
+    the profile that owns a row, read the way owner_may_get reads it. an
+    owner whose rights can't be read is none (fails closed)."""
+    if owner_may_get(pid, permission, db=db):
+        return "download"
+    try:
+        pid = int(pid)
+        from core.permission_store import context_for
+        if db is None:
+            from database.music_database import get_database
+            db = get_database()
+        if not hasattr(db, "get_permission_inputs"):
+            return "none"
+        ctx = context_for(db, pid)
+    except Exception:  # noqa: BLE001 - see docstring
+        return "none"
+    if not isinstance(ctx, Mapping):
+        return "none"
+    return "ask" if can(ctx, permission, "ask") else "none"
+
+
 def download_denied_reason(pid, get_profile: Callable[[int], Optional[Dict[str, Any]]]) -> Optional[str]:
     """why this profile may not start a download, or None when it may."""
     if pid is None:
@@ -279,10 +301,11 @@ PRESENTATION = "presentation"  # sidebar & look, never grants
 KINDS = (BOOL, RESTRICT, MODE, RATING, COUNT, SET, CHOICE, SET_FLAG, FIXED, ADMIN, PRESENTATION)
 
 MODES = ("none", "ask", "download")                 # low to high
-MODE_LABELS = {"download": "Download right away", "ask": "Ask first", "none": "Can't request"}
+MODE_LABELS = {"download": "Auto-approve", "ask": "Require approval", "none": "Requests off"}
 # a mode row whose values read differently (#2166 follow-up 6): a podcast
 # can always be followed, only the downloading is off
-ROW_VALUE_LABELS = {"podcasts.get": {"download": "Download right away", "none": "Follow only"}}
+ROW_VALUE_LABELS = {"podcasts.get": {"download": "Auto-approve", "ask": "Require approval",
+                                     "none": "Follow only"}}
 RATINGS = ("G", "PG", "PG-13", "R", "any")          # low to high
 FOLLOW = "follow"                                   # tv.max_rating: same as movies
 TV_RATING_LABELS = {"G": "TV-Y7", "PG": "TV-PG", "PG-13": "TV-14", "R": "TV-MA", "any": "Any"}
@@ -372,12 +395,12 @@ CATALOGUE_ROWS: Tuple[Perm, ...] = (
        "Browse, search, watch and ask for movies.", default=True, legacy="allowed_sides",
        enforced_at=("api/video/__init__.py side gate (today one switch for movies and tv)",
                     "core/seerr_compat/service.py video_allowed", "NEW: per-type split (decision 8)")),
-    _p("movies.get", MODE, "movies", "Getting movies",
-       "Download right away, Ask first, or Can't request.", default="download", values=MODES,
+    _p("movies.get", MODE, "movies", "Movie requests",
+       "Auto-approve, Require approval or Requests off.", default="download", values=MODES,
        needs=("movies.access",), legacy="can_download",
        enforced_at=("api/video/requests.py", "api/video/__init__.py download prefixes",
                     "api/video/wishlist.py", "api/video/watchlist.py", "seerr create", "video automations")),
-    _p("movies.max_rating", RATING, "movies", "Up to",
+    _p("movies.max_rating", RATING, "movies", "Maximum content rating",
        "Titles above it, or with no rating, stay out of sight.", default="any",
        needs=("movies.access",), legacy="max_rating",
        enforced_at=("core/content_filter.py via api/video/kids.py", "NEW write paths (S16)")),
@@ -385,16 +408,16 @@ CATALOGUE_ROWS: Tuple[Perm, ...] = (
        "Movie asks. Movies they get right away are never capped.",
        default={"n": 0, "days": 7}, needs=("movies.access",), legacy="request_limit",
        enforced_at=("api/video/requests.py", "seerr _file_request", "core/owner_gate.py")),
-    _p("movies.quality", SET, "movies", "Quality they can ask for",
+    _p("movies.quality", SET, "movies", "Allowed quality profiles",
        "Only profiles for movies.", default=ALL, needs=("movies.access",), media="movie",
        enforced_at=("resolve_request_quality on every request path (S23, #2168)",)),
-    _p("movies.quality_default", CHOICE, "movies", "Starts on",
+    _p("movies.quality_default", CHOICE, "movies", "Default quality profile",
        "What a request gets when they don't pick.", default=None, set_row="movies.quality",
        needs=("movies.access",), media="movie"),
     _p("movies.quality_ask", SET_FLAG, "movies", "Needs my OK",
        "These always come to you first.", default=[], needs=("movies.access",), media="movie"),
     # the movies & tv pages, shared by both kinds
-    _p("video.dashboard", BOOL, "movies", "Movies & TV home", "The video side's dashboard.",
+    _p("video.dashboard", BOOL, "movies", "Dashboard", "The movies & TV home page.",
        default=True, pages=("video-dashboard",), group="Movies & TV pages", also_in=("tv",),
        needs=_VIDEO_NEEDS, legacy="allowed_pages"),
     _p("video.search", BOOL, "movies", "Search", "Find movies and shows.",
@@ -428,11 +451,11 @@ CATALOGUE_ROWS: Tuple[Perm, ...] = (
        "Browse, search, watch and ask for shows.", default=True, legacy="allowed_sides",
        enforced_at=("api/video/__init__.py side gate (today one switch for movies and tv)",
                     "NEW: per-type split (decision 8)")),
-    _p("tv.get", MODE, "tv", "Getting shows",
-       "A season or a whole series is one ask.", default="download", values=MODES,
+    _p("tv.get", MODE, "tv", "TV show requests",
+       "Auto-approve, Require approval or Requests off. A season or a whole series is one request.", default="download", values=MODES,
        needs=("tv.access",), legacy="can_download",
        enforced_at=("api/video/requests.py", "api/video/__init__.py download prefixes", "seerr create")),
-    _p("tv.max_rating", RATING, "tv", "Up to",
+    _p("tv.max_rating", RATING, "tv", "Maximum content rating",
        "TV ratings follow the movie one unless you set their own: PG-13 allows up to TV-14.",
        default=FOLLOW, needs=("tv.access",), legacy="max_rating",
        enforced_at=("core/content_filter.py (today one cap for both)",)),
@@ -440,9 +463,10 @@ CATALOGUE_ROWS: Tuple[Perm, ...] = (
        "Show, season, episode and YouTube asks. A season or a whole series is one ask.",
        default={"n": 0, "days": 7}, needs=("tv.access",), legacy="request_limit",
        enforced_at=("api/video/requests.py", "seerr _file_request", "core/owner_gate.py")),
-    _p("tv.quality", SET, "tv", "Quality they can ask for", "Only profiles for shows.",
+    _p("tv.quality", SET, "tv", "Allowed quality profiles", "Only profiles for shows.",
        default=ALL, needs=("tv.access",), media="tv"),
-    _p("tv.quality_default", CHOICE, "tv", "Starts on", "What a request gets when they don't pick.",
+    _p("tv.quality_default", CHOICE, "tv", "Default quality profile",
+       "What a request gets when they don't pick.",
        default=None, set_row="tv.quality", needs=("tv.access",), media="tv"),
     _p("tv.quality_ask", SET_FLAG, "tv", "Needs my OK", "These always come to you first.",
        default=[], needs=("tv.access",), media="tv"),
@@ -451,8 +475,8 @@ CATALOGUE_ROWS: Tuple[Perm, ...] = (
     _p("music.access", BOOL, "music", "Music side", "Library, search and discover.",
        default=True, legacy="allowed_sides",
        enforced_at=("NEW music-side gate (S15)",)),
-    _p("music.get", MODE, "music", "Getting music",
-       "Download right away, Ask first, or Can't request.", default="download", values=MODES,
+    _p("music.get", MODE, "music", "Music requests",
+       "Auto-approve, Require approval or Requests off.", default="download", values=MODES,
        needs=("music.access",), legacy="can_download",
        enforced_at=("web_server.check_download_permission", "wishlist routes",
                     "core/wishlist/processing.py approved_only")),
@@ -465,11 +489,12 @@ CATALOGUE_ROWS: Tuple[Perm, ...] = (
        default={"n": 0, "days": 7}, needs=("music.access",), legacy="request_limit",
        enforced_at=("api/music_requests.py quota", "music_database music quota",
                     "core/owner_gate.py")),
-    _p("music.quality", SET, "music", "Quality they can ask for", "Music quality profiles.",
+    _p("music.quality", SET, "music", "Allowed quality profiles", "Music quality profiles.",
        default=ALL, needs=("music.access",), media="music",
        enforced_at=("resolver on web_server wishlist add, api/wishlist_routes.py, "
                     "api/artist_watchlist.py, api/mirrored_playlists.py",)),
-    _p("music.quality_default", CHOICE, "music", "Starts on", "What an add gets when they don't pick.",
+    _p("music.quality_default", CHOICE, "music", "Default quality profile",
+       "What an add gets when they don't pick.",
        default=None, set_row="music.quality", needs=("music.access",), media="music"),
     _p("music.dashboard", BOOL, "music", "Dashboard", "The music home page.",
        default=True, pages=("dashboard",), group="Parts of music", needs=("music.access",),
@@ -521,16 +546,20 @@ CATALOGUE_ROWS: Tuple[Perm, ...] = (
     _p("books.access", BOOL, "books", "Audiobooks",
        "Browse Audible, follow authors and get books.",
        default=True, pages=("audiobooks",), legacy="allowed_pages", api_prefixes=("/api/audiobooks",)),
-    # no books request flow yet (decision 7): download or nothing
-    _p("books.get", MODE, "books", "Getting books", "Download right away or Can't request.",
-       default="download", values=("none", "download"), needs=("books.access",), legacy="can_download",
-       enforced_at=("api/helpers.py download gate", "NEW: audiobook wishlist/watchlist + worker (S5)")),
+    # ask first files a book request (core/requests/media.py, #2188): the
+    # book reaches their wishlist when an admin approves it
+    _p("books.get", MODE, "books", "Audiobook requests",
+       "Auto-approve, Require approval or Requests off.",
+       default="download", values=MODES, needs=("books.access",), legacy="can_download",
+       enforced_at=("api/helpers.py download gate", "api/audiobooks.py wishlist add (asks file a request)",
+                    "core/audiobook_wishlist_worker.py owner check + approved requests")),
     _p("podcasts.access", BOOL, "books", "Podcasts",
        "Subscribe to shows; new episodes arrive on their own.",
        default=True, pages=("podcasts",), legacy="allowed_pages", planned_prefixes=("/api/podcasts",)),
-    _p("podcasts.get", MODE, "books", "Getting episodes", "Download right away or follow only.",
-       default="download", values=("none", "download"), needs=("podcasts.access",), legacy="can_download",
-       enforced_at=("api/podcasts.py", "core/podcast_automation.py")),
+    _p("podcasts.get", MODE, "books", "Podcast episode requests",
+       "Auto-approve, Require approval or Follow only. Subscribing to shows is always allowed.",
+       default="download", values=MODES, needs=("podcasts.access",), legacy="can_download",
+       enforced_at=("api/podcasts.py (asks file an episode request)", "core/podcast_automation.py")),
 
     # ── requests & moderation ────────────────────────────────────────────
     _p("requests.see_all", BOOL, "requests", "See everyone's requests",
@@ -1393,11 +1422,17 @@ def may_see_request(profile_ctx: Optional[Mapping[str, Any]], owner_profile_id) 
 NOT_ALLOWED = "not_allowed"
 
 
+# a get row's label names the setting ("Movie requests"); a refusal says
+# what the member can't do (#2192)
+REFUSAL_LABELS = {"music.get": "Getting music", "movies.get": "Getting movies", "tv.get": "Getting shows",
+                  "books.get": "Getting books", "podcasts.get": "Getting episodes"}
+
+
 def refusal_body(permission: str) -> Dict[str, Any]:
     """the standard calm refusal. the ui shows ``message`` as an empty
     state, never a 403 toast."""
     row = CATALOGUE.get(permission)
-    label = row.label if row else "That"
+    label = REFUSAL_LABELS.get(permission) or (row.label if row else "That")
     return {"success": False, "error": NOT_ALLOWED, "permission": permission,
             "message": "%s isn't part of your profile. Ask an admin if you'd like it." % label}
 
@@ -1837,8 +1872,11 @@ def summarize(eff: Mapping[str, Any], *, is_admin: bool = False, name: str = "Th
     if eff.get("books.access"):
         lines.append({"category": "books", "text": "Audiobooks: %s." % mode_words(eff["books.get"])})
     if eff.get("podcasts.access"):
+        pod = eff.get("podcasts.get")
         lines.append({"category": "books", "text": "Podcasts: %s." % (
-            "new episodes download on their own" if eff.get("podcasts.get") == "download"
+            "new episodes download on their own" if pod == "download"
+            else ("%s ask for episodes, new ones don't download on their own" % ("you" if you else "they"))
+            if pod == "ask"
             else "%s follow shows, episodes don't download" % ("you" if you else "they"))})
     never = [second_person(CATALOGUE[pid].label) for pid in STORED_IDS
              if CATALOGUE[pid].kind == BOOL and not eff.get(pid) and not CATALOGUE[pid].group
@@ -1873,7 +1911,7 @@ def catalogue_payload() -> Dict[str, Any]:
             "open_policy": OPEN_POLICY}
 
 
-__all__ = ["profile_can_download", "owner_may_get", "download_denied_reason", "DOWNLOADS_OFF", "NO_PROFILE",
+__all__ = ["profile_can_download", "owner_may_get", "owner_mode", "download_denied_reason", "DOWNLOADS_OFF", "NO_PROFILE",
            "PROFILE_UNREADABLE", "strict_profile_getter",
            "may_manage_profile", "may_cancel_download", "profile_view_for", "profiles_listed_for",
            "PUBLIC_PROFILE_FIELDS",

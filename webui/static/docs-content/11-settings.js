@@ -20,7 +20,7 @@ Settings save themselves a moment after you change them. The status at the top r
 - **Spotify** — Client ID, Client Secret, and Redirect URI (from the Spotify Developer Dashboard). Powers metadata, discovery, and playlist sync. Redirect URIs must be **HTTPS** for anything that isn't a loopback address (NAS, Docker, remote host) — see [Connecting services](#gs-connecting).
 - **slskd** — slskd URL and API key, entered on the Soulseek source panel (Downloads / Sources tabs). Powers Soulseek downloading.
 - **Tidal** — Client ID, Client Secret, and Redirect URI. Log in with the Authenticate button — it opens Tidal's authorization page in the browser, and the callback is just a success page: close the window and you're connected.
-- **Last.fm** — API key, API secret, and your username. Powers scrobbling, similar artists, and listening-history import.
+- **Last.fm** — API key, API secret, and your username. Powers scrobbling, similar artists, and listening-history import. From 1 December 2026 a Last.fm API key needs a **Last.fm Pro** subscription; a key without one is refused, and the card says so. SoulSync then fills in from free sources: top tracks from ListenBrainz or Deezer, similar artists from ListenBrainz or Deezer, similar tracks and Radio from Deezer, Your Artists from ListenBrainz or your own plays. Artist pages still get a bio, tags and numbers: the bio from TheAudioDB or Wikipedia, tags from MusicBrainz, ListenBrainz listeners and Deezer fans, with a small note under the bio saying where it came from. Answers are kept for a while and Last.fm data you already have is kept, so a key that lapses keeps what it already knew. The refused key is tried again every few hours, so subscribing puts Last.fm first again on its own (or click **Test**). History import has no stand-in: import from ListenBrainz instead.
 - **Genius** — Client access token for lyrics.
 - **Pollinations** — Optional API key for playlist cover art. Works without one (one image every 45 seconds, with their mark).
 - **Qobuz** — Email and password, or a pasted auth token when login hits a CAPTCHA. Powers metadata enrichment and Qobuz downloads.
@@ -28,7 +28,7 @@ Settings save themselves a moment after you change them. The status at the top r
 - **Deezer** — App ID, App Secret, and Redirect URI (OAuth), or an ARL token for playlist access and downloads. Powers favorites, playlists, and Deezer downloads.
 - **Discogs** — Personal access token for release metadata.
 - **AcoustID** — API key for audio fingerprinting and download verification.
-- **ListenBrainz** — User token (username optional) for listening-history import and scrobbling.
+- **ListenBrainz** — User token (username optional) for listening-history import and scrobbling. The recommended scrobbler: free and open, no subscription.
 
 Each service card shows **configured** or **missing** in its header — the colored dot next to the service name is branding, not a live health light.
 `
@@ -229,7 +229,13 @@ Backups don't live in Settings — they're on the **Tools** page, in the **Backu
 
 ## VACUUM
 
-Over time the database accumulates unused space from deleted rows. **Compact Database (VACUUM)** rewrites the database file to reclaim that space — it locks the database briefly, so it can take a minute on large libraries. **Incremental Vacuum** is a mode you switch on (**Enable Incremental Vacuum**): after a one-time full compact, freed pages are reclaimed in small batches automatically.
+Over time the database accumulates unused space from deleted rows. **Compact Database (VACUUM)** rewrites the database file to reclaim that space. Back up first: it needs free disk space about the size of the database (SoulSync refuses to start it without that), and the database is locked while it runs, which on a very large library can take a long time. **Incremental Vacuum** is a mode you switch on (**Enable Incremental Vacuum**): after a one-time full compact, freed pages are handed back in slices by Cache Maintenance.
+
+## Tidy up and table sizes
+
+**Tidy Up (safe)** drops old rows from caches and logs that keep their own retention (never listening history or library data), merges the full-text search indexes, refreshes the query planner's stats and folds the write-ahead log back into the database. It doesn't lock the library for long and is safe to run any time; the Cache Maintenance repair job does the same on its schedule. **Show Biggest Tables** measures what takes the room; it reads the whole file, so it runs in the background and the list fills in when it's done. The **Write-Ahead Log** line shows the size of the \`-wal\` file; SoulSync folds it back every 10 minutes and caps it at 64 MB after each fold.
+
+Tuning for big libraries can be changed with environment variables: \`SOULSYNC_DB_CACHE_MB\` (page cache per connection, 8 by default), \`SOULSYNC_DB_WAL_LIMIT_MB\` (64), \`SOULSYNC_DB_MMAP_MB\` (0, off) and \`SOULSYNC_DB_CHECKPOINT_MINUTES\` (10, 0 turns it off).
 
 ## Cache management
 

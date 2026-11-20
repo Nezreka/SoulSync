@@ -71,13 +71,13 @@ Each row shows the person's template (with how many changes they have), then Mus
 **Settings > People > Global policy** sets the most any member can have. It uses the same categories and rows as the editor, without Sidebar & look. Each row is a ceiling:
 
 - a switch can be on, or **Admins only**
-- **Getting music**, **Getting movies** and the rest can be capped at Ask first, or at Can't request
-- **Up to** caps the highest rating anyone gets
-- **Request limit, at most** caps how many asks anyone gets, one ceiling each for music, movies and TV
-- **Quality members may pick** limits the quality profiles anyone can ask for, and **Needs my OK** marks the ones that always come to you first. **4K always asks** covers every 4K profile, later ones too
+- **Music requests**, **Movie requests**, **TV show requests**, **Audiobook requests** and **Podcast episode requests** can be held at **Require approval**, or at **Requests off** (for podcast episodes, **Follow only**). Require approval sends every one to your Requests, even for someone whose template says **Auto-approve**
+- **Maximum content rating** caps the highest rating anyone gets
+- **Maximum request limit** caps how many requests anyone makes, one ceiling each for music, movies and TV
+- **Allowed quality profiles** limits the quality profiles anyone can ask for, and **Needs my OK** marks the ones that always come to you first. **4K always asks** covers every 4K profile, later ones too
 - **Hide explicit music** can be forced on for everyone
 
-A category with a ceiling set says **Limited here**.
+A category with a ceiling set says **Limited here**. A template or person the policy holds lower shows the value in force, with a lock line that says what the policy keeps it at and, apart from that, what the template itself is set to.
 
 ## Saving
 
@@ -130,7 +130,7 @@ Click someone on the People list to open their editor. It's a wide sheet in thre
 
 ## The header
 
-Their picture and name, and a line like "Member · Signs in with Plex · 2 changes from Teen". **Follows** switches their template: changes they had stay, and ones that now match the new template drop away. **Back to Teen** drops every personal change after you confirm.
+Their picture and name, and a line like "Member · Signs in with Plex · 2 changes from Teen". **Follows** switches their template: changes they had stay, and ones that now match the new template drop away. **Back to Teen** shows only when they have personal changes, and drops every one of them. A change that says the same as the template isn't counted as one.
 
 ## The rail
 
@@ -174,27 +174,27 @@ The same rows show in the editor, on each template and in the global policy. Any
 Movies and TV shows are separate, so a profile can have just one. A TV-only profile gets shows everywhere (search, discover, detail pages, the calendar, requests, Seerr apps) and never sees movies.
 
 - **Movies** / **TV shows**: the side itself
-- **Getting movies** / **Getting shows**: **Download right away**, **Ask first** or **Can't request**. A season or a whole series is one ask.
-- **Up to**: the highest rating. Titles above it, or with no rating, stay out of sight. TV follows the movie rating unless you set its own (PG-13 allows up to TV-14).
-- **Quality they can ask for**, **Starts on**, **Needs my OK**: see [Request quality](#docs/prof-quality)
-- **Movies & TV pages**: Movies & TV home, Search, Library, Discover, Calendar, Watchlist, Wishlist, Downloads and YouTube channels. They show under both Movies and TV shows.
+- **Movie requests** / **TV show requests**: **Auto-approve** (it downloads right away), **Require approval** (it comes to you first) or **Requests off**. A season or a whole series is one request.
+- **Maximum content rating**: the highest rating. Titles above it, or with no rating, stay out of sight. TV follows the movie rating unless you set its own (PG-13 allows up to TV-14).
+- **Allowed quality profiles**, **Default quality profile**, **Needs my OK**: see [Request quality](#docs/prof-quality)
+- **Movies & TV pages**: Dashboard, Search, Library, Discover, Calendar, Watchlist, Wishlist, Downloads and YouTube channels. They show under both Movies and TV shows.
 
 ## Music
 
 - **Music side**
-- **Getting music**: **Download right away**, **Ask first** or **Can't request**. Asks become requests (see [Requests](#docs/prof-requests)).
+- **Music requests**: **Auto-approve**, **Require approval** or **Requests off**. With Require approval, what they add becomes a request (see [Requests](#docs/prof-requests)).
 - **Hide explicit music**: albums and tracks marked explicit are left out
-- **Quality they can ask for** and **Starts on**: the music quality profiles they can pick
+- **Allowed quality profiles** and **Default quality profile**: the music quality profiles they can pick
 - **Parts of music**: Dashboard, Search, Library, Discover, Playlist sync, Playlist Explorer, Import, Listening stats, Watchlist, Wishlist, Downloads, Music videos and Sample Studio
 
 **Playlist sync** covers its auto-sync schedules too: a member with Playlist sync keeps their schedules even without Their own automations.
 
 ## Audiobooks & podcasts
 
-- **Audiobooks** and **Getting books**: Download right away or Can't request
-- **Podcasts** and **Getting episodes**: Download right away, or follow only (new episodes show up but don't download)
+- **Audiobooks** and **Audiobook requests**: **Auto-approve** (a book they want goes on their wishlist and downloads), **Require approval** (the heart says **Request**, and the book goes on their wishlist once you approve it) or **Requests off**
+- **Podcasts** and **Podcast episode requests**: **Auto-approve** (new episodes of shows they follow download on their own), **Require approval** (they ask for episodes one at a time, and nothing downloads on its own) or **Follow only** (new episodes show up to play, nothing downloads). Following a show is always allowed.
 
-These are separate from Getting music: someone can ask first for music and still get books right away.
+These are separate from Music requests: someone can need approval for music and still get books right away. Book and episode requests land on the same Requests page as music.
 
 ## Requests & moderation
 
@@ -222,11 +222,11 @@ Every browser or phone signed in as a profile is tracked. **Where you are signed
             body: `
 Quality is set per kind of title, in the Movies and TV shows categories:
 
-- **Quality they can ask for**: the quality profiles they may pick. Only profiles marked for that kind (or for both) are offered. Mark a profile **Used for** Movies, TV or Both under Settings > Quality.
-- **Starts on**: what a request gets when they don't pick
+- **Allowed quality profiles**: the quality profiles they may pick. Only profiles marked for that kind (or for both) are offered. Mark a profile **Used for** Movies, TV or Both under Settings > Quality.
+- **Default quality profile**: what a request gets when they don't pick
 - **Needs my OK**: profiles that always come to you first, even for someone who downloads right away. In the global policy, **4K always asks** covers every 4K profile, later ones too.
 
-Music has **Quality they can ask for** and **Starts on** as well.
+Music has **Allowed quality profiles** and **Default quality profile** as well.
 
 ## What they see when they ask
 
@@ -238,7 +238,7 @@ The button says **Get it** when it will start downloading right away and **Ask f
 
 ## Everywhere else
 
-Every way of getting something follows the same rules: the request sheet, a downloader's direct adds, manual search, watchlist and collection auto adds, airing auto-wishlist, import lists, automations and Seerr apps. A quality someone isn't allowed is refused when they pick it by hand, and falls back to their **Starts on** in the background. A show remembers its quality, so later episodes keep it.
+Every way of getting something follows the same rules: the request sheet, a downloader's direct adds, manual search, watchlist and collection auto adds, airing auto-wishlist, import lists, automations and Seerr apps. A quality someone isn't allowed is refused when they pick it by hand, and falls back to their **Default quality profile** in the background. A show remembers its quality, so later episodes keep it.
 
 You can change a request's quality when you approve it. Admins can pick anything.
 `
@@ -256,6 +256,7 @@ A member sees only what they can use:
 - request sheets say how many asks of that kind are left, like "3 of 5 movie asks left this week"
 - in the music library, a member who asks first gets the Wishlist and no Automatic Search, Interactive Search, Enhance Quality or Upgrade: those download right away, so they are only there for a profile that may download (Interactive Search also needs a library of their own)
 - the notification panel is their own notes, downloads and automations, never the server's health, numbers or jobs
+- the dashboards (music and video) have no worker orbs and no Manage Workers: the enrichment workers are the admin's
 - Help & Docs and the help sheet's search show only the guides for what they can use; setup, settings, tools, the API, troubleshooting and the diagnostics are the admin's
 
 ## What you can do
@@ -264,7 +265,7 @@ A member's own **Profile & account** has a **What you can do** card: the same pl
 
 ## Seerr apps
 
-Apps built for Seerr (Jellyseerr, Overseerr) act as the profile linked to the Jellyfin user they send, under that person's permissions: their ratings, their Getting movies and Getting shows, their quality and their movie and TV limits. They see only their own requests unless they can see everyone's.
+Apps built for Seerr (Jellyseerr, Overseerr) act as the profile linked to the Jellyfin user they send, under that person's permissions: their ratings, their Movie requests and TV show requests, their quality and their movie and TV limits. They see only their own requests unless they can see everyone's.
 
 A Jellyfin user with no profile is refused on new installs. Installs that had Seerr set up before keep acting as the profile they always did; Settings > System > Seerr Compatible API shows which one, with **Refuse Jellyfin users with no profile** to stop it.
 `
@@ -430,9 +431,19 @@ Someone who **asks first** doesn't download: what they add becomes a **request**
 
 ## How asking works
 
-Music requests are grouped the way a person thinks of them: an **album** or a single **track**. Movies and shows ask through the request sheet (see [Request quality](#docs/prof-quality)). Asks land in **Waiting**, newest first, with the asks they have left.
+Music requests are grouped the way a person thinks of them: an **album** or a single **track**. Audiobooks and podcast episodes wait beside them, one book or one episode each. Movies and shows ask through the request sheet (see [Request quality](#docs/prof-quality)). Asks land in **Waiting**, newest first, with the asks they have left.
 
-Admins **approve** (or approve all), optionally with a reply, or **decline** with a reason. Approving lets the download start, still on the requester's own list so they watch it arrive. Declining takes it off and keeps a watchlist scan from filing it again. Members can **withdraw** their own waiting requests.
+Admins **approve** (or approve all), optionally with a reply, or **decline** with a reason. Approving lets the download start, still on the requester's own list so they watch it arrive. An approved book goes on the requester's audiobook wishlist and the wishlist search picks it up; an approved episode starts downloading. Declining takes it off and keeps a watchlist scan from filing it again. Members can **withdraw** their own waiting requests.
+
+## Picking the release yourself
+
+By default an approval downloads the best match on its own. **Approval settings**, at the top of the Requests page (admins), sets it for **Music**, **Movies**, **TV** and **Audiobooks** separately: **Download automatically** or **I pick the release**. Nothing changes until you switch one.
+
+With **I pick the release**, an approved request waits on the **Pick a release** tab. Nothing automatic touches it: not the wishlist runs, not retries, not scheduled searches. The tab lists who asked, what kind it is and when you approved it, and **Pick release** opens the same picker you'd use anywhere else: Interactive Search for a track (one per track of an album), the release list for a book, manual search for a movie, an episode or a season of a show. Pick one and it downloads, imports and lands for whoever asked like any other request. If a pick fails, the request stays on the tab to pick again. **Download automatically instead**, in its menu, hands it back.
+
+The **Approve** button follows the setting. Its menu has the other way for that one request: **Approve & pick release** or **Approve & auto-download**. Approve all always follows the settings. A held show doesn't follow new episodes on its own; hand it back, or follow it yourself, if you want that.
+
+Moderators pick the same way, for anyone's request but their own. Music videos, YouTube videos and podcast episodes have one file each, so they always download right away.
 
 ## Moderators
 
@@ -445,6 +456,7 @@ A **Moderator** (Requests & moderation in the editor) approves, declines and tid
 Each request shows where it stands:
 
 - **Waiting**: with an admin or a moderator
+- **Approved, waiting for a release to be picked**: approved, an admin chooses the exact release next
 - **On the way**: approved, downloading
 - **In your library**: arrived and matched
 - **Declined**: someone said no (the reason shows)

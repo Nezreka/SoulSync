@@ -40,8 +40,10 @@ import { ListeningHistoryBand } from './listening-history-band';
 import { SyncRail } from './sync-band';
 import { WeeklyDigest } from './weekly-digest';
 
-export function DashboardPage() {
-  const header = useDashboardHeader();
+/** `isAdmin` decides the worker orbs, their sheet and Manage Workers: server
+ *  maintenance, the admins' (#2196). */
+export function DashboardPage({ isAdmin }: { isAdmin: boolean }) {
+  const header = useDashboardHeader({ workers: isAdmin });
   // cards for parts this profile switched off stay off the dashboard (#1909)
   const statsOn = useFeatureOn('stats');
   // playlist sync off for this profile: no sync rail, its auto-sync runs
@@ -51,15 +53,21 @@ export function DashboardPage() {
   const automationsOn = useFeatureOn('automations');
 
   useEffect(() => {
-    window.workerOrbs?.setPage('dashboard');
-  }, []);
+    if (isAdmin) window.workerOrbs?.setPage('dashboard');
+  }, [isAdmin]);
 
   return (
     <div className="page-shell dashboard-container dash-room" id="dashboard-page">
-      <DashboardHeaderView header={header} library={<LibraryCard />} />
+      <DashboardHeaderView
+        header={header}
+        library={<LibraryCard admin={isAdmin} />}
+        workers={isAdmin}
+      />
       {/* The exception surface: renders NOTHING while every core connection
-          is healthy — the one place that shouts when a human is needed. */}
-      <AlertsBand />
+          is healthy — the one place that shouts when a human is needed.
+          That human is the admin: a down server or a spotify ban, with a
+          jump to Settings, is nothing a member can act on (#2208). */}
+      {isAdmin ? <AlertsBand /> : null}
       <div className="room-top">
         {/* What setup left for later. Renders nothing once it's all done,
             dismissed, or for anyone who isn't an admin. */}

@@ -83,6 +83,86 @@ def title_similarity(a: Any, b: Any) -> float:
 # failure than guessing.
 TITLE_MATCH_FLOOR = 0.8
 
+# a guest credit is not part of the song's name: "My Heart Is Open (feat. Gwen
+# Stefani)" and "My Heart Is Open" are one song. version words (live, remix)
+# stay, they are different recordings.
+_FEAT_GROUP = re.compile(
+    r"[\(\[]\s*(?:feat\.?|ft\.?|featuring|with)\s[^\)\]]*[\)\]]", re.IGNORECASE)
+_FEAT_TAIL = re.compile(r"\s+(?:feat\.?|ft\.?|featuring)\s.*$", re.IGNORECASE)
+# a title that names no song: what a tagger writes when it knows nothing
+_PLACEHOLDER = re.compile(
+    r"^(?:(?:track|trakc|piste|titel|audio track|untitled|unknown|\d+)\s*)+$")
+_PLACEHOLDER_WORDS = {"unknown", "untitled"}
+# how far two lengths may drift and still be one song at one position: a
+# remaster or another edition's cut, not another song
+_DURATION_SLACK_MS = 10_000
+_DURATION_SLACK_SHARE = 0.05
+
+
+def song_key(text: Any) -> str:
+    """the title without its guest credit, normalised"""
+    raw = _FEAT_TAIL.sub("", _FEAT_GROUP.sub(" ", str(text or "")))
+    return normalize_title(raw)
+
+
+def is_placeholder_title(text: Any) -> bool:
+    """an empty title or one that only says "track 2" / "unknown" names no
+    song, so it can't speak against a position"""
+    key = song_key(text)
+    if not key:
+        return True
+    return bool(_PLACEHOLDER.match(key)) or bool(_PLACEHOLDER_WORDS & set(key.split()))
+
+
+def titles_conflict(a: Any, b: Any) -> bool:
+    """True when two titles clearly name different songs (wolf39us: "Lost
+    Stars" at the slot of "Maps"). a placeholder, a guest credit, a version
+    tail ("X - 2011 Remaster" against "X") or a cut-short provider title
+    ("This Summer" against "This Summer's Gonna Hurt...") is not a conflict."""
+    if is_placeholder_title(a) or is_placeholder_title(b):
+        return False
+    left, right = song_key(a), song_key(b)
+    if left == right:
+        return False
+    if left.startswith(right) or right.startswith(left):
+        return False
+    # a shared remaster tail is no likeness: "Let It Be - Remastered 2009"
+    # and "Dig It - Remastered 2009" share half their words (#2206)
+    left_core, right_core = _without_edition_words(left), _without_edition_words(right)
+    if left_core and right_core:
+        if left_core.startswith(right_core) or right_core.startswith(left_core):
+            return False
+        return title_similarity(left_core, right_core) < 0.5
+    return title_similarity(left, right) < 0.5
+
+
+# words that say which pressing, never which song
+_EDITION_WORDS = frozenset({
+    "remaster", "remastered", "digital", "digitally", "version", "mono", "stereo",
+    "deluxe", "edition", "bonus", "explicit", "clean",
+})
+_YEAR = re.compile(r"^(?:19|20)\d\d$")
+
+
+def _without_edition_words(key: str) -> str:
+    return " ".join(w for w in key.split() if w not in _EDITION_WORDS and not _YEAR.match(w))
+
+
+def durations_disagree(a_ms: Any, b_ms: Any) -> bool:
+    """both lengths known and further apart than one song's editions drift"""
+    try:
+        first, second = int(a_ms or 0), int(b_ms or 0)
+    except (TypeError, ValueError):
+        return False
+    if first <= 0 or second <= 0:
+        return False
+    slack = max(_DURATION_SLACK_MS, round(max(first, second) * _DURATION_SLACK_SHARE))
+    return abs(first - second) > slack
+
+
+def _song_similarity(a: Any, b: Any) -> float:
+    return max(title_similarity(a, b), title_similarity(song_key(a), song_key(b)))
+
 
 @dataclass
 class TrackPairing:
@@ -100,6 +180,7 @@ class TrackPairing:
     # 'track_number' | 'title' | None — shown in the UI so the user can see
     # WHY a pairing was proposed, not just that it was.
     matched_by: Optional[str] = None
+    local_duration: Optional[int] = None
 
     @property
     def mapped(self) -> bool:
@@ -130,21 +211,32 @@ def _target_title(target: Dict[str, Any]) -> str:
     return str(target.get("name") or target.get("title") or "")
 
 
+def _target_duration(target: Dict[str, Any]) -> Optional[int]:
+    # milliseconds only: a source's "duration" may be seconds
+    return _int_or_none(target.get("duration_ms"))
+
+
 def map_album_tracks(
     local_tracks: Sequence[Dict[str, Any]],
     target_tracks: Sequence[Dict[str, Any]],
 ) -> List[TrackPairing]:
     """Line the album's local files up against the target release's tracklist.
 
-    Two passes, most-trustworthy first:
+    Three passes, most-trustworthy first:
 
-    1. **Track number.** The strongest signal, and the only one that survives a
-       title the tagger mangled. Used only when the number is UNAMBIGUOUS on
-       both sides — a duplicated number (multi-disc flattened into one folder)
-       is skipped rather than guessed at.
+    1. **Number and title together.** The number is unambiguous on both sides
+       (a duplicated number, a multi-disc album flattened into one folder, is
+       skipped), the two titles don't name different songs, the lengths agree,
+       and no other track on the target carries the local file's exact title.
     2. **Title similarity**, for whatever pass 1 left over. Greedy on the best
-       score above ``TITLE_MATCH_FLOOR``, and strictly one-to-one so two local
-       files can never claim the same target track.
+       score above ``TITLE_MATCH_FLOOR``, the same number and then the
+       closer length breaking ties, strictly one-to-one.
+    3. **Number alone**, only for a file whose title names no song ("track
+       02", "unknown"), so a mangled tag still lands on its slot.
+
+    A title that clearly names a different song never maps by number
+    (wolf39us: "1. Lost Stars" went to "1. Maps" while "15. Lost Stars" was on
+    the same tracklist), and neither does a length that is another song's.
 
     Anything still unmatched comes back with ``target_id=None``. That is a
     RESULT, not a failure: the caller shows it and excludes it. An album is
@@ -159,52 +251,93 @@ def map_album_tracks(
             local_track_number=_int_or_none(local.get("track_number")),
             local_path=str(local.get("file_path") or ""),
             local_file_id=_int_or_none(local.get("file_id")),
+            local_duration=_int_or_none(local.get("duration")),
         ))
 
-    remaining = list(target_tracks or ())
+    targets = list(target_tracks or ())
+    claimed: set = set()
 
-    # Pass 1 — unambiguous track numbers only.
-    by_number: Dict[int, List[Dict[str, Any]]] = {}
-    for target in remaining:
+    by_number: Dict[int, List[int]] = {}
+    for index, target in enumerate(targets):
         number = _int_or_none(target.get("track_number"))
         if number is not None:
-            by_number.setdefault(number, []).append(target)
-
+            by_number.setdefault(number, []).append(index)
     local_number_counts: Dict[int, int] = {}
     for pairing in pairings:
         if pairing.local_track_number is not None:
             local_number_counts[pairing.local_track_number] = (
                 local_number_counts.get(pairing.local_track_number, 0) + 1)
 
-    claimed: List[int] = []
-    for pairing in pairings:
+    def slot_of(pairing: TrackPairing) -> Optional[int]:
         number = pairing.local_track_number
         if number is None:
-            continue
+            return None
         candidates = by_number.get(number) or []
         if len(candidates) != 1 or local_number_counts.get(number, 0) != 1:
             # Ambiguous on one side or the other — leave it to the title pass
             # rather than pick one of two tracks that share a number.
-            continue
-        target = candidates[0]
-        _apply(pairing, target, "track_number")
-        claimed.append(id(target))
+            return None
+        return None if candidates[0] in claimed else candidates[0]
 
-    remaining = [t for t in remaining if id(t) not in claimed]
+    def fits_slot(pairing: TrackPairing, index: int) -> bool:
+        target = targets[index]
+        return (not titles_conflict(pairing.local_title, _target_title(target))
+                and not durations_disagree(pairing.local_duration, _target_duration(target)))
 
-    # Pass 2 — title similarity, greedy on the best score, one-to-one.
+    # Pass 1 — the number, when the title and length say the same.
     for pairing in pairings:
-        if pairing.mapped or not remaining:
+        if is_placeholder_title(pairing.local_title):
             continue
-        best = None
-        best_score = 0.0
-        for target in remaining:
-            score = title_similarity(pairing.local_title, _target_title(target))
-            if score > best_score:
-                best, best_score = target, score
-        if best is not None and best_score >= TITLE_MATCH_FLOOR:
-            _apply(pairing, best, "title")
-            remaining = [t for t in remaining if t is not best]
+        index = slot_of(pairing)
+        if index is None or not fits_slot(pairing, index):
+            continue
+        key = song_key(pairing.local_title)
+        named_elsewhere = any(
+            i != index and i not in claimed and song_key(_target_title(t)) == key
+            for i, t in enumerate(targets))
+        if named_elsewhere and song_key(_target_title(targets[index])) != key:
+            continue
+        _apply(pairing, targets[index], "track_number")
+        if pairing.mapped:
+            claimed.add(index)
+
+    # Pass 2 — title similarity, best score first, one-to-one.
+    scored = []
+    for p_index, pairing in enumerate(pairings):
+        if pairing.mapped:
+            continue
+        for t_index, target in enumerate(targets):
+            if t_index in claimed:
+                continue
+            score = _song_similarity(pairing.local_title, _target_title(target))
+            if score < TITLE_MATCH_FLOOR:
+                continue
+            same_number = (pairing.local_track_number is not None
+                           and pairing.local_track_number == _int_or_none(target.get("track_number")))
+            gap = None
+            if pairing.local_duration and _target_duration(target):
+                gap = abs(int(pairing.local_duration) - int(_target_duration(target)))
+            scored.append((-score, not same_number, gap if gap is not None else 1 << 40,
+                           p_index, t_index))
+    scored.sort()
+    for _score, _number, _gap, p_index, t_index in scored:
+        pairing = pairings[p_index]
+        if pairing.mapped or t_index in claimed:
+            continue
+        _apply(pairing, targets[t_index], "title")
+        if pairing.mapped:
+            claimed.add(t_index)
+
+    # Pass 3 — the number alone, for a title that names no song.
+    for pairing in pairings:
+        if pairing.mapped or not is_placeholder_title(pairing.local_title):
+            continue
+        index = slot_of(pairing)
+        if index is None or not fits_slot(pairing, index):
+            continue
+        _apply(pairing, targets[index], "track_number")
+        if pairing.mapped:
+            claimed.add(index)
 
     return pairings
 
@@ -387,6 +520,10 @@ def apply_album_reassign(
 
 __all__ = [
     "TITLE_MATCH_FLOOR",
+    "durations_disagree",
+    "is_placeholder_title",
+    "song_key",
+    "titles_conflict",
     "apply_album_reassign",
     "ReassignPlan",
     "TrackPairing",

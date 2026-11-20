@@ -18,6 +18,7 @@ _JOB_MODULES = [
     "wishlist_audit",
     "youtube_ghosts",
     "watched_cleanup",
+    "shelf_life",
     "naming_conformance",
     "missing_subtitles",
     "media_info",

@@ -491,7 +491,7 @@ def try_staging_match(task_id, batch_id, track, deps: StagingDeps):
 
         import shutil
         shutil.copy2(best_match['full_path'], dest_path)
-        logger.info(f"[Staging] Copied to transfer: {dest_path}")
+        logger.info(f"[Staging] Copied to music library folder: {dest_path}")
 
         # Mark task as completed with staging context.
         # If the batch was populated by the torrent / usenet album-bundle
