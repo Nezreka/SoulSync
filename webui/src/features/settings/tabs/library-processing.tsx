@@ -477,6 +477,19 @@ export function MusicTagsHero({ store }: { store: SettingsStore }) {
   );
 }
 
+/** "Fill empty tags automatically" (core/library2/tag_fill.py). unset is
+ *  Fill empty tags only: the import already fills blanks the same way */
+export const FILL_EMPTY_TAGS_OPTIONS = [
+  { value: 'fill', label: 'Fill empty tags only' },
+  { value: 'update', label: 'Fill and update' },
+  { value: 'off', label: 'Off' },
+] as const;
+
+export function fillEmptyTags(raw: unknown): string {
+  const value = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+  return FILL_EMPTY_TAGS_OPTIONS.some((o) => o.value === value) ? value : 'fill';
+}
+
 export function MusicTags({ store }: { store: SettingsStore }) {
   const settings = useSettings(store);
   const loads = useLoads(store);
@@ -633,6 +646,33 @@ export function MusicTags({ store }: { store: SettingsStore }) {
             group={{ service: null, name: 'General', tags: GENERAL_TAGS }}
           />
           <p className={s.cardFoot}>Supported formats: MP3, FLAC, MP4/M4A, OGG.</p>
+        </Card>
+
+        <SectionLabel title="Library files" hint="Tags the library learns after a download" />
+        <Card>
+          <Row
+            field
+            label="Fill empty tags automatically"
+            htmlFor="fill-empty-tags"
+            help="When the library learns something after a download (a genre, a year, a track total), SoulSync writes it into the tags the file left blank."
+            more={
+              <>
+                <strong>Fill empty tags only</strong> never replaces a tag the file has.{' '}
+                <strong>Fill and update</strong> also replaces tags that differ from the library, as
+                applying a Library Re-tag finding does. Hand-tagged and locked albums, files still
+                downloading or seeding, and read-only files are left alone. Every fill is listed on
+                the Tools page under Filled Tags and can be undone. <strong>Off</strong> files them
+                as Library Re-tag findings instead.
+              </>
+            }
+          >
+            <Select
+              id="fill-empty-tags"
+              value={loads ? fillEmptyTags(meta.fill_empty_tags) : 'fill'}
+              options={FILL_EMPTY_TAGS_OPTIONS.map((o) => ({ ...o }))}
+              onChange={(event) => setMeta('fill_empty_tags')(event.target.value)}
+            />
+          </Row>
         </Card>
       </div>
 

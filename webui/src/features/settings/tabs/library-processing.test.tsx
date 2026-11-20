@@ -6,7 +6,7 @@
  * the credentials Connections saves).
  */
 
-import { act, fireEvent, render, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createSettingsStore, type SettingsPayload, type SettingsStore } from '../settings-store';
@@ -16,6 +16,7 @@ import {
   MusicTags,
   MusicTagsHero,
   artList,
+  fillEmptyTags,
   postProcessingSummary,
 } from './library-processing';
 
@@ -230,5 +231,39 @@ describe('Tags and artwork, and Import', () => {
     cards();
     expect(input('genre-whitelist-enabled').checked).toBe(true);
     expect(document.querySelector('#genre-whitelist-chips [data-genre="jazz"]')).not.toBeNull();
+  });
+});
+
+describe('Fill empty tags automatically', () => {
+  const select = () => document.getElementById('fill-empty-tags') as HTMLSelectElement;
+
+  it('shows Fill empty tags only when nothing is saved, and keeps a saved choice', () => {
+    act(() => store.hydrate({ metadata_enhancement: {} }));
+    cards();
+    expect(select().value).toBe('fill');
+    cleanup();
+    act(() => store.hydrate({ metadata_enhancement: { fill_empty_tags: 'update' } }));
+    cards();
+    expect(select().value).toBe('update');
+  });
+
+  it('reads junk as the default', () => {
+    expect(fillEmptyTags(undefined)).toBe('fill');
+    expect(fillEmptyTags('always')).toBe('fill');
+    expect(fillEmptyTags(' Off ')).toBe('off');
+  });
+
+  it('saves the choice under metadata_enhancement', async () => {
+    act(() => store.hydrate({ metadata_enhancement: {} }));
+    cards();
+    fireEvent.change(select(), { target: { value: 'off' } });
+    await act(() => store.flush());
+    expect(saved().metadata_enhancement).toEqual({ fill_empty_tags: 'off' });
+  });
+
+  it('lives with post-processing: hidden while it is off', () => {
+    act(() => store.hydrate({ metadata_enhancement: { enabled: false } }));
+    cards();
+    expect(select().closest('#post-processing-options')!.hasAttribute('hidden')).toBe(true);
   });
 });

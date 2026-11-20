@@ -115,7 +115,10 @@ def fill_known_blanks(database, file_ids, config=None) -> int:
         if config is None:
             from core.metadata.common import get_config_manager
             config = get_config_manager()
-        if config.get('metadata_enhancement.enabled', True) is False:
+        # post-processing off, or "Fill empty tags automatically" set to Off:
+        # SoulSync writes nothing into the file on its own
+        from core.library2.tag_fill import fill_mode
+        if fill_mode(config) == 'off':
             return 0
         from contextlib import closing
         with closing(database._get_connection()) as conn:

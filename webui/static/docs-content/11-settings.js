@@ -138,6 +138,8 @@ These live on other tabs, not Downloads:
 - **AcoustID verification** — fingerprints each download and quarantines files that don't match the expected track
 - **Duration tolerance** (Library › Tags and artwork): how far a file's length can drift from the expected length before it's quarantined. **0 = auto**: 3s short (5s for tracks over 10 minutes) or 15s long. Raise it if good files keep landing in quarantine for being a few seconds off, which is common with CD rips (pregaps, trimmed silence) and alternate masters. A set value applies both ways, so anything under 15 also tightens the long side. Max 60
 
+- **Fill empty tags automatically** (Library › Tags and artwork, Library files): when the library learns something after a download (a genre, a year, a track total), SoulSync writes it into the tags the file left blank. **Fill empty tags only** (the default) never replaces a tag the file has; **Fill and update** also replaces tags that differ from the library; **Off** leaves them as Library Re-tag findings. Hand-tagged and locked albums, files still downloading or seeding, and read-only files are left alone, and every fill can be undone from **Tools → Filled Tags**
+
 ## Organization
 
 - **Path templates** — customize how artists, albums, and tracks are named and nested (e.g. \`$albumartist/$album/$track - $title\`). Variables use \`$name\` syntax: \`$albumartist\`, \`$artist\`, \`$album\`, \`$track\`, \`$title\`, \`$year\`, \`$discnum\`, \`$explicit\` (\`[E]\` on explicit tracks), \`$contentrating\` (\`[E]\` or \`[C]\`), \`$albumartistinfo\` / \`$albumartistcomposite\` / \`$albumartistclash\` (MusicBrainz's note, country or genre, to keep same-named artists apart), and more

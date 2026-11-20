@@ -6239,6 +6239,23 @@
       "asked": true,
       "shows": ["metadata_enhancement.tags.genre_merge"]
     },
+    "#fill-empty-tags": {
+      "sel": "#fill-empty-tags",
+      "kind": "select",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "fill",
+      "to": "update",
+      "saves": {
+        "settings": {
+          "metadata_enhancement": {
+            "fill_empty_tags": "update"
+          }
+        }
+      },
+      "asked": "update",
+      "shows": ["metadata_enhancement.fill_empty_tags"]
+    },
     "#genre-whitelist-enabled": {
       "sel": "#genre-whitelist-enabled",
       "kind": "checkbox",
@@ -13122,7 +13139,7 @@
     "#post-processing-options \"More about this setting\"": {
       "label": "More about this setting",
       "anchor": "post-processing-options",
-      "count": 10,
+      "count": 11,
       "sides": ["music", "video"],
       "scenario": "music"
     },
