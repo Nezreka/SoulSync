@@ -93,6 +93,28 @@ def lidarr_whole_album(batch: Optional[dict], config_get: Callable[..., Any]) ->
     return bool(choice)
 
 
+def per_track_exclusions(batch: Optional[dict], config_get: Callable[..., Any], *,
+                         hybrid: bool, bundle_sources) -> Optional[list]:
+    """Sources a hybrid batch's per-track search skips.
+
+    An album batch skips the release sources: a torrent or usenet grab per
+    track fetches the same release N times. Lidarr is skipped only when it
+    had its whole-album turn, i.e. it is in ``bundle_sources`` (the bundle
+    prefix of the chain). Further down the chain, after a source that cannot
+    bundle, Lidarr never got that turn and per-track is the only way it is
+    asked. "Whole album via Lidarr" off skips Lidarr for every track.
+    """
+    excluded = set()
+    is_album = isinstance(batch, dict) and bool(batch.get('is_album_download'))
+    if is_album and hybrid:
+        excluded |= {'torrent', 'usenet'}
+        if 'lidarr' in (bundle_sources or ()):
+            excluded.add('lidarr')
+    if not lidarr_whole_album(batch, config_get):
+        excluded.add('lidarr')
+    return sorted(excluded) or None
+
+
 def album_bundle_sources(config_get: Callable[..., Any]) -> frozenset:
     """The sources that may run the album-bundle flow right now."""
     if config_get('download_source.youtube_album_bundle', False):

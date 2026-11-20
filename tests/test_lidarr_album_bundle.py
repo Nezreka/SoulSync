@@ -464,3 +464,22 @@ def test_find_album_looks_past_an_edition_note(client):
     fake = FakeLidarr({'Fleetwood Mac Rumours (Live)': [live]})
     with patch.object(client, '_api_get', side_effect=fake.get):
         assert client._find_album('Rumours (Live)', 'Fleetwood Mac') is None
+
+
+def test_per_track_skips_lidarr_only_after_its_whole_album_turn():
+    from core.downloads.album_bundle_dispatch import per_track_exclusions
+    album = {'is_album_download': True}
+    cfg = _cfg({'download_source.mode': 'hybrid'})
+    # lidarr leads the chain: it had the album, per-track skips it
+    assert per_track_exclusions(album, cfg, hybrid=True, bundle_sources=['lidarr']) == [
+        'lidarr', 'torrent', 'usenet']
+    # hifi, lidarr: no bundle turn, so per-track is how lidarr gets asked
+    assert per_track_exclusions(album, cfg, hybrid=True, bundle_sources=[]) == ['torrent', 'usenet']
+    # whole album off: lidarr skipped for every track, album or not
+    off = _cfg({'download_source.mode': 'hybrid', 'lidarr_download.whole_album_default': False})
+    assert per_track_exclusions({}, off, hybrid=True, bundle_sources=[]) == ['lidarr']
+    # a playlist batch in hybrid with the switch on skips nothing
+    assert per_track_exclusions({}, cfg, hybrid=True, bundle_sources=['lidarr']) is None
+    # lidarr-only mode never skips lidarr
+    assert per_track_exclusions(album, _cfg({'download_source.mode': 'lidarr'}),
+                                hybrid=False, bundle_sources=['lidarr']) is None
