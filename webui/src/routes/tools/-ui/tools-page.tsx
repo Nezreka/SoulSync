@@ -25,6 +25,7 @@ import {
 import { MaintenanceHero } from './maintenance-hero';
 import { DbUpdaterCard, DuplicateCleanerCard, ReconcileIdsCard } from './scanning-cards';
 import { BackupManagerCard, MediaScanCard, MetadataUpdaterCard } from './server-cards';
+import { TagFillsCard } from './tag-fills-card';
 import { ToolsSection } from './tool-card';
 import {
   VideoBackupsCard,
@@ -254,6 +255,7 @@ function MusicToolSections({ isAdmin }: { isAdmin: boolean }) {
         blurb="Enriching what SoulSync knows, and fixing what it got wrong."
       >
         <MetadataUpdaterCard />
+        <TagFillsCard />
         <DiscoveryPoolCard />
         <ManualLibraryMatchCard />
       </ToolsSection>

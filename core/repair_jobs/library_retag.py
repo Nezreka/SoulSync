@@ -20,8 +20,10 @@ things it does differently from the version it replaces:
   carries BOTH — the fix takes the hand-set value unless the user explicitly
   releases the field (``fix_action='overwrite_manual'``).
 
-The default scan creates findings. Automatic writing requires an explicit
-auto_apply setting (or the legacy dry_run=False opt-in).
+The default scan fills blank tags (``core/library2/tag_fill``, while the
+fill setting allows it) and files findings for what differs. Writing every
+difference requires an explicit auto_apply setting (or the legacy
+dry_run=False opt-in), or the fill setting's ``update`` mode.
 """
 
 from __future__ import annotations
@@ -83,8 +85,13 @@ class LibraryRetagJob(RepairJob):
     help_text = (
         "Compares the tags written in each audio file against what the Library "
         "holds for that track, and reports every field that differs.\n\n"
-        "By default the scan creates findings. Auto apply must be explicitly enabled. "
-        "Applying a finding writes the library's values "
+        "A tag that is blank in the file and known to the library is filled on its own "
+        "while Fill empty tags automatically (Settings > Library > Post-Processing) allows "
+        "it, which it does by default whenever post-processing writes tags. Every fill is "
+        "listed on the Tools page under Filled tags and can be undone, one file or one run "
+        "at a time. What differs from the library is filed as a finding, unless that "
+        "setting is Fill and update. Auto apply writes every difference on each run of "
+        "this job. Applying a finding writes the library's values "
         "into the file — the same engine the Re-tag dialog uses, so the preview "
         "and the finding agree.\n\n"
         "Full depth refreshes the provider metadata in the catalogue first. "
@@ -180,6 +187,13 @@ class LibraryRetagJob(RepairJob):
             context.report_progress(
                 phase=f"Comparing tags for {total} files...", total=total)
 
+        # what SoulSync may write on its own (Settings > Library): blanks, or
+        # blanks and differences. one batch id for the run, so the run can be
+        # listed and undone as one
+        from core.library2 import tag_fill
+        fill = tag_fill.fill_mode(context.config_manager)
+        batch_id = tag_fill.now_batch('job')
+
         done = 0
         for start in range(0, total, _BATCH):
             if context.check_stop():
@@ -217,13 +231,27 @@ class LibraryRetagJob(RepairJob):
                 manual_fields = [d.get("field") for d in diff if d.get("manual")]
                 artist = subject.get("artist_name") or "Unknown"
                 title = entry.get("title") or subject.get("title") or "Unknown"
+                if fill != 'off' and not options['auto_apply']:
+                    entry = self._fill(context, entry, files, fill, batch_id, options, result)
+                    if not entry.get('has_changes'):
+                        clean.append(int(entry['track_id']))
+                        continue
+                    diff = entry.get("diff") or []
+                    manual_fields = [d.get("field") for d in diff if d.get("manual")]
                 if options['auto_apply']:
                     stats = retag.write_tags(context.db, [entry['track_id']], options=options,
                         protect_hand_tagged=True, file_ids=[f['file_id'] for f in files if f.get('file_id')],
-                        lyrics_value=entry.get('lyrics_value'))
+                        lyrics_value=entry.get('lyrics_value'), record_changes=True)
                     result.errors += stats.get('failed', 0)
                     if not stats.get('failed'):
                         result.auto_fixed += stats.get('written', 0)
+                        try:
+                            # kept like any automatic write: listed, and undone
+                            tag_fill.record_job_changes(context.db, stats.get('changes') or [],
+                                batch_id=batch_id, mode='apply', track_id=entry['track_id'],
+                                album_id=entry.get('album_id'))
+                        except Exception as exc:  # noqa: BLE001 - the write stands
+                            logger.debug("[Library Re-tag] recording an applied write failed: %s", exc)
                         if stats.get('written') and context.report_change:
                             context.report_change(finding_type='library_retag', action='applied_tags',
                                 entity_type='track', entity_id=f"lib2:{entry['track_id']}",
@@ -269,3 +297,43 @@ class LibraryRetagJob(RepairJob):
             if context.update_progress:
                 context.update_progress(done, total)
         return result
+
+    def _fill(self, context: JobContext, entry: dict, files: list, fill: str, batch_id: str,
+              options: dict, result: JobResult) -> dict:
+        """Fill what the library knows into this track's files, then compare
+        again: what is left is the finding. A file the fill leaves alone (hand
+        tagged, locked, in a download folder, read-only) is filed as before."""
+        from core.library2 import retag, tag_fill
+
+        filled = []
+        for f in files:
+            if not f.get('file_id'):
+                continue
+            outcome = tag_fill.fill_file(context.db, f['file_id'], mode=fill,
+                                         config=context.config_manager, batch_id=batch_id, source='job')
+            if outcome.get('written') or outcome.get('cover'):
+                filled.append(f)
+        if not filled:
+            return entry
+        result.auto_fixed += len(filled)
+        if context.report_change:
+            context.report_change(finding_type='library_retag', action='filled_tags',
+                entity_type='track', entity_id=f"lib2:{entry['track_id']}",
+                file_path=entry.get('file_path'), details={'file_ids': [f.get('file_id') for f in filled]})
+        from core.library2.status import _coerce_tags
+        conn = context.db._get_connection()
+        try:
+            again = retag.track_contexts(conn, [int(entry['track_id'])], lyrics=options['lyrics'] == 'fetch')
+            # the fill re-read the file; the finding carries that check
+            row = conn.execute('SELECT tags_json FROM lib2_track_files WHERE id=?',
+                               (files[0].get('file_id'),)).fetchone() if files[0].get('file_id') else None
+        finally:
+            conn.close()
+        for item in again:
+            item.update(file_id=files[0].get('file_id'), file_path=files[0]['path'],
+                        sibling_files=[{'id': f.get('file_id'), 'path': f['path']} for f in files[1:]])
+        compared = retag.tag_preview(again, options=options)
+        if not compared or compared[0].get('error'):
+            return entry
+        validation = _coerce_tags(row[0] if row else None).get('_validation') or entry.get('validation')
+        return {**compared[0], 'validation': validation}

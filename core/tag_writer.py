@@ -179,6 +179,14 @@ def _clear_tag_field(audio, field: str) -> bool:
         id3, vorbis, mp4 = _TEXT_TAGS[field]
         drop(id3, [vorbis], mp4)
         return True
+    if field == 'cover_art':
+        # only the undo of a write that ADDED a cover asks for this: the file
+        # had no picture before, so taking every picture out puts it back
+        if isinstance(audio, FLAC):
+            audio.clear_pictures()
+        else:
+            drop('APIC', ['metadata_block_picture', 'coverart'], 'covr')
+        return True
     for kind, number_key, total_key in (('track', 'track_number', 'total_tracks'), ('disc', 'disc_number', 'total_discs')):
         frame, atom = ('TRCK', 'trkn') if kind == 'track' else ('TPOS', 'disk')
         if field == number_key:
