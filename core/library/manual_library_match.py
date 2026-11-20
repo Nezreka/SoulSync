@@ -393,11 +393,21 @@ def get_match_for_track(
             if match:
                 return match
 
+    # an exact soundcloud upload is matched by its id or not at all, and its
+    # match never stands in for a catalogue track that shares the names (the
+    # metadata lookup skips exact rows, so one can't shadow an older catalogue
+    # match either; the check below covers a db that doesn't)
+    from core.wishlist.soundcloud_exact import is_exact_id, is_exact_track
+    if is_exact_track(track):
+        return None
     title = (track.get("name") or track.get("title") or track.get("track_name") or "").strip()
     artist = _first_artist_name(track)
     metadata_getter = getattr(db, "find_manual_library_match_by_metadata", None)
     if metadata_getter is not None and title and artist:
-        return metadata_getter(profile_id, title, artist, server_source)
+        match = metadata_getter(profile_id, title, artist, server_source)
+        if isinstance(match, dict) and is_exact_id(match.get("source_track_id")):
+            return None
+        return match
     return None
 
 

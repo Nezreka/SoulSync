@@ -302,6 +302,12 @@ def reresolve_manual_match_live_plex(cache_db, media_client, m, *, profile_id,
                     chosen = t
                     break
         if chosen is None:
+            # an exact soundcloud upload is only ever its own file: the top
+            # search hit is a track with the same names, so the match stands
+            # and this sync just doesn't find it
+            from core.wishlist.soundcloud_exact import is_exact_id
+            if is_exact_id(str(source_track_id)):
+                return None
             chosen = results[0]   # search_tracks already ranks artist→title; best effort
         live = getattr(chosen, '_original_plex_track', None)
         if live is None or not hasattr(live, 'ratingKey'):
@@ -1265,11 +1271,17 @@ class PlaylistSyncService:
                 # its media-server mapping is awaiting a scan.
                 from core.wishlist.library_match import find_owned_match
                 from core.settings import config_manager
-                owned = find_owned_match(
-                    getattr(wishlist_service, 'database', None), spotify_track.name, spotify_track.artists,
-                    getattr(spotify_track, 'album', None), config_manager.get_active_media_server(),
-                    strict_identity=True,
-                )
+                from core.wishlist.soundcloud_exact import is_exact_id, upload_acquired
+                if is_exact_id(spotify_track.id):
+                    # an exact soundcloud upload is owned by its own download only
+                    owned = upload_acquired(getattr(wishlist_service, 'database', None),
+                                            {'id': spotify_track.id}, _sync_profile_id.get() or 1)
+                else:
+                    owned = find_owned_match(
+                        getattr(wishlist_service, 'database', None), spotify_track.name, spotify_track.artists,
+                        getattr(spotify_track, 'album', None), config_manager.get_active_media_server(),
+                        strict_identity=True,
+                    )
                 if owned:
                     match_result.owned_in_library = True
                     logger.info("Skipping wishlist for already-owned recording: %s", spotify_track.name)
@@ -1657,6 +1669,13 @@ class PlaylistSyncService:
                     logger.debug(f"Provider-ID match for '{original_title}' pointed at {_provider_id}, which did not materialize")
             except Exception as provider_err:
                 logger.debug(f"Provider-ID match lookup error: {provider_err}")
+
+            # an exact soundcloud upload is that one file: only the id-keyed
+            # legs above may answer, never a library track with the same names
+            from core.wishlist.soundcloud_exact import is_exact_id
+            if any(is_exact_id(_id) for _id in match_lookup_ids(spotify_track)):
+                logger.debug(f"No id match for exact upload '{original_title}'; skipping the name matcher")
+                return None, 0.0
 
             # Try each artist (same as modal logic), then the playlist's own
             # names for them (#2222). the library's other names for each are

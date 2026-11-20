@@ -106,3 +106,53 @@ def test_never_raises_on_a_broken_media_client():
     # a transient Plex error must not bubble — the caller falls through, not crash.
     assert reresolve_manual_match_live_plex(
         _CacheDb(), _Boom(), _MATCH, profile_id=1, source_track_id="sp1", server_source="plex") is None
+
+
+# an exact soundcloud upload (core/wishlist/soundcloud_exact) is only ever its
+# own file: the live search runs by its names, so the top hit is the original
+# it is a flip of. only the stored file may heal its match.
+_EXACT = "soundcloud_exact_123"
+_EXACT_MATCH = {
+    "source": "soundcloud_exact", "source_title": "Song (DJ Flip)", "source_artist": "Artist A",
+    "library_file_path": "/music/Artist A/Song (DJ Flip) [123].mp3",
+    "library_track_id": 39161,   # stale
+}
+
+
+def test_exact_upload_never_takes_the_top_result():
+    original = _TrackInfo(_PlexTrack(40000, "/music/Artist A/Album/03 - Song.flac"))
+    db = _CacheDb()
+    assert reresolve_manual_match_live_plex(
+        db, _MediaClient([original]), _EXACT_MATCH, profile_id=1,
+        source_track_id=_EXACT, server_source="plex") is None
+    assert db.healed == []
+
+
+def test_exact_upload_heals_onto_its_own_file():
+    original = _TrackInfo(_PlexTrack(40000, "/music/Artist A/Album/03 - Song.flac"))
+    upload = _TrackInfo(_PlexTrack(39170, "/data/Artist A/Song (DJ Flip) [123].mp3"))
+    db = _CacheDb()
+    live = reresolve_manual_match_live_plex(
+        db, _MediaClient([original, upload]), _EXACT_MATCH, profile_id=1,
+        source_track_id=_EXACT, server_source="plex")
+    assert live is not None and live.ratingKey == 39170
+    assert [(h["id"], h["source_track_id"]) for h in db.healed] == [("39170", _EXACT)]
+
+
+def test_exact_upload_with_no_stored_file_never_heals():
+    original = _TrackInfo(_PlexTrack(40000, "/music/Artist A/Album/03 - Song.flac"))
+    db = _CacheDb()
+    assert reresolve_manual_match_live_plex(
+        db, _MediaClient([original]), dict(_EXACT_MATCH, library_file_path=""), profile_id=1,
+        source_track_id=_EXACT, server_source="plex") is None
+    assert db.healed == []
+
+
+def test_catalogue_match_still_falls_back_to_the_top_result():
+    original = _TrackInfo(_PlexTrack(40000, "/music/Artist A/Album/03 - Song.flac"))
+    db = _CacheDb()
+    live = reresolve_manual_match_live_plex(
+        db, _MediaClient([original]), _EXACT_MATCH | {"source": "spotify"}, profile_id=1,
+        source_track_id="sp1", server_source="plex")
+    assert live.ratingKey == 40000
+    assert [h["id"] for h in db.healed] == ["40000"]

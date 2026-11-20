@@ -36,7 +36,7 @@ def test_no_v1_module_imports_from_web_server():
     import pathlib
     v1 = ['library', 'system', 'search', 'wishlist', 'watchlist', 'downloads', 'playlists',
           'settings', 'discover', 'profiles', 'retag', 'listenbrainz', 'cache', 'metasync',
-          'request', 'helpers', 'auth', 'serializers']
+          'request', 'helpers', 'auth', 'serializers', 'soundcloud_exact']
     offenders = []
     for name in v1:
         text = pathlib.Path('api', f'{name}.py').read_text(encoding='utf-8')

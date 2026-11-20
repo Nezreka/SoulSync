@@ -454,6 +454,13 @@ def _same_recording(mine: Any, theirs: Any) -> bool:
     its own conflates every alternate take of a song.
     """
     from core.downloads.status import track_info_identity
+    from core.wishlist.soundcloud_exact import exact_id_of, is_exact_track
+
+    # an exact SoundCloud upload is only ever itself
+    if is_exact_track(mine) != is_exact_track(theirs):
+        return False
+    if is_exact_track(mine):
+        return exact_id_of(mine) == exact_id_of(theirs)
 
     mine_id = _dedup_provider_identity(mine)
     theirs_id = _dedup_provider_identity(theirs)
@@ -700,6 +707,13 @@ def _download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWork
             popularity=track_data.get('popularity', 0),
         )
         logger.info(f"[Modal Worker] Starting download task for: {track.name} by {track.artists[0] if track.artists else 'Unknown'}")
+
+        # An exact SoundCloud upload is that one file: everything below matches
+        # by title and artist, so it takes its own path before any of it.
+        from core.wishlist.soundcloud_exact import is_exact_track
+        if is_exact_track(track_data):
+            from core.downloads.soundcloud_exact_task import run_exact_soundcloud_task
+            return run_exact_soundcloud_task(task_id, batch_id, track_data, track, deps)
 
         # === CROSS-BATCH DEDUP: has a sibling batch already obtained this file? ===
         _owner_id, _owner = _find_owning_sibling(task_id, track)

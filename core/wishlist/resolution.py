@@ -264,6 +264,8 @@ def check_and_remove_from_wishlist(
                 _queue_playlist_sync_for_lone_download(
                     wishlist_service, database, match_profiles, track_id)
             logger.info("[Wishlist] Attempting to remove track from wishlist: %s", track_id)
+            # an exact upload's source details, read while its row still exists
+            exact_block = _exact_block(track_id, track_info, database, owner_profiles)
             removed = wishlist_service.mark_track_download_result(
                 track_id, success=True,
                 profile_ids=owner_profiles or None,
@@ -284,6 +286,9 @@ def check_and_remove_from_wishlist(
             )
             if not removed:
                 logger.warning("ℹ️ [Wishlist] Track not found in wishlist or already removed: %s", track_id)
+            elif published_path:
+                _record_exact_match(track_id, track_info, published_path, database, owner_profiles,
+                                    block=exact_block)
             return bool(removed)
 
         logger.warning("ℹ️ [Wishlist] No track ID found for wishlist removal check")
@@ -291,6 +296,66 @@ def check_and_remove_from_wishlist(
     except Exception as exc:
         logger.error("[Wishlist] Error in wishlist removal check: %s", exc)
         return False
+
+
+def _exact_profiles(track_info, owner_profiles) -> List[Any]:
+    return list(owner_profiles or [(track_info or {}).get("profile_id") or 1])
+
+
+def _exact_block(track_id, track_info, database, owner_profiles) -> Optional[Dict[str, Any]]:
+    """an exact soundcloud upload's stored source block: on the import's track
+    info, else recovered by its id from the stored wishlist row or a mirrored
+    playlist row (a rebuilt payload can lose it). None for any other track."""
+    try:
+        from core.wishlist.soundcloud_exact import exact_source_for, is_exact_id
+        if not is_exact_id(str(track_id)):
+            return None
+        bare = str(track_id).split("::", 1)[0]
+        # the recovery legs look the row up by this id
+        info = {**(track_info or {}), "id": bare}
+        block = exact_source_for(info)
+        if block:
+            return block
+        database = database or get_database()
+        for pid in _exact_profiles(track_info, owner_profiles):
+            block = exact_source_for(info, database, pid)
+            if block:
+                return block
+    except Exception as exc:  # noqa: BLE001 - the match is extra
+        logger.debug("[Wishlist] exact upload block not recovered for %s: %s", track_id, exc)
+    return None
+
+
+def _record_exact_match(track_id, track_info, published_path, database, owner_profiles,
+                        *, block: Optional[Dict[str, Any]] = None) -> None:
+    """an exact soundcloud upload that landed: file a manual match under its
+    exact id, so a playlist sync finds this file by id and a re-add says it's
+    already in the library. best effort: on a media server the library row
+    may not exist yet. ``block`` is the source block read before the wishlist
+    row went; without it the recovery runs here (playlist rows still answer)."""
+    try:
+        from core.wishlist.soundcloud_exact import EXACT_SOURCE, is_exact_id, match_context
+        if not is_exact_id(str(track_id)):
+            return
+        bare = str(track_id).split("::", 1)[0]
+        database = database or get_database()
+        lib_id = database.find_track_id_by_file_path(str(published_path))
+        if not lib_id:
+            logger.debug("[Wishlist] exact upload %s: no library row for %s yet", bare, published_path)
+            return
+        from core.library import manual_library_match as _mlm
+        block = block or _exact_block(track_id, track_info, database, owner_profiles) or {}
+        profiles = _exact_profiles(track_info, owner_profiles)
+        for pid in profiles:
+            _mlm.save_match(
+                database, int(pid), EXACT_SOURCE, bare, lib_id,
+                library_file_path=str(published_path),
+                source_title=(track_info or {}).get("name") or "",
+                source_artist=_primary_track_artist_name(track_info),
+                source_context_json=match_context(block),
+            )
+    except Exception as exc:  # noqa: BLE001 - the row is cleared; the match is extra
+        logger.debug("[Wishlist] exact upload match not recorded for %s: %s", track_id, exc)
 
 
 def _queue_playlist_sync_for_lone_download(wishlist_service, database, profile_ids, track_id) -> None:
@@ -341,8 +406,13 @@ def _match_by_metadata(wishlist_tracks: List[Dict[str, Any]], track_name: str,
     wanted_artist = _normalized(artist_name)
     wanted_album = _normalized(album_name)
 
+    from core.wishlist.soundcloud_exact import is_exact_id
+
     candidates: List[Dict[str, Any]] = []
     for wishlist_track in wishlist_tracks:
+        # an exact soundcloud upload is only ever cleared by its own id
+        if is_exact_id(_candidate_track_id(wishlist_track)):
+            continue
         if _normalized(wishlist_track.get("name")) != wanted_name:
             continue
         wl_names = artist_names(wishlist_track.get("artists"))
@@ -407,6 +477,13 @@ def check_and_remove_track_from_wishlist_by_metadata(
     download's. ``matched_path`` is recorded for the audit trail when known.
     """
     try:
+        # an exact soundcloud upload completes through its own id
+        # (check_and_remove_from_wishlist), never on a library match's proof
+        from core.wishlist.soundcloud_exact import is_exact_track
+        if is_exact_track(track_data):
+            logger.info("[Analysis] Not removing exact upload %s by metadata", track_data.get("id"))
+            return False
+
         wishlist_service = wishlist_service or get_wishlist_service()
         track_name = track_data.get("name", "")
         track_id = track_data.get("id", "")
@@ -457,6 +534,26 @@ def check_and_remove_track_from_wishlist_by_metadata(
         return False
 
 
+def remove_acquired_exact_row(track_data: Dict[str, Any], profile_id: int,
+                              database=None, *, matched_path: Any = None) -> bool:
+    """Remove an exact soundcloud upload's wishlist row by its own id, once the
+    analysis found its own download in this profile's library
+    (soundcloud_exact.upload_acquired). The by-metadata remover refuses exact
+    rows and the owned sweeps skip them; the id is the proof here."""
+    from core.wishlist.soundcloud_exact import exact_id_of
+    track_id = exact_id_of(track_data)
+    if not track_id:
+        return False
+    database = database or get_database()
+    audit = {"reason": REASON_ALREADY_OWNED, "final_path": str(matched_path or "")}
+    removed = database.update_wishlist_retry(track_id, True, profile_id=profile_id,
+                                             profile_ids=[profile_id], audit=audit)
+    if removed:
+        _log_removal("removed", track_id=track_id, reason=REASON_ALREADY_OWNED,
+                     path=matched_path, via="exact-id")
+    return bool(removed)
+
+
 def remove_published_wishlist_entries(pending: List[Dict[str, Any]],
                                       published_paths: Dict[str, str],
                                       *, batch_id: str = "",
@@ -502,5 +599,6 @@ def remove_published_wishlist_entries(pending: List[Dict[str, Any]],
 __all__ = [
     "check_and_remove_from_wishlist",
     "check_and_remove_track_from_wishlist_by_metadata",
+    "remove_acquired_exact_row",
     "remove_published_wishlist_entries",
 ]

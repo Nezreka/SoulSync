@@ -36,6 +36,11 @@ def is_manual_context(context: Any) -> bool:
         return False
     if info.get('_manual_metadata'):
         return True
+    # an exact soundcloud upload: tagged from what the user typed, cover from
+    # its own artwork. a lookup by name would retag it as the original.
+    from core.wishlist.soundcloud_exact import is_exact_id
+    if is_exact_id(info.get('id')):
+        return True
     # a track no catalogue has (#2097): the playlist's own artist and title
     # are the tags. a lookup by name would file a bootleg as the original.
     stub_id = str(info.get('id') or '')

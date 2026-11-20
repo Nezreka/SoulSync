@@ -62,6 +62,7 @@ def create_api_blueprint():
     from .system import register_routes as reg_system
     from .search import register_routes as reg_search
     from .wishlist import register_routes as reg_wishlist
+    from .soundcloud_exact import register_routes as reg_soundcloud_exact
     from .watchlist import register_routes as reg_watchlist
     from .downloads import register_routes as reg_downloads
     from .playlists import register_routes as reg_playlists
@@ -85,6 +86,7 @@ def create_api_blueprint():
     reg_system(bp)
     reg_search(bp)
     reg_wishlist(bp)
+    reg_soundcloud_exact(bp)
     reg_watchlist(bp)
     reg_downloads(bp)
     reg_playlists(bp)

@@ -331,3 +331,20 @@ def test_discography_row_cleared_when_requested_album_owned(install):
     )
     cleanup_wishlist_after_db_update(_FakeConfig())
     assert ws.mark_calls == [('sp-1', True)]
+
+
+def test_exact_soundcloud_upload_is_never_owned_by_its_names(install):
+    """the twin of the owned sweep's guard (core/wishlist/processing._cleanup_one):
+    an exact upload isn't owned because the library has a song by that name."""
+    from core.downloads.cleanup import cleanup_wishlist_after_db_update
+    owned = (_owned('Money', 'Pink Floyd', 'DSOTM'), 0.95)
+    tracks = [
+        {'spotify_track_id': 'soundcloud_exact_123', 'name': 'Money', 'artists': ['Pink Floyd'],
+         'album': {'name': 'DSOTM'}},
+        {'spotify_track_id': 'sp-1', 'name': 'Money', 'artists': ['Pink Floyd'],
+         'album': {'name': 'DSOTM'}},
+    ]
+    ws, _, _ = install(profiles=[{'id': 1}], tracks_per_profile={1: tracks},
+                       hits={('Money', 'Pink Floyd'): owned})
+    cleanup_wishlist_after_db_update(_FakeConfig())
+    assert ws.mark_calls == [('sp-1', True)]

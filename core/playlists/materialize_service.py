@@ -270,24 +270,35 @@ def _rebuild_one_from_db(db, config_manager, playlist: dict, *, profile_id: int 
     # comes from the row, not from whoever happens to be calling
     from core.library_scope import library_scope_for_profile, reset_library_scope, set_library_scope
     library_root = library_root_for_profile(import_owner_id(playlist))
+    from core.wishlist.soundcloud_exact import is_exact_id, upload_file
     resolved: List[dict] = []
     seen = set()
-    _scope_token = set_library_scope(library_scope_for_profile(_profile(playlist, profile_id)))
+    owner_profile = _profile(playlist, profile_id)
+    _scope_token = set_library_scope(library_scope_for_profile(owner_profile))
     try:
         for t in (db.get_mirrored_playlist_tracks(playlist["id"]) or []):
             title = (t.get("track_name") or "").strip()
             artist = (t.get("artist_name") or "").strip()
             if not title:
                 continue
-            try:
-                db_track, conf = db.check_track_exists(title, artist, confidence_threshold=0.7)
-            except Exception:
-                continue
-            if db_track is None or conf < 0.7:
-                continue
+            source_id = str(t.get("source_track_id") or "")
+            if is_exact_id(source_id):
+                # an exact soundcloud upload is only ever its own download,
+                # never a library track with the same names
+                db_track = None
+                file_path = upload_file(db, {"id": source_id}, owner_profile)
+                if not file_path:
+                    continue
+            else:
+                try:
+                    db_track, conf = db.check_track_exists(title, artist, confidence_threshold=0.7)
+                except Exception:
+                    continue
+                if db_track is None or conf < 0.7:
+                    continue
+                file_path = getattr(db_track, "file_path", None)
             real = resolve_library_file_path(
-                getattr(db_track, "file_path", None), config_manager=config_manager,
-                library_root=library_root)
+                file_path, config_manager=config_manager, library_root=library_root)
             if real and real not in seen:
                 seen.add(real)
                 resolved.append({
