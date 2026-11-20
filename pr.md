@@ -55,6 +55,12 @@ last.fm api keys need a paid pro subscription from 1 december 2026, so everythin
 - **move a track into an album (#2193).** a missing track's ⋯ menu has "move a track here": search what you own, pick one, see where the file goes and which tags change, and it moves into that slot with its plays, history, playlist and wishlist links. nothing is copied, and an album it leaves empty goes the way removing it does.
 - **reassign moves, it doesn't copy (#2193).** reassign to another artist staged a copy and only removed the original on some paths, so the album came out twice. it always replaces now, and the old row folds into the new one instead of staying behind as a missing, still wanted track.
 
+## shelf life
+
+- **shelf life, a keep-or-cut score for the video library (thanks @PapaBearDoes, #2211).** a new library maintenance job, off by default, scores every owned movie and show from 0 to 100 for how much it has earned its space: watching (every account on plex or jellyfin counts), how replaceable it is (streaming services in your region), cultural value (ratings weighted by trakt votes, awards, a lift for a devoted following), size per hour, and requests. anything under the line (30) becomes a finding with the reasons in plain words; keep takes it off, approving runs delete title to the recycle bin, and free up space picks the lowest scores for a gb target behind one typed phrase. playing, in progress, recently watched, padlocked, kept, requested-but-unwatched, airing and new titles are never scored down.
+- on top of the pr, it now checks every gate again the moment you delete (a title watched or kept since its finding is left out, with the reason), treats all copies of a title as one (a 1080p copy watched last week protects its unwatched 4k twin, and the size shown is what really goes), holds a show playing on a second server, and refuses the generic bulk fix.
+- after the update, already enriched titles are queued once for their trakt list and streaming counts, so on a big library the enrichment page looks busy for a few hours.
+
 ## big libraries
 
 - **library search stopped piling up (thanks xcrittpm, #2205).** the cache behind library search had no lock, so whenever a scan deleted rows every request rebuilt it at once. on a 47 gb library that was 22 threads stuck on the same read. one thread rebuilds now while the others answer from the last snapshot, a delete only folds the new rows, and the periodic refresh runs on its own thread: 20 requests on a 600k track test library went from about 264 seconds to about 3.

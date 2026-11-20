@@ -81,6 +81,7 @@ export const RELEASES: Release[] = [
       'Pick the release yourself for approved requests: per media type, or per request when you approve, with a Pick a release queue on the Requests page (thanks SeadogsBooty, #2199).',
       'Audiobook search, file details, matching and deleting follow permissions, and a member’s audiobook library is just the shelf (thanks SeadogsBooty, #2198, #2201).',
       'Removing many artists from the Watchlist takes about a second, not a minute (thanks SeadogsBooty, #2200).',
+      'Shelf Life: a Library Maintenance job that scores every movie and show for how much it has earned its space and offers the lowest for Delete Title, with Free up space and Keep. Off by default (thanks PapaBearDoes, #2211).',
       'Big libraries: library search stops piling threads onto one rebuild, and the database tidies itself: old caches prune, the write-ahead log is trimmed, and Settings, System shows the biggest tables (thanks xcrittpm, #2205).',
       'Cover art findings use the cover you pick, any of the four, and only appear when something is really missing (thanks Vidariondr, #2202).',
       'Re-identify keeps the song you picked (thanks wolf39us, #2206), Import matches a pasted release link or MusicBrainz id with a default search source (thanks Ericsson, #2203), and an album title links to its page (thanks Ktzenjammer, #2204).',
@@ -109,6 +110,11 @@ export const RELEASES: Release[] = [
       {
         title: 'Audiobooks follow permissions',
         desc: 'Search now, Find releases and grabbing need the right to get books, file details, matching, deleting and scans are the admin’s, and a member’s audiobook library shows cover, title, author, narrator, series and length (thanks SeadogsBooty, #2198, #2201).',
+      },
+      {
+        title: 'Shelf Life',
+        desc: 'A Library Maintenance job, off by default, scores every movie and show from 0 to 100 on watching, how replaceable it is, ratings and following, size and requests. Anything under the line becomes a finding: Keep it, or delete it through Delete Title to the recycle bin. Free up space picks the lowest scores for a GB target. Playing, in progress, recently watched, padlocked, requested and airing titles are never offered, and all of it is checked again the moment you delete (thanks PapaBearDoes, #2211).',
+        page: 'video-tools',
       },
       {
         title: 'Big libraries stay quick',
