@@ -26,7 +26,12 @@ declare global {
       message: string,
       type?: string,
       durationOrContext?: number | string | null,
-      opts?: { history?: boolean; journal?: boolean },
+      opts?: {
+        history?: boolean;
+        journal?: boolean;
+        /** a button on the toast (and on its line in the notification panel) */
+        action?: { label: string; run?: () => void; page?: string };
+      },
     ) => void;
     /** index.html: the signed-in profile the server rendered in, null when it knows none (#2156) */
     SOULSYNC_BOOT_PROFILE?: SoulSyncNavProfile | null;

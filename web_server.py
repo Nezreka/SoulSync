@@ -580,6 +580,13 @@ def _inject_static_cache_bust():
     return {'static_v': _get_static_v(), **_initial_appearance_context()}
 
 
+def _server_build_id():
+    """what this server serves: the version (with its commit) and the static
+    files' bust value. a tab whose page says something else is running old
+    JS, and the socket connect tells it so (webui/src/shell/build-check.ts)"""
+    return f"{SOULSYNC_VERSION}/{_get_static_v()}"
+
+
 @app.context_processor
 def _inject_soulsync_version():
     """Expose the version string to every Jinja template so the sidebar
@@ -587,7 +594,8 @@ def _inject_soulsync_version():
     edited at every release. The base version is the source of truth at
     `_SOULSYNC_BASE_VERSION`; bumping that single constant updates the UI
     everywhere it's rendered."""
-    return {'soulsync_version': SOULSYNC_VERSION, 'soulsync_base_version': _SOULSYNC_BASE_VERSION}
+    return {'soulsync_version': SOULSYNC_VERSION, 'soulsync_base_version': _SOULSYNC_BASE_VERSION,
+            'soulsync_build': _server_build_id()}
 
 
 @app.context_processor
@@ -23906,6 +23914,12 @@ def handle_connect():
     # revocation sweep can drop it if that session is later revoked.
     _ws_store_snapshot()
     _ws_join_role_room()
+    # which build this server runs: an open tab from before an update offers
+    # a reload (never forces one)
+    try:
+        emit('server:build', {'build': _server_build_id()})
+    except Exception as e:  # noqa: BLE001 - the check is a nicety
+        logger.debug(f"server build emit failed: {e}")
     logger.info("WebSocket client connected")
 
 @socketio.on('disconnect')

@@ -100,6 +100,7 @@ Each problem has a plain title, a line on why, a fix button when there is one, a
 | Workers | enrichment workers that are paused or stopped | Resume |
 | Downloads | downloads waiting in review | Open review |
 | Automations | an automation whose last run failed | open it |
+| Security | the auth proxy header is set but no trusted proxy address is, so the header is being ignored | open Security settings |
 | Setup | unfinished setup items | each item's own action |
 | Updates | an update is out, and how important it is | release notes |
 
@@ -212,6 +213,10 @@ Secrets show as \`***\` so you can see the redaction happened. API keys, tokens,
 2. Verify your download source credentials in Settings (Soulseek via slskd, Tidal, Qobuz, etc.).
 3. Check \`app.log\` and \`post_processing.log\` for the specific failure.
 4. Try the [track redownload wizard](#lib-redownload) to search a different source.
+
+## "SoulSync was updated. Reload this tab"
+
+A tab you left open while SoulSync was updated is still running the old version. It notices when it reconnects and offers a **Reload** button instead of breaking on the next page you open. Nothing reloads by itself, so finish what you're doing first. The same note shows if a page fails to load because its file went away with the update.
 
 ## Import folder not detected
 
