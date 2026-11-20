@@ -355,3 +355,39 @@ def test_an_abandoned_write_transaction_is_rolled_back_at_once(db):
         other.rollback()
     finally:
         other.close()
+
+
+def _with_block_then_cursor_local(db):
+    # the shape of most MusicDatabase readers: the cursor is a local next to
+    # conn, and a function drops its locals in order, conn first
+    with db._get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT 1")
+        return cursor.fetchone()[0]
+
+
+def _with_block_then_execute_local(db):
+    with db._get_connection() as conn:
+        cur = conn.execute("SELECT 1")
+        return cur.fetchone()[0]
+
+
+@pytest.mark.parametrize("call", [_with_block_then_cursor_local, _with_block_then_execute_local])
+def test_a_cursor_local_dropped_after_conn_still_returns_the_connection(db, call):
+    """#2221: conn was finalized while its cursor was still alive, so the
+    connection was never reused and every call opened (and set up) a new one:
+    hundreds of ms each on a big database, thousands of times per sweep."""
+    call(db)
+    before = dict(cp.stats)
+    for _ in range(10):
+        assert call(db) == 1
+    assert cp.stats["misses"] - before["misses"] == 0
+    assert cp.stats["kept_by_cursor"] - before["kept_by_cursor"] == 0
+    assert cp.stats["hits"] - before["hits"] == 10
+
+
+def test_executescript_cursor_is_tracked_like_the_others(db):
+    c = db._get_connection()
+    cur = c.executescript("CREATE TABLE IF NOT EXISTS es(x); INSERT INTO es VALUES (1);")
+    assert getattr(cur, "_pool_proxy", None) is c
+    c.close()

@@ -12,7 +12,7 @@ import time
 from contextlib import closing
 from functools import lru_cache
 from datetime import datetime, timezone
-from typing import List, Optional, Dict, Any, Tuple, Union
+from typing import List, Optional, Dict, Any, Tuple, Union, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from utils.logging_config import get_logger
@@ -2240,6 +2240,7 @@ class MusicDatabase:
 
             self._ensure_wishlist_quality_columns(cursor)
             self._add_release_group_columns(cursor)
+            self._ensure_wishlist_owned_checked_column(cursor)
 
             # One-time: materialize the current global quality/AcoustID/downsample
             # settings into the `quality_profiles` default row and backfill
@@ -2683,6 +2684,22 @@ class MusicDatabase:
                         logger.debug("wishlist column removal %s: %s", dead_col, e)
         except Exception as e:
             logger.error("Error adding wishlist quality-profile column: %s", e)
+
+    def _ensure_wishlist_owned_checked_column(self, cursor):
+        """When the already-in-the-library check last looked at a wishlist row
+        (#2221). the auto-wishlist cycle used to check every row, every cycle,
+        before building a batch: hours on a 13k wishlist against a 1M track
+        library. with this it checks new and stale rows first, within a time
+        budget, and the batch checks the rest of its own tracks before it
+        downloads them. NULL means never checked."""
+        try:
+            cursor.execute("PRAGMA table_info(wishlist_tracks)")
+            cols = {c[1] for c in cursor.fetchall()}
+            if cols and 'owned_checked_at' not in cols:
+                cursor.execute("ALTER TABLE wishlist_tracks ADD COLUMN owned_checked_at TIMESTAMP DEFAULT NULL")
+                logger.info("Added owned_checked_at column to wishlist_tracks table")
+        except Exception as e:
+            logger.error("Error adding wishlist owned_checked_at column: %s", e)
 
     def _add_release_group_columns(self, cursor):
         """MusicBrainz release-GROUP ids for wishlist rows (upstream 9c06ffd5b).
@@ -18319,6 +18336,53 @@ class MusicDatabase:
                 return cursor.rowcount
         except Exception as e:
             logger.error(f"Error resetting wishlist retry backoff: {e}")
+            return 0
+
+    def get_wishlist_owned_checked(self, *, profile_id: Optional[int] = None,
+                                   row_ids: Optional[Iterable[Any]] = None) -> Dict[int, Optional[str]]:
+        """``{wishlist row id: owned_checked_at}`` (#2221): when the
+        already-in-the-library check last looked at each row, None for never.
+        one profile's rows, or the given row ids. empty on any error, which
+        reads as "never checked", so a failure checks more, never less."""
+        try:
+            with self._get_connection() as conn:
+                if row_ids is not None:
+                    ids = sorted({int(i) for i in row_ids if str(i).strip().lstrip('-').isdigit()})
+                    out: Dict[int, Optional[str]] = {}
+                    for start in range(0, len(ids), 500):
+                        chunk = ids[start:start + 500]
+                        rows = conn.execute(
+                            f"SELECT id, owned_checked_at FROM wishlist_tracks "
+                            f"WHERE id IN ({','.join('?' * len(chunk))})", chunk).fetchall()
+                        out.update({int(r[0]): r[1] for r in rows})
+                    return out
+                rows = conn.execute(
+                    "SELECT id, owned_checked_at FROM wishlist_tracks WHERE profile_id = ?",
+                    (profile_id if profile_id is not None else 1,)).fetchall()
+                return {int(r[0]): r[1] for r in rows}
+        except Exception as e:
+            logger.debug("owned_checked_at read failed: %s", e)
+            return {}
+
+    def stamp_wishlist_owned_checked(self, row_ids: Iterable[Any]) -> int:
+        """Record that the already-in-the-library check just looked at these
+        wishlist rows and kept them (#2221). one write for the lot."""
+        ids = sorted({int(i) for i in (row_ids or []) if str(i).strip().lstrip('-').isdigit()})
+        if not ids:
+            return 0
+        try:
+            changed = 0
+            with self._get_connection() as conn:
+                for start in range(0, len(ids), 500):
+                    chunk = ids[start:start + 500]
+                    cur = conn.execute(
+                        f"UPDATE wishlist_tracks SET owned_checked_at = CURRENT_TIMESTAMP "
+                        f"WHERE id IN ({','.join('?' * len(chunk))})", chunk)
+                    changed += cur.rowcount
+                conn.commit()
+            return changed
+        except Exception as e:
+            logger.warning("owned_checked_at stamp failed: %s", e)
             return 0
 
     def get_wishlist_count(self, profile_id: int = 1, category: Optional[str] = None,

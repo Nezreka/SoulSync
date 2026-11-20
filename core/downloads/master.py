@@ -748,6 +748,7 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
         # non-English artists whose native-script metadata AcoustID can't
         # reconcile with the romanized request).
         batch_skip_acoustid = False
+        batch_check_owned = False
         with tasks_lock:
             if batch_id in download_batches:
                 force_download_all = download_batches[batch_id].get('force_download_all', False)
@@ -765,6 +766,7 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
                     download_batches[batch_id].get('source_playlist_ref') or ''
                 ).strip()
                 batch_skip_acoustid = bool(download_batches[batch_id].get('skip_acoustid', False))
+                batch_check_owned = bool(download_batches[batch_id].get('check_owned_before_download', False))
         # a Library v2 wishlist -- the admin's, or one filling a profile's own
         # library (#1199) -- carries upgrade intents; asked once, off the lock
         from core.library_scope import library_scope_for_profile
@@ -873,6 +875,22 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
                 db, batch_album_context, batch_artist_context,
                 alias_cache=alias_cache)
 
+        # #2221: an auto wishlist batch is force_download_all, and the
+        # cycle-start library sweep stops at its time budget. the tracks it
+        # did not reach are checked here, each just before it would download,
+        # so a budgeted sweep never sends an owned track to download.
+        owned_checker = None
+        if force_download_all and batch_check_owned and playlist_id == 'wishlist':
+            try:
+                from core.wishlist.processing import BatchOwnedChecker
+                owned_checker = BatchOwnedChecker(
+                    db, int(batch_profile_id or 1), tracks_json,
+                    deps.config_manager.get_active_media_server(),
+                    logger=logger, log_prefix="[Wishlist Batch]")
+            except Exception as _oc_err:  # noqa: BLE001 - the batch runs as it always did
+                logger.warning(f"[Wishlist Batch] Library check unavailable for {batch_id}: {_oc_err}")
+                owned_checker = None
+
         for i, track_data in enumerate(tracks_json):
             # Use original table index if provided (for partial track selection),
             # otherwise fall back to enumeration index
@@ -929,6 +947,28 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
                     })
                     continue
 
+            if owned_checker is not None:
+                try:
+                    _is_owned, _owned_track = owned_checker.check(track_data)
+                except Exception as _oc_err:  # noqa: BLE001 - one track's check must not stop the batch
+                    logger.debug(f"[Wishlist Batch] Library check failed for '{track_name}': {_oc_err}")
+                    _is_owned, _owned_track = False, None
+                if _is_owned:
+                    analysis_results.append({
+                        'track_index': track_index,
+                        'track': track_data,
+                        'found': True,
+                        'confidence': 1.0,
+                        'match_reason': 'already_owned',
+                        'matched_file_path': getattr(_owned_track, 'file_path', None),
+                        'matched_track_id': getattr(_owned_track, 'id', None),
+                    })
+                    with tasks_lock:
+                        if batch_id in download_batches:
+                            download_batches[batch_id]['analysis_processed'] = i + 1
+                            download_batches[batch_id]['analysis_results'] = analysis_results.copy()
+                    continue
+
             # Skip database check if force download is enabled
             if force_download_all:
                 logger.warning(f"[Force Download] Skipping database check for '{track_name}' - treating as missing")
@@ -963,6 +1003,9 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
                     download_batches[batch_id]['analysis_processed'] = i + 1
                     # Store incremental results for live updates
                     download_batches[batch_id]['analysis_results'] = analysis_results.copy()
+
+        if owned_checker is not None:
+            owned_checker.finish()
 
         missing_tracks = [res for res in analysis_results if not res['found']]
 

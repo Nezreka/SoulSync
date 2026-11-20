@@ -1856,3 +1856,62 @@ def test_a_stored_library_v2_upgrade_row_still_mints_its_intent(monkeypatch):
              'artists': [{'name': 'Any Artist'}], 'source_info': {}}
     intent = _wishlist_upgrade_task(monkeypatch, db, track)
     assert intent is not None and intent.track_id == 42
+
+
+class _CheckerSpy:
+    """stands in for core.wishlist.processing.BatchOwnedChecker (#2221)"""
+    made = []
+
+    def __init__(self, db, profile_id, tracks, active_server, **kwargs):
+        self.checked = []
+        self.finished = False
+        _CheckerSpy.made.append(self)
+
+    def check(self, track):
+        self.checked.append(track.get('name'))
+        if track.get('name') == 'Owned':
+            return True, SimpleNamespace(file_path='/music/owned.flac', id=7)
+        return False, None
+
+    def finish(self):
+        self.finished = True
+
+
+def test_an_auto_wishlist_batch_checks_its_tracks_before_downloading(monkeypatch):
+    """#2221: the cycle-start sweep stops at its time budget, so an auto
+    wishlist batch (force_download_all) checks its own tracks against the
+    library and does not download the owned one."""
+    db = _FakeDB()
+    monkeypatch.setattr('database.music_database.MusicDatabase', lambda: db)
+    monkeypatch.setattr('core.wishlist.processing.BatchOwnedChecker', _CheckerSpy)
+    _CheckerSpy.made.clear()
+    _seed_batch('B2221', force_download_all=True, check_owned_before_download=True, profile_id=1)
+    deps = _build_deps()
+    tracks = [{'id': 'o', 'name': 'Owned', 'artists': ['A']},
+              {'id': 'm', 'name': 'Missing', 'artists': ['A']}]
+
+    mw.run_full_missing_tracks_process('B2221', 'wishlist', tracks, deps)
+
+    checker = _CheckerSpy.made[0]
+    assert checker.checked == ['Owned', 'Missing'] and checker.finished
+    results = {r['track']['name']: r for r in download_batches['B2221']['analysis_results']}
+    assert results['Owned']['found'] is True
+    assert results['Owned']['match_reason'] == 'already_owned'
+    assert results['Owned']['matched_file_path'] == '/music/owned.flac'
+    assert results['Missing']['found'] is False
+    assert len(download_batches['B2221']['queue']) == 1
+
+
+def test_a_batch_without_the_flag_keeps_its_force_semantics(monkeypatch):
+    """a manual or playlist force batch never asked for the check: no checker"""
+    db = _FakeDB()
+    monkeypatch.setattr('database.music_database.MusicDatabase', lambda: db)
+    monkeypatch.setattr('core.wishlist.processing.BatchOwnedChecker', _CheckerSpy)
+    _CheckerSpy.made.clear()
+    _seed_batch('B2221b', force_download_all=True, profile_id=1)
+    tracks = [{'id': 'o', 'name': 'Owned', 'artists': ['A']}]
+
+    mw.run_full_missing_tracks_process('B2221b', 'wishlist', tracks, _build_deps())
+
+    assert _CheckerSpy.made == []
+    assert len(download_batches['B2221b']['queue']) == 1

@@ -401,6 +401,86 @@ def get_match_for_track(
     return None
 
 
+_ASCII_LOWER = str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")
+
+
+def _nocase(value: Any) -> str:
+    # what sqlite's COLLATE NOCASE compares: A-Z folded, nothing else
+    return str(value or "").translate(_ASCII_LOWER)
+
+
+class ManualMatchIndex:
+    """One profile's manual matches, read once, answering the three readers
+    ``get_match_for_track`` calls with the same results the SQL gives.
+
+    #2221: the wishlist sweep asked up to ~45 queries per row (every id x every
+    source label, then by id, then by title/artist) to learn that a row has no
+    manual match, which is the answer for nearly every row. one read of the
+    table for the whole sweep instead. pass it as ``db`` to
+    ``get_match_for_track``; ``match_is_live`` still needs the real database.
+    """
+
+    def __init__(self, rows: list[dict], profile_id: int):
+        self.profile_id = profile_id
+        self._exact: dict[tuple, dict] = {}
+        self._by_id: dict[str, list[dict]] = {}
+        self._by_meta: dict[tuple, list[dict]] = {}
+        # newest first, the order every reader breaks ties with
+        ordered = sorted(rows, key=lambda r: str(r.get("updated_at") or ""), reverse=True)
+        for row in ordered:
+            server = row.get("server_source") or ""
+            sid = str(row.get("source_track_id") or "")
+            self._exact.setdefault((row.get("source"), sid, server), row)
+            if sid:
+                self._by_id.setdefault(sid, []).append(row)
+            title, artist = row.get("source_title"), row.get("source_artist")
+            if title and artist:
+                self._by_meta.setdefault((_nocase(title), _nocase(artist)), []).append(row)
+
+    @classmethod
+    def load(cls, db, profile_id: int) -> Optional["ManualMatchIndex"]:
+        """None when the table cannot be read in one go: the caller then asks
+        the database row by row, as before."""
+        lister = getattr(db, "list_manual_library_matches", None)
+        if lister is None:
+            return None
+        try:
+            rows = lister(profile_id, -1)   # sqlite: LIMIT -1 is no limit
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("manual match index read failed: %s", exc)
+            return None
+        if not isinstance(rows, list):
+            return None
+        return cls([dict(r) for r in rows if isinstance(r, dict)], profile_id)
+
+    @staticmethod
+    def _pick(rows: list[dict], server_source: str) -> Optional[dict]:
+        wanted = server_source or ""
+        live = [r for r in rows if (r.get("server_source") or "") in (wanted, "")]
+        # same server first, then newest (rows are already newest first)
+        for row in live:
+            if (row.get("server_source") or "") == wanted:
+                return dict(row)
+        return dict(live[0]) if live else None
+
+    def get_manual_library_match(self, profile_id, source, source_track_id, server_source=""):
+        if profile_id != self.profile_id:
+            return None
+        row = self._exact.get((source, str(source_track_id or ""), server_source or ""))
+        return dict(row) if row else None
+
+    def find_manual_library_match_by_source_track_id(self, profile_id, source_track_id, server_source=""):
+        if profile_id != self.profile_id or not source_track_id:
+            return None
+        return self._pick(self._by_id.get(str(source_track_id), []), server_source)
+
+    def find_manual_library_match_by_metadata(self, profile_id, source_title, source_artist, server_source=""):
+        if profile_id != self.profile_id or not source_title or not source_artist:
+            return None
+        return self._pick(self._by_meta.get((_nocase(source_title), _nocase(source_artist)), []),
+                          server_source)
+
+
 def delete_match(db, match_id: int, profile_id: int) -> bool:
     """Delete match by PK id, scoped to profile."""
     # #1289: capture the source_track_id BEFORE deleting so the mirrored
