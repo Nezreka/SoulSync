@@ -90,6 +90,7 @@ export const EPISODE_EG = {
   seasonraw: '1',
   episode: '01',
   episodetitle: 'A Beating Heart',
+  absolute: '001',
   year: '2025',
   quality: 'WEBDL-1080p',
   resolution: '1080p',

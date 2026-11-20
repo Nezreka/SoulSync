@@ -301,7 +301,7 @@ export function VideoNaming() {
           placeholder={EPISODE_PH}
           example={eg.episode}
           help="Filled in with Dexter: Resurrection, its first episode, as the example."
-          more="Variables: $series, $season (01), $seasonraw (1), $episode (01), $episodetitle, $year, $quality, $resolution, $source, $codec, $audiolangs, $sublangs, $tmdbid, $imdbid, $tvdbid (the show's ids)."
+          more="Variables: $series, $season (01), $seasonraw (1), $episode (01), $episodetitle, $year, $quality, $resolution, $source, $codec, $audiolangs, $sublangs, $tmdbid, $imdbid, $tvdbid (the show's ids), $absolute (001, the episode's number counted across every season, for anime)."
         />
         <Row
           label="Colons in titles"

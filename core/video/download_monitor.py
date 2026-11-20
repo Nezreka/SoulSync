@@ -424,7 +424,8 @@ def _make_organizer(db):
                            expected_duration_sec=_expected_duration_sec(db, dl),
                            ids=ids,
                            series_name=_series_name(db, dl, settings, ids, owned_dir),
-                           locked=title_locked(db, dl))
+                           locked=title_locked(db, dl),
+                           absolute_of=absolute_lookup(db, ids, settings))
         if _pre_persist_dest and plan["action"] in ("import", "upgrade") and plan.get("dest"):
             try:
                 db.update_video_download(dl["id"], dest_path=plan["dest"]["path"])
@@ -712,6 +713,18 @@ def template_ids(db, dl, settings, *, tmdb_lookup=None):
     except Exception:   # noqa: BLE001 - an id is a naming nicety, never a blocker
         logger.debug("template id resolution failed", exc_info=True)
     return out
+
+
+def absolute_lookup(db, ids, settings):
+    """``absolute_of`` for plan_import: an episode's absolute number from the
+    show's episode list, by the show's TMDB id in ``ids`` (template_ids).
+    None when the episode template has no $absolute, or there's no id to
+    look it up by, so a library that doesn't name by it asks nothing."""
+    tmpl = str((settings or {}).get("episode_template") or "")
+    tmdb_id = (ids or {}).get("tmdb_id")
+    if not tmdb_id or ("$absolute" not in tmpl and "${absolute}" not in tmpl):
+        return None
+    return lambda season, episode: db.episode_absolute_number(tmdb_id, season, episode)
 
 
 def write_sidecars(db, dl, dest_path, settings, fs):

@@ -18,11 +18,14 @@ Template tokens
             $audiolangs $sublangs $tmdbid $imdbid
   Episodes: $series $season $seasonraw $episode $episodetitle $year $quality
             $resolution $source $codec $audiolangs $sublangs $tmdbid $imdbid
-            $tvdbid $airdate
+            $tvdbid $airdate $absolute
             (an episode's ids are its SHOW's)
   ($season/$episode are zero-padded to 2; $seasonraw is the bare number; a
   multi-episode file renders its span through $episode — 'S01E01-E02'; $airdate
-  is the episode's YYYY-MM-DD air date, for daily-show naming. $audiolangs /
+  is the episode's YYYY-MM-DD air date, for daily-show naming. $absolute is
+  the episode's place in the show's aired order, specials left out, padded to
+  3 ('033', a span '033-034'), for anime naming beside S$seasonE$episode; empty
+  while the show's episode list doesn't hold the episode. $audiolangs /
   $sublangs are the file's audio / embedded subtitle languages as 'JA+EN',
   empty when it has no language tags -- write '[$audiolangs]' and the
   brackets go with it. An id that isn't
@@ -263,6 +266,15 @@ def _pad2(v: Any) -> str:
         return _str(v)
 
 
+def _pad3(v: Any) -> str:
+    """an absolute episode number at 3 digits, wider past 999; '' for none"""
+    try:
+        n = int(v)
+    except (TypeError, ValueError):
+        return ""
+    return "%03d" % n if n > 0 else ""
+
+
 def _plausible_year(v: Any) -> bool:
     try:
         return 1870 <= int(v) <= 2999
@@ -321,6 +333,18 @@ def missing_ids(scope: Any, fields: dict, settings: Any) -> list:
             if re.search(r"\$\{?" + t + r"(?![A-Za-z0-9_])", tpl) and not _str(fields.get(t)).strip()]
 
 
+def absolute_unknown(scope: Any, fields: dict, settings: Any) -> bool:
+    """the episode template names $absolute and this episode's absolute
+    number isn't known (its show's episode list doesn't hold it yet): mass
+    rename and the naming check leave the file alone instead of renaming it
+    without a number it will have once the list fills in."""
+    if scope != "episode":
+        return False
+    s = normalize(settings)
+    tpl = str(s.get("episode_template") or "")
+    return ("$absolute" in tpl or "${absolute}" in tpl) and fields.get("absolute") is None
+
+
 def _movie_values(f: dict) -> dict:
     title = f.get("title") or "Unknown"
     return {
@@ -347,6 +371,10 @@ def _episode_values(f: dict) -> dict:
     episode = _pad2(f.get("episode"))
     if f.get("episode_end"):
         episode = "%s-E%s" % (episode, _pad2(f.get("episode_end")))
+    # $absolute: Sonarr's {absolute:000}, and its span the same way ('033-034')
+    absolute = _pad3(f.get("absolute"))
+    if absolute and f.get("absolute_end"):
+        absolute = "%s-%s" % (absolute, _pad3(f.get("absolute_end")))
     return {
         "series": series,
         "season": _pad2(f.get("season")),
@@ -355,6 +383,7 @@ def _episode_values(f: dict) -> dict:
         "episodetitle": _str(f.get("episode_title")),
         # daily-show naming (P8): $airdate = the episode's YYYY-MM-DD air date
         "airdate": str(f.get("air_date") or "")[:10],
+        "absolute": absolute,
         "year": _str(f.get("year")) if _plausible_year(f.get("year")) else "",
         "quality": _str(f.get("quality")),
         "resolution": _str(f.get("resolution")),

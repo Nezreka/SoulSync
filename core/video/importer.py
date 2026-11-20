@@ -281,6 +281,17 @@ def _fallback_ids(dl: dict, override: dict, force: bool) -> dict:
     return {"tmdb_id": mid} if (mid and src == "tmdb") else {}
 
 
+def _absolute(absolute_of, scope, season, episode):
+    """an episode's absolute number for $absolute, or None. never raises: a
+    number is a naming nicety, never a reason to fail an import."""
+    if scope != "episode" or absolute_of is None or season is None or episode is None:
+        return None
+    try:
+        return absolute_of(season, episode)
+    except Exception:   # noqa: BLE001 - see above
+        return None
+
+
 def _naming_year(ctx_year, ids):
     """The year the template names a title by: the grab's own, else the one
     resolved for the title (``ids['year']``). Empty values count as missing."""
@@ -294,7 +305,8 @@ def plan_import(dl: dict, src_path: str, *, list_dir: Callable, probe: dict | No
                 override: dict | None = None, library_dir: str | None = None,
                 expected_duration_sec: float | None = None,
                 ids: dict | None = None, series_name: str | None = None,
-                locked: bool = False) -> dict:
+                locked: bool = False,
+                absolute_of: Callable[[Any, Any], Any] | None = None) -> dict:
     """Decide what to do with a finished download. Returns one of:
 
       {"action": "import",  "dest": {...}, "quality_label": str}
@@ -312,7 +324,9 @@ def plan_import(dl: dict, src_path: str, *, list_dir: Callable, probe: dict | No
     tokens (an episode's are its show's); None = only a TMDB id we're sure of.
     ``series_name`` is what $series renders as for a show the library does not
     own yet, when its plain title's folder is already another show's
-    (core.video.show_folder, #2052); None = the title.
+    (core.video.show_folder, #2052); None = the title. ``absolute_of(season,
+    episode)`` gives an episode's absolute number for $absolute (None when
+    it isn't known); None = $absolute renders empty.
 
     MANUAL placement: ``force=True`` with an ``override`` ({scope, title, year, season,
     episode, episode_title, target_dir, media_id}) trusts the user's chosen identity —
@@ -466,6 +480,8 @@ def plan_import(dl: dict, src_path: str, *, list_dir: Callable, probe: dict | No
             "season": ctx.get("season"),
             "episode": ep, "episode_end": ep_end, "episode_title": ctx.get("episode_title"),
             "air_date": ctx.get("air_date"),
+            "absolute": _absolute(absolute_of, scope, ctx.get("season"), ep),
+            "absolute_end": _absolute(absolute_of, scope, ctx.get("season"), ep_end),
             "quality": quality, "resolution": parsed.get("resolution"),
             "source": parsed.get("source"), "codec": parsed.get("codec"),
             "audio_languages": (probe or {}).get("audio_languages"),
@@ -571,7 +587,8 @@ def run_import(dl: dict, src_path: str, *, fs: Any, prober: Callable | None = No
                recycle: Callable | None = None,
                expected_duration_sec: float | None = None,
                plan: dict | None = None, ids: dict | None = None,
-               series_name: str | None = None, locked: bool = False) -> dict:
+               series_name: str | None = None, locked: bool = False,
+               absolute_of: Callable[[Any, Any], Any] | None = None) -> dict:
     """Execute the import and return a DB patch dict for the download row.
 
     ``fs`` is an injected facade with: ``list_dir(dir)->iterable[name]``,
@@ -605,7 +622,8 @@ def run_import(dl: dict, src_path: str, *, fs: Any, prober: Callable | None = No
         plan = plan_import(dl, src_path, list_dir=fs.list_dir, probe=probe_info,
                            settings=settings, force=force, override=override,
                            library_dir=library_dir, expected_duration_sec=expected_duration_sec,
-                           ids=ids, series_name=series_name, locked=locked)
+                           ids=ids, series_name=series_name, locked=locked,
+                           absolute_of=absolute_of)
     if plan["action"] == "reject":
         # Leave the file where it is; remember WHERE so manual import can find it.
         # _bad_release is transient (stripped by update_video_download): it tells

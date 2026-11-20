@@ -70,7 +70,7 @@ def _episode_fields(row: Dict[str, Any]) -> Dict[str, Any]:
             "subtitle_languages": row.get("subtitle_languages"),
             # an episode's ids are its show's, the same as at import
             "tmdbid": row.get("show_tmdb_id"), "imdbid": row.get("show_imdb_id"),
-            "tvdbid": row.get("show_tvdb_id")}
+            "tvdbid": row.get("show_tvdb_id"), "absolute": row.get("absolute_number")}
 
 
 def _base_dir_of(path: str, base_dirs: List[str]) -> Optional[str]:
@@ -114,9 +114,9 @@ def _inverse_reroot(new_local: str, old_local: str, stored: str) -> str:
 def preview(progress: Optional[Callable[[int, int], None]] = None) -> Dict[str, Any]:
     """Every file whose on-disk name differs from the current template.
     {status, entries: [{key, kind, title, current, proposed, reason?}],
-    unresolved: int, held: int} (held: would be renamed, but an id their
-    name uses isn't stored, so they're left alone; the naming check lists
-    those titles).
+    unresolved: int, held: int} (held: would be renamed, but an id or an
+    anime episode's absolute number their name uses isn't stored, so they're
+    left alone; the naming check lists the titles missing an id).
 
     ``progress(done, total)`` is called as files are scanned so a background
     caller can report a live count. Pure read — never mutates."""
@@ -137,7 +137,7 @@ def preview(progress: Optional[Callable[[int, int], None]] = None) -> Dict[str, 
     name_bases = [d for d in base_dirs if d not in mapped]
     entries: List[Dict[str, Any]] = []
     unresolved = 0
-    held = 0   # files left alone because an id their name uses isn't stored
+    held = 0   # files left alone because an id or absolute number their name uses isn't stored
 
     # Per-directory resolution cache. Files in one server folder (a show's
     # episodes, movies sharing a root) re-root to the same local folder, so once
@@ -186,6 +186,9 @@ def preview(progress: Optional[Callable[[int, int], None]] = None) -> Dict[str, 
             if organization.missing_ids(kind, fields, settings):
                 held += 1
                 return   # no stored id: renaming now would strip the '{imdb-...}' it may carry
+            if organization.absolute_unknown(kind, fields, settings):
+                held += 1
+                return   # no absolute number yet: renaming now would leave it out
             entries.append({"key": key, "kind": kind, "title": title,
                             "current": local, "proposed": proposed})
 
