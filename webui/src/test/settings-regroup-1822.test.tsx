@@ -46,9 +46,15 @@ describe('where sections live', () => {
       resolve(process.cwd(), 'src/features/settings/tabs/library-video-prefs.tsx'),
       'utf8',
     );
-    expect(section).toContain('data-stg="appearance" data-video-only=""');
+    expect(section).toContain('<div data-ui="" data-video-only=""');
     expect(section).toContain('title="Video pages"');
-    expect(html).toContain('<div data-stg-react="appearance" data-stg-part="video-pages"');
+    // settings-bic phase 5: Appearance is one page, the card in it
+    const page = readFileSync(
+      resolve(process.cwd(), 'src/features/settings/tabs/appearance-tab.tsx'),
+      'utf8',
+    );
+    expect(page).toContain('<VideoPagesCard />');
+    expect(html).toContain('<div data-stg-react="appearance" data-stg-part="page"');
   });
 
   it('NotificationsSection: Notifications is on connections (React, SETTINGS_PORT.md video pass V3c)', () => {

@@ -7163,6 +7163,202 @@
       "asked": "guard-probe",
       "shows": ["m3u_export.rewrite_to"]
     },
+    "#accent-preset": {
+      "sel": "#accent-preset",
+      "kind": "radiogroup",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "#8b5cf6",
+      "to": "#1db954",
+      "saves": {
+        "settings": {
+          "ui_appearance": {
+            "accent_preset": "#1db954"
+          }
+        }
+      },
+      "asked": "#1db954",
+      "shows": ["ui_appearance.accent_preset"]
+    },
+    "#accent-custom-color": {
+      "sel": "#accent-custom-color",
+      "kind": "color",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "#1db954",
+      "to": "#123456",
+      "saves": {
+        "settings": {
+          "ui_appearance": {
+            "accent_color": "#123456"
+          }
+        }
+      },
+      "asked": "#123456",
+      "shows": ["ui_appearance.accent_color"]
+    },
+    "#sidebar-visualizer-type": {
+      "sel": "#sidebar-visualizer-type",
+      "kind": "select",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "wave",
+      "to": "bars",
+      "saves": {
+        "settings": {
+          "ui_appearance": {
+            "sidebar_visualizer": "bars"
+          }
+        }
+      },
+      "asked": "bars",
+      "shows": ["ui_appearance.sidebar_visualizer"]
+    },
+    "#particles-enabled": {
+      "sel": "#particles-enabled",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": false,
+      "to": true,
+      "saves": {
+        "settings": {
+          "ui_appearance": {
+            "particles_enabled": true
+          }
+        }
+      },
+      "asked": true,
+      "shows": ["ui_appearance.particles_enabled"]
+    },
+    "#worker-orbs-enabled": {
+      "sel": "#worker-orbs-enabled",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": true,
+      "to": false,
+      "saves": {
+        "settings": {
+          "ui_appearance": {
+            "worker_orbs_enabled": false
+          }
+        }
+      },
+      "asked": false,
+      "shows": ["ui_appearance.worker_orbs_enabled"]
+    },
+    "#reduce-effects-enabled": {
+      "sel": "#reduce-effects-enabled",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": false,
+      "to": true,
+      "saves": {
+        "settings": {
+          "ui_appearance": {
+            "reduce_effects": true
+          }
+        }
+      },
+      "asked": true,
+      "shows": ["ui_appearance.reduce_effects"]
+    },
+    "#max-performance-enabled": {
+      "sel": "#max-performance-enabled",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": false,
+      "to": true,
+      "saves": {
+        "settings": {
+          "ui_appearance": {
+            "max_performance": true
+          }
+        }
+      },
+      "asked": true,
+      "shows": ["ui_appearance.max_performance"]
+    },
+    "#sw-location": {
+      "sel": "#sw-location",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "97501",
+      "to": "97502",
+      "saves": {
+        "requests": [
+          {
+            "method": "PUT",
+            "url": "/api/weather/location",
+            "body": "{\"location\":\"97502\"}"
+          }
+        ]
+      },
+      "asked": "97502",
+      "click": ["Save"],
+      "showsEndpoint": "/api/weather"
+    },
+    "#sw-enabled": {
+      "sel": "#sw-enabled",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": true,
+      "to": false,
+      "saves": {
+        "requests": [
+          {
+            "method": "PUT",
+            "url": "/api/weather/display",
+            "body": "{\"enabled\":false}"
+          }
+        ]
+      },
+      "asked": false,
+      "showsEndpoint": "/api/weather"
+    },
+    "#sw-holidays": {
+      "sel": "#sw-holidays",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": true,
+      "to": false,
+      "saves": {
+        "requests": [
+          {
+            "method": "PUT",
+            "url": "/api/weather/holidays",
+            "body": "{\"enabled\":false}"
+          }
+        ]
+      },
+      "asked": false,
+      "showsEndpoint": "/api/weather"
+    },
+    "#sw-celsius": {
+      "sel": "#sw-celsius",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": false,
+      "to": true,
+      "saves": {
+        "requests": [
+          {
+            "method": "PUT",
+            "url": "/api/weather/units",
+            "body": "{\"use_celsius\":true}"
+          }
+        ]
+      },
+      "asked": true,
+      "showsEndpoint": "/api/weather"
+    },
     "#spotify-client-id": {
       "sel": "#spotify-client-id",
       "kind": "text",
@@ -8367,125 +8563,6 @@
       "asked": "http://guard.example:4321",
       "shows": ["security.cors_origins"]
     },
-    "#accent-preset": {
-      "sel": "#accent-preset",
-      "kind": "select",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "#8b5cf6",
-      "to": "#1db954",
-      "saves": {
-        "settings": {
-          "ui_appearance": {
-            "accent_preset": "#1db954"
-          }
-        }
-      },
-      "asked": "#1db954",
-      "shows": ["ui_appearance.accent_preset"]
-    },
-    "#accent-custom-color": {
-      "sel": "#accent-custom-color",
-      "kind": "color",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "#1db954",
-      "to": "#123456",
-      "saves": {
-        "settings": {
-          "ui_appearance": {
-            "accent_color": "#123456"
-          }
-        }
-      },
-      "asked": "#123456",
-      "shows": ["ui_appearance.accent_color"]
-    },
-    "#sidebar-visualizer-type": {
-      "sel": "#sidebar-visualizer-type",
-      "kind": "select",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "wave",
-      "to": "bars",
-      "saves": {
-        "settings": {
-          "ui_appearance": {
-            "sidebar_visualizer": "bars"
-          }
-        }
-      },
-      "asked": "bars",
-      "shows": ["ui_appearance.sidebar_visualizer"]
-    },
-    "#particles-enabled": {
-      "sel": "#particles-enabled",
-      "kind": "checkbox",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": false,
-      "to": true,
-      "saves": {
-        "settings": {
-          "ui_appearance": {
-            "particles_enabled": true
-          }
-        }
-      },
-      "asked": true,
-      "shows": ["ui_appearance.particles_enabled"]
-    },
-    "#worker-orbs-enabled": {
-      "sel": "#worker-orbs-enabled",
-      "kind": "checkbox",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": true,
-      "to": false,
-      "saves": {
-        "settings": {
-          "ui_appearance": {
-            "worker_orbs_enabled": false
-          }
-        }
-      },
-      "asked": false,
-      "shows": ["ui_appearance.worker_orbs_enabled"]
-    },
-    "#reduce-effects-enabled": {
-      "sel": "#reduce-effects-enabled",
-      "kind": "checkbox",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": false,
-      "to": true,
-      "saves": {
-        "settings": {
-          "ui_appearance": {
-            "reduce_effects": true
-          }
-        }
-      },
-      "asked": true,
-      "shows": ["ui_appearance.reduce_effects"]
-    },
-    "#max-performance-enabled": {
-      "sel": "#max-performance-enabled",
-      "kind": "checkbox",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": false,
-      "to": true,
-      "saves": {
-        "settings": {
-          "ui_appearance": {
-            "max_performance": true
-          }
-        }
-      },
-      "asked": true,
-      "shows": ["ui_appearance.max_performance"]
-    },
     "#max-workers": {
       "sel": "#max-workers",
       "kind": "select",
@@ -8712,83 +8789,6 @@
         }
       },
       "asked": false
-    },
-    "#sw-location": {
-      "sel": "#sw-location",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "97501",
-      "to": "97502",
-      "saves": {
-        "requests": [
-          {
-            "method": "PUT",
-            "url": "/api/weather/location",
-            "body": "{\"location\":\"97502\"}"
-          }
-        ]
-      },
-      "asked": "97502",
-      "click": ["Save"],
-      "showsEndpoint": "/api/weather"
-    },
-    "#sw-enabled": {
-      "sel": "#sw-enabled",
-      "kind": "checkbox",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": true,
-      "to": false,
-      "saves": {
-        "requests": [
-          {
-            "method": "PUT",
-            "url": "/api/weather/display",
-            "body": "{\"enabled\":false}"
-          }
-        ]
-      },
-      "asked": false,
-      "showsEndpoint": "/api/weather"
-    },
-    "#sw-holidays": {
-      "sel": "#sw-holidays",
-      "kind": "checkbox",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": true,
-      "to": false,
-      "saves": {
-        "requests": [
-          {
-            "method": "PUT",
-            "url": "/api/weather/holidays",
-            "body": "{\"enabled\":false}"
-          }
-        ]
-      },
-      "asked": false,
-      "showsEndpoint": "/api/weather"
-    },
-    "#sw-celsius": {
-      "sel": "#sw-celsius",
-      "kind": "checkbox",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": false,
-      "to": true,
-      "saves": {
-        "requests": [
-          {
-            "method": "PUT",
-            "url": "/api/weather/units",
-            "body": "{\"use_celsius\":true}"
-          }
-        ]
-      },
-      "asked": true,
-      "showsEndpoint": "/api/weather"
     },
     "#sw-preview-preset": {
       "sel": "#sw-preview-preset",
@@ -10052,6 +10052,46 @@
       "asked": true,
       "showsEndpoint": "/api/video/downloads/config/import-lists"
     },
+    "#video-billboard-autoplay": {
+      "sel": "#video-billboard-autoplay",
+      "kind": "checkbox",
+      "only": "video",
+      "sides": ["music", "video"],
+      "scenario": "video",
+      "from": true,
+      "to": false,
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/video/enrichment/config",
+            "body": "{\"billboard_autoplay\":false,\"watch_region\":\"JP\"}"
+          }
+        ]
+      },
+      "asked": false,
+      "showsEndpoint": "/api/video/enrichment/config"
+    },
+    "#video-watch-region": {
+      "sel": "#video-watch-region",
+      "kind": "select",
+      "only": "video",
+      "sides": ["music", "video"],
+      "scenario": "video",
+      "from": "JP",
+      "to": "US",
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/video/enrichment/config",
+            "body": "{\"billboard_autoplay\":true,\"watch_region\":\"US\"}"
+          }
+        ]
+      },
+      "asked": "US",
+      "showsEndpoint": "/api/video/enrichment/config"
+    },
     "#tmdb-api-key": {
       "sel": "#tmdb-api-key",
       "kind": "text",
@@ -10350,46 +10390,6 @@
         ]
       },
       "asked": false,
-      "showsEndpoint": "/api/video/enrichment/config"
-    },
-    "#video-billboard-autoplay": {
-      "sel": "#video-billboard-autoplay",
-      "kind": "checkbox",
-      "only": "video",
-      "sides": ["music", "video"],
-      "scenario": "video",
-      "from": true,
-      "to": false,
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/video/enrichment/config",
-            "body": "{\"billboard_autoplay\":false,\"watch_region\":\"JP\"}"
-          }
-        ]
-      },
-      "asked": false,
-      "showsEndpoint": "/api/video/enrichment/config"
-    },
-    "#video-watch-region": {
-      "sel": "#video-watch-region",
-      "kind": "select",
-      "only": "video",
-      "sides": ["music", "video"],
-      "scenario": "video",
-      "from": "JP",
-      "to": "US",
-      "saves": {
-        "requests": [
-          {
-            "method": "POST",
-            "url": "/api/video/enrichment/config",
-            "body": "{\"billboard_autoplay\":true,\"watch_region\":\"US\"}"
-          }
-        ]
-      },
-      "asked": "US",
       "showsEndpoint": "/api/video/enrichment/config"
     },
     "input[data-vseed-idx=\"3\"][data-vseed-field=\"ratio\"]": {
@@ -13369,6 +13369,89 @@
       "sides": ["music", "video"],
       "scenario": "music"
     },
+    "#settings-open-feature-picker": {
+      "id": "settings-open-feature-picker",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#stg-view-appearance-all \"More about this setting\"": {
+      "label": "More about this setting",
+      "anchor": "stg-view-appearance-all",
+      "count": 9,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#accent-preset \"Spotify Green\"": {
+      "label": "Spotify Green",
+      "anchor": "accent-preset",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#accent-preset \"Ocean Blue\"": {
+      "label": "Ocean Blue",
+      "anchor": "accent-preset",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#accent-preset \"Purple\"": {
+      "label": "Purple",
+      "anchor": "accent-preset",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#accent-preset \"Boulder Purple\"": {
+      "label": "Boulder Purple",
+      "anchor": "accent-preset",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#accent-preset \"Sunset Orange\"": {
+      "label": "Sunset Orange",
+      "anchor": "accent-preset",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#accent-preset \"Rose\"": {
+      "label": "Rose",
+      "anchor": "accent-preset",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#accent-preset \"Teal\"": {
+      "label": "Teal",
+      "anchor": "accent-preset",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#accent-preset \"Custom\"": {
+      "label": "Custom",
+      "anchor": "accent-preset",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#stg-view-appearance-all \"Save\"": {
+      "label": "Save",
+      "anchor": "stg-view-appearance-all",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#stg-view-appearance-all \"Clear\"": {
+      "label": "Clear",
+      "anchor": "stg-view-appearance-all",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
     "\"More about this setting\"": {
       "label": "More about this setting",
       "anchor": "",
@@ -13509,12 +13592,6 @@
       "sides": ["music", "video"],
       "scenario": "music"
     },
-    "#settings-open-feature-picker": {
-      "id": "settings-open-feature-picker",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
     "#db-optimize-btn": {
       "id": "db-optimize-btn",
       "count": 1,
@@ -13576,20 +13653,6 @@
     "#imgcache-clear-btn": {
       "id": "imgcache-clear-btn",
       "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "\"Save\"": {
-      "label": "Save",
-      "anchor": "",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "\"Clear\"": {
-      "label": "Clear",
-      "anchor": "",
-      "count": 2,
       "sides": ["music", "video"],
       "scenario": "music"
     },
@@ -13742,6 +13805,13 @@
     },
     "\"Error\"": {
       "label": "Error",
+      "anchor": "",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "\"Clear\"": {
+      "label": "Clear",
       "anchor": "",
       "count": 1,
       "sides": ["music", "video"],
@@ -14628,10 +14698,10 @@
       "discover-adventurousness-val": "not a form control: a <b> on the page",
       "settings-open-feature-picker": "a button, held in `buttons`",
       "custom-color-group": "not a form control: a <div> on the page",
-      "sw-status": "not a form control: a <span> on the page",
+      "sw-status": "not a form control: a <div> on the page",
       "lvl-debug": "a css class of the log level buttons (.log-filter-btn.lvl-debug), not an id",
       "data-level": "an attribute of a <button>, which is not a form control",
-      "accent-preview-swatch": "not a form control: a <div> on the page",
+      "accent-preview-swatch": "not a form control: a <span> on the page",
       "save-settings": "a button, held in `buttons`",
       "stg-search-results": "not a form control: a <div> on the page",
       "stg-active-title": "not a form control: a <h2> on the page",

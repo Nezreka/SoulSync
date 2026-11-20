@@ -251,7 +251,7 @@ export function Recommendations({ store, pool }: { store: SettingsStore; pool: P
       </Card>
 
       {/* the discovery pool is the music side's own */}
-      <div data-music-only="" className={s.cards}>
+      <div data-music-only="" className={s.stack}>
         <Card title="Discovery pool" hint="Where new releases for Discover come from">
           <Row
             field

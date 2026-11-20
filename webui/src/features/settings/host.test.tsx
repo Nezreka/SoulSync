@@ -32,7 +32,7 @@ describe('the settings host', () => {
     host.hydrate({ ui_appearance: { sidebar_visualizer: 'wave' } });
     render(<SettingsPage store={store} tabs={{ appearance: Appearance }} />);
     await act(async () => host.show('appearance'));
-    const slot = document.querySelector('[data-stg-react="appearance"][data-stg-part="ui"]')!;
+    const slot = document.querySelector('[data-stg-react="appearance"][data-stg-part="page"]')!;
     expect(slot.textContent).toBe('visualizer wave');
     const first = slot.firstElementChild;
     await act(async () => host.show('appearance'));
@@ -56,10 +56,10 @@ describe('the settings host', () => {
     // opening Logs leaves Appearance on the page too: the settings search reads
     // every tab, and the shell is about to hide what is not the open tab
     await act(async () => host.show('logs'));
-    expect(text()).toEqual(['ui 0', 'video-pages 0', 'weather 0', 'whole 1 open']);
+    expect(text()).toEqual(['page 0', 'whole 1 open']);
     // opening a tab again tells it so (the weather tile reloads on arrival)
     await act(async () => host.show('appearance'));
-    expect(text()).toEqual(['ui 1 open', 'video-pages 1 open', 'weather 1 open', 'whole 1']);
+    expect(text()).toEqual(['page 1 open', 'whole 1']);
   });
 
   it('a new visit mounts its tabs closed, not as the last visit left them', async () => {

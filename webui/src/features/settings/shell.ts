@@ -405,7 +405,7 @@ export const TAB_TITLES: Record<string, { title: string; sub: string }> = {
   },
   appearance: {
     title: 'Appearance',
-    sub: 'Accent colour, effects and the sidebar weather',
+    sub: 'Accent color, effects and the sidebar weather',
   },
   advanced: {
     title: 'System',

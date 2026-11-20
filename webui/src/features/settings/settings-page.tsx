@@ -407,6 +407,7 @@ export function SettingsPage({
         {slot('quality', 'page')}
         {slot('library', 'page')}
         {slot('discovery', 'page')}
+        {slot('appearance', 'page')}
 
         {/* the tabs not rebuilt yet: the blocks they always rendered, in the
             order the old columns gave them */}
@@ -421,11 +422,8 @@ export function SettingsPage({
             {slot('advanced', 'security')}
           </div>
           <div className="settings-third-column">
-            {slot('appearance', 'ui')}
-            {slot('appearance', 'video-pages')}
             {slot('advanced', 'database')}
             {slot('advanced', 'tools')}
-            {slot('appearance', 'weather')}
             {slot('advanced', 'developer')}
             {slot('advanced', 'experimental')}
           </div>

@@ -8,6 +8,7 @@
  */
 
 import { Card, Row, Select, Switch } from '../ui';
+import s from '../ui/settings.module.css';
 import { DOWNLOADS_URL, useVideoDownloads, videoDownloads } from './video-downloads';
 import { useVideoPrefs, videoPrefs } from './video-prefs';
 
@@ -54,7 +55,7 @@ async function saveSpecials(on: boolean) {
 export function VideoPagesCard() {
   const { autoplay, region } = useVideoPrefs();
   return (
-    <div data-ui="" data-stg="appearance" data-video-only="">
+    <div data-ui="" data-video-only="" className={s.stack}>
       <Card title="Video pages" hint="What the movie and show pages show. Saves at once.">
         <Row
           label="Autoplay trailers in the billboard"

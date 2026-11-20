@@ -3057,25 +3057,6 @@ body.max-performance .nav-button.active:hover {
     transition: all var(--dur-slow) ease;
 }
 
-#custom-color-group input[type="color"] {
-    width: 100%;
-    height: 40px;
-    border: 1px solid var(--white-a10);
-    border-radius: var(--radius-md);
-    background: var(--white-a05);
-    cursor: pointer;
-    padding: 2px;
-}
-
-#custom-color-group input[type="color"]::-webkit-color-swatch-wrapper {
-    padding: 2px;
-}
-
-#custom-color-group input[type="color"]::-webkit-color-swatch {
-    border: none;
-    border-radius: var(--radius-sm);
-}
-
 /* Help Text */
 .help-text {
     color: var(--white-a50);

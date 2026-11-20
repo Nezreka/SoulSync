@@ -622,7 +622,7 @@ The MCP server and the Lidarr and Seerr compatible APIs are off until you turn t
 ## Mobile, PWA & theming
 
 - Fully responsive, and installable as a **PWA** (cover art cached for speed, never stale pages).
-- Accent colours (presets or any custom colour), a sidebar visualizer, background particles, worker orbs, and **Reduce Visual Effects** / **Max Performance** switches for low-power devices.
+- Accent colours (presets or any custom colour), a sidebar visualizer, background particles, worker orbs, and **Reduce visual effects** / **Max performance** switches for low-power devices (kept per device).
 
 ## Companion browser extension
 

@@ -127,7 +127,7 @@ export const TABS: TabDef[] = [
     label: 'Appearance',
     icon: 'palette',
     title: 'Appearance',
-    sub: 'Accent colour, effects and the sidebar weather',
+    sub: 'Accent color, effects and the sidebar weather',
     views: ONE,
   },
   {

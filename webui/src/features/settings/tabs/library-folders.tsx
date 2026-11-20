@@ -522,7 +522,7 @@ export function M3uExportOptions({ store }: { store: SettingsStore }) {
   const settings = useSettings(store);
   const m3u = settings.m3u_export || {};
   return (
-    <div data-ui="" data-m3u-paths="">
+    <div data-ui="" data-m3u-paths="" className={s.stack}>
       <Card title="M3U paths" hint="How track paths are written in saved M3U files">
         <Row
           label="Write M3U entries relative to the playlist file"

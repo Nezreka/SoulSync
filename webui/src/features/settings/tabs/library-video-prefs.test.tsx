@@ -8,6 +8,7 @@
 import { act, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { createSettingsStore } from '../settings-store';
 import { AppearanceTab } from './appearance-tab';
 import { MonitorSpecialsRow, VideoPagesCard } from './library-video-prefs';
 import { videoDownloads } from './video-downloads';
@@ -65,11 +66,11 @@ const posts = (url: string) =>
 
 describe('Video pages and Monitor Specials', () => {
   it('Appearance draws the video pages card, on the video side only', () => {
-    const store = { subscribe: () => () => {}, getState: () => ({}) } as never;
-    render(<AppearanceTab store={store} part="video-pages" opened={0} active={false} />);
-    const card = el('video-watch-region').closest('[data-stg]')!;
-    expect(card.getAttribute('data-stg')).toBe('appearance');
-    expect(card.hasAttribute('data-video-only')).toBe(true);
+    const store = createSettingsStore({ post: () => Promise.resolve({ success: true }) });
+    render(<AppearanceTab store={store} part="page" opened={0} active={false} />);
+    // settings-bic phase 5: a card of the Appearance page
+    expect(el('video-watch-region').closest('[data-stg-new="appearance"]')).not.toBeNull();
+    const card = el('video-watch-region').closest('[data-video-only]')!;
     expect(card.textContent).toContain('Video pages');
   });
 
