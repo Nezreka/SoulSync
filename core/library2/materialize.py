@@ -124,6 +124,9 @@ def materialize_wishlist_row(conn, row_id: int, *, profile_id: int = 1) -> Optio
         info = {}
     if info.get('source') == 'library_v2':
         return None  # A projection mirror must retain inherited intent, without pinning a track rule.
+    from core.wishlist.soundcloud_exact import is_exact_id
+    if is_exact_id(row['spotify_track_id']):
+        return None  # an exact soundcloud upload is no catalogue track; the queue row is its only record
     data = json.loads(row['spotify_data'] or '{}')
     if not isinstance(data, dict):
         raise ValueError('Wishlist track payload is not an object')

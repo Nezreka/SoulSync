@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 from typing import Any, Callable, Dict, List, Optional
 
 from core.library2.release_dates import album_release_date
@@ -344,6 +345,36 @@ def _flag(value: Any) -> Optional[bool]:
         return None
 
 
+def _exact_upload_id(conn, track_id: Any, file_path: Any) -> Optional[str]:
+    """the exact soundcloud id whose import the file being planned is, from
+    the manual match the import recorded (wishlist/resolution._record_exact_
+    match), any profile's: a reorganize moves the library's file, not a
+    profile's. only when ``file_path`` is the match's own file (the path it
+    stored, or, moved since, a file named with the upload's id): the catalogue
+    can file the upload as a second file of the original's track, and the
+    original's file is no upload. a media-server ('server') match holds the
+    server's id, not this one."""
+    from core.library2.track_files import path_identity
+    from core.wishlist.soundcloud_exact import carries_upload_id, is_exact_id, sc_id_of
+    try:
+        rows = conn.execute(
+            "SELECT source_track_id, library_file_path FROM manual_library_track_matches "
+            "WHERE library_track_id = ? AND source_track_id LIKE 'soundcloud^_exact^_%' ESCAPE '^' "
+            "AND COALESCE(library_track_id_kind, 'lib2') <> 'server' ORDER BY id",
+            (track_id,)).fetchall()
+    except sqlite3.OperationalError:   # a catalogue without the matches table
+        return None
+    planned = path_identity(file_path)
+    for row in rows:
+        if not is_exact_id(row[0]):
+            continue
+        exact_id = str(row[0]).split('::', 1)[0]
+        if ((row[1] and path_identity(row[1]) == planned)
+                or carries_upload_id(file_path, sc_id_of(exact_id))):
+            return exact_id
+    return None
+
+
 def _as_provider_album(album: Dict[str, Any], track_count: int,
                        total_discs: int) -> Dict[str, Any]:
     """Shape the catalogue album like the provider payload the context builder
@@ -596,6 +627,13 @@ def plan_album_reorganize(
             record_type=filing["type"],
             type_source=filing["source"],
         )
+        exact_id = _exact_upload_id(conn, track["id"], db_path)
+        if exact_id:
+            # an exact soundcloud upload's file: its import filed it with its
+            # id on the name (imports/paths.exact_upload_path) beside the
+            # original's file; the plan keeps it there, as the import's track
+            # info did
+            context["track_info"]["id"] = exact_id
         if wants_quality and resolved and os.path.isfile(resolved):
             # #2195: $quality comes from the file itself, as a download fills
             # it. the planner never set it, so a rename dropped it from the

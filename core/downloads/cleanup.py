@@ -106,6 +106,11 @@ def cleanup_wishlist_after_db_update(config_manager) -> None:
             if not track_name or not artists or not spotify_track_id:
                 continue
 
+            # an exact soundcloud upload isn't owned because a song by that name is
+            from core.wishlist.soundcloud_exact import is_exact_id
+            if is_exact_id(spotify_track_id):
+                continue
+
             # Check each artist. A match whose library row still points into
             # atomic-publish staging is not ownership (#1289) — the file is
             # quarantined and may never publish, so the request has to stand.

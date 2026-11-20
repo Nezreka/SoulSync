@@ -9505,7 +9505,11 @@ class MusicDatabase:
                                               source_title: str,
                                               source_artist: str,
                                               server_source: str = '') -> Optional[Dict[str, Any]]:
-        """Return a manual match by title/artist when provider IDs differ."""
+        """Return a manual match by title/artist when provider IDs differ.
+
+        An exact SoundCloud upload's match (core/wishlist/soundcloud_exact) is
+        found by its id only, so it is left out here: as the newest row for a
+        title/artist it would otherwise shadow a catalogue track's own match."""
         if not source_title or not source_artist:
             return None
         try:
@@ -9517,6 +9521,7 @@ class MusicDatabase:
                       AND source_title = ? COLLATE NOCASE
                       AND source_artist = ? COLLATE NOCASE
                       AND (server_source = ? OR server_source = '')
+                      AND COALESCE(source_track_id, '') NOT GLOB 'soundcloud_exact_[0-9]*'
                     ORDER BY
                         CASE WHEN server_source = ? THEN 0 ELSE 1 END,
                         updated_at DESC
@@ -16958,9 +16963,14 @@ class MusicDatabase:
                     """, (profile_id,))
 
                     existing_tracks = cursor.fetchall()
+                    from core.wishlist.soundcloud_exact import is_exact_id
 
                     # Check if any existing track has matching name AND artist
                     for existing in existing_tracks:
+                        # an exact soundcloud upload is only a duplicate of itself
+                        # (its own key, found below), whatever the names say
+                        if is_exact_id(existing['spotify_track_id']) or is_exact_id(track_id):
+                            continue
                         try:
                             existing_data = json.loads(existing['spotify_data'])
                             existing_name = existing_data.get('name', '')
@@ -18623,6 +18633,7 @@ class MusicDatabase:
         Returns the number of duplicates removed."""
         try:
             from core.settings import config_manager
+            from core.wishlist.soundcloud_exact import is_exact_id
             allow_duplicates = config_manager.get('wishlist.allow_duplicate_tracks', True)
 
             with self._get_connection() as conn:
@@ -18653,7 +18664,10 @@ class MusicDatabase:
                         else:
                             artist_name = 'unknown'
 
-                        if allow_duplicates:
+                        if is_exact_id(track['spotify_track_id']):
+                            # an exact soundcloud upload is only a duplicate of itself
+                            key = ('exact', track['spotify_track_id'])
+                        elif allow_duplicates:
                             # Include album in the key so same song from different albums survives
                             album = track_data.get('album', {})
                             album_name = (album.get('name', '') if isinstance(album, dict) else str(album)).lower()

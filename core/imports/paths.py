@@ -1504,8 +1504,31 @@ def _with_library_names(template_context: dict, context, artist_context) -> None
         template_context[key] = swap_credit(template_context.get(key), names)
 
 
+def exact_upload_path(context, path: str) -> str:
+    """``path`` with ``[<soundcloud id>]`` on its file stem when the import is
+    an exact soundcloud upload (core/wishlist/soundcloud_exact), else as it is.
+    the upload is tagged with the original's names, so every template would
+    otherwise file it on the original's own path. idempotent."""
+    from core.wishlist.soundcloud_exact import exact_id_of, sc_id_of
+    info = get_import_track_info(normalize_import_context(context)) if isinstance(context, dict) else None
+    sc_id = sc_id_of(exact_id_of(info))
+    if not sc_id or not path:
+        return path
+    stem, ext = os.path.splitext(path)
+    suffix = f" [{sc_id}]"
+    return path if stem.endswith(suffix) else f"{stem}{suffix}{ext}"
+
+
 def build_final_path_for_track(context, artist_context, album_info, file_ext, create_dirs: bool = True):
     """Shared path builder used by both post-processing and verification.
+    An exact soundcloud upload's path carries its id (``exact_upload_path``)."""
+    final_path, is_replace = _template_final_path(context, artist_context, album_info, file_ext,
+                                                  create_dirs=create_dirs)
+    return exact_upload_path(context, final_path), is_replace
+
+
+def _template_final_path(context, artist_context, album_info, file_ext, create_dirs: bool = True):
+    """The template destination behind ``build_final_path_for_track``.
 
     ``create_dirs`` gates the directory-creation side effects. The download
     import flow leaves it True (it's about to write the file there). The

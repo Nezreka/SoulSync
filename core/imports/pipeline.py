@@ -2441,6 +2441,28 @@ def _post_process_matched_download(context_key, context, file_path, runtime, met
                 _confirm_existing_file_bookkeeping(
                     context, artist_context, album_info)
                 return
+            # an exact soundcloud upload's path carries its own id
+            # (paths.exact_upload_path); a file already there is never proof
+            # this upload is in, nor one to replace. fail, keep the download.
+            from core.wishlist.soundcloud_exact import is_exact_track
+            if is_exact_track(get_import_track_info(context)):
+                logger.error("[Protection] Exact SoundCloud upload would land on an existing file, "
+                             "not importing: %s", final_path)
+                task_id = context.get('task_id')
+                batch_id = context.get('batch_id')
+                if task_id:
+                    with tasks_lock:
+                        if task_id in download_tasks:
+                            download_tasks[task_id]['status'] = 'failed'
+                            download_tasks[task_id]['error_message'] = (
+                                "Exact SoundCloud upload: a different file is already at "
+                                "its library path")
+                    if batch_id:
+                        _notify_download_completed(batch_id, task_id, success=False)
+                context['_context_failure_msg'] = 'exact upload destination already exists'
+                with matched_context_lock:
+                    matched_downloads_context.pop(context_key, None)
+                return
             # THE backstop for sella's incident: an upgrade/replace must NEVER
             # swap a good library file for a materially shorter one. Before any
             # branch atomically publishes over final_path, compare decoded lengths.

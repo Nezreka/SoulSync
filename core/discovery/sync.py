@@ -350,6 +350,13 @@ async def _database_only_find_track(spotify_track, candidate_pool=None):
         except Exception as e:
             logger.debug("provider-id match failed: %s", e)
 
+        # an exact soundcloud upload is that one file: only the id-keyed legs
+        # above may answer, never a library track with the same names
+        from core.wishlist.soundcloud_exact import is_exact_id
+        if any(is_exact_id(_id) for _id in match_lookup_ids(spotify_track)):
+            logger.info(f"No id match for exact upload '{original_title}'; skipping the name matcher")
+            return None, 0.0
+
         # Try each artist, then the playlist's own names for them (#2222)
         for artist in (sync_artist_names(spotify_track) or spotify_track.artists):
             if isinstance(artist, str):

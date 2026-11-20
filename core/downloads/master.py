@@ -32,6 +32,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from difflib import SequenceMatcher
+from types import SimpleNamespace
 from typing import Any, Callable, Optional
 
 from core.downloads import album_bundle_dispatch as _album_bundle_dispatch
@@ -405,12 +406,18 @@ def preview_ownership(db, tracks_json, *, album_context, artist_context, is_albu
     # the wishlist of the library being worked in (E-12), not the caller's own
     from core.library_scope import acting_profile_id
     wished = _wishlist_keys(db, acting_profile_id(profile_id), alias_cache)
+    from core.wishlist.soundcloud_exact import is_exact_track, upload_acquired
     results = []
     for i, track_data in enumerate(tracks_json or []):
         if not isinstance(track_data, dict):
             continue
         track_index = track_data.get('_original_index', i)
-        if live_manual_match(db, profile_id, track_data, source):
+        if is_exact_track(track_data):
+            # same as the analysis: an exact soundcloud upload is owned by its
+            # own download, never by a library track with the same names
+            found = upload_acquired(db, track_data, profile_id)
+            confidence = 1.0 if found else 0.0
+        elif live_manual_match(db, profile_id, track_data, source):
             found, confidence = True, 1.0
         else:
             found, confidence, _ = match_track_in_library(
@@ -904,8 +911,12 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
 
             # Manual library matches are authoritative unless the user explicitly
             # requested a force re-download from the normal download modal.
+            # an exact soundcloud upload's own matches are read below, by the
+            # stricter rule of its own module (a live file, not a track row)
+            from core.wishlist.soundcloud_exact import is_exact_track, upload_acquired, upload_file
+            _exact = is_exact_track(track_data)
             _manual_match = (
-                None if ignore_manual_matches
+                None if ignore_manual_matches or _exact
                 else live_manual_match(db, batch_profile_id, track_data, batch_source)
             )
             if _manual_match:
@@ -925,7 +936,9 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
                 })
                 continue
 
-            if effective_playlist_folder_mode and not force_download_all:
+            # an exact soundcloud upload isn't on disk because an "Artist - Title"
+            # file with its names is
+            if effective_playlist_folder_mode and not force_download_all and not _exact:
                 if track_exists_in_playlist_folder_from_track_data(
                     effective_playlist_name,
                     track_data,
@@ -947,7 +960,7 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
                     })
                     continue
 
-            if owned_checker is not None:
+            if owned_checker is not None and not _exact:
                 try:
                     _is_owned, _owned_track = owned_checker.check(track_data)
                 except Exception as _oc_err:  # noqa: BLE001 - one track's check must not stop the batch
@@ -969,8 +982,19 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
                             download_batches[batch_id]['analysis_results'] = analysis_results.copy()
                     continue
 
+            if _exact:
+                # an exact soundcloud upload is owned by its own download (its
+                # id match or history), never by a library track with the same
+                # names. like a manual match it holds under the wishlist's
+                # internal force; a force re-download asks again
+                found = not ignore_manual_matches and upload_acquired(db, track_data, batch_profile_id)
+                confidence = 1.0 if found else 0.0
+                if found:
+                    # where its file is, for the playlist materialization
+                    matched_track = SimpleNamespace(
+                        file_path=upload_file(db, track_data, batch_profile_id), id=None)
             # Skip database check if force download is enabled
-            if force_download_all:
+            elif force_download_all:
                 logger.warning(f"[Force Download] Skipping database check for '{track_name}' - treating as missing")
                 found, confidence = False, 0.0
             else:
@@ -994,7 +1018,12 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
             # WISHLIST REMOVAL: If track is found in database, check if it should be removed from wishlist
             if found and confidence >= 0.7:
                 try:
-                    deps.check_and_remove_track_from_wishlist_by_metadata(track_data)
+                    if _exact:
+                        # the by-metadata remover refuses an exact row; its id is the proof
+                        from core.wishlist.resolution import remove_acquired_exact_row
+                        remove_acquired_exact_row(track_data, batch_profile_id, db)
+                    else:
+                        deps.check_and_remove_track_from_wishlist_by_metadata(track_data)
                 except Exception as wishlist_error:
                     logger.error(f"[Analysis] Error checking wishlist removal for found track: {wishlist_error}")
 

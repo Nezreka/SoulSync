@@ -332,6 +332,42 @@ def add_tracks(
     }
 
 
+def add_exact_track(db: Any, playlist: Dict[str, Any], payload: Dict[str, Any]) -> Dict[str, Any]:
+    """append one exact soundcloud upload (core/wishlist/soundcloud_exact),
+    already identified: a manual match identify never redoes, carrying the
+    payload so a playlist sync wishlists that exact id. one row per upload,
+    keyed on source_track_id, not the loose track_key."""
+    track_id = str(payload.get('id') or '')
+    if not track_id:
+        raise UserPlaylistError('No track to add')
+    artists = payload.get('artists') or []
+    first = artists[0] if artists else {}
+    artist = first.get('name') if isinstance(first, dict) else str(first or '')
+    images = (payload.get('album') or {}).get('images') or []
+    image = images[0].get('url') if images and isinstance(images[0], dict) else None
+    with _edit_lock:
+        current = _stored_tracks(db, playlist['id'])
+        if any(str(t.get('source_track_id') or '') == track_id for t in current):
+            return {'added': False, 'already_present': True, 'track_count': len(current)}
+        current.append({
+            'track_name': str(payload.get('name') or ''),
+            'artist_name': artist or '',
+            'album_name': '',
+            'duration_ms': int(payload.get('duration_ms') or 0),
+            'image_url': image,
+            'source_track_id': track_id,
+            'extra_data': {
+                'discovered': True,
+                'manual_match': True,
+                'provider': 'soundcloud_exact',
+                'confidence': 1.0,
+                'matched_data': payload,
+            },
+        })
+        _write(db, playlist, current)
+    return {'added': True, 'already_present': False, 'track_count': len(current)}
+
+
 def remove_track(db: Any, playlist: Dict[str, Any], position: int) -> int:
     """drop the track at a 1-based position; returns the new count."""
     with _edit_lock:

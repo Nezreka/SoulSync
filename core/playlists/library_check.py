@@ -118,6 +118,7 @@ def check_mirror_tracks(db: Any, tracks: List[Dict[str, Any]], *, profile_id: in
     that are due, up to ``limit`` of them or ``time_budget`` seconds,
     whichever comes first. returns {checked, found, remaining}."""
     from core.downloads.master import live_manual_match, match_track_in_library
+    from core.wishlist.soundcloud_exact import exact_id_of, is_exact_id, upload_acquired
 
     pending = unchecked_rows(tracks)
     batch = pending[:max(0, int(limit))]
@@ -137,6 +138,11 @@ def check_mirror_tracks(db: Any, tracks: List[Dict[str, Any]], *, profile_id: in
         attempted += 1
         extra = parse_extra(row.get("extra_data"))
         query = _query_track(row, extra, db)
+        exact_id = (str(row.get("source_track_id")).split("::", 1)[0]
+                    if is_exact_id(row.get("source_track_id")) else exact_id_of(query))
+        if exact_id and query is not None:
+            # every lookup below then goes by the upload's id
+            query = {**query, "id": exact_id}
         found, lib_id, id_kind = False, None, None
         if query is not None:
             try:
@@ -144,6 +150,11 @@ def check_mirror_tracks(db: Any, tracks: List[Dict[str, Any]], *, profile_id: in
                 if manual:
                     found, lib_id = True, manual.get("library_track_id")
                     id_kind = manual.get("library_track_id_kind") or "lib2"
+                elif exact_id:
+                    # an exact soundcloud upload is owned by its own download
+                    # (its id match above, or its history), never by a library
+                    # track with the same names
+                    found = upload_acquired(db, query, profile_id)
                 else:
                     hit, _conf, db_track = match_track_in_library(
                         db, query, album_tracks_map={}, album_context=None,

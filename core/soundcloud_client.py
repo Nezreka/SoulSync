@@ -102,6 +102,14 @@ _MIN_AUDIO_SIZE_BYTES = 100 * 1024
 _UNSAFE_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
 
+def _is_preview_format(fmt: Dict[str, Any]) -> bool:
+    """a yt-dlp SoundCloud format that is only the snippet: the extractor
+    suffixes its format_id with '_preview' and ranks it preference -10."""
+    if fmt.get('format_id') == 'download':
+        return False
+    return str(fmt.get('format_id') or '').endswith('_preview') or fmt.get('preference') == -10
+
+
 def _sanitize_filename(name: str) -> str:
     """Replace reserved filesystem characters with underscores."""
     cleaned = _UNSAFE_FILENAME_CHARS.sub('_', name)
@@ -387,9 +395,14 @@ class SoundcloudClient(DownloadSourcePlugin):
 
         # a full extraction lists the formats: "download" is the uploader's
         # original file, offered only when the api allows it (#2116)
-        original = next((f for f in entry.get('formats') or []
-                         if isinstance(f, dict) and f.get('format_id') == 'download'), None)
+        formats = [f for f in entry.get('formats') or [] if isinstance(f, dict)]
+        original = next((f for f in formats if f.get('format_id') == 'download'), None)
         original_ext = str((original or {}).get('ext') or '').lower()
+        # a Go+ track served anonymously: every stream is the 30s snippet
+        # (yt-dlp tags a snipped transcoding '<id>_preview', preference -10).
+        # entry['duration'] is the full length either way, so it can't tell.
+        # None when the entry lists no formats (a flat search result).
+        preview_only = all(_is_preview_format(f) for f in formats) if formats else None
 
         track_result = TrackResult(
             username='soundcloud',
@@ -410,8 +423,12 @@ class SoundcloudClient(DownloadSourcePlugin):
                 'track_id': sc_track_id,
                 'permalink_url': url,
                 'uploader': uploader or None,
+                # the title as uploaded and its cover, for an exact-upload add
+                'upload_title': title or None,
+                'artwork_url': entry.get('thumbnail') or None,
                 'duration_seconds': duration_seconds,
                 'official_download': bool(original),
+                'preview_only': preview_only,
                 'quality_label': (f"Official free download ({original_ext or 'original'})"
                                   if original else 'Stream (~128 kbps)'),
             },

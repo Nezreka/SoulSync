@@ -1380,6 +1380,11 @@ def _check_one_owned(wishlist_service, music_database, _mlm, profile_id, track, 
         return 'kept'
 
     try:
+        # an exact soundcloud upload isn't owned because a song by that name is
+        from core.wishlist.soundcloud_exact import is_exact_id
+        if is_exact_id(spotify_track_id):
+            return 'kept'
+
         # Manual match check — skip fuzzy search if user already linked this track.
         manual_match = _mlm.get_match_for_track(match_index or music_database, profile_id, track,
                                                 default_source='wishlist')
