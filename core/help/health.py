@@ -604,6 +604,19 @@ def check_automations() -> List[dict]:
                     [fix_page("Open Automations", "/automations")], "wf-auto")]
 
 
+# ---------------------------------------------------------------- security
+def check_security() -> List[dict]:
+    """the auth proxy header is ignored without a trusted proxy list; an
+    install that set only the header must hear it, not just get a PIN screen"""
+    from core.security.auth_proxy import setup_problem
+    problem = setup_problem(_config_get)
+    if not problem:
+        return []
+    return [finding("security.auth_proxy_trusted", "warning", "security",
+                    "The auth proxy header is being ignored", problem,
+                    [fix_settings("Open Security settings", "advanced")], "prof-security")]
+
+
 # ---------------------------------------------------------------- setup + updates
 def check_setup() -> List[dict]:
     fn = _p("checklist")
@@ -655,6 +668,7 @@ def _plan() -> List[tuple]:
         ("workers", "enrichment workers", check_workers, 2.0),
         ("review", "the review queue", check_review_queue, 4.0),
         ("automations", "automations", check_automations, 3.0),
+        ("security", "security settings", check_security, 2.0),
         ("setup", "setup", check_setup, 5.0),
         ("updates", "for updates", check_updates, 5.0),
     ]

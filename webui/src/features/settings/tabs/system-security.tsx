@@ -300,6 +300,7 @@ export function SecuritySection({ store }: SettingsTabProps) {
   const scopes = useTrimmedField(store, 'oidc_scopes');
   const redirect = useTrimmedField(store, 'oidc_redirect_uri');
   const authHeader = useTrimmedField(store, 'auth_proxy_header');
+  const proxyTrusted = useTrimmedField(store, 'auth_proxy_trusted');
 
   // cors: saved trimmed; a malformed entry gets saveSettings' warning once the
   // typing stops, as it did on the save that followed
@@ -842,13 +843,37 @@ export function SecuritySection({ store }: SettingsTabProps) {
             {help(
               <>
                 If an auth proxy (Authelia / Authentik / oauth2-proxy) logs users in in front of
-                SoulSync, enter the header it sets and SoulSync trusts it.{' '}
+                SoulSync, enter the header it sets and SoulSync trusts it from the addresses below.{' '}
                 <strong>
                   Only set this behind a proxy that strips any client-supplied copy of the header.
                 </strong>{' '}
                 Blank = off.
               </>,
             )}
+          </div>
+
+          <div className="form-group security-nested">
+            <label htmlFor="security-auth-proxy-trusted">↳ Trusted proxy addresses:</label>
+            <textarea
+              id="security-auth-proxy-trusted"
+              rows={2}
+              placeholder={'172.18.0.2\n172.18.0.0/16'}
+              style={MONO}
+              {...proxyTrusted}
+            />
+            {help(
+              <>
+                Your proxy's IP or range, one per line or comma separated. The header only counts on
+                requests that really come from one of these (never from a forwarded address).{' '}
+                <strong>Empty = the header is ignored.</strong>
+              </>,
+            )}
+            {authHeader.value && !proxyTrusted.value ? (
+              <div className="setting-help-text" id="security-auth-proxy-untrusted" role="alert">
+                <strong>The header is being ignored</strong> until you add your proxy's address
+                here, so people get the PIN screen instead.
+              </div>
+            ) : null}
           </div>
 
           <div className="form-group">

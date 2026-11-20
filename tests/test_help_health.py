@@ -507,3 +507,16 @@ def test_the_real_app_registers_every_help_route_admin_only(monkeypatch):
     monkeypatch.setattr(profile_context, "is_admin_request", lambda: True)
     resp = client.get("/api/debug-info?lines=10")
     assert resp.status_code == 200 and "recent_logs" in resp.get_json()
+
+
+def test_auth_proxy_header_without_trusted_list_warns():
+    health.configure(config_get=_config({"security": {"auth_proxy_header": "Remote-User"}}))
+    found = _by_id(health.check_security())
+    f = found["security.auth_proxy_trusted"]
+    assert_shape(f)
+    assert f["severity"] == "warning"
+    health.configure(config_get=_config({"security": {"auth_proxy_header": "Remote-User",
+                                                      "auth_proxy_trusted": "172.18.0.0/16"}}))
+    assert health.check_security() == []
+    health.configure(config_get=_config({"security": {"auth_proxy_header": ""}}))
+    assert health.check_security() == []

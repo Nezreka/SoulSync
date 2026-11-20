@@ -112,10 +112,16 @@ Pick one:
   skipped once the proxy has logged you in. Set the header name in **Settings →
   Security → "Auth proxy user header"** (e.g. `Remote-User`).
 
-  > ⚠️ **Only enable this behind a proxy you control that STRIPS any client-supplied
-  > copy of that header.** Otherwise a direct visitor could send `Remote-User: admin`
-  > and walk straight in. It's **off by default** — an unset header name means
-  > SoulSync ignores the header entirely (a spoofed one does nothing).
+  The header only counts from your proxy: also fill in **Trusted proxy addresses**
+  (the proxy's IP or a range, e.g. `172.18.0.2` or `172.18.0.0/16`, one per line or
+  comma separated). SoulSync checks the address that actually connected, never
+  `X-Forwarded-For`, so a visitor who reaches SoulSync directly and sends
+  `Remote-User: admin` gets nothing.
+
+  > ⚠️ **An empty trusted list means the header is ignored.** If you set the header
+  > before this list existed, add your proxy's address now: until you do, people
+  > get the PIN screen and Help > Health shows a warning. Keep the proxy stripping
+  > any client-supplied copy of the header too. Both settings are **off by default**.
 - **HTTP Basic Auth** — quick and simple (nginx `auth_basic` / Caddy `basicauth`).
   Better than nothing; weaker than an auth proxy.
 - **SoulSync launch PIN** — set an admin PIN in Settings. Enforced server-side, so

@@ -632,6 +632,15 @@ app.config["SESSION_COOKIE_NAME"] = "soulsync_session"
 from core.security.reverse_proxy import apply_reverse_proxy_mode as _apply_reverse_proxy_mode
 if _apply_reverse_proxy_mode(app, config_manager.get):
     logger.info("[Security] Reverse-proxy mode ON: trusting X-Forwarded-* and Secure session cookie")
+# the auth proxy header only counts from security.auth_proxy_trusted; say so
+# loudly when the header is set without that list (it is ignored then)
+try:
+    from core.security.auth_proxy import setup_problem as _auth_proxy_problem
+    _proxy_problem = _auth_proxy_problem(config_manager.get)
+    if _proxy_problem:
+        logger.warning(f"[Security] {_proxy_problem}")
+except Exception as _proxy_exc:  # noqa: BLE001 - a log line never blocks startup
+    logger.debug(f"[Security] auth proxy setup check failed: {_proxy_exc}")
 
 # --- WebSocket (Socket.IO) Setup ---
 from core.socketio_cors import (
@@ -857,13 +866,10 @@ def _enforce_launch_pin():
     # An auth proxy (Authelia/Authentik/oauth2-proxy) that already authenticated the
     # user counts as verified — opt-in via security.auth_proxy_header, OFF (empty)
     # by default so a direct install is unaffected.
-    from core.security.auth_proxy import trusted_proxy_user
-    try:
-        _proxy_header = config_manager.get('security.auth_proxy_header', '') or ''
-    except Exception:
-        _proxy_header = ''
+    # only from an address in security.auth_proxy_trusted
+    from core.security.auth_proxy import request_proxy_user
     _verified = bool(session.get('launch_pin_verified', False)) or bool(
-        trusted_proxy_user(request.headers.get, _proxy_header)
+        request_proxy_user(request, config_manager.get if config_manager else None)
     )
     if request_is_locked(
         request.path, request.method,
@@ -939,9 +945,8 @@ def _set_profile_context():
     except Exception:
         require_pin = False
     if require_pin and not _require_login_enabled():
-        _proxy_header = (config_manager.get('security.auth_proxy_header', '') or '') if config_manager else ''
-        from core.security.auth_proxy import trusted_proxy_user
-        _proxy_authed = bool(trusted_proxy_user(request.headers.get, _proxy_header))
+        from core.security.auth_proxy import request_proxy_user
+        _proxy_authed = bool(request_proxy_user(request, config_manager.get if config_manager else None))
         if not session.get('launch_pin_verified', False) and not _proxy_authed:
             g.profile_id = None
             g.is_admin = False
@@ -23859,9 +23864,8 @@ def _ws_connection_blocked():
         require_pin = bool(config_manager.get('security.require_pin_on_launch', False)) if config_manager else False
         if not require_login and not require_pin and not revoked:
             return False
-        proxy_header = (config_manager.get('security.auth_proxy_header', '') or '') if config_manager else ''
-        from core.security.auth_proxy import trusted_proxy_user
-        proxy_authed = bool(trusted_proxy_user(request.headers.get, proxy_header))
+        from core.security.auth_proxy import request_proxy_user
+        proxy_authed = bool(request_proxy_user(request, config_manager.get if config_manager else None))
         from core.security.ws_gate import is_ws_connection_blocked
         return is_ws_connection_blocked(
             require_login=require_login,

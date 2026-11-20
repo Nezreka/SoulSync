@@ -417,6 +417,14 @@ To turn it on you have to be signed in with OIDC yourself, and every profile tha
 Passwords aren't deleted. They just aren't used, and work again when the switch is off. The admin's password can't be removed while login mode is on, because it's the way back in.
 
 **If the provider is down:** set \`SOULSYNC_OIDC_ONLY_OVERRIDE=off\` on the container and restart. OIDC only is off while it's set (the saved setting stays on), so you can sign in with the admin password and fix things. An amber shield joins the buttons at the bottom right for admins as a reminder. Remove the variable and restart to turn OIDC only back on.
+
+## Auth proxy header
+
+Behind Authelia, Authentik or oauth2-proxy, Settings > Security > Reverse proxy > **Auth proxy user header** (for example \`Remote-User\`) lets someone the proxy already signed in skip the launch PIN.
+
+SoulSync only believes that header when the request comes straight from an address in **Trusted proxy addresses**: your proxy's IP or a range, like \`172.18.0.2\` or \`172.18.0.0/16\` (one per line or comma separated). It checks the address that really connected, never \`X-Forwarded-For\`, so nobody can fake their way onto the list.
+
+**The list starts empty, and an empty list means the header is ignored.** If you set the header before this list existed, people now get the PIN screen until you add the proxy's address; Help > Health shows a warning until you do. To find the address, check the proxy container's IP (\`docker inspect\`) or the Docker network's range.
 `
         },
         {
