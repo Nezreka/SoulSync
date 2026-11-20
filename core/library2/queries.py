@@ -1329,39 +1329,34 @@ def _own_release_ids(conn, album_rows, group) -> set:
     a soundtrack with one verse) belongs under Appears On, not in the
     discography beside their own albums.
 
-    The album junction can't tell: it files every track artist who isn't the
-    release's main artist as "featured", the co-headliner of a collaboration
-    and a one-verse guest alike. The track credits can. A release is theirs
-    when they are its main artist, or the lead credit on more than half its
-    tracks (a collaboration). Exactly half is a split single: one side each,
-    and it stays with the artist credited first. One the library holds no tracks of yet (a
-    provider discography entry) goes by its album credit."""
+    A release is theirs when it is filed under them (its main artist), or
+    when they co-lead it (sql_util.co_lead_sql; the Artists list reads the
+    same rule): the lead credit on more than half its tracks, shared with
+    the album's own artist or backed by a primary album credit. Leading a
+    track on someone else's release is a guest: Rampa leads track 8 of
+    16BL's dj mix (#2142). Exactly half is a split single: one side each,
+    and it stays with the artist credited first (#2003). One the library
+    holds no tracks of yet (a provider discography entry) goes by its album
+    credit."""
+    from .sql_util import co_lead_sql
     group = [int(g) for g in group]
     own = {int(r["id"]) for r in album_rows if r["primary_artist_id"] in group}
     rest = [int(r["id"]) for r in album_rows if int(r["id"]) not in own]
     if not rest:
         return own
     marks = ",".join("?" for _ in group)
-    led = {}
-    for row in conn.execute(
-        f"""SELECT t.album_id, COUNT(DISTINCT t.id) AS total,
-                   COUNT(DISTINCT CASE WHEN x.artist_id IN ({marks})
-                                        AND COALESCE(x.role, 'primary') = 'primary'
-                                       THEN t.id END) AS led
-              FROM lib2_tracks t
-              LEFT JOIN lib2_track_artists x ON x.track_id = t.id
-             WHERE t.album_id IN (SELECT value FROM json_each(?))
-             GROUP BY t.album_id""",
-        (*group, json.dumps(rest)),
-    ):
-        led[int(row["album_id"])] = (int(row["total"] or 0), int(row["led"] or 0))
+    for member in group:
+        # an int, inlined: the expression appears three times in the rule
+        own.update(int(row[0]) for row in conn.execute(
+            f"""SELECT al.id FROM lib2_albums al
+                 WHERE al.id IN (SELECT value FROM json_each(?))
+                   AND {co_lead_sql(str(int(member)), 'al', 'own')}""",
+            (json.dumps(rest),)))
+    held = {int(row[0]) for row in conn.execute(
+        "SELECT DISTINCT album_id FROM lib2_tracks WHERE album_id IN (SELECT value FROM json_each(?))",
+        (json.dumps(rest),))}
     for album_id in rest:
-        total, lead = led.get(album_id, (0, 0))
-        # more than half: a split single, one side each, belongs to the
-        # artist it is credited to first, and appears on the other (#2003)
-        if total and lead * 2 > total:
-            own.add(album_id)
-        elif not total and conn.execute(
+        if album_id not in own and album_id not in held and conn.execute(
                 f"SELECT 1 FROM lib2_album_artists WHERE album_id=? AND artist_id IN ({marks})",
                 (album_id, *group)).fetchone():
             own.add(album_id)
