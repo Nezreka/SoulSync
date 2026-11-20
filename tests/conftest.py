@@ -1153,6 +1153,16 @@ def _fresh_provider_cache_and_lastfm_key(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _fresh_koito_probe():
+    """the koito probe answers live per process; each test starts with
+    nothing probed."""
+    from core import listenbrainz_client
+    listenbrainz_client._KOITO_SERVERS.clear()
+    yield
+    listenbrainz_client._KOITO_SERVERS.clear()
+
+
+@pytest.fixture(autouse=True)
 def _fresh_reconciler_name_misses():
     """the reconciler believes a file-name miss for a few minutes; each test
     starts without one from another test"""

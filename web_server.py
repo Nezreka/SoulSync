@@ -11055,9 +11055,45 @@ def library_log_play_eligible():
         # flip another pile's row.
         owner = listening_owner(db, get_current_profile_id())
         ok = db.mark_play_scrobble_eligible(data.get('play_id'), profile_id=owner)
+        if ok and listening_stats_worker is not None:
+            # send it now instead of at the next 5-minute batch; the batch
+            # stays as the retry for a send that fails
+            listening_stats_worker.request_scrobble_flush()
         return jsonify({"success": ok})
     except Exception as e:
         logger.debug(f"log-play/eligible failed (non-fatal): {e}")
+        return jsonify({"success": False, "error": str(e)}), 200
+
+
+@app.route('/api/library/now-playing', methods=['POST'])
+@requires("music.access")
+def library_now_playing():
+    """Tell this listener's scrobble accounts what the web player just
+    started (Last.fm track.updateNowPlaying, ListenBrainz playing_now).
+
+    Body: ``{track: {title, artist, album}, duration_ms}``. Fire-and-forget
+    from the player; the send runs in the background, so this answers at
+    once with how many account sets were queued. Never a scrobble.
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        track = data.get('track') or data
+        if not isinstance(track, dict):
+            return jsonify({"success": False, "queued": 0}), 200
+        try:
+            duration_seconds = int(data.get('duration_ms') or 0) / 1000.0
+        except (TypeError, ValueError):
+            duration_seconds = 0
+        from core.playback.now_playing import queue_now_playing
+        queued = queue_now_playing(get_database(), config_manager, get_current_profile_id(), {
+            'title': str(track.get('title') or ''),
+            'artist': str(track.get('artist') or ''),
+            'album': str(track.get('album') or ''),
+            'duration_seconds': duration_seconds,
+        })
+        return jsonify({"success": True, "queued": queued})
+    except Exception as e:
+        logger.debug(f"now-playing failed (non-fatal): {e}")
         return jsonify({"success": False, "error": str(e)}), 200
 
 _enrichment_locks = {svc: threading.Lock() for svc in ('audiodb', 'deezer', 'musicbrainz', 'spotify', 'itunes', 'lastfm', 'genius', 'tidal', 'qobuz', 'discogs', 'bandcamp', 'jiosaavn')}
