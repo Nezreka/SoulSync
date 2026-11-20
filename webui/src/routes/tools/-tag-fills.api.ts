@@ -7,7 +7,7 @@
  * can be undone one file or one run at a time.
  */
 
-import type { TagChange } from './-tools.finding-copy';
+import { readTagChanges, type TagChange } from './-tools.finding-copy';
 
 export type TagFillMode = 'off' | 'fill' | 'update';
 
@@ -86,18 +86,57 @@ export async function fetchTagFills(timeoutMs = 10000): Promise<TagFillSummary |
   try {
     const response = await fetch(BASE, { signal: AbortSignal.timeout(timeoutMs) });
     if (!response.ok) return null;
-    return (await response.json()) as TagFillSummary;
+    return readSummary(await response.json());
   } catch {
     return null;
   }
+}
+
+const num = (value: unknown) => (typeof value === 'number' && Number.isFinite(value) ? value : 0);
+
+/** the reply in the card's shape, whatever came back: an older server or a
+ *  proxy page must not break the Tools page */
+export function readSummary(raw: unknown): TagFillSummary | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const data = raw as Record<string, unknown>;
+  const mode = data.mode === 'off' || data.mode === 'update' ? data.mode : 'fill';
+  const runs = Array.isArray(data.runs)
+    ? (data.runs as Array<Record<string, unknown>>)
+        .filter((run) => run && typeof run.batch_id === 'string')
+        .map((run) => ({
+          batch_id: run.batch_id as string,
+          source: typeof run.source === 'string' ? run.source : 'queue',
+          at: typeof run.at === 'string' ? run.at : null,
+          files: num(run.files),
+          fields: num(run.fields),
+          covers: num(run.covers),
+          undone: num(run.undone),
+        }))
+    : [];
+  const undo = data.undo && typeof data.undo === 'object' ? (data.undo as TagFillUndoState) : {};
+  return {
+    mode,
+    days: num(data.days) || 7,
+    files: num(data.files),
+    fields: num(data.fields),
+    covers: num(data.covers),
+    runs,
+    undo,
+  };
 }
 
 export async function fetchTagFillFiles(run: string): Promise<TagFillFile[] | null> {
   try {
     const response = await fetch(`${BASE}/files?run=${encodeURIComponent(run)}`);
     if (!response.ok) return null;
-    const data = (await response.json()) as { files?: TagFillFile[] };
-    return data.files ?? [];
+    const data = (await response.json()) as { files?: unknown };
+    if (!Array.isArray(data?.files)) return [];
+    return (data.files as Array<Record<string, unknown>>)
+      .filter((file) => file && typeof file.id === 'number')
+      .map((file) => ({
+        ...(file as unknown as TagFillFile),
+        fields: readTagChanges(file.fields),
+      }));
   } catch {
     return null;
   }

@@ -6,7 +6,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { fillWords, runWords } from '../-tag-fills.api';
+import { fillWords, readSummary, runWords } from '../-tag-fills.api';
 import { TagFillsCard } from './tag-fills-card';
 
 const fetchMock = vi.fn();
@@ -92,6 +92,30 @@ describe('the words', () => {
       '2026-11-20 10:00 · Library Re-tag · 214 tags in 63 files · 3 undone',
     );
     expect(runWords({ ...RUN, undone: 63 })).toBe('2026-11-20 10:00 · on its own · undone');
+  });
+});
+
+describe("a reply that is not the card's shape", () => {
+  it('reads as an empty summary, never a crash', () => {
+    expect(readSummary({ success: true })).toEqual({
+      mode: 'fill',
+      days: 7,
+      files: 0,
+      fields: 0,
+      covers: 0,
+      runs: [],
+      undo: {},
+    });
+    expect(readSummary([])).toBeNull();
+    expect(readSummary({ runs: [{ files: 2 }, RUN] })!.runs).toEqual([RUN]);
+  });
+
+  it('renders on a server that does not know the route', async () => {
+    serve({ success: true });
+    render(<TagFillsCard />);
+    await waitFor(() =>
+      expect(document.getElementById('tag-fills-week')!.textContent).toBe('0 tags in 0 files'),
+    );
   });
 });
 

@@ -321,8 +321,8 @@ describe('ToolsPage shell', () => {
       cards: [...section.querySelectorAll('.tool-card')].map((card) => card.id),
     }));
     // Section order and per-section card order both come from index.html.
-    // The eleven vanilla cards, plus Update File Locations (the maintenance
-    // hero is a separate block, not a card).
+    // The eleven vanilla cards, plus Update File Locations and Filled Tags
+    // (the maintenance hero is a separate block, not a card).
     expect(sections).toEqual([
       {
         title: 'Database & Scanning',
@@ -336,7 +336,12 @@ describe('ToolsPage shell', () => {
       },
       {
         title: 'Metadata & Cache',
-        cards: ['metadata-updater-card', 'discovery-pool-card', 'manual-library-match-card'],
+        cards: [
+          'metadata-updater-card',
+          'tag-fills-card',
+          'discovery-pool-card',
+          'manual-library-match-card',
+        ],
       },
       {
         title: 'Management',
