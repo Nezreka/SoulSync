@@ -134,6 +134,8 @@ export interface MixShelfProps {
   onPlayMix?: (key: string) => void;
   /** which mix key is currently resolving, if any. */
   playingKey?: string | null;
+  /** a line above the cards (the one-time share listening ask) */
+  notice?: React.ReactNode;
 }
 
 export function MixShelf({
@@ -148,6 +150,7 @@ export function MixShelf({
   onOpenMix,
   onPlayMix,
   playingKey,
+  notice,
 }: MixShelfProps) {
   return (
     <DiscoverSection
@@ -158,6 +161,7 @@ export function MixShelf({
       count={mixes.length}
       loaded={loaded}
     >
+      {notice}
       <div className={gridClassName} id={gridId}>
         {mixes.map((mix) => (
           <DiscoverMixCard

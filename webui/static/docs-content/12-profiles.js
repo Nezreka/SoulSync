@@ -358,6 +358,15 @@ A profile's stats, Recently Played and recommendations read its own listening wh
 
 The card at the top of **My Account** says which one you are on.
 
+## Who sees your listening
+
+Your plays are yours. Two switches under **My Account → Your listening** (the admin has them too):
+
+- **Share my listening**: off for everyone, including profiles that existed before this switch. A **Blend** on Discover (a mix of what you and someone else play) is only made when you both have it on. The first time you open Made For You, Discover asks once; **Not now** stops the asking and leaves it off. With several people sharing, you get blends with the three whose taste is closest to yours (most artists in common).
+- **Private session**: while it's on, what you play in SoulSync's player isn't saved at all, so it never reaches your stats, mixes, blends or scrobbles. It turns itself off after 6 hours. Plays you make in a Plex, Jellyfin or Navidrome app are read from the server's own history, so those still count.
+
+Profiles without a listening source of their own all play into the shared history, so that history only counts as shared when **everyone** on it has Share my listening on. Profiles that are turned off don't count. Install-wide shelves (the seasonal Rewind) read the shared history plus the own history of people who share; your mix recipes only ever read your own plays.
+
 ## Your sidebar weather
 
 The weather line under your name shows your own town and its local time, never the admin's. Set it under **Profile & account → Sidebar weather**: type a town or ZIP and save. You can switch to °C and turn holiday decorations on or off there too. With no town set, you see no weather line. Admins set theirs in Settings → Appearance.

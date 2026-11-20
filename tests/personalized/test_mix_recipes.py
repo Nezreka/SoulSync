@@ -224,6 +224,24 @@ def test_years_narrow_the_library_pool(db):
     assert set(_names(pool)) == {'Deftones'}    # only Deftones' LP sits in 2020
 
 
+def test_only_your_own_plays_pick_the_library_track(db):
+    # someone else's heavy rotation must not decide which of an artist's
+    # tracks your mix plays
+    def play(title, pile, times):
+        with db._get_connection() as conn:
+            tid = conn.execute("SELECT id FROM lib2_tracks WHERE title = ?", (title,)).fetchone()[0]
+            for n in range(times):
+                conn.execute("INSERT INTO listening_history (track_id, title, artist, played_at, "
+                             "lib2_track_id, profile_id) VALUES (?, ?, 'Deftones', ?, ?, ?)",
+                             (f'k{title}{pile}{n}', title, f'2026-01-0{n + 1} 00:00:00', tid, pile))
+            conn.commit()
+    play('Deftones 1', 1, 2)
+    play('Deftones 2', 2, 6)
+    r = Recipe.from_dict({'name': 'x', 'genres': ['metal'], 'year_from': 2020, 'year_to': 2022})
+    pool = R.library_pool(db, r, 1, [], random.Random(0))
+    assert [t['name'] for t in pool] == ['Deftones 1']
+
+
 def test_tags_narrow_every_source(db):
     rid = _make(db, tags=['progressive metal'],
                 mix={'library': 0.5, 'discovery': 0.5, 'trending': 0})

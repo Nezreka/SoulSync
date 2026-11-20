@@ -61,7 +61,7 @@ The top of Discover greets you and puts what you go back to in one grid: **Flow*
 
 - **Flow** is one tap for endless-feeling listening: your favourites woven with the tracks of theirs you never play and their neighbours in your library. Every press is a fresh draw, and every track is one you own.
 - **On Repeat** is what you've played most in the last 30 days. **Repeat Rewind** is what you had on repeat 2 to 12 months ago and then stopped playing.
-- **Blend** mixes two people's listening into one playlist, leading with what you both play. It appears once another profile has its own ListenBrainz or Last.fm listening history.
+- **Blend** mixes two people's listening into one playlist, leading with what you both play. It needs both of you to have your own listening history and **Share my listening** on (My Account → Your listening; Discover asks once). You get up to three, with the people whose taste is closest to yours.
 
 ## Moods
 

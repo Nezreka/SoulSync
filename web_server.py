@@ -11034,6 +11034,11 @@ def library_log_play():
         # means the shared one, same as before.
         from core.listening_scope import listening_owner
         db = get_database()
+        # a private session keeps the play out of everything: taste, blends,
+        # stats and scrobbles. checked here, not trusted to the page
+        from core.personalized.listening_privacy import in_private_session
+        if in_private_session(db, get_current_profile_id()):
+            return jsonify({"success": True, "skipped": True, "private": True}), 200
         event['profile_id'] = listening_owner(db, get_current_profile_id())
         play_id = db.record_web_player_play(event)
         return jsonify({"success": True, "play_id": play_id})
