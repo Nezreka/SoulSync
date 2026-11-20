@@ -371,6 +371,23 @@ Listening data requires **Listening Stats** to be enabled in Settings → Librar
 - **Range picker** (Listening tab only) — **7 Days**, **30 Days**, **12 Months**, **All Time**.
 - **Sync now** — pulls the latest play history now; the line beside it reads "Last synced: …" or "Not synced yet". (In standalone mode this is replaced by the note "Standalone mode: manual sync unavailable".)
 - **Last.fm and ListenBrainz** — each service you've configured shows its account, a status (**Checking settings…**, **Configure in Settings**, **Syncing…**, **Sync failed**, **Sync paused**, **Up to date**, **Ready to sync**), a **Sync now** / **Resume sync** / **Retry sync** link, and a progress bar while syncing. Hover the status for detail like "Last synced … · next check in …".
+- **Import Spotify history**: brings in your Spotify streaming history from Spotify's privacy export. See below.
+
+## Import your Spotify history
+
+Ask Spotify for your data (Spotify account page → Privacy settings → Download your data). **Account data** arrives in a few days and covers the last year; **Extended streaming history** takes longer and covers every year you've used Spotify. Either works, and so does both.
+
+On the Stats page click **Import Spotify history**, then drop the zip Spotify sent (or the \`StreamingHistory_music\`, \`Streaming_History_Audio\` or \`endsong\` json files inside it) and click **Import**.
+
+- The file is read in your browser. Only music plays are sent to SoulSync, as plain rows (time, song, artist, album, Spotify track id). Nothing else in the export leaves your device.
+- Left out: plays under 30 seconds, podcasts, audiobooks and videos, and anything you played in a Spotify **private session**.
+- Each play lands in your own listening history as its own source, with its Spotify track id, so it matches the exact song in your library when the library knows that id (otherwise by title and artist).
+- A play ListenBrainz or Last.fm already brought in (Spotify scrobbled it there) is linked to that play, not added twice. Importing the same export again adds nothing.
+- **Count these plays in Stats and Your Year** is on by default. Turn it off to keep the history for your mixes and recommendations only: Daily Mixes, Repeat Rewind, Discover recommendations and stations still use it, while Stats, Your Year, the dashboard's week and the artist page leave it out. You can switch it later in the same window.
+- When it's done you get a summary, e.g. "12,340 plays from 2015 to 2024, 3,100 artists, 9,800 matched to your library", plus what was left out.
+- **Remove this import** takes every play it added back out. Plays from ListenBrainz or Last.fm stay.
+
+The admin's import goes into the shared listening history. Anyone else's goes into their own: importing makes your listening history yours, like connecting your own ListenBrainz does, so your stats and mixes read it and nobody else's do. Who can see it follows **Share my listening** like the rest of your history. Importing needs **Listening stats** in the profile's permissions.
 
 ## Listening tab
 

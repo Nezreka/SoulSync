@@ -129,11 +129,17 @@ def similarity_from_rank(rank: object, max_rank: int = 10) -> float:
     return round((max_rank - r + 1) / max_rank, 4)
 
 
+# most artists favourites alone may add as seeds (ones you also play are
+# always lifted)
+MAX_FAVORITE_ONLY_SEEDS = 25
+
+
 def build_recency_weighted_seeds(
     top_artists: Sequence[dict],
     recent_play_counts: Optional[Dict[str, float]] = None,
     *,
     recency_factor: float = 1.5,
+    favorites: Optional[Dict[str, float]] = None,
 ) -> List[dict]:
     """Blend lifetime + recent play counts into seed weights — "what you're into NOW".
 
@@ -142,6 +148,11 @@ def build_recency_weighted_seeds(
     your current taste instead of your all-time history. ``recency_factor`` is the dial
     (0 = pure lifetime). Returns ``[{'name', 'weight'}]`` for :func:`rank_recommended_artists`.
     Pure — the caller supplies both play-count maps from the listening history.
+
+    ``favorites`` is ``{artist name: units}`` from what you said you love (Liked
+    Songs, server stars, the Watchlist; core.discovery.favorite_seeds). A unit
+    weighs the median of your play seeds, so a liked artist sits among the
+    artists you play, and one you never played still becomes a seed.
     """
     recent = {_norm(k): _positive_float(v, 0.0) for k, v in (recent_play_counts or {}).items()}
     out: List[dict] = []
@@ -152,6 +163,25 @@ def build_recency_weighted_seeds(
         lifetime = _positive_float(a.get("play_count", a.get("weight", 1.0)))
         boost = recency_factor * recent.get(_norm(name), 0.0)
         out.append({"name": name, "weight": lifetime + boost})
+    if favorites:
+        from core.discovery.favorite_seeds import seed_unit
+        unit = seed_unit(s["weight"] for s in out)
+        index = {_norm(s["name"]): s for s in out}
+        added = 0
+        # strongest first, so a long watchlist adds its best few, not all of it
+        for name, units in sorted(favorites.items(), key=lambda kv: (-_positive_float(kv[1], 0.0),
+                                                                      str(kv[0]))):
+            extra = _positive_float(units, 0.0) * unit
+            key = _norm(name)
+            if not key or extra <= 0:
+                continue
+            if key in index:
+                index[key]["weight"] += extra
+            elif added < MAX_FAVORITE_ONLY_SEEDS:
+                seed = {"name": str(name).strip(), "weight": extra}
+                out.append(seed)
+                index[key] = seed
+                added += 1
     return out
 
 

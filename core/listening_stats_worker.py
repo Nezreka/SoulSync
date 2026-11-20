@@ -485,8 +485,15 @@ class ListeningStatsWorker:
             logger.error(f"Failed to build stats cache: {e}")
 
     def _build_owner_stats_cache(self, owner):
-        """every cached stat for one pile. the shared pile keeps the old keys."""
-        from core.listening_scope import STATS_CACHE_RANGES, owner_clause, owner_key
+        """every cached stat for one pile. the shared pile keeps the old keys.
+
+        drawn as stats, so plays the pile keeps for taste only stay out."""
+        from core.listening_scope import stats_view
+        with stats_view(self.db):
+            self._build_owner_stats_cache_view(owner)
+
+    def _build_owner_stats_cache_view(self, owner):
+        from core.listening_scope import STATS_CACHE_RANGES, owner_key, stats_owner_clause
         for time_range in STATS_CACHE_RANGES:
             granularity = 'month' if time_range in ('12m', 'all') else 'day'
             cache = {
@@ -529,7 +536,7 @@ class ListeningStatsWorker:
         cursor = conn.cursor()
         cursor.execute(f"""
             SELECT title, artist, album, played_at, duration_ms
-            FROM listening_history WHERE {owner_clause(owner)}
+            FROM listening_history WHERE {stats_owner_clause(owner)}
             ORDER BY played_at DESC LIMIT 20
         """)
         recent = [{'title': r[0], 'artist': r[1], 'album': r[2], 'played_at': r[3], 'duration_ms': r[4]}

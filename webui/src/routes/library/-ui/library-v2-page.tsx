@@ -228,6 +228,7 @@ import { AlbumArtPickerModal, ArtistImagePickerModal } from './art-picker-modal'
 import { ArtistHeroVideo } from './artist-hero-video';
 import { ArtistNamingSetting } from './artist-naming-setting';
 import { ArtistPageLibraryProvider, ReleaseMonitorButton } from './artist-page-release-actions';
+import { ArtistYourPlays } from './artist-your-plays';
 import { parseArtworkTarget, watchPendingArtwork } from './artwork-pending';
 import { cardFadeIn } from './card-fade';
 import {
@@ -9693,6 +9694,8 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
             </header>
           )}
 
+          <ArtistYourPlays artistId={artistId} artistName={artist.name} />
+
           <div ref={heroSentinelRef} className={styles.heroSentinel} aria-hidden="true" />
           <div className={styles.releasesBar}>
             <div className={styles.releasesToggle}>
@@ -13020,7 +13023,7 @@ function TrackRow(props: TrackRowProps) {
               ) : (
                 <span className={missing ? styles.muted : undefined}>{label}</span>
               )}
-              {track.popular ? <PopularMark /> : null}
+              {track.popular ? <PopularMark source={track.popular_source} /> : null}
               <InlineFileStatus status={track.file_status} linkedFrom={track.linked_from} />
               {(track.file_count ?? 0) > 1 ? (
                 <button
@@ -13800,9 +13803,12 @@ export function TrackLyricsBadge({
 
 /** Legacy parity: present/missing indicator that sits inline after the title. */
 /** #2144: plexamp's flame for an album's most played tracks (last.fm plays,
- *  ranked inside the album by the server). */
-export function PopularMark() {
-  const text = 'Popular: one of the most played tracks on this album (Last.fm)';
+ *  ranked inside the album by the server; listenbrainz listens when last.fm
+ *  knows too little). */
+export function PopularMark({ source }: { source?: 'lastfm' | 'listenbrainz' | null }) {
+  const text = `Popular: one of the most played tracks on this album (${
+    source === 'listenbrainz' ? 'ListenBrainz' : 'Last.fm'
+  })`;
   return (
     <span className={styles.popularMark} role="img" aria-label={text} title={text}>
       <LineIcon name="flame" size={13} />

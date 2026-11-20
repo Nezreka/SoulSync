@@ -343,6 +343,43 @@ describe('library v2 album track table', () => {
     expect(marks[0].closest('tr')).toContainElement(screen.getByText('Back In Black'));
   });
 
+  it('a flame ranked on ListenBrainz says so', async () => {
+    server.use(
+      http.get('/api/library/v2/albums/42', () =>
+        HttpResponse.json({
+          success: true,
+          album: album([
+            track({
+              id: 7,
+              title: 'Back In Black',
+              track_number: 6,
+              popular: true,
+              popular_source: 'listenbrainz',
+            }),
+          ]),
+        }),
+      ),
+      http.get('/api/library/v2/albums/42/match-status', () =>
+        HttpResponse.json({ success: true, album: [], tracks: {} }),
+      ),
+      http.get('/api/library/v2/quality-profiles', () =>
+        HttpResponse.json({ success: true, profiles: [] }),
+      ),
+      http.get('/api/library/v2/albums/42/queue-status', () =>
+        HttpResponse.json({ tracks: {}, albums: {} }),
+      ),
+    );
+
+    render(
+      <QueryClientProvider client={createTestQueryClient()}>
+        <AlbumTrackTable albumId={42} onAction={vi.fn()} />
+      </QueryClientProvider>,
+    );
+
+    const mark = await screen.findByRole('img', { name: /most played tracks on this album/ });
+    expect(mark).toHaveAttribute('title', expect.stringContaining('ListenBrainz'));
+  });
+
   it('shows media-server recognition in its own column', async () => {
     server.use(
       http.get('/api/library/v2/albums/42', () =>

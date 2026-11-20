@@ -79,8 +79,13 @@ def _timestamp(value):
     return int(dt.timestamp())
 
 
-def insert_import_events(database, events, source, profile_id=SHARED_OWNER):
+def insert_import_events(database, events, source, profile_id=SHARED_OWNER,
+                         tolerance_seconds=CROSS_SOURCE_TOLERANCE_SECONDS):
     """Keep repeats; link only exact same-source or close cross-source events.
+
+    tolerance_seconds is how far apart a play and its copy from another
+    service may sit. a source that only knows the minute (a spotify account
+    export) needs more than one that knows the second.
 
     An alias records each source's original timestamp even when no new history
     row is needed. UNIQUE(history_id, source) prevents a canonical play from
@@ -113,8 +118,9 @@ def insert_import_events(database, events, source, profile_id=SHARED_OWNER):
         # the account column comes with a migration; a table without it just
         # doesn't record who played
         has_account = "server_account_id" in history_columns
-        low = min(key[2] for key in incoming) - CROSS_SOURCE_TOLERANCE_SECONDS
-        high = max(key[2] for key in incoming) + CROSS_SOURCE_TOLERANCE_SECONDS
+        tolerance = max(0, int(tolerance_seconds))
+        low = min(key[2] for key in incoming) - tolerance
+        high = max(key[2] for key in incoming) + tolerance
         # Clean only this window on connections without foreign-key enforcement.
         conn.execute("""
             DELETE FROM listening_import_events
@@ -150,7 +156,7 @@ def insert_import_events(database, events, source, profile_id=SHARED_OWNER):
                 if existing_source == source:
                     if delta != 0:
                         continue
-                elif delta > CROSS_SOURCE_TOLERANCE_SECONDS:
+                elif delta > tolerance:
                     continue
                 elif not name[1]:
                     continue  # No artist: insufficient evidence across services.

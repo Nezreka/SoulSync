@@ -276,6 +276,7 @@ A personal front page shaped by your library, your listening and your watchlist.
 - **Your Mixes**: *Fresh Tape* (new from artists you follow), *The Archives* (your Spotify Discover Weekly, refreshed weekly), *Hidden Gems*, *Popular Picks*, *Discovery Shuffle*, *Your Listening Mix*, and decade *Time Machine* mixes. Download or sync any of them to your server.
 - **Adventurousness dial**: drag from "safe" to "deep cuts" and the recommendations re-rank live. Each profile has its own dial; one that never turned it follows the default set in Settings.
 - **Shelves**: Recommended artists, Because you listen to…, New releases for you, New in your genres, Albums you're missing, More from your labels, Deep cuts.
+- **What you love counts**: Liked Songs, songs you starred or rated highly on your media server, and the artists on your Watchlist seed recommendations, Daily Mixes and stations next to what you play, per profile, weighed against your own play counts.
 - **Stations**: endless artist radio, or a stable 40-track snapshot you can download or sync.
 - **Outside picks**: **Deezer Curated** editorial playlists (no key needed), **ListenBrainz** recommendations, and **Last.fm Radio**.
 - **SoulSync Charts**: what the SoulSync network is wishlisting, keeping and playing this week, as playlists that open ready to sync (needs [MetaSync](#metasync--soulsync-charts), and the shelf hides itself without it).
@@ -355,9 +356,10 @@ An inbox for everything in your staging folder, with a Picard-style matcher.
 - **Listening stats**: plays, time, top artists / albums / tracks, genres, when you listen, streaks, and how much of what you own you actually play.
 - **Your Year**: a full-screen, Wrapped-style story of your year, ending in a card studio that exports shareable images using your real album art.
 - **Scrobbling** to Last.fm and ListenBrainz from Plex, Jellyfin, Navidrome and the web player. ListenBrainz is the recommended one: from 1 December 2026 Last.fm API keys need a Last.fm Pro subscription. The web player also sends **now playing** when a song starts, and a play is sent the moment it counts (half the song or 4 minutes) instead of in the next batch. Self-hosted **Maloja** and **Koito** work through the ListenBrainz card, with one-click address buttons.
-- **Last.fm is optional**: without a key, or with one Last.fm no longer accepts, top tracks, similar artists, Radio and Your Artists fill in from ListenBrainz, Deezer and your own plays, and earlier Last.fm answers stay cached.
+- **Last.fm is optional**: without a key, or with one Last.fm no longer accepts, top tracks, similar artists, Radio and Your Artists fill in from ListenBrainz, Deezer and your own plays, the album flame ranks tracks on ListenBrainz listens, and earlier Last.fm answers stay cached.
 - **Per-profile**: a profile with its own Plex account, Jellyfin user, ListenBrainz or Last.fm gets its own stats and recommendations, and can scrobble its plays to its own account.
-- **History import** from Last.fm, ListenBrainz, Maloja and Koito.
+- **History import** from Last.fm, ListenBrainz, Maloja and Koito, and **Spotify streaming history** from Spotify's privacy export (account data or extended history). The export is read in your browser and only music plays are sent; plays under 30 seconds, podcasts and private-session plays stay out. Plays already in your history from ListenBrainz or Last.fm aren't doubled, it can count in Stats and Your Year or feed only your mixes and recommendations, and **Remove this import** takes it back out.
+- **You and this artist**: on every artist page you've played, your plays, your rank for them, first and last listened, a year of plays per month, and the songs of theirs you play most.
 
 ## Player & radio
 
