@@ -260,13 +260,25 @@ def _stamp_track_statuses(database, playlist):
     """where each track stands, on the track, plus the totals (#1721).
     best effort: the tracks still show without it."""
     try:
-        from core.playlists.track_status import status_counts, track_status, wishlist_ids
+        from core.playlists.track_status import (
+            parse_extra, placement_counts, server_placement, status_counts, track_status,
+            wishlist_ids)
         tracks = playlist.get('tracks') or []
         ids = {i for t in tracks for i in wishlist_ids(t)}
         wishlisted = database.get_wishlisted_ids(ids, profile_id=playlist.get('profile_id'))
         for t in tracks:
             t['status'] = track_status(t, wishlisted)
+            # in the library is not on the server playlist (#2235)
+            t['server_placement'] = server_placement(t, t['status'])
+            _with = parse_extra(t.get('extra_data')).get('server_placement_with')
+            if t['server_placement'] == 'duplicate' and _with:
+                t['server_placement_with'] = _with
         playlist['status_counts'] = status_counts(t['status'] for t in tracks)
+        playlist['placement_counts'] = placement_counts(t['server_placement'] for t in tracks)
+        try:
+            playlist['server_type'] = config_manager.get_active_media_server() if config_manager else None
+        except Exception:  # noqa: BLE001 - the label falls back to "your server"
+            playlist['server_type'] = None
         # how many the detail's library check should look at (#1910): the
         # unchecked ones plus its own stale misses
         from core.playlists.library_check import unchecked_rows

@@ -977,6 +977,21 @@ class PlexClient(MediaServerBase):
             logger.error(f"Error reconciling Plex playlist '{playlist_name}': {e}")
             return False
 
+    def read_playlist_track_ids(self, playlist_name: str, playlist_id=None) -> Optional[List[str]]:
+        """what the server playlist holds right now, for the sync's readback
+        (#2235). None when it can't be read, never a guess: [] means empty."""
+        if not self.ensure_connection():
+            return None
+        try:
+            try:
+                playlist = self._target_playlist(playlist_name, playlist_id)
+            except NotFound:
+                return None
+            return [str(i.ratingKey) for i in playlist.items() if hasattr(i, 'ratingKey')]
+        except Exception as e:
+            logger.debug(f"Plex playlist readback for '{playlist_name}' failed: {e}")
+            return None
+
     def get_playlist_track_ids(self, playlist_id, playlist_name: str = "") -> List[str]:
         """The playlist's current track ratingKeys, in current order. [] if missing."""
         if not self.ensure_connection():

@@ -453,6 +453,11 @@ def _record_library_membership(tracks_json, match_details) -> None:
                 # the sync's verdict, so the mirror's library check
                 # (core/playlists/library_check) leaves it alone
                 'library_checked_via': 'sync',
+                # on the server playlist, or why not (#2235). None when the
+                # sync couldn't read the playlist back, so an old answer
+                # never outlives the run that could have changed it
+                'server_placement': detail.get('server_placement') if found else None,
+                'server_placement_with': detail.get('folded_into') if found else None,
             })
             written += 1
         if written:
@@ -1082,6 +1087,9 @@ def _run_sync_task(
             # the mode it ran in, so the next scheduled run sees a mode
             # change as a change (#1704)
             sync_mode=sync_mode,
+            # matched but not on the server playlist (#2235): the next
+            # scheduled run must not skip while any are left
+            unplaced_tracks=getattr(result, 'unplaced_tracks', 0) or 0,
         )
         if _mirror_tracks_hash is not None:
             _status_kwargs['mirror_tracks_hash'] = _mirror_tracks_hash

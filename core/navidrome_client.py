@@ -1701,6 +1701,26 @@ class NavidromeClient(MediaServerBase):
             logger.error(f"Error getting tracks for playlist {playlist_id}: {e}")
             return []
 
+    def read_playlist_track_ids(self, playlist_name: str, playlist_id=None) -> Optional[List[str]]:
+        """what the server playlist holds right now, for the sync's readback
+        (#2235). None when it can't be read, never a guess: [] means empty."""
+        if not self.ensure_connection():
+            return None
+        try:
+            target = self._follow_playlist_id(playlist_name, playlist_id) if playlist_id else None
+            if target is None:
+                target = self.get_playlist_by_name(playlist_name)
+            if target is None:
+                return None
+            response = self._make_request('getPlaylist', {'id': target.id})
+            if not response:
+                return None
+            return [str(e.get('id')) for e in (response.get('playlist') or {}).get('entry', []) or []
+                    if e.get('id')]
+        except Exception as e:
+            logger.debug(f"Navidrome playlist readback for '{playlist_name}' failed: {e}")
+            return None
+
     def get_playlists_by_name(self, name: str) -> List[PlaylistInfo]:
         """Get all playlists matching a specific name (case-insensitive), own
         playlists only (see _playlist_owner_filter)"""

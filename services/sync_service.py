@@ -384,6 +384,9 @@ class SyncResult:
     # source entries that resolved to a library track already on the playlist
     # (synced_tracks + duplicate_tracks == matched_tracks)
     duplicate_tracks: int = 0
+    # matched tracks the server playlist doesn't hold after the write, read
+    # back from the server (#2235). they are in the library, not on the playlist
+    unplaced_tracks: int = 0
 
     @property
     def success_rate(self) -> float:
@@ -789,6 +792,11 @@ class PlaylistSyncService:
             # longer on the server (#1754); filled in the write branch below
             # and read back when the per-track history details are built.
             server_missing_results: set = set()
+            # what the server playlist really holds after the write (#2235):
+            # MatchResults (by identity) the server doesn't hold, and whether
+            # the playlist could be read back at all (None = no answer)
+            unplaced_results: set = set()
+            placement_known = False
             if is_request_list or server_type == 'soulsync':
                 step_title = "Request list: library check complete" if is_request_list else "Standalone: library check complete"
                 self._update_progress(
@@ -873,6 +881,7 @@ class PlaylistSyncService:
                 # longer on the server (#1754); the write dispatch below
                 # fills this from its in-thread readback.
                 _write_skipped_ids: list = []
+                _navidrome_id_kw: dict = {}
                 if not media_client:
                     logger.error("No active media client available for playlist sync")
                     sync_success = False
@@ -1082,6 +1091,15 @@ class PlaylistSyncService:
                         except Exception as _row_err:  # noqa: BLE001 - bookkeeping
                             logger.warning(
                                 "dead library row cleanup failed: %s", _row_err)
+                # #2235: read the playlist back. "matched" is soulsync's
+                # answer, the playlist is the server's, and jellyfin answers
+                # 204 to an add it quietly drops. a mirror read 167 in library
+                # against a 149-track jellyfin playlist and nothing said why.
+                if sync_success and media_client is not None and matched_tracks:
+                    unplaced_results, placement_known, synced_tracks = await self._read_back_placement(
+                        media_client, server_type, playlist.name,
+                        _navidrome_id_kw.get('playlist_id'),
+                        matched_tracks, synced_tracks)
                 # Not in library (for wishlist), not "total minus playlist size".
                 failed_tracks = unmatched_count
 
@@ -1169,6 +1187,16 @@ class PlaylistSyncService:
                     # found, but not on the playlist as its own entry: the file
                     # it matched is already there under this other source track
                     detail['folded_into'] = _source_label(keeper.spotify_track)
+                if _is_found:
+                    # where it stands on the server playlist (#2235)
+                    from core.sync.server_placement import (
+                        DUPLICATE, NOT_ON_SERVER, ON_PLAYLIST)
+                    if id(mr) in unplaced_results:
+                        detail['server_placement'] = NOT_ON_SERVER
+                    elif keeper is not None:
+                        detail['server_placement'] = DUPLICATE
+                    elif placement_known:
+                        detail['server_placement'] = ON_PLAYLIST
                 _match_details.append(detail)
 
             result = SyncResult(
@@ -1183,6 +1211,7 @@ class PlaylistSyncService:
                 wishlist_added_count=wishlist_added_count,
                 match_details=_match_details,
                 duplicate_tracks=len(folds),
+                unplaced_tracks=len(unplaced_results),
             )
 
             logger.info(f"Sync completed: {result.success_rate:.1f}% success rate")
@@ -1204,6 +1233,59 @@ class PlaylistSyncService:
             if not getattr(self, 'syncing_playlists', None):
                 self._cancelled = False
     
+    async def _read_back_placement(self, media_client, server_type, playlist_name,
+                                   playlist_id, matched_tracks, synced_tracks):
+        """read the server playlist back after a write and say which matched
+        tracks it doesn't hold (#2235).
+
+        returns ``(unplaced_result_ids, known, synced_tracks)``: the
+        MatchResults (by id()) that aren't on the playlist, whether the
+        playlist could be read at all, and synced_tracks corrected to what
+        the server really holds. a playlist that can't be read changes
+        nothing: no answer is not "all missing"."""
+        from core.sync.server_placement import missing_from_server, norm_id
+        # a match with no server id never went out at all: the dedupe drops
+        # a None key without a word, so it counted as matched and synced
+        no_id = {id(r) for r in matched_tracks
+                 if r.plex_track is not None
+                 and not norm_id(getattr(r.plex_track, 'ratingKey', None))}
+        reader = getattr(media_client, 'read_playlist_track_ids', None)
+        server_ids = None
+        if callable(reader):
+            try:
+                server_ids = await run_blocking(reader, playlist_name, playlist_id)
+            except Exception as read_err:  # noqa: BLE001 - a readback never fails a sync
+                logger.debug("playlist readback for %r failed: %s", playlist_name, read_err)
+                server_ids = None
+        if not isinstance(server_ids, (list, tuple)):
+            server_ids = None  # only a real list is an answer
+        # the ids this sync wanted on the playlist, once each. read off the
+        # matches still standing, so a dead id the write guard already moved
+        # to missing (#1754) isn't counted twice
+        sent = {norm_id(getattr(r.plex_track, 'ratingKey', None))
+                for r in matched_tracks if r.plex_track is not None} - {''}
+        missing = missing_from_server(sent, server_ids)
+        unplaced = set(no_id)
+        if missing:
+            unplaced.update(
+                id(r) for r in matched_tracks
+                if r.plex_track is not None
+                and norm_id(getattr(r.plex_track, 'ratingKey', None)) in missing)
+        if server_ids is not None:
+            synced_tracks = len(sent) - len(missing)
+        else:
+            synced_tracks = max(0, min(synced_tracks, len(sent)))
+        if unplaced:
+            names = [f"'{getattr(r.plex_track, 'title', '') or getattr(r.spotify_track, 'name', '')}' "
+                     f"(server id {getattr(r.plex_track, 'ratingKey', None) or 'none'})"
+                     for r in matched_tracks if id(r) in unplaced]
+            logger.warning(
+                "Playlist '%s': %d track(s) are in the library but the %s playlist "
+                "doesn't hold them (the server doesn't know them under these ids yet; "
+                "a library scan on the server and in SoulSync usually fixes it): %s",
+                playlist_name, len(unplaced), server_type, ", ".join(names[:10]))
+        return unplaced, server_ids is not None, synced_tracks
+
     def _drop_skipped_unmatched_wishlist(self, playlist, unmatched_tracks,
                                           total_tracks=0, matched_tracks=()):
         """Clear the unmatched list when this sync skips the sync-time
