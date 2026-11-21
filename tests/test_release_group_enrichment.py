@@ -259,3 +259,71 @@ def test_an_unreadable_track_list_is_asked_again_later(db, worker):
     worker.mb_service.mb_client.get_release.return_value = None
     _drain(worker)
     assert _statuses(db) == {"error:"}
+
+
+def test_spotify_version_tails_still_count_as_the_tracks(db, worker):
+    # spotify names remastered tracks 'Never Meant - Remastered 2014'; the
+    # release lists 'Never Meant'. the tail must not read as another album.
+    _wishlist_album(db, "American Football", "American Football",
+                    ["Never Meant - Remastered 2014", "The Summer Ends (2014 Remaster)", "Honestly?"])
+    worker.mb_service.match_release = MagicMock(return_value={"mbid": REL, "release_group_mbid": RG})
+    worker.mb_service.mb_client.get_release.return_value = _release_with(
+        "Never Meant", "The Summer Ends", "Honestly?", "For Sure")
+    _drain(worker)
+    assert _statuses(db) == {f"matched:{RG}"}
+
+
+RG_OTHER = "44444444-4444-4444-8444-444444444444"
+
+
+def test_a_namesake_that_carries_the_tracks_is_found_when_the_first_does_not(db, worker):
+    # three self-titled records tie on title and artist; the best-scored one
+    # is the 2016 album, the wishlist holds the 1999 one
+    _wishlist_album(db, "American Football", "American Football", ["Never Meant", "The Summer Ends"])
+    worker.mb_service.match_release = MagicMock(return_value={"mbid": REL, "release_group_mbid": RG})
+    client = worker.mb_service.mb_client
+    client.search_release.return_value = [
+        {"id": REL, "title": "American Football", "release-group": {"id": RG}},
+        {"id": REL_OTHER, "title": "American Football", "release-group": {"id": RG_OTHER}},
+    ]
+    client.get_release.side_effect = lambda mbid, includes=None: (
+        _release_with("Where Are We Now?", "Born to Lose") if mbid == REL
+        else _release_with("Never Meant", "The Summer Ends", "Honestly?"))
+    _drain(worker)
+    assert _statuses(db) == {f"matched:{RG_OTHER}"}
+    # the failed release is not read twice
+    assert [c.args[0] for c in client.get_release.call_args_list] == [REL, REL_OTHER]
+
+
+def test_other_namesakes_unreadable_is_asked_again_later(db, worker):
+    _wishlist_album(db, "Album A", "The Testers", ["One", "Two"])
+    worker.mb_service.match_release = MagicMock(return_value={"mbid": REL, "release_group_mbid": RG})
+    client = worker.mb_service.mb_client
+    client.search_release.side_effect = RuntimeError("503")
+    client.get_release.return_value = _release_with("Three", "Four")
+    _drain(worker)
+    assert _statuses(db) == {"error:"}
+
+
+def test_old_wishlist_matches_are_checked_again_once(db):
+    import json
+    with db._get_connection() as conn:
+        # a fresh db has run it already; an upgraded one has not
+        conn.execute("DROP TABLE _wishlist_release_groups_rechecked")
+        for n, status in enumerate(("matched", "not_found")):
+            conn.execute(
+                "INSERT INTO wishlist_tracks (spotify_track_id, spotify_data, profile_id,"
+                " musicbrainz_release_group_id, musicbrainz_match_status) VALUES (?, ?, 1, ?, ?)",
+                (f"t{n}", json.dumps({"name": "x"}), RG if status == "matched" else None, status))
+        db._recheck_wishlist_release_groups(conn.cursor())
+        conn.commit()
+        rows = conn.execute("SELECT spotify_track_id, musicbrainz_release_group_id, musicbrainz_match_status"
+                            " FROM wishlist_tracks ORDER BY spotify_track_id").fetchall()
+        assert [tuple(r) for r in rows] == [("t0", None, None), ("t1", None, "not_found")]
+        # once: a row matched after the recheck keeps its group
+        conn.execute("UPDATE wishlist_tracks SET musicbrainz_release_group_id = ?,"
+                     " musicbrainz_match_status = 'matched' WHERE spotify_track_id = 't0'", (RG,))
+        db._recheck_wishlist_release_groups(conn.cursor())
+        conn.commit()
+        assert conn.execute("SELECT musicbrainz_match_status FROM wishlist_tracks"
+                            " WHERE spotify_track_id = 't0'").fetchone()[0] == "matched"

@@ -105,6 +105,10 @@ class MusicBrainzWorker:
             'errors': 0
         }
 
+        # (album, artist) -> (time, (group, unread)): the rows of one wishlist
+        # album share one track-list check (_match_wishlist_album)
+        self._wishlist_verdicts: Dict[tuple, tuple] = {}
+
         # Retry configuration
         self.retry_days = 30  # Retry 'not_found' items after 30 days
 
@@ -396,7 +400,7 @@ class MusicBrainzWorker:
         """
         album, artist = item['album'], item.get('artist') or ''
         key = (album.casefold(), artist.casefold())
-        verdicts = self.__dict__.setdefault('_wishlist_verdicts', {})
+        verdicts = self._wishlist_verdicts
         cached = verdicts.get(key)
         if cached and time.time() - cached[0] < 3600:
             return cached[1]
@@ -416,6 +420,19 @@ class MusicBrainzWorker:
         if result and result.get('mbid'):
             carries = (self.mb_service.release_carries_tracks(result['mbid'], titles)
                        if checkable else True)
+            if carries is False:
+                # the best-scored namesake is not it: one of the others may be
+                try:
+                    other = self.mb_service.release_carrying_wishlist_tracks(
+                        album, artist or None, titles, skip=(result['mbid'],))
+                except Exception as exc:  # noqa: BLE001 - a lookup failure is "ask later"
+                    logger.debug(f"Wishlist album '{album}': other releases not read: {exc}")
+                    carries = None
+                else:
+                    if other and other.get('id'):
+                        result = {'mbid': other['id'],
+                                  'release_group_mbid': self.mb_service.release_group_of(other)}
+                        carries = True
             if carries is None:
                 unread = True
             elif carries:
