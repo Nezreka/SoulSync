@@ -10,7 +10,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { appURL } from '@/platform/url-base';
 
-import { bookCover, posterUrl, proxiedImage } from '../-lib/rails';
+import { libraryThumb, remoteImage, youtubeThumb } from '../-lib/images';
+import { bookCover, posterUrl } from '../-lib/rails';
 import {
   albumsQuery,
   artistsQuery,
@@ -80,7 +81,7 @@ export function Search() {
         key: `ar${a.id}`,
         title: a.name,
         sub: 'Artist',
-        art: a.image_url ?? a.remote_image_url,
+        art: libraryThumb(a.image_url) ?? remoteImage(a.remote_image_url),
         href: `/player/music/artist/${a.id}`,
       })),
     );
@@ -90,7 +91,7 @@ export function Search() {
         key: `al${a.id}`,
         title: a.title,
         sub: a.artist_name ?? 'Album',
-        art: a.image_url ?? a.remote_image_url,
+        art: libraryThumb(a.image_url) ?? remoteImage(a.remote_image_url),
         href: `/player/music/album/${a.id}`,
       })),
     );
@@ -128,7 +129,7 @@ export function Search() {
             key: `y${v.id}`,
             title: v.title,
             sub: v.channel_title ?? 'YouTube',
-            art: proxiedImage(v.thumbnail_url),
+            art: youtubeThumb(v.thumbnail_url, 'card', v.id),
             href: v.channel_id
               ? `/player/youtube/${encodeURIComponent(v.channel_id)}`
               : '/player/youtube',
@@ -143,7 +144,7 @@ export function Search() {
           key: `p${p.id}`,
           title: p.title,
           sub: p.author ?? 'Podcast',
-          art: p.artwork_url,
+          art: remoteImage(p.artwork_url),
           href: `/player/podcasts/${p.id}`,
         })),
     );

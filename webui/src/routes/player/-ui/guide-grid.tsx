@@ -13,7 +13,7 @@ import type { GuideBlock, GuideProgram } from '../-lib/schedule';
 
 import { clock, runtime } from '../-lib/format';
 import { blockArtists, mergeIntoBlocks } from '../-lib/schedule';
-import { Art, PlayButton, PlayerLink, styles as s } from './kit';
+import { Art, PlayButton, PlayerLink, styles as s, useProgressive } from './kit';
 
 export interface Picked {
   channel: Channel;
@@ -98,6 +98,22 @@ export function GuideGrid({
   for (let t = Math.ceil(from / 1_800_000) * 1_800_000; t < to; t += 1_800_000) marks.push(t);
   const nowVisible = now >= from && now < to;
 
+  // eighty channels of cells is a lot to mount at once on a TV: rows come in
+  // a couple of dozen at a time, ahead of the scroll
+  const totalRows = groups.reduce((n, g) => n + g.channels.length, 0);
+  const rows = useProgressive(
+    totalRows,
+    groups.map((g) => `${g.kind}:${g.channels.length}`).join('|'),
+    24,
+  );
+  let budget = rows.count;
+  const visibleGroups = [];
+  for (const group of groups) {
+    if (budget <= 0) break;
+    visibleGroups.push({ ...group, channels: group.channels.slice(0, budget) });
+    budget -= group.channels.length;
+  }
+
   return (
     <div className={s.guide} role="grid" aria-label={label}>
       <div className={s.guideCanvas} style={{ width: `calc(var(--g-chan) + ${width}px)` }}>
@@ -111,7 +127,7 @@ export function GuideGrid({
             ))}
           </div>
         </div>
-        {groups.map((group) => (
+        {visibleGroups.map((group) => (
           <div key={group.kind} role="rowgroup" aria-label={group.label}>
             <div className={s.guideGroup}>{group.label}</div>
             {group.channels.map((channel) => {
@@ -186,6 +202,9 @@ export function GuideGrid({
             })}
           </div>
         ))}
+        {rows.count < totalRows ? (
+          <div ref={rows.sentinel} className={s.gridMore} aria-hidden="true" />
+        ) : null}
         {nowVisible ? (
           <div
             className={s.guideNow}

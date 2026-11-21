@@ -13,7 +13,8 @@ import { appURL } from '@/platform/url-base';
 import type { CatalogMovie, CatalogShow, CatalogYoutube, VideoCatalog } from '../-player.types';
 import type { GuideItem } from './schedule';
 
-import { posterUrl, proxiedImage } from './rails';
+import { youtubeThumb } from './images';
+import { posterUrl } from './rails';
 
 export type ChannelKind =
   | 'type'
@@ -79,16 +80,25 @@ export function movieItem(movie: CatalogMovie): GuideItem {
   };
 }
 
+const episodeCache = new WeakMap<CatalogShow, GuideItem[]>();
+
+/** a show's episodes as guide items, made once per show (a show sits in several channels) */
 export function episodeItems(show: CatalogShow): GuideItem[] {
-  return show.episodes.map(([id, season, episode, seconds, title]) => ({
+  const hit = episodeCache.get(show);
+  if (hit) return hit;
+  const href = `/player/tv/${show.id}`;
+  const art = show.has_poster ? posterUrl('show', show.id) : null;
+  const items = show.episodes.map(([id, season, episode, seconds, title]) => ({
     key: `episode:${id}`,
     title: show.title,
     subtitle: `S${season} E${episode}${title ? ` · ${title}` : ''}`,
     seconds: seconds ?? 0,
-    href: `/player/tv/${show.id}`,
-    art: show.has_poster ? posterUrl('show', show.id) : null,
+    href,
+    art,
     kind: 'episode',
   }));
+  episodeCache.set(show, items);
+  return items;
 }
 
 export function youtubeItem(video: CatalogYoutube): GuideItem {
@@ -97,7 +107,7 @@ export function youtubeItem(video: CatalogYoutube): GuideItem {
     title: video.title,
     subtitle: video.channel_title ?? undefined,
     seconds: video.duration_seconds ?? 0,
-    art: proxiedImage(video.thumbnail_url),
+    art: youtubeThumb(video.thumbnail_url, 'card', video.id),
     kind: 'youtube',
     href: video.channel_id
       ? `/player/youtube/${encodeURIComponent(video.channel_id)}`
@@ -126,13 +136,33 @@ export function trackItem(track: MusicTrackLike): GuideItem {
   };
 }
 
-function distinctItems(pool: GuideItem[]): number {
-  return new Set(pool.map((item) => item.key)).size;
+/** enough different items to fill a channel? stops counting once it knows */
+function hasEnough(pool: GuideItem[], need = MIN_POOL): boolean {
+  const seen = new Set<string>();
+  for (const item of pool) {
+    seen.add(item.key);
+    if (seen.size >= need) return true;
+  }
+  return false;
 }
 
 function add(out: Channel[], channel: Channel) {
   const playable = channel.pool.filter((item) => item.seconds >= 60);
-  if (distinctItems(playable) >= MIN_POOL) out.push({ ...channel, pool: playable });
+  if (hasEnough(playable)) out.push({ ...channel, pool: playable });
+}
+
+/** the "Music" channel: songs from across the library */
+export function musicTypeChannel(tracks: readonly MusicTrackLike[]): Channel | null {
+  const out: Channel[] = [];
+  add(out, {
+    id: 'type-music',
+    name: 'Music',
+    kind: 'type',
+    blurb: 'songs from your library',
+    pool: tracks.map(trackItem),
+    music: true,
+  });
+  return out[0] ?? null;
 }
 
 function groupBy<T>(items: readonly T[], keys: (item: T) => string[]): Map<string, T[]> {
@@ -179,14 +209,8 @@ export function autoChannels(
     blurb: 'your downloaded videos',
     pool: youtube.map(youtubeItem),
   });
-  add(out, {
-    id: 'type-music',
-    name: 'Music',
-    kind: 'type',
-    blurb: 'songs from your library',
-    pool: tracks.map(trackItem),
-    music: true,
-  });
+  const music = musicTypeChannel(tracks);
+  if (music) out.push(music);
 
   // genres mix films and episodes
   const genreMovies = groupBy(movies, (m) => m.genres);

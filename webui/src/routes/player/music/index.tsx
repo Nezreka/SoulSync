@@ -7,6 +7,7 @@ import type { RailCard } from '../-lib/rails';
 import type { LibAlbum, LibArtist, LibSong, Pagination } from '../-player.types';
 
 import { runtime } from '../-lib/format';
+import { libraryThumb, remoteImage } from '../-lib/images';
 import { CardGrid, Empty, PageTitle, PlayButton, PlayerLink, Tabs, styles as s } from '../-ui/kit';
 import { NotPartOfProfile } from '../-ui/not-part';
 import { useSections } from '../-ui/sections';
@@ -76,7 +77,7 @@ function MusicBrowse() {
     key: `ar${a.id}`,
     title: a.name,
     subtitle: a.album_count ? `${a.album_count} album${a.album_count === 1 ? '' : 's'}` : undefined,
-    art: a.image_url ?? a.remote_image_url,
+    art: libraryThumb(a.image_url) ?? remoteImage(a.remote_image_url),
     href: `/player/music/artist/${a.id}`,
     shape: 'square',
   }));
@@ -84,7 +85,7 @@ function MusicBrowse() {
     key: `al${a.id}`,
     title: a.title,
     subtitle: [a.artist_name, a.year].filter(Boolean).join(' · '),
-    art: a.image_url ?? a.remote_image_url,
+    art: libraryThumb(a.image_url) ?? remoteImage(a.remote_image_url),
     href: `/player/music/album/${a.id}`,
     shape: 'square',
   }));

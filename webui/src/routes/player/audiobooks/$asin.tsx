@@ -34,7 +34,7 @@ function BookPage() {
     return <div className={s.skeleton} style={{ height: '50vh', marginTop: '2rem' }} />;
   if (!book) return <NotFound what="Audiobook" />;
 
-  const cover = bookCover(book);
+  const cover = bookCover(book, 'hero');
   const seconds = (book.runtime_minutes ?? catalog.data?.runtime_minutes ?? 0) * 60;
   const resume = saved.data?.[asin];
   const resuming = resume && !resume.finished && resume.position_seconds > 0;

@@ -621,3 +621,69 @@ describe('the guide, round two', () => {
     expect(b.from - a.from).toBe(2 * 3_600_000);
   });
 });
+
+describe('image sizes', () => {
+  it('asks each cdn for a card-sized copy', async () => {
+    const { remoteImage, youtubeThumb, libraryThumb, posterSet } = await import('./images');
+    expect(remoteImage('https://image.tmdb.org/t/p/original/a.jpg')).toContain(
+      encodeURIComponent('/t/p/w342/a.jpg'),
+    );
+    expect(remoteImage('https://image.tmdb.org/t/p/original/a.jpg', 'hero')).toContain(
+      encodeURIComponent('/t/p/w1280/'),
+    );
+    expect(
+      remoteImage('https://cdn-images.dzcdn.net/images/cover/x/1000x1000-000000-80-0-0.jpg'),
+    ).toContain('/250x250-');
+    expect(remoteImage('https://is1-ssl.mzstatic.com/image/thumb/a/3000x3000bb.jpg')).toContain(
+      '/300x300bb.',
+    );
+    expect(remoteImage('https://m.media-amazon.com/images/I/abc._SL500_.jpg')).toContain(
+      '._SL300_.',
+    );
+    expect(remoteImage('https://yt3.googleusercontent.com/abc=s0')).toContain(
+      encodeURIComponent('abc=s240'),
+    );
+    expect(remoteImage('https://coverartarchive.org/release/x/front')).toBe(
+      'https://coverartarchive.org/release/x/front-250',
+    );
+    expect(remoteImage('https://example.com/huge.jpg')).toBe(
+      `/api/image-proxy?url=${encodeURIComponent('https://example.com/huge.jpg')}&v=rail`,
+    );
+    expect(remoteImage(null)).toBeNull();
+    expect(youtubeThumb('https://i.ytimg.com/vi/abc123/hq720.jpg?sqp=x', 'card')).toContain(
+      encodeURIComponent('https://i.ytimg.com/vi/abc123/mqdefault.jpg'),
+    );
+    expect(youtubeThumb('https://i.ytimg.com/vi/abc123/hq720.jpg', 'hero')).toContain(
+      encodeURIComponent('hq720'),
+    );
+    expect(libraryThumb('/api/library/v2/artwork/album/5?v=1')).toBe(
+      '/api/library/v2/artwork/album/5?v=1&size=thumb',
+    );
+    const set = posterSet('movie', 7);
+    expect(set.srcSet.split(', ')).toEqual([
+      '/api/video/poster/movie/7?w=185 185w',
+      '/api/video/poster/movie/7?w=342 342w',
+      '/api/video/poster/movie/7?w=500 500w',
+    ]);
+  });
+});
+
+describe('lazy seeded order', () => {
+  it('is a full permutation, seeded, and cheap to take a few from', async () => {
+    const { seededOrder } = await import('./schedule');
+    const items = Array.from({ length: 1000 }, (_, i) => i);
+    const all = [...seededOrder(items, 42)];
+    expect([...all].sort((a, b) => a - b)).toEqual(items);
+    expect([...seededOrder(items, 42)]).toEqual(all);
+    expect([...seededOrder(items, 43)]).not.toEqual(all);
+    const it = seededOrder(items, 42);
+    expect([it.next().value, it.next().value]).toEqual(all.slice(0, 2));
+  });
+
+  it('a huge pool schedules a day quickly', () => {
+    const big = pool(40_000, 2400);
+    const t0 = performance.now();
+    scheduleDay('huge', big, new Date(2026, 10, 20));
+    expect(performance.now() - t0).toBeLessThan(80);
+  });
+});

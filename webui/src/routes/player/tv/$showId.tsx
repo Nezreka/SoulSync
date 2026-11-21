@@ -5,6 +5,7 @@ import { useMemo, useState } from 'react';
 import type { DetailEpisode, VideoFile } from '../-player.types';
 
 import { remaining, runtime, shortDate } from '../-lib/format';
+import { backdropSet, stillSet, WIDE_SIZES } from '../-lib/images';
 import {
   backdropUrl,
   fraction,
@@ -82,7 +83,9 @@ function EpisodeRow({
       >
         <div className={s.rowArt}>
           <Art
-            src={episode.has_still ? posterUrl('episode', episode.id, 400) : null}
+            src={episode.has_still ? stillSet(episode.id).src : null}
+            srcSet={episode.has_still ? stillSet(episode.id).srcSet : undefined}
+            sizes={WIDE_SIZES}
             alt={`Episode ${episode.episode_number}`}
           />
           {done !== undefined ? (
@@ -195,6 +198,7 @@ function ShowPage() {
     <>
       <Hero
         backdrop={show.has_backdrop !== false ? backdropUrl('show', id) : null}
+        backdropSrcSet={backdropSet('show', id).srcSet}
         poster={show.has_poster !== false ? posterUrl('show', id, 500) : null}
         title={show.title}
         trailer={<BackgroundTrailer kind="show" id={id} />}

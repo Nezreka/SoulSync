@@ -2,7 +2,8 @@ import { useQuery } from '@tanstack/react-query';
 import { createFileRoute } from '@tanstack/react-router';
 
 import { ago, clockDuration, compactCount } from '../-lib/format';
-import { proxiedImage, ytChannelCard, ytVideoCard } from '../-lib/rails';
+import { remoteImage, youtubeThumb } from '../-lib/images';
+import { ytChannelCard, ytVideoCard } from '../-lib/rails';
 import { youtubeHomeQuery } from '../-player.api';
 import { Badge, CardRail, Empty, Hero, PlayButton, PlayerLink, styles as s } from '../-ui/kit';
 import { NotPartOfProfile } from '../-ui/not-part';
@@ -53,13 +54,13 @@ function YoutubeHome() {
     <>
       {lead ? (
         <Hero
-          backdrop={proxiedImage(lead.thumbnail)}
+          backdrop={youtubeThumb(lead.thumbnail, 'hero')}
           kicker={
             <span className={s.channelKicker}>
               {leadChannel?.avatar ? (
                 <img
                   className={s.kickerAvatar}
-                  src={proxiedImage(leadChannel.avatar) ?? ''}
+                  src={remoteImage(leadChannel.avatar) ?? ''}
                   alt=""
                 />
               ) : null}

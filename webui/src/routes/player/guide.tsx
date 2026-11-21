@@ -9,6 +9,7 @@ import type { ChannelFilter } from './-lib/channels';
 import {
   autoChannels,
   CHANNEL_GROUPS,
+  musicTypeChannel,
   matchesFilter,
   numberChannels,
   playlistChannel,
@@ -151,16 +152,27 @@ function GuidePage() {
   const playlistData = useRef(playlistTracks);
   playlistData.current = playlistTracks;
 
+  const cat = useMemo(
+    () =>
+      catalog.data ?? {
+        movies: [],
+        shows: [],
+        youtube: [],
+        recent_episodes: [],
+        kinds: { movies: false, shows: false, youtube: false },
+      },
+    [catalog.data],
+  );
+  // each part rebuilds only when its own data lands
+  const videoChannels = useMemo(() => autoChannels(cat), [cat]);
+  const musicChannel = useMemo(() => musicTypeChannel(musicPool), [musicPool]);
+  const serverMusic = useMemo(
+    () => (musicChannels.data ?? []).map(serverMusicChannel).filter((c): c is Channel => !!c),
+    [musicChannels.data],
+  );
   const channels = useMemo(() => {
-    const out: Channel[] = [];
-    const cat = catalog.data ?? {
-      movies: [],
-      shows: [],
-      youtube: [],
-      recent_episodes: [],
-      kinds: { movies: false, shows: false, youtube: false },
-    };
-    out.push(...autoChannels(cat, musicPool));
+    const out: Channel[] = [...videoChannels];
+    if (musicChannel) out.splice(Math.min(3, out.length), 0, musicChannel);
     firstPlaylists.forEach((p, i) => {
       const tracks = playlistData.current[i]?.data ?? [];
       const channel = playlistChannel({
@@ -175,16 +187,13 @@ function GuidePage() {
       });
       if (channel) out.push(channel);
     });
-    for (const m of musicChannels.data ?? []) {
-      const channel = serverMusicChannel(m);
-      if (channel) out.push(channel);
-    }
+    out.push(...serverMusic);
     for (const rule of rules) {
       const channel = ruleChannel(rule, cat);
       if (channel) out.push(channel);
     }
     return numberChannels(out);
-  }, [catalog.data, musicPool, playlistKey, rules, firstPlaylists, musicChannels.data]);
+  }, [videoChannels, musicChannel, serverMusic, playlistKey, rules, firstPlaylists, cat]);
 
   const { from, to } = guideWindow(now, offset);
   // a schedule only changes when the window or the half hour does

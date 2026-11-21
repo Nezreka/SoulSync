@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { createFileRoute } from '@tanstack/react-router';
 
 import { runtime, shortDate } from '../-lib/format';
+import { backdropSet } from '../-lib/images';
 import { backdropUrl, movieCard, moreLikeThis, posterUrl, proxiedImage } from '../-lib/rails';
 import { rankVersions, resolutionLabel } from '../-lib/video';
 import {
@@ -55,6 +56,7 @@ function MoviePage() {
     <>
       <Hero
         backdrop={m.has_backdrop !== false ? backdropUrl('movie', id) : null}
+        backdropSrcSet={backdropSet('movie', id).srcSet}
         poster={m.has_poster !== false ? posterUrl('movie', id, 500) : null}
         title={m.title}
         trailer={<BackgroundTrailer kind="movie" id={id} />}

@@ -2,7 +2,8 @@ import { useQuery } from '@tanstack/react-query';
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 
 import { compactCount, plainText } from '../-lib/format';
-import { proxiedImage, ytVideoCard } from '../-lib/rails';
+import { remoteImage, youtubeThumb } from '../-lib/images';
+import { ytVideoCard } from '../-lib/rails';
 import { youtubeChannelQuery } from '../-player.api';
 import { Badge, CardGrid, Empty, Hero, PlayButton, Tabs, styles as s } from '../-ui/kit';
 import { NotFound, NotPartOfProfile } from '../-ui/not-part';
@@ -38,13 +39,13 @@ function ChannelPage() {
       : show === 'embed'
         ? videos.filter((v) => !v.downloaded)
         : videos;
-  const art = proxiedImage(channel.banner) ?? proxiedImage(videos[0]?.thumbnail);
+  const art = remoteImage(channel.banner, 'hero') ?? youtubeThumb(videos[0]?.thumbnail, 'hero');
 
   return (
     <>
       <Hero
         backdrop={art}
-        poster={proxiedImage(channel.avatar)}
+        poster={remoteImage(channel.avatar)}
         posterShape="square"
         posterRound
         kicker={channel.handle ?? 'YouTube channel'}

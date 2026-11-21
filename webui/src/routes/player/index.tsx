@@ -6,6 +6,7 @@ import type { RailCard } from './-lib/rails';
 import type { CatalogMovie, CatalogShow } from './-player.types';
 
 import { runtime } from './-lib/format';
+import { backdropSet, remoteImage } from './-lib/images';
 import {
   backdropUrl,
   continueRails,
@@ -81,9 +82,20 @@ function PlayerHome() {
 
   const rails = useMemo(() => continueRails(progress.data ?? []), [progress.data]);
   const cat = catalog.data;
-  const spotlight = cat ? pickSpotlight(cat.movies, cat.shows) : null;
+  const spotlight = useMemo(() => (cat ? pickSpotlight(cat.movies, cat.shows) : null), [cat]);
 
-  const recentMovies = cat && sections.movies ? recentMovieCards(cat.movies) : [];
+  // a library's worth of sorting: once per catalog, not once per render
+  const { recentMovies, topRated } = useMemo(() => {
+    if (!cat || !sections.movies) return { recentMovies: [], topRated: [] };
+    return {
+      recentMovies: recentMovieCards(cat.movies),
+      topRated: cat.movies
+        .filter((m) => (m.rating ?? 0) > 0)
+        .sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0))
+        .slice(0, 20)
+        .map((m) => ({ ...movieCard(m), key: `top:${m.id}` })),
+    };
+  }, [cat, sections.movies]);
   const recentEpisodes = cat && sections.tv ? recentEpisodeCards(cat.recent_episodes) : [];
   const recentVideos = cat ? recentYoutubeCards(cat.youtube) : [];
   const recentAlbums = recentAlbumCards(albums.data?.albums ?? []);
@@ -92,7 +104,7 @@ function PlayerHome() {
     key: `podcast:${p.id}`,
     title: p.title,
     subtitle: p.author ?? undefined,
-    art: p.artwork_url,
+    art: remoteImage(p.artwork_url),
     href: `/player/podcasts/${p.id}`,
     shape: 'square',
   }));
@@ -113,6 +125,7 @@ function PlayerHome() {
       {spotlight ? (
         <Hero
           backdrop={backdropUrl(spotlight.kind, spotlight.item.id)}
+          backdropSrcSet={backdropSet(spotlight.kind, spotlight.item.id).srcSet}
           kicker={spotlight.kind === 'movie' ? 'New in movies' : 'New episodes'}
           title={spotlight.item.title}
           meta={
@@ -190,14 +203,7 @@ function PlayerHome() {
       <CardRail title="Your podcasts" cards={podcastCards} more={{ to: '/player/podcasts' }} />
 
       {spotlight && sections.movies && cat ? (
-        <CardRail
-          title="Top rated in your library"
-          cards={[...cat.movies]
-            .filter((m) => (m.rating ?? 0) > 0)
-            .sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0))
-            .slice(0, 20)
-            .map((m) => ({ ...movieCard(m), key: `top:${m.id}` }))}
-        />
+        <CardRail title="Top rated in your library" cards={topRated} />
       ) : null}
 
       {nothing ? (

@@ -81,7 +81,34 @@ export function startOfLocalDay(ms: number): number {
   return d.getTime();
 }
 
+/**
+ * a seeded random order drawn lazily: forward fisher-yates over a virtual
+ * array (only the swapped slots are stored), so taking the 30 movies a day
+ * needs costs 30 steps, not a shuffle of all 9,000.
+ */
+export function* seededOrder<T>(items: readonly T[], seed: number): Generator<T> {
+  const n = items.length;
+  const rand = seededRandom(seed);
+  const swapped = new Map<number, number>();
+  for (let i = 0; i < n; i++) {
+    const j = i + Math.floor(rand() * (n - i));
+    const atJ = swapped.get(j) ?? j;
+    swapped.set(j, swapped.get(i) ?? i);
+    yield items[atJ];
+  }
+}
+
+const airableCache = new WeakMap<readonly GuideItem[], GuideItem[]>();
+
 export function airable(items: readonly GuideItem[]): GuideItem[] {
+  const hit = airableCache.get(items);
+  if (hit) return hit;
+  const out = airableUncached(items);
+  airableCache.set(items, out);
+  return out;
+}
+
+function airableUncached(items: readonly GuideItem[]): GuideItem[] {
   return items
     .filter((item) => Number.isFinite(item.seconds) && item.seconds >= MIN_SECONDS)
     .map((item) => (item.seconds > MAX_SECONDS ? { ...item, seconds: MAX_SECONDS } : item));
@@ -100,11 +127,34 @@ export interface ScheduleOptions {
  * end of the day. an ordered pool continues from a day-based offset so an
  * episodic channel moves forward through the run day by day.
  */
+const dayCache = new WeakMap<readonly GuideItem[], Map<string, GuideProgram[]>>();
+
+/** a channel's day, computed once per pool: browsing or the half hour ticking reuses it */
 export function scheduleDay(
   channelId: string,
   pool: readonly GuideItem[],
   day: Date,
   options: ScheduleOptions = {},
+): GuideProgram[] {
+  const key = `${channelId}|${startOfLocalDay(day.getTime())}|${options.ordered ? 1 : 0}`;
+  let days = dayCache.get(pool);
+  if (!days) {
+    days = new Map();
+    dayCache.set(pool, days);
+  }
+  const hit = days.get(key);
+  if (hit) return hit;
+  const out = scheduleDayUncached(channelId, pool, day, options);
+  if (days.size > 64) days.clear();
+  days.set(key, out);
+  return out;
+}
+
+function scheduleDayUncached(
+  channelId: string,
+  pool: readonly GuideItem[],
+  day: Date,
+  options: ScheduleOptions,
 ): GuideProgram[] {
   const items = airable(pool);
   if (!items.length) return [];
@@ -112,31 +162,36 @@ export function scheduleDay(
   const dayEnd = dayStart + 24 * 60 * 60 * 1000;
   const seed = hashSeed(`${channelId}|${dayKey(new Date(dayStart))}`);
 
-  let order: GuideItem[];
-  if (options.ordered) {
-    // days since the epoch in local time, so tomorrow starts further along
-    const dayIndex = Math.round(dayStart / 86400000);
-    const offset = (hashSeed(channelId) + dayIndex * 7) % items.length;
-    order = [...items.slice(offset), ...items.slice(0, offset)];
-  } else {
-    order = seededShuffle(items, seed);
-  }
-
   const out: GuideProgram[] = [];
   let cursor = dayStart;
-  let index = 0;
-  // a short pool repeats; a reshuffle per lap keeps repeats from lining up
-  let lap = 0;
-  while (cursor < dayEnd) {
-    if (index >= order.length) {
-      index = 0;
-      lap += 1;
-      if (!options.ordered) order = seededShuffle(items, seed + lap);
-    }
-    const item = order[index++];
+  const push = (item: GuideItem) => {
     const end = cursor + item.seconds * 1000;
     out.push({ ...item, start: cursor, end });
     cursor = end;
+  };
+
+  if (options.ordered) {
+    // days since the epoch in local time, so tomorrow starts further along
+    const dayIndex = Math.round(dayStart / 86400000);
+    let index = (hashSeed(channelId) + dayIndex * 7) % items.length;
+    while (cursor < dayEnd) {
+      push(items[index]);
+      index = (index + 1) % items.length;
+    }
+    return out;
+  }
+
+  // a short pool repeats; each lap draws a fresh order so repeats don't line up
+  let lap = 0;
+  let order = seededOrder(items, seed);
+  while (cursor < dayEnd) {
+    const next = order.next();
+    if (next.done) {
+      lap += 1;
+      order = seededOrder(items, seed + lap);
+      continue;
+    }
+    push(next.value);
   }
   return out;
 }

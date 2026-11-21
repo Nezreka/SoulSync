@@ -3,6 +3,7 @@ import { createFileRoute } from '@tanstack/react-router';
 
 import type { RailCard } from '../-lib/rails';
 
+import { remoteImage } from '../-lib/images';
 import { podcastSubsQuery } from '../-player.api';
 import { CardGrid, Empty, PageTitle, styles as s } from '../-ui/kit';
 import { NotPartOfProfile } from '../-ui/not-part';
@@ -22,7 +23,7 @@ function PodcastsBrowse() {
     key: `p${p.id}`,
     title: p.title,
     subtitle: p.author ?? undefined,
-    art: p.artwork_url,
+    art: remoteImage(p.artwork_url),
     href: `/player/podcasts/${p.id}`,
     shape: 'square',
   }));

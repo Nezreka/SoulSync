@@ -32,13 +32,19 @@ export function PlayerLink({
 /** an image that fades in when loaded, and says the title when there is none */
 export function Art({
   src,
+  srcSet,
+  sizes,
   alt,
   className,
   eager,
 }: {
   src?: string | null;
+  /** widths the server can make (images.ts); the browser picks by rendered size */
+  srcSet?: string;
+  sizes?: string;
   alt: string;
   className?: string;
+  /** above the fold: fetch now, and first */
   eager?: boolean;
 }) {
   const [state, setState] = useState<'loading' | 'ok' | 'failed'>(src ? 'loading' : 'failed');
@@ -49,8 +55,11 @@ export function Art({
         <img
           className={className ?? s.artImg}
           src={src}
+          srcSet={srcSet}
+          sizes={srcSet ? (sizes ?? 'auto, 220px') : undefined}
           alt=""
           loading={eager ? 'eager' : 'lazy'}
+          fetchPriority={eager ? 'high' : 'auto'}
           decoding="async"
           data-loaded={state === 'ok'}
           onLoad={() => setState('ok')}
@@ -99,7 +108,7 @@ export function Card({
   const body = (
     <>
       <div className={s.art}>
-        <Art src={card.art} alt={card.title} />
+        <Art src={card.art} srcSet={card.artSet} sizes={card.artSizes} alt={card.title} />
         {card.flag ? (
           <span className={s.cardFlag} data-tone={card.flag.tone}>
             {card.flag.label}
@@ -241,13 +250,58 @@ export function CardGrid({
   shape?: RailCard['shape'];
   round?: boolean;
 }) {
+  // a library is thousands of titles: render a screenful ahead and grow as
+  // the end comes near, instead of putting every card in the page at once
+  const shown = useProgressive(cards.length, `${cards.length}:${cards[0]?.key ?? ''}`);
   return (
-    <div className={s.grid} data-shape={shape}>
-      {cards.map((card) => (
-        <Card key={card.key} card={card} round={round} />
-      ))}
-    </div>
+    <>
+      <div className={s.grid} data-shape={shape}>
+        {cards.slice(0, shown.count).map((card) => (
+          <Card key={card.key} card={card} round={round} />
+        ))}
+      </div>
+      {shown.count < cards.length ? (
+        <div ref={shown.sentinel} className={s.gridMore} aria-hidden="true" />
+      ) : null}
+    </>
   );
+}
+
+export const GRID_STEP = 60;
+
+/** the nearest ancestor that scrolls vertically, or null for the viewport */
+export function scrollParent(el: HTMLElement): HTMLElement | null {
+  for (let node = el.parentElement; node; node = node.parentElement) {
+    const overflow = getComputedStyle(node).overflowY;
+    if (overflow === 'auto' || overflow === 'scroll') return node;
+  }
+  return null;
+}
+
+/**
+ * how many of ``total`` to render: a step, and another step each time the
+ * sentinel comes within a couple of screens. ``resetKey`` starts over (a new
+ * sort or filter).
+ */
+export function useProgressive(total: number, resetKey: string, step = GRID_STEP) {
+  const [count, setCount] = useState(step);
+  const observer = useRef<IntersectionObserver | null>(null);
+  useEffect(() => setCount(step), [resetKey, step]);
+  useEffect(() => () => observer.current?.disconnect(), []);
+  const sentinel = (el: HTMLDivElement | null) => {
+    observer.current?.disconnect();
+    if (!el || typeof IntersectionObserver === 'undefined') return;
+    // the margin only reaches ahead inside the observer's root, so the root
+    // is the box that actually scrolls (the page, or the guide's own grid)
+    observer.current = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) setCount((c) => Math.min(total, c + step));
+      },
+      { root: scrollParent(el), rootMargin: '1600px 0px' },
+    );
+    observer.current.observe(el);
+  };
+  return { count: Math.min(count, total), sentinel };
 }
 
 export function SkeletonRail({
@@ -288,10 +342,12 @@ export function Hero({
   overview,
   actions,
   trailer,
+  backdropSrcSet,
 }: {
   /** a background trailer layer (trailer.tsx), between the backdrop and its scrim */
   trailer?: ReactNode;
   backdrop?: string | null;
+  backdropSrcSet?: string;
   poster?: string | null;
   posterShape?: 'poster' | 'square';
   posterRound?: boolean;
@@ -307,7 +363,16 @@ export function Hero({
   return (
     <header className={s.hero}>
       <div className={s.heroBackdrop}>
-        {backdrop ? <Art src={backdrop} alt="" className={undefined} eager /> : null}
+        {backdrop ? (
+          <Art
+            src={backdrop}
+            srcSet={backdropSrcSet}
+            sizes="100vw"
+            alt=""
+            className={undefined}
+            eager
+          />
+        ) : null}
         {trailer}
       </div>
       <div className={s.heroBody}>

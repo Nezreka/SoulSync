@@ -1046,6 +1046,10 @@
   gap: calc(var(--u) * 1.6) calc(var(--u) * 1.2);
 }
 
+.gridMore {
+  height: 1px;
+}
+
 .grid[data-shape='square'] {
   --grid-min: var(--pl-card-square);
 }
@@ -2203,6 +2207,9 @@
 
 .guideRow {
   position: relative;
+  /* rows scrolled far out of the guide skip layout and paint */
+  content-visibility: auto;
+  contain-intrinsic-size: auto var(--g-row);
   display: flex;
   height: var(--g-row);
   border-bottom: 1px solid var(--pl-line);

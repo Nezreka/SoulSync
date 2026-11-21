@@ -23,9 +23,14 @@ export function remaining(position: number, duration: number | null | undefined)
   return `${runtime(left)} left`;
 }
 
+// one formatter: toLocaleTimeString builds a new one per call, and the guide
+// prints thousands of times
+let clockFormat: Intl.DateTimeFormat | null = null;
+
 /** 9:30 PM style clock in the viewer's locale */
 export function clock(ms: number): string {
-  return new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  clockFormat ??= new Intl.DateTimeFormat([], { hour: 'numeric', minute: '2-digit' });
+  return clockFormat.format(ms);
 }
 
 export function plural(n: number, one: string, many = `${one}s`): string {

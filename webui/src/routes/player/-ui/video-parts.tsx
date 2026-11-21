@@ -5,7 +5,7 @@ import { useState } from 'react';
 
 import type { CastMember, VideoFile } from '../-player.types';
 
-import { proxiedImage } from '../-lib/rails';
+import { remoteImage } from '../-lib/images';
 import { rankVersions, versionLines, VIDEO_SORTS, type VideoSort } from '../-lib/video';
 import { Art, VerdictBadge, styles as s } from './kit';
 
@@ -21,7 +21,7 @@ export function CastRow({ cast }: { cast?: CastMember[] }) {
           const body = (
             <>
               <div className={s.personPhoto}>
-                <Art src={proxiedImage(person.photo)} alt={person.name.slice(0, 1)} />
+                <Art src={remoteImage(person.photo)} alt={person.name.slice(0, 1)} />
               </div>
               <div className={s.personName}>{person.name}</div>
               {person.character ? <div className={s.personRole}>{person.character}</div> : null}

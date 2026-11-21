@@ -6,8 +6,9 @@ import type { RailCard } from './-lib/rails';
 import type { PersonCredit } from './-player.types';
 
 import { plainText, plural, shortDate } from './-lib/format';
+import { posterSet, remoteImage } from './-lib/images';
 import { dedupeCredits } from './-lib/people';
-import { backdropUrl, posterUrl, proxiedImage } from './-lib/rails';
+import { backdropUrl } from './-lib/rails';
 import { personQuery } from './-player.api';
 import { CardGrid, CardRail, Hero, Tabs, styles as s } from './-ui/kit';
 import { NotFound, NotPartOfProfile } from './-ui/not-part';
@@ -31,7 +32,12 @@ function creditCard(c: PersonCredit): RailCard {
     key: `${c.kind}:${c.tmdb_id}:${c.role ?? ''}`,
     title: c.title,
     subtitle: [c.year, c.role].filter(Boolean).join(' · '),
-    art: owned ? posterUrl(c.kind, c.library_id!) : c.poster ? proxiedImage(c.poster) : null,
+    ...(owned
+      ? {
+          art: posterSet(c.kind, c.library_id!).src,
+          artSet: posterSet(c.kind, c.library_id!).srcSet,
+        }
+      : { art: remoteImage(c.poster) }),
     href: owned ? `/player/${c.kind === 'movie' ? 'movies' : 'tv'}/${c.library_id}` : undefined,
     shape: 'poster',
     flag: owned ? { label: 'In your library', tone: 'yes' } : undefined,
@@ -72,7 +78,7 @@ function PersonPage() {
     <>
       <Hero
         backdrop={scene?.library_id ? backdropUrl(scene.kind, scene.library_id) : null}
-        poster={proxiedImage(p.photo)}
+        poster={remoteImage(p.photo, 'hero')}
         kicker={p.known_for ?? 'Person'}
         title={p.name}
         meta={
@@ -114,7 +120,7 @@ function PersonPage() {
           <div className={s.people}>
             {p.photos!.slice(0, 16).map((url) => (
               <div key={url} className={s.photo}>
-                <img src={proxiedImage(url) ?? ''} alt="" loading="lazy" />
+                <img src={remoteImage(url) ?? ''} alt="" loading="lazy" decoding="async" />
               </div>
             ))}
           </div>

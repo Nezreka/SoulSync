@@ -3,6 +3,7 @@ import { createFileRoute } from '@tanstack/react-router';
 import { useMemo, useState } from 'react';
 
 import { plainText, remaining, runtime, shortDate } from '../-lib/format';
+import { remoteImage } from '../-lib/images';
 import { episodeKey, fraction } from '../-lib/rails';
 import { podcastShowQuery, podcastSubsQuery, progressLookupQuery } from '../-player.api';
 import { Art, Badge, Hero, PlayButton, styles as s } from '../-ui/kit';
@@ -46,8 +47,8 @@ function PodcastPage() {
   return (
     <>
       <Hero
-        backdrop={art}
-        poster={art}
+        backdrop={remoteImage(art, 'hero')}
+        poster={remoteImage(art, 'hero')}
         posterShape="square"
         kicker="Podcast"
         title={show.data?.title ?? sub.title}
@@ -87,7 +88,7 @@ function PodcastPage() {
           return (
             <div key={key} className={s.row} data-media="true" tabIndex={0} data-nav>
               <div className={s.rowArt} style={{ aspectRatio: '1', width: '5.5em' }}>
-                <Art src={episode.artwork_url ?? art} alt="" />
+                <Art src={remoteImage(episode.artwork_url ?? art)} alt="" />
                 {done !== undefined ? (
                   <div className={s.rowBar}>
                     <div className={s.progressFill} style={{ width: `${done * 100}%` }} />

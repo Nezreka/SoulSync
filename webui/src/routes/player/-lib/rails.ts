@@ -23,6 +23,16 @@ import {
   clockDuration as clockDurationShort,
   compactCount as compactCountShort,
 } from './format';
+import {
+  CARD_SIZES,
+  libraryThumb,
+  posterSet,
+  remoteImage,
+  stillSet,
+  WIDE_SIZES,
+  youtubeThumb,
+  type ImgSize,
+} from './images';
 
 export interface RailCard {
   key: string;
@@ -35,6 +45,9 @@ export interface RailCard {
   progress?: number;
   /** the progress row this card came from, for remove / mark finished */
   source?: { itemType: string; itemId: string };
+  /** the widths the art comes in (images.ts) and how wide it shows */
+  artSet?: string;
+  artSizes?: string;
   /** a small label over the artwork's corner: a duration, an episode count */
   badge?: string;
   /** a status mark over the artwork's other corner */
@@ -77,7 +90,7 @@ export function continueCard(row: ProgressRow): RailCard {
     key: `${row.item_type}:${row.item_id}`,
     title: meta.title || 'Untitled',
     subtitle: meta.subtitle,
-    art: meta.artwork ?? meta.backdrop ?? null,
+    art: remoteImage(meta.artwork ?? meta.backdrop),
     href: meta.href,
     shape: SHAPE_BY_TYPE[row.item_type] ?? 'square',
     progress: fraction(row.position_seconds, row.duration_seconds),
@@ -135,7 +148,7 @@ export function movieCard(m: CatalogMovie): RailCard {
     subtitle: [m.year, m.runtime_seconds ? runtimeShort(m.runtime_seconds) : '']
       .filter(Boolean)
       .join(' · '),
-    art: m.has_poster ? posterUrl('movie', m.id) : null,
+    ...(m.has_poster ? posterArt('movie', m.id) : { art: null }),
     href: `/player/movies/${m.id}`,
     shape: 'poster',
     badge: m.rating ? `★ ${m.rating.toFixed(1)}` : undefined,
@@ -148,7 +161,7 @@ export function showCard(x: CatalogShow): RailCard {
     key: `show:${x.id}`,
     title: x.title,
     subtitle: [x.year, x.network].filter(Boolean).join(' · '),
-    art: x.has_poster ? posterUrl('show', x.id) : null,
+    ...(x.has_poster ? posterArt('show', x.id) : { art: null }),
     href: `/player/tv/${x.id}`,
     shape: 'poster',
     badge: `${x.episode_count} ep`,
@@ -189,7 +202,9 @@ export function recentEpisodeCards(
     key: `episode:${e.id}`,
     title: e.show_title,
     subtitle: `S${e.season_number} E${e.episode_number}${e.title ? ` · ${e.title}` : ''}`,
-    art: e.has_still ? posterUrl('episode', e.id, 400) : posterUrl('show', e.show_id, 400),
+    ...(e.has_still
+      ? { art: stillSet(e.id).src, artSet: stillSet(e.id).srcSet, artSizes: WIDE_SIZES }
+      : { art: posterUrl('show', e.show_id, 342) }),
     href: `/player/tv/${e.show_id}`,
     shape: 'wide' as const,
   }));
@@ -200,7 +215,7 @@ export function recentAlbumCards(albums: readonly LibAlbum[], limit = 20): RailC
     key: `album:${a.id}`,
     title: a.title,
     subtitle: a.artist_name ?? undefined,
-    art: a.image_url ?? a.remote_image_url ?? null,
+    art: libraryThumb(a.image_url) ?? remoteImage(a.remote_image_url),
     href: `/player/music/album/${a.id}`,
     shape: 'square' as const,
   }));
@@ -211,19 +226,24 @@ export function recentYoutubeCards(videos: readonly CatalogYoutube[], limit = 20
     key: `youtube:${v.id}`,
     title: v.title,
     subtitle: v.channel_title ?? undefined,
-    art: proxiedImage(v.thumbnail_url),
+    art: youtubeThumb(v.thumbnail_url, 'card', v.id),
     href: v.channel_id ? `/player/youtube/${encodeURIComponent(v.channel_id)}` : '/player/youtube',
     shape: 'wide' as const,
     badge: v.duration_seconds ? clockDurationShort(v.duration_seconds) : undefined,
   }));
 }
 
-export function bookCover(book: OwnedBook): string {
+export function bookCover(book: OwnedBook, size: ImgSize = 'card'): string {
   return book.cover_url
     ? book.cover_url.startsWith('/')
       ? appURL(book.cover_url)
-      : book.cover_url
+      : (remoteImage(book.cover_url, size) ?? book.cover_url)
     : appURL(`/api/audiobooks/library/${encodeURIComponent(book.asin)}/cover`);
+}
+
+function posterArt(kind: 'movie' | 'show', id: number) {
+  const set = posterSet(kind, id);
+  return { art: set.src, artSet: set.srcSet, artSizes: CARD_SIZES };
 }
 
 export function recentBookCards(books: readonly OwnedBook[], limit = 20): RailCard[] {
@@ -255,7 +275,7 @@ export function ytVideoCard(v: YtVideo, showChannel = true): RailCard {
     key: `yt:${v.id}`,
     title: v.title,
     subtitle: bits.join(' · '),
-    art: proxiedImage(v.thumbnail),
+    art: youtubeThumb(v.thumbnail, 'card', v.id),
     href: v.channel_id ? `/player/youtube/${encodeURIComponent(v.channel_id)}` : undefined,
     shape: 'wide',
     badge: v.duration_seconds ? clockDurationShort(v.duration_seconds) : undefined,
@@ -273,7 +293,7 @@ export function ytChannelCard(c: YtChannel): RailCard {
     ]
       .filter(Boolean)
       .join(' · '),
-    art: proxiedImage(c.avatar),
+    art: remoteImage(c.avatar),
     href: `/player/youtube/${encodeURIComponent(c.id)}`,
     shape: 'square',
   };

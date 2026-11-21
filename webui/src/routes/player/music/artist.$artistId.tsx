@@ -5,6 +5,7 @@ import type { RailCard } from '../-lib/rails';
 import type { LibRelease } from '../-player.types';
 
 import { plainText } from '../-lib/format';
+import { libraryThumb, remoteImage } from '../-lib/images';
 import { ownedReleases } from '../-lib/music';
 import { artistQuery } from '../-player.api';
 import { CardRail, Empty, Hero, PlayButton, styles as s } from '../-ui/kit';
@@ -21,7 +22,7 @@ function releaseCards(releases: LibRelease[]): RailCard[] {
     key: `rel${r.id}`,
     title: r.title,
     subtitle: r.year ? String(r.year) : undefined,
-    art: r.image_url ?? r.remote_image_url,
+    art: libraryThumb(r.image_url) ?? remoteImage(r.remote_image_url),
     href: `/player/music/album/${r.id}`,
     shape: 'square',
   }));
