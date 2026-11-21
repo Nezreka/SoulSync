@@ -16,13 +16,15 @@ afterEach(cleanup);
 it('uses one category bar instead of a second sidebar', () => {
   expect(document.querySelectorAll('.stg-category-nav .stg-tabbar')).toHaveLength(1);
   // #1822: Discovery got its own tab, everything else regrouped into the
-  // eight; #2166 added People, which only an admin sees
-  expect(document.querySelectorAll('.stg-category-nav .stg-tab')).toHaveLength(10);
+  // eight; #2166 added People and listen anywhere added Devices, which only
+  // an admin sees
+  expect(document.querySelectorAll('.stg-category-nav .stg-tab')).toHaveLength(11);
   expect(document.querySelectorAll('.stg-category-nav .stg-tab:not([hidden])')).toHaveLength(9);
-  expect(
-    document.querySelector<HTMLButtonElement>('.stg-category-nav .stg-tab[data-tab="people"]')!
-      .hidden,
-  ).toBe(true);
+  for (const tab of ['people', 'devices'])
+    expect(
+      document.querySelector<HTMLButtonElement>(`.stg-category-nav .stg-tab[data-tab="${tab}"]`)!
+        .hidden,
+    ).toBe(true);
   expect(document.querySelector('.stg-nav-rail')).toBeNull();
 });
 it('search leaves mounted forms and their visibility unchanged until selecting a result', () => {
