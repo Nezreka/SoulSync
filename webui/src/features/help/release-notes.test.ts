@@ -73,8 +73,8 @@ describe('the notes themselves', () => {
   it('hide a release still above the running build', () => {
     RELEASES.push({ ...release, version: '99.0.0', items: [] });
     try {
-      expect(currentRelease('3.6.8')?.version).toBe('3.6.8');
-      expect(releasedNotes('3.6.8').map((r) => r.version)).not.toContain('99.0.0');
+      expect(currentRelease('3.6.9')?.version).toBe('3.6.9');
+      expect(releasedNotes('3.6.9').map((r) => r.version)).not.toContain('99.0.0');
       expect(currentRelease('99.0.0')?.version).toBe('99.0.0');
     } finally {
       RELEASES.pop();
@@ -83,7 +83,7 @@ describe('the notes themselves', () => {
 
   it('compare versions by number, not by string', () => {
     expect(compareVersions('3.6.10', '3.6.9')).toBeGreaterThan(0);
-    expect(compareVersions('v3.6.8', '3.6.8+abc')).toBe(0);
+    expect(compareVersions('v3.6.9', '3.6.9+abc')).toBe(0);
     expect(compareVersions('2.4', '2.4.0')).toBe(0);
     expect(compareVersions(null, '0.0.1')).toBeLessThan(0);
   });
@@ -91,20 +91,20 @@ describe('the notes themselves', () => {
 
 describe('the version modal’s sections', () => {
   it('lead with the release in the modal’s style, then one Earlier in section', () => {
-    const sections = modalSections('3.6.8');
+    const sections = modalSections('3.6.9');
     expect(sections).toHaveLength(2);
-    expect(sections[0].title).toBe('3.6.8: a phone pass, Last.fm without Pro and request fixes');
+    expect(sections[0].title).toBe('3.6.9: the player, settings rebuilt and music apps');
     expect(sections[0].description).toBe(release.summary);
     expect(sections[0].features).toEqual(release.features);
     expect(sections[1]).toEqual({
-      title: 'Earlier in 3.6.7',
+      title: 'Earlier in 3.6.8',
       description: release.earlier!.summary,
       features: [],
     });
   });
 
   it('showVersionInfo builds the modal from window.SoulSyncReleaseNotes and marks the version seen', async () => {
-    document.body.innerHTML = '<button class="version-button">v3.6.8</button>';
+    document.body.innerHTML = '<button class="version-button">v3.6.9</button>';
     installReleaseNotes();
     const populate = vi.fn();
     // eslint-disable-next-line @typescript-eslint/no-implied-eval
@@ -116,10 +116,10 @@ describe('the version modal’s sections', () => {
     await fn();
     expect(populate).toHaveBeenCalledTimes(1);
     const [data] = populate.mock.calls[0];
-    expect(data.version).toBe('3.6.8');
-    expect(data.sections).toEqual(modalSections('3.6.8'));
+    expect(data.version).toBe('3.6.9');
+    expect(data.sections).toEqual(modalSections('3.6.9'));
     expect(data.subtitle).not.toMatch(/[–—]/);
-    expect(localStorage.getItem('soulsync_helper_version_seen')).toBe('3.6.8');
+    expect(localStorage.getItem('soulsync_helper_version_seen')).toBe('3.6.9');
   });
 
   it('showVersionInfo has no notes of its own to fall back on', () => {
@@ -132,15 +132,15 @@ describe('the version modal’s sections', () => {
 describe('the window bridge', () => {
   it('installReleaseNotes publishes the notes and says so', () => {
     delete window.SoulSyncReleaseNotes;
-    document.body.innerHTML = '<button class="version-button">v3.6.8</button>';
+    document.body.innerHTML = '<button class="version-button">v3.6.9</button>';
     const ready = vi.fn();
     window.addEventListener(RELEASE_NOTES_READY, ready, { once: true });
     installReleaseNotes();
     expect(ready).toHaveBeenCalledTimes(1);
     // typed again: tsc narrows the property to never after the delete
     const bridge = window.SoulSyncReleaseNotes as ReleaseNotesBridge | undefined;
-    expect(bridge?.latestVersion()).toBe('3.6.8');
-    expect(bridge?.modalSections()).toEqual(modalSections('3.6.8'));
+    expect(bridge?.latestVersion()).toBe('3.6.9');
+    expect(bridge?.modalSections()).toEqual(modalSections('3.6.9'));
   });
 
   it('importing the module publishes nothing: mountHelpHost installs it', () => {
