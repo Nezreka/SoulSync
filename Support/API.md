@@ -6,7 +6,7 @@ SoulSync includes a full REST API at `/api/v1/` that lets you control everything
 
 ### 1. Generate an API Key
 
-Go to **Settings** in the SoulSync web UI and find the **SoulSync API** section. Click **Generate API Key**, give it a label, and copy the key immediately — it's only shown once.
+Go to **Settings** in the SoulSync web UI and open **System › API**. Under **New API key**, give it a label and click **Generate key**, then copy the key immediately — it's only shown once.
 
 Alternatively, if no keys exist yet, use the bootstrap endpoint. It needs no key, but only the admin may call it: on a single-profile install with no login or launch PIN that's any request, otherwise send your signed-in admin session cookie (or just use Settings).
 
@@ -206,7 +206,7 @@ SoulSync can act as an MCP server, so an AI app like Claude can search for music
 
 ### Turn it on
 
-Go to **Settings > Advanced > SoulSync API > MCP for AI Clients** and tick **Answer MCP requests at /mcp**. While it's off, `/mcp` answers `404`.
+Go to **Settings > System > API > MCP for AI clients** and tick **Answer MCP requests at /mcp**. While it's off, `/mcp` answers `404`.
 
 ### Connect a client
 
@@ -248,7 +248,7 @@ Some request apps only know how to talk to Lidarr. SoulSync can answer as Lidarr
 
 ### Turn it on
 
-Go to **Settings > Advanced > SoulSync API > Lidarr Compatible API**:
+Go to **Settings > System > API > Lidarr compatible API**:
 
 1. Tick **Answer as Lidarr at /lidarr**. While it's off, every `/lidarr` route answers `404`.
 2. Pick **Requests go to profile**. Requested albums land on that profile's wishlist.
@@ -277,7 +277,7 @@ Apps built for Seerr (Jellyseerr, Overseerr) can use SoulSync's video side inste
 
 ### Turn it on
 
-Go to **Settings > System > SoulSync API > Seerr Compatible API**:
+Go to **Settings > System > API > Seerr compatible API**:
 
 1. Tick **Answer as Seerr at /seerr**. While it's off, every `/seerr` route answers `404`.
 2. Pick **Jellyfin users with no profile request as**.

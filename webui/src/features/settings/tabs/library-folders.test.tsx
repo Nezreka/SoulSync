@@ -1,15 +1,23 @@
 /**
- * Library > Folders (SETTINGS_PORT.md, step 8a): the markup it replaced, the
- * parked vanilla panels in their old places, the tabs, the folder rules and
- * the two folder lists.
+ * Library > Folders, Music and Podcasts, and the M3U options Discovery draws
+ * (settings-bic phase 4): the folder rules, the locks, the install-default
+ * warning on its field, the folder check drawn by the field, the two folder
+ * lists and Rebuild playlist folders.
  */
 
 import { act, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createSettingsStore, type SettingsPayload, type SettingsStore } from '../settings-store';
-import { shape, vanilla } from './__fixtures__/shape';
-import { FoldersCard, isDocker, pathsSummary, podcastsPath } from './library-folders';
+import { folderChecks } from './library-card';
+import {
+  M3uExportOptions,
+  MusicFolders,
+  PodcastFolders,
+  isDocker,
+  pathsSummary,
+  podcastsPath,
+} from './library-folders';
 
 type Shell = Window & Record<string, unknown>;
 const shell = window as unknown as Shell;
@@ -38,24 +46,24 @@ afterEach(async () => {
   delete shell.showToast;
 });
 
-const card = () => render(<FoldersCard store={store} part="folders" opened={0} active={false} />);
+const card = () =>
+  render(
+    <div>
+      <MusicFolders store={store} />
+      <PodcastFolders store={store} />
+      <M3uExportOptions store={store} />
+    </div>,
+  );
 const input = (id: string) => document.getElementById(id) as HTMLInputElement;
+/** a path's lock: the button inside its field */
+const lock = (id: string) =>
+  input(id).parentElement!.querySelector<HTMLButtonElement>('[data-lock]')!;
 function saved(): SettingsPayload {
   const merged: SettingsPayload = {};
   for (const body of posted)
     for (const [k, v] of Object.entries(body)) merged[k] = { ...merged[k], ...v };
   return merged;
 }
-
-describe('the Folders card is the markup it replaced', () => {
-  it('with the React Audiobooks and Video panels', () => {
-    const { container } = card();
-    const want = shape(vanilla('library-folders.vanilla.html', { afterInit: true }));
-    const got = shape(container);
-    expect(got.elements).toEqual(want.elements);
-    expect(got.text).toBe(want.text);
-  });
-});
 
 describe('the rules', () => {
   it('reads Docker and the default folders as loadSettingsData did', () => {
@@ -72,55 +80,60 @@ describe('the rules', () => {
 });
 
 describe('the card', () => {
-  it('the tabs show one panel, the vanilla ones included, and the arrows move', () => {
-    card();
-    const tab = (k: string) => document.getElementById(`folders-${k}-tab`)!;
-    const panel = (k: string) => document.getElementById(`folders-${k}-panel`)!;
-    expect(panel('music').hidden).toBe(false);
-    expect(panel('audiobooks').hidden).toBe(true);
-    fireEvent.click(tab('video'));
-    expect(panel('video').hidden).toBe(false);
-    expect(panel('music').hidden).toBe(true);
-    expect(tab('video').getAttribute('aria-selected')).toBe('true');
-    fireEvent.keyDown(tab('video'), { key: 'ArrowRight' });
-    expect(panel('music').hidden).toBe(false);
-    fireEvent.keyDown(tab('music'), { key: 'End' });
-    expect(panel('video').hidden).toBe(false);
-  });
-
-  it('the guide follows the deployment; the default library folder warns on bare metal', () => {
+  it('the guide follows the deployment; the install default warns on its own field, on bare metal', () => {
     act(() =>
       store.hydrate({ _environment: { docker: false }, soulseek: { transfer_path: './Transfer' } }),
     );
     card();
     const guide = (k: string) =>
-      document.querySelector(`[data-paths-guide="${k}"]`)!.classList.contains('hidden');
-    const warn = () =>
-      document.querySelector('[data-paths-default-warning]')!.classList.contains('hidden');
-    expect([guide('docker'), guide('native'), warn()]).toEqual([true, false, false]);
+      (document.querySelector(`[data-paths-guide="${k}"]`) as HTMLElement).hidden;
+    const line = () =>
+      input('transfer-path').closest('[data-row]')!.querySelector('[data-folder-line]');
+    expect([guide('docker'), guide('native')]).toEqual([true, false]);
+    expect(line()!.getAttribute('data-tone')).toBe('warn');
+    expect(line()!.textContent).toContain('Still the install folder default');
     act(() =>
       store.hydrate({ _environment: { docker: true }, soulseek: { transfer_path: './Transfer' } }),
     );
-    expect([guide('docker'), guide('native'), warn()]).toEqual([false, true, true]);
+    expect([guide('docker'), guide('native')]).toEqual([false, true]);
+    expect(line()).toBeNull();
   });
 
-  it('the video panel guides follow the deployment too', () => {
-    act(() => store.hydrate({ _environment: { docker: false } }));
+  it("the folder check's answer is drawn under its field", () => {
+    act(() => store.hydrate({ soulseek: { download_path: '/dl' } }));
     card();
-    const guide = (k: string) =>
-      document
-        .querySelector(`#folders-video-panel [data-paths-guide="${k}"]`)!
-        .classList.contains('hidden');
-    expect([guide('docker'), guide('native')]).toEqual([true, false]);
-    act(() => store.hydrate({ _environment: { docker: true } }));
-    expect([guide('docker'), guide('native')]).toEqual([false, true]);
+    const dl = input('download-path');
+    // folder-check.js leaves a field that draws its own line alone and tells it
+    expect(dl.hasAttribute('data-folder-own')).toBe(true);
+    expect(dl.getAttribute('data-folder-check')).toBe('music');
+    expect(dl.getAttribute('data-folder-role')).toBe('input');
+    act(() => {
+      dl.dispatchEvent(
+        new CustomEvent('ss:folder-check', { detail: { tone: 'ok', text: 'Ready · 412 GB free' } }),
+      );
+    });
+    const line = dl.closest('[data-row]')!.querySelector('[data-folder-line]')!;
+    expect(line.textContent).toBe('Ready · 412 GB free');
+    expect(line.getAttribute('data-tone')).toBe('ok');
+    expect(document.body.textContent).toContain('412 GB');
+    act(() => {
+      dl.dispatchEvent(
+        new CustomEvent('ss:folder-check', {
+          detail: { tone: 'info', text: "Doesn't exist yet. SoulSync creates it on first use" },
+        }),
+      );
+    });
+    expect(
+      dl.closest('[data-row]')!.querySelector('[data-folder-line]')!.getAttribute('data-tone'),
+    ).toBe('idle');
+    folderChecks.reset();
   });
 
   it('an emptied folder stays empty while typed, and a load shows the stored one', async () => {
     act(() => store.hydrate({ soulseek: { transfer_path: '/music' } }));
     card();
     const transfer = input('transfer-path');
-    fireEvent.click(transfer.nextElementSibling!);
+    fireEvent.click(lock('transfer-path'));
     fireEvent.change(transfer, { target: { value: '' } });
     // not the default filled straight back in
     expect(transfer.value).toBe('');
@@ -143,18 +156,15 @@ describe('the card', () => {
     const transfer = input('transfer-path');
     expect(transfer.readOnly).toBe(true);
     expect(input('download-path').readOnly).toBe(true);
-    const button = transfer.nextElementSibling as HTMLButtonElement;
+    const button = lock('transfer-path');
     fireEvent.click(button);
     expect(transfer.readOnly).toBe(false);
     expect(button.textContent).toBe('Lock');
     fireEvent.change(transfer, { target: { value: '/mnt/music' } });
     fireEvent.change(input('min-free-disk-gb'), { target: { value: '' } });
     fireEvent.click(input('m3u-relative-paths'));
-    fireEvent.change(document.getElementById('playlists-materialize-mode')!, {
-      target: { value: 'copy' },
-    });
-    fireEvent.click(document.getElementById('folders-podcasts-tab')!);
-    fireEvent.click(input('podcasts-path').nextElementSibling!);
+    fireEvent.click(document.querySelector('#playlists-materialize-mode [data-value="copy"]')!);
+    fireEvent.click(lock('podcasts-path'));
     fireEvent.change(input('podcasts-path'), { target: { value: '/pods' } });
     await waitFor(() => expect(store.hasPending()).toBe(false));
     expect(saved()).toEqual({
@@ -170,23 +180,29 @@ describe('the card', () => {
     ).toHaveBeenCalledWith('music');
   });
 
-  it('the folder lists: add, type, remove with its status line; samples get a default row', async () => {
+  it('the folder lists: add, type, remove; samples get a default row', async () => {
     act(() => store.hydrate({ library: { music_paths: ['/music2'] } }));
     card();
-    await waitFor(() => expect(document.querySelectorAll('.music-path-input')).toHaveLength(1));
-    // folder-check.js put a status line after the row
-    const row = document.querySelector('.music-path-row')!;
-    row.insertAdjacentHTML('afterend', '<div class="folder-check">Ready</div>');
-    expect(document.querySelectorAll('.sample-path-input')[0]).toHaveProperty('value', './samples');
+    const inputs = () =>
+      document.querySelectorAll<HTMLInputElement>('#music-paths-list input[type="text"]');
+    await waitFor(() => expect(inputs()).toHaveLength(1));
+    // each row is checked as an existing folder, and draws its own line
+    expect(inputs()[0].getAttribute('data-folder-role')).toBe('existing');
+    expect(inputs()[0].closest('[data-folder-row]')).not.toBeNull();
+    const samples = document.querySelectorAll<HTMLInputElement>('#sample-paths-list input');
+    expect(samples[0].value).toBe('./samples');
+    // the Sample Studio folders are not checked
+    expect(samples[0].hasAttribute('data-folder-check')).toBe(false);
     expect(document.querySelector('#sample-paths-list')!.textContent).toContain('default');
-    const add = document.querySelector('#music-paths-list + .form-actions button')!;
-    fireEvent.click(add);
-    const inputs = () => document.querySelectorAll<HTMLInputElement>('.music-path-input');
+    const list = document.getElementById('music-paths-list')!.parentElement!;
+    fireEvent.click(list.querySelector('button:not([aria-label])')!);
     expect(inputs()).toHaveLength(2);
     fireEvent.change(inputs()[1], { target: { value: ' /archive ' } });
-    fireEvent.click(document.querySelector('.music-path-row button')!);
+    fireEvent.click(
+      document.querySelector('#music-paths-list button[aria-label="Remove /music2"]')!,
+    );
     expect(inputs()).toHaveLength(1);
-    expect(document.querySelector('#music-paths-list .folder-check')).toBeNull();
+    expect(inputs()[0].value).toBe(' /archive ');
     await waitFor(() => expect(store.hasPending()).toBe(false));
     expect(saved().library).toEqual({ music_paths: ['/archive'] });
   });
@@ -210,7 +226,7 @@ describe('the card', () => {
     fireEvent.click(document.getElementById('playlists-rebuild-btn')!);
     await waitFor(() =>
       expect(document.getElementById('playlists-rebuild-status')!.textContent).toBe(
-        'Rebuilt 2 playlist folders — 3 linked, 1 copied, 2 stale removed.',
+        'Rebuilt 2 playlist folders: 3 linked, 1 copied, 2 stale removed.',
       ),
     );
     expect(shell.showToast).toHaveBeenCalledWith('Playlist folders rebuilt', 'success');

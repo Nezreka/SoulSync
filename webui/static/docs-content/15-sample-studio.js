@@ -92,7 +92,7 @@ Saved chops are rendered into your **sample folders**, configured under Settings
 
 ## Organization
 
-Inside the destination folder, chops are filed with the **sample path template** (Settings → File Organization), using the source track's artist, title, and album plus your chop name — for example \`Artist/Track - My chop.wav\`. Every rendered file also carries its own tags: the chop name as title, the source artist, a comment with the source track and settings, and the cover art when the source track has it. The files are self-describing in any DAW or file browser.
+Inside the destination folder, chops are filed with the **sample path template** (Settings → Library → Naming), using the source track's artist, title, and album plus your chop name — for example \`Artist/Track - My chop.wav\`. Every rendered file also carries its own tags: the chop name as title, the source artist, a comment with the source track and settings, and the cover art when the source track has it. The files are self-describing in any DAW or file browser.
 
 Sample folders are separate from your music library on purpose — library scans never pick chops up as albums. And files never move on their own: removing a folder from settings doesn't touch existing chops.
 `,

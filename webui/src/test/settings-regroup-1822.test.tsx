@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { resolveTab, tabDef } from '@/features/settings/nav';
 import { SettingsPage } from '@/features/settings/settings-page';
 import { switchSettingsTab } from '@/features/settings/shell';
 import { withHelpLines } from '@/features/settings/tabs/__fixtures__/shape';
@@ -24,52 +25,87 @@ describe('where sections live', () => {
       resolve(process.cwd(), 'src/features/settings/tabs/connections-metasync.tsx'),
       'utf8',
     );
-    expect(section).toMatch(/tab="connections"\s+title="MetaSync"/);
-    expect(html).toContain('<div data-stg-react="connections" data-stg-part="metasync"');
+    // settings-bic phase 7: on the parts, one card per step
+    expect(section).toContain('title="Step 1: connect SoulSync and MetaSync"');
+    // settings-bic: a pill of the Connections page, which the page draws as one slot
+    expect(html).toContain('<div data-stg-react="connections" data-stg-part="page"');
+    expect(tabDef('connections').views.map((v) => v.key)).toContain('metasync');
   });
 
-  it('Video Quality is on quality (React, SETTINGS_PORT.md video pass V1)', () => {
-    const section = readFileSync(
-      resolve(process.cwd(), 'src/features/settings/tabs/video-quality.tsx'),
+  it('Video Quality is on quality, its own pill (settings-bic phase 3)', () => {
+    const page = readFileSync(
+      resolve(process.cwd(), 'src/features/settings/tabs/quality/quality-page.tsx'),
       'utf8',
     );
-    expect(section).toContain("const TAB = 'quality';");
-    expect(section).toMatch(/tab=\{TAB\}\s+title="Video Quality"/);
-    expect(html).toContain('<div data-stg-react="quality" data-stg-part="video"');
+    expect(page).toMatch(/<ViewPanel tab=\{TAB\} view="video"[^>]*>\s*<VideoQualitySections \/>/);
+    expect(html).toContain('<div data-stg-react="quality" data-stg-part="page"');
+    expect(tabDef('quality').views.map((v) => v.label)).toContain('Movies and TV');
   });
 
-  it('Video Preferences is on library (React, SETTINGS_PORT.md video pass V2c)', () => {
+  it('the video pages card is on Appearance (settings-bic phase 4, DESIGN 3.3)', () => {
     const section = readFileSync(
       resolve(process.cwd(), 'src/features/settings/tabs/library-video-prefs.tsx'),
       'utf8',
     );
-    expect(section).toContain("const TAB = 'library';");
-    expect(section).toMatch(/tab=\{TAB\}\s+title="Video Preferences"/);
-    expect(html).toContain('<div data-stg-react="library" data-stg-part="video-prefs"');
+    expect(section).toContain('<div data-ui="" data-video-only=""');
+    expect(section).toContain('title="Video pages"');
+    // settings-bic phase 5: Appearance is one page, the card in it
+    const page = readFileSync(
+      resolve(process.cwd(), 'src/features/settings/tabs/appearance-tab.tsx'),
+      'utf8',
+    );
+    expect(page).toContain('<VideoPagesCard />');
+    expect(html).toContain('<div data-stg-react="appearance" data-stg-part="page"');
   });
 
-  it.each([
-    ['NotificationsSection', 'Notifications', 'connections', 'notifications'],
-    ['ImportListsSection', 'Import Lists', 'discovery', 'import-lists'],
-  ])('%s: %s is on %s (React, SETTINGS_PORT.md video pass V3c)', (fn, heading, tab, part) => {
+  it('Notifications is a pill of Connections, on the parts (settings-bic phase 6)', () => {
+    const page = readFileSync(
+      resolve(process.cwd(), 'src/features/settings/tabs/connections/connections-page.tsx'),
+      'utf8',
+    );
+    expect(page).toMatch(
+      /<ViewPanel tab=\{TAB\} view="notifications"[^>]*>[\s\S]*<NotificationsCard \/>/,
+    );
     const lists = readFileSync(
       resolve(process.cwd(), 'src/features/settings/tabs/video-row-lists.tsx'),
       'utf8',
     );
-    const body = lists.split(`export function ${fn}(`)[1].split('</Section>')[0];
-    expect(body).toContain(`tab="${tab}"`);
-    expect(body).toContain(`title="${heading}"`);
-    expect(html).toContain(`<div data-stg-react="${tab}" data-stg-part="${part}"`);
+    const body = lists.split('export function NotificationsCard(')[1];
+    expect(body).toContain('title="Notifications"');
+    expect(body).toContain('id="video-notifications"');
+    expect(html).toContain('<div data-stg-react="connections" data-stg-part="page"');
+    expect(tabDef('connections').views.map((v) => v.key)).toContain('notifications');
   });
 
-  it('Database Maintenance is on advanced (React, SETTINGS_PORT.md step 9a)', () => {
-    const tab = readFileSync(
-      resolve(process.cwd(), 'src/features/settings/tabs/system-tab.tsx'),
+  it('Import lists, playlists and recommendations are pills of Discovery (settings-bic phase 5)', () => {
+    const page = readFileSync(
+      resolve(process.cwd(), 'src/features/settings/tabs/discovery/discovery-page.tsx'),
       'utf8',
     );
-    expect(tab).toContain("const TAB = 'advanced';");
-    expect(tab).toContain('title="Database Maintenance"');
-    expect(html).toContain('<div data-stg-react="advanced" data-stg-part="database"');
+    expect(page).toMatch(
+      /<ViewPanel tab=\{TAB\} view="import-lists"[^>]*>[\s\S]*<ImportListsCard \/>/,
+    );
+    expect(page).toMatch(/<ViewPanel tab=\{TAB\} view="playlists"[^>]*>[\s\S]*<Playlists /);
+    expect(html).toContain('<div data-stg-react="discovery" data-stg-part="page"');
+    expect(tabDef('discovery').views.map((v) => v.key)).toEqual([
+      'recommendations',
+      'playlists',
+      'import-lists',
+    ]);
+    expect(tabDef('discovery').views.find((v) => v.key === 'import-lists')?.side).toBe('video');
+  });
+
+  it('Database Maintenance is a pill of System, with Clear quarantine (settings-bic phase 6)', () => {
+    const read = (f: string) =>
+      readFileSync(resolve(process.cwd(), 'src/features/settings/tabs/' + f), 'utf8');
+    const page = read('system/system-page.tsx');
+    expect(page).toContain("const TAB = 'advanced';");
+    expect(page).toContain('<MaintenanceView store={store}');
+    expect(read('system-tab.tsx')).toContain('title="Database"');
+    expect(read('system-tab.tsx')).toContain('id="quarantine-clear-btn"');
+    // it left the AcoustID sheet
+    expect(read('connections-extras.tsx')).not.toContain('/api/quarantine/clear');
+    expect(html).toContain('<div data-stg-react="advanced" data-stg-part="page"');
   });
 
   it('has a tab for every section tag and no tab left empty', () => {
@@ -84,7 +120,8 @@ describe('where sections live', () => {
         (el) => el.getAttribute('data-stg') ?? el.getAttribute('data-stg-react'),
       ),
     );
-    expect([...used].every((tag) => tabs.includes(tag))).toBe(true);
+    // the Logs slot is System's now (a pill of it): old keys resolve to their tab
+    expect([...used].every((tag) => tabs.includes(resolveTab(tag).tab))).toBe(true);
     expect(tabs.every((tab) => used.has(tab))).toBe(true);
     expect(doc.querySelector('.stg-tab[data-tab="advanced"] .stg-tab-label')?.textContent).toBe(
       'System',

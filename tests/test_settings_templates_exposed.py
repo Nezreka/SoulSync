@@ -25,16 +25,17 @@ def test_the_builder_reads_the_compilation_template():
 
 
 def test_every_music_template_has_a_settings_field_that_loads_and_saves():
-    # the Organization card is React (SETTINGS_PORT.md step 8b): each template
-    # has a field, shows the saved value (or its default) and saves its key
+    # Library > Naming (settings-bic phase 4): each template has a field (the
+    # page's template() helper, given its key and id), shows the saved value
+    # (or its default) and saves its key
     tabs = ROOT / "webui" / "src" / "features" / "settings" / "tabs"
     card = (tabs / "library-organization.tsx").read_text(encoding="utf-8")
     rules = (tabs / "organization.ts").read_text(encoding="utf-8")
     defaults = rules.split("export const TEMPLATE_DEFAULTS", 1)[1].split("} as const", 1)[0]
     for key in sorted(_template_keys_the_builder_reads()):
         field = "template-" + key.replace("_", "-")
-        block = card.split(f'id="{field}"', 1)
-        assert len(block) == 2, f"no settings field for {key}"
-        assert f"{{...template('{key}')}}" in block[1][:300], f"the {key} field is not wired"
+        flat = " ".join(card.split())
+        assert f"template( '{key}', '{field}'," in flat, f"no settings field for {key}"
+        assert f"useTemplateField(store, '{key}'" in card, f"the {key} field is not wired"
         assert f"  {key}: '" in defaults, f"settings never loads {key}"
-    assert "setOrg(`templates.${key}`, event.target.value)" in card, "templates never save"
+    assert "store.set('file_organization', `templates.${key}`, next);" in card, "templates never save"

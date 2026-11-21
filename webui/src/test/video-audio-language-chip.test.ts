@@ -15,13 +15,13 @@ const CSS = read('static/video/video-side.css');
 
 describe('audio language chips', () => {
   it('are pick chips, not reject chips', () => {
-    expect(JS).toContain(
-      "className={on ? 'vq-chip vq-chip--pick on' : 'vq-chip vq-chip--pick'}\n                        data-vq-lang={k}",
-    );
-    // the reject chips keep the plain class
-    expect(JS).toContain(
-      "className={on ? 'vq-chip on' : 'vq-chip'}\n                        data-vq-reject={k}",
-    );
+    // (settings-bic phase 3) both are the parts' Chips: on is the accent with a
+    // tick, never the red ⊘; each keeps its own hook
+    expect(JS).toMatch(/<Chips\s+id="vq-langs"[^>]*itemAttr="data-vq-lang"/);
+    expect(JS).toMatch(/<Chips\s+id="vq-rejects"[^>]*itemAttr="data-vq-reject"/);
+    const PARTS = read('src/features/settings/ui/parts.tsx');
+    const chips = PARTS.slice(PARTS.indexOf('export function Chips('));
+    expect(chips.slice(0, chips.indexOf('\n}\n'))).toContain('<Icon name="check"');
   });
 
   it('a picked language is the accent with a tick, out-ranking the red ⊘', () => {

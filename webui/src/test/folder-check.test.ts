@@ -108,3 +108,22 @@ it('a missing extra folder is a warning, not "will be created"', async () => {
   await waitFor(() => expect((input.nextElementSibling as HTMLElement)?.dataset.tone).toBe('warn'));
   expect(input.nextElementSibling?.textContent).toContain('Not found');
 });
+
+it('a field that draws its own line hears the result instead of getting one', async () => {
+  document.body.innerHTML = `<div class="path-input-group"><input id="own" data-folder-check="o" data-folder-own value="/m"></div>`;
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(
+      async () =>
+        new Response(JSON.stringify({ results: { own: { state: 'ok', free_bytes: 1024 ** 3 } } })),
+    ),
+  );
+  new Function(source)();
+  const heard: Array<{ tone: string; text: string }> = [];
+  document
+    .getElementById('own')!
+    .addEventListener('ss:folder-check', (event) => heard.push((event as CustomEvent).detail));
+  (window as unknown as { SoulSyncFolderCheck: Check }).SoulSyncFolderCheck.refresh('o');
+  await waitFor(() => expect(heard).toEqual([{ tone: 'ok', text: 'Ready · 1.0 GB free' }]));
+  expect(document.querySelector('.folder-check')).toBeNull();
+});

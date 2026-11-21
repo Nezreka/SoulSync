@@ -1,15 +1,16 @@
 /**
  * #2026: the Sources tab read only the music chain, so usenet carrying every
- * video download sat under Available as "not in chain". The tiles are React
- * now (SETTINGS_PORT.md step 7a): this runs the real tiles on a sources model.
+ * video download looked unused. Downloads > Sources (tabs/downloads/
+ * sources-view.tsx) says where else each source is used: a source out of the
+ * music order names the video and audiobook orders it is in.
  */
 
 import { act, render } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 
 import { createSettingsStore } from '@/features/settings/settings-store';
+import { SourcesView } from '@/features/settings/tabs/downloads/sources-view';
 import { createSourcesModel } from '@/features/settings/tabs/sources-model';
-import { SourceTiles } from '@/features/settings/tabs/sources-tab';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -28,8 +29,10 @@ function bookStore(books: string[]) {
   return store;
 }
 
-async function tiles(music: string[], video: string[] | null, books: string[]) {
-  const model = createSourcesModel({ store: bookStore(books) });
+/** the "Not used for music" lines, by source */
+async function unused(music: string[], video: string[] | null, books: string[]) {
+  const store = bookStore(books);
+  const model = createSourcesModel({ store });
   model.load({ download_source: { mode: 'hybrid', hybrid_order: music } });
   if (video) {
     vi.stubGlobal(
@@ -42,34 +45,34 @@ async function tiles(music: string[], video: string[] | null, books: string[]) {
     );
     await act(() => model.loadVideoChain());
   }
-  const { container } = render(<SourceTiles model={model} opened={0} active={false} />);
-  const groups: Record<string, string[]> = {};
-  container.querySelectorAll('.src-group').forEach((g) => {
-    const label = g.querySelector('.src-group-label')!.textContent!;
-    groups[label] = [...g.querySelectorAll<HTMLElement>('.src-tile')].map((t) => {
-      const chips = [...t.querySelectorAll('.src-tile-chip')].map((c) => c.textContent);
-      return `${t.dataset.sourceId}:${chips.join('|')}`;
-    });
-  });
-  return groups;
+  const { container } = render(
+    <SourcesView store={store} model={model} opened={0} active={false} />,
+  );
+  await act(() => model.loadChain());
+  const lines: Record<string, string> = {};
+  for (const row of container.querySelectorAll<HTMLElement>('[data-pool] > li[data-id]'))
+    lines[row.dataset.id!] = row.textContent!;
+  const order = [...container.querySelectorAll<HTMLElement>('ul[aria-label] > li[data-id]')].map(
+    (row) => row.dataset.id,
+  );
+  return { lines, order };
 }
 
-it('puts a source used only by the video chain in use, labelled video', async () => {
-  const g = await tiles(['deezer_dl', 'soulseek'], ['usenet'], []);
-  expect(g['In use']).toEqual(['deezer_dl:Music #1', 'soulseek:Music #2', 'usenet:Video #1']);
-  expect(g['Available']).toContain('torrent:not in a chain');
+it('a source used only by the video order says so', async () => {
+  const { lines, order } = await unused(['deezer_dl', 'soulseek'], ['usenet'], []);
+  expect(order).toEqual(['deezer_dl', 'soulseek']);
+  expect(lines.usenet).toContain('Video #1');
+  expect(lines.torrent).toContain('Not tested yet');
 });
 
-it('names every chain a source is in', async () => {
-  const g = await tiles(['soulseek'], ['torrent', 'soulseek'], ['torrent']);
-  expect(g['In use']).toEqual(['soulseek:Music #1|Video #2', 'torrent:Video #1|Audiobooks #1']);
-  expect(g['Available']).toEqual(
-    expect.arrayContaining(['deezer_dl:not in a chain', 'usenet:not in a chain']),
-  );
+it('names every order a source is in', async () => {
+  const { lines } = await unused(['soulseek'], ['usenet', 'torrent'], ['torrent', 'usenet']);
+  expect(lines.torrent).toContain('Video #2, Audiobooks #1');
+  expect(lines.usenet).toContain('Video #1, Audiobooks #2');
 });
 
-it('still renders from the music chain before the video chain is read', async () => {
-  const g = await tiles(['soulseek'], null, []);
-  expect(g['In use']).toEqual(['soulseek:Music #1']);
-  expect(g['Indexers']).toEqual(['prowlarr:torrent & usenet']);
+it('still renders from the music order before the video order is read', async () => {
+  const { lines, order } = await unused(['soulseek', 'youtube'], null, []);
+  expect(order).toEqual(['soulseek', 'youtube']);
+  expect(lines.usenet).toContain('Not tested yet');
 });

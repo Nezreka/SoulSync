@@ -9,7 +9,7 @@ import { act, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createSettingsStore } from '@/features/settings/settings-store';
-import { SecuritySection } from '@/features/settings/tabs/system-security';
+import { SecurityView } from '@/features/settings/tabs/system-security';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -26,7 +26,7 @@ function page(security: Record<string, unknown>) {
     },
     delay: 0,
   });
-  render(<SecuritySection store={store} part="security" opened={0} active={false} />);
+  render(<SecurityView store={store} />);
   act(() => store.hydrate({ security }));
   return { store, posted, block: () => document.getElementById('security-oidc-provider')! };
 }

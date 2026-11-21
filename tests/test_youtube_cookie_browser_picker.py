@@ -44,7 +44,7 @@ def _youtube(js: str) -> str:
 
 def _picker(js: str) -> str:
     """the cookie <select> as the panel renders it"""
-    return _youtube(js).split('id="youtube-cookies-browser"', 1)[1].split("</select>", 1)[0]
+    return _youtube(js).split('id="youtube-cookies-browser"', 1)[1].split("</Select>", 1)[0]
 
 
 def test_the_server_reports_its_own_os():
@@ -109,7 +109,11 @@ def test_the_warning_has_somewhere_to_render(js):
     # the Settings page is React (SETTINGS_PORT.md step V4c): read in its place
     from tests.support.settings_page import index_with_settings_page
     index = index_with_settings_page()
-    assert 'data-stg-part="youtube"' in index
+    # (settings-bic) the source panels are parked inside the Downloads page,
+    # which the settings page draws as one slot
+    assert 'data-stg-react="downloads" data-stg-part="page"' in index
+    home = _read("webui/src/features/settings/tabs/downloads/sources-view.tsx")
+    assert '<MoreSourcePanels {...props} part="youtube" />' in home
     panel = _youtube(js)
     assert 'id="youtube-cookie-abe-warning"' in panel
     assert 'role="status"' in panel.split('id="youtube-cookie-abe-warning"', 1)[1][:80]
@@ -131,7 +135,9 @@ def test_the_help_text_points_at_something_that_works(js):
     work is the difference between a fact and an instruction."""
     panel = _youtube(js)
     # up to the paste field
-    block = panel.split('id="youtube-cookies-browser"', 1)[1].split('id="youtube-cookies-paste-group"', 1)[0]
+    # the help is the field's own (its first line, the rest behind the "i"),
+    # written above the select in the source
+    block = panel.split('label="Browser cookies"', 1)[1].split('id="youtube-cookies-paste-group"', 1)[0]
     low = block.lower()
     assert "firefox" in low
     assert "paste cookies.txt" in low

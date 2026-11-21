@@ -28,7 +28,8 @@ CARDS = "\n".join(
 )
 
 # the video cards are React too (SETTINGS_PORT.md video pass V3a): a <Card
-# service="..."> with its <Test spec="...">, the switches <Toggle k="...">
+# service="..." test="..."> (what the service sheet's Test tests, since the
+# settings-bic rebuild one Test per sheet, in its foot), the switches <Toggle k="...">
 VIDEO_CARDS = (_TABS / "connections-video-api.tsx").read_text(encoding="utf-8")
 
 # hydrabase's own Connect button is its test: it opens the socket and says so
@@ -65,7 +66,7 @@ def test_every_music_service_frame_has_a_test_button():
     assert len(frames) >= 12
     missing = [sid for sid, body in frames
                if sid not in HAS_OWN_CHECK
-               and not re.search(r'testService\(store, |void test\(\)', body)]
+               and not re.search(r'test=\{\(\) => testService\(store, |test=\{test\}', body)]
     assert missing == []
 
 
@@ -74,10 +75,11 @@ def test_every_video_service_frame_has_a_test_button():
     frames = [(sid, VIDEO_CARDS[pos:starts[i + 1][0] if i + 1 < len(starts) else len(VIDEO_CARDS)])
               for i, (pos, sid) in enumerate(starts)]
     assert len(frames) >= 11
-    missing = [sid for sid, body in frames if "<Test spec=" not in body]
+    missing = [sid for sid, body in frames if not re.search(r'\btest="[a-z,]+"', body)]
     assert missing == []
-    # and the button is the one the page's css and tiles know
-    assert "data-video-test-service={spec}" in VIDEO_CARDS
+    # the sheet's Test calls it, and the frame says what it tests
+    assert "test={() => testVideoServices(test)}" in VIDEO_CARDS
+    assert "'data-video-test-service': test" in VIDEO_CARDS
 
 
 def test_every_music_button_reaches_a_real_backend_branch():
@@ -87,7 +89,6 @@ def test_every_music_button_reaches_a_real_backend_branch():
     called = set(re.findall(r"onclick=\"testConnection\('([a-z_]+)'\)", INDEX))
     called |= set(re.findall(r"testService\(store, '([a-z_]+)'\)", CARDS))
     called |= set(re.findall(r"testConnection\('([a-z_]+)', store\)", CARDS))
-    called |= set(re.findall(r"\['([a-z_]+)', '[^']+'\]", CARDS.split("const TEST_ROW", 1)[1].split("];", 1)[0]))
     assert {"concerts", "itunes", "musicbrainz", "discogs"} <= called
     unknown = [svc for svc in called
                if svc != "server" and f'service == "{svc}"' not in src]
@@ -97,7 +98,7 @@ def test_every_music_button_reaches_a_real_backend_branch():
 def test_video_bundle_buttons_name_real_workers():
     from core.video.enrichment.backfill import build_backfill_workers
     workers = set(build_backfill_workers(SimpleNamespace(get_setting=lambda k: None)))
-    specs = re.findall(r'<Test spec="([^"]+)"', VIDEO_CARDS)
+    specs = re.findall(r'\btest="([a-z,]+)"', VIDEO_CARDS)
     assert len(specs) >= 11
     for spec in specs:
         for svc in spec.split(","):
@@ -105,7 +106,7 @@ def test_video_bundle_buttons_name_real_workers():
                 continue        # matcher clients / subtitle providers / list source
             assert svc in workers, svc
             # only a switched-on service is tested, and the switch is its own
-            assert f'<Toggle k="{svc}">' in VIDEO_CARDS or "," not in spec
+            assert re.search(rf'<Toggle\s+k="{svc}"', VIDEO_CARDS) or "," not in spec
 
 
 # ── concerts ────────────────────────────────────────────────────────────────

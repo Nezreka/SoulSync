@@ -123,11 +123,16 @@ def settings_js():
 _TABS = _ROOT / "webui/src/features/settings/tabs"
 
 
+_QUALITY_VIEW = _TABS / "quality" / "audiobooks-view.tsx"
+
+
 @pytest.fixture(scope="module")
 def panel():
-    """the Library tab's two Audiobooks panels, React since SETTINGS_PORT.md
-    step 8c: what index.html and settings.js held for them"""
-    return (_TABS / "library-audiobooks.tsx").read_text(encoding="utf-8")
+    """the Library tab's Audiobooks kind (settings-bic phase 4: its folders,
+    naming, import and tags, and the download options Downloads > Sources
+    draws), and Quality > Audiobooks, where Audiobook Quality moved"""
+    return (_TABS / "library-audiobooks.tsx").read_text(encoding="utf-8") + (
+        _QUALITY_VIEW.read_text(encoding="utf-8"))
 
 
 @pytest.fixture(scope="module")
@@ -148,17 +153,20 @@ def test_the_settings_page_has_the_input(panel, element_id):
 
 
 def test_the_folder_path_input_can_be_unlocked(panel):
-    # Every other output path has an unlock button; the React one is the
-    # shared LockedPath, read-only until Unlock
+    # Every other output path has an unlock button; the Library one is the
+    # shared LibPath (a PathField with its lock), read-only until Unlock
     import re
-    assert re.search(r'<LockedPath\s+(?:\w+=\{[^{}]*\}\s+)*id="audiobooks-path"', panel)
+    assert re.search(r'<LibPath\s+(?:\w+=\{[^{}]*\}\s+)*id="audiobooks-path"', panel)
+    card = (_TABS / "library-card.tsx").read_text(encoding="utf-8")
+    assert "const [locked, setLocked] = useState(true);" in card
 
 
 def _saves(panel: str, key: str) -> bool:
     """the panel saves this audiobooks.* key (a dotted key is one key of a
     dict inside the section, saved alone)"""
     import re
-    return bool(re.search(rf"set\(\s*'{re.escape(key)}'", panel)) or f"{key}: value" in panel
+    return (bool(re.search(rf"set\(\s*(?:'audiobooks',\s*)?'{re.escape(key)}'", panel))
+            or f"{key}: value" in panel)
 
 
 def _reads(panel: str, key: str) -> bool:
@@ -175,10 +183,10 @@ def test_the_three_fields_are_read_and_saved(panel):
     assert "store.set('library', 'audiobooks_path'" in panel
     assert "ab.remove_owned_from_wishlist === true" in panel
     assert "set('remove_owned_from_wishlist'" in panel
-    # the template is the Organization card's, which owns every template
+    # the template field is the shared naming one (Reset reaches it too)
     card = (_TABS / "library-organization.tsx").read_text(encoding="utf-8")
-    assert "template={template('audiobook_path')}" in card
-    assert "setOrg(`templates.${key}`" in card
+    assert "useTemplateField(store, 'audiobook_path')" in panel
+    assert "store.set('file_organization', `templates.${key}`, next);" in card
 
 
 def test_settings_js_no_longer_saves_the_audiobook_fields(settings_js):
@@ -237,7 +245,9 @@ def test_a_short_book_is_staged_not_dropped(defaults):
 # database by hand, which is how the first ten of these spent a week invisible.
 _EXPOSED = {
     "marketplace": "audiobook-marketplace",
-    "download_source.mode": "audiobook-download-mode",
+    # download_source.mode: the audiobook order on Downloads > Sources writes
+    # it (sources-model.ts); the hidden select that duplicated it went
+    # (settings-bic phase 4). test_the_order_writes_the_mode pins it
     "quality.format_order": "audiobook-format-first",
     "quality.min_bitrate_kbps": "audiobook-min-bitrate",
     "quality.max_bitrate_kbps": "audiobook-max-bitrate",
@@ -278,16 +288,15 @@ def test_every_exposed_knob_has_a_default(defaults, key):
 
 
 def test_every_audiobook_knob_explains_itself():
-    # every help body of the old panel is in the React one, word for word:
-    # library-audiobooks.test.tsx compares them against the frozen markup
-    test = (_TABS / "library-audiobooks.test.tsx").read_text(encoding="utf-8")
-    assert "library-audiobook-organization.vanilla.html" in test
-    assert "'.setting-help-body, .stg-help-text, .settings-hint, label'" in test
-    fixture = (_TABS / "__fixtures__/library-audiobook-organization.vanilla.html").read_text(
-        encoding="utf-8")
-    for element_id in _EXPOSED.values():
-        tail = fixture.split(f'id="{element_id}"', 1)[1][:2000]
-        assert "setting-help-body" in tail, f"{element_id} has no help text"
+    # every knob is a Row with its one line of help (the rest behind the "i"):
+    # on Library's Audiobooks kind, or Quality > Audiobooks for the quality ones
+    panel = (_TABS / "library-audiobooks.tsx").read_text(encoding="utf-8")
+    view = _QUALITY_VIEW.read_text(encoding="utf-8")
+    for key, element_id in _EXPOSED.items():
+        src = view if key.startswith("quality.") else panel
+        at = src.index(f'id="{element_id}"')
+        row = src[src.rindex("<Row", 0, at):at]
+        assert "help=" in row, f"{element_id} has no help text"
 
 
 def test_the_audiobook_block_actually_persists():
@@ -340,11 +349,19 @@ def test_the_two_downloader_categories_stay_in_step(panel):
 
 def test_the_audiobook_group_is_labelled_on_the_page(panel):
     # these knobs used to sit in the music section under a heading, and the
-    # next reader took them for global settings. they have their own tab now.
-    organization = panel.split("export function AudiobookOrganizationPanel", 1)[1]
-    assert 'id="organization-audiobooks-panel"' in organization
-    for knob in ('template-audiobook-path', 'audiobook-marketplace', 'audiobook-write-nfo'):
-        assert _has_input(organization, knob)
+    # next reader took them for global settings. each Library pill has an
+    # Audiobooks kind of its own (settings-bic phase 4)
+    page = (_TABS / "library" / "library-page.tsx").read_text(encoding="utf-8")
+    for part in ("AudiobookFolders,", "AudiobookNaming,", "AudiobookImport,", "AudiobookTags,"):
+        assert part in page
+    for fn, knob in (("export function AudiobookNaming", "template-audiobook-path"),
+                     ("export function AudiobookImport", "audiobook-staging-days"),
+                     ("export function AudiobookTags", "audiobook-write-nfo"),
+                     ("export function AudiobookDownloadOptions", "audiobook-marketplace")):
+        assert _has_input(panel.split(fn, 1)[1], knob)
+    # the download options are drawn under the audiobook order on Downloads
+    sources = (_TABS / "downloads" / "sources-view.tsx").read_text(encoding="utf-8")
+    assert "<AudiobookDownloadOptions store={store} />" in sources
 
 
 @pytest.mark.parametrize("css_class", ["settings-subheading", "settings-unit"])
@@ -360,15 +377,17 @@ def test_the_new_markup_is_actually_styled(css_class):
 # ---------------------------------------------------------------------------
 
 def test_the_source_order_is_not_a_text_box(panel):
-    """Ordering sources is a reorder, not a spelling test: the chain widget
-    on the Downloads tab orders them (sources-model.ts)."""
+    """Ordering sources is a reorder, not a spelling test: the order list on
+    the Downloads tab orders them (sources-model.ts). The hidden select and
+    the empty arrow-list home that duplicated it went (settings-bic phase 4)."""
     assert 'id="audiobook-hybrid-order"' not in panel
-    assert 'id="audiobook-hybrid-rows"' in panel
+    assert 'id="audiobook-hybrid-rows"' not in panel
+    assert 'id="audiobook-download-mode"' not in panel
 
 
-def test_the_source_rows_reuse_the_shared_markup(panel):
-    block = panel.split('id="audiobook-hybrid-container"', 1)[1][:800]
-    assert 'className="hybrid-source-list"' in block
+def test_the_order_writes_the_mode(model):
+    # one source is that source's mode, two or more is hybrid
+    assert "'download_source.mode': order.length > 1 ? 'hybrid' : order[0] || 'torrent'," in model
 
 
 def test_the_source_rows_can_be_reordered_and_toggled(model):
@@ -378,14 +397,16 @@ def test_the_source_rows_can_be_reordered_and_toggled(model):
     assert "'download_source.hybrid_order': order.slice()" in model
 
 
-def test_the_chain_is_only_shown_when_it_applies(panel):
-    assert "display: loads && mode === 'hybrid' ? '' : 'none'" in panel
-
-
 def test_the_last_source_cannot_be_switched_off():
-    widget = (_TABS / "sources-tab.tsx").read_text(encoding="utf-8")
-    body = widget.split("const remove = (id: string) => {", 1)[1].split("};", 1)[0]
-    assert "full.length <= 1" in body
+    # the order list (settings-bic) holds the rule for all three orders: a
+    # row can only go while more than the fewest allowed are left, by the
+    # menu and by dragging it out
+    widget = (_TABS.parent / "ui" / "order-list.tsx").read_text(encoding="utf-8")
+    assert "minItems = 1," in widget
+    assert "const canRemove = ids.length > minItems;" in widget
+    body = widget.split("const remove = (id: string, by: 'menu' | 'drag') => {", 1)[1].split("};", 1)[0]
+    assert "if (!canRemove) return;" in body
+    assert "live.current.canRemove && middle > poolBox.top" in widget
 
 
 def test_the_order_is_loaded_and_saved(model):
@@ -405,10 +426,13 @@ def test_the_offered_sources_match_the_backend_chain(defaults, model):
     assert offered == set(defaults["audiobooks"]["download_source"]["hybrid_order"])
 
 
-def test_the_mode_options_match_the_backend(defaults, panel):
-    block = panel.split('id="audiobook-download-mode"', 1)[1].split("</select>", 1)[0]
-    offered = {part.split('"')[0] for part in block.split('value="')[1:]}
-    assert offered == {"soulseek", "torrent", "usenet", "hybrid"}
+def test_the_mode_options_match_the_backend(defaults, model):
+    # the order offers the backend's sources; the mode follows from it
+    line = next(ln for ln in model.splitlines()
+                if ln.startswith("export const AUDIOBOOK_SOURCES"))
+    offered = {part.strip(" '\"") for part in
+               line.split("[", 1)[1].split("]", 1)[0].split(",")}
+    assert offered | {"hybrid"} == {"soulseek", "torrent", "usenet", "hybrid"}
 
 
 # ---------------------------------------------------------------------------
@@ -651,8 +675,8 @@ def test_the_quality_profile_is_one_for_the_whole_side():
 
 def test_the_preferred_format_choice_keeps_the_others_behind_it():
     # Picking MP3 must not silently discard every other format.
-    # the Organization card's Audiobooks panel is React (step 8c)
-    panel = _read("webui/src/features/settings/tabs/library-audiobooks.tsx")
+    # Quality > Audiobooks has it since the settings-bic rebuild
+    panel = _read("webui/src/features/settings/tabs/quality/audiobooks-view.tsx")
     block = panel.split("set('quality.format_order', [", 1)[1].split("]);", 1)[0]
     assert "first," in block
     assert ".filter((f) => f !== first)" in block
@@ -662,6 +686,8 @@ def test_the_quality_floor_is_separate_from_the_completeness_floor():
     # They answer different questions: could this be the whole book at all,
     # versus do I want it. Sharing one number would conflate fact with taste.
     panel = _read("webui/src/features/settings/tabs/library-audiobooks.tsx")
-    assert "'audiobook-min-bitrate'," in panel
-    assert "'audiobook-completeness-tolerance'," in panel
-    assert "min_complete_kbps" not in panel
+    quality = _read("webui/src/features/settings/tabs/quality/audiobooks-view.tsx")
+    # two fields, on two pages: Quality > Audiobooks and Library
+    assert 'id="audiobook-min-bitrate"' in quality
+    assert 'id="audiobook-completeness-tolerance"' in panel
+    assert "min_complete_kbps" not in panel + quality

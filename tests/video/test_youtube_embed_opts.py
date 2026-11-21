@@ -78,5 +78,9 @@ def test_worker_plumbs_the_settings_into_every_download():
 def test_settings_ui_has_the_fields():
     for frag in ("youtube_sponsorblock: s('youtube_sponsorblock')", "youtube_embed_subs: b('youtube_embed_subs')"):
         assert frag in _ORG, frag
-    assert '<Select id="vo-sponsorblock" field="youtube_sponsorblock">' in _PANEL
-    assert '<Check id="vo-yt-subs" field="youtube_embed_subs"' in _PANEL
+    # Quality > YouTube draws them (settings-bic phase 4, DESIGN 3.3): what a
+    # YouTube file contains
+    assert "onChange={(value) => save('youtube_sponsorblock', value)}" in _PANEL
+    assert 'id="vo-yt-subs"\n          field="youtube_embed_subs"' in _PANEL
+    quality = (_TABS / "quality" / "quality-page.tsx").read_text(encoding="utf-8")
+    assert "<YoutubeFileOptions />" in quality

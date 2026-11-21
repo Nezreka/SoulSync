@@ -614,7 +614,7 @@ def check_security() -> List[dict]:
         return []
     return [finding("security.auth_proxy_trusted", "warning", "security",
                     "The auth proxy header is being ignored", problem,
-                    [fix_settings("Open Security settings", "advanced")], "prof-security")]
+                    [fix_settings("Open Security settings", "security")], "prof-security")]
 
 
 # ---------------------------------------------------------------- setup + updates

@@ -124,15 +124,16 @@ def test_the_toggle_exists_in_the_settings_page():
     there was no way for a user to see or change it (sassmastawillis went
     looking for it and there was nothing to find)."""
     # the Organization card is React (SETTINGS_PORT.md step 8b)
-    assert "'detect-multi-artist-compilations'," in _card()
+    assert 'id="detect-multi-artist-compilations"' in _card()
 
 
 def test_the_toggle_saves_and_loads_under_the_key_the_backend_reads():
-    card = _card()
-    assert "store.set('file_organization', 'detect_multi_artist_compilations', v)" in card
+    card = " ".join(_card().split())
+    assert ("store.set( 'file_organization', 'detect_multi_artist_compilations', "
+            "event.target.checked, )") in card
     # `!== false` and not `=== true`: the backend default is ON, so a config
-    # that has never stored the key must still render the box ticked.
-    assert "org.detect_multi_artist_compilations !== false," in card
+    # that has never stored the key must still render the switch on.
+    assert "checked={org.detect_multi_artist_compilations !== false}" in card
 
 
 def test_the_backend_default_and_the_checkbox_default_agree():
@@ -144,5 +145,5 @@ def test_the_backend_default_and_the_checkbox_default_agree():
     assert '"detect_multi_artist_compilations": True' in defaults_src or \
            "'detect_multi_artist_compilations': True" in defaults_src
     # the card ticks it unless the key is saved off (see above)
-    assert "org.detect_multi_artist_compilations !== false," in _card(), \
+    assert "checked={org.detect_multi_artist_compilations !== false}" in _card(), \
         'markup default must match the backend default'

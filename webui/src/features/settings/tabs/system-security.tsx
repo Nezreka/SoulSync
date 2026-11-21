@@ -1,6 +1,9 @@
 /**
- * System > Security & Access (SETTINGS_PORT.md, step 9c). Same markup,
- * classes and ids.
+ * System > Security (settings-bic phase 6), on the parts: the hero says who
+ * can get in, then three cards: Lock with a PIN, Sign-in (the admin
+ * password, the recovery question, Require sign-in, Plex, OIDC with its
+ * provider fields shown while it is on, who new people start as) and
+ * Reverse proxy. Every control, id and key is the one it was.
  *
  * The PIN, the admin password and the recovery question are saved through
  * their own profile endpoints, as init.js did; the switches and fields below
@@ -14,17 +17,33 @@
  * them once they are on the page.
  */
 
-import { type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 
-import type { SettingsTabProps } from '../host';
 import type { SettingsStore } from '../settings-store';
 
+import {
+  Btn,
+  Card,
+  CopyValue,
+  FieldLine,
+  FieldNote,
+  More,
+  Note,
+  Row,
+  Say,
+  SecretField,
+  Select,
+  Switch,
+  Tag,
+  TextArea,
+  TextField,
+  Value,
+} from '../ui';
+import s from '../ui/settings.module.css';
 import { useLoadedDraft } from './library-card';
-import { Section, SecretInput } from './parts';
 import { openPeopleSettings } from './people/people-tab';
 import { text } from './source-panels';
 
-const TAB = 'advanced';
 type Section_ = Record<string, unknown>;
 
 type Shell = Window & {
@@ -75,19 +94,12 @@ type AdminProfile = {
 };
 type Msg = { text: string; ok: boolean } | null;
 
+/** what a save said, under its fields */
 function Message({ id, msg }: { id: string; msg: Msg }) {
   return (
-    <p
-      id={id}
-      className="setting-help-text"
-      style={{
-        marginTop: '6px',
-        display: msg ? 'block' : 'none',
-        ...(msg ? { color: msg.ok ? '#4caf50' : '#ff5252' } : {}),
-      }}
-    >
+    <Say id={id} tone={msg ? (msg.ok ? 'ok' : 'bad') : undefined} hidden={!msg}>
       {msg?.text}
-    </p>
+    </Say>
   );
 }
 
@@ -99,8 +111,6 @@ const post = async (url: string, body: unknown) => {
   });
   return (await response.json()) as { success?: boolean; error?: string };
 };
-
-const MONO = { width: '100%', fontFamily: 'monospace', fontSize: '12px' };
 
 /** the admin's OIDC connect button, as the markup had it: the shell replaces
  *  it with the connection's status once it knows the admin (oidc-signin.ts) */
@@ -128,7 +138,7 @@ function useTrimmedField(store: SettingsStore, key: string) {
 const CONNECT_BOX = { __html: CONNECT_HTML };
 const EMPTY_BOX = { __html: '' };
 
-export function SecuritySection({ store }: SettingsTabProps) {
+export function SecurityView({ store }: { store: SettingsStore }) {
   const settings = useSettings(store);
   const loads = useLoads(store);
   const sec = (settings.security || {}) as Section_;
@@ -319,585 +329,581 @@ export function SecuritySection({ store }: SettingsTabProps) {
   });
   useEffect(() => () => clearTimeout(corsTimer.current), []);
 
-  const toggle = (
-    id: string,
-    checked: boolean,
-    save: (value: boolean) => void,
-    label: ReactNode,
-    extra?: { disabled?: boolean; style?: Record<string, string> },
-  ) => (
-    <label className="toggle-label" style={extra?.style}>
-      <input
-        type="checkbox"
-        id={id}
-        checked={checked}
-        disabled={extra?.disabled}
-        onChange={(event) => save(event.target.checked)}
-      />{' '}
-      <span>{label}</span>
-    </label>
-  );
-  const help = (children: ReactNode, style?: Record<string, string>, id?: string) => (
-    <div className="setting-help-text" style={style} id={id}>
-      {children}
-    </div>
-  );
+  const pinOn = on('require_pin_on_launch') && !pinLocked;
+  const loginLocked = admin !== null && !hasPassword;
+  const loginOn = on('require_login') && !loginLocked;
+  const plex = on('plex_signin');
+  const oidcOnly = on('oidc_only');
+  const proxy = on('trust_reverse_proxy');
+  const corsBad = loads ? badOrigins(cors.value.trim()) : [];
+  // no PIN and no sign-in: said on the page, where the locks are
+  const open = !!loads && admin !== null && !pinOn && !loginOn;
 
   return (
-    <Section tab={TAB} title="Security & Access" hint="PIN · user accounts · reverse proxy">
-      <div className="settings-group security-wrapper" data-stg={TAB}>
-        {help(
-          <>
-            By default, anyone who can reach SoulSync on your network can use it. Protect access
-            below with a simple shared <strong>PIN</strong>, or full <strong>user accounts</strong>{' '}
-            with passwords — you only need one. The last group is just for exposing SoulSync over
-            the internet.
-          </>,
-          { marginBottom: '18px' },
-        )}
-
-        {/* ── Method A: PIN ── */}
-        <div className="security-subgroup">
-          <h4 className="security-subhead">
-            🔑 Lock with a PIN{' '}
-            <span className="security-subhead-note">simple · one shared PIN</span>
-          </h4>
-
-          <div
-            className="form-group"
-            id="security-pin-setup"
-            style={{ display: setupShown ? 'block' : 'none' }}
+    <>
+      <div className={s.cards}>
+        {open ? (
+          <Note>
+            <span id="security-open-note">
+              Anyone who can reach SoulSync can use it: there is no PIN and no sign-in. Turn on one
+              of them below.
+            </span>
+          </Note>
+        ) : null}
+        <Card
+          title="Lock with a PIN"
+          hint="One shared PIN for the whole app. Simple, and fine on a home network."
+          actions={
+            <span id="security-change-pin-section" hidden={!(admin !== null && hasPin)}>
+              <Btn small onClick={openSetup}>
+                Change PIN
+              </Btn>
+            </span>
+          }
+        >
+          <Row
+            off={pinLocked}
+            label="Require the PIN to open SoulSync"
+            htmlFor="security-require-pin"
+            help={
+              pinLocked
+                ? 'Set a PIN below first.'
+                : 'A lock screen on every page load, checked against the admin PIN.'
+            }
+            more="Closing the tab asks again."
           >
-            <label>Step 1 — Set admin PIN:</label>
-            {help('Set a PIN before you can turn on the lock screen.', { marginBottom: '8px' })}
-            <input
-              ref={pinInput}
-              type="password"
-              id="security-new-pin"
-              placeholder="4 to 20 digits"
-              inputMode="numeric"
-              maxLength={20}
-              autoComplete="off"
-              style={{ marginBottom: '6px' }}
-              value={pin.pin}
-              onChange={(event) => setPin({ ...pin, pin: event.target.value })}
-            />
-            <input
-              type="password"
-              id="security-confirm-pin"
-              inputMode="numeric"
-              placeholder="Confirm PIN"
-              maxLength={20}
-              autoComplete="off"
-              style={{ marginBottom: '6px' }}
-              value={pin.confirm}
-              onChange={(event) => setPin({ ...pin, confirm: event.target.value })}
-            />
-            <button
-              className="auth-button"
-              id="security-save-pin-btn"
-              onClick={() => void savePin()}
-            >
-              Save PIN
-            </button>
-            <Message id="security-pin-msg" msg={pinMsg} />
-          </div>
-
-          <div className="form-group">
-            {toggle(
-              'security-require-pin',
-              on('require_pin_on_launch') && !pinLocked,
-              (checked) => {
+            <Switch
+              id="security-require-pin"
+              checked={pinOn}
+              disabled={pinLocked}
+              onChange={(event) => {
+                const checked = event.target.checked;
                 // no PIN yet (or one being changed): set it first
                 if (checked && (setupShown || pinLocked)) return openSetup();
                 set('require_pin_on_launch', checked);
                 // this one saved straight away (handleSecurityPinToggle)
                 void store.flush();
-              },
-              'Require PIN to access SoulSync',
-              { disabled: pinLocked },
-            )}
-            {help(
-              'A lock screen appears on every page load, verified against the admin PIN. Closing the tab requires re-entry.',
-            )}
-          </div>
-
-          <div
-            className="form-group"
-            id="security-change-pin-section"
-            style={{ display: admin !== null && hasPin ? 'block' : 'none' }}
-          >
-            <button className="auth-button" onClick={openSetup}>
-              Change PIN
-            </button>
-          </div>
-        </div>
-
-        {/* ── Method B: Login accounts ── */}
-        <div className="security-subgroup">
-          <h4 className="security-subhead">
-            👤 User accounts (login){' '}
-            <span className="security-subhead-note">per-person · best for public access</span>
-          </h4>
-          {help(
-            <>
-              Everyone signs in with their account name + password. Turning this on{' '}
-              <strong>replaces</strong> the PIN and the profile picker. Set passwords for other
-              people in <strong>Manage Profiles</strong>.
-            </>,
-            { marginBottom: '12px' },
-          )}
-
-          <div className="form-group">
-            <label>Step 1 — Admin login password:</label>
-            <div
-              className="security-saved-status"
-              id="security-login-password-status"
-              style={{ display: hasPassword ? 'block' : 'none' }}
-            >
-              ✓ A login password is set
-            </div>
-            <input
-              type="password"
-              id="security-login-password"
-              placeholder={
-                hasPassword ? 'Enter a new password to change it' : 'Enter password (min 6)'
-              }
-              maxLength={200}
-              autoComplete="new-password"
-              style={{ margin: '6px 0' }}
-              value={password.password}
-              onChange={(event) => setPassword({ ...password, password: event.target.value })}
-            />
-            <input
-              type="password"
-              id="security-login-password-confirm"
-              placeholder={hasPassword ? 'Confirm new password' : 'Confirm password'}
-              maxLength={200}
-              autoComplete="new-password"
-              style={{ marginBottom: '6px' }}
-              value={password.confirm}
-              onChange={(event) => setPassword({ ...password, confirm: event.target.value })}
-            />
-            <button className="auth-button" onClick={() => void savePassword()}>
-              Save Password
-            </button>
-            <Message id="security-login-password-msg" msg={passwordMsg} />
-          </div>
-
-          <div className="form-group">
-            <label>
-              Step 2 <span style={{ opacity: '0.6' }}>(recommended)</span> — Password recovery
-              question:
-            </label>
-            {help('So you can reset a forgotten password by answering it on the sign-in screen.', {
-              marginBottom: '8px',
-            })}
-            <div
-              className="security-saved-status"
-              id="security-recovery-status"
-              style={{ display: admin?.has_recovery ? 'block' : 'none' }}
-            >
-              {admin?.has_recovery
-                ? '✓ Recovery question saved' +
-                  (admin.recovery_question ? ': “' + admin.recovery_question + '”' : '')
-                : ''}
-            </div>
-            <select
-              id="security-recovery-question"
-              className="form-select"
-              style={{ marginBottom: '6px' }}
-              value={recovery.pick}
-              onChange={(event) => setRecovery({ ...recovery, pick: event.target.value })}
-            >
-              <option value="">— Select a question —</option>
-              {RECOVERY_QUESTIONS.map((q) => (
-                <option key={q}>{q}</option>
-              ))}
-              <option value="__custom__">Custom question…</option>
-            </select>
-            <input
-              type="text"
-              id="security-recovery-custom"
-              placeholder="Type your own question"
-              maxLength={120}
-              style={{
-                display: recovery.pick === '__custom__' ? 'block' : 'none',
-                marginBottom: '6px',
               }}
-              value={recovery.custom}
-              onChange={(event) => setRecovery({ ...recovery, custom: event.target.value })}
             />
-            <input
-              type="text"
-              id="security-recovery-answer"
-              placeholder={admin?.has_recovery ? 'Enter a new answer to change it' : 'Your answer'}
-              maxLength={120}
-              autoComplete="off"
-              style={{ marginBottom: '6px' }}
-              value={answer}
-              onChange={(event) => setAnswer(event.target.value)}
-            />
-            <button className="auth-button" onClick={() => void saveRecovery()}>
-              Save Recovery Question
-            </button>
-            <Message id="security-recovery-msg" msg={recoveryMsg} />
+          </Row>
+          <div id="security-pin-setup" hidden={!setupShown}>
+            <Row
+              stack
+              label={hasPin ? 'New admin PIN' : 'Admin PIN'}
+              htmlFor="security-new-pin"
+              help="4 to 20 digits. Set it before you turn the lock on."
+            >
+              <FieldLine wrap>
+                <TextField
+                  ref={pinInput}
+                  type="password"
+                  id="security-new-pin"
+                  placeholder="4 to 20 digits"
+                  inputMode="numeric"
+                  maxLength={20}
+                  autoComplete="off"
+                  value={pin.pin}
+                  onChange={(event) => setPin({ ...pin, pin: event.target.value })}
+                />
+                <TextField
+                  type="password"
+                  id="security-confirm-pin"
+                  aria-label="Confirm PIN"
+                  inputMode="numeric"
+                  placeholder="Confirm PIN"
+                  maxLength={20}
+                  autoComplete="off"
+                  value={pin.confirm}
+                  onChange={(event) => setPin({ ...pin, confirm: event.target.value })}
+                />
+                <Btn small kind="primary" id="security-save-pin-btn" onClick={() => void savePin()}>
+                  Save PIN
+                </Btn>
+              </FieldLine>
+            </Row>
           </div>
+          <div className={s.cardPad} hidden={!pinMsg}>
+            <Message id="security-pin-msg" msg={pinMsg} />
+          </div>
+        </Card>
+
+        <Card
+          title="Sign-in"
+          hint="Everyone signs in with their own account. It replaces the PIN and the profile picker. Set other people's passwords in People."
+        >
+          <Row
+            stack
+            label={
+              <>
+                Admin password{' '}
+                <span id="security-login-password-status" hidden={!hasPassword}>
+                  <Tag accent>Set</Tag>
+                </span>
+              </>
+            }
+            htmlFor="security-login-password"
+            help={
+              hasPassword
+                ? 'A password is set. Type a new one to change it.'
+                : 'At least 6 characters. Sign-in can be turned on once it is set.'
+            }
+          >
+            <FieldLine wrap>
+              <TextField
+                type="password"
+                id="security-login-password"
+                placeholder={hasPassword ? 'New password' : 'Password, 6 or more'}
+                maxLength={200}
+                autoComplete="new-password"
+                value={password.password}
+                onChange={(event) => setPassword({ ...password, password: event.target.value })}
+              />
+              <TextField
+                type="password"
+                id="security-login-password-confirm"
+                aria-label="Confirm password"
+                placeholder={hasPassword ? 'Confirm new password' : 'Confirm password'}
+                maxLength={200}
+                autoComplete="new-password"
+                value={password.confirm}
+                onChange={(event) => setPassword({ ...password, confirm: event.target.value })}
+              />
+              <Btn small kind="primary" onClick={() => void savePassword()}>
+                Save password
+              </Btn>
+            </FieldLine>
+            <Message id="security-login-password-msg" msg={passwordMsg} />
+          </Row>
+
+          <Row
+            stack
+            label={
+              <>
+                Recovery question <Tag>Recommended</Tag>
+              </>
+            }
+            htmlFor="security-recovery-question"
+            help="So you can reset a forgotten password by answering it on the sign-in screen."
+          >
+            <div id="security-recovery-status" hidden={!admin?.has_recovery}>
+              <FieldNote>
+                {admin?.has_recovery
+                  ? 'Saved' +
+                    (admin.recovery_question ? `: “${admin.recovery_question}”` : '') +
+                    '. Answer a new one below to change it.'
+                  : ''}
+              </FieldNote>
+            </div>
+            <FieldLine wrap>
+              <Select
+                id="security-recovery-question"
+                value={recovery.pick}
+                onChange={(event) => setRecovery({ ...recovery, pick: event.target.value })}
+              >
+                <option value="">Pick a question</option>
+                {RECOVERY_QUESTIONS.map((q) => (
+                  <option key={q}>{q}</option>
+                ))}
+                <option value="__custom__">My own question…</option>
+              </Select>
+              <span className={s.grow} hidden={recovery.pick !== '__custom__'}>
+                <TextField
+                  full
+                  id="security-recovery-custom"
+                  aria-label="Your own question"
+                  placeholder="Type your own question"
+                  maxLength={120}
+                  value={recovery.custom}
+                  onChange={(event) => setRecovery({ ...recovery, custom: event.target.value })}
+                />
+              </span>
+            </FieldLine>
+            <FieldLine wrap>
+              <TextField
+                id="security-recovery-answer"
+                aria-label="Answer"
+                placeholder={admin?.has_recovery ? 'A new answer, to change it' : 'Your answer'}
+                maxLength={120}
+                autoComplete="off"
+                value={answer}
+                onChange={(event) => setAnswer(event.target.value)}
+              />
+              <Btn small kind="primary" onClick={() => void saveRecovery()}>
+                Save recovery question
+              </Btn>
+            </FieldLine>
+            <Message id="security-recovery-msg" msg={recoveryMsg} />
+          </Row>
 
           {/* the switch is locked until the admin has a password (anti-lockout,
               made visible instead of a refused save) */}
-          <div
-            className={admin !== null && !hasPassword ? 'form-group security-locked' : 'form-group'}
+          <Row
             id="security-login-toggle-wrap"
+            off={loginLocked}
+            label="Require sign-in"
+            htmlFor="security-require-login"
+            help={
+              <span id="security-require-login-help">
+                {loginLocked
+                  ? 'Set the admin password above first, then you can turn this on.'
+                  : 'A sign-in screen in place of the profile picker and the PIN. Best when SoulSync is reachable from the internet.'}
+              </span>
+            }
           >
-            {toggle(
-              'security-require-login',
-              on('require_login') && !(admin !== null && !hasPassword),
-              (v) => set('require_login', v),
-              'Step 3 — Require login (username + password)',
-              { disabled: admin !== null && !hasPassword },
-            )}
-            {help(
-              admin !== null && !hasPassword ? (
-                <>
-                  🔒 Set the admin password in <strong>Step 1</strong> first — then you can turn
-                  this on.
-                </>
-              ) : (
-                'Replaces the profile picker + PIN with a sign-in screen. Best for instances exposed to the internet.'
-              ),
-              undefined,
-              'security-require-login-help',
-            )}
-          </div>
+            <Switch
+              id="security-require-login"
+              checked={loginOn}
+              disabled={loginLocked}
+              onChange={(event) => set('require_login', event.target.checked)}
+            />
+          </Row>
 
-          <div className="form-group">
-            {toggle(
-              'security-plex-signin',
-              on('plex_signin'),
-              (v) => set('plex_signin', v),
-              'Sign in with Plex',
-            )}
-            {help(
-              'Adds a "Sign in with Plex" button to the sign-in screen. Anyone with access to your Plex server signs in with their Plex account (SoulSync never sees their password), and their playlists sync to their own Plex account. The server\'s owner signs in as the admin. New Plex profiles start as the template New people start as names, below. Needs Plex as a media server and internet access to plex.tv.',
-            )}
-            {toggle(
-              'security-plex-signin-auto-create',
-              loads ? sec.plex_signin_auto_create !== false : true,
-              (v) => set('plex_signin_auto_create', v),
-              'Let new Plex users sign up (off: only people who already have a Plex profile here can sign in)',
-              { style: { marginTop: '8px' } },
-            )}
-          </div>
+          <Row
+            label="Sign in with Plex"
+            htmlFor="security-plex-signin"
+            help="Adds a Sign in with Plex button. Anyone with access to your Plex server signs in with their Plex account."
+            more="SoulSync never sees their password, and their playlists sync to their own Plex account. The server's owner signs in as the admin. New Plex profiles start as the template below. Needs Plex as a media server and internet access to plex.tv."
+          >
+            <Switch
+              id="security-plex-signin"
+              checked={plex}
+              onChange={(event) => set('plex_signin', event.target.checked)}
+            />
+          </Row>
+          <Row
+            sub
+            off={!plex}
+            label="Let new Plex users sign up"
+            htmlFor="security-plex-signin-auto-create"
+            help="Off: only people who already have a Plex profile here can sign in."
+          >
+            <Switch
+              id="security-plex-signin-auto-create"
+              checked={loads ? sec.plex_signin_auto_create !== false : true}
+              onChange={(event) => set('plex_signin_auto_create', event.target.checked)}
+            />
+          </Row>
 
-          <div className="form-group">
-            {toggle(
-              'security-oidc-signin',
-              oidc,
-              (v) => set('oidc_signin', v),
-              'Sign in with OIDC',
-            )}
-            {help(
-              <>
-                Adds a sign-in button for your own identity provider (Pocket ID, Authentik,
-                Authelia, Keycloak or any other OpenID Connect provider). SoulSync never sees
-                passwords. Create a client at the provider with this callback URL:{' '}
-                <code id="security-oidc-callback-url">{callback.url}</code>. New OIDC profiles start
-                with what New sign-ups below sets. Accounts are matched by the provider's account
-                id, never by email, and nobody becomes an admin from a provider claim: to sign in as
-                the admin, save these settings, then connect your own account at the bottom.
-              </>,
-            )}
-            <div
-              className="setting-warning"
-              id="security-oidc-callback-warn"
-              role="status"
-              hidden={!callback.warn}
+          <Row
+            label="Sign in with OIDC"
+            htmlFor="security-oidc-signin"
+            help="A sign-in button for your own identity provider: Pocket ID, Authentik, Authelia, Keycloak or any other OpenID Connect provider."
+            more="SoulSync never sees passwords. Accounts are matched by the provider's account id, never by email, and nobody becomes an admin from a provider claim: to sign in as the admin, save these settings, then connect your own account below. New OIDC profiles start as the template below."
+          >
+            <Switch
+              id="security-oidc-signin"
+              checked={oidc}
+              onChange={(event) => set('oidc_signin', event.target.checked)}
+            />
+          </Row>
+          {/* the provider's settings, shown while the switch is on; hidden
+              fields keep their values and still save */}
+          <div id="security-oidc-provider" hidden={loads > 0 && !oidc}>
+            <Row
+              sub
+              stack
+              label="Callback URL"
+              help="Create a client at your provider with this address."
             >
-              SoulSync sees this connection as plain http, so that's the callback it sends your
-              provider. Turn on Behind a reverse proxy below and restart, have your proxy send
-              X-Forwarded-Proto, or set the Callback URL override to your https address.
-            </div>
-            {/* the provider's settings, shown while the switch is on; hidden
-                fields keep their values and still save */}
-            <div
-              className="security-nested security-nested-block"
-              id="security-oidc-provider"
-              hidden={loads > 0 && !oidc}
+              <CopyValue id="security-oidc-callback-url" value={callback.url} />
+              <div id="security-oidc-callback-warn" role="status" hidden={!callback.warn}>
+                <Note>
+                  SoulSync sees this connection as plain http, so that's the callback it sends your
+                  provider. Turn on Behind a reverse proxy below and restart, have your proxy send
+                  X-Forwarded-Proto, or set the callback URL override to your https address.
+                </Note>
+              </div>
+            </Row>
+            <Row sub field label="Issuer URL" htmlFor="security-oidc-issuer">
+              <TextField
+                wide
+                mono
+                id="security-oidc-issuer"
+                placeholder="https://id.example.com"
+                autoComplete="off"
+                {...issuer}
+              />
+            </Row>
+            <Row sub field label="Client ID" htmlFor="security-oidc-client-id">
+              <TextField wide mono id="security-oidc-client-id" autoComplete="off" {...clientId} />
+            </Row>
+            <Row sub field label="Client secret" htmlFor="security-oidc-client-secret">
+              <SecretField
+                wide
+                id="security-oidc-client-secret"
+                autoComplete="new-password"
+                value={loads ? text(sec.oidc_client_secret) : ''}
+                onChange={(v) => set('oidc_client_secret', v)}
+              />
+            </Row>
+            <Row
+              sub
+              field
+              label="Button label"
+              htmlFor="security-oidc-button-label"
+              help="What the sign-in button says."
             >
-              <div className="form-group">
-                <label htmlFor="security-oidc-issuer">Issuer URL:</label>
-                <input
-                  type="text"
-                  id="security-oidc-issuer"
-                  placeholder="https://id.example.com"
-                  autoComplete="off"
-                  style={MONO}
-                  {...issuer}
-                />
-              </div>
-              <div className="form-group">
-                <label htmlFor="security-oidc-client-id">Client ID:</label>
-                <input
-                  type="text"
-                  id="security-oidc-client-id"
-                  autoComplete="off"
-                  style={MONO}
-                  {...clientId}
-                />
-              </div>
-              <div className="form-group">
-                <label htmlFor="security-oidc-client-secret">Client secret:</label>
-                <SecretInput
-                  id="security-oidc-client-secret"
-                  autoComplete="new-password"
-                  style={MONO}
-                  value={loads ? text(sec.oidc_client_secret) : ''}
-                  onChange={(v) => set('oidc_client_secret', v)}
-                />
-              </div>
-              <div className="form-group">
-                <label htmlFor="security-oidc-button-label">Button label:</label>
-                <input
-                  type="text"
-                  id="security-oidc-button-label"
-                  placeholder="Sign in with OIDC"
-                  autoComplete="off"
-                  maxLength={40}
-                  style={{ width: '100%' }}
-                  {...buttonLabel}
-                />
-              </div>
-              <div className="form-group">
-                <label htmlFor="security-oidc-icon-url">
-                  Icon URL <span style={{ opacity: '0.6' }}>(optional)</span>:
-                </label>
-                <input
-                  type="text"
+              <TextField
+                wide
+                id="security-oidc-button-label"
+                placeholder="Sign in with OIDC"
+                autoComplete="off"
+                maxLength={40}
+                {...buttonLabel}
+              />
+            </Row>
+            <Row
+              sub
+              label="Let new OIDC users sign up"
+              htmlFor="security-oidc-signin-auto-create"
+              help="Off: only accounts already connected to a profile can sign in."
+            >
+              <Switch
+                id="security-oidc-signin-auto-create"
+                checked={loads ? sec.oidc_signin_auto_create !== false : true}
+                onChange={(event) => set('oidc_signin_auto_create', event.target.checked)}
+              />
+            </Row>
+            <More count={5} names="icon, required group, groups claim, scopes, callback override">
+              <Row
+                sub
+                field
+                label="Icon URL"
+                htmlFor="security-oidc-icon-url"
+                help="Your provider's logo on the sign-in card in My Account, https only. Empty shows a plain key."
+              >
+                <TextField
+                  wide
+                  mono
                   id="security-oidc-icon-url"
                   placeholder="https://..."
                   autoComplete="off"
-                  style={MONO}
                   {...iconUrl}
                 />
-                {help(
-                  "Your provider's logo, shown on the sign-in card in My Account (https only). Leave empty for a plain key icon.",
-                )}
-              </div>
-              <div className="form-group">
-                <label htmlFor="security-oidc-required-group">
-                  Required group <span style={{ opacity: '0.6' }}>(optional)</span>:
-                </label>
-                <input
-                  type="text"
+              </Row>
+              <Row
+                sub
+                field
+                label="Required group"
+                htmlFor="security-oidc-required-group"
+                help="Only accounts in this group get in. Empty lets every account at the provider sign in."
+              >
+                <TextField
+                  wide
+                  mono
                   id="security-oidc-required-group"
                   autoComplete="off"
-                  style={MONO}
                   {...group}
                 />
-                {help(
-                  'Only accounts in this group get in. Leave empty to let every account at the provider sign in.',
-                )}
-              </div>
-              <div className="form-group">
-                <label htmlFor="security-oidc-groups-claim">Groups claim:</label>
-                <input
-                  type="text"
+              </Row>
+              <Row sub field label="Groups claim" htmlFor="security-oidc-groups-claim">
+                <TextField
+                  wide
+                  mono
                   id="security-oidc-groups-claim"
                   placeholder="groups"
                   autoComplete="off"
-                  style={MONO}
                   {...claim}
                 />
-              </div>
-              <div className="form-group">
-                <label htmlFor="security-oidc-scopes">Scopes:</label>
-                <input
-                  type="text"
+              </Row>
+              <Row
+                sub
+                field
+                label="Scopes"
+                htmlFor="security-oidc-scopes"
+                help="Add the scope your provider needs to send groups, if you set a required group."
+                more={
+                  <>
+                    Pocket ID: <code>groups</code>. Add <code>offline_access</code> on Authentik or
+                    Authelia so signing someone out there signs them out here too.
+                  </>
+                }
+              >
+                <TextField
+                  wide
+                  mono
                   id="security-oidc-scopes"
                   placeholder="openid profile email"
                   autoComplete="off"
-                  style={MONO}
                   {...scopes}
                 />
-                {help(
-                  <>
-                    Add the scope your provider needs to send groups, if you set a required group
-                    (Pocket ID: <code>groups</code>). Add <code>offline_access</code> on Authentik
-                    or Authelia so signing someone out there signs them out here too.
-                  </>,
-                )}
-              </div>
-              <div className="form-group">
-                <label htmlFor="security-oidc-redirect-uri">
-                  Callback URL override <span style={{ opacity: '0.6' }}>(optional)</span>:
-                </label>
-                <input
-                  type="text"
+              </Row>
+              <Row
+                sub
+                field
+                label="Callback URL override"
+                htmlFor="security-oidc-redirect-uri"
+                help="Only if your reverse proxy doesn't pass the public address through."
+              >
+                <TextField
+                  wide
+                  mono
                   id="security-oidc-redirect-uri"
                   autoComplete="off"
-                  style={MONO}
                   {...redirect}
                 />
-                {help("Only if your reverse proxy doesn't pass the public address through.")}
-              </div>
-              <div className="form-group">
-                {toggle(
-                  'security-oidc-signin-auto-create',
-                  loads ? sec.oidc_signin_auto_create !== false : true,
-                  (v) => set('oidc_signin_auto_create', v),
-                  'Let new OIDC users sign up (off: only accounts already connected to a profile can sign in)',
-                )}
-              </div>
-              {/* the admin's own connection: the shell draws it (oidc-signin.ts) */}
+              </Row>
+            </More>
+            {/* the admin's own connection: the shell draws it (oidc-signin.ts) */}
+            <Row
+              sub
+              stack
+              label="Your admin account"
+              help="Connect it to sign in as the admin with OIDC."
+            >
               <div
-                className="form-group security-oidc-admin"
+                className="security-oidc-admin"
                 id="security-oidc-admin"
                 dangerouslySetInnerHTML={CONNECT_BOX}
               />
-              {/* sign in with OIDC only (#1839; oidc-only.ts draws the status) */}
-              <div className="form-group" id="security-oidc-only-wrap">
-                {toggle(
-                  'security-oidc-only',
-                  on('oidc_only'),
-                  (v) => set('oidc_only', v),
-                  'OIDC only: turn off every other way to sign in',
-                )}
-                {help(
-                  <>
-                    Password sign-in, the recovery question, Sign in with Plex and switching
-                    profiles with a password stop working, and anyone signed in some other way is
-                    signed out. Invites send people to your provider instead of asking for a
-                    password. Needs login mode, and you have to be signed in with OIDC yourself to
-                    turn it on. Every profile needs an OIDC connection first. Passwords are kept and
-                    work again if you turn this off. If the provider is ever down, set{' '}
-                    <code>SOULSYNC_OIDC_ONLY_OVERRIDE=off</code> on the container and restart, then
-                    sign in with the admin password.
-                  </>,
-                )}
-                <div
-                  className="setting-help-text"
-                  id="security-oidc-only-status"
-                  hidden
-                  dangerouslySetInnerHTML={EMPTY_BOX}
-                />
-              </div>
-            </div>
+            </Row>
+            {/* sign in with OIDC only (#1839; oidc-only.ts draws the status) */}
+            <Row
+              sub
+              id="security-oidc-only-wrap"
+              label="OIDC only"
+              htmlFor="security-oidc-only"
+              help="Turns off every other way to sign in. Needs sign-in on, and you signed in with OIDC yourself."
+              more={
+                <>
+                  Password sign-in, the recovery question, Sign in with Plex and switching profiles
+                  with a password stop working, and anyone signed in some other way is signed out.
+                  Invites send people to your provider instead of asking for a password. Every
+                  profile needs an OIDC connection first. Passwords are kept and work again if you
+                  turn this off. If the provider is ever down, set{' '}
+                  <code>SOULSYNC_OIDC_ONLY_OVERRIDE=off</code> on the container and restart, then
+                  sign in with the admin password.
+                </>
+              }
+            >
+              <Switch
+                id="security-oidc-only"
+                checked={oidcOnly}
+                onChange={(event) => set('oidc_only', event.target.checked)}
+              />
+            </Row>
+            <div
+              className={`setting-help-text ${s.oidcStatus}`}
+              id="security-oidc-only-status"
+              hidden
+              dangerouslySetInnerHTML={EMPTY_BOX}
+            />
           </div>
-          <div className="form-group" id="security-signup-template">
-            <label htmlFor="security-signup-template-open">New people start as</label>
-            <button
-              type="button"
+
+          <Row
+            field
+            id="security-signup-template"
+            label="New people start as"
+            help="Everyone who signs in with Plex or OIDC for the first time follows this template: the sides, pages and downloads they get, and any request limit."
+          >
+            <Value>{signupTemplate ?? 'A template'}</Value>
+            <Btn
+              small
               id="security-signup-template-open"
-              className="auth-button"
               onClick={() => openPeopleSettings('templates')}
             >
-              {signupTemplate ?? 'Templates'}: change in People
-            </button>
-            {help(
-              'Everyone who signs in with Plex or OIDC for the first time follows this template: the sides, pages and downloads they get and any request limit. Pick it, or change what it allows, under Settings > People > Templates.',
-            )}
-          </div>
-        </div>
+              Change in People
+            </Btn>
+          </Row>
+        </Card>
 
-        {/* ── Reverse proxy & remote access ── */}
-        <div className="security-subgroup">
-          <h4 className="security-subhead">🌐 Reverse proxy &amp; remote access</h4>
-          {help(
+        <Card
+          title="Reverse proxy"
+          hint={
             <>
-              Only needed if you expose SoulSync to the internet behind nginx / Caddy / Traefik. See{' '}
+              Only for SoulSync on the internet behind nginx, Caddy or Traefik. See{' '}
               <code>Support/REVERSE-PROXY.md</code>.
-            </>,
-            { marginBottom: '12px' },
-          )}
-
-          <div className="form-group">
-            {toggle(
-              'security-trust-proxy',
-              on('trust_reverse_proxy'),
-              (v) => set('trust_reverse_proxy', v),
-              'Behind a reverse proxy',
-            )}
-            {help(
+            </>
+          }
+        >
+          <Row
+            label={
               <>
-                Trusts the proxy's <code>X-Forwarded-*</code> headers, marks the session cookie
-                HTTPS-only, and adds security headers.{' '}
-                <strong>Leave OFF for direct / LAN access over http://</strong> — it would otherwise
-                break plain-HTTP login. <strong>Takes effect after a restart.</strong>
-              </>,
-            )}
-          </div>
-
-          <div className="form-group security-nested">
-            <label htmlFor="security-auth-proxy-header">
-              ↳ Auth proxy user header <span style={{ opacity: '0.6' }}>(optional)</span>:
-            </label>
-            <input
-              type="text"
+                Behind a reverse proxy <Tag>Restart</Tag>
+              </>
+            }
+            htmlFor="security-trust-proxy"
+            help="Trusts the proxy's X-Forwarded headers, makes the session cookie HTTPS only and adds security headers. Takes effect after a restart."
+            more="Leave it off for direct or home network access over http://: it would break plain-HTTP sign-in."
+          >
+            <Switch
+              id="security-trust-proxy"
+              checked={proxy}
+              onChange={(event) => set('trust_reverse_proxy', event.target.checked)}
+            />
+          </Row>
+          <Row
+            sub
+            field
+            label="Auth proxy user header"
+            htmlFor="security-auth-proxy-header"
+            help="If an auth proxy (Authelia, Authentik, oauth2-proxy) signs people in in front of SoulSync, the header it sets. SoulSync trusts it from the addresses below. Empty is off."
+            more="Only set this behind a proxy that strips any copy of the header a client sends, or anyone could sign in as anyone."
+          >
+            <TextField
+              wide
+              mono
               id="security-auth-proxy-header"
               placeholder="Remote-User"
               autoComplete="off"
-              style={MONO}
               {...authHeader}
             />
-            {help(
-              <>
-                If an auth proxy (Authelia / Authentik / oauth2-proxy) logs users in in front of
-                SoulSync, enter the header it sets and SoulSync trusts it from the addresses below.{' '}
-                <strong>
-                  Only set this behind a proxy that strips any client-supplied copy of the header.
-                </strong>{' '}
-                Blank = off.
-              </>,
-            )}
-          </div>
-
-          <div className="form-group security-nested">
-            <label htmlFor="security-auth-proxy-trusted">↳ Trusted proxy addresses:</label>
-            <textarea
+          </Row>
+          <Row
+            sub
+            stack
+            label="Trusted proxy addresses"
+            htmlFor="security-auth-proxy-trusted"
+            help="Your proxy's IP or range, one per line or comma separated. Empty means the header is ignored."
+            more="The header only counts on requests that really come from one of these, never from a forwarded address."
+            error={
+              authHeader.value && !proxyTrusted.value ? (
+                <span id="security-auth-proxy-untrusted">
+                  The header is being ignored until you add your proxy&apos;s address here, so
+                  people get the PIN screen instead.
+                </span>
+              ) : null
+            }
+          >
+            <TextArea
+              mono
               id="security-auth-proxy-trusted"
               rows={2}
+              invalid={!!authHeader.value && !proxyTrusted.value}
               placeholder={'172.18.0.2\n172.18.0.0/16'}
-              style={MONO}
               value={proxyTrusted.value}
               onChange={proxyTrusted.onChange}
             />
-            {help(
+          </Row>
+          <Row
+            stack
+            label="Allowed WebSocket origins"
+            htmlFor="security-cors-origins"
+            help="Addresses allowed to open live-update connections, one per line or comma-separated. Empty is same-origin only, the safe default."
+            more={
               <>
-                Your proxy's IP or range, one per line or comma separated. The header only counts on
-                requests that really come from one of these (never from a forwarded address).{' '}
-                <strong>Empty = the header is ignored.</strong>
-              </>,
-            )}
-            {authHeader.value && !proxyTrusted.value ? (
-              <div className="setting-help-text" id="security-auth-proxy-untrusted" role="alert">
-                <strong>The header is being ignored</strong> until you add your proxy's address
-                here, so people get the PIN screen instead.
-              </div>
-            ) : null}
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="security-cors-origins">Allowed WebSocket Origins:</label>
-            <textarea
+                A full address with no trailing slash. Add your public domain if live updates fail
+                behind a proxy. <code>*</code> on its own line allows any origin, which is not safe.
+              </>
+            }
+            error={
+              corsBad.length
+                ? `${corsBad.length === 1 ? `"${corsBad[0]}" is` : `${corsBad.length} entries are`} not a full address like https://soulsync.example.com, so ${corsBad.length === 1 ? 'it is' : 'they are'} ignored.`
+                : null
+            }
+          >
+            <TextArea
+              mono
               id="security-cors-origins"
               rows={3}
+              invalid={corsBad.length > 0}
               placeholder={'https://soulsync.example.com\nhttp://192.168.1.5:8888'}
-              style={MONO}
               value={loads ? cors.value : ''}
               onChange={(event) => cors.onChange(event.target.value)}
             />
-            {help(
-              <>
-                Origins (full URL, no trailing slash) allowed to open WebSocket connections — one
-                per line or comma-separated. Empty = same-origin only (the secure default; fine for
-                direct access and most reverse-proxy setups). Add your public domain if live updates
-                fail behind a proxy. <code>*</code> on its own line allows any origin (insecure).
-              </>,
-            )}
-          </div>
-        </div>
+          </Row>
+        </Card>
       </div>
-    </Section>
+    </>
   );
 }

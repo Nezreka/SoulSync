@@ -92,7 +92,7 @@ Artist descriptions, artist art, album info.
 ### 🟣 Deezer
 Deezer IDs, genres, album metadata.
 ### 🎵 JioSaavn
-Track, album, and artist metadata — strong for Indian and Bollywood catalogs (experimental, enable under Settings → Advanced).
+Track, album, and artist metadata — strong for Indian and Bollywood catalogs (experimental, enable under Settings → System → Developer).
 ### 🟢 Spotify
 Artist genres, follower counts, images, album release dates, track previews.
 ### 🌸 iTunes
@@ -363,7 +363,7 @@ The **Stats** page has two tabs, **Listening** and **Library**, with the tab, ra
 
 ![Listening Stats page with play totals, activity chart, and top artists](dash-stats.jpg)
 
-Listening data requires **Listening Stats** to be enabled in Settings → Library ("Enable listening stats collection from media server") — it polls play history from your active media server (Plex, Jellyfin, or Navidrome).
+Listening data requires **Listening Stats** to be enabled in Settings → Discovery → Recommendations ("Collect listening stats from your media server") — it polls play history from your active media server (Plex, Jellyfin, or Navidrome).
 
 ## Header controls
 
@@ -701,7 +701,7 @@ The **Update File Locations** card (Tools → Database & Scanning, admins only) 
 
 ## What gets updated
 
-A record moves only when its file is not where it says, the file is found in exactly one place by the same path under one of your library folders (the music library folder or a Settings → Library music path, never the download folder), and it is the same size the library recorded. Anything else is left alone: not found anywhere, found in two places, a different size, no size recorded, or a path some other record already holds. Files are never moved or touched, and the path your media server reports for a file is never changed.
+A record moves only when its file is not where it says, the file is found in exactly one place by the same path under one of your library folders (the music library folder or a music path under Settings → Library → Folders, never the download folder), and it is the same size the library recorded. Anything else is left alone: not found anywhere, found in two places, a different size, no size recorded, or a path some other record already holds. Files are never moved or touched, and the path your media server reports for a file is never changed.
 
 > [!NOTE]
 > A library scan (Refresh & Scan, Full Refresh, Deep Scan) does the same on its own, with one more rule: the old folder has to be gone or empty. If it still has files in it, the scan leaves the records for you to check here. Those runs show up on the card too and can be undone the same way.
