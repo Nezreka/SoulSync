@@ -3259,6 +3259,11 @@ def _shutdown_runtime_components():
 
     _stop_component(web_scan_manager, "web scan manager")
     _stop_component(automation_engine, "automation engine")
+    try:
+        from core.library import folder_watch as _folder_watch
+        _stop_component(_folder_watch.get_service(), "folder watch")
+    except Exception as e:
+        logger.error(f"Error stopping folder watch: {e}")
 
     # Persist API call history before shutting down worker pools.
     try:
@@ -23105,6 +23110,33 @@ def _start_library_background():
     on_files_arrived(refresh_upgradable_counts)
     on_files_arrived(matcher.nudge)
     start_library_watch(connect)
+    _start_folder_watch()
+
+
+def _start_folder_watch():
+    """live folder watching (core/library/folder_watch.py): a change in a
+    music library folder rescans that album folder, a change in the Import
+    folder wakes the auto-import. held behind the library upgrade like the
+    workers: it writes to the catalogue"""
+    from core.library import folder_watch
+    from core.library2.migration_gate import defer_or_start
+
+    def _wake_import():
+        import api.import_routes as _imp
+        worker = _imp.auto_import_worker
+        if (worker is not None and worker.running and not worker.paused
+                and config_manager.get('auto_import.enabled', False)):
+            worker.trigger_scan()
+
+    def _busy():
+        # a full refresh indexes every file itself; the watcher waits for it
+        from api import database_admin as _db_admin
+        return (_db_admin.db_update_state or {}).get('status') == 'running'
+
+    service = folder_watch.install(folder_watch.FolderWatchService(
+        config_manager=config_manager, get_database=get_database,
+        trigger_import=_wake_import, busy=_busy))
+    defer_or_start(service, get_database())
 
 
 # never under pytest, for the same reason as the warmer
@@ -25037,6 +25069,10 @@ from api.library_coverage import configure as _cfg_cov, create_blueprint as _bp_
 _cfg_cov(get_database=get_database, config_manager=config_manager,
          media_server_engine_getter=lambda: media_server_engine)
 app.register_blueprint(_bp_cov())
+
+# live folder watching: what is watched and how (Settings > Library > Folders)
+from api.folder_watch import create_blueprint as _bp_folder_watch
+app.register_blueprint(_bp_folder_watch())
 
 # help sheet: health, report a problem, the log files (api/help.py)
 from api.help import configure as _cfg_help, create_blueprint as _bp_help
