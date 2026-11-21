@@ -100,16 +100,105 @@ export function continueCard(row: ProgressRow): RailCard {
   };
 }
 
-/** split continue rows into the rails above, keeping server order (newest first) */
-export function continueRails(rows: readonly ProgressRow[]) {
-  return CONTINUE_GROUPS.map((group) => ({
-    ...group,
-    cards: rows
-      .filter(
-        (row) => !row.finished && row.position_seconds > 0 && group.types.includes(row.item_type),
-      )
-      .map(continueCard),
-  })).filter((rail) => rail.cards.length > 0);
+/**
+ * a row of the media server's own resume list (the video side's
+ * /dashboard/continue-watching): something started on the tv shows up here
+ * too, and a show you finished an episode of offers the next one.
+ */
+export interface ServerResume {
+  kind: 'movie' | 'show';
+  id: number | null;
+  show_id?: number;
+  reason?: 'in_progress' | 'up_next';
+  title: string;
+  subtitle?: string | null;
+  image_url?: string | null;
+  runtime_minutes?: number | null;
+  view_offset_ms?: number | null;
+  last_viewed_at?: string | number | null;
+  season_number?: number;
+}
+
+/** epoch ms from an iso string or epoch seconds/ms; unknown sinks */
+export function whenMs(value: string | number | null | undefined): number {
+  if (value === null || value === undefined || value === '') return 0;
+  if (typeof value === 'number') return value < 1e12 ? value * 1000 : value;
+  const n = Number(value);
+  if (Number.isFinite(n)) return whenMs(n);
+  const t = Date.parse(
+    value.includes('T') || value.endsWith('Z') ? value : `${value.replace(' ', 'T')}Z`,
+  );
+  return Number.isFinite(t) ? t : 0;
+}
+
+export function serverResumeCard(item: ServerResume): RailCard | null {
+  if (item.kind === 'movie' && item.id) {
+    const runtimeSec = (item.runtime_minutes ?? 0) * 60;
+    return {
+      key: `movie:${item.id}`,
+      title: item.title,
+      subtitle: item.subtitle || undefined,
+      art: item.image_url ? remoteImage(item.image_url) : backdropUrl('movie', item.id, 780),
+      href: `/player/movies/${item.id}`,
+      shape: 'wide',
+      progress: fraction((item.view_offset_ms ?? 0) / 1000, runtimeSec || null),
+      preview: { kind: 'movie', id: item.id },
+    };
+  }
+  if (item.kind === 'show' && item.show_id) {
+    const upNext = item.reason === 'up_next';
+    return {
+      key: item.id ? `episode:${item.id}` : `show:${item.show_id}`,
+      title: item.title,
+      subtitle: item.subtitle || undefined,
+      art: item.image_url ? remoteImage(item.image_url) : backdropUrl('show', item.show_id, 780),
+      href: `/player/tv/${item.show_id}${item.season_number !== undefined ? `?season=${item.season_number}` : ''}`,
+      shape: 'wide',
+      progress: upNext
+        ? undefined
+        : fraction((item.view_offset_ms ?? 0) / 1000, (item.runtime_minutes ?? 0) * 60 || null),
+      badge: upNext ? 'Up next' : undefined,
+      preview: { kind: 'show', id: item.show_id },
+    };
+  }
+  return null;
+}
+
+/** continue watching is one row of wide stills: a movie shows its backdrop */
+function watchingCard(row: ProgressRow): RailCard {
+  const card = continueCard(row);
+  const id = Number(row.item_id);
+  if (row.item_type !== 'movie' || !Number.isFinite(id)) return card;
+  return {
+    ...card,
+    shape: 'wide',
+    art: row.meta?.backdrop ? remoteImage(row.meta.backdrop) : backdropUrl('movie', id, 780),
+    preview: { kind: 'movie', id },
+  };
+}
+
+/**
+ * split continue rows into the rails above, newest first. the media
+ * server's resume list joins continue watching; where both know the same
+ * movie or episode, the player's own row wins (it has the exact spot).
+ */
+export function continueRails(rows: readonly ProgressRow[], server: readonly ServerResume[] = []) {
+  const live = rows.filter((row) => !row.finished && row.position_seconds > 0);
+  return CONTINUE_GROUPS.map((group) => {
+    const own = live
+      .filter((row) => group.types.includes(row.item_type))
+      .map((row) => ({ at: whenMs(row.updated_at), card: watchingCard(row) }));
+    const extra =
+      group.id === 'watching'
+        ? server
+            .map((item) => ({ at: whenMs(item.last_viewed_at), card: serverResumeCard(item) }))
+            .filter((x): x is { at: number; card: RailCard } => !!x.card)
+        : [];
+    const seen = new Set(own.map((x) => x.card.key));
+    const merged = [...own, ...extra.filter((x) => !seen.has(x.card.key) && seen.add(x.card.key))];
+    merged.sort((a, b) => b.at - a.at);
+    return { ...group, cards: merged.map((x) => x.card) };
+  }).filter((rail) => rail.cards.length > 0);
 }
 
 /** newest first by an iso-ish date string; missing dates sink */

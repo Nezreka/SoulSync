@@ -3252,3 +3252,12 @@ a.crewRow:hover {
   color: var(--pl-text-3);
   font-size: calc(var(--u) * 0.76);
 }
+
+/* home: what you're part-way through comes first; the spotlight follows */
+.homeLead {
+  padding-top: calc(var(--u) * 0.5);
+}
+
+.homeLead ~ .hero {
+  margin-top: calc(var(--u) * 1.5);
+}

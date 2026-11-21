@@ -60,7 +60,7 @@ function TitlePage() {
   if (detail.isLoading || redirect)
     return <div className={s.skeleton} style={{ height: '60vh', marginTop: '2rem' }} />;
   const d = detail.data;
-  if (!d || detail.isError) return <NotFound what="Title" />;
+  if (!d?.title || detail.isError) return <NotFound what="Title" />;
 
   const seconds = d.runtime_minutes ? d.runtime_minutes * 60 : null;
   const director = d.crew?.filter((c) => c.job === 'Director').map((c) => c.name);

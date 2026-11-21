@@ -37,7 +37,7 @@ export function RequestButton({
       ? 'Adding…'
       : 'Asking…'
     : result?.state === 'got'
-      ? 'Added, it will download'
+      ? 'On your wishlist'
       : result?.state === 'asked'
         ? result.already
           ? 'Already requested'
@@ -58,7 +58,14 @@ export function RequestButton({
         disabled={busy || !!done}
         onClick={async () => {
           setBusy(true);
-          const r = await requestTitle({ kind, tmdb_id: tmdbId, title, year, poster_url: poster });
+          const r = await requestTitle({
+            kind,
+            tmdb_id: tmdbId,
+            title,
+            year,
+            poster_url: poster,
+            get: mode === 'download',
+          });
           setBusy(false);
           setResult(r);
           if (r.state === 'got' || r.state === 'owned')

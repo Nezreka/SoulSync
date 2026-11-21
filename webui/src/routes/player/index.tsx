@@ -25,6 +25,7 @@ import {
   finishProgress,
   podcastSubsQuery,
   removeProgress,
+  serverResumeQuery,
   videoCatalogQuery,
 } from './-player.api';
 import {
@@ -62,6 +63,7 @@ function PlayerHome() {
   const sections = useSections();
   const queryClient = useQueryClient();
   const progress = useQuery(continueQuery());
+  const resume = useQuery({ ...serverResumeQuery(), enabled: sections.video });
   const catalog = useQuery({ ...videoCatalogQuery(), enabled: sections.video });
   const albums = useQuery({
     ...albumsQuery({ sort: 'added', limit: 20 }),
@@ -80,7 +82,10 @@ function PlayerHome() {
     onSettled: refresh,
   });
 
-  const rails = useMemo(() => continueRails(progress.data ?? []), [progress.data]);
+  const rails = useMemo(
+    () => continueRails(progress.data ?? [], resume.data ?? []),
+    [progress.data, resume.data],
+  );
   const cat = catalog.data;
   const spotlight = useMemo(() => (cat ? pickSpotlight(cat.movies, cat.shows) : null), [cat]);
 
@@ -122,6 +127,25 @@ function PlayerHome() {
 
   return (
     <>
+      {rails.length ? (
+        <div className={s.homeLead}>
+          {rails.map((rail) => (
+            <CardRail
+              key={rail.id}
+              title={rail.label}
+              cards={rail.cards}
+              actionsFor={(card) =>
+                card.source
+                  ? [
+                      { label: 'Mark as finished', onSelect: () => finish.mutate(card) },
+                      { label: 'Remove from this row', onSelect: () => remove.mutate(card) },
+                    ]
+                  : []
+              }
+            />
+          ))}
+        </div>
+      ) : null}
       {spotlight ? (
         <Hero
           backdrop={backdropUrl(spotlight.kind, spotlight.item.id)}
@@ -172,18 +196,6 @@ function PlayerHome() {
       ) : (
         <h1 className={s.pageTitle}>Home</h1>
       )}
-
-      {rails.map((rail) => (
-        <CardRail
-          key={rail.id}
-          title={rail.label}
-          cards={rail.cards}
-          actionsFor={(card) => [
-            { label: 'Mark as finished', onSelect: () => finish.mutate(card) },
-            { label: 'Remove from this row', onSelect: () => remove.mutate(card) },
-          ]}
-        />
-      ))}
 
       {loading ? <SkeletonRail /> : null}
 

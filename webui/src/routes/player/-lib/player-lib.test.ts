@@ -703,3 +703,38 @@ describe('lazy seeded order', () => {
     expect(performance.now() - t0).toBeLessThan(80);
   });
 });
+
+describe('continue watching joins the media server resume list', () => {
+  it('merges, dedupes in favour of the player row, and sorts newest first', async () => {
+    const { continueRails, whenMs } = await import('./rails');
+    const rows = [
+      {
+        item_type: 'movie',
+        item_id: '5',
+        position_seconds: 600,
+        duration_seconds: 6000,
+        finished: false,
+        meta: { title: 'Mine' },
+        updated_at: '2026-11-20T10:00:00Z',
+      },
+    ];
+    const server = [
+      { kind: 'movie' as const, id: 5, title: 'Dupe', last_viewed_at: '2026-11-20 12:00:00' },
+      {
+        kind: 'show' as const,
+        id: 77,
+        show_id: 9,
+        reason: 'up_next' as const,
+        title: 'Show',
+        last_viewed_at: Date.parse('2026-11-20T11:00:00Z') / 1000,
+      },
+      { kind: 'movie' as const, id: null, title: 'No id' },
+    ];
+    const [watching] = continueRails(rows, server);
+    expect(watching.cards.map((c) => c.title)).toEqual(['Show', 'Mine']);
+    expect(watching.cards[0].badge).toBe('Up next');
+    expect(watching.cards[0].href).toBe('/player/tv/9');
+    expect(whenMs('2026-11-20 12:00:00')).toBe(Date.parse('2026-11-20T12:00:00Z'));
+    expect(whenMs(null)).toBe(0);
+  });
+});

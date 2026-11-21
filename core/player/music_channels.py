@@ -1,21 +1,27 @@
 """the guide's music channels: one per genre you have plenty of, and one per
-vibe, from the moods the library already knows (AudioDB's on the artist,
-album or track, the most specific one winning).
+vibe, from the moods the library already knows (AudioDB's, on the album or
+its artist).
 
 owned tracks only, in the caller's library scope: a channel never airs a
-song that isn't on disk. each channel carries a sample of its tracks (a
-stable one, so the same channel airs the same songs today on every screen);
-the guide shuffles them into a day.
+song that isn't on disk.
+
+it has to stay quick on a big library (300k tracks), so it works by album:
+one grouped pass gives every owned album with its genres, mood and how
+many owned tracks it has; the channels are made from those; then only a
+spread sample of each channel's albums has its tracks read. the sample is
+stable (by id), so the same channel airs the same songs today on every
+screen; the guide shuffles them into a day.
 """
 
 from __future__ import annotations
 
 import json
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, Iterable, List
 
 PER_CHANNEL = 240
-TOP_GENRES = 16
+ALBUMS_PER_CHANNEL = 60
+TOP_GENRES = 30
 MIN_TRACKS = 20
 
 # moods (lowercase) folded into the vibes a guide shows. anything not listed
@@ -54,10 +60,10 @@ def genre_key(name: str) -> str:
     return " ".join(sorted(w for w in words if w))
 
 
-def _spread(track_id: int) -> int:
-    """a stable scatter of track ids (knuth's multiplicative hash), so a
-    channel's sample is spread across the library, not its oldest corner."""
-    return (int(track_id) * 2654435761) & 0xFFFFFFFF
+def _spread(entity_id: int) -> int:
+    """a stable scatter of ids (knuth's multiplicative hash), so a sample is
+    spread across the library, not its oldest corner."""
+    return (int(entity_id) * 2654435761) & 0xFFFFFFFF
 
 
 def vibe_for(mood: Any) -> str | None:
@@ -70,47 +76,61 @@ def vibe_for(mood: Any) -> str | None:
     return None
 
 
-def build(rows, per_channel: int = PER_CHANNEL, top_genres: int = TOP_GENRES,
-          min_tracks: int = MIN_TRACKS) -> List[Dict[str, Any]]:
-    """rows: (track_id, title, artist, duration_ms, album_id, album_genres,
-    artist_genres, mood). pure, so the grouping is tested apart from sql."""
-    by_genre: Dict[str, List[list]] = {}
-    display: Dict[str, Dict[str, int]] = {}
-    by_vibe: Dict[str, List[list]] = {}
-    for track_id, title, artist, duration, album_id, album_genres, artist_genres, mood in rows:
-        seconds = int(duration / 1000) if duration else 0
-        if seconds < 60:
+def plan(albums: Iterable[tuple], top_genres: int = TOP_GENRES,
+         min_tracks: int = MIN_TRACKS) -> List[Dict[str, Any]]:
+    """albums: (album_id, album_genres, artist_genres, mood, owned_tracks).
+    the channels and which albums feed each, without a single track read.
+    pure, so the grouping is tested apart from sql."""
+    by_genre: Dict[str, Dict[str, Any]] = {}
+    by_vibe: Dict[str, Dict[str, Any]] = {}
+    for album_id, album_genres, artist_genres, mood, tracks in albums:
+        tracks = int(tracks or 0)
+        if tracks <= 0:
             continue
-        track = [track_id, title or "", artist or "", seconds, album_id]
-        genres = _genres(album_genres) or _genres(artist_genres)
-        for g in genres[:2]:
+        for g in (_genres(album_genres) or _genres(artist_genres))[:2]:
             key = genre_key(g)
             if not key:
                 continue
-            by_genre.setdefault(key, []).append(track)
-            names = display.setdefault(key, {})
-            names[g] = names.get(g, 0) + 1
+            entry = by_genre.setdefault(key, {"albums": [], "count": 0, "names": {}})
+            entry["albums"].append(album_id)
+            entry["count"] += tracks
+            entry["names"][g] = entry["names"].get(g, 0) + tracks
         vibe = vibe_for(mood)
         if vibe:
-            by_vibe.setdefault(vibe, []).append(track)
+            entry = by_vibe.setdefault(vibe, {"albums": [], "count": 0})
+            entry["albums"].append(album_id)
+            entry["count"] += tracks
 
-    def sample(tracks: List[list]) -> List[list]:
-        return sorted(tracks, key=lambda t: _spread(t[0]))[:per_channel]
+    def sample(ids: List[int]) -> List[int]:
+        return sorted(ids, key=_spread)[:ALBUMS_PER_CHANNEL]
 
     out: List[Dict[str, Any]] = []
-    ranked = sorted(by_genre.items(), key=lambda kv: (-len(kv[1]), kv[0]))
-    for key, tracks in ranked[:top_genres]:
-        if len(tracks) < min_tracks:
+    ranked = sorted(by_genre.items(), key=lambda kv: (-kv[1]["count"], kv[0]))
+    for key, entry in ranked[:top_genres]:
+        if entry["count"] < min_tracks:
             continue
-        name = max(display[key].items(), key=lambda kv: kv[1])[0]
+        name = max(entry["names"].items(), key=lambda kv: kv[1])[0]
         out.append({"id": "music-genre-" + key.replace(" ", "-"), "name": name, "kind": "genre",
-                    "count": len(tracks), "tracks": sample(tracks)})
+                    "count": entry["count"], "albums": sample(entry["albums"])})
     for vibe in VIBES:
-        tracks = by_vibe.get(vibe, [])
-        if len(tracks) >= min_tracks:
+        entry = by_vibe.get(vibe)
+        if entry and entry["count"] >= min_tracks:
             out.append({"id": f"music-vibe-{vibe.lower().replace(' & ', '-').replace(' ', '-')}",
-                        "name": vibe, "kind": "vibe", "count": len(tracks),
-                        "tracks": sample(tracks)})
+                        "name": vibe, "kind": "vibe", "count": entry["count"],
+                        "albums": sample(entry["albums"])})
+    return out
+
+
+def fill(channels: List[Dict[str, Any]], tracks_by_album: Dict[int, List[list]],
+         per_channel: int = PER_CHANNEL) -> List[Dict[str, Any]]:
+    """each planned channel with a stable sample of its albums' tracks"""
+    out = []
+    for c in channels:
+        pool = [t for album_id in c["albums"] for t in tracks_by_album.get(album_id, [])]
+        picked = sorted(pool, key=lambda t: _spread(t[0]))[:per_channel]
+        if picked:
+            out.append({"id": c["id"], "name": c["name"], "kind": c["kind"],
+                        "count": c["count"], "tracks": picked})
     return out
 
 
@@ -122,12 +142,30 @@ def read(conn) -> List[Dict[str, Any]]:
     visible = scope_visibility_sql("track", "t")
     if visible:
         where.append(visible)
-    rows = conn.execute(f"""
-        SELECT t.id, t.title, COALESCE(ar.name, ''), t.duration, al.id, al.genres, ar.genres,
-               COALESCE(NULLIF(t.mood, ''), NULLIF(al.mood, ''), NULLIF(ar.mood, ''))
+    owned = " AND ".join(where)
+    albums = conn.execute(f"""
+        SELECT al.id, al.genres, ar.genres,
+               COALESCE(NULLIF(al.mood, ''), NULLIF(ar.mood, '')), COUNT(t.id)
         FROM lib2_tracks t
         JOIN lib2_albums al ON al.id = t.album_id
         LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id
-        WHERE {' AND '.join(where)}
+        WHERE {owned}
+        GROUP BY al.id
     """).fetchall()  # noqa: S608 - the fragments are the library's own sql builders
-    return build([tuple(r) for r in rows])
+    channels = plan([tuple(r) for r in albums])
+    wanted = sorted({a for c in channels for a in c["albums"]})
+    tracks_by_album: Dict[int, List[list]] = {}
+    for start in range(0, len(wanted), 500):
+        chunk = wanted[start:start + 500]
+        rows = conn.execute(f"""
+            SELECT t.id, t.title, COALESCE(ar.name, ''), t.duration, t.album_id
+            FROM lib2_tracks t
+            JOIN lib2_albums al ON al.id = t.album_id
+            LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+            WHERE t.album_id IN ({",".join("?" for _ in chunk)}) AND {owned}
+        """, chunk).fetchall()  # noqa: S608
+        for r in rows:
+            seconds = int(r[3] / 1000) if r[3] else 0
+            if seconds >= 60:
+                tracks_by_album.setdefault(r[4], []).append([r[0], r[1] or "", r[2], seconds, r[4]])
+    return fill(channels, tracks_by_album)

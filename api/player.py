@@ -285,13 +285,16 @@ def youtube_channel(channel_id):
 
 
 _music_cache: dict = {}
+# a library's genres move slowly; a cold read is a pass over every owned track
+# (seconds on a 300k-track library), so a profile pays it a few times a day
+_MUSIC_CACHE_SECONDS = 6 * 3600
 
 
 @bp.route("/api/player/music-channels", methods=["GET"])
 @requires("music.library")
 def music_channels():
     """the guide's genre and vibe channels from the caller's owned tracks.
-    cached a couple of minutes per profile: it is one pass over the tracks."""
+    cached hours per profile and scope: it is one pass over the tracks."""
     from contextlib import closing
 
     from core.player import music_channels as mc
@@ -301,7 +304,7 @@ def music_channels():
     key = (pid, str(_session_scope()))
     now = time.monotonic()
     hit = _music_cache.get(key)
-    if hit and now - hit[0] < _CACHE_SECONDS:
+    if hit and now - hit[0] < _MUSIC_CACHE_SECONDS:
         return jsonify({"success": True, "channels": hit[1]})
     try:
         with closing(get_database()._get_connection()) as conn:

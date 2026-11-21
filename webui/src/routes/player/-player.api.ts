@@ -2,6 +2,7 @@ import { queryOptions } from '@tanstack/react-query';
 
 import { apiClient, readJson } from '@/app/api-client';
 
+import type { ServerResume } from './-lib/rails';
 import type {
   CatalogBook,
   Extras,
@@ -537,6 +538,8 @@ export async function requestTitle(body: {
   title: string;
   year?: number | string | null;
   poster_url?: string | null;
+  /** a profile that may download (admins always) gets it now: straight to the wishlist */
+  get?: boolean;
 }): Promise<RequestResult> {
   const res = await apiClient.post('video/requests', { json: body, throwHttpErrors: false });
   let data: {
@@ -560,3 +563,14 @@ export async function requestTitle(body: {
     return { state: 'owned' };
   return { state: 'error', message: data.message || data.error || 'Could not ask for it' };
 }
+
+/** the media server's own resume list, as the video side's dashboard shows it */
+export const serverResumeQuery = () =>
+  queryOptions({
+    queryKey: ['player', 'continue', 'server'],
+    queryFn: async () =>
+      (await apiClient.get('video/dashboard/continue-watching').json<{ items?: ServerResume[] }>())
+        .items ?? [],
+    staleTime: 60_000,
+    refetchOnWindowFocus: true,
+  });
