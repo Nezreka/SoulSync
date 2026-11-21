@@ -1322,7 +1322,8 @@
   position: absolute;
   inset: 0;
   display: grid;
-  place-items: end start;
+  /* top: the bottom corners carry a card's badges */
+  place-items: start;
   padding: calc(var(--u) * 0.9);
   overflow: hidden;
   /* no picture: a colour of its own, the title set in it */
@@ -2198,17 +2199,35 @@
 .empty {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: center;
   gap: calc(var(--u) * 0.5);
-  padding: calc(var(--u) * 1.6) calc(var(--u) * 1.8);
-  border: 1px dashed var(--white-a12);
+  padding: calc(var(--u) * 3) calc(var(--u) * 2);
+  border: 1px solid var(--white-a06);
   border-radius: var(--radius-sheet);
+  background:
+    radial-gradient(ellipse at 50% 0%, rgba(var(--accent-rgb), 0.08), transparent 70%),
+    var(--white-a02);
   color: var(--pl-text-2);
+  text-align: center;
+}
+
+/* a small mark above the words, so an empty page still looks made */
+.empty::before {
+  width: calc(var(--u) * 2.6);
+  height: calc(var(--u) * 2.6);
+  margin-bottom: calc(var(--u) * 0.4);
+  border-radius: var(--radius-circle);
+  background:
+    radial-gradient(circle at 35% 35%, rgba(var(--accent-rgb), 0.55), transparent 60%),
+    var(--white-a06);
+  box-shadow: 0 0 calc(var(--u) * 2) rgba(var(--accent-rgb), 0.2);
+  content: '';
 }
 
 .emptyTitle {
   color: var(--pl-text);
-  font-weight: 650;
+  font-size: calc(var(--u) * 1.15);
+  font-weight: 750;
 }
 
 .emptyText {
