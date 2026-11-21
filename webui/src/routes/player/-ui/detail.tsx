@@ -299,7 +299,10 @@ export function MoreLikeThis({
       ) : null}
       {elsewhere.length ? (
         <div className={s.detailRail}>
-          <CardRail title="Fans also watch" cards={elsewhere.map((t) => extraCard(t, owned))} />
+          <CardRail
+            title={`Similar ${elsewhere.every((t) => t.kind === 'show') ? 'shows' : elsewhere.every((t) => t.kind === 'movie') ? 'movies' : 'titles'} to add`}
+            cards={elsewhere.map((t) => extraCard(t, owned))}
+          />
         </div>
       ) : null}
     </>

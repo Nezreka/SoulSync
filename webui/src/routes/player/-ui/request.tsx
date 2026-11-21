@@ -47,7 +47,7 @@ export function RequestButton({
           : result?.state === 'owned'
             ? 'Already in your library'
             : mode === 'download'
-              ? 'Get it'
+              ? 'Request'
               : 'Request';
 
   return (
