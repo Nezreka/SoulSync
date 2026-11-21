@@ -42,7 +42,7 @@ import { SeekBar } from './seek-bar';
 import { StatsOverlay } from './stats';
 import { SubtitleOverlay } from './subtitles';
 import { useLoading } from './use-loading';
-import { brightnessFilter, useBrightness } from './use-picture';
+import { dimOpacity, useBrightness } from './use-picture';
 import { getEngine, usePlayer, useVideoOpen } from './use-player';
 
 const IDLE_MS = 2600;
@@ -62,6 +62,17 @@ function useMountVideo(frame: React.RefObject<HTMLDivElement | null>, active: bo
       if (video.parentElement === host) host.removeChild(video);
     };
   }, [frame, active]);
+}
+
+/**
+ * the picture dimmed: a black layer over the video at the right strength.
+ * not a css filter: a browser drawing video in a hardware overlay (most, on
+ * a real gpu) skips filters on it, so a filter dims nothing there
+ */
+function Dimmer({ brightness }: { brightness: number }) {
+  const opacity = dimOpacity(brightness);
+  if (!opacity) return null;
+  return <div className={s.dimmer} style={{ opacity }} aria-hidden="true" />;
 }
 
 function UpNext({ state }: { state: PlayerState }) {
@@ -180,10 +191,10 @@ function FullPlayer({ state, onLeave }: { state: PlayerState; onLeave: () => voi
       <div
         ref={frame}
         className={s.fullFrame}
-        style={{ filter: brightnessFilter(brightness) }}
         onClick={() => engine.toggle()}
         onDoubleClick={toggleFullscreen}
       />
+      <Dimmer brightness={brightness} />
 
       {state.status === 'loading' || state.status === 'buffering' ? (
         <div className={s.spinner} aria-hidden="true" />
@@ -351,7 +362,8 @@ function MiniPlayer({ onOpen }: { onOpen: () => void }) {
   useMountVideo(frame, true);
   return (
     <div className={s.mini}>
-      <div ref={frame} className={s.miniFrame} style={{ filter: brightnessFilter(brightness) }} />
+      <div ref={frame} className={s.miniFrame} />
+      <Dimmer brightness={brightness} />
       <SubtitleOverlay state={state} raised={false} />
       <button
         type="button"

@@ -1089,3 +1089,11 @@ a.nowTitle:hover {
   color: var(--pl-text);
   overflow-wrap: anywhere;
 }
+
+/* the dimmer: over the video, under the controls, never in the way of a click */
+.dimmer {
+  position: absolute;
+  inset: 0;
+  background: var(--black-a90);
+  pointer-events: none;
+}

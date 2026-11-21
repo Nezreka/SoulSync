@@ -46,7 +46,10 @@ export function useBrightness(): number {
   );
 }
 
-/** the css for it: nothing at full brightness */
-export function brightnessFilter(v: number): string | undefined {
-  return v < 1 ? `brightness(${v})` : undefined;
+/** the dimming layer is black at 90%: this strength of it leaves the picture at ``v`` */
+const LAYER = 0.9;
+
+/** how strong the layer over the picture is (0: none, at full brightness) */
+export function dimOpacity(v: number): number {
+  return v < 1 ? Math.min(1, Math.round(((1 - v) / LAYER) * 100) / 100) : 0;
 }
