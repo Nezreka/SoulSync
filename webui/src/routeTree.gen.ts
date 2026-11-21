@@ -57,6 +57,7 @@ import { Route as PlayerYoutubeChannelIdRouteImport } from './routes/player/yout
 import { Route as PlayerTvShowIdRouteImport } from './routes/player/tv/$showId'
 import { Route as PlayerPodcastsPodcastIdRouteImport } from './routes/player/podcasts/$podcastId'
 import { Route as PlayerPersonPersonIdRouteImport } from './routes/player/person.$personId'
+import { Route as PlayerMusicPlaylistsRouteImport } from './routes/player/music/playlists'
 import { Route as PlayerMoviesMovieIdRouteImport } from './routes/player/movies/$movieId'
 import { Route as PlayerKeywordNameRouteImport } from './routes/player/keyword.$name'
 import { Route as PlayerCollectionsCollectionIdRouteImport } from './routes/player/collections.$collectionId'
@@ -67,6 +68,7 @@ import { Route as AudiobooksAuthorNameRouteImport } from './routes/audiobooks/au
 import { Route as ArtistDetailSourceIdRouteImport } from './routes/artist-detail/$source/$id'
 import { Route as PlayerTvNetworkNameRouteImport } from './routes/player/tv/network.$name'
 import { Route as PlayerTitleKindTmdbIdRouteImport } from './routes/player/title.$kind.$tmdbId'
+import { Route as PlayerMusicPlaylistPlaylistIdRouteImport } from './routes/player/music/playlist.$playlistId'
 import { Route as PlayerMusicLabelNameRouteImport } from './routes/player/music/label.$name'
 import { Route as PlayerMusicGenreNameRouteImport } from './routes/player/music/genre.$name'
 import { Route as PlayerMusicArtistArtistIdRouteImport } from './routes/player/music/artist.$artistId'
@@ -314,6 +316,11 @@ const PlayerPersonPersonIdRoute = PlayerPersonPersonIdRouteImport.update({
   path: '/person/$personId',
   getParentRoute: () => PlayerRouteRoute,
 } as any)
+const PlayerMusicPlaylistsRoute = PlayerMusicPlaylistsRouteImport.update({
+  id: '/music/playlists',
+  path: '/music/playlists',
+  getParentRoute: () => PlayerRouteRoute,
+} as any)
 const PlayerMoviesMovieIdRoute = PlayerMoviesMovieIdRouteImport.update({
   id: '/movies/$movieId',
   path: '/movies/$movieId',
@@ -365,6 +372,12 @@ const PlayerTitleKindTmdbIdRoute = PlayerTitleKindTmdbIdRouteImport.update({
   path: '/title/$kind/$tmdbId',
   getParentRoute: () => PlayerRouteRoute,
 } as any)
+const PlayerMusicPlaylistPlaylistIdRoute =
+  PlayerMusicPlaylistPlaylistIdRouteImport.update({
+    id: '/music/playlist/$playlistId',
+    path: '/music/playlist/$playlistId',
+    getParentRoute: () => PlayerRouteRoute,
+  } as any)
 const PlayerMusicLabelNameRoute = PlayerMusicLabelNameRouteImport.update({
   id: '/music/label/$name',
   path: '/music/label/$name',
@@ -445,6 +458,7 @@ export interface FileRoutesByFullPath {
   '/player/collections/$collectionId': typeof PlayerCollectionsCollectionIdRoute
   '/player/keyword/$name': typeof PlayerKeywordNameRoute
   '/player/movies/$movieId': typeof PlayerMoviesMovieIdRoute
+  '/player/music/playlists': typeof PlayerMusicPlaylistsRoute
   '/player/person/$personId': typeof PlayerPersonPersonIdRoute
   '/player/podcasts/$podcastId': typeof PlayerPodcastsPodcastIdRoute
   '/player/tv/$showId': typeof PlayerTvShowIdRoute
@@ -461,6 +475,7 @@ export interface FileRoutesByFullPath {
   '/player/music/artist/$artistId': typeof PlayerMusicArtistArtistIdRoute
   '/player/music/genre/$name': typeof PlayerMusicGenreNameRoute
   '/player/music/label/$name': typeof PlayerMusicLabelNameRoute
+  '/player/music/playlist/$playlistId': typeof PlayerMusicPlaylistPlaylistIdRoute
   '/player/title/$kind/$tmdbId': typeof PlayerTitleKindTmdbIdRoute
   '/player/tv/network/$name': typeof PlayerTvNetworkNameRoute
 }
@@ -507,6 +522,7 @@ export interface FileRoutesByTo {
   '/player/collections/$collectionId': typeof PlayerCollectionsCollectionIdRoute
   '/player/keyword/$name': typeof PlayerKeywordNameRoute
   '/player/movies/$movieId': typeof PlayerMoviesMovieIdRoute
+  '/player/music/playlists': typeof PlayerMusicPlaylistsRoute
   '/player/person/$personId': typeof PlayerPersonPersonIdRoute
   '/player/podcasts/$podcastId': typeof PlayerPodcastsPodcastIdRoute
   '/player/tv/$showId': typeof PlayerTvShowIdRoute
@@ -523,6 +539,7 @@ export interface FileRoutesByTo {
   '/player/music/artist/$artistId': typeof PlayerMusicArtistArtistIdRoute
   '/player/music/genre/$name': typeof PlayerMusicGenreNameRoute
   '/player/music/label/$name': typeof PlayerMusicLabelNameRoute
+  '/player/music/playlist/$playlistId': typeof PlayerMusicPlaylistPlaylistIdRoute
   '/player/title/$kind/$tmdbId': typeof PlayerTitleKindTmdbIdRoute
   '/player/tv/network/$name': typeof PlayerTvNetworkNameRoute
 }
@@ -574,6 +591,7 @@ export interface FileRoutesById {
   '/player/collections/$collectionId': typeof PlayerCollectionsCollectionIdRoute
   '/player/keyword/$name': typeof PlayerKeywordNameRoute
   '/player/movies/$movieId': typeof PlayerMoviesMovieIdRoute
+  '/player/music/playlists': typeof PlayerMusicPlaylistsRoute
   '/player/person/$personId': typeof PlayerPersonPersonIdRoute
   '/player/podcasts/$podcastId': typeof PlayerPodcastsPodcastIdRoute
   '/player/tv/$showId': typeof PlayerTvShowIdRoute
@@ -590,6 +608,7 @@ export interface FileRoutesById {
   '/player/music/artist/$artistId': typeof PlayerMusicArtistArtistIdRoute
   '/player/music/genre/$name': typeof PlayerMusicGenreNameRoute
   '/player/music/label/$name': typeof PlayerMusicLabelNameRoute
+  '/player/music/playlist/$playlistId': typeof PlayerMusicPlaylistPlaylistIdRoute
   '/player/title/$kind/$tmdbId': typeof PlayerTitleKindTmdbIdRoute
   '/player/tv/network/$name': typeof PlayerTvNetworkNameRoute
 }
@@ -642,6 +661,7 @@ export interface FileRouteTypes {
     | '/player/collections/$collectionId'
     | '/player/keyword/$name'
     | '/player/movies/$movieId'
+    | '/player/music/playlists'
     | '/player/person/$personId'
     | '/player/podcasts/$podcastId'
     | '/player/tv/$showId'
@@ -658,6 +678,7 @@ export interface FileRouteTypes {
     | '/player/music/artist/$artistId'
     | '/player/music/genre/$name'
     | '/player/music/label/$name'
+    | '/player/music/playlist/$playlistId'
     | '/player/title/$kind/$tmdbId'
     | '/player/tv/network/$name'
   fileRoutesByTo: FileRoutesByTo
@@ -704,6 +725,7 @@ export interface FileRouteTypes {
     | '/player/collections/$collectionId'
     | '/player/keyword/$name'
     | '/player/movies/$movieId'
+    | '/player/music/playlists'
     | '/player/person/$personId'
     | '/player/podcasts/$podcastId'
     | '/player/tv/$showId'
@@ -720,6 +742,7 @@ export interface FileRouteTypes {
     | '/player/music/artist/$artistId'
     | '/player/music/genre/$name'
     | '/player/music/label/$name'
+    | '/player/music/playlist/$playlistId'
     | '/player/title/$kind/$tmdbId'
     | '/player/tv/network/$name'
   id:
@@ -770,6 +793,7 @@ export interface FileRouteTypes {
     | '/player/collections/$collectionId'
     | '/player/keyword/$name'
     | '/player/movies/$movieId'
+    | '/player/music/playlists'
     | '/player/person/$personId'
     | '/player/podcasts/$podcastId'
     | '/player/tv/$showId'
@@ -786,6 +810,7 @@ export interface FileRouteTypes {
     | '/player/music/artist/$artistId'
     | '/player/music/genre/$name'
     | '/player/music/label/$name'
+    | '/player/music/playlist/$playlistId'
     | '/player/title/$kind/$tmdbId'
     | '/player/tv/network/$name'
   fileRoutesById: FileRoutesById
@@ -1157,6 +1182,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PlayerPersonPersonIdRouteImport
       parentRoute: typeof PlayerRouteRoute
     }
+    '/player/music/playlists': {
+      id: '/player/music/playlists'
+      path: '/music/playlists'
+      fullPath: '/player/music/playlists'
+      preLoaderRoute: typeof PlayerMusicPlaylistsRouteImport
+      parentRoute: typeof PlayerRouteRoute
+    }
     '/player/movies/$movieId': {
       id: '/player/movies/$movieId'
       path: '/movies/$movieId'
@@ -1225,6 +1257,13 @@ declare module '@tanstack/react-router' {
       path: '/title/$kind/$tmdbId'
       fullPath: '/player/title/$kind/$tmdbId'
       preLoaderRoute: typeof PlayerTitleKindTmdbIdRouteImport
+      parentRoute: typeof PlayerRouteRoute
+    }
+    '/player/music/playlist/$playlistId': {
+      id: '/player/music/playlist/$playlistId'
+      path: '/music/playlist/$playlistId'
+      fullPath: '/player/music/playlist/$playlistId'
+      preLoaderRoute: typeof PlayerMusicPlaylistPlaylistIdRouteImport
       parentRoute: typeof PlayerRouteRoute
     }
     '/player/music/label/$name': {
@@ -1322,6 +1361,7 @@ interface PlayerRouteRouteChildren {
   PlayerCollectionsCollectionIdRoute: typeof PlayerCollectionsCollectionIdRoute
   PlayerKeywordNameRoute: typeof PlayerKeywordNameRoute
   PlayerMoviesMovieIdRoute: typeof PlayerMoviesMovieIdRoute
+  PlayerMusicPlaylistsRoute: typeof PlayerMusicPlaylistsRoute
   PlayerPersonPersonIdRoute: typeof PlayerPersonPersonIdRoute
   PlayerPodcastsPodcastIdRoute: typeof PlayerPodcastsPodcastIdRoute
   PlayerTvShowIdRoute: typeof PlayerTvShowIdRoute
@@ -1338,6 +1378,7 @@ interface PlayerRouteRouteChildren {
   PlayerMusicArtistArtistIdRoute: typeof PlayerMusicArtistArtistIdRoute
   PlayerMusicGenreNameRoute: typeof PlayerMusicGenreNameRoute
   PlayerMusicLabelNameRoute: typeof PlayerMusicLabelNameRoute
+  PlayerMusicPlaylistPlaylistIdRoute: typeof PlayerMusicPlaylistPlaylistIdRoute
   PlayerTitleKindTmdbIdRoute: typeof PlayerTitleKindTmdbIdRoute
   PlayerTvNetworkNameRoute: typeof PlayerTvNetworkNameRoute
 }
@@ -1350,6 +1391,7 @@ const PlayerRouteRouteChildren: PlayerRouteRouteChildren = {
   PlayerCollectionsCollectionIdRoute: PlayerCollectionsCollectionIdRoute,
   PlayerKeywordNameRoute: PlayerKeywordNameRoute,
   PlayerMoviesMovieIdRoute: PlayerMoviesMovieIdRoute,
+  PlayerMusicPlaylistsRoute: PlayerMusicPlaylistsRoute,
   PlayerPersonPersonIdRoute: PlayerPersonPersonIdRoute,
   PlayerPodcastsPodcastIdRoute: PlayerPodcastsPodcastIdRoute,
   PlayerTvShowIdRoute: PlayerTvShowIdRoute,
@@ -1367,6 +1409,7 @@ const PlayerRouteRouteChildren: PlayerRouteRouteChildren = {
   PlayerMusicArtistArtistIdRoute: PlayerMusicArtistArtistIdRoute,
   PlayerMusicGenreNameRoute: PlayerMusicGenreNameRoute,
   PlayerMusicLabelNameRoute: PlayerMusicLabelNameRoute,
+  PlayerMusicPlaylistPlaylistIdRoute: PlayerMusicPlaylistPlaylistIdRoute,
   PlayerTitleKindTmdbIdRoute: PlayerTitleKindTmdbIdRoute,
   PlayerTvNetworkNameRoute: PlayerTvNetworkNameRoute,
 }
