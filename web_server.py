@@ -8144,6 +8144,13 @@ def start_download():
 
 
 
+from core.download_plugins.types import track_candidates
+from core.downloads.streaming_pickup import PickupMisses, check_streaming_pickup
+
+# finished streaming downloads whose file hasn't turned up yet (#2231)
+_streaming_pickup_misses = PickupMisses()
+
+
 def _find_completed_file_robust(download_dir, api_filename, transfer_dir=None):
     """Thin wrapper around the shared file finder.
 
@@ -8546,6 +8553,10 @@ def get_download_status():
                         'direction': 'Download',  # Required by frontend
                         'error': getattr(download, 'error', None),
                     }
+                    _st_failure = _streaming_pickup_misses.failure(
+                        _make_context_key(download.username, download.filename))
+                    if _st_failure and not streaming_transfer['error']:
+                        streaming_transfer['error'] = f"Not imported: {_st_failure}"
                     all_transfers.append(streaming_transfer)
 
                     # Check if download is completed and needs post-processing
@@ -8559,8 +8570,20 @@ def get_download_status():
 
                         if context and context_key not in processed_download_ids:
                             download_dir = docker_resolve_path(config_manager.get('soulseek.download_path', './downloads'))
-                            found_result = _find_completed_file_robust(download_dir, download.filename)
-                            found_path = found_result[0] if found_result and found_result[0] else None
+                            # the plugin's reported path first: the saved name
+                            # often isn't the result title (#2231)
+                            _st_task_status = None
+                            if context.get('task_id'):
+                                with tasks_lock:
+                                    _st_task = download_tasks.get(context.get('task_id'))
+                                    if _st_task:
+                                        _st_task_status = ('completed' if _st_task.get('stream_processed')
+                                                           else _st_task.get('status'))
+                            _st_outcome, _st_value = check_streaming_pickup(
+                                download, context_key, download_dir,
+                                _find_completed_file_robust, _streaming_pickup_misses,
+                                task_status=_st_task_status)
+                            found_path = _st_value if _st_outcome == 'found' else None
 
                             if found_path:
                                 # Prevent two contexts from claiming the same physical file
@@ -8611,10 +8634,19 @@ def get_download_status():
                                 processing_thread = threading.Thread(target=process_streaming_download)
                                 processing_thread.daemon = True
                                 processing_thread.start()
-                            else:
-                                # File not found - likely already processed and moved to library
-                                # Mark as processed to prevent infinite checking
+                            elif _st_outcome == 'handled':
+                                # its task already moved on through the monitor path
                                 processed_download_ids.add(context_key)
+                            elif _st_outcome == 'gave_up':
+                                # never just mark it processed: a miss alone left the
+                                # file orphaned in the download folder (#2231)
+                                processed_download_ids.add(context_key)
+                                logger.error(f"[{source_label}] Gave up importing {context_key}: {_st_value}")
+                                streaming_transfer['error'] = f"Not imported: {_st_value}"
+                                if not context.get('task_id'):
+                                    direct_download_state.mark_status(
+                                        download.id, 'failed', error=f"Not imported: {_st_value}")
+                            # 'wait': not found yet, look again on a later poll
         except Exception as streaming_error:
             import traceback
             logger.error(f"Could not fetch YouTube/Tidal downloads for status: {streaming_error}")
@@ -9251,7 +9283,8 @@ def manual_search_for_task(task_id):
                 with candidate_binding(_search_profile):
                     result = run_async(client.search(query))
                 if isinstance(result, tuple):
-                    tracks = result[0] if result else []
+                    # files inside soulseek folder groups are candidates too (#2228)
+                    tracks = track_candidates(result[0], result[1] if len(result) > 1 else None) if result else []
                 else:
                     tracks = result or []
                 return src_name, tracks, None
@@ -11784,7 +11817,9 @@ def _inspect_sources_stream(track_obj, quality_profile_id, *, log_tag='Inspector
                 # the tier the APP default wants.
                 with quality_profile_context(quality_profile_id), \
                         (candidate_binding(_bind_to) if _bind_to is not None else nullcontext()):
-                    tracks_result, _ = run_async(client.search(q, timeout=20))
+                    tracks_result, _albums_result = run_async(client.search(q, timeout=20))
+                    # files inside soulseek folder groups are candidates too (#2228)
+                    tracks_result = track_candidates(tracks_result, _albums_result)
                 if not tracks_result:
                     continue
                 pairs = evaluate_candidates(tracks_result, track_obj, q, quality_profile_id)

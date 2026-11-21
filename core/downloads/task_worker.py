@@ -25,6 +25,7 @@ from typing import Any, Callable, Optional
 
 from core.runtime_state import download_batches, download_tasks, tasks_lock
 from core.spotify_client import Track as SpotifyTrack
+from core.download_plugins.types import track_candidates
 from utils.logging_config import get_logger
 
 # Must live under the soulsync.* namespace — handlers only attach there. The
@@ -977,9 +978,11 @@ def _download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWork
                     _search_kwargs['quality_profile_id'] = _profile_id
                 if _track_hint:
                     _search_kwargs['track_hint'] = _track_hint
-                tracks_result, _ = deps.run_async(
+                tracks_result, _albums_result = deps.run_async(
                     deps.download_orchestrator.search(query, **_search_kwargs)
                 )
+                # files inside soulseek folder groups are candidates too (#2228)
+                tracks_result = track_candidates(tracks_result, _albums_result)
                 logger.debug(f"Search completed for task {task_id}, got {len(tracks_result) if tracks_result else 0} results")
 
                 # CRITICAL: Check cancellation immediately after search returns
@@ -1146,8 +1149,9 @@ def _download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWork
                                 download_tasks[task_id]['current_source'] = fallback_source
                                 download_tasks[task_id]['current_query'] = fb_query
                                 download_tasks[task_id].pop('search_live', None)
-                            fb_results, _ = deps.run_async(_search_fallback_source(
+                            fb_results, _fb_albums = deps.run_async(_search_fallback_source(
                                 fb_client, fb_query, _track_hint, _profile_id))
+                            fb_results = track_candidates(fb_results, _fb_albums)
                             with tasks_lock:
                                 if task_id not in download_tasks or download_tasks[task_id]['status'] == 'cancelled':
                                     return
