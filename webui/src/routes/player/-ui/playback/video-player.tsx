@@ -7,9 +7,11 @@
  * the engine owns the <video>; this only moves it between the two frames.
  *
  * keys while full screen: space or k play/pause, j/l or arrows 10 seconds,
- * up/down volume, f full screen, m mute, n next, escape leaves.
+ * up/down volume, f full screen, m mute, n next, e episodes, i stats,
+ * c subtitles, escape closes what's open, then leaves.
  */
 
+import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { PlayerState } from '../../-engine/engine';
@@ -28,8 +30,11 @@ import {
   SubtitleMenu,
   VolumeControl,
 } from './controls';
+import { EndScreen } from './end-screen';
+import { EpisodesPanel } from './episodes-panel';
 import {
   BackSecondsIcon,
+  EpisodesIcon,
   CloseIcon,
   CollapseIcon,
   ForwardSecondsIcon,
@@ -46,8 +51,6 @@ import { dimOpacity, useBrightness } from './use-picture';
 import { getEngine, usePlayer, useVideoOpen } from './use-player';
 
 const IDLE_MS = 2600;
-/** the up-next card shows this long before the end */
-const UP_NEXT_S = 25;
 
 /** put the engine's <video> into a frame while it's on screen */
 function useMountVideo(frame: React.RefObject<HTMLDivElement | null>, active: boolean) {
@@ -75,27 +78,6 @@ function Dimmer({ brightness }: { brightness: number }) {
   return <div className={s.dimmer} style={{ opacity }} aria-hidden="true" />;
 }
 
-function UpNext({ state }: { state: PlayerState }) {
-  const to = nextIndex(state.queue, true);
-  const left = state.duration - state.position;
-  if (to === null || to === state.queue.index || !state.duration || left > UP_NEXT_S || left <= 0)
-    return null;
-  const next = state.queue.items[to];
-  return (
-    <div className={s.upNext} role="status">
-      {next.backdrop || next.artwork ? <img src={(next.backdrop ?? next.artwork)!} alt="" /> : null}
-      <div className={s.upNextText}>
-        <span className={s.upNextLabel}>Up next in {Math.ceil(left)}</span>
-        <span className={s.upNextTitle}>{next.title}</span>
-        {next.subtitle ? <span className={s.upNextSub}>{next.subtitle}</span> : null}
-      </div>
-      <button type="button" className={s.upNextPlay} onClick={() => getEngine().next()} data-nav>
-        <PlayIcon /> Play now
-      </button>
-    </div>
-  );
-}
-
 function FullPlayer({ state, onLeave }: { state: PlayerState; onLeave: () => void }) {
   const engine = getEngine();
   const item = current(state.queue)!;
@@ -104,12 +86,17 @@ function FullPlayer({ state, onLeave }: { state: PlayerState; onLeave: () => voi
   const [idle, setIdle] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [stats, setStats] = useState(false);
+  const [episodes, setEpisodes] = useState(false);
   const brightness = useBrightness();
   const loading = useLoading(state);
   const timer = useRef<number | undefined>(undefined);
   useMountVideo(frame, true);
 
+  const episodesOpen = useRef(false);
+  episodesOpen.current = episodes;
   const wake = useCallback(() => {
+    // someone's here: no "are you still watching?"
+    getEngine().activity();
     setIdle(false);
     window.clearTimeout(timer.current);
     timer.current = window.setTimeout(() => setIdle(true), IDLE_MS);
@@ -153,11 +140,17 @@ function FullPlayer({ state, onLeave }: { state: PlayerState; onLeave: () => voi
         m: () => engine.setMuted(!v.muted),
         n: () => engine.next(),
         i: () => setStats((v) => !v),
+        e: () => setEpisodes((v) => !v),
         c: () => {
           const first = v.tracks?.subtitles.find((t) => t.kind !== 'unknown');
           engine.setSubtitle(v.subtitle ? null : (first?.id ?? null));
         },
-        Escape: () => (document.fullscreenElement ? void document.exitFullscreen() : onLeave()),
+        Escape: () =>
+          episodesOpen.current
+            ? setEpisodes(false)
+            : document.fullscreenElement
+              ? void document.exitFullscreen()
+              : onLeave(),
       };
       const fn = act[e.key];
       if (!fn) return;
@@ -252,7 +245,11 @@ function FullPlayer({ state, onLeave }: { state: PlayerState; onLeave: () => voi
       <SubtitleOverlay state={state} raised={!(idle && playing)} />
       {stats ? <StatsOverlay state={state} video={video} onClose={() => setStats(false)} /> : null}
 
-      <UpNext state={state} />
+      {episodes && item.type === 'episode' ? (
+        <EpisodesPanel state={state} onClose={() => setEpisodes(false)} />
+      ) : (
+        <EndScreen state={state} />
+      )}
 
       <div className={s.fullBottom}>
         <SeekBar
@@ -308,6 +305,19 @@ function FullPlayer({ state, onLeave }: { state: PlayerState; onLeave: () => voi
                 data-nav
               >
                 <NextIcon />
+              </button>
+            ) : null}
+            {item.type === 'episode' && item.parentId ? (
+              <button
+                type="button"
+                className={s.ctl}
+                aria-label="Episodes"
+                aria-pressed={episodes}
+                title="Episodes (e)"
+                onClick={() => setEpisodes((v) => !v)}
+                data-nav
+              >
+                <EpisodesIcon />
               </button>
             ) : null}
             <AudioMenu state={state} />
@@ -380,6 +390,11 @@ function MiniPlayer({ onOpen }: { onOpen: () => void }) {
 export function VideoPlayer() {
   const state = usePlayer();
   const [open, setOpen] = useVideoOpen();
+  const queryClient = useQueryClient();
+  // marked watched: the pages showing it (badges, continue watching) catch up
+  useEffect(() => {
+    if (state.watchedKey) void queryClient.invalidateQueries({ queryKey: ['player'] });
+  }, [state.watchedKey, queryClient]);
   if (state.kind !== 'video' || !current(state.queue)) return null;
   return inPlayer(
     open ? (

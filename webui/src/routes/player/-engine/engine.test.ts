@@ -4,7 +4,7 @@ import type { EngineDeps, Playable, SavedPosition, TrackPick } from './engine';
 import type { Tracks } from './tracks';
 import type { MediaKind, PlayItem } from './types';
 
-import { PlayerEngine } from './engine';
+import { PlayerEngine, STILL_WATCHING_AFTER } from './engine';
 
 /** just enough of a media element: src, time, play/pause and its events */
 class FakeMedia {
@@ -513,5 +513,64 @@ describe('louder than full, and audio sync', () => {
     t.engine.playItems([movie('2')]);
     await t.flush();
     expect(asked.at(-1)).toBe(0);
+  });
+});
+
+describe('watched', () => {
+  it('marks a movie watched once, into its credits', async () => {
+    const marked: string[] = [];
+    const t = setup({ playable: () => ({ url: '/s', duration: 100 }) });
+    (t.engine as unknown as { deps: EngineDeps }).deps.watched = (i) => marked.push(i.id);
+    t.engine.playItems([movie('1')]);
+    await t.flush();
+    t.media.video!.duration = 100;
+    t.media.video!.tick(50);
+    expect(marked).toEqual([]);
+    t.media.video!.tick(93);
+    t.media.video!.tick(95);
+    expect(marked).toEqual(['1']);
+    expect(t.engine.getState().watchedKey).toBe('movie:1');
+  });
+});
+
+describe('are you still watching', () => {
+  it('asks after a run of episodes nobody touched, and goes on when told', async () => {
+    const t = setup({});
+    const eps = ['1', '2', '3', '4', '5', '6'].map((id) => ({
+      ...movie(id),
+      type: 'episode' as const,
+    }));
+    t.engine.playItems(eps);
+    await t.flush();
+    for (let i = 0; i < STILL_WATCHING_AFTER; i++) {
+      t.media.video!.finish();
+      await t.flush();
+    }
+    expect(t.engine.getState().queue.index).toBe(STILL_WATCHING_AFTER);
+    t.media.video!.finish();
+    await t.flush();
+    expect(t.engine.getState().stillWatching).toBe(true);
+    expect(t.engine.getState().queue.index).toBe(STILL_WATCHING_AFTER);
+    t.engine.keepWatching();
+    await t.flush();
+    expect(t.engine.getState().stillWatching).toBe(false);
+    expect(t.engine.getState().queue.index).toBe(STILL_WATCHING_AFTER + 1);
+  });
+
+  it('anyone moving resets the count', async () => {
+    const t = setup({});
+    const eps = ['1', '2', '3', '4', '5', '6'].map((id) => ({
+      ...movie(id),
+      type: 'episode' as const,
+    }));
+    t.engine.playItems(eps);
+    await t.flush();
+    for (let i = 0; i < 5; i++) {
+      t.engine.activity();
+      t.media.video!.finish();
+      await t.flush();
+    }
+    expect(t.engine.getState().stillWatching).toBe(false);
+    expect(t.engine.getState().queue.index).toBe(5);
   });
 });

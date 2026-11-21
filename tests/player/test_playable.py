@@ -297,3 +297,13 @@ def test_hides_explicit_reads_the_profile_not_itself(monkeypatch):
     monkeypatch.setattr(cf, "current_restrictions", lambda: {"hide_explicit": True})
     with app.test_request_context("/"):
         assert music.hides_explicit() is True
+
+
+def test_music_reads_settings_from_where_they_live(tmp_path):
+    """the real path lookup, not stubbed: settings moved to core.settings and
+    every track broke (no module named config.settings)"""
+    from core.player.sources import music
+    assert music._on_disk(str(tmp_path / "gone.flac")) is None
+    song = tmp_path / "here.flac"
+    song.write_bytes(b"x")
+    assert music._on_disk(str(song)) == str(song)

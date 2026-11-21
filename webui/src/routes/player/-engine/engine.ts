@@ -94,6 +94,8 @@ export interface EngineDeps {
    */
   transcodeStart: (url: string, t: number) => Promise<{ start: number; seek: number }>;
   save: (item: PlayItem, position: number, duration: number | null, finished: boolean) => void;
+  /** a movie or episode is into its credits: mark it watched (library + media server) */
+  watched?: (item: PlayItem) => void;
   store: { get: (key: string) => string | null; set: (key: string, value: string) => void };
   now: () => number;
   /** amplify an element past full volume (a web audio gain); absent: no boost */
@@ -146,7 +148,17 @@ export interface PlayerState {
   subtitleLoading: boolean;
   /** audio sync for this item, in ms (later +, earlier -) */
   audioDelay: number;
+  /** the last movie or episode marked watched ("type:id"), so pages can refresh */
+  watchedKey: string | null;
+  /** episodes played on their own, one after another: is anyone still there? */
+  stillWatching: boolean;
 }
+
+/** this many videos in a row with nobody touching anything, then ask before the next */
+export const STILL_WATCHING_AFTER = 3;
+
+/** a movie or episode counts as watched this far through (into the credits, like plex) */
+export const WATCHED_AT = 0.92;
 
 /** the audio track, and a picture subtitle drawn in by the converter */
 export interface TrackPick {
@@ -242,6 +254,8 @@ export class PlayerEngine {
       cues: [],
       subtitleLoading: false,
       audioDelay: 0,
+      watchedKey: null,
+      stillWatching: false,
     };
     this.bindMediaSession();
   }
@@ -280,6 +294,7 @@ export class PlayerEngine {
 
   /** play these, from ``start`` (a whole album, a season, one movie) */
   playItems(items: PlayItem[], start = 0, options: PlayOptions = {}) {
+    this.chosen();
     this.saveNow();
     this.set({ queue: Q.play(this.state.queue, items, start) });
     void this.load(options);
@@ -304,6 +319,7 @@ export class PlayerEngine {
   }
 
   next() {
+    this.chosen();
     const to = Q.nextIndex(this.state.queue, false);
     if (to !== null) this.jump(to);
   }
@@ -521,6 +537,7 @@ export class PlayerEngine {
       item: null,
       kind: null,
       status: 'idle',
+      stillWatching: false,
       error: null,
       position: 0,
       duration: 0,
@@ -740,13 +757,18 @@ export class PlayerEngine {
         this.pendingSeek = null;
       }
       el.playbackRate = this.state.rate;
-      if (!this.state.duration && Number.isFinite(el.duration)) this.set({ duration: el.duration });
+      // the file's own length beats a listed runtime (a cut without ads runs short);
+      // a converted stream's element only knows what's arrived, so not that
+      const real = Number.isFinite(el.duration) && el.duration > 0;
+      const direct = !this.playable?.transcode && this.state.parts.length <= 1;
+      if (real && (!this.state.duration || direct)) this.set({ duration: el.duration });
     });
     el.addEventListener('timeupdate', () => {
       if (!mine()) return;
       const position =
         this.streamOffset + bookTime(this.state.parts, this.partIndex, el.currentTime);
       this.set({ position });
+      this.checkWatched(position);
       this.checkSleep();
       this.updatePositionState();
     });
@@ -812,6 +834,40 @@ export class PlayerEngine {
     });
   }
 
+  /** once per play: into the credits of a movie or episode, it's watched */
+  private checkWatched(position: number) {
+    const item = this.state.item;
+    const duration = this.state.duration;
+    if (!item || (item.type !== 'movie' && item.type !== 'episode')) return;
+    if (!duration || position < duration * WATCHED_AT) return;
+    const key = `${item.type}:${item.id}`;
+    if (this.state.watchedKey === key) return;
+    this.set({ watchedKey: key });
+    this.deps.watched?.(item);
+  }
+
+  /** someone moved, clicked or pressed a key: they're still there */
+  activity() {
+    this.autoRun = 0;
+  }
+
+  /** a person picked what plays next: the count starts over, any question is answered */
+  private chosen() {
+    this.autoRun = 0;
+    if (this.state.stillWatching) this.set({ stillWatching: false });
+  }
+
+  private autoRun = 0;
+
+  /** the answer to "are you still watching?": yes, play the next one */
+  keepWatching() {
+    const to = Q.nextIndex(this.state.queue, true);
+    this.chosen();
+    if (to === null) return;
+    this.set({ queue: Q.goTo(this.state.queue, to) });
+    void this.load();
+  }
+
   private onEnded() {
     const parts = this.state.parts;
     if (parts.length > 1 && this.partIndex + 1 < parts.length) {
@@ -828,6 +884,14 @@ export class PlayerEngine {
     if (to === null) {
       this.set({ status: 'ended' });
       return;
+    }
+    if (this.state.kind === 'video') {
+      // a run of videos nobody has touched: ask before the next one
+      if (this.autoRun >= STILL_WATCHING_AFTER) {
+        this.set({ status: 'ended', stillWatching: true });
+        return;
+      }
+      this.autoRun++;
     }
     this.set({ queue: Q.goTo(this.state.queue, to) });
     void this.load();

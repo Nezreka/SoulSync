@@ -164,3 +164,10 @@ export const BrightnessIcon = () => (
     <path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6 7 7M17 17l1.4 1.4M5.6 18.4 7 17M17 7l1.4-1.4" />
   </Icon>
 );
+
+export const EpisodesIcon = () => (
+  <Icon>
+    <rect x="3" y="5" width="13" height="10" rx="1.5" />
+    <path d="M19 8v9a2 2 0 0 1-2 2H7" />
+  </Icon>
+);

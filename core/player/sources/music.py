@@ -38,7 +38,7 @@ def _scope():
 
 
 def _on_disk(stored: str) -> Optional[str]:
-    from config.settings import config_manager
+    from core.settings import config_manager
     from core.library.path_resolver import resolve_library_file_path
     return resolve_library_file_path(stored, config_manager=config_manager)
 
@@ -46,7 +46,7 @@ def _on_disk(stored: str) -> Optional[str]:
 def _server_stream(conn, track_id: int) -> Optional[str]:
     """the active media server's own stream url for this track, when its
     client builds one (navidrome / subsonic)"""
-    from config.settings import config_manager
+    from core.settings import config_manager
     from core.media_server.engine import get_media_server_engine
     server = config_manager.get_active_media_server()
     client = get_media_server_engine().client(server)
@@ -101,7 +101,7 @@ def locate(item_id: str) -> Source:
                 return Source("file", audio_mime(local), path=local, duration=duration)
         url = _server_stream(conn, track_id)
     if url:
-        from config.settings import config_manager
+        from core.settings import config_manager
         return Source("relay", audio_mime(files[0][0]), url=url, duration=duration,
                       extra={"via": config_manager.get_active_media_server()})
     raise Refused(404, "no_file", "SoulSync can't reach that track's file.")

@@ -265,10 +265,10 @@ def test_every_player_route_declares_its_access():
     rules = [r for r in app.url_map.iter_rules() if r.rule.startswith("/api/player/")]
     own = [r for r in rules if "/progress" in r.rule or r.rule.endswith("/continue")
            or "/favorites" in r.rule or r.rule.endswith("/home-layout")
-           or r.rule.endswith("/watchlist")]
+           or r.rule.endswith("/watchlist") or r.rule.endswith("/watched")]
     music = [r for r in rules if r.rule.endswith("/music-channels")]
     library = [r for r in rules if r not in own and r not in music]
-    assert len(own) == 14 and len(library) == 7 and len(music) == 1
+    assert len(own) == 15 and len(library) == 7 and len(music) == 1
     assert declared_access(app.view_functions[music[0].endpoint]) == ("perm", "music.library")
     # your own rows: self only
     for rule in own:

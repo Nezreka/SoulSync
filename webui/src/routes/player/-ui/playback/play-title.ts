@@ -12,7 +12,8 @@ import { playItems } from './use-player';
 
 export function usePlayTitle() {
   const queryClient = useQueryClient();
-  return async (kind: 'movie' | 'show', id: number) => {
+  /** ``from``: a show from this episode on (a continue-watching row), else the one up next */
+  return async (kind: 'movie' | 'show', id: number, from?: number) => {
     if (kind === 'movie') {
       const m = await queryClient.fetchQuery(movieDetailQuery(id));
       playItems([movieItem({ id, title: m.title, year: m.year })]);
@@ -21,12 +22,15 @@ export function usePlayTitle() {
     const show = await queryClient.fetchQuery(showDetailQuery(id));
     const seasons = show.seasons ?? [];
     const next = show.next_up;
-    const from = next
-      ? seasons
-          .find((x) => x.season_number === next.season_number)
-          ?.episodes.find((e) => e.episode_number === next.episode_number && e.owned !== false)?.id
-      : undefined;
-    const queue = episodeItems({ id, title: show.title }, seasons, from);
+    const start = from
+      ? from
+      : next
+        ? seasons
+            .find((x) => x.season_number === next.season_number)
+            ?.episodes.find((e) => e.episode_number === next.episode_number && e.owned !== false)
+            ?.id
+        : undefined;
+    const queue = episodeItems({ id, title: show.title }, seasons, start);
     if (queue.length) playItems(queue);
   };
 }

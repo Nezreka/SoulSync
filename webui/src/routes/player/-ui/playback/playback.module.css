@@ -695,6 +695,8 @@ a.nowTitle:hover {
 
 .fullTop {
   top: 0;
+  /* over the end screen and the episodes: close and the small window always reachable */
+  z-index: 3;
   display: flex;
   align-items: center;
   gap: calc(var(--u) * 1);
@@ -824,11 +826,19 @@ a.nowTitle:hover {
   cursor: pointer;
 }
 
-.upNext {
+.upNextWrap {
   position: absolute;
   right: calc(var(--u) * 2);
   bottom: calc(var(--u) * 8);
   z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: calc(var(--u) * 0.8);
+  max-width: calc(100% - var(--u) * 4);
+}
+
+.upNext {
   display: flex;
   align-items: center;
   gap: calc(var(--u) * 0.9);
@@ -1096,4 +1106,308 @@ a.nowTitle:hover {
   inset: 0;
   background: var(--black-a90);
   pointer-events: none;
+}
+
+/* ── video: the end (keep watching, are you still there) ────────────── */
+
+.others {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 0.45);
+  max-width: 100%;
+}
+
+.othersRow {
+  display: flex;
+  gap: calc(var(--u) * 0.7);
+  overflow-x: auto;
+}
+
+.other {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: calc(var(--u) * 0.15);
+  width: calc(var(--u) * 11);
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--pl-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.otherArt {
+  position: relative;
+  overflow: hidden;
+  aspect-ratio: 16 / 9;
+  border: 1px solid var(--white-a15);
+  border-radius: var(--radius-md);
+  background: var(--black-a60);
+  transition: border-color var(--dur-fast) ease;
+}
+
+.other:hover .otherArt,
+.other:focus-visible .otherArt {
+  border-color: var(--pl-text);
+}
+
+.otherArt img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.otherTitle,
+.otherSub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.otherTitle {
+  font-size: calc(var(--u) * 0.85);
+  font-weight: 700;
+}
+
+.otherSub {
+  color: var(--pl-text-2);
+  font-size: calc(var(--u) * 0.75);
+}
+
+.endScreen {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: calc(var(--u) * 1.4);
+  padding: calc(var(--u) * 2);
+  background: var(--black-a80);
+  backdrop-filter: blur(8px);
+  animation: fullIn var(--dur-moderate) var(--pl-ease) both;
+}
+
+.endTitle {
+  margin: 0;
+  font-size: calc(var(--u) * 1.6);
+  font-weight: 800;
+  text-align: center;
+}
+
+.endButtons {
+  display: flex;
+  gap: calc(var(--u) * 0.7);
+}
+
+.btnGhost {
+  height: calc(var(--u) * 2.6);
+  padding: 0 calc(var(--u) * 1.3);
+  border: 1px solid var(--white-a50);
+  border-radius: var(--radius-pill);
+  background: none;
+  color: var(--pl-text);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+/* ── video: episodes, without leaving it ─────────────────────────────── */
+
+.episodes {
+  position: absolute;
+  top: calc(var(--u) * 5);
+  right: calc(var(--u) * 1);
+  /* above the controls, which stay usable */
+  bottom: calc(var(--u) * 7);
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  width: min(calc(100% - var(--u) * 2), calc(var(--u) * 30));
+  padding: calc(var(--u) * 1) calc(var(--u) * 1) 0;
+  border: 1px solid var(--white-a15);
+  border-radius: var(--radius-lg);
+  background: var(--black-a90);
+  backdrop-filter: blur(12px);
+  animation: fullIn var(--dur-moderate) var(--pl-ease) both;
+}
+
+.episodesHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--u) * 0.6);
+}
+
+.episodesTitle {
+  overflow: hidden;
+  font-size: calc(var(--u) * 1.15);
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.episodesSeasons {
+  display: flex;
+  flex: none;
+  gap: calc(var(--u) * 0.4);
+  margin: calc(var(--u) * 0.6) 0;
+  overflow-x: auto;
+  padding-bottom: calc(var(--u) * 0.2);
+}
+
+.episodesSeason {
+  flex: none;
+  height: calc(var(--u) * 2);
+  padding: 0 calc(var(--u) * 0.8);
+  border: 1px solid var(--white-a15);
+  border-radius: var(--radius-pill);
+  background: none;
+  color: var(--pl-text-2);
+  font: inherit;
+  font-size: calc(var(--u) * 0.8);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.episodesSeason[aria-selected='true'] {
+  border-color: var(--pl-text);
+  background: var(--pl-text);
+  color: var(--pl-bg);
+}
+
+.episodesNote {
+  color: var(--pl-text-2);
+}
+
+.episodesList {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: calc(var(--u) * 0.3);
+  margin: 0;
+  padding: 0 0 calc(var(--u) * 1);
+  overflow-y: auto;
+  list-style: none;
+}
+
+.episode {
+  display: flex;
+  gap: calc(var(--u) * 0.8);
+  width: 100%;
+  padding: calc(var(--u) * 0.5);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--pl-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.episode:hover:not(:disabled),
+.episode:focus-visible {
+  background: var(--white-a08);
+}
+
+.episode[aria-current='true'] {
+  border-color: var(--white-a20);
+  background: var(--white-a06);
+}
+
+.episode:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.episodeArt {
+  position: relative;
+  flex: none;
+  width: calc(var(--u) * 8.5);
+  overflow: hidden;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--radius-sm);
+  background: var(--white-a06);
+}
+
+.episodeArt img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.episodeBar {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: calc(var(--u) * 0.2);
+  background: var(--black-a60);
+}
+
+.episodeBar span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+.episodeNow {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: var(--black-a60);
+  font-size: calc(var(--u) * 0.72);
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.episodeText {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 0.15);
+  min-width: 0;
+}
+
+.episodeName {
+  overflow: hidden;
+  font-size: calc(var(--u) * 0.88);
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.episodeMeta {
+  display: flex;
+  gap: calc(var(--u) * 0.6);
+  color: var(--pl-text-3);
+  font-size: calc(var(--u) * 0.72);
+}
+
+.episodeSeen {
+  color: var(--accent-light);
+}
+
+.episodeOverview {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--pl-text-2);
+  font-size: calc(var(--u) * 0.75);
+  line-height: 1.4;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+/* over a playing picture: a dark card, so the titles read on anything */
+.upNextWrap .others {
+  padding: calc(var(--u) * 0.7);
+  border: 1px solid var(--white-a15);
+  border-radius: var(--radius-lg);
+  background: var(--black-a80);
+  backdrop-filter: blur(12px);
+  animation: fullIn var(--dur-moderate) var(--pl-ease) both;
 }

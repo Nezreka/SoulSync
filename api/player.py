@@ -13,7 +13,7 @@ import time
 from flask import Blueprint, jsonify, request
 
 from core.permissions import requires, requires_any, self_only
-from core.player import catalog, progress
+from core.player import catalog, progress, watched
 from core.profile_context import get_current_profile_id
 from utils.logging_config import get_logger
 
@@ -124,7 +124,20 @@ def finish_progress():
         return _bad(e)
     except Exception:  # noqa: BLE001
         return _failed("finish")
-    return jsonify({"success": True, "progress": row})
+    return jsonify({"success": True, "progress": row,
+                    "watched": watched.mark(body.get("item_type"), body.get("item_id"))})
+
+
+@bp.route("/api/player/watched", methods=["POST"])
+@self_only
+def mark_watched():
+    """the player is into the credits of a movie or episode: it counts as
+    watched (in soulsync and on the media server account)"""
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    body = request.get_json(silent=True) or {}
+    return jsonify({"success": True, "watched": watched.mark(body.get("item_type"), body.get("item_id"))})
 
 
 @bp.route("/api/player/progress", methods=["DELETE"])

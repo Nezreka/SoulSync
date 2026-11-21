@@ -441,6 +441,10 @@ A video a browser can't play as it is (an MKV, HEVC, AC3 or DTS sound) is conver
 - `GET /api/player/transcode/<item_type>/<item_id>?q=&part=&t=`: the converted stream, fragmented MP4, from `t` seconds. It can't seek by `Range`: to seek, start a new one at the new `t`. A few run at once; past that it answers `503 busy`.
 - `GET /api/player/transcode/<item_type>/<item_id>/start?t=`: where a stream asked to start at `t` really starts, `{start, seek}`. Copied video can only start at a keyframe, so request `t=seek` and count the stream's time from `start`.
 
+#### Watched
+
+- `POST /api/player/watched` with `{item_type, item_id}`: a movie or episode is into its credits (92% of the way): it counts as watched, in SoulSync's video library and on the media server account, for the profile whose watch state it is (the same rules as the detail page's watched toggle). Returns `{watched}`: false for anything else, or a profile that keeps no watch state of its own. `POST /api/player/progress/finish` does the same for a movie or episode played to the end.
+
 #### Audio and subtitle tracks
 
 - `GET /api/player/tracks/<item_type>/<item_id>?part=`: `{audio, subtitles}`, read from the file (with ffprobe, its header only) and the subtitle files beside it (`Movie.en.srt`, `Movie.es.forced.srt`). An audio track is `{index, language, title, codec, channels, layout, default, plays}`; a subtitle is `{id, language, title, codec, kind, forced, sdh, default, external}`, where `id` is `s<n>` (in the file) or `x<n>` (a file beside it), and `kind` is `text` or `image` (PGS, VobSub).

@@ -99,6 +99,17 @@ async function transcodeStart(url: string, t: number): Promise<{ start: number; 
   return { start: body.start ?? t, seek: body.seek ?? t };
 }
 
+/** into the credits: it counts as watched (fire and forget) */
+function watched(item: PlayItem) {
+  void fetch(appURL('/api/player/watched'), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ item_type: item.type, item_id: item.id }),
+    keepalive: true,
+    credentials: 'same-origin',
+  }).catch(() => undefined);
+}
+
 /** fire and forget, and still sent when the page is closing (keepalive) */
 function save(item: PlayItem, position: number, duration: number | null, finished: boolean) {
   const meta = {
@@ -183,6 +194,7 @@ export function browserDeps(): EngineDeps {
     tracks,
     subtitle,
     save,
+    watched,
     store,
     now: () => Date.now(),
     mediaSession:
