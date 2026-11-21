@@ -985,7 +985,7 @@ def register_routes(bp):
         """Kick off (or report) the background rename preview. Scanning a big
         library resolves every stored path against the filesystem, which is too
         slow to block the request — so it runs on a worker and the UI polls this.
-        Returns {success, ready, done, total, entries?, unresolved?, error?}."""
+        Returns {success, ready, done, total, entries?, unresolved?, held?, error?}."""
         from core.video.mass_rename import start_preview
         st = start_preview()
         # If a fresh result is already sitting there, hand it straight back.

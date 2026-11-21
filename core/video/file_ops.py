@@ -53,6 +53,8 @@ def expected_path(row: dict, real: str, roots: List[str], settings: dict) -> Opt
     fields = naming_fields(row)
     if organization.languages_unknown(row.get("scope"), fields, settings):
         return None   # not probed yet: its right name isn't known
+    if organization.missing_ids(row.get("scope"), fields, settings):
+        return None   # an id it names isn't stored yet
     fields["quality"] = file_quality(fields.get("quality"), real)
     ext = os.path.splitext(real)[1]
     return organization.render_path(row.get("scope"), root, fields, settings, ext)["path"]
