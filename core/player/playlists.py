@@ -115,14 +115,68 @@ def _facts(conn, ids: Iterable[int]) -> Dict[int, Dict[str, Any]]:
     return out
 
 
-def _stamped_id(row: Dict[str, Any]) -> Optional[int]:
-    extra = _extra(row)
-    if extra.get("library_track_id") and (extra.get("library_track_id_kind") or "lib2") == "lib2":
+# a playlist's matching, kept a while: the same songs (by content, so an edit
+# is new) for the same profile settings skip the lookups. on a big library a
+# 1,500-song playlist is seconds of disk reads, every open and every play
+_MATCH_TTL = 600.0
+_MATCH_MAX = 32
+_matches: Dict[Any, Any] = {}
+
+
+def _forget_matches() -> None:
+    _matches.clear()
+
+
+def _matched(db: Any, rows: List[Dict[str, Any]], *, scope: Any, hide_explicit: bool, playlist_id: int):
+    import time
+    key = (str(getattr(db, "database_path", id(db))), str(scope), bool(hide_explicit),
+           tuple((r.get("track_name"), r.get("artist_name"), r.get("album_name"),
+                       r.get("extra_data") if isinstance(r.get("extra_data"), str) else json.dumps(
+                           r.get("extra_data"), sort_keys=True, default=str)) for r in rows))
+    from core.subsonic.library import Library
+    with db._get_connection() as conn:
+        # a new file in the library (a download landing) is a new answer
+        newest = conn.execute("SELECT MAX(id) FROM lib2_track_files").fetchone()[0]
+        key = key + (newest,)
+        hit = _matches.get(key)
+        if hit and time.monotonic() - hit[0] < _MATCH_TTL:
+            return hit[1]
+        lib = Library(conn, db_key=str(getattr(db, "database_path", id(db))), scope=scope,
+                      hide_explicit=hide_explicit)
+        from core.subsonic.library import stamped_tracks
+        ids: List[Optional[int]] = stamped_tracks(conn, rows)
+        # the rest by name, in a few batched lookups
+        todo = [n for n, tid in enumerate(ids) if tid is None]
         try:
-            return int(extra["library_track_id"])
-        except (TypeError, ValueError):
-            return None
-    return None
+            found = lib.find_tracks([(rows[n].get("track_name") or "", rows[n].get("artist_name") or "",
+                                      rows[n].get("album_name") or "") for n in todo])
+        except Exception:  # noqa: BLE001 - unmatched songs never sink the list
+            logger.warning("playlist %s: matching songs by name failed", playlist_id, exc_info=True)
+            found = [None] * len(todo)
+        for n, tid in zip(todo, found, strict=True):
+            ids[n] = tid
+        ok = playable_ids(conn, ids, scope=scope, hide_explicit=hide_explicit)
+        # why a song can't play: hidden as explicit for this profile, or not
+        # in the library. only asked when explicit songs are hidden
+        explicit: Set[int] = set()
+        if hide_explicit:
+            open_lib = Library(conn, db_key=str(getattr(db, "database_path", id(db))), scope=scope,
+                               hide_explicit=False)
+            off = [n for n, tid in enumerate(ids) if tid is None or tid not in ok]
+            try:
+                again = open_lib.find_tracks([(rows[n].get("track_name") or "", rows[n].get("artist_name") or "",
+                                               rows[n].get("album_name") or "") for n in off])
+            except Exception:  # noqa: BLE001
+                again = [None] * len(off)
+            maybe = {n: ids[n] or tid for n, tid in zip(off, again, strict=True)}
+            open_ok = playable_ids(conn, [t for t in maybe.values() if t], scope=scope, hide_explicit=False)
+            explicit = {n for n, t in maybe.items() if t and t in open_ok}
+        facts = _facts(conn, [i for i in ids if i in ok])
+    out = (ids, ok, explicit, facts)
+    if len(_matches) >= _MATCH_MAX:
+        _matches.pop(next(iter(_matches)))
+    _matches[key] = (time.monotonic(), out)
+    return out
 
 
 def detail(db: Any, profile_id: int, playlist_id: int, *, scope: Any,
@@ -134,39 +188,8 @@ def detail(db: Any, profile_id: int, playlist_id: int, *, scope: Any,
     if not p or p.get("is_request_list"):
         return None
     rows = db.get_mirrored_playlist_tracks(int(playlist_id), profile_id=int(profile_id)) or []
-    from core.subsonic.library import Library
-    with db._get_connection() as conn:
-        lib = Library(conn, db_key=str(getattr(db, "database_path", id(db))), scope=scope,
-                      hide_explicit=hide_explicit)
-        ids: List[Optional[int]] = []
-        for r in rows:
-            tid = _stamped_id(r)
-            if tid is None:
-                try:
-                    tid = lib.find_track(r.get("track_name") or "", r.get("artist_name") or "",
-                                         r.get("album_name") or "")
-                except Exception:  # noqa: BLE001 - one unmatched song never sinks the list
-                    logger.debug("playlist %s: matching a row failed", playlist_id, exc_info=True)
-                    tid = None
-            ids.append(tid)
-        ok = playable_ids(conn, ids, scope=scope, hide_explicit=hide_explicit)
-        # why a song can't play: hidden as explicit for this profile, or not
-        # in the library. only asked when explicit songs are hidden
-        explicit: Set[int] = set()
-        if hide_explicit:
-            open_lib = Library(conn, db_key=str(getattr(db, "database_path", id(db))), scope=scope,
-                               hide_explicit=False)
-            for n, (r, tid) in enumerate(zip(rows, ids, strict=True)):
-                if tid is not None and tid in ok:
-                    continue
-                try:
-                    found = tid or _stamped_id(r) or open_lib.find_track(
-                        r.get("track_name") or "", r.get("artist_name") or "", r.get("album_name") or "")
-                except Exception:  # noqa: BLE001
-                    found = None
-                if found and playable_ids(conn, [found], scope=scope, hide_explicit=False):
-                    explicit.add(n)
-        facts = _facts(conn, [i for i in ids if i in ok])
+    ids, ok, explicit, facts = _matched(db, rows, scope=scope, hide_explicit=hide_explicit,
+                                        playlist_id=playlist_id)
     songs = []
     total_ms = 0
     for n, (r, tid) in enumerate(zip(rows, ids, strict=True), start=1):

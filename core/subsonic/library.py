@@ -724,16 +724,32 @@ class Library:
     def find_track(self, title: str, artist: str, album: str = "") -> Optional[int]:
         """the owned track with this title by this artist (a playlist row, a
         mix track, a top song), or None. one indexed lookup per title."""
-        from core.playlists.user_playlists import track_key
         if not title:
             return None
+        return self.find_tracks([(title, artist, album)])[0]
+
+    def find_tracks(self, wanted: Sequence[Tuple[str, str, str]]) -> List[Optional[int]]:
+        """find_track for many (title, artist, album) at once: a few batched
+        lookups instead of one per song (a 1,500-song playlist took seconds)"""
+        titles = sorted({_sql_lower((t or "").strip()) for t, _, _ in wanted if (t or "").strip()})
+        by_title: Dict[str, List[Any]] = {}
+        for i in range(0, len(titles), 400):
+            chunk = titles[i:i + 400]
+            marks = ",".join("?" * len(chunk))
+            for r in self.conn.execute(
+                    f"SELECT t.id, t.title, COALESCE(t.track_artist, ar.name) AS artist, ar.name AS album_artist, "
+                    f"al.title AS album FROM lib2_tracks t JOIN lib2_albums al ON al.id = t.album_id "
+                    f"LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id "
+                    f"WHERE LOWER(t.title) IN ({marks}) AND {owned_track_sql('t')}{self._hidden()}",
+                    chunk).fetchall():
+                by_title.setdefault(_sql_lower(r["title"] or ""), []).append(r)
+        return [self._pick(by_title.get(_sql_lower((t or "").strip()), [])[:50], t, a, al) if (t or "").strip()
+                else None for t, a, al in wanted]
+
+    @staticmethod
+    def _pick(rows: Sequence[Any], title: str, artist: str, album: str) -> Optional[int]:
+        from core.playlists.user_playlists import track_key
         want = track_key({"track_name": title, "artist_name": artist})
-        rows = self.conn.execute(
-            f"SELECT t.id, t.title, COALESCE(t.track_artist, ar.name) AS artist, ar.name AS album_artist, "
-            f"al.title AS album FROM lib2_tracks t JOIN lib2_albums al ON al.id = t.album_id "
-            f"LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id "
-            f"WHERE LOWER(t.title) = LOWER(:title) AND {owned_track_sql('t')}{self._hidden()} LIMIT 50",
-            {"title": title.strip()}).fetchall()
         best = None
         for r in rows:
             keys = {track_key({"track_name": r["title"], "artist_name": r["artist"] or ""}),
@@ -745,6 +761,58 @@ class Library:
         return best
 
 
+def _stamp(row: Dict[str, Any]) -> Tuple[Optional[int], Optional[str]]:
+    extra = row.get("extra_data")
+    if isinstance(extra, str):
+        try:
+            extra = json.loads(extra)
+        except (TypeError, ValueError):
+            extra = {}
+    extra = extra if isinstance(extra, dict) else {}
+    try:
+        tid = int(extra.get("library_track_id") or 0) or None
+    except (TypeError, ValueError):
+        tid = None
+    return tid, extra.get("library_track_id_kind")
+
+
+def stamped_tracks(conn, rows: Sequence[Dict[str, Any]]) -> List[Optional[int]]:
+    """the library track a playlist row was stamped with, when it can be
+    trusted. marked lib2 (a manual match): yes. marked anything else (a
+    media server's id): no. unmarked: only when that lib2 track has the
+    row's title, since old stamps carry other id spaces with no mark (a
+    playlist played the wrong song, or nothing, off them)."""
+    out: List[Optional[int]] = []
+    check: Dict[int, List[int]] = {}
+    for n, r in enumerate(rows):
+        tid, kind = _stamp(r)
+        if tid and kind == "lib2":
+            out.append(tid)
+            continue
+        out.append(None)
+        if tid and not kind:
+            check.setdefault(tid, []).append(n)
+    ids = list(check)
+    for i in range(0, len(ids), 500):
+        chunk = ids[i:i + 500]
+        marks = ",".join("?" * len(chunk))
+        for tid, title in conn.execute(f"SELECT id, title FROM lib2_tracks WHERE id IN ({marks})", chunk).fetchall():
+            for n in check.get(int(tid), []):
+                want = _sql_lower((rows[n].get("track_name") or "").strip())
+                if want and _sql_lower((title or "").strip()) == want:
+                    out[n] = int(tid)
+    return out
+
+
+_ASCII_LOWER = str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")
+
+
+def _sql_lower(text: str) -> str:
+    """sqlite's LOWER(): a to z only. a batch matches what one-by-one did,
+    accented titles included"""
+    return text.translate(_ASCII_LOWER)
+
+
 def _safe(value: Any) -> str:
     return str(value or "Unknown").replace("/", "_").strip() or "Unknown"
 
@@ -753,6 +821,6 @@ def _reset_for_tests() -> None:
     forget_snapshots()
 
 
-__all__ = ["ARTIST", "ALBUM", "TRACK", "PLAYLIST", "MIX", "IGNORED_ARTICLES", "AUDIO_MIME", "sid", "parse_id",
+__all__ = ["stamped_tracks", "ARTIST", "ALBUM", "TRACK", "PLAYLIST", "MIX", "IGNORED_ARTICLES", "AUDIO_MIME", "sid", "parse_id",
            "sort_key", "index_letter", "explicit_sql", "track_explicit_sql", "album_explicit_sql",
            "snapshot_sql", "build_snapshot", "snapshot", "forget_snapshots", "Library", "Album", "Snapshot"]
