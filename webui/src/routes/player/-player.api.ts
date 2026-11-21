@@ -574,3 +574,68 @@ export const serverResumeQuery = () =>
     staleTime: 60_000,
     refetchOnWindowFocus: true,
   });
+
+// ── discover: the video side's tmdb lists, owned titles stamped ────────
+
+export const discoverListQuery = (key: string, pages = 2) =>
+  queryOptions({
+    queryKey: ['player', 'discover', key, pages],
+    queryFn: async () =>
+      (
+        await apiClient
+          .get('video/discover/list', { searchParams: { key, pages } })
+          .json<{ items?: ExtraTitle[] }>()
+      ).items ?? [],
+    staleTime: 30 * MINUTE,
+    retry: false,
+  });
+
+/** one wall blended from tmdb's picks for titles you own (more votes rank higher) */
+export const discoverForYouQuery = () =>
+  queryOptions({
+    queryKey: ['player', 'discover', 'foryou'],
+    queryFn: async () =>
+      (await apiClient.get('video/discover/foryou').json<{ items?: ExtraTitle[] }>()).items ?? [],
+    staleTime: 30 * MINUTE,
+    retry: false,
+  });
+
+/** "more like <a title you own>" rails */
+export const discoverMoreLikeQuery = () =>
+  queryOptions({
+    queryKey: ['player', 'discover', 'morelike'],
+    queryFn: async () =>
+      (
+        await apiClient
+          .get('video/discover/morelike')
+          .json<{ rails?: { title: string; items: ExtraTitle[] }[] }>()
+      ).rails ?? [],
+    staleTime: 30 * MINUTE,
+    retry: false,
+  });
+
+export interface StudioCollection {
+  id: number;
+  name: string;
+  media_type: 'movie' | 'show';
+  summary?: string | null;
+  poster?: string | null;
+  pinned?: boolean;
+  /** library ids of the members this profile can see */
+  members: number[];
+  /** list members not in the library */
+  missing?: number;
+}
+
+/** the collections built in collection studio, with what you can see of each */
+export const studioCollectionsQuery = () =>
+  queryOptions({
+    queryKey: ['player', 'collections'],
+    queryFn: async () =>
+      (
+        await apiClient
+          .get('player/collections', { timeout: 60_000 })
+          .json<{ collections?: StudioCollection[] }>()
+      ).collections ?? [],
+    staleTime: 10 * MINUTE,
+  });

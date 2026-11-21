@@ -227,6 +227,42 @@ def video_catalog():
         return jsonify({"success": False, "error": "Could not read the video library"}), 500
 
 
+_collections_cache: dict = {}
+
+
+@bp.route("/api/player/collections", methods=["GET"])
+@requires_any("movies.access", "tv.access")
+def collections():
+    """the collection studio's collections, each with the members this
+    profile can see (it's the catalog's own list, so kinds and the kids cap
+    hold). a collection with nothing visible isn't listed. resolving is
+    cached for half an hour: a list collection may fetch a remote list."""
+    from core.player import collections as coll
+    try:
+        sees_movies, sees_shows, sees_youtube, cap = _video_view()
+        now = time.monotonic()
+        hit = _collections_cache.get("all")
+        if hit and now - hit[0] < 1800:
+            data = hit[1]
+        else:
+            data = coll.read(get_video_db())
+            if not data.get("partial"):
+                _collections_cache["all"] = (now, data)
+        shaped = shape_video_catalog(_read_catalog(sees_movies, sees_shows, sees_youtube),
+                                     sees_movies, sees_shows, sees_youtube, cap)
+        visible = {"movie": {r[0] for r in shaped.get("movies") or []},
+                   "show": {r[0] for r in shaped.get("shows") or []}}
+        out = []
+        for c in data["collections"]:
+            members = [m for m in c["members"] if m in visible.get(c["media_type"], set())]
+            if members:
+                out.append(dict(c, members=members))
+        return jsonify({"success": True, "collections": out})
+    except Exception:  # noqa: BLE001
+        logger.exception("player collections failed")
+        return jsonify({"success": False, "error": "Could not read collections"}), 500
+
+
 def _youtube_gate():
     """the video side's own rule for youtube: any video access at all."""
     from api.video import access

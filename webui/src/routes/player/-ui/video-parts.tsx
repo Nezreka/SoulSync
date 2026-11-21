@@ -163,3 +163,19 @@ export function BrowseToolbar({
     </div>
   );
 }
+
+/** the decade a library is filtered to, with a way out */
+export function DecadeChip({ decade, onClear }: { decade: number; onClear: () => void }) {
+  return (
+    <button
+      type="button"
+      className={s.filterChip}
+      aria-pressed="true"
+      onClick={onClear}
+      aria-label={`Clear the ${decade}s filter`}
+      data-nav
+    >
+      {decade}s ×
+    </button>
+  );
+}

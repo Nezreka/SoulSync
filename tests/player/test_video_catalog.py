@@ -212,3 +212,33 @@ def test_keyword_route_stamps_and_filters(monkeypatch):
     assert body["shows"] == []
     assert client.get("/api/player/keyword?name=nope").get_json()["found"] is False
     assert client.get("/api/player/keyword").status_code == 400
+
+
+def test_collections_route_shows_only_members_the_profile_can_see(monkeypatch):
+    """studio collections: members narrow to the catalog this profile sees
+    (its kinds and its rating cap); a shelf with nothing visible is gone."""
+    from flask import Flask
+    import api.player as player_api
+    from core.player import collections as coll
+
+    shelves = {"collections": [
+        {"id": 1, "name": "Heists", "media_type": "movie", "members": [10, 11, 12], "pinned": False},
+        {"id": 2, "name": "Late night", "media_type": "movie", "members": [12], "pinned": False},
+        {"id": 3, "name": "Sitcoms", "media_type": "show", "members": [20], "pinned": False},
+    ], "partial": False}
+    monkeypatch.setattr(coll, "read", lambda db: shelves)
+    monkeypatch.setattr(player_api, "get_video_db", lambda: None)
+    player_api._collections_cache.clear()
+    # movies 10 and 11 pass the cap, 12 is over it; tv isn't part of the profile
+    monkeypatch.setattr(player_api, "_video_view", lambda: (True, False, False, VideoCap(movie=13)))
+    monkeypatch.setattr(player_api, "_read_catalog", lambda *a: {
+        "movies": [[10, "A", 2000, None, "PG", None, [], None, 0, 0, None, 1, None, None],
+                   [11, "B", 2001, None, "PG-13", None, [], None, 0, 0, None, 2, None, None],
+                   [12, "C", 2002, None, "R", None, [], None, 0, 0, None, 3, None, None]],
+        "shows": [[20, "S", 2000, None, "TV-PG", None, [], None, 0, 0, 1, [], 4]],
+        "recent_episodes": [], "youtube": [], "genres": {}})
+    app = Flask(__name__)
+    app.secret_key = "t"
+    app.register_blueprint(player_api.create_blueprint())
+    body = app.test_client().get("/api/player/collections").get_json()
+    assert [(c["name"], c["members"]) for c in body["collections"]] == [("Heists", [10, 11])]

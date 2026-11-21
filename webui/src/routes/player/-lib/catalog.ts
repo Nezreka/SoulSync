@@ -55,6 +55,8 @@ export function decodeCatalog(wire: CatalogWire): VideoCatalog {
     has_backdrop: !!m(row, 'has_backdrop'),
     studio: str(m(row, 'studio')),
     tmdb_id: num(m(row, 'tmdb_id')),
+    collection_id: num(m(row, 'collection_id')),
+    collection: str(m(row, 'collection')),
   }));
 
   const sh = reader(wire.fields?.show);

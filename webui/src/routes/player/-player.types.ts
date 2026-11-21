@@ -35,6 +35,9 @@ export interface CatalogMovie {
   has_backdrop: boolean;
   studio: string | null;
   tmdb_id: number | null;
+  /** the franchise tmdb files it under (a box set) */
+  collection_id?: number | null;
+  collection?: string | null;
 }
 
 /** [episode id, season, episode, seconds, title] */

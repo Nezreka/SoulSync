@@ -76,11 +76,20 @@ def vibe_for(mood: Any) -> str | None:
     return None
 
 
-def plan(albums: Iterable[tuple], top_genres: int = TOP_GENRES,
-         min_tracks: int = MIN_TRACKS) -> List[Dict[str, Any]]:
-    """albums: (album_id, album_genres, artist_genres, mood, owned_tracks).
+def plan(albums: Iterable[tuple], track_moods: Iterable[tuple] = (),
+         top_genres: int = TOP_GENRES, min_tracks: int = MIN_TRACKS) -> List[Dict[str, Any]]:
+    """albums: (album_id, album_genres, artist_genres, mood, owned_tracks),
+    the mood being the album's or else its artist's. track_moods:
+    (album_id, track mood, owned tracks with it): a track's own mood comes
+    first, so an album with them takes its vibes from its tracks.
     the channels and which albums feed each, without a single track read.
     pure, so the grouping is tested apart from sql."""
+    vibes_by_album: Dict[Any, Dict[str, int]] = {}
+    for album_id, mood, count in track_moods:
+        vibe = vibe_for(mood)
+        if vibe:
+            votes = vibes_by_album.setdefault(album_id, {})
+            votes[vibe] = votes.get(vibe, 0) + int(count or 0)
     by_genre: Dict[str, Dict[str, Any]] = {}
     by_vibe: Dict[str, Dict[str, Any]] = {}
     for album_id, album_genres, artist_genres, mood, tracks in albums:
@@ -95,11 +104,14 @@ def plan(albums: Iterable[tuple], top_genres: int = TOP_GENRES,
             entry["albums"].append(album_id)
             entry["count"] += tracks
             entry["names"][g] = entry["names"].get(g, 0) + tracks
-        vibe = vibe_for(mood)
-        if vibe:
+        votes = vibes_by_album.get(album_id)
+        if votes is None:
+            fallback = vibe_for(mood)
+            votes = {fallback: tracks} if fallback else {}
+        for vibe, count in votes.items():
             entry = by_vibe.setdefault(vibe, {"albums": [], "count": 0})
             entry["albums"].append(album_id)
-            entry["count"] += tracks
+            entry["count"] += count
 
     def sample(ids: List[int]) -> List[int]:
         return sorted(ids, key=_spread)[:ALBUMS_PER_CHANNEL]
@@ -122,11 +134,15 @@ def plan(albums: Iterable[tuple], top_genres: int = TOP_GENRES,
 
 
 def fill(channels: List[Dict[str, Any]], tracks_by_album: Dict[int, List[list]],
-         per_channel: int = PER_CHANNEL) -> List[Dict[str, Any]]:
-    """each planned channel with a stable sample of its albums' tracks"""
+         per_channel: int = PER_CHANNEL,
+         track_vibe: Dict[Any, str] | None = None) -> List[Dict[str, Any]]:
+    """each planned channel with a stable sample of its albums' tracks. on a
+    vibe channel, a track with a mood of its own airs only on its vibe."""
+    track_vibe = track_vibe or {}
     out = []
     for c in channels:
-        pool = [t for album_id in c["albums"] for t in tracks_by_album.get(album_id, [])]
+        pool = [t for album_id in c["albums"] for t in tracks_by_album.get(album_id, [])
+                if c["kind"] != "vibe" or track_vibe.get(t[0], c["name"]) == c["name"]]
         picked = sorted(pool, key=lambda t: _spread(t[0]))[:per_channel]
         if picked:
             out.append({"id": c["id"], "name": c["name"], "kind": c["kind"],
@@ -152,13 +168,20 @@ def read(conn) -> List[Dict[str, Any]]:
         WHERE {owned}
         GROUP BY al.id
     """).fetchall()  # noqa: S608 - the fragments are the library's own sql builders
-    channels = plan([tuple(r) for r in albums])
+    track_moods = conn.execute(f"""
+        SELECT t.album_id, t.mood, COUNT(*)
+        FROM lib2_tracks t
+        WHERE t.mood IS NOT NULL AND t.mood != '' AND {owned}
+        GROUP BY t.album_id, t.mood
+    """).fetchall()  # noqa: S608
+    channels = plan([tuple(r) for r in albums], [tuple(r) for r in track_moods])
     wanted = sorted({a for c in channels for a in c["albums"]})
     tracks_by_album: Dict[int, List[list]] = {}
+    track_vibe: Dict[Any, str] = {}
     for start in range(0, len(wanted), 500):
         chunk = wanted[start:start + 500]
         rows = conn.execute(f"""
-            SELECT t.id, t.title, COALESCE(ar.name, ''), t.duration, t.album_id
+            SELECT t.id, t.title, COALESCE(ar.name, ''), t.duration, t.album_id, t.mood
             FROM lib2_tracks t
             JOIN lib2_albums al ON al.id = t.album_id
             LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id
@@ -168,4 +191,7 @@ def read(conn) -> List[Dict[str, Any]]:
             seconds = int(r[3] / 1000) if r[3] else 0
             if seconds >= 60:
                 tracks_by_album.setdefault(r[4], []).append([r[0], r[1] or "", r[2], seconds, r[4]])
-    return fill(channels, tracks_by_album)
+                vibe = vibe_for(r[5])
+                if vibe:
+                    track_vibe[r[0]] = vibe
+    return fill(channels, tracks_by_album, track_vibe=track_vibe)

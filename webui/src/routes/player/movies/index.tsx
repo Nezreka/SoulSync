@@ -5,12 +5,13 @@ import { useMemo } from 'react';
 import type { RailCard } from '../-lib/rails';
 
 import { movieCard } from '../-lib/rails';
-import { genresOf, sortTitles, validateBrowseSearch } from '../-lib/video';
+import { decadeOf, genresOf, sortTitles, validateBrowseSearch } from '../-lib/video';
 import { videoCatalogQuery } from '../-player.api';
+import { BrowseTabs, MovieCollections, VideoCategories, VideoForYou } from '../-ui/browse';
 import { CardGrid, Empty, PageTitle, useViewMode, ViewToggle, styles as s } from '../-ui/kit';
 import { NotPartOfProfile } from '../-ui/not-part';
 import { useSections } from '../-ui/sections';
-import { BrowseToolbar } from '../-ui/video-parts';
+import { BrowseToolbar, DecadeChip } from '../-ui/video-parts';
 
 export const Route = createFileRoute('/player/movies/')({
   validateSearch: validateBrowseSearch,
@@ -20,18 +21,24 @@ export const Route = createFileRoute('/player/movies/')({
 function MoviesBrowse() {
   const sections = useSections();
   const [view, setView] = useViewMode('movies');
-  const { sort = 'added', genre = '' } = Route.useSearch();
+  const search = Route.useSearch();
+  const { sort = 'added', genre = '', decade } = search;
+  // a filter link (a genre, a decade) lands on the library
+  const tab = search.tab ?? (genre || decade ? 'library' : 'foryou');
   const navigate = useNavigate({ from: '/player/movies/' });
   const catalog = useQuery({ ...videoCatalogQuery(), enabled: sections.movies });
-  const movies = catalog.data?.movies ?? [];
+  const movies = useMemo(() => catalog.data?.movies ?? [], [catalog.data]);
   const genres = useMemo(() => genresOf(movies), [movies]);
 
   const cards: RailCard[] = useMemo(
     () =>
-      sortTitles(genre ? movies.filter((m) => m.genres.includes(genre)) : movies, sort).map(
-        movieCard,
-      ),
-    [movies, genre, sort],
+      sortTitles(
+        movies.filter(
+          (m) => (!genre || m.genres.includes(genre)) && (!decade || decadeOf(m.year) === decade),
+        ),
+        sort,
+      ).map(movieCard),
+    [movies, genre, decade, sort],
   );
 
   if (!sections.movies) return <NotPartOfProfile what="Movies" />;
@@ -39,35 +46,71 @@ function MoviesBrowse() {
   return (
     <>
       <PageTitle>Movies</PageTitle>
-      <BrowseToolbar
-        sort={sort}
-        onSort={(next) =>
-          void navigate({ search: (prev) => ({ ...prev, sort: next }), replace: true })
-        }
-        genres={genres}
-        genre={genre}
-        onGenre={(next) =>
+      <BrowseTabs
+        value={tab}
+        onChange={(next) =>
           void navigate({
-            search: (prev) => ({ ...prev, genre: next || undefined }),
+            search: next === 'library' ? { tab: next, sort } : { tab: next },
             replace: true,
           })
         }
-        count={cards.length}
-        noun={cards.length === 1 ? 'film' : 'films'}
-        extra={<ViewToggle value={view} onChange={setView} />}
       />
       {catalog.isLoading ? <div className={s.skeleton} style={{ height: '50vh' }} /> : null}
       {catalog.isError ? (
         <Empty title="Could not load your movies">Try again in a moment.</Empty>
       ) : null}
-      {catalog.data && !cards.length ? (
-        <Empty title={genre ? `No ${genre.toLowerCase()} films` : 'No movies on disk yet'}>
-          {genre
-            ? 'Try another genre.'
-            : 'Films you add in SoulSync show up here once they are downloaded.'}
-        </Empty>
+      {catalog.data && tab === 'foryou' ? (
+        <VideoForYou kind="movie" movies={movies} shows={catalog.data.shows} />
       ) : null}
-      {cards.length ? <CardGrid cards={cards} view={view} /> : null}
+      {catalog.data && tab === 'collections' ? <MovieCollections movies={movies} /> : null}
+      {catalog.data && tab === 'categories' ? (
+        <VideoCategories kind="movie" items={movies} />
+      ) : null}
+      {catalog.data && tab === 'library' ? (
+        <>
+          <BrowseToolbar
+            sort={sort}
+            onSort={(next) =>
+              void navigate({ search: (prev) => ({ ...prev, sort: next }), replace: true })
+            }
+            genres={genres}
+            genre={genre}
+            onGenre={(next) =>
+              void navigate({
+                search: (prev) => ({ ...prev, genre: next || undefined }),
+                replace: true,
+              })
+            }
+            count={cards.length}
+            noun={cards.length === 1 ? 'film' : 'films'}
+            extra={
+              <>
+                {decade ? (
+                  <DecadeChip
+                    decade={decade}
+                    onClear={() =>
+                      void navigate({
+                        search: (prev) => ({ ...prev, decade: undefined }),
+                        replace: true,
+                      })
+                    }
+                  />
+                ) : null}
+                <ViewToggle value={view} onChange={setView} />
+              </>
+            }
+          />
+          {!cards.length ? (
+            <Empty title={genre || decade ? 'No films match' : 'No movies on disk yet'}>
+              {genre || decade
+                ? 'Try another genre or decade.'
+                : 'Films you add in SoulSync show up here once they are downloaded.'}
+            </Empty>
+          ) : (
+            <CardGrid cards={cards} view={view} />
+          )}
+        </>
+      ) : null}
     </>
   );
 }

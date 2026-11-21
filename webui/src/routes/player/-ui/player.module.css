@@ -3261,3 +3261,75 @@ a.crewRow:hover {
 .homeLead ~ .hero {
   margin-top: calc(var(--u) * 1.5);
 }
+
+/* ── browse tabs + category tiles ────────────────────────────────────── */
+
+.browseTabs {
+  margin: 0 0 calc(var(--u) * 1.4);
+}
+
+.tileGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--pl-card-wide), 1fr));
+  gap: calc(var(--u) * 0.9);
+}
+
+.tile {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--radius-lg);
+  background: linear-gradient(135deg, var(--white-a08), var(--white-a04));
+  color: var(--pl-text);
+  text-decoration: none;
+  transition: transform var(--dur-fast) var(--pl-ease);
+}
+
+.tile img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform var(--dur-slow) var(--pl-ease);
+}
+
+.tile:hover,
+.tile:focus-visible {
+  transform: translateY(-2px);
+}
+
+.tile:hover img,
+.tile:focus-visible img {
+  transform: scale(1.05);
+}
+
+.tileShade {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to top, var(--black-a85) 0%, var(--black-a40) 45%, transparent 75%);
+}
+
+.tileText {
+  position: absolute;
+  right: calc(var(--u) * 0.9);
+  bottom: calc(var(--u) * 0.75);
+  left: calc(var(--u) * 0.9);
+  display: flex;
+  flex-direction: column;
+}
+
+.tileLabel {
+  overflow: hidden;
+  font-size: calc(var(--u) * 1.15);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tileSub {
+  color: var(--pl-text-2);
+  font-size: calc(var(--u) * 0.8);
+}

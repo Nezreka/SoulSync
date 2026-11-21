@@ -107,10 +107,19 @@ export function rankVersions(files: readonly VideoFile[]): VideoFile[] {
 }
 
 /** ?sort= and ?genre= on the movie and tv browse pages */
+export type BrowseTab = 'foryou' | 'library' | 'collections' | 'categories';
+
 export interface BrowseSearch {
+  tab?: BrowseTab;
   sort?: VideoSort;
   genre?: string;
+  /** a decade's first year: 1990 is the 90s */
+  decade?: number;
 }
+
+/** the decade a year falls in (1994 -> 1990) */
+export const decadeOf = (year: number | null | undefined) =>
+  year ? Math.floor(year / 10) * 10 : null;
 
 export function validateBrowseSearch(search: Record<string, unknown>): BrowseSearch {
   const out: BrowseSearch = {};
@@ -122,5 +131,15 @@ export function validateBrowseSearch(search: Record<string, unknown>): BrowseSea
   )
     out.sort = search.sort;
   if (typeof search.genre === 'string' && search.genre) out.genre = search.genre;
+  if (
+    search.tab === 'foryou' ||
+    search.tab === 'library' ||
+    search.tab === 'collections' ||
+    search.tab === 'categories'
+  )
+    out.tab = search.tab;
+  const decade = Number(search.decade);
+  if (Number.isInteger(decade) && decade >= 1880 && decade <= 2100 && decade % 10 === 0)
+    out.decade = decade;
   return out;
 }

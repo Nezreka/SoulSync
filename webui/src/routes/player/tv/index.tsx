@@ -4,21 +4,14 @@ import { useMemo } from 'react';
 
 import type { RailCard } from '../-lib/rails';
 
-import { recentEpisodeCards, showCard } from '../-lib/rails';
-import { genresOf, sortTitles, validateBrowseSearch } from '../-lib/video';
+import { showCard } from '../-lib/rails';
+import { decadeOf, genresOf, sortTitles, validateBrowseSearch } from '../-lib/video';
 import { videoCatalogQuery } from '../-player.api';
-import {
-  CardGrid,
-  CardRail,
-  Empty,
-  PageTitle,
-  useViewMode,
-  ViewToggle,
-  styles as s,
-} from '../-ui/kit';
+import { BrowseTabs, ShowCollections, VideoCategories, VideoForYou } from '../-ui/browse';
+import { CardGrid, Empty, PageTitle, useViewMode, ViewToggle, styles as s } from '../-ui/kit';
 import { NotPartOfProfile } from '../-ui/not-part';
 import { useSections } from '../-ui/sections';
-import { BrowseToolbar } from '../-ui/video-parts';
+import { BrowseToolbar, DecadeChip } from '../-ui/video-parts';
 
 export const Route = createFileRoute('/player/tv/')({
   validateSearch: validateBrowseSearch,
@@ -28,16 +21,23 @@ export const Route = createFileRoute('/player/tv/')({
 function TvBrowse() {
   const sections = useSections();
   const [view, setView] = useViewMode('tv');
-  const { sort = 'added', genre = '' } = Route.useSearch();
+  const search = Route.useSearch();
+  const { sort = 'added', genre = '', decade } = search;
+  const tab = search.tab ?? (genre || decade ? 'library' : 'foryou');
   const navigate = useNavigate({ from: '/player/tv/' });
   const catalog = useQuery({ ...videoCatalogQuery(), enabled: sections.tv });
-  const shows = catalog.data?.shows ?? [];
+  const shows = useMemo(() => catalog.data?.shows ?? [], [catalog.data]);
   const genres = useMemo(() => genresOf(shows), [shows]);
 
   const cards: RailCard[] = useMemo(
     () =>
-      sortTitles(genre ? shows.filter((x) => x.genres.includes(genre)) : shows, sort).map(showCard),
-    [shows, genre, sort],
+      sortTitles(
+        shows.filter(
+          (x) => (!genre || x.genres.includes(genre)) && (!decade || decadeOf(x.year) === decade),
+        ),
+        sort,
+      ).map(showCard),
+    [shows, genre, decade, sort],
   );
 
   if (!sections.tv) return <NotPartOfProfile what="TV shows" />;
@@ -45,43 +45,74 @@ function TvBrowse() {
   return (
     <>
       <PageTitle>TV</PageTitle>
-      {!genre ? (
-        <CardRail
-          title="New episodes"
-          cards={recentEpisodeCards(catalog.data?.recent_episodes ?? [], 16)}
-        />
-      ) : null}
-      <div className={s.rail}>
-        <BrowseToolbar
-          sort={sort}
-          onSort={(next) =>
-            void navigate({ search: (prev) => ({ ...prev, sort: next }), replace: true })
-          }
-          genres={genres}
-          genre={genre}
-          onGenre={(next) =>
-            void navigate({
-              search: (prev) => ({ ...prev, genre: next || undefined }),
-              replace: true,
-            })
-          }
-          count={cards.length}
-          noun={cards.length === 1 ? 'show' : 'shows'}
-          extra={<ViewToggle value={view} onChange={setView} />}
-        />
-      </div>
+      <BrowseTabs
+        value={tab}
+        onChange={(next) =>
+          void navigate({
+            search: next === 'library' ? { tab: next, sort } : { tab: next },
+            replace: true,
+          })
+        }
+      />
       {catalog.isLoading ? <div className={s.skeleton} style={{ height: '50vh' }} /> : null}
       {catalog.isError ? (
         <Empty title="Could not load your shows">Try again in a moment.</Empty>
       ) : null}
-      {catalog.data && !cards.length ? (
-        <Empty title={genre ? `No ${genre.toLowerCase()} shows` : 'No episodes on disk yet'}>
-          {genre
-            ? 'Try another genre.'
-            : 'Shows appear here once at least one episode is downloaded.'}
-        </Empty>
+      {catalog.data && tab === 'foryou' ? (
+        <VideoForYou
+          kind="show"
+          movies={catalog.data.movies}
+          shows={shows}
+          recentEpisodes={catalog.data.recent_episodes}
+        />
       ) : null}
-      {cards.length ? <CardGrid cards={cards} view={view} /> : null}
+      {catalog.data && tab === 'collections' ? <ShowCollections shows={shows} /> : null}
+      {catalog.data && tab === 'categories' ? <VideoCategories kind="show" items={shows} /> : null}
+      {catalog.data && tab === 'library' ? (
+        <>
+          <BrowseToolbar
+            sort={sort}
+            onSort={(next) =>
+              void navigate({ search: (prev) => ({ ...prev, sort: next }), replace: true })
+            }
+            genres={genres}
+            genre={genre}
+            onGenre={(next) =>
+              void navigate({
+                search: (prev) => ({ ...prev, genre: next || undefined }),
+                replace: true,
+              })
+            }
+            count={cards.length}
+            noun={cards.length === 1 ? 'show' : 'shows'}
+            extra={
+              <>
+                {decade ? (
+                  <DecadeChip
+                    decade={decade}
+                    onClear={() =>
+                      void navigate({
+                        search: (prev) => ({ ...prev, decade: undefined }),
+                        replace: true,
+                      })
+                    }
+                  />
+                ) : null}
+                <ViewToggle value={view} onChange={setView} />
+              </>
+            }
+          />
+          {!cards.length ? (
+            <Empty title={genre || decade ? 'No shows match' : 'No episodes on disk yet'}>
+              {genre || decade
+                ? 'Try another genre or decade.'
+                : 'Shows appear here once at least one episode is downloaded.'}
+            </Empty>
+          ) : (
+            <CardGrid cards={cards} view={view} />
+          )}
+        </>
+      ) : null}
     </>
   );
 }

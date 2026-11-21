@@ -52,6 +52,19 @@ def test_fill_takes_a_stable_capped_sample_of_the_albums_tracks():
     assert mc.fill(plan, {}) == []
 
 
+def test_a_tracks_own_mood_comes_before_its_album():
+    albums = [_album(1, mood="Relaxed", tracks=30)]
+    # the album says relaxed, but its tracks say energetic
+    out = {c["id"]: c for c in mc.plan(albums, [(1, "Energetic", 25), (1, "odd", 5)])}
+    assert list(out) == ["music-vibe-high-energy"]
+    assert out["music-vibe-high-energy"]["count"] == 25
+    planned = [{"id": "v", "name": "High energy", "kind": "vibe", "count": 2, "albums": [1]}]
+    tracks = {1: [[1, "a", "A", 200, 1], [2, "b", "A", 200, 1], [3, "c", "A", 200, 1]]}
+    filled = mc.fill(planned, tracks, track_vibe={1: "High energy", 2: "Chill"})
+    # a chill track stays off the high energy channel; one with no mood rides along
+    assert [t[0] for t in filled[0]["tracks"]] == sorted([1, 3], key=mc._spread)
+
+
 def test_vibe_lookup():
     assert mc.vibe_for("Energetic") == "High energy"
     assert mc.vibe_for("odd / Happy") == "Feel good"
@@ -72,8 +85,13 @@ def test_read_runs_on_the_real_schema_and_only_airs_owned_tracks(tmp_path):
     for i in range(25):
         lib2_seed.track(conn, "Miles Davis", "Kind of Blue", f"wanted {i}", owned=False,
                         duration=300_000)
+    # moods only on the tracks (no genre, no album mood): they still make a vibe
+    for i in range(22):
+        lib2_seed.track(conn, "Run DMC", "Raising Hell", f"cut {i}", duration=200_000,
+                        mood="Energetic")
     conn.commit()
     out = {c["id"]: c for c in mc.read(conn)}
-    assert set(out) == {"music-genre-jazz", "music-vibe-chill"}
+    assert set(out) == {"music-genre-jazz", "music-vibe-chill", "music-vibe-high-energy"}
+    assert len(out["music-vibe-high-energy"]["tracks"]) == 22
     assert out["music-genre-jazz"]["count"] == 26
     assert len(out["music-genre-jazz"]["tracks"]) == 25

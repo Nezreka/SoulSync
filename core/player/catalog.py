@@ -26,7 +26,8 @@ RECENT_EPISODES = 40
 YOUTUBE_MAX = 3000
 
 MOVIE_FIELDS = ("id", "title", "year", "runtime_seconds", "content_rating", "rating",
-                "genre_ids", "added_at", "has_poster", "has_backdrop", "studio", "tmdb_id")
+                "genre_ids", "added_at", "has_poster", "has_backdrop", "studio", "tmdb_id",
+                "collection_id", "collection")
 SHOW_FIELDS = ("id", "title", "year", "network", "content_rating", "rating", "genre_ids",
                "added_at", "has_poster", "has_backdrop", "episode_count", "episodes", "tmdb_id")
 
@@ -52,13 +53,16 @@ def owned_movies(conn) -> List[list]:
     out = []
     for r in conn.execute("""
             SELECT id, title, year, runtime_minutes, content_rating, rating, added_at,
-                   poster_url IS NOT NULL, backdrop_url IS NOT NULL, studio, tmdb_id
+                   poster_url IS NOT NULL, backdrop_url IS NOT NULL, studio, tmdb_id,
+                   tmdb_collection_id, tmdb_collection_name
             FROM movies WHERE has_file = 1"""):
         file_seconds, file_added = files.get(r[0], (None, None))
         seconds = file_seconds or ((r[3] or 0) * 60) or None
         out.append([r[0], r[1], r[2], int(seconds) if seconds else None, r[4],
                     round(r[5], 1) if r[5] else None, genres.get(r[0], []),
-                    file_added or r[6], 1 if r[7] else 0, 1 if r[8] else 0, r[9], r[10]])
+                    file_added or r[6], 1 if r[7] else 0, 1 if r[8] else 0, r[9], r[10],
+                    # the franchise (0 means tmdb says none)
+                    r[11] or None, r[12] if r[11] else None])
     return out
 
 
