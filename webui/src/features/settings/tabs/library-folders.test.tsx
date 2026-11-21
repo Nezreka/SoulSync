@@ -51,6 +51,10 @@ describe('the Folders card is the markup it replaced', () => {
   it('with the React Audiobooks and Video panels', () => {
     const { container } = card();
     const want = shape(vanilla('library-folders.vanilla.html', { afterInit: true }));
+    // the media server folders section is new since the port, not old markup
+    const coverage = container.querySelector('#library-coverage');
+    expect(coverage).not.toBeNull();
+    coverage?.remove();
     const got = shape(container);
     expect(got.elements).toEqual(want.elements);
     expect(got.text).toBe(want.text);

@@ -17,6 +17,7 @@ import type { SettingsStore } from '../settings-store';
 
 import { AudiobookFoldersPanel, audiobooksPath } from './library-audiobooks';
 import { isDocker, LIBRARY_TAB, LibrarySection, LockedPath, useMediaTabs } from './library-card';
+import { ServerFoldersSection } from './library-coverage';
 import { OrganizationCard } from './library-organization';
 import { ProcessingCards } from './library-processing';
 import { VideoFoldersPanel } from './library-video-folders';
@@ -643,6 +644,20 @@ export function FoldersCard({ store }: SettingsTabProps) {
               }}
             />
           </div>
+          {/* every music folder the media server has, and whether SoulSync
+              scans it (library-coverage.tsx). "Add as a library folder" is a
+              row on the list above */}
+          <ServerFoldersSection
+            stg={TAB}
+            onAddLibraryFolder={(path) => {
+              const rows = music.map((r) => r.trim()).filter(Boolean);
+              if (rows.includes(path)) return;
+              const next = [...rows, path];
+              setMusic(next);
+              saveList('music_paths', next);
+              setTimeout(() => refreshChecks('music'), 0);
+            }}
+          />
           <div className="settings-group" data-stg={TAB}>
             <h3>Sample Studio Folders</h3>
             <div className="help-text" style={{ marginBottom: '12px' }}>
