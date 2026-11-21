@@ -114,8 +114,9 @@ def _inverse_reroot(new_local: str, old_local: str, stored: str) -> str:
 def preview(progress: Optional[Callable[[int, int], None]] = None) -> Dict[str, Any]:
     """Every file whose on-disk name differs from the current template.
     {status, entries: [{key, kind, title, current, proposed, reason?}],
-    unresolved: int, held: int} (held: left alone, an id their name uses
-    isn't stored; the naming check lists those titles).
+    unresolved: int, held: int} (held: would be renamed, but an id their
+    name uses isn't stored, so they're left alone; the naming check lists
+    those titles).
 
     ``progress(done, total)`` is called as files are scanned so a background
     caller can report a live count. Pure read — never mutates."""
@@ -169,9 +170,6 @@ def preview(progress: Optional[Callable[[int, int], None]] = None) -> Dict[str, 
         nonlocal unresolved, held
         if organization.languages_unknown(kind, fields, settings):
             return   # not probed yet: renaming now could strip a right '[JA]'
-        if organization.missing_ids(kind, fields, settings):
-            held += 1
-            return   # no stored id: renaming now would strip the folder's '{imdb-...}'
         local = _resolve(stored, size)
         if not local or not os.path.exists(local):
             unresolved += 1
@@ -185,6 +183,9 @@ def preview(progress: Optional[Callable[[int, int], None]] = None) -> Dict[str, 
         fields = dict(fields, quality=file_quality(fields.get("quality"), local))
         proposed = organization.render_path(kind, base, fields, settings, ext)["path"]
         if os.path.normpath(proposed) != os.path.normpath(local):
+            if organization.missing_ids(kind, fields, settings):
+                held += 1
+                return   # no stored id: renaming now would strip the '{imdb-...}' it may carry
             entries.append({"key": key, "kind": kind, "title": title,
                             "current": local, "proposed": proposed})
 

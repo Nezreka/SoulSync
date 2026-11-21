@@ -260,12 +260,14 @@ def move_plan(db, kind: str, item_id: int, library_id: int, folder=None) -> dict
 
     from core.video import file_ops, organization
     from core.video.library_actions import _same_drive
+    from core.video.library_roots import containing_root, library_roots
     where = move_root(db, kind, library_id, folder)
     if where.get("error"):
         return where
     lib, root = where["library"], where["root"]
     settings = organization.load(db)
     moves, skipped, size, cross = [], [], 0, 0
+    own_roots: dict = {}   # scope -> the library folders a file can sit under now
     for row in db.library_title_files(kind, item_id):
         name = os.path.basename(str(row.get("relative_path") or "").replace("\\", "/"))
         real = file_ops._locate(db, row)
@@ -278,15 +280,26 @@ def move_plan(db, kind: str, item_id: int, library_id: int, folder=None) -> dict
             skipped.append({"file_id": row["file_id"], "filename": name,
                             "reason": "not read yet, so its name isn't known"})
             continue
-        if organization.missing_ids(row.get("scope"), fields, settings):
-            skipped.append({"file_id": row["file_id"], "filename": name,
-                            "reason": "an id its name uses isn't known yet"})
-            continue
         fields["quality"] = file_ops.file_quality(fields.get("quality"), real)
         want = organization.render_path(row.get("scope"), root, fields, settings,
                                         os.path.splitext(real)[1])["path"]
         if file_ops.same_path(real, want):
             continue
+        if organization.missing_ids(row.get("scope"), fields, settings):
+            # the template would drop an id this title has none stored for:
+            # the file moves under its own name, keeping the '{imdb-tt...}'
+            # it may carry, rather than stay behind or lose it
+            scope = row.get("scope")
+            if scope not in own_roots:
+                own_roots[scope] = library_roots(db, scope)
+            here = containing_root(real, own_roots[scope])
+            if not here:
+                skipped.append({"file_id": row["file_id"], "filename": name,
+                                "reason": "an id its name uses isn't known yet"})
+                continue
+            want = os.path.join(root, os.path.relpath(real, here))
+            if file_ops.same_path(real, want):
+                continue
         if os.path.exists(want):
             skipped.append({"file_id": row["file_id"], "filename": name,
                             "reason": "a file with that name is already there"})

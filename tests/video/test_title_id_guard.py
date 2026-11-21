@@ -175,3 +175,73 @@ def test_a_title_that_carries_its_year_is_not_labelled_with_it_twice(db, tmp_pat
     held = _pending(db, "naming_id_missing")
     assert [h["title"].split(" — ")[0] for h in held] == ["The Body (2026)"]
     assert "Manage panel, under Matches" in held[0]["description"]
+
+
+# ── review follow-ups ────────────────────────────────────────────────────────
+
+def test_a_file_already_named_without_the_id_is_not_held(db, tmp_path):
+    # nothing to strip: a show whose files never carried the tag conforms, so
+    # the naming check stays quiet instead of saying "name not checked"
+    from core.video.repair.worker import VideoRepairWorker
+    _seed_show_files(db, tmp_path, n=2)
+    tv = tmp_path / "TV"
+    conn = db._get_connection()
+    for fid, path in conn.execute("SELECT id, relative_path FROM media_files").fetchall():
+        bare = path.replace(" {imdb-tt0105559}", "").replace(" [x]", "")
+        os.makedirs(os.path.dirname(bare), exist_ok=True)
+        os.replace(path, bare)
+        conn.execute("UPDATE media_files SET relative_path=? WHERE id=?", (bare, fid))
+    conn.commit()
+    conn.close()
+    VideoRepairWorker(db)._run_job("naming_conformance", forced=True)
+    assert _pending(db, "naming_id_missing") == []
+    assert _pending(db, "naming_mismatch") == []
+    assert os.path.isdir(tv / "Tenchi Muyo! Ryo-Ohki (1992)")
+
+
+def test_mass_rename_holds_only_a_file_it_would_rename(db, tmp_path, monkeypatch):
+    from api import video as videoapi
+    from core.video import mass_rename
+    movies = tmp_path / "Movies"
+    real = movies / "Heat (1995)" / "Heat (1995).mkv"
+    real.parent.mkdir(parents=True)
+    real.write_bytes(b"x" * 900)
+    db.set_setting("movies_path", str(movies))
+    organization.save(db, {"movie_template": _MOVIE_TPL})
+    db.upsert_movie("plex", {"server_id": "p1", "title": "Heat", "year": 1995,
+                             "file": {"relative_path": str(real), "size_bytes": 900}})
+    monkeypatch.setattr(videoapi, "_video_db", db)
+    out = mass_rename.preview()
+    assert out["entries"] == [] and out["held"] == 0     # already its tag-less name
+
+
+def test_the_finding_carries_the_title_for_its_poster(db, tmp_path):
+    from api.video.repair import finding_poster
+    from core.video.repair.worker import VideoRepairWorker
+    show_id = _seed_show_files(db, tmp_path, n=1)
+    VideoRepairWorker(db)._run_job("naming_conformance", forced=True)
+    held = _pending(db, "naming_id_missing")[0]
+    assert held["details"]["show_id"] == show_id
+    assert finding_poster(held) == "/api/video/poster/show/%s" % show_id
+
+
+def test_the_library_tab_says_why_a_held_file_has_no_template_path(db, tmp_path):
+    from core.video import file_ops
+    _seed_show_files(db, tmp_path, n=1)
+    fid = db._get_connection().execute("SELECT id FROM media_files").fetchone()[0]
+    plan = file_ops.rename_plan(db, fid)
+    assert "uses an id" in plan["error"] and "outside your library folders" not in plan["error"]
+    assert file_ops.rename_to_template(db, fid)["success"] is False
+
+
+def test_a_move_keeps_the_name_of_a_file_waiting_on_an_id(db, tmp_path):
+    # moving a title to another library used to skip such a file, leaving it
+    # behind: it moves under its own name, tag and all
+    from core.video import bulk_ops, libraries
+    show_id = _seed_show_files(db, tmp_path, n=1)
+    real = db._get_connection().execute("SELECT relative_path FROM media_files").fetchone()[0]
+    lib = libraries.create_library(db, {"kind": "show", "name": "Anime", "path": str(tmp_path / "Anime")})
+    plan = bulk_ops.move_plan(db, "show", show_id, lib["id"])
+    assert plan["skipped"] == [] and plan["files"] == 1
+    assert plan["moves"][0]["to"] == os.path.join(
+        str(tmp_path / "Anime"), os.path.relpath(real, str(tmp_path / "TV")))

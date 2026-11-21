@@ -33,7 +33,7 @@ from __future__ import annotations
 import os
 
 from core.video.file_ops import (
-    expected_path, move_into_place, move_sidecars, naming_fields, same_path,
+    move_into_place, move_sidecars, name_check, naming_fields, same_path,
     update_stored_path)
 from core.video.repair import register_job
 from core.video.repair.base import JobContext, JobResult, VideoRepairJob
@@ -97,15 +97,16 @@ class NamingConformanceJob(VideoRepairJob):
             if not real:
                 result.skipped += 1          # can't locate locally — never guess
                 continue
-            missing = organization.missing_ids(r["scope"], naming_fields(r), settings)
-            if missing:
+            check = name_check(r, real, configured_roots, settings)
+            expected = check["path"]
+            if check["why"] == "ids":
                 h = held.setdefault((r["scope"], r.get("title_id")), {
                     "scope": r["scope"], "title_id": r.get("title_id"), "title": r.get("title"),
-                    "year": r.get("year"), "missing": missing, "files": 0, "example_path": real})
+                    "year": r.get("year"), "missing": check["missing"], "files": 0,
+                    "example_path": real})
                 h["files"] += 1
                 result.skipped += 1
                 continue
-            expected = expected_path(r, real, configured_roots, settings)
             if not expected:
                 result.skipped += 1
                 continue
@@ -148,10 +149,12 @@ class NamingConformanceJob(VideoRepairJob):
             title=f"{label} — name not checked: no {ids} stored",
             description=(f"Your naming template uses the {ids}, and this title has none stored, so "
                          f"its {n} file{'s' if n != 1 else ''} keep their names rather than lose the "
-                         "id tag they carry. Re-enrich asks TMDB for it again"
+                         "id tag they may carry. Re-enrich asks TMDB for it again"
                          + (", and TVDB" if kind == "show" else "")
                          + ". If no source has it, set it in the title's Manage panel, under Matches."),
-            details={"kind": kind, "title_id": h["title_id"], "title": h.get("title"),
+            # movie_id / show_id give the finding its poster on the tools page
+            details={"kind": kind, "title_id": h["title_id"], kind + "_id": h["title_id"],
+                     "title": h.get("title"),
                      "year": h.get("year"), "missing": h["missing"], "files": n,
                      "example_path": h["example_path"]})
         return entity_id
