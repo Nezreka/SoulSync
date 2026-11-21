@@ -815,8 +815,8 @@ def presence_stop():
 @bp.route("/api/player/presence", methods=["GET"])
 @self_only
 def presence_list():
-    """what others on this server are watching or listening to right now:
-    profiles that share, things this profile may see"""
+    """what's playing on this server right now: this profile's own screens
+    (marked you) and others' (profiles that share, things this one may see)"""
     from core.player import presence
     pid = _profile()
     if pid is None:

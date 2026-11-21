@@ -51,7 +51,9 @@ export function Avatar({ profile }: { profile: WatchingSession['profile'] }) {
   );
 }
 
-const names = (xs: readonly WatchingSession[]) => xs.map((x) => x.profile.name).join(', ');
+/** "You" for your own screen */
+export const nameOf = (x: WatchingSession) => (x.you ? 'You' : x.profile.name);
+const names = (xs: readonly WatchingSession[]) => xs.map(nameOf).join(', ');
 
 /** up to three faces on a channel's row */
 export function ViewerFaces({ sessions }: { sessions?: readonly WatchingSession[] }) {
@@ -99,7 +101,7 @@ export function ViewerPins({
             key={`${s.profile_id}:${s.started}`}
             className={v.pin}
             style={{ left: at }}
-            title={`${s.profile.name} · ${clock(s.position)} in${s.playing ? '' : ' (paused)'}`}
+            title={`${nameOf(s)} · ${clock(s.position)} in${s.playing ? '' : ' (paused)'}`}
             aria-hidden="true"
           >
             <Avatar profile={s.profile} />
@@ -131,13 +133,13 @@ export function ViewersHere({
           <li key={`${s.profile_id}:${s.started}`} className={v.person}>
             <Avatar profile={s.profile} />
             <span className={v.personText}>
-              <strong>{s.profile.name}</strong>
+              <strong>{nameOf(s)}</strong>
               <span>
                 {s.meta.title ?? 'watching'} · {clock(s.position)} in
                 {s.playing ? '' : ', paused'}
               </span>
             </span>
-            {p ? (
+            {p && !s.you ? (
               <button
                 type="button"
                 className={k.btn}

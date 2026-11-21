@@ -16,7 +16,7 @@ import { clock } from './-engine/timeline';
 import { MEDIA_KIND, type ItemType } from './-engine/types';
 import { remoteImage } from './-lib/images';
 import { playerSettingsQuery, togetherQuery, watchingNowQuery } from './-player.api';
-import { Avatar } from './-ui/channel-viewers';
+import { Avatar, nameOf } from './-ui/channel-viewers';
 import { PlayIcon } from './-ui/icons';
 import { Empty, PageTitle, PlayerLink, styles as k } from './-ui/kit';
 import { channelByIdTune } from './-ui/playback/tuner';
@@ -77,18 +77,18 @@ function NowCard({ x }: { x: WatchingSession }) {
       <div className={s.cardBody}>
         <div className={s.who}>
           <Avatar profile={x.profile} />
-          <span className={s.whoName}>{x.profile.name}</span>
+          <span className={s.whoName}>{nameOf(x)}</span>
         </div>
         <h3 className={s.cardTitle}>{x.meta.title ?? 'Something'}</h3>
         {x.meta.subtitle ? <p className={s.cardSub}>{x.meta.subtitle}</p> : null}
         <div className={s.actions}>
-          {item ? (
+          {item && !x.you ? (
             <button type="button" className={k.btnPrimary} onClick={join} data-nav>
               <PlayIcon />
               {x.live && x.channel ? 'Tune in' : `Join at ${clock(x.position)}`}
             </button>
           ) : null}
-          {item && !x.live ? (
+          {item && !x.live && !x.you ? (
             <button type="button" className={k.btn} onClick={() => playItems([item])} data-nav>
               Start it
             </button>
@@ -194,7 +194,11 @@ function WatchingPage() {
               <NowCard key={`${x.profile_id}:${x.item_type}:${x.item_id}:${x.started}`} x={x} />
             ))}
           </div>
-        ) : (
+        ) : null}
+        {!now.isLoading && sessions.length && sessions.every((x) => x.you) ? (
+          <p className={s.note}>Nobody else is playing anything right now.</p>
+        ) : null}
+        {now.isLoading || sessions.length ? null : (
           <Empty title="Nobody else is playing anything">
             When someone on this server watches or listens, it shows up here, live.
           </Empty>

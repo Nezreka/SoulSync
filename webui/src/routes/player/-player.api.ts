@@ -344,6 +344,8 @@ export interface WatchingSession {
   meta: ProgressMeta;
   started: number;
   seen: number;
+  /** this profile's own screen */
+  you?: boolean;
 }
 
 export const watchingNowQuery = () =>

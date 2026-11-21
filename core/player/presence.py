@@ -133,16 +133,19 @@ def everyone(*, now: Optional[float] = None) -> List[Session]:
 def visible_to(viewer_id: int, sessions: List[Session], *,
                shares: Callable[[int], bool],
                may_see: Callable[[Session], bool]) -> List[Dict[str, Any]]:
-    """what a viewer sees: others' screens, from profiles that share, of
-    things the viewer may see. a profile on two screens shows twice."""
+    """what a viewer sees: its own screens (marked you, first) and others',
+    from profiles that share, of things the viewer may see. a profile on
+    two screens shows twice."""
     out = []
     for s in sessions:
-        if s.profile_id == int(viewer_id) or not shares(s.profile_id) or not may_see(s):
+        you = s.profile_id == int(viewer_id)
+        if not you and (not shares(s.profile_id) or not may_see(s)):
             continue
         row = asdict(s)
         row.pop("session", None)
+        row["you"] = you
         out.append(row)
-    out.sort(key=lambda r: (not r["playing"], -r["seen"]))
+    out.sort(key=lambda r: (not r["you"], not r["playing"], -r["seen"]))
     return out
 
 

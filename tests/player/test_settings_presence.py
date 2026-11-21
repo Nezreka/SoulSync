@@ -91,7 +91,8 @@ def test_viewers_see_others_who_share_and_what_they_may_see():
     presence.beat(4, {**BEAT, "session": "t3"}, now=1000)
     rows = presence.visible_to(2, presence.everyone(now=1000), shares=lambda p: p != 4,
                                may_see=lambda s: s.item_type != "movie")
-    assert [(r["profile_id"], r["item_id"]) for r in rows] == [(3, "9")]
+    # yourself first, marked; then the others you may see
+    assert [(r["profile_id"], r["item_id"], r["you"]) for r in rows] == [(2, "7", True), (3, "9", False)]
     assert "session" not in rows[0]
 
 
@@ -100,7 +101,7 @@ def test_presence_routes_follow_sharing(client, monkeypatch):
     _as(client, 2)
     assert client.post("/api/player/presence", json=BEAT).get_json()["shared"] is True
     _as(client, 3)
-    seen = client.get("/api/player/presence").get_json()["sessions"]
+    seen = [r for r in client.get("/api/player/presence").get_json()["sessions"] if not r["you"]]
     assert [(r["profile"]["name"], r["item_id"], r["position"]) for r in seen] == [("Ada", "7", 61.5)]
     # ada stops sharing: gone at once, and her next beats aren't kept
     _as(client, 2)
@@ -110,11 +111,12 @@ def test_presence_routes_follow_sharing(client, monkeypatch):
     assert client.get("/api/player/presence").get_json()["sessions"] == []
 
 
-def test_a_viewer_never_sees_itself(client, monkeypatch):
+def test_a_viewer_sees_itself_marked_you(client, monkeypatch):
     monkeypatch.setattr(player_api, "_viewer_may_see", lambda s: True)
     _as(client, 2)
     client.post("/api/player/presence", json=BEAT)
-    assert client.get("/api/player/presence").get_json()["sessions"] == []
+    rows = client.get("/api/player/presence").get_json()["sessions"]
+    assert [(r["item_id"], r["you"]) for r in rows] == [("7", True)]
 
 
 def test_together_finds_what_you_both_started(db):

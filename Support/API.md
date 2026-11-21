@@ -464,7 +464,7 @@ A video a browser can't play as it is (an MKV, HEVC, AC3 or DTS sound) is conver
 
 - `POST /api/player/presence` with `{session, item_type, item_id, position, duration, playing, live, channel?, meta?}`: a screen is playing something. Sent every 15 seconds and on a start, pause or change; forgotten 75 seconds after the last one. Kept in memory only. A profile that doesn't share gets `{shared: false}` and nothing is kept.
 - `DELETE /api/player/presence?session=`: the screen stopped.
-- `GET /api/player/presence`: what others play right now, `{sessions: [{profile, item_type, item_id, position, duration, playing, live, channel, meta, started, seen}], sharing}`. Only profiles that share, never your own screens, and only what this profile may see (its media access and its rating cap).
+- `GET /api/player/presence`: what's playing right now, `{sessions: [{profile, item_type, item_id, position, duration, playing, live, channel, meta, started, seen, you}], sharing}`. Your own screens come first with `you: true` (kept only while you share); then others, only profiles that share and only what this profile may see (its media access and its rating cap).
 - `GET /api/player/presence/together`: titles you and others (that share) both started in the last two months, your place and theirs. A show counts as one title, whichever episode each of you is on.
 
 #### Comments and marks
