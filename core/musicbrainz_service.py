@@ -2155,6 +2155,30 @@ class MusicBrainzService:
         mbid = group.get('id') if isinstance(group, dict) else None
         return str(mbid).strip().lower() if mbid else None
 
+    #: the share of a wishlist album's track titles its matched release has to carry
+    WISHLIST_TRACK_SHARE = 0.5
+
+    def release_carries_tracks(self, release_mbid: str, track_titles: Any) -> Optional[bool]:
+        """Whether this release's track list carries the album's own tracks.
+
+        A title and an artist do not pin an album down: a band's self-titled
+        records share both, and a record too new for MusicBrainz matches an
+        older namesake. Half of the titles is enough, so a deluxe edition still
+        matches its standard release. None when the track list could not be
+        read, so a timeout is not taken for "a different album".
+        """
+        owned = {tuple(self._title_words(strip_featuring_credit(str(title or ''))))
+                 for title in track_titles or []} - {()}
+        if not owned:
+            return True
+        release = self.mb_client.get_release(release_mbid, includes=['recordings'])
+        if not isinstance(release, dict):
+            return None
+        listed = {tuple(self._title_words(strip_featuring_credit(track.get('title', ''))))
+                  for medium in release.get('media') or []
+                  for track in (medium.get('tracks') or [])}
+        return len(owned & listed) >= len(owned) * self.WISHLIST_TRACK_SHARE
+
     def lookup_release_group(self, release_mbid: str) -> Optional[str]:
         """One MusicBrainz lookup: the release group a release belongs to.
         None when MusicBrainz has no answer (unknown release or an outage —
