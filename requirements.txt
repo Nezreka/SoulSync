@@ -62,7 +62,7 @@ tzlocal>=5.0
 # YouTube extraction ALSO requires a JavaScript runtime (Deno) on the system --
 # it is NOT a Python package and cannot be listed here. Docker images bundle
 # it; bare-metal installs need it on PATH: https://docs.deno.com/runtime/
-yt-dlp>=2026.3.17
+yt-dlp[default]>=2026.3.17
 
 # music.youtube.com playlist metadata (artist + album per track, and no
 # flat-extraction page cap). Optional at RUNTIME -- core/youtube_music_meta.py
