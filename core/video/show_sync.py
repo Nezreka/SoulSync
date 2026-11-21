@@ -24,8 +24,53 @@ logger = get_logger("video.show_sync")
 
 
 # what a retired row knew that the new one may not: the ids, the year, and
-# anime/standard when set by hand
-_CARRY_OVER = ("tmdb_id", "tvdb_id", "imdb_id", "year", "series_type")
+# the choices made by hand for the show (anime/standard, quality profile,
+# release rules, aliases, subtitle languages). each only fills a gap: what
+# the server sent wins
+_CARRY_OVER = ("tmdb_id", "tvdb_id", "imdb_id", "year", "series_type", "quality_profile_id",
+               "manual_aliases", "preferred_sources", "release_group_allow",
+               "release_group_block", "pack_preference", "subtitle_langs")
+# choices whose default is a value, not a gap: the old row's wins
+_CARRY_CHOICE = ("hands_off", "monitored")
+
+
+def _carry_over(conn, old: dict, target_id: int) -> None:
+    """fill the healed row from the one it replaces. a field the user locked
+    (Manage, or a fix-match's ids) keeps the old row's value and its lock,
+    since a lock means a scan never changes it; everything else only fills
+    what the new row lacks."""
+    import json
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(shows)").fetchall()}
+    try:
+        locked = set(json.loads(old.get("locked_fields") or "[]") or [])
+    except (TypeError, ValueError):
+        locked = set()
+    sets, params = [], []
+    for c in _CARRY_OVER:
+        if c in cols and c not in locked and old.get(c) not in (None, ""):
+            sets.append("%s=COALESCE(NULLIF(%s, ''), ?)" % (c, c))
+            params.append(old[c])
+    for c in _CARRY_CHOICE:
+        if c in cols and old.get(c) is not None:
+            sets.append("%s=?" % c)
+            params.append(old[c])
+    for c in sorted(locked & cols):
+        sets.append("%s=?" % c)
+        params.append(old.get(c))
+    if locked:
+        new = conn.execute("SELECT locked_fields FROM shows WHERE id=?", (target_id,)).fetchone()
+        try:
+            mine = set(json.loads((new["locked_fields"] if new else None) or "[]") or [])
+        except (TypeError, ValueError):
+            mine = set()
+        sets.append("locked_fields=?")
+        params.append(json.dumps(sorted(mine | locked)))
+    if sets:
+        conn.execute("UPDATE shows SET " + ", ".join(sets) + " WHERE id=?", params + [target_id])
+    if "genres" in locked and old.get("_genres") is not None:
+        conn.execute("DELETE FROM show_genres WHERE show_id=?", (target_id,))
+        conn.executemany("INSERT OR IGNORE INTO show_genres (show_id, genre_id) VALUES (?, ?)",
+                         [(target_id, g) for g in old["_genres"]])
 
 
 class _Skip(Exception):
@@ -128,19 +173,17 @@ def sync_show(db, show_id: int, *, remove_when_gone: bool = True,
                 (row["server_source"], str(tree.get("server_id")))).fetchone()
             if new_row and int(new_row["id"]) != int(show_id):
                 target_id = int(new_row["id"])
-                old = conn.execute("SELECT " + ", ".join(_CARRY_OVER) + " FROM shows WHERE id=?",
-                                   (int(show_id),)).fetchone()
+                old = dict(conn.execute("SELECT * FROM shows WHERE id=?", (int(show_id),)).fetchone())
+                old["_genres"] = [r[0] for r in conn.execute(
+                    "SELECT genre_id FROM show_genres WHERE show_id=?", (int(show_id),))]
                 conn.execute("DELETE FROM shows WHERE id=?", (int(show_id),))
                 # the new row is the server's one-show read, which can come
                 # back without ids or a year the old row had (a re-keyed show
-                # lost its imdb id and year this way): what it lacks comes over
-                # from the row it replaces, after the delete so a legacy unique
-                # id index can't collide
-                fill = [(c, old[c]) for c in _CARRY_OVER if old[c] not in (None, "")]
-                if fill:
-                    conn.execute(
-                        "UPDATE shows SET " + ", ".join("%s=COALESCE(NULLIF(%s, ''), ?)" % (c, c) for c, _ in fill)
-                        + " WHERE id=?", [v for _, v in fill] + [target_id])
+                # lost its imdb id and year this way), and never with what the
+                # user chose for the show: those come over from the row it
+                # replaces, after the delete so a legacy unique id index can't
+                # collide
+                _carry_over(conn, old, target_id)
                 conn.commit()
                 logger.info("show sync: '%s' re-keyed on %s (%s → %s) — row healed",
                             row["title"], row["server_source"],
