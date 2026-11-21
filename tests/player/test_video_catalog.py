@@ -30,10 +30,10 @@ def conn(tmp_path):
             pass
     c.executescript("""
         INSERT INTO genres (id, name) VALUES (1, 'Comedy'), (2, 'Drama');
-        INSERT INTO movies (id, title, year, runtime_minutes, content_rating, has_file, added_at)
-            VALUES (1, 'Owned', 1994, 100, 'PG', 1, '2026-01-01'),
-                   (2, 'Wanted', 2001, 90, 'R', 0, '2026-01-02'),
-                   (3, 'No runtime file', 1985, 95, 'R', 1, '2026-01-03');
+        INSERT INTO movies (id, title, year, runtime_minutes, content_rating, has_file, added_at, studio)
+            VALUES (1, 'Owned', 1994, 100, 'PG', 1, '2026-01-01', 'A24'),
+                   (2, 'Wanted', 2001, 90, 'R', 0, '2026-01-02', NULL),
+                   (3, 'No runtime file', 1985, 95, 'R', 1, '2026-01-03', NULL);
         INSERT INTO movie_genres VALUES (1, 1), (1, 2);
         INSERT INTO media_files (movie_id, relative_path, runtime_seconds, added_at)
             VALUES (1, 'a.mkv', 6012, '2026-02-01'), (3, 'b.mkv', NULL, '2026-02-02');
@@ -81,6 +81,7 @@ def test_owned_movies_only_with_file_runtime_first(conn):
     names = catalog.genre_names(conn)
     assert sorted(names[g] for g in movies[1]["genre_ids"]) == ["Comedy", "Drama"]
     assert movies[1]["added_at"] == "2026-02-01"
+    assert movies[1]["studio"] == "A24"
     # no probed runtime: the metadata minutes stand in
     assert movies[3]["runtime_seconds"] == 95 * 60
 

@@ -14,6 +14,7 @@ import type {
   OwnedBook,
   Pagination,
   PlayerProfile,
+  Person,
   PodcastShow,
   PodcastSub,
   ProgressMeta,
@@ -116,6 +117,8 @@ export const albumsQuery = (opts: {
   limit?: number;
   sort?: string;
   search?: string;
+  genre?: string;
+  label?: string;
 }) =>
   queryOptions({
     queryKey: ['player', 'music', 'albums', opts],
@@ -127,6 +130,8 @@ export const albumsQuery = (opts: {
             limit: opts.limit ?? 120,
             sort: opts.sort ?? 'added',
             ...(opts.search ? { search: opts.search } : {}),
+            ...(opts.genre ? { genre: opts.genre } : {}),
+            ...(opts.label ? { label: opts.label } : {}),
           },
         })
         .json<{ albums?: LibAlbum[]; pagination?: Pagination }>(),
@@ -421,4 +426,20 @@ export const videoPrefsQuery = () =>
     queryFn: () => apiClient.get('video/prefs').json<{ billboard_autoplay?: boolean }>(),
     staleTime: 30 * MINUTE,
     retry: false,
+  });
+
+export const personQuery = (tmdbId: number) =>
+  queryOptions({
+    queryKey: ['player', 'person', tmdbId],
+    queryFn: () => readJson<Person>(apiClient.get(`video/person/${tmdbId}`)),
+    staleTime: 30 * MINUTE,
+    retry: false,
+  });
+
+/** login mode decides whether the menu offers sign out (the manager's rule) */
+export const currentProfileQuery = () =>
+  queryOptions({
+    queryKey: ['player', 'current-profile'],
+    queryFn: () => apiClient.get('profiles/current').json<{ login_mode?: boolean }>(),
+    staleTime: 10 * MINUTE,
   });

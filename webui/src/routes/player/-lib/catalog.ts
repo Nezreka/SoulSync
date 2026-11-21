@@ -53,6 +53,7 @@ export function decodeCatalog(wire: CatalogWire): VideoCatalog {
     added_at: str(m(row, 'added_at')),
     has_poster: !!m(row, 'has_poster'),
     has_backdrop: !!m(row, 'has_backdrop'),
+    studio: str(m(row, 'studio')),
   }));
 
   const sh = reader(wire.fields?.show);

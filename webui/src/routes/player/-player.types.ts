@@ -33,6 +33,7 @@ export interface CatalogMovie {
   added_at: string | null;
   has_poster: boolean;
   has_backdrop: boolean;
+  studio: string | null;
 }
 
 /** [episode id, season, episode, seconds, title] */
@@ -207,6 +208,32 @@ export interface CastMember {
   name: string;
   character?: string | null;
   photo?: string | null;
+  tmdb_id?: number | null;
+}
+
+export interface PersonCredit {
+  kind: 'movie' | 'show';
+  tmdb_id: number;
+  title: string;
+  year?: number | string | null;
+  role?: string | null;
+  department?: string | null;
+  poster?: string | null;
+  /** the library title when you own it */
+  library_id?: number | null;
+}
+
+export interface Person {
+  name: string;
+  biography?: string | null;
+  birthday?: string | null;
+  deathday?: string | null;
+  place_of_birth?: string | null;
+  known_for?: string | null;
+  photo?: string | null;
+  photos?: string[] | null;
+  also_known_as?: string[] | null;
+  credits?: PersonCredit[];
 }
 
 export interface VideoDetailBase {
@@ -229,7 +256,7 @@ export interface VideoDetailBase {
   has_poster?: boolean;
   has_backdrop?: boolean;
   cast?: CastMember[];
-  crew?: { name: string; job: string }[];
+  crew?: { name: string; job: string; tmdb_id?: number | null }[];
   studio?: string | null;
   subtitle_langs?: string[] | string | null;
   watched?: boolean | null;

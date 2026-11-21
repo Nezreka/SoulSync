@@ -117,6 +117,7 @@ const catalog: VideoCatalog = {
       added_at: '2026-01-01',
       has_poster: true,
       has_backdrop: true,
+      studio: null,
     },
     {
       id: 2,
@@ -129,6 +130,7 @@ const catalog: VideoCatalog = {
       added_at: '2026-01-03',
       has_poster: true,
       has_backdrop: true,
+      studio: null,
     },
     {
       id: 3,
@@ -141,6 +143,7 @@ const catalog: VideoCatalog = {
       added_at: '2026-01-02',
       has_poster: true,
       has_backdrop: true,
+      studio: null,
     },
     {
       id: 4,
@@ -153,6 +156,7 @@ const catalog: VideoCatalog = {
       added_at: null,
       has_poster: false,
       has_backdrop: false,
+      studio: null,
     },
   ],
   shows: [

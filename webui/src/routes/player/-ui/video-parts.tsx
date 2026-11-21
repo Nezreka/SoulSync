@@ -1,5 +1,6 @@
 /** pieces the movie and show pages share: cast row, version picker, browse toolbar */
 
+import { Link } from '@tanstack/react-router';
 import { useState } from 'react';
 
 import type { CastMember, VideoFile } from '../-player.types';
@@ -16,15 +17,32 @@ export function CastRow({ cast }: { cast?: CastMember[] }) {
         <h2 className={s.sectionTitle}>Cast</h2>
       </div>
       <div className={s.people}>
-        {cast.slice(0, 18).map((person, index) => (
-          <div key={`${person.name}-${index}`} className={s.person} tabIndex={0} data-nav>
-            <div className={s.personPhoto}>
-              <Art src={proxiedImage(person.photo)} alt={person.name.slice(0, 1)} />
+        {cast.slice(0, 24).map((person, index) => {
+          const body = (
+            <>
+              <div className={s.personPhoto}>
+                <Art src={proxiedImage(person.photo)} alt={person.name.slice(0, 1)} />
+              </div>
+              <div className={s.personName}>{person.name}</div>
+              {person.character ? <div className={s.personRole}>{person.character}</div> : null}
+            </>
+          );
+          return person.tmdb_id ? (
+            <Link
+              key={`${person.name}-${index}`}
+              to="/player/person/$personId"
+              params={{ personId: String(person.tmdb_id) }}
+              className={s.person}
+              data-nav
+            >
+              {body}
+            </Link>
+          ) : (
+            <div key={`${person.name}-${index}`} className={s.person} tabIndex={0} data-nav>
+              {body}
             </div>
-            <div className={s.personName}>{person.name}</div>
-            {person.character ? <div className={s.personRole}>{person.character}</div> : null}
-          </div>
-        ))}
+          );
+        })}
       </div>
     </section>
   );

@@ -8,6 +8,7 @@ import { plainText } from '../-lib/format';
 import { ownedReleases } from '../-lib/music';
 import { artistQuery } from '../-player.api';
 import { CardRail, Empty, Hero, PlayButton, styles as s } from '../-ui/kit';
+import { LabelLink, MusicGenreLinks } from '../-ui/links';
 import { NotFound, NotPartOfProfile } from '../-ui/not-part';
 import { useSections } from '../-ui/sections';
 
@@ -57,9 +58,12 @@ function ArtistPage() {
         posterRound
         kicker="Artist"
         title={a.name}
-        meta={(a.genres ?? []).slice(0, 4).map((g) => (
-          <span key={g}>{g}</span>
-        ))}
+        meta={
+          <>
+            <MusicGenreLinks genres={(a.genres ?? []).slice(0, 4)} />
+            {a.label ? <LabelLink label={a.label} /> : null}
+          </>
+        }
         overview={about}
         actions={
           <>

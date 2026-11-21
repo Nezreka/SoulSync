@@ -9,12 +9,13 @@
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 
+import { CardSizeSlider, type CardSizeRange } from '@/components/card-size';
 import { appURL } from '@/platform/url-base';
 
 import type { PlayerProfile } from '../-player.types';
 
-import { profilesQuery, selectProfile } from '../-player.api';
-import { ExitIcon, LockIcon } from './icons';
+import { currentProfileQuery, profilesQuery, selectProfile } from '../-player.api';
+import { ChevronDownIcon, ExitIcon, LockIcon } from './icons';
 import s from './player.module.css';
 import { inPlayer, useTrailersSetting } from './trailer';
 
@@ -180,17 +181,27 @@ export function WhoGate({
   profiles,
   currentId,
   onDone,
+  initial,
 }: {
   profiles: PlayerProfile[];
   currentId: number | null;
   onDone: () => void;
+  /** switch straight to this profile (the menu's avatars): only its pin or password shows */
+  initial?: PlayerProfile;
 }) {
   const offered = offeredProfiles(profiles);
   const { asking, setAsking, error, setError, busy, pick } = usePicker(currentId, onDone);
   const firstRef = useRef<HTMLButtonElement>(null);
+  const started = useRef(false);
   useEffect(() => {
-    if (!asking) firstRef.current?.focus();
-  }, [asking]);
+    if (initial && !started.current) {
+      started.current = true;
+      void pick(initial);
+    }
+  }, [initial]);
+  useEffect(() => {
+    if (!asking && !initial) firstRef.current?.focus();
+  }, [asking, initial]);
 
   return (
     <div className={s.gate} role="dialog" aria-modal="true" aria-label="Who's watching?">
@@ -208,6 +219,10 @@ export function WhoGate({
               )
             }
             onCancel={() => {
+              if (initial) {
+                onDone();
+                return;
+              }
               setAsking(null);
               setError('');
             }}
@@ -246,15 +261,27 @@ export function WhoGate({
   );
 }
 
-/** the header chip: who you are, and the switch */
-export function ProfileChip({ currentId }: { currentId: number | null }) {
+/** the header chip and its menu: who you are, who else, and this device's settings */
+export function ProfileChip({
+  currentId,
+  cardSize,
+  cardRange,
+  onCardSize,
+}: {
+  currentId: number | null;
+  cardSize: number | null;
+  cardRange: CardSizeRange;
+  onCardSize: (value: number | null) => void;
+}) {
   const { data: profiles = [] } = useQuery(profilesQuery());
+  const current = useQuery(currentProfileQuery());
   const [trailers, setTrailers] = useTrailersSetting();
   const [open, setOpen] = useState(false);
-  const [switching, setSwitching] = useState(false);
+  const [switchTo, setSwitchTo] = useState<PlayerProfile | 'pick' | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   const me = profiles.find((p) => p.id === currentId);
   const others = offeredProfiles(profiles).filter((p) => p.id !== currentId);
+  const loginMode = !!current.data?.login_mode;
 
   useEffect(() => {
     if (!open) return;
@@ -272,6 +299,15 @@ export function ProfileChip({ currentId }: { currentId: number | null }) {
     };
   }, [open]);
 
+  const signOut = async () => {
+    try {
+      await fetch(appURL('/api/auth/logout'), { method: 'POST' });
+    } catch {
+      /* reload anyway */
+    }
+    window.location.reload();
+  };
+
   return (
     <div className={s.chip} ref={ref}>
       <button
@@ -283,50 +319,119 @@ export function ProfileChip({ currentId }: { currentId: number | null }) {
         data-nav
       >
         {me ? <Avatar profile={me} /> : <span className={s.avatar} />}
-        <span>{me?.name ?? 'Profile'}</span>
+        <span className={s.chipName}>{me?.name ?? 'Profile'}</span>
+        <span className={s.chipCaret} aria-hidden="true">
+          <ChevronDownIcon />
+        </span>
       </button>
       {open ? (
-        <div className={s.menu} role="menu">
+        <div className={s.profileMenu} role="menu" aria-label="Profile">
+          <div className={s.menuWho}>
+            {me ? <Avatar profile={me} className={s.menuAvatar} /> : null}
+            <div>
+              <div className={s.menuName}>{me?.name ?? 'Profile'}</div>
+              <div className={s.menuRole}>{me?.is_admin ? 'Admin' : 'Member'}</div>
+            </div>
+          </div>
+
           {others.length ? (
-            <>
+            <div className={s.menuSection}>
               <div className={s.menuLabel}>Switch profile</div>
+              <div className={s.menuProfiles}>
+                {others.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    role="menuitem"
+                    className={s.menuProfile}
+                    onClick={() => {
+                      setOpen(false);
+                      setSwitchTo(p);
+                    }}
+                    title={p.has_pin || p.has_password ? `${p.name} (locked)` : p.name}
+                    data-nav
+                  >
+                    <Avatar profile={p} />
+                    <span className={s.menuProfileName}>{p.name}</span>
+                    {p.has_pin || p.has_password ? (
+                      <span className={s.menuLock} aria-label="locked">
+                        <LockIcon />
+                      </span>
+                    ) : null}
+                  </button>
+                ))}
+              </div>
               <button
                 type="button"
                 role="menuitem"
                 className={s.menuItem}
                 onClick={() => {
                   setOpen(false);
-                  setSwitching(true);
+                  setSwitchTo('pick');
                 }}
                 data-nav
               >
                 Who's watching…
               </button>
-              <div className={s.menuSep} />
-            </>
+            </div>
           ) : null}
-          <button
-            type="button"
-            role="menuitemcheckbox"
-            aria-checked={trailers}
-            className={s.menuItem}
-            onClick={() => setTrailers(!trailers)}
-            data-nav
-          >
-            Background trailers: {trailers ? 'on' : 'off'}
-          </button>
-          <div className={s.menuSep} />
-          <a role="menuitem" className={s.menuItem} href={appURL('/')} data-nav>
-            <ExitIcon /> Back to SoulSync
-          </a>
+
+          <div className={s.menuSection}>
+            <div className={s.menuLabel}>On this device</div>
+            <button
+              type="button"
+              role="menuitemcheckbox"
+              aria-checked={trailers}
+              className={s.menuToggle}
+              onClick={() => setTrailers(!trailers)}
+              data-nav
+            >
+              <span>
+                <span className={s.menuToggleTitle}>Background trailers</span>
+                <span className={s.menuToggleSub}>Movie and show pages play their trailer</span>
+              </span>
+              <span
+                className={s.switch}
+                data-on={trailers ? 'true' : undefined}
+                aria-hidden="true"
+              />
+            </button>
+            <div className={s.menuRow}>
+              <span className={s.menuToggleTitle}>Card size</span>
+              <CardSizeSlider
+                label="Card size"
+                size={cardSize}
+                range={cardRange}
+                onChange={onCardSize}
+              />
+            </div>
+          </div>
+
+          <div className={s.menuSection}>
+            <a role="menuitem" className={s.menuItem} href={appURL('/')} data-nav>
+              <ExitIcon /> Back to SoulSync
+            </a>
+            {loginMode ? (
+              <button
+                type="button"
+                role="menuitem"
+                className={s.menuItem}
+                onClick={() => void signOut()}
+                data-nav
+              >
+                Sign out
+              </button>
+            ) : null}
+          </div>
         </div>
       ) : null}
-      {switching
+      {switchTo
         ? inPlayer(
             <WhoGate
               profiles={profiles}
               currentId={currentId}
-              onDone={() => setSwitching(false)}
+              initial={switchTo === 'pick' ? undefined : switchTo}
+              onDone={() => setSwitchTo(null)}
             />,
           )
         : null}

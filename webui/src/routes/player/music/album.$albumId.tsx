@@ -7,6 +7,7 @@ import { runtime } from '../-lib/format';
 import { fileQuality } from '../-lib/music';
 import { albumQuery } from '../-player.api';
 import { Badge, Hero, PlayButton, PlayerLink, styles as s } from '../-ui/kit';
+import { LabelLink, MusicGenreLinks } from '../-ui/links';
 import { NotFound, NotPartOfProfile } from '../-ui/not-part';
 import { useSections } from '../-ui/sections';
 
@@ -62,6 +63,8 @@ function AlbumPage() {
               {owned.length} of {a.tracks.length} tracks
             </span>
             {totalMs ? <span>{runtime(totalMs / 1000)}</span> : null}
+            <MusicGenreLinks genres={(a.genres ?? []).slice(0, 3)} />
+            {a.label ? <LabelLink label={a.label} /> : null}
           </>
         }
         badges={

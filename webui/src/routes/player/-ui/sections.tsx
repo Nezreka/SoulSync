@@ -39,9 +39,18 @@ export function useSections(): SectionAccess {
   return { music, movies, tv, video: movies || tv, podcasts, audiobooks };
 }
 
+export type NavGroup = 'main' | 'watch' | 'listen';
+
+export const NAV_GROUPS: { id: NavGroup; label?: string }[] = [
+  { id: 'main' },
+  { id: 'watch', label: 'Watch' },
+  { id: 'listen', label: 'Listen' },
+];
+
 export interface NavEntry {
   to: string;
   label: string;
+  group: NavGroup;
   /** a shorter label for the phone tab bar */
   short?: string;
   icon: ReactNode;
@@ -50,23 +59,56 @@ export interface NavEntry {
 }
 
 export const NAV: NavEntry[] = [
-  { to: '/player', label: 'Home', icon: <HomeIcon />, exact: true, visible: () => true },
-  { to: '/player/music', label: 'Music', icon: <MusicIcon />, visible: (a) => a.music },
-  { to: '/player/movies', label: 'Movies', icon: <MovieIcon />, visible: (a) => a.movies },
-  { to: '/player/tv', label: 'TV', icon: <TvIcon />, visible: (a) => a.tv },
-  { to: '/player/youtube', label: 'YouTube', icon: <YoutubeIcon />, visible: (a) => a.video },
-  { to: '/player/podcasts', label: 'Podcasts', icon: <PodcastIcon />, visible: (a) => a.podcasts },
   {
-    to: '/player/audiobooks',
-    label: 'Audiobooks',
-    short: 'Books',
-    icon: <BookIcon />,
-    visible: (a) => a.audiobooks,
+    to: '/player',
+    label: 'Home',
+    group: 'main',
+    icon: <HomeIcon />,
+    exact: true,
+    visible: () => true,
   },
   {
     to: '/player/guide',
     label: 'Guide',
+    group: 'main',
     icon: <GuideIcon />,
     visible: (a) => a.video || a.music,
+  },
+  {
+    to: '/player/movies',
+    label: 'Movies',
+    group: 'watch',
+    icon: <MovieIcon />,
+    visible: (a) => a.movies,
+  },
+  { to: '/player/tv', label: 'TV', group: 'watch', icon: <TvIcon />, visible: (a) => a.tv },
+  {
+    to: '/player/youtube',
+    label: 'YouTube',
+    group: 'watch',
+    icon: <YoutubeIcon />,
+    visible: (a) => a.video,
+  },
+  {
+    to: '/player/music',
+    label: 'Music',
+    group: 'listen',
+    icon: <MusicIcon />,
+    visible: (a) => a.music,
+  },
+  {
+    to: '/player/podcasts',
+    label: 'Podcasts',
+    group: 'listen',
+    icon: <PodcastIcon />,
+    visible: (a) => a.podcasts,
+  },
+  {
+    to: '/player/audiobooks',
+    label: 'Audiobooks',
+    group: 'listen',
+    short: 'Books',
+    icon: <BookIcon />,
+    visible: (a) => a.audiobooks,
   },
 ];

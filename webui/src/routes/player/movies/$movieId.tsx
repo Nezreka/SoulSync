@@ -11,6 +11,7 @@ import {
   videoCatalogQuery,
 } from '../-player.api';
 import { Badge, CardRail, Hero, PlayButton, VerdictBadge, styles as s } from '../-ui/kit';
+import { PeopleLinks, StudioLink, VideoGenreLinks } from '../-ui/links';
 import { NotFound, NotPartOfProfile } from '../-ui/not-part';
 import { useSections } from '../-ui/sections';
 import { BackgroundTrailer, TrailerButton } from '../-ui/trailer';
@@ -39,10 +40,10 @@ function MoviePage() {
   const best = rankVersions(files.data?.files ?? [])[0];
   const resume = saved.data?.[String(id)];
   const resuming = !!resume && !resume.finished && resume.position_seconds > 0;
-  const director = m.crew?.filter((c) => c.job === 'Director').map((c) => c.name);
-  const writers = m.crew
-    ?.filter((c) => c.job === 'Screenplay' || c.job === 'Writer' || c.job === 'Story')
-    .map((c) => c.name);
+  const director = m.crew?.filter((c) => c.job === 'Director');
+  const writers = m.crew?.filter(
+    (c) => c.job === 'Screenplay' || c.job === 'Writer' || c.job === 'Story',
+  );
   const seconds = best?.runtime_seconds ?? (m.runtime_minutes ? m.runtime_minutes * 60 : null);
   const langs = fileLanguages(best);
   const similar = moreLikeThis(catalog.data?.movies ?? [], { id, genres: m.genres ?? [] }).map(
@@ -62,9 +63,7 @@ function MoviePage() {
           <>
             {m.year ? <span>{m.year}</span> : null}
             {seconds ? <span>{runtime(seconds)}</span> : null}
-            {(m.genres ?? []).slice(0, 3).map((g) => (
-              <span key={g}>{g}</span>
-            ))}
+            <VideoGenreLinks kind="movies" genres={(m.genres ?? []).slice(0, 3)} />
           </>
         }
         badges={
@@ -111,9 +110,9 @@ function MoviePage() {
         </div>
         <Facts
           rows={[
-            ['Directed by', director?.length ? director.join(', ') : null],
-            ['Written by', writers?.length ? writers.slice(0, 3).join(', ') : null],
-            ['Studio', m.studio],
+            ['Directed by', director?.length ? <PeopleLinks people={director} /> : null],
+            ['Written by', writers?.length ? <PeopleLinks people={writers.slice(0, 3)} /> : null],
+            ['Studio', m.studio ? <StudioLink studio={m.studio} /> : null],
             ['Released', shortDate(m.release_date)],
             ['Streaming since', shortDate(m.digital_release_date)],
             ['Audio', langs.audio],

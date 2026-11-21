@@ -30,6 +30,7 @@ import {
   VerdictBadge,
   styles as s,
 } from '../-ui/kit';
+import { NetworkLink, PeopleLinks, VideoGenreLinks } from '../-ui/links';
 import { NotFound, NotPartOfProfile } from '../-ui/not-part';
 import { useSections } from '../-ui/sections';
 import { BackgroundTrailer, TrailerButton } from '../-ui/trailer';
@@ -185,7 +186,7 @@ function ShowPage() {
       ? `${firstYear}–${lastYear}`
       : firstYear;
   const next = show.next_up;
-  const creators = show.crew?.filter((c) => c.job === 'Creator').map((c) => c.name);
+  const creators = show.crew?.filter((c) => c.job === 'Creator');
   const similar = moreLikeThis(catalog.data?.shows ?? [], { id, genres: show.genres ?? [] }).map(
     showCard,
   );
@@ -201,15 +202,13 @@ function ShowPage() {
         meta={
           <>
             {years ? <span>{years}</span> : null}
-            {show.network ? <span>{show.network}</span> : null}
+            {show.network ? <NetworkLink network={show.network} /> : null}
             {seasons.length ? (
               <span>
                 {seasons.length} season{seasons.length === 1 ? '' : 's'}
               </span>
             ) : null}
-            {(show.genres ?? []).slice(0, 3).map((g) => (
-              <span key={g}>{g}</span>
-            ))}
+            <VideoGenreLinks kind="tv" genres={(show.genres ?? []).slice(0, 3)} />
           </>
         }
         badges={
@@ -240,8 +239,8 @@ function ShowPage() {
       <div className={s.rail}>
         <Facts
           rows={[
-            ['Created by', creators?.length ? creators.join(', ') : null],
-            ['Network', show.network],
+            ['Created by', creators?.length ? <PeopleLinks people={creators} /> : null],
+            ['Network', show.network ? <NetworkLink network={show.network} /> : null],
             [
               'Episodes',
               show.episode_total

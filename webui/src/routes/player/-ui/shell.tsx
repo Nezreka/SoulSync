@@ -9,48 +9,90 @@ import { Link, Outlet, useRouterState } from '@tanstack/react-router';
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 
-import { CardSizeSlider, useCardSize, type CardSizeRange } from '@/components/card-size';
+import { useCardSize, type CardSizeRange } from '@/components/card-size';
 import { appURL } from '@/platform/url-base';
 
 import { profilesQuery } from '../-player.api';
-import { ExitIcon, NextIcon, PlayIcon, PrevIcon } from './icons';
+import { BackIcon, ChevronIcon, ExitIcon, NextIcon, PlayIcon, PrevIcon } from './icons';
 import { PLAYBACK_NOT_YET } from './kit';
 import s from './player.module.css';
 import { gateNeeded, ProfileChip, WhoGate } from './profiles';
 import { Search } from './search';
-import { NAV, useSections } from './sections';
+import { NAV, NAV_GROUPS, useSections } from './sections';
 import { focusFirstIn, useSpatialNav } from './use-spatial-nav';
 
 const CARD_SCALE_RANGE: CardSizeRange = { min: 64, max: 160, base: 100 };
 
-function Sidebar() {
+const COLLAPSE_KEY = 'ss-player-side-collapsed';
+
+function readCollapsed(): boolean {
+  try {
+    return localStorage.getItem(COLLAPSE_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
   const sections = useSections();
+  const entries = NAV.filter((entry) => entry.visible(sections));
   return (
-    <nav className={s.side} aria-label="Player">
+    <nav className={s.side} aria-label="Player" data-collapsed={collapsed ? 'true' : undefined}>
       <div className={s.brand}>
         <img className={s.brandLogo} src={appURL('/static/trans2.png')} alt="" />
-        SoulSync
+        <span className={s.brandWord}>SoulSync</span>
       </div>
-      {NAV.filter((entry) => entry.visible(sections)).map((entry) => (
-        <Link
-          key={entry.to}
-          to={entry.to as '/player'}
-          className={s.navLink}
-          activeOptions={{ exact: !!entry.exact }}
+      {NAV_GROUPS.map((group) => {
+        const items = entries.filter((e) => e.group === group.id);
+        if (!items.length) return null;
+        return (
+          <div
+            key={group.id}
+            className={s.navGroup}
+            role="group"
+            aria-label={group.label ?? 'Main'}
+          >
+            {group.label ? <div className={s.navGroupLabel}>{group.label}</div> : null}
+            {items.map((entry) => (
+              <Link
+                key={entry.to}
+                to={entry.to as '/player'}
+                className={s.navLink}
+                activeOptions={{ exact: !!entry.exact }}
+                title={collapsed ? entry.label : undefined}
+                data-nav
+              >
+                <span className={s.navIcon}>{entry.icon}</span>
+                <span className={s.navLabel}>{entry.label}</span>
+                {entry.short ? <span className={s.navShort}>{entry.short}</span> : null}
+              </Link>
+            ))}
+          </div>
+        );
+      })}
+      <div className={s.sideFoot}>
+        <a
+          className={s.managerLink}
+          href={appURL('/')}
+          title={collapsed ? 'Back to SoulSync' : undefined}
           data-nav
         >
-          <span className={s.navIcon}>{entry.icon}</span>
-          <span className={s.navLabel}>{entry.label}</span>
-          {entry.short ? <span className={s.navShort}>{entry.short}</span> : null}
-        </Link>
-      ))}
-      <div className={s.sideFoot}>
-        <a className={s.managerLink} href={appURL('/')} data-nav>
           <span className={s.navIcon}>
             <ExitIcon />
           </span>
-          Back to SoulSync
+          <span className={s.navLabel}>Back to SoulSync</span>
         </a>
+        <button
+          type="button"
+          className={s.collapseBtn}
+          onClick={onToggle}
+          aria-label={collapsed ? 'Expand the sidebar' : 'Collapse the sidebar'}
+          aria-expanded={!collapsed}
+          data-nav
+        >
+          <span className={s.navIcon}>{collapsed ? <ChevronIcon /> : <BackIcon />}</span>
+          <span className={s.navLabel}>Collapse</span>
+        </button>
       </div>
     </nav>
   );
@@ -107,6 +149,16 @@ export function PlayerShell({ profileId }: { profileId: number | null }) {
   // one card size for the whole player on this device, as a percent
   const [cardSize, setCardSize] = useCardSize('ss-player-card-scale', CARD_SCALE_RANGE);
   const cardScale = (cardSize ?? CARD_SCALE_RANGE.base) / 100;
+  const [collapsed, setCollapsed] = useState(readCollapsed);
+  const toggleCollapsed = () =>
+    setCollapsed((was) => {
+      try {
+        localStorage.setItem(COLLAPSE_KEY, was ? '0' : '1');
+      } catch {
+        /* private mode */
+      }
+      return !was;
+    });
 
   // decided once per entry, when the profile list is in
   useEffect(() => {
@@ -144,22 +196,20 @@ export function PlayerShell({ profileId }: { profileId: number | null }) {
       className={s.app}
       ref={rootRef}
       data-player-root
+      data-side-collapsed={collapsed ? 'true' : undefined}
       style={{ '--pl-card-scale': cardScale } as CSSProperties}
     >
-      <Sidebar />
+      <Sidebar collapsed={collapsed} onToggle={toggleCollapsed} />
       <main className={s.main} ref={mainRef}>
         <div className={s.header}>
           <Search />
           <div className={s.headerEnd}>
-            <span className={s.sizeControl}>
-              <CardSizeSlider
-                label="Card size"
-                size={cardSize}
-                range={CARD_SCALE_RANGE}
-                onChange={setCardSize}
-              />
-            </span>
-            <ProfileChip currentId={profileId} />
+            <ProfileChip
+              currentId={profileId}
+              cardSize={cardSize}
+              cardRange={CARD_SCALE_RANGE}
+              onCardSize={setCardSize}
+            />
           </div>
         </div>
         <div className={s.page} data-page key={pathname}>
