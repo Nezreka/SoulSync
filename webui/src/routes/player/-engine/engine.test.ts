@@ -574,3 +574,78 @@ describe('are you still watching', () => {
     expect(t.engine.getState().queue.index).toBe(5);
   });
 });
+
+describe('subtitle sync and new subtitles', () => {
+  const tracks: Tracks = {
+    audio: [],
+    subtitles: [
+      {
+        id: 's0',
+        language: 'en',
+        title: null,
+        codec: 'subrip',
+        kind: 'text',
+        forced: false,
+        default: false,
+        external: false,
+      },
+    ],
+  };
+
+  it('keeps a subtitle shift for the title, without reloading the stream', async () => {
+    let asked = 0;
+    const t = setup({ tracks, playable: () => (asked++, { url: '/s', duration: 100 }) });
+    t.engine.playItems([movie('1')]);
+    await t.flush();
+    t.engine.setSubtitleDelay(400);
+    expect(t.engine.getState().subtitleDelay).toBe(400);
+    expect(asked).toBe(1);
+    t.engine.playItems([movie('2')]);
+    await t.flush();
+    expect(t.engine.getState().subtitleDelay).toBe(0);
+    t.engine.playItems([movie('1')]);
+    await t.flush();
+    expect(t.engine.getState().subtitleDelay).toBe(400);
+  });
+
+  it('switches to a subtitle file just downloaded beside the video', async () => {
+    const t = setup({ tracks });
+    t.engine.playItems([movie('1')]);
+    await t.flush();
+    const deps = (t.engine as unknown as { deps: EngineDeps }).deps;
+    deps.tracks = async () => ({
+      audio: [],
+      subtitles: [
+        ...tracks.subtitles,
+        {
+          id: 'x0',
+          language: 'fr',
+          title: null,
+          codec: 'srt',
+          kind: 'text',
+          forced: false,
+          default: false,
+          external: true,
+        },
+      ],
+    });
+    await t.engine.refreshTracks('fr');
+    await t.flush();
+    expect(t.engine.getState().subtitle).toBe('x0');
+    expect(t.engine.getState().tracks?.subtitles).toHaveLength(2);
+  });
+});
+
+describe('a reload keeps the length', () => {
+  it('an audio sync change on a title with no listed length keeps the one it learned', async () => {
+    const t = setup({ playable: () => ({ url: '/s' }) });
+    t.engine.playItems([{ ...movie('1'), duration: null }]);
+    await t.flush();
+    t.media.video!.duration = 300;
+    t.media.video!.emit('loadedmetadata');
+    expect(t.engine.getState().duration).toBe(300);
+    t.engine.setAudioDelay(100);
+    await t.flush();
+    expect(t.engine.getState().duration).toBe(300);
+  });
+});

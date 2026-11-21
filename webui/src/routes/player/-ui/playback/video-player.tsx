@@ -32,6 +32,7 @@ import {
 } from './controls';
 import { EndScreen } from './end-screen';
 import { EpisodesPanel } from './episodes-panel';
+import { FindSubtitles } from './find-subtitles';
 import {
   BackSecondsIcon,
   EpisodesIcon,
@@ -47,7 +48,7 @@ import { SeekBar } from './seek-bar';
 import { StatsOverlay } from './stats';
 import { SubtitleOverlay } from './subtitles';
 import { useLoading } from './use-loading';
-import { dimOpacity, useBrightness } from './use-picture';
+import { dimOpacity, OBJECT_FIT, useBrightness, useFit } from './use-picture';
 import { getEngine, usePlayer, useVideoOpen } from './use-player';
 
 const IDLE_MS = 2600;
@@ -87,13 +88,19 @@ function FullPlayer({ state, onLeave }: { state: PlayerState; onLeave: () => voi
   const [fullscreen, setFullscreen] = useState(false);
   const [stats, setStats] = useState(false);
   const [episodes, setEpisodes] = useState(false);
+  const [finding, setFinding] = useState(false);
+  const fit = useFit();
+  useEffect(() => {
+    const el = engine.element('video') as HTMLVideoElement;
+    el.style.objectFit = OBJECT_FIT[fit];
+  }, [engine, fit]);
   const brightness = useBrightness();
   const loading = useLoading(state);
   const timer = useRef<number | undefined>(undefined);
   useMountVideo(frame, true);
 
   const episodesOpen = useRef(false);
-  episodesOpen.current = episodes;
+  episodesOpen.current = episodes || finding;
   const wake = useCallback(() => {
     // someone's here: no "are you still watching?"
     getEngine().activity();
@@ -147,7 +154,7 @@ function FullPlayer({ state, onLeave }: { state: PlayerState; onLeave: () => voi
         },
         Escape: () =>
           episodesOpen.current
-            ? setEpisodes(false)
+            ? (setEpisodes(false), setFinding(false))
             : document.fullscreenElement
               ? void document.exitFullscreen()
               : onLeave(),
@@ -245,7 +252,9 @@ function FullPlayer({ state, onLeave }: { state: PlayerState; onLeave: () => voi
       <SubtitleOverlay state={state} raised={!(idle && playing)} />
       {stats ? <StatsOverlay state={state} video={video} onClose={() => setStats(false)} /> : null}
 
-      {episodes && item.type === 'episode' ? (
+      {finding ? (
+        <FindSubtitles state={state} onClose={() => setFinding(false)} />
+      ) : episodes && item.type === 'episode' ? (
         <EpisodesPanel state={state} onClose={() => setEpisodes(false)} />
       ) : (
         <EndScreen state={state} />
@@ -314,14 +323,27 @@ function FullPlayer({ state, onLeave }: { state: PlayerState; onLeave: () => voi
                 aria-label="Episodes"
                 aria-pressed={episodes}
                 title="Episodes (e)"
-                onClick={() => setEpisodes((v) => !v)}
+                onClick={() => {
+                  setFinding(false);
+                  setEpisodes((v) => !v);
+                }}
                 data-nav
               >
                 <EpisodesIcon />
               </button>
             ) : null}
             <AudioMenu state={state} />
-            <SubtitleMenu state={state} />
+            <SubtitleMenu
+              state={state}
+              onFind={
+                item.type === 'movie' || item.type === 'episode'
+                  ? () => {
+                      setEpisodes(false);
+                      setFinding(true);
+                    }
+                  : undefined
+              }
+            />
             <QualityMenu quality={state.quality} />
             <PictureMenu />
             <SpeedMenu rate={state.rate} />

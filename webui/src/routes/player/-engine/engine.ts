@@ -148,6 +148,8 @@ export interface PlayerState {
   subtitleLoading: boolean;
   /** audio sync for this item, in ms (later +, earlier -) */
   audioDelay: number;
+  /** subtitle sync for this item, in ms (later +, earlier -) */
+  subtitleDelay: number;
   /** the last movie or episode marked watched ("type:id"), so pages can refresh */
   watchedKey: string | null;
   /** episodes played on their own, one after another: is anyone still there? */
@@ -254,6 +256,7 @@ export class PlayerEngine {
       cues: [],
       subtitleLoading: false,
       audioDelay: 0,
+      subtitleDelay: 0,
       watchedKey: null,
       stillWatching: false,
     };
@@ -499,6 +502,31 @@ export class PlayerEngine {
     }
   }
 
+  /** subtitle sync: the player draws them, so it's only a shift of its own clock. kept for the title */
+  setSubtitleDelay(ms: number) {
+    const item = this.state.item;
+    if (!item) return;
+    const delay = Math.max(-30_000, Math.min(30_000, Math.round(ms)));
+    this.deps.store.set(`subdelay:${item.type}:${item.id}`, String(delay));
+    this.set({ subtitleDelay: delay });
+  }
+
+  /**
+   * read the tracks again (a subtitle was just downloaded beside the file).
+   * ``language``: switch to the newest subtitle file in it
+   */
+  async refreshTracks(language?: string) {
+    const item = this.state.item;
+    if (!item || this.state.kind !== 'video') return;
+    const tracks = await this.deps.tracks(item).catch(() => null);
+    if (!tracks || this.state.item !== item) return;
+    this.set({ tracks });
+    if (language) {
+      const fresh = tracks.subtitles.filter((t) => t.external && t.language === language).at(-1);
+      if (fresh) this.setSubtitle(fresh.id);
+    }
+  }
+
   /** the video quality: kept on this device, applied now at the same spot */
   setQuality(quality: Quality) {
     if (quality === this.state.quality) return;
@@ -594,7 +622,8 @@ export class PlayerEngine {
       status: 'loading',
       error: null,
       position: options.startAt ?? 0,
-      duration: item.duration ?? 0,
+      // the same item again (a track or quality change): its length is still its length
+      duration: item.duration ?? (options.keepTracks ? this.state.duration : 0),
       buffered: 0,
       parts: [],
       chapters: [],
@@ -613,7 +642,10 @@ export class PlayerEngine {
       const saved = Number(this.deps.store.get(`delay:${item.type}:${item.id}`)) || 0;
       this.pick = { audio: 0, burn: null, delay: kind === 'video' ? saved : 0 };
       this.tracksFor = null;
-      this.set({ audioDelay: this.pick.delay ?? 0 });
+      this.set({
+        audioDelay: this.pick.delay ?? 0,
+        subtitleDelay: Number(this.deps.store.get(`subdelay:${item.type}:${item.id}`)) || 0,
+      });
     }
     // a video's tracks first: the saved language picks which audio to ask for
     if (kind === 'video' && this.tracksFor !== key) {
@@ -675,7 +707,8 @@ export class PlayerEngine {
     const parts = playable.parts?.length
       ? playable.parts
       : [{ index: 0, start: 0, duration: playable.duration ?? 0 }];
-    const duration = playable.duration ?? item.duration ?? 0;
+    const duration =
+      playable.duration ?? item.duration ?? (options.keepTracks ? this.state.duration : 0);
     const start =
       options.startAt ??
       (saved && !saved.finished && saved.position > RESUME_MIN ? saved.position : 0);

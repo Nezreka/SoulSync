@@ -13,7 +13,8 @@ import { useSubtitleStyle } from './use-subtitle-style';
 export function SubtitleOverlay({ state, raised }: { state: PlayerState; raised: boolean }) {
   const style = useSubtitleStyle();
   if (!state.subtitle || !state.cues.length) return null;
-  const showing = cuesAt(state.cues, state.position);
+  // subtitle sync: later (+) shows each line that much after its time
+  const showing = cuesAt(state.cues, state.position - state.subtitleDelay / 1000);
   if (!showing.length) return null;
   return (
     <div

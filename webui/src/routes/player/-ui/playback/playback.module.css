@@ -1411,3 +1411,79 @@ a.nowTitle:hover {
   backdrop-filter: blur(12px);
   animation: fullIn var(--dur-moderate) var(--pl-ease) both;
 }
+
+/* ── menus: a heading over a group of options ───────────────────────── */
+
+.menuGroup {
+  padding: calc(var(--u) * 0.6) calc(var(--u) * 0.75) calc(var(--u) * 0.2);
+  border-top: 1px solid var(--white-a08);
+  color: var(--pl-text-3);
+  font-size: calc(var(--u) * 0.66);
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.menuGroup:first-of-type {
+  border-top: none;
+}
+
+/* ── video: find subtitles ───────────────────────────────────────────── */
+
+.finderLang {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--u) * 0.8);
+  margin: calc(var(--u) * 0.8) 0;
+  color: var(--pl-text-2);
+  font-size: calc(var(--u) * 0.85);
+}
+
+.finderLang select {
+  height: calc(var(--u) * 2.2);
+  padding: 0 calc(var(--u) * 0.6);
+  border: 1px solid var(--white-a20);
+  border-radius: var(--radius-md);
+  background: var(--white-a06);
+  color: var(--pl-text);
+  font: inherit;
+}
+
+.finderError {
+  margin: 0 0 calc(var(--u) * 0.6);
+  color: var(--danger-light);
+  font-size: calc(var(--u) * 0.85);
+}
+
+.finderRow {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 0.8);
+  width: 100%;
+  padding: calc(var(--u) * 0.6);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--pl-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.finderRow:hover:not(:disabled),
+.finderRow:focus-visible {
+  background: var(--white-a08);
+}
+
+.finderRow:disabled {
+  cursor: progress;
+}
+
+.finderScore {
+  flex: none;
+  margin-left: auto;
+  color: var(--pl-text-3);
+  font-size: calc(var(--u) * 0.8);
+  font-variant-numeric: tabular-nums;
+}

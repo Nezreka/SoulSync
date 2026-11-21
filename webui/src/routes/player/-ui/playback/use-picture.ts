@@ -46,6 +46,53 @@ export function useBrightness(): number {
   );
 }
 
+/** how the picture fills the screen */
+export type Fit = 'fit' | 'fill' | 'stretch';
+export const FITS: { key: Fit; label: string; detail: string }[] = [
+  { key: 'fit', label: 'Fit', detail: 'The whole picture, bars where it needs them' },
+  { key: 'fill', label: 'Fill screen', detail: 'No bars, the edges cropped' },
+  { key: 'stretch', label: 'Stretch', detail: 'No bars, the picture stretched' },
+];
+const FIT_KEY = 'ss-player:fit';
+let fit: Fit | null = null;
+
+function readFit(): Fit {
+  try {
+    const v = localStorage.getItem(FIT_KEY);
+    return v === 'fill' || v === 'stretch' ? v : 'fit';
+  } catch {
+    return 'fit';
+  }
+}
+
+export function setFit(next: Fit) {
+  fit = next;
+  try {
+    localStorage.setItem(FIT_KEY, next);
+  } catch {
+    /* private window: it lasts the visit */
+  }
+  for (const l of listeners) l();
+}
+
+export function useFit(): Fit {
+  return useSyncExternalStore(
+    (l) => {
+      listeners.add(l);
+      return () => listeners.delete(l);
+    },
+    () => (fit ??= readFit()),
+    () => 'fit',
+  );
+}
+
+/** the css object-fit for it */
+export const OBJECT_FIT: Record<Fit, 'contain' | 'cover' | 'fill'> = {
+  fit: 'contain',
+  fill: 'cover',
+  stretch: 'fill',
+};
+
 /** the dimming layer is black at 90%: this strength of it leaves the picture at ``v`` */
 const LAYER = 0.9;
 

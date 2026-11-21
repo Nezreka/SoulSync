@@ -22,7 +22,14 @@ import {
 } from './icons';
 import { PopMenu } from './menu';
 import s from './playback.module.css';
-import { BRIGHTNESS_STEPS, setBrightness, useBrightness } from './use-picture';
+import {
+  BRIGHTNESS_STEPS,
+  FITS,
+  setBrightness,
+  setFit,
+  useBrightness,
+  useFit,
+} from './use-picture';
 import { getEngine } from './use-player';
 import { setSubtitleStyle, useSubtitleStyle } from './use-subtitle-style';
 
@@ -194,6 +201,7 @@ export function AudioMenu({ state }: { state: PlayerState }) {
           const words = audioLabel(t);
           return {
             key: String(t.index),
+            group: 'Track',
             label: words.label,
             detail: words.detail,
             selected: t.index === state.audioTrack,
@@ -211,6 +219,7 @@ export function AudioMenu({ state }: { state: PlayerState }) {
         ...tracks,
         {
           key: 'earlier',
+          group: 'Sync',
           label: 'Sound earlier',
           detail: 'If voices come after the lips move',
           keepOpen: true,
@@ -218,53 +227,82 @@ export function AudioMenu({ state }: { state: PlayerState }) {
         },
         {
           key: 'later',
+          group: 'Sync',
           label: 'Sound later',
           detail: 'If voices come before the lips move',
           keepOpen: true,
           onSelect: () => setDelay(delay + 50),
         },
         ...(delay
-          ? [{ key: 'reset', label: 'Back in sync', keepOpen: true, onSelect: () => setDelay(0) }]
+          ? [
+              {
+                key: 'reset',
+                group: 'Sync',
+                label: 'Back in sync',
+                keepOpen: true,
+                onSelect: () => setDelay(0),
+              },
+            ]
           : []),
       ]}
     />
   );
 }
 
-/** brightness: dim the picture (for watching in bed) */
+/** the picture: how bright (dim it for watching in bed) and how it fills the screen */
 export function PictureMenu() {
   const brightness = useBrightness();
+  const fit = useFit();
   return (
     <PopMenu
-      label="Brightness"
-      title="Brightness"
+      label="Picture"
+      title="Picture"
       icon={<BrightnessIcon />}
       badge={brightness < 1 ? `${Math.round(brightness * 100)}%` : undefined}
-      options={BRIGHTNESS_STEPS.map((v) => ({
-        key: String(v),
-        label: v === 1 ? 'Full' : `${Math.round(v * 100)}%`,
-        detail: v === 0.15 ? 'Barely there' : v <= 0.45 ? 'Dim' : undefined,
-        selected: Math.abs(v - brightness) < 0.01,
-        onSelect: () => setBrightness(v),
-      }))}
+      options={[
+        ...BRIGHTNESS_STEPS.map((v) => ({
+          key: String(v),
+          group: 'Brightness',
+          label: v === 1 ? 'Full' : `${Math.round(v * 100)}%`,
+          detail: v === 0.15 ? 'Barely there' : v === 0.3 ? 'For the dark' : undefined,
+          selected: Math.abs(v - brightness) < 0.01,
+          keepOpen: true,
+          onSelect: () => setBrightness(v),
+        })),
+        ...FITS.map((f) => ({
+          key: f.key,
+          group: 'Shape',
+          label: f.label,
+          detail: f.detail,
+          selected: fit === f.key,
+          keepOpen: true,
+          onSelect: () => setFit(f.key),
+        })),
+      ]}
     />
   );
 }
 
-/** subtitles: off, each track, and how they look */
-export function SubtitleMenu({ state }: { state: PlayerState }) {
+/** subtitles: off, each track, their sync, how they look, and finding more */
+export function SubtitleMenu({ state, onFind }: { state: PlayerState; onFind?: () => void }) {
   const subs = (state.tracks?.subtitles ?? []).filter((t) => t.kind !== 'unknown');
   const style = useSubtitleStyle();
-  if (!subs.length) return null;
+  const current = subs.find((t) => t.id === state.subtitle);
+  const delay = state.subtitleDelay;
+  if (!subs.length && !onFind) return null;
+  const step = (ms: number) => getEngine().setSubtitleDelay(delay + ms);
   return (
     <PopMenu
       label="Subtitles"
-      title="Subtitles"
+      title={
+        delay ? `Subtitles · ${Math.abs(delay)} ms ${delay > 0 ? 'later' : 'earlier'}` : 'Subtitles'
+      }
       icon={<SubtitlesIcon />}
       badge={state.subtitleLoading ? '…' : state.subtitle ? 'on' : undefined}
       options={[
         {
           key: 'off',
+          group: 'Track',
           label: 'Off',
           selected: !state.subtitle,
           onSelect: () => getEngine().setSubtitle(null),
@@ -273,24 +311,77 @@ export function SubtitleMenu({ state }: { state: PlayerState }) {
           const words = subtitleLabel(t);
           return {
             key: t.id,
+            group: 'Track',
             label: words.label,
             detail: words.detail,
             selected: t.id === state.subtitle,
             onSelect: () => getEngine().setSubtitle(t.id),
           };
         }),
-        ...(['small', 'medium', 'large'] as const).map((size) => ({
-          key: `size-${size}`,
-          label: `Text ${size}`,
-          selected: style.size === size,
-          onSelect: () => setSubtitleStyle({ size }),
-        })),
-        {
-          key: 'box',
-          label: style.box ? 'Dark box behind: on' : 'Dark box behind: off',
-          selected: style.box,
-          onSelect: () => setSubtitleStyle({ box: !style.box }),
-        },
+        ...(onFind
+          ? [
+              {
+                key: 'find',
+                group: 'Track',
+                label: 'Find subtitles…',
+                detail: 'Search your subtitle providers',
+                onSelect: onFind,
+              },
+            ]
+          : []),
+        // the player draws text subtitles itself, so their timing can move freely
+        ...(current?.kind === 'text'
+          ? [
+              {
+                key: 'earlier',
+                group: 'Sync',
+                label: 'Show earlier',
+                detail: 'If lines come after they are spoken',
+                keepOpen: true,
+                onSelect: () => step(-100),
+              },
+              {
+                key: 'later',
+                group: 'Sync',
+                label: 'Show later',
+                detail: 'If lines come before they are spoken',
+                keepOpen: true,
+                onSelect: () => step(100),
+              },
+              ...(delay
+                ? [
+                    {
+                      key: 'reset',
+                      group: 'Sync',
+                      label: 'Back in sync',
+                      keepOpen: true,
+                      onSelect: () => getEngine().setSubtitleDelay(0),
+                    },
+                  ]
+                : []),
+            ]
+          : []),
+        ...(subs.length
+          ? [
+              ...(['small', 'medium', 'large'] as const).map((size) => ({
+                key: `size-${size}`,
+                group: 'Look',
+                label:
+                  size === 'small' ? 'Small text' : size === 'large' ? 'Large text' : 'Medium text',
+                selected: style.size === size,
+                keepOpen: true,
+                onSelect: () => setSubtitleStyle({ size }),
+              })),
+              {
+                key: 'box',
+                group: 'Look',
+                label: 'Dark box behind',
+                selected: style.box,
+                keepOpen: true,
+                onSelect: () => setSubtitleStyle({ box: !style.box }),
+              },
+            ]
+          : []),
       ]}
     />
   );

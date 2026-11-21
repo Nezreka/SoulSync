@@ -17,6 +17,8 @@ export interface MenuOption {
   selected?: boolean;
   /** stays open after it's picked (a step you press several times) */
   keepOpen?: boolean;
+  /** a heading over this option and the ones after it, until the next group */
+  group?: string;
   onSelect: () => void;
 }
 
@@ -75,7 +77,12 @@ export function PopMenu({
       {open ? (
         <div className={s.menu} role="menu" aria-label={label}>
           {title ? <div className={s.menuTitle}>{title}</div> : null}
-          {options.map((o) => (
+          {options.map((o, i) => [
+            o.group && o.group !== options[i - 1]?.group ? (
+              <div key={`g-${o.group}`} className={s.menuGroup} role="presentation">
+                {o.group}
+              </div>
+            ) : null,
             <button
               key={o.key}
               type="button"
@@ -98,8 +105,8 @@ export function PopMenu({
                   ✓
                 </span>
               ) : null}
-            </button>
-          ))}
+            </button>,
+          ])}
         </div>
       ) : null}
     </div>
