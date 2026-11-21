@@ -18,7 +18,7 @@ import type {
 } from '../-player.types';
 import type { GuideProgram } from './schedule';
 
-import { libraryThumb, remoteImage, youtubeThumb } from './images';
+import { albumArtwork, libraryThumb, remoteImage, youtubeThumb } from './images';
 import { backdropUrl, bookCover, episodeKey, posterUrl } from './rails';
 
 export function movieItem(
@@ -165,7 +165,7 @@ export function artistItems(rows: readonly ArtistQueueRow[]): PlayItem[] {
     id: String(r.track_id),
     title: r.track_title,
     subtitle: r.artist_name ?? undefined,
-    artwork: libraryThumb(r.album_image_url ?? null),
+    artwork: albumArtwork(r.album_id),
     href: `/player/music/album/${r.album_id}`,
     duration: r.duration ? r.duration / 1000 : null,
     parentId: String(r.album_id),
@@ -216,7 +216,7 @@ export function songItems(songs: readonly LibSong[]): PlayItem[] {
     id: String(x.id),
     title: x.title,
     subtitle: x.artist_name ?? undefined,
-    artwork: libraryThumb(x.album_thumb_url ?? null),
+    artwork: albumArtwork(x.album_id),
     href: x.album_id ? `/player/music/album/${x.album_id}` : '/player/music',
     duration: x.duration ? x.duration / 1000 : null,
     parentId: x.album_id ? String(x.album_id) : undefined,

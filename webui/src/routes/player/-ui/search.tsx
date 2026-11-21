@@ -14,12 +14,12 @@
  */
 
 import { useQuery } from '@tanstack/react-query';
-import { useNavigate } from '@tanstack/react-router';
+import { useNavigate, useRouterState } from '@tanstack/react-router';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 
 import { appURL } from '@/platform/url-base';
 
-import { libraryThumb, remoteImage, youtubeThumb } from '../-lib/images';
+import { albumArtwork, libraryThumb, remoteImage, youtubeThumb } from '../-lib/images';
 import { bookCover, posterUrl } from '../-lib/rails';
 import { parseQuery, rank, scoreHit, type Query } from '../-lib/search';
 import { genresOf } from '../-lib/video';
@@ -265,7 +265,7 @@ export function Search() {
             key: `so${x.id}`,
             title: x.title,
             sub: [x.artist_name, x.album_title].filter(Boolean).join(' · ') || 'Song',
-            art: libraryThumb(x.album_thumb_url),
+            art: albumArtwork(x.album_id),
             href: `/player/music/album/${x.album_id}`,
             type: 'Song',
           }),
@@ -543,6 +543,17 @@ export function Search() {
   );
 
   useEffect(() => setActive(0), [raw, filter]);
+
+  // a result opened (by mouse, enter or a remote): the page changed, so the
+  // panel goes and the box lets go of focus
+  const href = useRouterState({ select: (st) => st.location.href });
+  const lastHref = useRef(href);
+  useEffect(() => {
+    if (href === lastHref.current) return;
+    lastHref.current = href;
+    setOpen(false);
+    if (document.activeElement === input.current) input.current?.blur();
+  }, [href]);
   useEffect(() => {
     if (filter !== 'all' && !groups.some((g) => g.id === filter)) setFilter('all');
   }, [groups, filter]);
@@ -621,6 +632,10 @@ export function Search() {
           src={hit.art.startsWith('/') ? appURL(hit.art) : hit.art}
           alt=""
           loading="lazy"
+          // no cover: the empty tile, never a broken image
+          onError={(e) => {
+            e.currentTarget.style.visibility = 'hidden';
+          }}
         />
       ) : (
         <span

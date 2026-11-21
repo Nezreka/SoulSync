@@ -62,6 +62,15 @@ export function libraryThumb(url: string | null | undefined): string | null {
   return remoteImage(url, 'card');
 }
 
+/**
+ * an album's cover by its id: the library's artwork route, at thumb size.
+ * the songs list carries the album's raw stored image (often a media
+ * server's own path, which this page can't load), so songs use this.
+ */
+export function albumArtwork(albumId: number | string | null | undefined): string | null {
+  return albumId ? appURL(`/api/library/v2/artwork/album/${albumId}?size=thumb`) : null;
+}
+
 const YT_ID = /i\.ytimg\.com\/vi(?:_webp)?\/([\w-]{6,})\//;
 
 /** a youtube video's still: 320x180 on a card, 1280x720 for a hero */
