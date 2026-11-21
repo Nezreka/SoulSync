@@ -311,3 +311,28 @@ def test_a_library_reorganize_keeps_the_library_artist_it_belongs_to(db, templat
     ctx = _context("Machine Gun Kelly", MGK_DZ, "Lost Americana")
     ctx["_library_reorganize"] = True
     assert library_names(ctx, ctx["artist"]) == {}
+
+
+def test_a_compilations_various_artists_id_names_nobody(db):
+    # #2229: ryo (supercell) was stored with spotify's Various Artists id,
+    # and Lena Chappelle's compilation download carried it: the file was
+    # named and tagged ryo (supercell). an artist that still holds it from an
+    # older build (the heal takes it off) must not be found by it
+    from core.imports.library_names import library_names
+    va = "0LyfQWJT6nXafLPZqxe9Of"
+    conn = db._get_connection()
+    conn.execute("DROP TRIGGER IF EXISTS trg_lib2_artist_no_various_artists_id_insert")
+    conn.execute("INSERT INTO lib2_artists (id, name, name_key, spotify_id, external_ids) "
+                 "VALUES (9, 'ryo (supercell)', 'ryo (supercell)', ?, ?)",
+                 (va, json.dumps({"deezer": "5080"})))
+    conn.commit()
+    conn.close()
+    names_mod.clear_cache()
+    assert library_artist_name("Lena Chappelle", {"spotify": va}) is None
+    assert library_artist_name("Lena Chappelle", {"deezer": "5080"}) is None
+    ctx = {"source": "spotify",
+           "artist": {"name": "Lena Chappelle", "id": va},
+           "album": {"name": "Guild Wars 2: Heart of Thorns (Original Soundtrack)",
+                     "artists": [{"name": "Various Artists", "id": va}]},
+           "track_info": {"name": "Attack on Tarir", "artists": [{"name": "Lena Chappelle"}]}}
+    assert library_names(ctx, ctx["artist"]) == {}

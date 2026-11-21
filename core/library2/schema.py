@@ -1675,6 +1675,12 @@ def ensure_library_v2_schema(connection: Any, *, run_backfills: bool = True) -> 
     # what each file that imported without a match most likely is
     from core.library2.unmatched_identify import ensure_unmatched_match_schema
     ensure_unmatched_match_schema(cursor)
+    # #2229: no artist row keeps a provider's "Various Artists" id
+    try:
+        from core.library2.various_artists_guard import ensure_various_artists_guard
+        ensure_various_artists_guard(cursor)
+    except Exception as e:  # noqa: BLE001
+        logger.error("Various Artists id guard failed (will retry next start): %s", e)
     if run_backfills:
         run_library_v2_backfills(connection)
     logger.debug("Library schema ensured")
@@ -1801,6 +1807,24 @@ def run_library_v2_backfills(connection: Any, *, commit: bool = False,
                 _commit()
         except Exception as e:  # noqa: BLE001
             logger.error("release kind by runtime repair failed (will retry next start): %s", e)
+
+    if not _stopped():
+        # #2229: a compilation's "Various Artists" id stored on a real artist
+        # pulled every later compilation track in under them. once: the
+        # trigger keeps it off from here
+        try:
+            if not _done_once(cursor, "various_artists_ids_v1"):
+                from core.library2.various_artists_guard import heal_various_artists_ids
+                healed = heal_various_artists_ids(connection)
+                stats["various_artists_ids"] = healed
+                if healed.get("artists"):
+                    logger.info("Took the Various Artists id off %d artists, gave %d tracks "
+                                "back to their own artist, %d files queued for findings",
+                                healed["artists"], healed["tracks"], healed["files"])
+                _mark_done(cursor, "various_artists_ids_v1")
+                _commit()
+        except Exception as e:  # noqa: BLE001
+            logger.error("Various Artists id heal failed (will retry next start): %s", e)
 
     if not _stopped():
         # A provider's 0 ("no BPM", "no length") was stored as a value: the

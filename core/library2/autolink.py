@@ -228,6 +228,10 @@ def _find_or_create_artist(conn, name: str, *, spotify_id: Optional[str] = None,
     # romaji release credit), the case G8's alias-awareness gap calls out.
     provider_id = _clean_provider_id(spotify_id)
     namespace = _provider_namespace(provider_id, source)
+    from core.various_artists_ids import is_various_artists_id
+    if provider_id and is_various_artists_id(provider_id, namespace or source):
+        # "Various Artists" is a credit, never this artist's id (#2229)
+        provider_id = namespace = None
     if provider_id:
         if namespace == "spotify":
             row = conn.execute(
@@ -998,17 +1002,27 @@ def link_download_into_library_v2(context: Dict[str, Any], *,
                     return None
                 artists = ti.get("artists") if isinstance(ti.get("artists"), list) else []
                 primary_artist = artists[0] if artists and isinstance(artists[0], dict) else {}
+                # the context's artist ids are the context artist's: the album
+                # artist on a wishlist or album grab. they are the track
+                # artist's only when they are the same artist; a compilation's
+                # is "Various Artists" paired with the singer (#2229)
+                context_artist_name = _get(canonical_artist, "name")
+                same_artist = (not context_artist_name
+                               or normalize_name(context_artist_name) == normalize_name(artist_name))
+                context_ids = ((canonical_artist.get("provider_ids"),
+                                canonical_artist.get("external_ids")) if same_artist else ())
                 qualified_artist_id = _qualified_provider_id(
-                    identity_source, canonical_artist.get("provider_ids"),
-                    canonical_artist.get("external_ids"), primary_artist.get("provider_ids"),
+                    identity_source, *context_ids, primary_artist.get("provider_ids"),
                     primary_artist.get("external_ids"),
                 )
+                context_artist_id = (_clean_provider_id(source_ids.get("artist_id"))
+                                     if same_artist else None)
                 artist_id = _find_or_create_artist(
                     conn,
                     artist_name,
                     spotify_id=(
                         qualified_artist_id
-                        or _clean_provider_id(source_ids.get("artist_id"))
+                        or context_artist_id
                         or _primary_artist_provider_id(ti)
                         or None
                     ) if use_provider_ids else None,

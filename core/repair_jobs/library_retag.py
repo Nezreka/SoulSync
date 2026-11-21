@@ -31,7 +31,8 @@ from __future__ import annotations
 from core.repair_jobs import register_job
 from core.library2.retag import RETAG_SOURCES
 from core.repair_jobs.base import (
-    JobContext, JobResult, RepairJob, drop_hand_tagged_albums, scoped_file_subjects,
+    JobContext, JobResult, RepairJob, drop_hand_tagged_albums, scope_findings_only,
+    scoped_file_subjects,
 )
 from utils.logging_config import get_logger
 
@@ -192,6 +193,10 @@ class LibraryRetagJob(RepairJob):
         # listed and undone as one
         from core.library2 import tag_fill
         fill = tag_fill.fill_mode(context.config_manager)
+        if scope_findings_only(context):
+            # a repair's follow-up: every difference is a finding to apply
+            fill = 'off'
+            options['auto_apply'] = False
         batch_id = tag_fill.now_batch('job')
 
         done = 0
