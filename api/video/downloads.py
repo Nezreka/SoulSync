@@ -404,7 +404,153 @@ def _with_title_identity(db, src) -> dict:
     if (not body.get("tmdb_id") and tmdb
             and str(body.get("media_source") or "").lower() == "tmdb"):
         body["tmdb_id"] = tmdb
-    return _with_release_identity(body, scope, ident)
+    body = _with_release_identity(body, scope, ident)
+    body = _with_episode_numbering(db, body, scope)
+    return _with_census(db, body, scope)
+
+
+# the numbering facts of one episode, kept a few minutes: a soulseek search is
+# polled every second and a half and each poll judges again (#2233)
+_NUMBERING_MEMO: dict = {}
+_NUMBERING_TTL_SECONDS = 600.0
+
+
+def _episode_numbering_facts(db, tmdb, season, episode, tvdb_id=None) -> dict:
+    """series type, air date, absolute number and the scene numbering of one
+    episode, the same facts the wishlist search carries
+    (video_process_wishlist.search_context). best-effort, never raises."""
+    import time as _time
+    key = (str(tmdb), int(season), int(episode), str(tvdb_id or ""))
+    now = _time.monotonic()
+    hit = _NUMBERING_MEMO.get(key)
+    if hit and now - hit[0] < _NUMBERING_TTL_SECONDS:
+        return dict(hit[1])
+    facts: dict = {}
+    try:
+        stype = str(db.effective_series_type(tmdb_id=int(tmdb)) or "").lower()
+    except Exception:   # noqa: BLE001 - a numbering assist must never break a search
+        stype = ""
+    if stype in ("daily", "anime"):
+        facts["series_type"] = stype
+    try:
+        air = db.episode_air_date(tmdb, season, episode)
+    except Exception:   # noqa: BLE001
+        air = None
+    if air:
+        facts["air_date"] = air
+    if stype == "anime":
+        try:
+            absolute = db.episode_absolute_number(tmdb, season, episode)
+        except Exception:   # noqa: BLE001
+            absolute = None
+        if absolute:
+            facts["absolute"] = absolute
+    try:
+        from core.video.numbering import annotate
+        item = {"show_tmdb_id": int(tmdb), "season_number": int(season),
+                "episode_number": int(episode), "tvdb_id": tvdb_id,
+                "air_date": air, "series_type": stype or None}
+        annotate([item], db=db)
+        if item.get("alt_season") is not None and item.get("alt_episode") is not None:
+            facts["alt_season"] = int(item["alt_season"])
+            facts["alt_episode"] = int(item["alt_episode"])
+            if item.get("alt_exclusive"):
+                facts["alt_exclusive"] = True
+    except Exception:   # noqa: BLE001
+        logger.debug("scene numbering lookup failed for %s S%sE%s", tmdb, season, episode,
+                     exc_info=True)
+    if len(_NUMBERING_MEMO) > 512:
+        _NUMBERING_MEMO.clear()
+    _NUMBERING_MEMO[key] = (now, dict(facts))
+    return facts
+
+
+def _with_episode_numbering(db, body: dict, scope: str) -> dict:
+    """an episode search with the numbering its show is released under: a
+    daily show by air date, anime by absolute number, and the scene's own
+    SxxExx where it differs from TMDB's. the wishlist search always carried
+    these; manual search sent the TMDB number alone, so it missed what the
+    wishlist found (#2233). what the client sent wins."""
+    if scope != "episode" or not body.get("tmdb_id"):
+        return body
+    try:
+        season, episode = int(body.get("season")), int(body.get("episode"))
+    except (TypeError, ValueError):
+        return body
+    facts = _episode_numbering_facts(db, body["tmdb_id"], season, episode, body.get("tvdb_id"))
+    for k, v in facts.items():
+        if body.get(k) in (None, ""):
+            body[k] = v
+    return body
+
+
+def _flag(v) -> bool:
+    """a body or query-string switch: true, 1, yes, on."""
+    return str(v or "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _judge_kwargs(body: dict, scope: str) -> dict:
+    """what a manual search judges its hits by, for _evaluate_hits. the same
+    set on every endpoint (search, start, poll), so a soulseek poll can never
+    judge by less than the start did (#2233)."""
+    from core.video.numbering import ctx_alt
+    out = {"want_year": body.get("year"), "want_title": _want_titles(body)}
+    if scope == "episode":
+        out["want_date"] = body.get("air_date") or None
+        out["want_absolute"] = body.get("absolute") or None
+        out["want_alt"] = ctx_alt(body)
+    if scope == "season" and _flag(body.get("with_episodes")):
+        out["season_episodes"] = True
+    out["census"] = body.get("_census")
+    return out
+
+
+def _with_census(db, body: dict, scope: str) -> dict:
+    """the show's episodes and which you have, for a tv manual search, so each
+    result can say what it covers (#2233). read once per request."""
+    body.pop("_census", None)   # never the client's: only what the library says
+    if scope == "movie":
+        return body
+    library_id, tmdb = _title_keys(body)
+    try:
+        census = db.show_episode_census(show_id=library_id, tmdb_id=body.get("tmdb_id") or tmdb)
+    except Exception:   # noqa: BLE001 - coverage is an assist, never a 500
+        census = {}
+    body["_census"] = census or {}
+    return body
+
+
+def _coverage(row: dict, census: dict):
+    """what one result covers of the show and how much of it you have:
+    {have, total} (counted against the library's episode list), plus a
+    ``have`` flag on each file of a soulseek pack. None when it can't say."""
+    if not census:
+        return None
+    from core.video.release_parse import parse_release
+    files = row.get("files") or []
+    keys: list = []
+    if len(files) > 1:
+        import os as _os
+        for f in files:
+            p = parse_release(_os.path.basename(str(f.get("filename") or "").replace("\\", "/")))
+            if p.get("season") is None or p.get("episode") is None:
+                continue
+            k = (int(p["season"]), int(p["episode"]))
+            f["have"] = bool(census.get(k))
+            keys.append(k)
+    elif row.get("is_series_pack"):
+        keys = [k for k in census if k[0] >= 1]
+    elif row.get("is_season_pack") and row.get("season") is not None:
+        keys = [k for k in census if k[0] == int(row["season"])]
+    elif row.get("season") is not None and row.get("episode") is not None:
+        s, e = int(row["season"]), int(row["episode"])
+        end = row.get("episode_end")
+        end = int(end) if end is not None and int(end) >= e else e
+        keys = [(s, n) for n in range(e, min(end, e + 200) + 1)]
+    if not keys:
+        return None
+    keys = list(dict.fromkeys(keys))
+    return {"have": sum(1 for k in keys if census.get(k)), "total": len(keys)}
 
 
 def _with_release_identity(body: dict, scope: str, ident: dict) -> dict:
@@ -513,8 +659,23 @@ def custom_query(body):
     return q or None
 
 
+def _slskd_query(body, scope: str, title: str, season, episode) -> str:
+    """the one text query a soulseek search sends: the scene's own numbering
+    when it differs, else the air date (daily) or absolute number (anime) the
+    show is released under, else SxxExx. the wishlist search's query (#2233)."""
+    from core.video.slskd_search import build_query
+    body = body if isinstance(body, dict) else {}
+    alt = body.get("alt_season") is not None and body.get("alt_episode") is not None
+    return build_query(scope, title, year=body.get("year"),
+                       season=body.get("alt_season") if alt else season,
+                       episode=body.get("alt_episode") if alt else episode,
+                       air_date=body.get("air_date"), absolute=body.get("absolute"),
+                       series_type=body.get("series_type"))
+
+
 def _search_queries(body, source: str, scope: str, title: str, season, episode) -> list:
     """Human-readable queries this manual search request will run/start."""
+    from core.video.numbering import ctx_alt
     body = body if isinstance(body, dict) else {}
     source = str(source or "").lower()
     typed = custom_query(body)
@@ -526,17 +687,14 @@ def _search_queries(body, source: str, scope: str, title: str, season, episode) 
             return [_format_strategy_query(t, q, extra) for t, q, extra in build_strategies(
                 scope, title, year=body.get("year"), season=season, episode=episode,
                 air_date=body.get("air_date"), absolute=body.get("absolute"),
-                series_type=body.get("series_type"), alt_titles=_alt_search_titles(body),
-                **_external_ids(body))]
+                series_type=body.get("series_type"), alt=ctx_alt(body),
+                alt_titles=_alt_search_titles(body), **_external_ids(body))]
         except Exception:   # noqa: BLE001 - query visibility must never break search
             logger.debug("manual search query summary failed", exc_info=True)
     if source == "extto":
         return [str(title or "").strip()] if str(title or "").strip() else []
     try:
-        from core.video.slskd_search import build_query
-        q = build_query(scope, title, year=body.get("year"), season=season, episode=episode,
-                        air_date=body.get("air_date"), absolute=body.get("absolute"),
-                        series_type=body.get("series_type"))
+        q = _slskd_query(body, scope, title, season, episode)
         return [q] if q else []
     except Exception:   # noqa: BLE001
         logger.debug("manual search text query summary failed", exc_info=True)
@@ -571,6 +729,7 @@ def _torrent_lane_hits(body, scope, title, want_season, want_episode, source):
     treats it (video_process_wishlist._hits_for_context). Usenet stays
     Prowlarr-only: EXT.to is torrents.
     """
+    from core.video.numbering import ctx_alt
     from core.video.prowlarr_search import prowlarr_search
     # A person is waiting on this response, so bound the time it will sit in the
     # shared Prowlarr budget (core.prowlarr_throttle). The background wishlist
@@ -587,6 +746,8 @@ def _torrent_lane_hits(body, scope, title, want_season, want_episode, source):
     else:
         pres = prowlarr_search(scope, title, year=body.get("year"),
                                season=want_season, episode=want_episode, source=source,
+                               air_date=body.get("air_date"), absolute=body.get("absolute"),
+                               series_type=body.get("series_type"), alt=ctx_alt(body),
                                max_wait_seconds=MANUAL_SEARCH_MAX_WAIT_SECONDS,
                                indexer_names=_basic_indexer_names(body),
                                alt_titles=_alt_search_titles(body),
@@ -629,15 +790,21 @@ def _torrent_lane_hits(body, scope, title, want_season, want_episode, source):
 
 def _evaluate_hits(raw, profile, scope, want_season, want_episode, blocked=None, want_year=None,
                    want_title=None, blocked_users=None, want_date=None, want_absolute=None,
-                   want_alt=None) -> list:
+                   want_alt=None, season_episodes=False, census=None) -> list:
     """Parse → evaluate → rank a list of raw indexer hits against the quality profile.
     Shared by the mock search and the live slskd start/poll endpoints.
 
     ``blocked`` = the per-release blocklist as {(username, filename)}; ``blocked_users``
     = uploaders blocked source-wide (every release from them skipped). Both None = look
-    them up. Blocked hits stay VISIBLE in manual search (greyed, with the reason — the
-    Sonarr behaviour) but are never `accepted`, so every auto-picker skips them; a manual
-    grab of one is a deliberate user override."""
+    them up. Blocked hits stay VISIBLE in manual search (greyed, with the reason) but
+    are never `accepted`, so every auto-picker skips them; a manual grab of one is a
+    deliberate user override.
+
+    ``season_episodes`` (manual search's Season scope, #2233): a single episode of
+    the wanted season is judged as that episode instead of rejected as "not a
+    full-season pack", so the season's packs and its episodes list together.
+    ``census`` = the show's {(season, episode): have}; each row then says what it
+    covers and how much of it you have (``cover``)."""
     from core.video.custom_formats import load_formats
     from core.video.release_parse import parse_release, search_title
     from core.video.release_rank import apply_formats, rank_values, sort_ranked
@@ -670,8 +837,13 @@ def _evaluate_hits(raw, profile, scope, want_season, want_episode, blocked=None,
         # count only reaches the judge when the hit is actually a torrent.
         proto = str(hit.get("protocol") or "").lower()
         seeders = hit.get("seeders") if proto == "torrent" else None
-        verdict = evaluate_release(parsed, profile, scope=scope, want_season=want_season,
-                                   want_episode=want_episode, size_gb=size_gb, want_year=want_year,
+        hit_scope, hit_episode = scope, want_episode
+        if (season_episodes and scope == "season" and not parsed.get("is_season_pack")
+                and not parsed.get("is_series_pack") and parsed.get("episode") is not None
+                and want_season is not None and parsed.get("season") == want_season):
+            hit_scope, hit_episode = "episode", parsed.get("episode")
+        verdict = evaluate_release(parsed, profile, scope=hit_scope, want_season=want_season,
+                                   want_episode=hit_episode, size_gb=size_gb, want_year=want_year,
                                    want_title=want_title, want_date=want_date,
                                    want_absolute=want_absolute, seeders=seeders,
                                    want_alt=want_alt)
@@ -770,7 +942,11 @@ def _evaluate_hits(raw, profile, scope, want_season, want_episode, blocked=None,
     # rejects stay visible (with their reason) for a deliberate manual override.
     accepted = [r for r in results if r["accepted"]]
     rejected = [r for r in results if not r["accepted"]]
-    return (accepted[:40] + rejected[:15])
+    out = accepted[:40] + rejected[:15]
+    if isinstance(census, dict) and census:
+        for r in out:
+            r["cover"] = _coverage(r, census)
+    return out
 
 
 def _same_show(download, title, media_id=None, media_source=None, year=None) -> bool:
@@ -1713,9 +1889,9 @@ def register_routes(bp):
         partial_note = None
         queries = _search_queries(body, source, scope, title, want_season, want_episode)
         if source == "soulseek":
-            from core.video.slskd_search import build_query, slskd_search
-            sres = slskd_search(custom_query(body) or build_query(
-                scope, title, year=body.get("year"), season=want_season, episode=want_episode))
+            from core.video.slskd_search import slskd_search
+            sres = slskd_search(custom_query(body) or _slskd_query(
+                body, scope, title, want_season, want_episode))
             if not sres.get("configured"):
                 return jsonify({"scope": scope, "results": [], "queries": queries, "error": "slskd isn't configured — set its URL on Settings → Downloads."})
             if sres.get("error"):
@@ -1742,8 +1918,7 @@ def register_routes(bp):
                               episode=want_episode, season_end=season_end, source=source)
         payload = {"scope": scope, "live": live, "queries": queries,
                    "results": _evaluate_hits(raw, profile, scope, want_season, want_episode,
-                                             want_year=body.get("year"),
-                                             want_title=_want_titles(body))}
+                                             **_judge_kwargs(body, scope))}
         # One half of the lane was down but the other answered: show the results
         # AND say what is missing, rather than silently returning a short list.
         if partial_note:
@@ -1770,9 +1945,8 @@ def register_routes(bp):
 
         if source == "soulseek":
             from core.video.slskd_search import (
-                _INTERACTIVE_MAX_WAIT_SECONDS, build_query, search_timeout_ms, start_search)
-            res = start_search(typed or build_query(scope, title, year=body.get("year"),
-                                                    season=want_season, episode=want_episode),
+                _INTERACTIVE_MAX_WAIT_SECONDS, search_timeout_ms, start_search)
+            res = start_search(typed or _slskd_query(body, scope, title, want_season, want_episode),
                                max_throttle_wait=_INTERACTIVE_MAX_WAIT_SECONDS)
             if not res.get("configured"):
                 return jsonify({"queries": queries, "error": "slskd isn't configured — set its URL on Settings → Downloads."})
@@ -1791,7 +1965,8 @@ def register_routes(bp):
             if eres.get("error"):
                 return jsonify({"queries": queries, "error": "EXT.to: " + str(eres["error"])})
             return jsonify({"id": None, "live": True, "complete": True, "queries": queries,
-                            "results": _evaluate_hits(eres["hits"], profile, scope, want_season, want_episode, want_year=body.get("year"), want_title=_want_titles(body))})
+                            "results": _evaluate_hits(eres["hits"], profile, scope, want_season, want_episode,
+                                                      **_judge_kwargs(body, scope))})
         if source in ("torrent", "usenet"):
             # Prowlarr is synchronous — like the old mock, results come back in one shot
             # (no polling id), so the client renders immediately. Shares the lane
@@ -1803,8 +1978,7 @@ def register_routes(bp):
                 return jsonify({"queries": queries, "error": hard_error})
             out = {"id": None, "live": True, "complete": True, "queries": queries,
                    "results": _evaluate_hits(hits, profile, scope, want_season, want_episode,
-                                             want_year=body.get("year"),
-                                             want_title=_want_titles(body))}
+                                             **_judge_kwargs(body, scope))}
             if note:
                 out["note"] = note
             return jsonify(out)
@@ -1818,7 +1992,8 @@ def register_routes(bp):
         raw = mock_search(scope, title, year=body.get("year"), season=want_season,
                           episode=want_episode, season_end=season_end, source=source)
         return jsonify({"id": None, "live": False, "complete": True, "queries": queries,
-                        "results": _evaluate_hits(raw, profile, scope, want_season, want_episode, want_year=body.get("year"), want_title=_want_titles(body))})
+                        "results": _evaluate_hits(raw, profile, scope, want_season, want_episode,
+                                                  **_judge_kwargs(body, scope))})
 
     @bp.route("/downloads/search/poll", methods=["GET"])
     def video_downloads_search_poll():
@@ -1837,7 +2012,8 @@ def register_routes(bp):
         profile, _pid = _profile_for_request(get_video_db(), args)
         polled = poll_search(sid)
         return jsonify({"live": True, "total_files": polled["total_files"],
-                        "results": _evaluate_hits(polled["hits"], profile, scope, want_season, want_episode, want_year=args.get("year"), want_title=_want_titles(args))})
+                        "results": _evaluate_hits(polled["hits"], profile, scope, want_season, want_episode,
+                                                  **_judge_kwargs(args, scope))})
 
     @bp.route("/downloads/grab", methods=["POST"])
     def video_downloads_grab():
