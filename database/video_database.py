@@ -9806,7 +9806,7 @@ class VideoDatabase:
         conn = self._get_connection()
         try:
             movies = [dict(r) for r in conn.execute(
-                "SELECT 'movie' AS scope, m.id AS item_id, f.id AS file_id, "
+                "SELECT 'movie' AS scope, m.id AS item_id, m.id AS title_id, f.id AS file_id, "
                 "m.title, m.year, m.tmdb_id, m.imdb_id, NULL AS tvdb_id, "
                 "NULL AS season, NULL AS episode, "
                 "NULL AS episode_title, NULL AS series, "
@@ -9814,7 +9814,7 @@ class VideoDatabase:
                 "FROM movies m JOIN media_files f ON f.movie_id = m.id "
                 "WHERE m.has_file = 1 AND m.hands_off = 0")]
             eps = [dict(r) for r in conn.execute(
-                "SELECT 'episode' AS scope, e.id AS item_id, f.id AS file_id, "
+                "SELECT 'episode' AS scope, e.id AS item_id, e.show_id AS title_id, f.id AS file_id, "
                 "s.title AS title, "
                 # the show's year, as mass rename reads it -- a NULL here rendered
                 # every '$series ($year)' episode path without its year
