@@ -602,5 +602,49 @@ SoulSync doesn't open anything on your router by itself. Pick one:
 So it also shows the same link as a QR. Turn wifi off on your phone and open it. The page then says **Reached from** the phone's address, and whether that was outside your network. The link works for 10 minutes.
 `
         },
+        {
+            id: 'music-apps',
+            title: 'Music Apps',
+            lede: 'Play your library in a music app that speaks the Subsonic or OpenSubsonic API, as one profile.',
+            body: `
+Many music apps can play from a server that speaks the **Subsonic** or **OpenSubsonic** API. SoulSync speaks it at \`/rest\`, so those apps play straight from SoulSync. No app is required; use whichever you like.
+
+## Set one up
+
+1. Go to **Settings > Devices > Set up a music app** (admins only).
+2. Pick **whose music** it plays. Only profiles with **Use music apps** are listed (off on the Kids template; an admin can turn it on per profile).
+3. Give it a name (Phone, Car) and click **Set it up**.
+4. SoulSync shows the **server** address, the **username** (the profile's name), an **app password** and an **API key**, plus a QR with all of it. They are shown **once**. Copy them into the app now.
+
+How to add it in a few apps:
+
+- **Symfonium, Amperfy, play:Sub, Substreamer, DSub, Tempo**: add a server of the Subsonic kind, with the server, username and password.
+- **Feishin**: add a server, pick OpenSubsonic, then the server, username and password.
+- **Music Assistant**: add the Subsonic music provider with the server, username and password.
+- **Apps that take an API key**: paste the API key and leave the username and password empty.
+
+Away from home, use your remote address (see [Reaching SoulSync From Outside](#docs/devices-remote)).
+
+The app password is not the profile's password and only works for that one app. The profile's real password never works in a music app, and neither does an API key from Settings. Too many wrong passwords from one address are held off for a minute.
+
+The app shows up under **Paired devices**. **Unpair** it and it stops at once; set it up again for a new password.
+
+## What works
+
+- Browsing by artist, album, genre and folder, album lists (newest, A to Z, by artist, by year, by genre, random, most played, recently played, starred, top rated) and search, including apps that copy the whole library to the phone.
+- Playing and downloading for offline. When an app asks for a lower bitrate, songs are converted on the fly to **MP3** or **Opus** (pick which under **Convert to**; needs ffmpeg). Seeking works.
+- Cover art, lyrics (the file's own, a .lrc next to it, then LRCLib; synced lyrics stay synced), artist bios, similar songs and top songs.
+- **Starring** a song adds it to the profile's **Liked Songs**. Albums and artists can be starred and rated too. Starring a song the profile doesn't have adds it to the wishlist for a profile that may download, or makes a request for one that may only ask.
+- **Playlists**: the profile's own playlists can be made and edited in the app. Mirrored playlists and the Daily Mixes show up too, read-only.
+- **Plays** are recorded in SoulSync for that profile, the same as the web player: they feed Listening stats and mixes, and are scrobbled when the profile scrobbles. A **private session** keeps them out. What is playing now goes to Last.fm and ListenBrainz too.
+- The play queue is kept per app, so you can pick up where you left off.
+
+Each app only ever sees its own profile: that profile's library (its own library when it keeps one), its playlists, stars, ratings, queue and plays. A profile that hides explicit music doesn't see it in the app either. An app can only play: never settings, downloads, people or anything for admins.
+
+## Files SoulSync can't read
+
+SoulSync plays the files it can open. If your media server has music on drives SoulSync can't reach, those songs answer **SoulSync can't read this file** in the app. The best fix is a folder override (**Settings > Library > Folders**). Otherwise, under **Set up a music app**, turn on **Stream files SoulSync can't read through** your media server (Plex, Jellyfin or Navidrome; off by default, music only). SoulSync then plays those songs from the media server, marks them in the app (\`soulsyncStreamVia\`), and still records every play itself.
+`
+        },
     ]
 });

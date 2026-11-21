@@ -244,6 +244,31 @@ The device itself:
 
 Person invites are the same as Settings > People > Invites: `GET/POST /api/profiles/invites` (admin, or an admin API key). `POST` takes `{preset: {template_id}, note?, expires_hours?}`; a new one lasts a week (168 hours, 1 to 720) unless `expires_hours` says otherwise, works once, and whoever opens it makes their own profile following that template.
 
+### Music apps: the Subsonic / OpenSubsonic API (`/rest`)
+
+SoulSync answers the Subsonic API (version 1.16.1) with the OpenSubsonic additions at `/rest/<method>` and `/rest/<method>.view`, GET or POST (form fields count like query ones). `f=json`, `f=jsonp&callback=<name>` or XML (the default). Every answer is HTTP 200 with `subsonic-response`: `{status, version, type: "soulsync", serverVersion, openSubsonic: true}`, and on a refusal `error: {code, message}`.
+
+Signing in is always a paired music app, never an API key and never a profile's own password:
+
+- `apiKey=<device token>` (OpenSubsonic `apiKeyAuthentication`), on its own.
+- `u=<profile name>` with `t=md5(app password + s)` and `s=<salt>`, or `p=<app password>` / `p=enc:<hex>`.
+
+Error codes: `10` a required parameter is missing, `40` wrong username or password (also after 10 wrong tries a minute from one address), `43` an API key with a username or password, `44` an unknown or unpaired API key, `50` not allowed (no profile picked yet, the profile lost **Use music apps**, or something a music app may not do), `70` not found (also a song this profile can't play, or a file SoulSync can't read with the media server switch off), `0` anything else. A device token in `X-Device-Token` works on `/rest` too, with the device gate's JSON refusals. `getOpenSubsonicExtensions` answers without signing in: `apiKeyAuthentication`, `formPost`, `songLyrics`, `transcodeOffset`.
+
+Ids are typed: `ar-<id>` artist, `al-<id>` album, `tr-<id>` song (a bare number is a song), `pl-<id>` playlist, `mx-<n>` a Daily Mix. One music folder, id `1`.
+
+Methods: `ping`, `getLicense`, `getOpenSubsonicExtensions`, `tokenInfo`, `getUser` (its own profile only), `getScanStatus`, `getMusicFolders`, `getIndexes`, `getArtists`, `getArtist`, `getAlbum`, `getSong`, `getMusicDirectory`, `getGenres`, `getAlbumList` / `getAlbumList2` (`random`, `newest`, `highest`, `frequent`, `recent`, `alphabeticalByName`, `alphabeticalByArtist`, `starred`, `byYear`, `byGenre`; `size` up to 500), `getRandomSongs`, `getSongsByGenre`, `search2` / `search3` (an empty query pages through the whole library), `getStarred` / `getStarred2`, `star` / `unstar` (`id`, `albumId`, `artistId`, each repeatable), `setRating`, `scrobble` (`submission=true` records the play, `false` is now playing), `getNowPlaying` (this profile's), `getPlaylists`, `getPlaylist`, `createPlaylist`, `updatePlaylist`, `deletePlaylist`, `getCoverArt` (`size`), `getLyrics`, `getLyricsBySongId`, `stream`, `download`, `getSimilarSongs` / `getSimilarSongs2`, `getTopSongs`, `getArtistInfo` / `getArtistInfo2`, `getAlbumInfo` / `getAlbumInfo2`, `getPlayQueue`, `savePlayQueue`. `getBookmarks`, `getPodcasts`, `getNewestPodcasts`, `getInternetRadioStations` and `getShares` answer empty; `startScan` answers `50`.
+
+What a request sees is its profile's: its library (own-library rules), less explicit music when the profile hides it, its playlists, stars, ratings, play queue (one per app) and plays. A starred song is a Liked Song. Starring a song the profile has no file for adds it to the wishlist (may download) or makes a request (may only ask), else `50`. Mirrored playlists, Liked Songs and Daily Mixes are `readonly: true`.
+
+`stream`: the file with `Range` / `206`, unless `format` (`mp3`, `opus`) or `maxBitRate` asks for less, then converted by ffmpeg on the fly (`timeOffset` seconds to start later, `estimateContentLength=true` for a `Content-Length`). `format=raw` always sends the file. At most 4 conversions run at once; past that, and without ffmpeg, the file goes out as it is. A song whose file SoulSync can't read is `70`, unless its media server's switch is on: then SoulSync proxies that server's stream, the response carries `soulsyncStreamVia: <server>` and the song in every list carries the field `soulsyncStreamVia`.
+
+Admin (Settings > Devices > Set up a music app):
+
+- `GET /api/devices/music-apps`: `{profiles: [{id, name}], addresses, bridge: [{id, name, on, active}], transcode_format, formats, ffmpeg}`. `profiles` are the ones with Use music apps.
+- `POST /api/devices/music-apps` `{profile_id, name?}`: `201 {device_id, name, server, addresses, username, password, api_key, qr_text}`. A paired device for that profile with its own app password (kept encrypted) and API key, both shown this once. Unpair it like any device; its password goes with it. `400` for a profile without Use music apps.
+- `PUT /api/devices/music-apps/settings` `{bridge?: {plex|jellyfin|navidrome: bool}, transcode_format?: "mp3"|"opus"}`: answers like the GET. Each switch is "Stream files SoulSync can't read through <server>", off by default.
+
 ---
 
 ## MCP for AI clients
