@@ -900,7 +900,10 @@ def _rehome_track_lead_releases_once(database: Any, conn: Any) -> Dict[str, int]
     if get_state(database).get("status") != "done":
         return {}
     from core.library2.schema import _done_once, _mark_done
-    name = "track_lead_releases_rehomed_v1"
+    # v2 (#2239/#2240): runs again for a library v1 already passed, for a
+    # release filed under its whole credit line ("A, B & C") and the kind
+    # a moved single's folder took. the repair only moves what still fits
+    name = "track_lead_releases_rehomed_v2"
     if _done_once(conn.cursor(), name):
         return {}
     from core.library2.release_artist_repair import rehome_track_lead_releases

@@ -100,11 +100,15 @@ def _rehome(conn: Any, album: Any, old_group: List[int], target_id: int,
         f" AND COALESCE(track_artist,'')=''"
         f" AND id IN (SELECT track_id FROM lib2_track_artists WHERE artist_id IN ({marks})"
         f"             AND role='primary')", (old_name, album_id, *old_group))
+    from core.library2.release_kind import settle_shape_kind
     keep = _same_named_release(conn, album, target_group)
     if keep is not None and keep != album_id:
         from core.library2.album_versions import merge_album_into
         merge_album_into(conn, keep, album_id)
+        settle_shape_kind(conn, keep)
         return "merged"
+    # the kind its folder took, when no source ever said one (#2240)
+    settle_shape_kind(conn, album_id)
     conn.execute("UPDATE lib2_albums SET primary_artist_id=?, updated_at=CURRENT_TIMESTAMP"
                  " WHERE id=?", (target_id, album_id))
     conn.execute(f"UPDATE lib2_album_artists SET role='featured' WHERE album_id=?"
@@ -156,6 +160,7 @@ def rehome_track_lead_releases(
         if tagged:
             said[album_id].add(tagged)
 
+    moved = set()
     for album_id, names in said.items():
         album = albums[album_id]
         artist_name = str(album["artist_name"] or "")
@@ -165,12 +170,18 @@ def rehome_track_lead_releases(
             continue  # the filed artist, as written somewhere
         if len({_name_key(name) for name in names}) != 1:
             continue  # the files don't agree whose release it is
+        # #2240: a tag naming the whole credit ('all artists combined')
+        # is its first artist's release, never an artist of its own
+        target_name = sorted(names)[0]
+        target_name = _credit_lead(conn, target_name, album_id, artist_name) or target_name
+        if _same_act(artist_name, target_name, aliases):
+            continue  # the filed artist leads the credit
         stats["albums_checked"] += 1
         old_group = resolve_alias_group(conn, int(album["primary_artist_id"])) or [
             int(album["primary_artist_id"])]
         if _locked(conn, album_id) or not _leads_a_track(conn, album_id, old_group):
             continue
-        target_id = _find_or_create_artist(conn, sorted(names)[0])
+        target_id = _find_or_create_artist(conn, target_name)
         if target_id is None or int(target_id) in old_group:
             continue
         # one album at a time: a merge that fails half way leaves nothing
@@ -183,10 +194,77 @@ def rehome_track_lead_releases(
             logger.warning("#2142: %r not moved to %s: %s", album["title"], sorted(names)[0], exc)
             continue
         conn.execute("RELEASE rehome_release")
+        moved.add(album_id)
         stats["albums_merged" if outcome == "merged" else "albums_moved"] += 1
         logger.info("#2142: %r was filed under %s, its files name %s (%s)",
-                    album["title"], artist_name, sorted(names)[0], outcome)
+                    album["title"], artist_name, target_name, outcome)
+
+    for album_id, album in albums.items():
+        if album_id not in moved:
+            _rehome_whole_credit(conn, album, said.get(album_id) or set(), stats)
     return stats
+
+
+def _library_has(conn: Any) -> Callable[[str], bool]:
+    def has(name: str) -> bool:
+        return conn.execute("SELECT 1 FROM lib2_artists WHERE LOWER(name)=LOWER(?) LIMIT 1",
+                            (name,)).fetchone() is not None
+    return has
+
+
+def _credit_lead(conn: Any, credit: str, album_id: int, *others: str) -> str:
+    """the first artist of ``credit`` when it is a whole credit line: the
+    album's credited artists and the library's own prove it a list. ''
+    when it is one artist's name (Earth, Wind & Fire)."""
+    from core.imports.collab_artist import credit_lead_artist
+    credited = [row[0] for row in conn.execute(
+        "SELECT DISTINCT ar.name FROM lib2_tracks t"
+        "  JOIN lib2_track_artists ta ON ta.track_id = t.id"
+        "  JOIN lib2_artists ar ON ar.id = ta.artist_id WHERE t.album_id = ?",
+        (int(album_id),)) if row[0]]
+    return credit_lead_artist(credit, [*credited, *others], _library_has(conn))
+
+
+def _rehome_whole_credit(conn: Any, album: Any, tagged: set, stats: Dict[str, int]) -> None:
+    """#2240: a release filed under an artist named after its whole credit
+    ("12th Planet, BARELY ALIVE & PhaseOne") goes to the credit's first
+    artist, the one its folder names under 'first listed'. only when the
+    credit is provably a list, the files name that credit or its first
+    artist (or nothing), and nobody locked the album."""
+    from core.imports.collab_artist import credit_segments
+    from core.library2.artist_aliases import resolve_alias_group
+    from core.library2.artist_merges import _name_key
+    from core.library2.autolink import _find_or_create_artist
+
+    artist_name = str(album["artist_name"] or "")
+    if len(credit_segments(artist_name)) < 2:
+        return
+    album_id = int(album["id"])
+    lead = _credit_lead(conn, artist_name, album_id)
+    if not lead or _name_key(lead) == _name_key(artist_name):
+        return
+    if any(_name_key(name) not in (_name_key(artist_name), _name_key(lead)) for name in tagged):
+        return  # the files name someone else: the pass above decides those
+    if _locked(conn, album_id):
+        return
+    old_group = resolve_alias_group(conn, int(album["primary_artist_id"])) or [
+        int(album["primary_artist_id"])]
+    target_id = _find_or_create_artist(conn, lead)
+    if target_id is None or int(target_id) in old_group:
+        return
+    stats["albums_checked"] += 1
+    conn.execute("SAVEPOINT rehome_release")
+    try:
+        outcome = _rehome(conn, album, old_group, int(target_id), artist_name)
+    except Exception as exc:  # noqa: BLE001 - this album stays where it is
+        conn.execute("ROLLBACK TO rehome_release")
+        conn.execute("RELEASE rehome_release")
+        logger.warning("#2240: %r not moved to %s: %s", album["title"], lead, exc)
+        return
+    conn.execute("RELEASE rehome_release")
+    stats["albums_merged" if outcome == "merged" else "albums_moved"] += 1
+    logger.info("#2240: %r was filed under the whole credit %s, now %s's (%s)",
+                album["title"], artist_name, lead, outcome)
 
 
 __all__ = ["rehome_track_lead_releases"]

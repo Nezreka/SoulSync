@@ -111,11 +111,56 @@ def _release_artist_name(file_path: str, album: Dict[str, Any], lead: str) -> Op
     if normalize_name(candidate) in ("", normalize_name(UNKNOWN_ARTIST)):
         return None
     from core.imports.collab_artist import listed_primary_of
+    # #2240: a credit line given as one name ("12th Planet, BARELY ALIVE &
+    # PhaseOne": itunes' artist, or an 'all artists combined' tag) is its
+    # first artist's release, never an artist of its own. the lead can be
+    # that same whole line, so a match on it no longer keeps it whole
+    candidate = credit_release_artist(candidate, (lead, *listed)) or candidate
     for name in (lead, *listed):
         if name and (normalize_name(name) == normalize_name(candidate)
                      or listed_primary_of(candidate, name)):
             return None if normalize_name(name) == normalize_name(lead or "") else name
     return candidate
+
+
+def _release_kind(context: Dict[str, Any], raw_type: Any, total_tracks: Any,
+                  duration_ms: Any):
+    """``(kind, said)``: the release kind the library files the album under,
+    and whether a source said it. the same kind its folder took ($albumtype):
+    a bare 'album' is every source's default (itunes and deezer's track
+    lookups say it of every single), so the release's shape decides it, as
+    the path builder does. 'Bubzstep', one track, went to Albums while its
+    folder said Single (#2240). ('', False) when nothing says anything."""
+    raw = str(raw_type or "").strip().lower()
+    raw = {"compile": "compilation", "compilations": "compilation"}.get(raw, raw)
+    if raw and raw != "album":
+        return raw, True
+    filed = context.get("_filed_release") if isinstance(context, dict) else None
+    kind = ""
+    try:
+        if isinstance(filed, dict) and filed.get("type"):
+            from core.imports.paths import get_album_type_display
+            kind = get_album_type_display(
+                filed["type"], filed.get("total_tracks"), str(filed.get("source") or ""),
+                bool(filed.get("locked")), filed.get("duration_ms") or None).strip().lower()
+        elif raw and int(total_tracks or 0) > 0:
+            from core.metadata.release_type import release_type_from_shape
+            kind = release_type_from_shape(total_tracks, duration_ms)
+    except (TypeError, ValueError):
+        kind = ""
+    if kind not in ("album", "single", "ep", "compilation"):
+        return raw, bool(raw)
+    return kind, kind == raw
+
+
+def credit_release_artist(credit: Any, known_names=()) -> str:
+    """the artist a release credited to ``credit`` files under when
+    ``credit`` is a whole credit line: its first artist. '' when it is one
+    artist's name. ``known_names``: other names the release credits, which
+    prove a line is a list, as the library's own artists do."""
+    from core.imports.collab_artist import credit_lead_artist, library_has_artist
+    return credit_lead_artist(str(credit or ""), [n for n in known_names if n],
+                              library_has_artist)
 
 
 def _primary_artist_provider_id(ti: Dict[str, Any]) -> Optional[str]:
@@ -365,7 +410,8 @@ def _find_or_create_album(conn, artist_id: int, title: str, *,
                           monitored: Optional[int] = None,
                           release_mbid: Optional[str] = None,
                           release_year: Any = None,
-                          file_folder: Optional[str] = None) -> int:
+                          file_folder: Optional[str] = None,
+                          album_type_said: bool = True) -> int:
     """``release_mbid``: the MusicBrainz release the file's own tags name
     (MUSICBRAINZ_ALBUMID). Two releases of one name (a standard and a "baby
     punk version") stay two albums, as 3.6.1's standalone scan kept them
@@ -449,6 +495,10 @@ def _find_or_create_album(conn, artist_id: int, title: str, *,
          int(release_year) if release_year else None),
     )
     album_id = cur.lastrowid
+    if not album_type_said:
+        # read off the release's shape, not a source's word: a provider that
+        # does say (enrichment, a discography refresh) may still correct it
+        conn.execute("UPDATE lib2_albums SET album_type_known=0 WHERE id=?", (album_id,))
     if release_mbid:
         _adopt_release_mbid(conn, album_id, release_mbid)
     conn.execute(
@@ -952,11 +1002,12 @@ def link_download_into_library_v2(context: Dict[str, Any], *,
             else None
         )
         total_tracks = canonical_album.get("total_tracks") or album_raw.get("total_tracks")
-        album_type = str(
-            canonical_album.get("album_type") or album_raw.get("album_type") or ""
-        ).lower() or (
-            "single" if (normalize_name(album_name) == normalize_name(title)
-                         or total_tracks in (1, "1")) else "album")
+        album_type, album_type_said = _release_kind(
+            context, canonical_album.get("album_type") or album_raw.get("album_type"),
+            total_tracks, canonical_album.get("duration_ms") or album_raw.get("duration_ms"))
+        if not album_type:
+            album_type = ("single" if (normalize_name(album_name) == normalize_name(title)
+                                       or total_tracks in (1, "1")) else "album")
         track_number = ti.get("track_number") or fallback.get("track_number")
         try:
             track_number = int(track_number) if track_number else None
@@ -971,9 +1022,17 @@ def link_download_into_library_v2(context: Dict[str, Any], *,
         # whose release this is when the name heuristics below file it (a
         # stale direct entity falls through to them too). read before the
         # write transaction opens: it is a file read
-        release_artist_name = None if fallback else _release_artist_name(
-            file_path, canonical_album if canonical_album.get("artists") else album_raw,
-            artist_name)
+        if fallback:
+            # a file known by its tags alone: its album artist tag, a whole
+            # credit line read as its first artist (#2240)
+            release_artist_name = fallback.get("album_artist") or None
+            if release_artist_name:
+                release_artist_name = (credit_release_artist(release_artist_name, (artist_name,))
+                                       or release_artist_name)
+        else:
+            release_artist_name = _release_artist_name(
+                file_path, canonical_album if canonical_album.get("artists") else album_raw,
+                artist_name)
 
         from database.music_database import get_database
         db = get_database()
@@ -1038,8 +1097,7 @@ def link_download_into_library_v2(context: Dict[str, Any], *,
                 # leaves that row's own monitoring untouched.
                 derived_monitored = 0 if fallback or context.get("_scan_discovered") else None
                 release_artist_id = artist_id
-                album_artist_name = (fallback.get("album_artist") if fallback
-                                     else release_artist_name)
+                album_artist_name = release_artist_name
                 if (album_artist_name and normalize_name(album_artist_name)
                         != normalize_name(artist_name or "")):
                     release_artist_id = _find_or_create_artist(
@@ -1055,7 +1113,8 @@ def link_download_into_library_v2(context: Dict[str, Any], *,
                     source=identity_source, monitored=derived_monitored,
                     release_mbid=tag_identity.get("release_mbid"),
                     release_year=tag_identity.get("year"),
-                    file_folder=os.path.dirname(str(file_path)))
+                    file_folder=os.path.dirname(str(file_path)),
+                    album_type_said=album_type_said)
                 track_id = _find_or_create_track(
                     conn, album_id, artist_id, title,
                     track_number=track_number, spotify_track_id=spotify_track_id,
