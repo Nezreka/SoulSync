@@ -473,6 +473,13 @@ A video a browser can't play as it is (an MKV, HEVC, AC3 or DTS sound) is conver
 - `POST /api/player/notes/<item_type>/<item_id>` with `{body}` posts a comment (always shared, can't be empty), or with `{at, body?, shared?}` keeps a mark (a note is optional; yours alone unless `shared`). Up to 1000 characters.
 - `PATCH /api/player/note/<id>` with `{body?, shared?}`: your own note. `DELETE /api/player/note/<id>`: your own note, or for an admin anyone's shared one.
 
+#### Guide channels and your lineup
+
+- `GET /api/player/guide/channels`: the channels people made: `{server: [...], mine: [...], can_edit_server}`. A server channel is an admin's, for everyone; a profile's own only it sees. Each is `{id, scope, spec}`.
+- `POST /api/player/guide/channels` with `{scope: mine|server, spec}`: make one (a server one needs an admin). `PUT /api/player/guide/channels/<id>` with `{spec}` changes it, `DELETE` removes it: your own, or for an admin a server one.
+- A spec: `{name, kinds: [movies, tv], genres, decades, studios, networks, collection, min_score, kids, added_days, show, order: shuffle|in_order}`. Lists match any of their values; `show` makes a marathon (one show, start to finish). The guide schedules it from its catalog like the channels it makes itself.
+- `GET /api/player/guide/lineup`: this profile's arrangement, `[{channel_id, position, hidden, name}]`, for any channel (the guide's own too). `PUT` with `{entries: [{channel_id, hidden?, name?}]}` in order replaces it; an empty list puts the guide's order back. Kept in player.db, the same on every screen.
+
 #### Watched
 
 - `POST /api/player/watched` with `{item_type, item_id}`: a movie or episode is into its credits (92% of the way): it counts as watched, in SoulSync's video library and on the media server account, for the profile whose watch state it is (the same rules as the detail page's watched toggle). Returns `{watched}`: false for anything else, or a profile that keeps no watch state of its own. `POST /api/player/progress/finish` does the same for a movie or episode played to the end.

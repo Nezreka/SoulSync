@@ -449,6 +449,54 @@ export const topTracksQuery = (artistId: number) =>
     staleTime: 5 * MINUTE,
   });
 
+// ── the guide's made channels and this profile's lineup ───────────────
+
+export const guideChannelsQuery = () =>
+  queryOptions({
+    queryKey: ['player', 'guide', 'channels'],
+    queryFn: async () =>
+      apiClient.get('player/guide/channels').json<{
+        server: import('./-lib/channels').SavedChannel[];
+        mine: import('./-lib/channels').SavedChannel[];
+        can_edit_server: boolean;
+      }>(),
+    staleTime: 5 * MINUTE,
+  });
+
+export const lineupQuery = () =>
+  queryOptions({
+    queryKey: ['player', 'guide', 'lineup'],
+    queryFn: async () =>
+      (
+        await apiClient
+          .get('player/guide/lineup')
+          .json<{ entries: import('./-lib/channels').LineupEntry[] }>()
+      ).entries,
+    staleTime: 5 * MINUTE,
+  });
+
+export const guideEdits = {
+  add: async (scope: 'server' | 'mine', spec: import('./-lib/channels').ChannelSpec) =>
+    (
+      await apiClient
+        .post('player/guide/channels', { json: { scope, spec } })
+        .json<{ channel: import('./-lib/channels').SavedChannel }>()
+    ).channel,
+  edit: async (id: string, spec: import('./-lib/channels').ChannelSpec) =>
+    (
+      await apiClient
+        .put(`player/guide/channels/${id}`, { json: { spec } })
+        .json<{ channel: import('./-lib/channels').SavedChannel }>()
+    ).channel,
+  remove: async (id: string) => apiClient.delete(`player/guide/channels/${id}`).json(),
+  saveLineup: async (entries: import('./-lib/channels').LineupEntry[]) =>
+    (
+      await apiClient
+        .put('player/guide/lineup', { json: { entries } })
+        .json<{ entries: import('./-lib/channels').LineupEntry[] }>()
+    ).entries,
+};
+
 // ── lyrics ─────────────────────────────────────────────────────────────
 
 export interface Lyrics {

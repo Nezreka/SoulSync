@@ -24,6 +24,7 @@ export type ChannelKind =
   | 'kids'
   | 'playlist'
   | 'rule'
+  | 'server'
   | 'music'
   | 'vibe';
 
@@ -392,6 +393,7 @@ export function matchesFilter(
 
 export const CHANNEL_GROUPS: { kind: ChannelKind; label: string }[] = [
   { kind: 'type', label: 'Everything' },
+  { kind: 'server', label: 'Channels for everyone' },
   { kind: 'rule', label: 'Your channels' },
   { kind: 'playlist', label: 'Your playlists' },
   { kind: 'vibe', label: 'Vibes' },
@@ -409,4 +411,221 @@ export function numberChannels(channels: readonly Channel[]): Channel[] {
     .map((c, i) => ({ c, i }))
     .sort((a, b) => (order.get(a.c.kind) ?? 99) - (order.get(b.c.kind) ?? 99) || a.i - b.i)
     .map(({ c }, i) => ({ ...c, number: 101 + i }));
+}
+
+// ── channels people make: a spec over the library ──────────────────────
+
+/** what goes on a channel someone made (core/player/lineup.py clean_spec) */
+export interface ChannelSpec {
+  name: string;
+  kinds: ('movies' | 'tv')[];
+  genres: string[];
+  decades: number[];
+  studios: string[];
+  networks: string[];
+  collection: string | null;
+  min_score: number | null;
+  kids: boolean;
+  added_days: number | null;
+  /** one show, start to finish (a marathon) */
+  show: number | null;
+  order: 'shuffle' | 'in_order';
+}
+
+export interface SavedChannel {
+  id: string;
+  /** server: an admin made it for everyone; mine: this profile's own */
+  scope: 'server' | 'mine';
+  spec: ChannelSpec;
+}
+
+export const EMPTY_SPEC: ChannelSpec = {
+  name: '',
+  kinds: ['movies', 'tv'],
+  genres: [],
+  decades: [],
+  studios: [],
+  networks: [],
+  collection: null,
+  min_score: null,
+  kids: false,
+  added_days: null,
+  show: null,
+  order: 'shuffle',
+};
+
+const DAY_MS = 86_400_000;
+
+function addedWithin(added: string | null, days: number | null, now: number): boolean {
+  if (!days) return true;
+  const t = added ? Date.parse(added.includes('T') ? added : `${added.replace(' ', 'T')}Z`) : NaN;
+  return Number.isFinite(t) && now - t <= days * DAY_MS;
+}
+
+function sameWord(list: readonly string[], value: string | null | undefined): boolean {
+  if (!list.length) return true;
+  const v = (value ?? '').toLowerCase();
+  return !!v && list.some((x) => x.toLowerCase() === v);
+}
+
+/** a movie or show fits the spec (a show's network, a movie's studio, each only checked on its own kind) */
+export function specMatches(
+  spec: ChannelSpec,
+  title: (CatalogMovie | CatalogShow) & { studio?: string | null; network?: string | null },
+  kind: 'movies' | 'tv',
+  now: number,
+): boolean {
+  if (spec.genres.length && !title.genres.some((g) => sameWord(spec.genres, g))) return false;
+  if (spec.decades.length && !spec.decades.includes(decadeOf(title.year) ?? -1)) return false;
+  if (spec.kids && !isKidSafe(title.content_rating)) return false;
+  if (spec.min_score != null && (title.rating ?? 0) < spec.min_score) return false;
+  if (!addedWithin(title.added_at, spec.added_days, now)) return false;
+  if (kind === 'movies') {
+    if (spec.networks.length && !spec.studios.length) return false;
+    if (!sameWord(spec.studios, (title as CatalogMovie).studio)) return false;
+    if (spec.collection && (title as CatalogMovie).collection !== spec.collection) return false;
+  } else {
+    if (spec.studios.length && !spec.networks.length) return false;
+    if (!sameWord(spec.networks, (title as CatalogShow).network)) return false;
+    if (spec.collection) return false;
+  }
+  return true;
+}
+
+/** the words under a channel's name: what it's made of */
+export function specBlurb(spec: ChannelSpec, showTitle?: string | null): string {
+  if (spec.show) return `${showTitle ?? 'one show'}, start to finish`;
+  return [
+    spec.kinds.map((k) => (k === 'tv' ? 'TV' : 'movies')).join(' + '),
+    spec.genres.slice(0, 2).join(', '),
+    spec.decades.length ? spec.decades.map((d) => `${d}s`).join(', ') : '',
+    [...spec.studios, ...spec.networks].slice(0, 2).join(', '),
+    spec.collection ?? '',
+    spec.min_score != null ? `★ ${spec.min_score}+` : '',
+    spec.added_days ? `added in ${spec.added_days} days` : '',
+    spec.kids ? 'kids' : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
+}
+
+/** what a spec would air (the builder's live count; the channel's pool) */
+export function specPool(spec: ChannelSpec, catalog: VideoCatalog, now: number): GuideItem[] {
+  const pool: GuideItem[] = [];
+  if (spec.kinds.includes('movies'))
+    pool.push(...catalog.movies.filter((m) => specMatches(spec, m, 'movies', now)).map(movieItem));
+  if (spec.kinds.includes('tv'))
+    pool.push(
+      ...catalog.shows.filter((x) => specMatches(spec, x, 'tv', now)).flatMap(episodeItems),
+    );
+  return pool;
+}
+
+/** a made channel. a marathon needs its show's every episode (``marathon``), in order */
+export function specChannel(
+  saved: SavedChannel,
+  catalog: VideoCatalog,
+  now: number,
+  marathon?: { title: string; episodes: GuideItem[] } | null,
+): Channel | null {
+  const spec = saved.spec;
+  const pool = spec.show ? (marathon?.episodes ?? []) : specPool(spec, catalog, now);
+  const out: Channel[] = [];
+  add(out, {
+    id: `made-${saved.id}`,
+    name: spec.name,
+    kind: saved.scope === 'server' ? 'server' : 'rule',
+    blurb: specBlurb(spec, marathon?.title),
+    pool,
+    ordered: spec.order === 'in_order',
+  });
+  return out[0] ?? null;
+}
+
+/** a rule from before channels lived on the server, as a spec */
+export function specFromRule(rule: ChannelRule): ChannelSpec {
+  return {
+    ...EMPTY_SPEC,
+    name: rule.name,
+    kinds: rule.kinds,
+    genres: rule.genre ? [rule.genre] : [],
+    decades: rule.decade ? [rule.decade] : [],
+    kids: !!rule.kidsOnly,
+  };
+}
+
+// ── a profile's lineup: its order, what it hid, what it renamed ────────
+
+export interface LineupEntry {
+  channel_id: string;
+  hidden: boolean;
+  name: string | null;
+}
+
+/**
+ * the channels in this profile's order and names; hidden ones kept but
+ * marked (the guide leaves them out, the editor shows them). channels the
+ * lineup doesn't name keep the guide's own order, after it. numbering is
+ * the guide's (numberChannels), which keeps this order within each group.
+ */
+export function applyLineup(
+  channels: readonly Channel[],
+  entries: readonly LineupEntry[],
+): (Channel & { hidden?: boolean; ownName?: string })[] {
+  const base = channels;
+  const at = new Map(entries.map((e, i) => [e.channel_id, i]));
+  const byId = new Map(entries.map((e) => [e.channel_id, e]));
+  return base
+    .map((c, i) => ({ c, i, pos: at.get(c.id) }))
+    .sort((a, b) => {
+      if (a.pos !== undefined && b.pos !== undefined) return a.pos - b.pos;
+      if (a.pos !== undefined) return -1;
+      if (b.pos !== undefined) return 1;
+      return a.i - b.i;
+    })
+    .map(({ c }) => {
+      const e = byId.get(c.id);
+      return {
+        ...c,
+        ownName: c.name,
+        name: e?.name || c.name,
+        hidden: !!e?.hidden,
+      };
+    });
+}
+
+/** every owned episode of a show, in airing order (specials last): a marathon's pool */
+export function marathonItems(show: {
+  id: number;
+  title: string;
+  has_poster?: boolean;
+  seasons?: readonly {
+    season_number: number;
+    episodes: readonly {
+      id: number;
+      episode_number: number;
+      title?: string | null;
+      runtime_minutes?: number | null;
+      owned?: boolean;
+    }[];
+  }[];
+}): GuideItem[] {
+  const href = `/player/tv/${show.id}`;
+  const art = show.has_poster !== false ? posterUrl('show', show.id) : null;
+  return [...(show.seasons ?? [])]
+    .sort((a, b) => (a.season_number || 999) - (b.season_number || 999))
+    .flatMap((season) =>
+      [...season.episodes]
+        .filter((e) => e.owned !== false)
+        .sort((a, b) => a.episode_number - b.episode_number)
+        .map((e) => ({
+          key: `episode:${e.id}`,
+          title: show.title,
+          subtitle: `S${season.season_number} E${e.episode_number}${e.title ? ` · ${e.title}` : ''}`,
+          seconds: (e.runtime_minutes ?? 0) * 60,
+          href,
+          art,
+          kind: 'episode',
+        })),
+    );
 }

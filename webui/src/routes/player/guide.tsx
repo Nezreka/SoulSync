@@ -11,12 +11,15 @@ import {
   CHANNEL_GROUPS,
   musicTypeChannel,
   matchesFilter,
+  applyLineup,
   numberChannels,
   playlistChannel,
-  ruleChannel,
   serverMusicChannel,
+  specChannel,
+  specFromRule,
+  marathonItems,
   type Channel,
-  type ChannelRule,
+  type SavedChannel,
 } from './-lib/channels';
 import {
   dayLabel,
@@ -27,10 +30,19 @@ import {
   saveRules,
 } from './-lib/guide';
 import { albumArtwork } from './-lib/images';
-import { hashSeed, mergeIntoBlocks, programsInWindow, type GuideProgram } from './-lib/schedule';
-import { genresOf } from './-lib/video';
+import {
+  hashSeed,
+  mergeIntoBlocks,
+  programsInWindow,
+  type GuideItem,
+  type GuideProgram,
+} from './-lib/schedule';
 import {
   favoritesQuery,
+  guideChannelsQuery,
+  guideEdits,
+  lineupQuery,
+  showDetailQuery,
   musicChannelsQuery,
   playlistQuery,
   saveFavorites,
@@ -41,8 +53,10 @@ import {
 import { ChannelForm } from './-ui/guide-form';
 import { GuideDetail, GuideGrid, OnNow, type Picked } from './-ui/guide-grid';
 import { Empty, PageTitle, Tabs, styles as s } from './-ui/kit';
+import { LineupEditor } from './-ui/lineup-editor';
 import { setLineup } from './-ui/playback/tuner';
 import { useSections } from './-ui/sections';
+import { ConfirmSheet } from './-ui/sheet';
 
 type GuideView = 'grid' | 'now';
 
@@ -145,8 +159,53 @@ function GuidePage() {
   });
   const musicPool = useMusicPool(sections.music);
   const favorites = useFavorites();
-  const [rules, setRules] = useState<ChannelRule[]>(() => loadRules(profileId));
-  const [making, setMaking] = useState(false);
+  const made = useQuery(guideChannelsQuery());
+  const lineupQ = useQuery(lineupQuery());
+  const queryClient = useQueryClient();
+  const [making, setMaking] = useState<SavedChannel | 'new' | null>(null);
+  const [editingLineup, setEditingLineup] = useState(false);
+  const [removing, setRemoving] = useState<SavedChannel | null>(null);
+  const madeList = useMemo(
+    () => [...(made.data?.server ?? []), ...(made.data?.mine ?? [])],
+    [made.data],
+  );
+  const refreshMade = () => queryClient.invalidateQueries({ queryKey: ['player', 'guide'] });
+
+  // channels made before they lived on the server: moved there once, then gone from this browser
+  const moved = useRef(false);
+  useEffect(() => {
+    if (moved.current || !made.data || made.data.mine.length) return;
+    const local = loadRules(profileId);
+    moved.current = true;
+    if (!local.length) return;
+    void Promise.all(
+      local.map((r) => guideEdits.add('mine', specFromRule(r)).catch(() => null)),
+    ).then(() => {
+      saveRules(profileId, []);
+      void refreshMade();
+    });
+  }, [made.data, profileId]);
+
+  // a marathon channel airs every episode of its show, in order
+  const marathonShows = useMemo(
+    () => [...new Set(madeList.map((c) => c.spec.show).filter((x): x is number => !!x))],
+    [madeList],
+  );
+  const marathonDetails = useQueries({
+    queries: marathonShows.map((id) => ({ ...showDetailQuery(id), enabled: sections.tv })),
+  });
+  const marathonKey = marathonDetails.map((q) => q.dataUpdatedAt).join(',');
+  const marathons = useMemo(() => {
+    const map = new Map<number, { title: string; episodes: GuideItem[] }>();
+    marathonShows.forEach((id, i) => {
+      const show = marathonDetails[i]?.data;
+      if (show) map.set(id, { title: show.title, episodes: marathonItems(show) });
+    });
+    return map;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [marathonShows, marathonKey]);
+  // added-in-the-last-n-days moves once a day, not every tick
+  const today = Math.floor(now / 86_400_000) * 86_400_000;
   const [picked, setPicked] = useState<Picked | null>(null);
   // what the pointer or focus rests on in the grid; settles before the panel follows
   const [preview, setPreview] = useState<Picked | null>(null);
@@ -180,7 +239,7 @@ function GuidePage() {
     () => (musicChannels.data ?? []).map(serverMusicChannel).filter((c): c is Channel => !!c),
     [musicChannels.data],
   );
-  const channels = useMemo(() => {
+  const allChannels = useMemo(() => {
     const out: Channel[] = [...videoChannels];
     if (musicChannel) out.splice(Math.min(3, out.length), 0, musicChannel);
     firstPlaylists.forEach((p, i) => {
@@ -200,12 +259,35 @@ function GuidePage() {
       if (channel) out.push(channel);
     });
     out.push(...serverMusic);
-    for (const rule of rules) {
-      const channel = ruleChannel(rule, cat);
+    for (const saved of madeList) {
+      const channel = specChannel(
+        saved,
+        cat,
+        today,
+        saved.spec.show ? marathons.get(saved.spec.show) : null,
+      );
       if (channel) out.push(channel);
     }
-    return numberChannels(out);
-  }, [videoChannels, musicChannel, serverMusic, playlistKey, rules, firstPlaylists, cat]);
+    return out;
+  }, [
+    videoChannels,
+    musicChannel,
+    serverMusic,
+    playlistKey,
+    madeList,
+    marathons,
+    firstPlaylists,
+    cat,
+    today,
+  ]);
+
+  // this profile's lineup: its order and names; what it hid stays out of the guide
+  const lined = useMemo(
+    () => applyLineup(allChannels, lineupQ.data ?? []),
+    [allChannels, lineupQ.data],
+  );
+  const channels = useMemo(() => numberChannels(lined.filter((c) => !c.hidden)), [lined]);
+  const numbers = useMemo(() => new Map(channels.map((c) => [c.id, c.number])), [channels]);
 
   // channel up / down follow the guide's numbers, from anywhere in the player
   useEffect(
@@ -277,6 +359,11 @@ function GuidePage() {
     };
   }, [view, making]);
 
+  // the made channel the panel shows, when it is one: changed or removed from there
+  const pickedMade = picked
+    ? madeList.find((m) => `made-${m.id}` === picked.channel.id)
+    : undefined;
+
   // the panel above the grid starts on what's on now on the first channel
   const firstChannel = groups[0]?.channels[0];
   const firstOn = useMemo<Picked | null>(() => {
@@ -293,7 +380,6 @@ function GuidePage() {
   // the music channels take a library pass the first time; the guide doesn't wait for them
   const loading = catalog.isLoading || playlists.isLoading;
   const tuningMusic = musicChannels.isLoading && musicChannels.fetchStatus === 'fetching';
-  const genres = genresOf([...(catalog.data?.movies ?? []), ...(catalog.data?.shows ?? [])]);
   const setSearch = (next: { view?: GuideView; filter?: ChannelFilter }) =>
     void navigate({ search: (prev) => ({ ...prev, ...next }), replace: true });
 
@@ -311,8 +397,11 @@ function GuidePage() {
             ]}
             onChange={(next) => setSearch({ view: next })}
           />
-          <button type="button" className={s.btn} onClick={() => setMaking((v) => !v)} data-nav>
-            {making ? 'Close' : 'Make a channel'}
+          <button type="button" className={s.btn} onClick={() => setEditingLineup(true)} data-nav>
+            Your lineup
+          </button>
+          <button type="button" className={s.btnPrimary} onClick={() => setMaking('new')} data-nav>
+            Make a channel
           </button>
         </div>
       </div>
@@ -377,15 +466,52 @@ function GuidePage() {
 
       {making ? (
         <ChannelForm
-          genres={genres}
-          onCancel={() => setMaking(false)}
-          onSave={(rule) => {
-            const next = [...rules, rule];
-            setRules(next);
-            saveRules(profileId, next);
-            setMaking(false);
+          catalog={cat}
+          editing={making === 'new' ? null : making}
+          canServer={!!made.data?.can_edit_server}
+          onCancel={() => setMaking(null)}
+          onSaved={() => {
+            setMaking(null);
+            void refreshMade();
           }}
         />
+      ) : null}
+
+      {editingLineup ? (
+        <LineupEditor
+          channels={lined.map((c) => ({ ...c, number: numbers.get(c.id) }))}
+          made={madeList}
+          canEditServer={!!made.data?.can_edit_server}
+          onChanged={() =>
+            void queryClient.invalidateQueries({ queryKey: ['player', 'guide', 'lineup'] })
+          }
+          onEdit={(c) => {
+            setEditingLineup(false);
+            setMaking(c);
+          }}
+          onRemove={(c) => setRemoving(c)}
+          onClose={() => setEditingLineup(false)}
+        />
+      ) : null}
+
+      {removing ? (
+        <ConfirmSheet
+          title={`Remove ${removing.spec.name}?`}
+          confirm="Remove"
+          danger
+          onClose={() => setRemoving(null)}
+          onConfirm={() => {
+            void guideEdits.remove(removing.id).then(() => {
+              setRemoving(null);
+              setPicked(null);
+              void refreshMade();
+            });
+          }}
+        >
+          {removing.scope === 'server'
+            ? 'It goes from the guide for everyone on this server.'
+            : 'It goes from your guide. The movies and shows on it stay in your library.'}
+        </ConfirmSheet>
       ) : null}
 
       {/* the panel on top stays put; the channels scroll under it inside the screen */}
@@ -413,13 +539,13 @@ function GuidePage() {
             onFavorite={favorites.toggle}
             onClose={() => setPicked(null)}
             onRemoveRule={
-              picked.channel.kind === 'rule'
-                ? () => {
-                    const next = rules.filter((r) => `rule-${r.id}` !== picked.channel.id);
-                    setRules(next);
-                    saveRules(profileId, next);
-                    setPicked(null);
-                  }
+              pickedMade && (pickedMade.scope === 'mine' || made.data?.can_edit_server)
+                ? () => setRemoving(pickedMade)
+                : undefined
+            }
+            onEditRule={
+              pickedMade && (pickedMade.scope === 'mine' || made.data?.can_edit_server)
+                ? () => setMaking(pickedMade)
                 : undefined
             }
           />

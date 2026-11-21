@@ -351,6 +351,7 @@ export function GuideDetail({
   favorite,
   onFavorite,
   onRemoveRule,
+  onEditRule,
   onClose,
 }: {
   picked: Picked;
@@ -359,6 +360,8 @@ export function GuideDetail({
   favorite: boolean;
   onFavorite: (channel: Channel) => void;
   onRemoveRule?: () => void;
+  /** a channel someone made: change what's on it */
+  onEditRule?: () => void;
   /** absent: it's the preview (what the pointer rests on), with nothing to close */
   onClose?: () => void;
 }) {
@@ -445,6 +448,11 @@ export function GuideDetail({
           >
             {favorite ? '★' : '☆'}
           </button>
+          {onEditRule ? (
+            <button type="button" className={s.btn} onClick={onEditRule} data-nav>
+              Change channel
+            </button>
+          ) : null}
           {onRemoveRule ? (
             <button type="button" className={s.btn} onClick={onRemoveRule} data-nav>
               Remove channel

@@ -959,3 +959,102 @@ def delete_note(note_id):
     if not ok:
         return jsonify({"success": False, "error": "not_found", "message": "No such note of yours."}), 404
     return jsonify({"success": True})
+
+
+# ── the guide: channels people make, and each profile's lineup ──────────
+
+def _is_admin() -> bool:
+    from flask import g
+    return bool(getattr(g, "is_admin", False))
+
+
+@bp.route("/api/player/guide/channels", methods=["GET"])
+@self_only
+def guide_channels():
+    """the server's channels and this profile's own; can_edit_server: an admin"""
+    from core.player import lineup
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    try:
+        out = lineup.list_channels(player_db(), pid)
+    except Exception:  # noqa: BLE001
+        return _failed("channels read", "Couldn't load the channels.")
+    return jsonify({"success": True, **out, "can_edit_server": _is_admin()})
+
+
+@bp.route("/api/player/guide/channels", methods=["POST"])
+@self_only
+def add_guide_channel():
+    """{scope: mine|server, spec}: a server channel is an admin's to make"""
+    from core.player import lineup
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    body = request.get_json(silent=True) or {}
+    server = body.get("scope") == "server"
+    if server and not _is_admin():
+        return jsonify({"success": False, "error": "not_allowed",
+                        "message": "Only an admin makes channels for everyone."}), 403
+    try:
+        ch = lineup.add_channel(player_db(), None if server else pid, body.get("spec"))
+    except lineup.LineupError as e:
+        return _bad(e)
+    except Exception:  # noqa: BLE001
+        return _failed("channel save", "Couldn't make that channel.")
+    return jsonify({"success": True, "channel": ch})
+
+
+@bp.route("/api/player/guide/channels/<channel_id>", methods=["PUT"])
+@self_only
+def edit_guide_channel(channel_id):
+    from core.player import lineup
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    try:
+        ch = lineup.edit_channel(player_db(), pid, channel_id, (request.get_json(silent=True) or {}).get("spec"),
+                                 admin=_is_admin())
+    except lineup.LineupError as e:
+        return _bad(e)
+    if ch is None:
+        return jsonify({"success": False, "error": "not_found", "message": "No such channel of yours."}), 404
+    return jsonify({"success": True, "channel": ch})
+
+
+@bp.route("/api/player/guide/channels/<channel_id>", methods=["DELETE"])
+@self_only
+def remove_guide_channel(channel_id):
+    from core.player import lineup
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    if not lineup.remove_channel(player_db(), pid, channel_id, admin=_is_admin()):
+        return jsonify({"success": False, "error": "not_found", "message": "No such channel of yours."}), 404
+    return jsonify({"success": True})
+
+
+@bp.route("/api/player/guide/lineup", methods=["GET"])
+@self_only
+def get_guide_lineup():
+    """this profile's order, hidden channels and names"""
+    from core.player import lineup
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    return jsonify({"success": True, "entries": lineup.get_lineup(player_db(), pid)})
+
+
+@bp.route("/api/player/guide/lineup", methods=["PUT"])
+@self_only
+def put_guide_lineup():
+    """{entries: [{channel_id, hidden?, name?}]} in order: the whole lineup"""
+    from core.player import lineup
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    try:
+        entries = lineup.put_lineup(player_db(), pid, (request.get_json(silent=True) or {}).get("entries"))
+    except lineup.LineupError as e:
+        return _bad(e)
+    return jsonify({"success": True, "entries": entries})

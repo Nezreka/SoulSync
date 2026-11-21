@@ -27,7 +27,8 @@ def _sweep_player_profile_data(profile_id: int) -> None:
     try:
         from database.player_database import get_player_database
         get_player_database().delete_profile_data(profile_id)
-        from core.player import presence, settings
+        from core.player import lineup, presence, settings
+        lineup.forget_profile(get_player_database(), profile_id)
         settings.forget(profile_id)
         presence.forget_profile(profile_id)
     except Exception:   # noqa: BLE001 - sweep is additive, never fatal

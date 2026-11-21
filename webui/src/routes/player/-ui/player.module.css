@@ -2737,14 +2737,6 @@
   }
 }
 
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: calc(var(--u) * 0.35);
-  color: var(--pl-text-3);
-  font-size: calc(var(--u) * 0.8);
-}
-
 .fieldInput {
   height: calc(var(--u) * 2.5);
   padding: 0 calc(var(--u) * 0.75);
