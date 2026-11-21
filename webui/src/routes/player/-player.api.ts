@@ -212,10 +212,14 @@ export interface PlaylistSong {
   added_at: string | null;
   /** the library track it plays; null: not in your library, or hidden from this profile */
   track_id: number | null;
+  /** why it can't play: hidden as explicit for this profile, or not in the library */
+  unplayable?: 'explicit' | 'missing' | null;
 }
 
 export interface PlaylistDetail extends PlaylistSummary {
   songs: PlaylistSong[];
+  /** this profile hides explicit music */
+  hides_explicit?: boolean;
   duration_ms: number;
   playable_count: number;
 }

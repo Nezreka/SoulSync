@@ -140,7 +140,8 @@ function PlaylistPage() {
 
   const yours = p.kind === 'yours';
   const queue = playlistItems({ ...p, songs });
-  const missing = p.songs.length - p.playable_count;
+  const hidden = p.songs.filter((x) => x.unplayable === 'explicit').length;
+  const missing = p.songs.length - p.playable_count - hidden;
   const from = sourceName(p.source);
   const needle = find.trim().toLowerCase();
   const shown = songs
@@ -207,7 +208,7 @@ function PlaylistPage() {
     albumHref: x.album_id ? `/player/music/album/${x.album_id}` : undefined,
     art: albumArtwork(x.album_id) ?? remoteImage(x.image_url),
     duration: x.duration_ms ? x.duration_ms / 1000 : null,
-    why: 'Not in your library',
+    why: x.unplayable === 'explicit' ? 'Explicit, hidden for this profile' : 'Not in your library',
     song: songFromRow(x),
   }));
   // a filtered list's index is not the playlist's
@@ -230,6 +231,11 @@ function PlaylistPage() {
             <span>{songCount(p.songs.length)}</span>
             {p.duration_ms ? <span>{runtime(p.duration_ms / 1000)}</span> : null}
             {missing ? <span>{missing.toLocaleString()} not in your library</span> : null}
+            {hidden ? (
+              <span title="This profile hides explicit music. An admin can change that in its permissions.">
+                {hidden.toLocaleString()} explicit, hidden for this profile
+              </span>
+            ) : null}
             {!yours && p.owner ? <span>by {p.owner}</span> : null}
           </div>
           <div className={m.plActions}>

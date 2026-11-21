@@ -74,6 +74,7 @@ def test_songs_resolve_to_library_tracks_by_stamp_or_name(mdb, lib):
     assert out["playable_count"] == 2
     assert out["songs"][0]["album_id"] == lib["album"]
     assert out["songs"][3]["title"] == "Not Here"
+    assert [x["unplayable"] for x in out["songs"]] == [None, None, "missing", "missing"]
 
 
 def test_hidden_explicit_songs_do_not_play(mdb, lib):
@@ -82,6 +83,9 @@ def test_hidden_explicit_songs_do_not_play(mdb, lib):
                [{"title": "Nobody", "artist": "Mitski", "lib2_track_id": lib["Nobody"]}])
     out = P.detail(mdb, 1, pid, scope="shared", hide_explicit=True)
     assert out["songs"][0]["track_id"] is None
+    # and it says why: hidden, not missing
+    assert out["songs"][0]["unplayable"] == "explicit"
+    assert out["hides_explicit"] is True
 
 
 def test_another_profiles_playlist_is_not_found(mdb):

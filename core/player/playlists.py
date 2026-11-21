@@ -150,10 +150,27 @@ def detail(db: Any, profile_id: int, playlist_id: int, *, scope: Any,
                     tid = None
             ids.append(tid)
         ok = playable_ids(conn, ids, scope=scope, hide_explicit=hide_explicit)
+        # why a song can't play: hidden as explicit for this profile, or not
+        # in the library. only asked when explicit songs are hidden
+        explicit: Set[int] = set()
+        if hide_explicit:
+            open_lib = Library(conn, db_key=str(getattr(db, "database_path", id(db))), scope=scope,
+                               hide_explicit=False)
+            for n, (r, tid) in enumerate(zip(rows, ids, strict=True)):
+                if tid is not None and tid in ok:
+                    continue
+                try:
+                    found = tid or _stamped_id(r) or open_lib.find_track(
+                        r.get("track_name") or "", r.get("artist_name") or "", r.get("album_name") or "")
+                except Exception:  # noqa: BLE001
+                    found = None
+                if found and playable_ids(conn, [found], scope=scope, hide_explicit=False):
+                    explicit.add(n)
         facts = _facts(conn, [i for i in ids if i in ok])
     songs = []
     total_ms = 0
     for n, (r, tid) in enumerate(zip(rows, ids, strict=True), start=1):
+        playable = tid is not None and tid in ok
         f = facts.get(tid) if tid in ok else None
         length = (f or {}).get("duration_ms") or int(r.get("duration_ms") or 0)
         total_ms += length
@@ -169,10 +186,12 @@ def detail(db: Any, profile_id: int, playlist_id: int, *, scope: Any,
             "image_url": r.get("image_url") or None,
             "added_at": r.get("added_at"),
             # playable: in this profile's library and not hidden from it
-            "track_id": tid if tid in ok else None,
+            "track_id": tid if playable else None,
+            # why it can't play: "explicit" (hidden for this profile) or "missing"
+            "unplayable": None if playable else ("explicit" if (n - 1) in explicit else "missing"),
         })
     out = summary(p)
-    out.update({"songs": songs, "duration_ms": total_ms,
+    out.update({"songs": songs, "duration_ms": total_ms, "hides_explicit": bool(hide_explicit),
                 "playable_count": sum(1 for s in songs if s["track_id"] is not None)})
     return out
 
