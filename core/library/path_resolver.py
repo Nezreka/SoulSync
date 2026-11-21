@@ -263,7 +263,8 @@ def resolve_library_file_path_with_diagnostic(
     if not isinstance(file_path, str) or not file_path:
         return None, attempt
 
-    if os.path.exists(file_path):
+    from core.library.path_mappings import foreign_rooted
+    if not foreign_rooted(file_path) and os.path.exists(file_path):
         if library_root and not _inside_library_root(file_path, library_root):
             return None, attempt
         attempt.raw_path_existed = True

@@ -61,6 +61,22 @@ def ensure_schema(cursor: Any) -> None:
 
 
 # ---------------------------------------------------------------- prefixes
+def foreign_rooted(path: Any, *, nt: Optional[bool] = None) -> bool:
+    """a path rooted the unix way (/mnt/music) read on a Windows host.
+
+    Windows takes it as a folder on the current drive (E:\\mnt\\music), so a
+    media server's linux path would match whatever stray folder of that name
+    sits there instead of the server's real files. such a path is never the
+    same folder here; overrides and suffix matching translate it."""
+    import os
+    windows = (os.name == "nt") if nt is None else nt
+    p = str(path or "")
+    return windows and p.startswith("/") and not p.startswith("//")
+
+
+_real_foreign = foreign_rooted
+
+
 def windows_style(path: str) -> bool:
     """a drive letter or a UNC share: compared without case"""
     text = str(path or "")

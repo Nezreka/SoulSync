@@ -290,7 +290,7 @@ def locate_folder(conn: Any, server_kind: str, server_folder: str, env: Env,
         if env.isdir(local):
             return local, "override", None
         broken = broken or local
-    if env.isdir(server_folder):
+    if not path_mappings.foreign_rooted(server_folder) and env.isdir(server_folder):
         return server_folder, "same", broken
     learned = env.learned(server_folder)
     if learned and env.isdir(learned):

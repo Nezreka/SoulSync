@@ -340,3 +340,22 @@ def test_remembered_result_round_trip():
     assert coverage.last_result()["reachable_pct"] == 10.0
     coverage.forget()
     assert coverage.last_result() is None
+
+
+# ------------------------------------------------- a linux path on a windows host
+def test_a_linux_server_path_is_never_the_same_folder_on_windows(conn, monkeypatch):
+    """Plex on linux says /mnt/musicBackup; SoulSync on Windows reads that as
+    E:\\mnt\\musicBackup, and a stray folder there was taken for the library
+    (0 of 40 files opened). on Windows such a path is never 'same'."""
+    from core.library import path_mappings
+    monkeypatch.setattr(path_mappings, "foreign_rooted",
+                        lambda p, nt=None: path_mappings.__dict__["_real_foreign"](p, nt=True))
+    env = _env(isdir=lambda _p: True)
+    local, how, _ = coverage.locate_folder(conn, "plex", "/mnt/musicBackup", env, [])
+    assert how != "same"
+
+
+def test_on_linux_the_same_path_still_counts(conn):
+    env = _env(isdir=lambda p: p == "/mnt/musicBackup")
+    local, how, _ = coverage.locate_folder(conn, "plex", "/mnt/musicBackup", env, [])
+    assert (local, how) == ("/mnt/musicBackup", "same")

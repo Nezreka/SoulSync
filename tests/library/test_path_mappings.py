@@ -235,3 +235,24 @@ def test_video_overrides_dont_reach_music(conn, two_mounts):
     _use(conn)
     assert pm.local_path("/plexmedia/Music/" + _REL) is None
     assert pm.local_path("/plexmedia/Music/" + _REL, media_type="video") == str(b / _REL)
+
+
+def test_a_unix_rooted_path_is_foreign_only_on_windows():
+    from core.library.path_mappings import foreign_rooted
+    assert foreign_rooted("/mnt/musicBackup/a.flac", nt=True)
+    assert not foreign_rooted("/mnt/musicBackup/a.flac", nt=False)
+    assert not foreign_rooted("H:\\Music\\a.flac", nt=True)
+    assert not foreign_rooted("\\\\192.168.86.36\\share\\a.flac", nt=True)
+    assert not foreign_rooted("//nas/share/a.flac", nt=True)
+    assert not foreign_rooted("", nt=True) and not foreign_rooted(None, nt=True)
+
+
+def test_the_resolver_never_opens_a_stray_copy_of_a_linux_path_on_windows(tmp_path, monkeypatch):
+    """E:\\mnt\\musicBackup on the Windows host must not stand in for the
+    media server's /mnt/musicBackup."""
+    from core.library import path_mappings, path_resolver
+    stray = tmp_path / "a.flac"
+    stray.write_bytes(b"x")
+    monkeypatch.setattr(path_mappings, "foreign_rooted", lambda p, nt=None: True)
+    path, attempt = path_resolver.resolve_library_file_path_with_diagnostic(str(stray))
+    assert not attempt.raw_path_existed
