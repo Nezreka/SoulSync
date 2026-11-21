@@ -22129,6 +22129,12 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     user-select: none;
 }
 
+/* hidden means hidden: display:flex above beat the attribute, so "Whole album
+   via Lidarr" showed (ticked) for everyone, even with no Lidarr in the chain */
+.force-download-toggle[hidden] {
+    display: none;
+}
+
 .force-download-toggle span {
     font-size: 13px;
     font-weight: 500;
