@@ -48,8 +48,9 @@ def tmdb_certification(kind, dr, region="US"):
 
 
 def parse_title_identity(kind, d):
-    """{name, original_name, year, aliases} out of a tmdb movie/tv detail
-    response fetched with alternative_titles appended. {} for an empty one."""
+    """{name, original_name, year, aliases, translations} out of a tmdb
+    movie/tv detail response fetched with alternative_titles and translations
+    appended. {} for an empty one."""
     d = d if isinstance(d, dict) else {}
     if not d.get("id"):
         return {}
@@ -66,10 +67,29 @@ def parse_title_identity(kind, d):
             seen.add(t.lower())
             aliases.append(t)
     year = str(date or "")[:4]
+    # the title in every language TMDB has (#2234). alternative_titles is
+    # TMDB's list of OTHER names; a film's own french or german title lives in
+    # its translations, so "Rocco et ses frères" was never an accepted name
+    # and every french release of Rocco and His Brothers was a wrong title
+    aliases = aliases[:60]
+    known = {str(t or "").strip().lower() for t in (name, original, *aliases)}
+    translations = []
+    tr = d.get("translations") if isinstance(d.get("translations"), dict) else {}
+    for row in (tr.get("translations") or []):
+        data = (row or {}).get("data") if isinstance(row, dict) else None
+        if not isinstance(data, dict):
+            continue
+        t = str(data.get("title" if kind == "movie" else "name") or "").strip()
+        if t and t.lower() not in known:
+            known.add(t.lower())
+            translations.append(t)
     out = {"name": str(name or "").strip() or None,
            "original_name": str(original or "").strip() or None,
            "year": int(year) if year.isdigit() else None,
-           "aliases": aliases[:30]}
+           "aliases": aliases}
+    # only when there are any, so a response without them reads as before
+    if translations:
+        out["translations"] = translations[:80]
     # genres and keywords, for the library rules (#2029): only when tmdb sent
     # them, so a response without them reads exactly as before
     genres = [str(g.get("name")).strip() for g in (d.get("genres") or [])
@@ -563,8 +583,9 @@ class TMDBClient:
 
     def title_identity(self, kind, tmdb_id):
         """who a movie or show is, for judging releases: TMDB's own (english)
-        name, its original-language name, its year and its alternative titles,
-        in one call. {} on any error / no key.
+        name, its original-language name, its year, its alternative titles and
+        its title in every language (translations, #2234), in one call. {} on
+        any error / no key.
 
         the alias list alone missed the names that matter most. a library
         whose server is in french stores "L'amour sous couverture", and TMDB's
@@ -578,7 +599,7 @@ class TMDBClient:
         try:
             r = requests.get(self.BASE + path + str(int(tmdb_id)),
                              params={"api_key": self.api_key,
-                                     "append_to_response": "alternative_titles,keywords"
+                                     "append_to_response": "alternative_titles,translations,keywords"
                                      + ("" if kind == "movie" else ",external_ids")},
                              timeout=12)
             r.raise_for_status()

@@ -289,6 +289,39 @@ _EDITION_TOKENS = frozenset({
     "extended", "remastered", "remaster", "unrated", "uncut", "directors", "director",
     "cut", "edition", "theatrical", "special", "imax", "final", "ultimate", "definitive",
 })
+# trailing words that say what language a release is in, not what it's called:
+# 'Rocco et ses frères (french)' is Rocco et ses frères (#2234). the long forms
+# only, so a short tag can't eat a real word
+_LANGUAGE_TOKENS = frozenset({
+    "french", "truefrench", "vff", "vfq", "vostfr", "subfrench", "multi", "dual",
+    "german", "deutsch", "italian", "spanish", "castellano", "latino", "portuguese",
+    "dublado", "japanese", "korean", "chinese", "mandarin", "cantonese", "russian",
+    "polish", "dutch", "flemish", "swedish", "danish", "norwegian", "finnish", "hindi",
+    "turkish", "czech", "hungarian", "arabic", "ukrainian", "english", "subbed", "dubbed",
+})
+# words that make a title a different film, never tolerated as extra words:
+# 'Kill Bill Vol 2', 'Rocky II', 'Dune Part Two', 'Wicked For Good'
+_SEQUEL_TOKENS = frozenset({
+    "part", "pt", "chapter", "vol", "volume", "episode", "ii", "iii", "iv", "vi",
+    "vii", "viii", "ix", "xi", "xii", "two", "three", "four", "five", "returns",
+    "reloaded", "revolutions", "rises", "begins", "origins", "resurrection", "redemption",
+    "revenge", "sequel", "prequel", "continues", "forever", "again", "new", "next",
+    "legacy", "reborn", "awakens", "strikes", "back", "for", "good", "and", "vs",
+    "versus", "meets", "of", "the", "suite", "teil", "parte", "partie",
+})
+# a word that carries a title on ('Rocco et ses frères de sang', 'Rocco and
+# the Sisters'): extra words starting with one are a longer title, not a
+# director's name after this one
+_CONTINUATION_WORDS = frozenset({
+    "de", "du", "des", "la", "le", "les", "l", "d", "au", "aux", "et", "of", "the", "and",
+    "a", "an", "in", "on", "at", "to", "from", "with", "without", "der", "die", "das",
+    "den", "dem", "und", "im", "am", "vom", "von", "van", "het", "een", "del", "della",
+    "di", "da", "dei", "il", "lo", "gli", "el", "los", "las", "y", "e", "en", "con",
+    "do", "dos", "na", "no", "och", "og", "i", "pa",
+})
+# how many extra words a release may add after a title when its year is the
+# wanted one (a director's name, 'Luchino Visconti')
+_MAX_EXTRA_WORDS = 3
 
 
 def _spaces(s: Any) -> str:
@@ -402,7 +435,54 @@ def _release_title_year(cand: str):
     return int(years[-1].group()) if years else None
 
 
-def titles_match(release_name: Any, want_title: Any) -> bool:
+def year_guarded_title(title: Any, year: Any):
+    """a name to accept a release under, guarded by the year when it is one
+    word: 'Oben' (Up, in german) is a common word and would take any release
+    called that, so it is accepted as 'Oben (2009)', which only matches a
+    release carrying the year (one either way). a one-word name with no year
+    to guard it is None (not accepted). a name already ending in a year, or
+    of two words or more, comes back as it is (#2234)."""
+    t = str(title or "").strip()
+    if not t:
+        return None
+    m = _WANT_YEAR_SUFFIX.match(t)
+    if m and normalize_title(m.group(1)):
+        return t
+    if len(normalize_title(t).split()) >= 2:
+        return t
+    try:
+        y = int(str(year or "")[:4])
+    except (TypeError, ValueError):
+        return None
+    return "%s (%d)" % (t, y) if 1900 <= y <= 2100 else None
+
+
+def _extra_words_ok(rest: list, rel_year, want_year) -> bool:
+    """the words a release adds after a whole wanted title, as the same film.
+    edition and language words always ('Paradox Extended', 'Rocco et ses
+    frères (french)'). anything else only when the release carries exactly the
+    wanted year, a few words at most, no numbers, no sequel words and not
+    starting like the title goes on ('de Sang', 'and the Sisters'): so
+    'Rocco.et.ses.Frères.Luchino.Visconti.1960' is the film, and 'Wicked For
+    Good 2025' or 'Dune Part Two' never pass for the first one (#2234)."""
+    if not rest:
+        return False
+    if all(tok in _EDITION_TOKENS or tok in _LANGUAGE_TOKENS for tok in rest):
+        return True
+    try:
+        wy = int(str(want_year or "")[:4])
+    except (TypeError, ValueError):
+        return False
+    if not rel_year or rel_year != wy:
+        return False
+    words = [tok for tok in rest if tok not in _EDITION_TOKENS and tok not in _LANGUAGE_TOKENS]
+    return (0 < len(words) <= _MAX_EXTRA_WORDS
+            and words[0] not in _CONTINUATION_WORDS
+            and all(tok.isalpha() and len(tok) > 1 and tok not in _SEQUEL_TOKENS
+                    for tok in words))
+
+
+def titles_match(release_name: Any, want_title: Any, want_year: Any = None) -> bool:
     """True when a release's parsed title matches ANY acceptable title (primary +
     aliases). Exact after normalization, tolerating only trailing edition words
     ('Paradox Extended' for 'Paradox') and squeezed spacing ('90DayFiance').
@@ -446,8 +526,12 @@ def titles_match(release_name: Any, want_title: Any) -> bool:
             if got.replace(" ", "") == want.replace(" ", ""):
                 return True                              # '90DayFiance' == '90 day fiance'
             if got.startswith(want + " "):
-                rest = got[len(want):].split()
-                if rest and all(tok in _EDITION_TOKENS for tok in rest):
+                # past a one-word title only edition and language words:
+                # 'Up Something 2009' isn't Up
+                multi = len(want.split()) >= 2
+                if _extra_words_ok(got[len(want):].split(),
+                                   _release_title_year(cand) if multi else None,
+                                   want_year if multi else None):
                     return True
     return not saw_any
 
