@@ -175,3 +175,40 @@ def detail(db: Any, profile_id: int, playlist_id: int, *, scope: Any,
     out.update({"songs": songs, "duration_ms": total_ms,
                 "playable_count": sum(1 for s in songs if s["track_id"] is not None)})
     return out
+
+
+def top_tracks(conn, artist_id: int, *, scope: Any, hide_explicit: bool,
+               limit: int = 10) -> List[Dict[str, Any]]:
+    """an artist's most played songs this profile can play: by play count,
+    then newest, so an artist nobody has played yet still shows their
+    latest. songs on their own albums and the ones they're credited on"""
+    from core.library2.sql_util import owned_sql
+    from core.library_scope import library_scope
+    from core.subsonic.library import _has_overrides, track_explicit_sql
+    with library_scope(scope):
+        hidden = f" AND NOT {track_explicit_sql('t', 'al', _has_overrides(conn))}" if hide_explicit else ""
+        rows = conn.execute(
+            f"SELECT t.id, t.title, COALESCE(NULLIF(t.track_artist, ''), ar.name), t.duration, "
+            f"al.id, al.title, t.play_count, t.explicit FROM lib2_tracks t "
+            f"JOIN lib2_albums al ON al.id = t.album_id "
+            f"LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id "
+            f"WHERE (al.primary_artist_id = ? OR t.track_artist LIKE '%' || ? || '%') "
+            f"AND {owned_sql('track', 't')}{hidden} "
+            f"ORDER BY t.play_count DESC, COALESCE(al.year, 0) DESC, t.id DESC LIMIT ?",
+            (int(artist_id), _artist_name(conn, artist_id), max(1, min(int(limit), 50)) * 3)).fetchall()
+    seen, out = set(), []
+    for r in rows:
+        # the same song on two releases (an album and its deluxe) shows once, its most played copy
+        key = " ".join(str(r[1]).casefold().split())
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({"track_id": int(r[0]), "title": r[1], "artist": r[2], "duration_ms": int(r[3] or 0),
+                    "album_id": r[4], "album": r[5], "plays": int(r[6] or 0), "explicit": bool(r[7])})
+    return out[:max(1, min(int(limit), 50))]
+
+
+def _artist_name(conn, artist_id: int) -> str:
+    row = conn.execute("SELECT name FROM lib2_artists WHERE id = ?", (int(artist_id),)).fetchone()
+    # a name that matches nothing when there's no artist, so only their own albums count
+    return (row[0] if row and row[0] else "\x00").replace("%", "").replace("_", "")

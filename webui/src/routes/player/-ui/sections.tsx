@@ -60,6 +60,8 @@ export interface NavEntry {
   exact?: boolean;
   /** other paths that belong to it (a single playlist's page is under Playlists) */
   also?: string[];
+  /** one of the phone's few tabs; the rest sit under More */
+  tab?: boolean;
   visible: (access: SectionAccess) => boolean;
 }
 
@@ -70,6 +72,7 @@ export const NAV: NavEntry[] = [
     group: 'main',
     icon: <HomeIcon />,
     exact: true,
+    tab: true,
     visible: () => true,
   },
   {
@@ -77,6 +80,7 @@ export const NAV: NavEntry[] = [
     label: 'Guide',
     group: 'main',
     icon: <GuideIcon />,
+    tab: true,
     visible: (a) => a.video || a.music,
   },
   {
@@ -100,9 +104,17 @@ export const NAV: NavEntry[] = [
     label: 'Movies',
     group: 'watch',
     icon: <MovieIcon />,
+    tab: true,
     visible: (a) => a.movies,
   },
-  { to: '/player/tv', label: 'TV', group: 'watch', icon: <TvIcon />, visible: (a) => a.tv },
+  {
+    to: '/player/tv',
+    label: 'TV',
+    group: 'watch',
+    icon: <TvIcon />,
+    tab: true,
+    visible: (a) => a.tv,
+  },
   {
     to: '/player/youtube',
     label: 'YouTube',
@@ -115,6 +127,7 @@ export const NAV: NavEntry[] = [
     label: 'Music',
     group: 'listen',
     icon: <MusicIcon />,
+    tab: true,
     visible: (a) => a.music,
   },
   {

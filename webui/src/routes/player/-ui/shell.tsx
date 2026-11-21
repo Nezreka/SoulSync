@@ -13,7 +13,7 @@ import { useCardSize, type CardSizeRange } from '@/components/card-size';
 import { appURL } from '@/platform/url-base';
 
 import { profilesQuery, watchingNowQuery } from '../-player.api';
-import { BackIcon, ChevronIcon, ExitIcon, GearIcon } from './icons';
+import { BackIcon, ChevronIcon, ExitIcon, GearIcon, MoreIcon } from './icons';
 import { AddToPlaylistHost } from './music/add-to-playlist';
 import { useNowPlaying } from './now-playing';
 import { MusicView } from './playback/music-view';
@@ -25,6 +25,7 @@ import s from './player.module.css';
 import { gateNeeded, ProfileChip, WhoGate } from './profiles';
 import { Search } from './search';
 import { NAV, NAV_GROUPS, useSections, type NavEntry } from './sections';
+import { Sheet } from './sheet';
 import { focusFirstIn, useSpatialNav } from './use-spatial-nav';
 
 const CARD_SCALE_RANGE: CardSizeRange = { min: 64, max: 160, base: 100 };
@@ -60,12 +61,58 @@ function currentEntry(entries: NavEntry[], path: string): NavEntry | null {
   return best;
 }
 
+/** a phone's More: every place that isn't one of its tabs, and settings */
+function MoreSheet({
+  entries,
+  watching,
+  onClose,
+}: {
+  entries: NavEntry[];
+  watching: number;
+  onClose: () => void;
+}) {
+  const pathname = useRouterState({ select: (r) => r.location.pathname });
+  const first = useRef(pathname);
+  // going somewhere closes it
+  useEffect(() => {
+    if (pathname !== first.current) onClose();
+  }, [pathname, onClose]);
+  return (
+    <Sheet title="More" onClose={onClose}>
+      <nav className={s.moreList} aria-label="More">
+        {entries.map((e) => (
+          <Link key={e.to} to={e.to as '/player'} className={s.moreItem} data-nav>
+            <span className={s.navIcon}>{e.icon}</span>
+            <span>{e.label}</span>
+            {e.to === '/player/watching' && watching ? (
+              <span className={s.navBadge}>{watching}</span>
+            ) : null}
+          </Link>
+        ))}
+        <Link to="/player/settings" className={s.moreItem} data-nav>
+          <span className={s.navIcon}>
+            <GearIcon />
+          </span>
+          <span>Settings</span>
+        </Link>
+        <a className={s.moreItem} href={appURL('/')} data-nav>
+          <span className={s.navIcon}>
+            <ExitIcon />
+          </span>
+          <span>Back to SoulSync</span>
+        </a>
+      </nav>
+    </Sheet>
+  );
+}
+
 function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
   const sections = useSections();
   const entries = NAV.filter((entry) => entry.visible(sections));
   const current = currentEntry(entries, useRouterState({ select: (r) => r.location.pathname }));
   // how many others are playing something right now
   const watching = useQuery(watchingNowQuery()).data?.sessions.length ?? 0;
+  const [more, setMore] = useState(false);
   return (
     <nav className={s.side} aria-label="Player" data-collapsed={collapsed ? 'true' : undefined}>
       <div className={s.brand}>
@@ -88,6 +135,7 @@ function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => 
                 key={entry.to}
                 to={entry.to as '/player'}
                 className={s.navLink}
+                data-tab={entry.tab ? 'true' : undefined}
                 activeOptions={{ exact: true }}
                 data-current={entry === current ? 'true' : undefined}
                 aria-current={entry === current ? 'page' : undefined}
@@ -107,6 +155,28 @@ function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => 
           </div>
         );
       })}
+      <button
+        type="button"
+        className={s.navMore}
+        aria-haspopup="dialog"
+        aria-expanded={more}
+        data-current={current && !current.tab ? 'true' : undefined}
+        onClick={() => setMore(true)}
+        data-nav
+      >
+        <span className={s.navIcon}>
+          <MoreIcon />
+        </span>
+        <span className={s.navLabel}>More</span>
+        {watching ? <span className={s.navBadge}>{watching}</span> : null}
+      </button>
+      {more ? (
+        <MoreSheet
+          entries={entries.filter((e) => !e.tab)}
+          watching={watching}
+          onClose={() => setMore(false)}
+        />
+      ) : null}
       <div className={s.sideFoot}>
         <Link
           to="/player/settings"

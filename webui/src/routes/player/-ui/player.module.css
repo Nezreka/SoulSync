@@ -1322,14 +1322,30 @@
   position: absolute;
   inset: 0;
   display: grid;
-  place-items: center;
-  padding: calc(var(--u) * 0.8);
-  background: linear-gradient(160deg, var(--white-a08), var(--white-a02));
-  color: var(--pl-text-3);
-  font-size: calc(var(--u) * 0.85);
-  font-weight: 600;
-  line-height: 1.25;
-  text-align: center;
+  place-items: end start;
+  padding: calc(var(--u) * 0.9);
+  overflow: hidden;
+  /* no picture: a colour of its own, the title set in it */
+  background:
+    radial-gradient(
+      circle at 85% 15%,
+      hsl(calc(var(--fb-hue) + 40) 70% 55% / 0.35),
+      transparent 55%
+    ),
+    linear-gradient(150deg, hsl(var(--fb-hue) 45% 30%), hsl(calc(var(--fb-hue) + 25) 55% 14%));
+  color: var(--white-a85);
+}
+
+.artFallbackText {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: calc(var(--u) * 1.05);
+  font-weight: 800;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  text-align: left;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
 }
 
 .cardBadge {
@@ -3633,7 +3649,9 @@ a.crewRow:hover {
 .billboardDot {
   position: relative;
   width: calc(var(--u) * 1.4);
+  min-width: 0;
   height: 4px;
+  min-height: 0;
   padding: 0;
   overflow: hidden;
   border: 0;
@@ -4346,4 +4364,85 @@ a.crewRow:hover {
 .managerLink[data-status='active'] {
   background: var(--white-a06);
   color: var(--pl-text);
+}
+
+/* ── the phone's tab bar: a few tabs and More ────────────────────────── */
+
+.navMore {
+  display: none;
+}
+
+.moreList {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 0.15);
+}
+
+.moreItem {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 0.8);
+  padding: calc(var(--u) * 0.75) calc(var(--u) * 0.6);
+  border-radius: var(--radius-md);
+  color: var(--pl-text);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.moreItem:hover,
+.moreItem:focus-visible {
+  background: var(--white-a08);
+}
+
+@media (max-width: 768px) {
+  .navLink:not([data-tab='true']) {
+    display: none;
+  }
+
+  .navMore {
+    position: relative;
+    display: flex;
+    flex: 1 1 0;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: calc(var(--u) * 0.2);
+    min-width: 0;
+    padding: calc(var(--u) * 0.35) 0;
+    border: none;
+    background: none;
+    color: var(--pl-text-3);
+    font: inherit;
+    font-size: calc(var(--u) * 0.66);
+    cursor: pointer;
+  }
+
+  .navMore[data-current='true'] {
+    color: var(--pl-text);
+  }
+
+  .navLink .navBadge,
+  .navMore .navBadge {
+    position: absolute;
+    top: calc(var(--u) * 0.2);
+    right: calc(50% - var(--u) * 1.4);
+    margin: 0;
+  }
+}
+
+/* a round picture (an artist, a channel): the name sits in the middle */
+[data-round='true'] .artFallback {
+  place-items: center;
+}
+
+[data-round='true'] .artFallbackText {
+  text-align: center;
+}
+
+button.railMore {
+  padding: 0;
+  border: none;
+  background: none;
+  font-family: inherit;
+  cursor: pointer;
 }

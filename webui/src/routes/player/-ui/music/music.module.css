@@ -668,3 +668,8 @@
     padding-top: calc(var(--u) * 1.5);
   }
 }
+
+/* a list with notes on the right (plays, a quality): one width for all, so the columns line up */
+.tracks[data-end='true'] .trackEnd {
+  min-width: calc(var(--u) * 7.5);
+}

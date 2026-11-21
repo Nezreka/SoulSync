@@ -424,6 +424,31 @@ export const noteEdits = {
   remove: async (id: number) => apiClient.delete(`player/note/${id}`).json(),
 };
 
+// ── an artist's most played songs ─────────────────────────────────────
+
+export interface TopTrack {
+  track_id: number;
+  title: string;
+  artist: string;
+  duration_ms: number;
+  album_id: number;
+  album: string;
+  plays: number;
+  explicit: boolean;
+}
+
+export const topTracksQuery = (artistId: number) =>
+  queryOptions({
+    queryKey: ['player', 'music', 'artist-top', artistId],
+    queryFn: async () =>
+      (
+        await apiClient
+          .get(`player/music/artist/${artistId}/top`, { searchParams: { limit: 10 } })
+          .json<{ tracks: TopTrack[] }>()
+      ).tracks,
+    staleTime: 5 * MINUTE,
+  });
+
 // ── lyrics ─────────────────────────────────────────────────────────────
 
 export interface Lyrics {

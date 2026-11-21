@@ -447,6 +447,10 @@ A video a browser can't play as it is (an MKV, HEVC, AC3 or DTS sound) is conver
 - `GET /api/player/playlists/<id>`: one of them with `songs`, each `{position, title, artist, album, album_id, artist_id, duration_ms, image_url, added_at, track_id}`. `track_id` is the library track it plays (the match identify stamped, else the library's own match by name, the same one Subsonic apps get), or null when this profile can't play it (not in its library, or explicit on a profile that hides it). Also `duration_ms` and `playable_count`.
 - Changing your playlists uses the playlist routes the music side already has (`/api/user-playlists`, `/api/mirrored-playlists/<id>/custom-name`, `DELETE /api/mirrored-playlists/<id>`).
 
+#### An artist's popular songs
+
+- `GET /api/player/music/artist/<artist_id>/top?limit=10`: the artist's most played songs this profile can play (play count, then newest), their own albums and the songs they're credited on. A song on two releases shows once, its most played copy. `[{track_id, title, artist, duration_ms, album_id, album, plays, explicit}]`.
+
 #### Lyrics
 
 - `GET /api/player/lyrics/track/<track_id>`: a library track's lyrics, `{success, synced, plain, source}`, the same answer as `POST /api/lyrics/fetch` (the `.lrc` beside the file and the file's own tags first, then LRCLib). Asked by track id: the server finds the file itself, so a client never sends a path. A track this profile can't play is refused the same way playback refuses it.

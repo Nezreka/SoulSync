@@ -80,6 +80,7 @@ export function TrackList({
       className={s.tracks}
       data-art={showArt ? 'true' : undefined}
       data-album={showAlbum ? 'true' : undefined}
+      data-end={rows.some((r) => r.end) ? 'true' : undefined}
       role="list"
       aria-label={label}
     >

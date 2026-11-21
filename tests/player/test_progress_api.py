@@ -269,11 +269,11 @@ def test_every_player_route_declares_its_access():
            or r.rule.endswith("/settings") or "/presence" in r.rule
            or "/note" in r.rule]
     music = [r for r in rules if r.rule.endswith("/music-channels")]
-    playlists = [r for r in rules if "/playlists" in r.rule]
+    playlists = [r for r in rules if "/playlists" in r.rule or r.rule.endswith("/top")]
     library = [r for r in rules if r not in own and r not in music and r not in playlists]
-    assert len(own) == 25 and len(library) == 7 and len(music) == 1 and len(playlists) == 2
+    assert len(own) == 25 and len(library) == 7 and len(music) == 1 and len(playlists) == 3
     assert declared_access(app.view_functions[music[0].endpoint]) == ("perm", "music.library")
-    # playlists: the music side's own gate, the same as its playlists page
+    # playlists and an artist's top songs: the music side's own gate
     for rule in playlists:
         assert declared_access(app.view_functions[rule.endpoint]) == ("perm", "music.access"), rule.rule
     # your own rows: self only

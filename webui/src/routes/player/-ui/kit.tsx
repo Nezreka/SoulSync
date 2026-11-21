@@ -31,6 +31,13 @@ export function PlayerLink({
 // ── artwork ────────────────────────────────────────────────────────────
 
 /** an image that fades in when loaded, and says the title when there is none */
+/** a steady colour for a title with no picture: the same title, the same colour */
+function hueOf(text: string): number {
+  let h = 0;
+  for (let i = 0; i < text.length; i++) h = (h * 31 + text.charCodeAt(i)) | 0;
+  return Math.abs(h) % 360;
+}
+
 export function Art({
   src,
   srcSet,
@@ -68,8 +75,12 @@ export function Art({
         />
       ) : null}
       {state === 'failed' ? (
-        <span className={s.artFallback} aria-hidden="true">
-          {alt}
+        <span
+          className={s.artFallback}
+          style={{ '--fb-hue': String(hueOf(alt)) } as React.CSSProperties}
+          aria-hidden="true"
+        >
+          <span className={s.artFallbackText}>{alt}</span>
         </span>
       ) : null}
     </>

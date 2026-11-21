@@ -679,6 +679,21 @@ def player_playlist(playlist_id):
     return jsonify({"success": True, "playlist": out})
 
 
+@bp.route("/api/player/music/artist/<int:artist_id>/top", methods=["GET"])
+@requires("music.access")
+def artist_top_tracks(artist_id):
+    """an artist's most played songs this profile can play"""
+    from core.player import playlists
+    from core.player.sources.music import _scope, hides_explicit
+    try:
+        with get_database()._get_connection() as conn:
+            rows = playlists.top_tracks(conn, artist_id, scope=_scope(), hide_explicit=hides_explicit(),
+                                        limit=request.args.get("limit", 10, type=int) or 10)
+    except Exception:  # noqa: BLE001
+        return _failed("top tracks", "Couldn't load their songs.")
+    return jsonify({"success": True, "tracks": rows})
+
+
 # ── player settings (per profile) ────────────────────────────────────────
 
 @bp.route("/api/player/settings", methods=["GET"])

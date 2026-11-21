@@ -87,3 +87,28 @@ def test_hidden_explicit_songs_do_not_play(mdb, lib):
 def test_another_profiles_playlist_is_not_found(mdb):
     pid = create_playlist(mdb, 2, "Private")
     assert P.detail(mdb, 1, pid, scope="shared", hide_explicit=False) is None
+
+
+def test_an_artists_top_songs_are_the_most_played_they_can_play(mdb, lib):
+    with mdb._get_connection() as conn:
+        conn.execute("UPDATE lib2_tracks SET play_count = 9 WHERE id = ?", (lib["Nobody"],))
+        conn.execute("UPDATE lib2_tracks SET play_count = 3 WHERE id = ?", (lib["Geyser"],))
+        conn.commit()
+        ar = conn.execute("SELECT primary_artist_id FROM lib2_albums WHERE id = ?", (lib["album"],)).fetchone()[0]
+        top = P.top_tracks(conn, ar, scope="shared", hide_explicit=False)
+        assert [t["title"] for t in top] == ["Nobody", "Geyser"]  # "Gone" has no file
+        hidden = P.top_tracks(conn, ar, scope="shared", hide_explicit=True)
+        assert [t["title"] for t in hidden] == ["Geyser"]
+
+
+def test_a_song_on_two_releases_is_popular_once(mdb, lib):
+    with mdb._get_connection() as conn:
+        ar = conn.execute("SELECT primary_artist_id FROM lib2_albums WHERE id = ?", (lib["album"],)).fetchone()[0]
+        deluxe = conn.execute("INSERT INTO lib2_albums (primary_artist_id, title) VALUES (?, 'Deluxe')", (ar,)).lastrowid
+        again = conn.execute("INSERT INTO lib2_tracks (album_id, title, duration, play_count) VALUES (?, 'Geyser', 1, 50)",
+                             (deluxe,)).lastrowid
+        conn.execute("INSERT INTO lib2_track_files (track_id, path, format, is_primary, file_state) "
+                     "VALUES (?, '/m/x.flac', 'flac', 1, 'active')", (again,))
+        conn.commit()
+        top = P.top_tracks(conn, ar, scope="shared", hide_explicit=False)
+        assert [(t["title"], t["track_id"]) for t in top if t["title"] == "Geyser"] == [("Geyser", again)]

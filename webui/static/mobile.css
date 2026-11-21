@@ -1628,8 +1628,10 @@
        data attribute because its classes are a CSS module's. So is the server
        activity drawer: its controls are sized for touch already, and Settings >
        People (switches, checkboxes and pills sized by its CSS module), and the
-       Settings page's new parts ([data-ui]), sized by theirs. */
-    button:not(.watchlist-card-remove):not(.wishlist-delete-btn):not(.wishlist-delete-album-btn):not(.wishlist-delete-btn-small):not(.wishlist-back-btn):not(.alphabet-btn):not(.filter-btn):not(.playlist-modal-close):not(.notif-bell-btn):not(.helper-float-btn):not(.hero-indicator):not(.discover-blacklist-btn):not(.tool-help-button):not(.vst-half):not([data-import-page-result-row]):not([data-import-page-inline-action]):not([data-import-page-pill]):not(.modal-track-play-btn):not(.cancel-track-btn):not(.dash-qs-swatch):not(.watchlist-filter-btn):not(.play-button):not(.stop-button):not(.mini-nav-btn):not(.mini-toggle-btn):not(.expand-hint):not(.sync-tab-button):not(.sync-tab-close):not(.automx-dot):not(.automx-pill):not([data-stats-mark]):not([data-library-v2] button):not(.notif-panel button):not(.notif-history-modal button):not(.toast-compact button):not([data-server-activity] button):not([data-people] button):not([data-ui] button) {
+       Settings page's new parts ([data-ui]), sized by theirs. The /player app
+       sizes every control of its own for touch ([data-player-root]); the
+       floor turned its carousel dots into fat pills. */
+    button:not(.watchlist-card-remove):not(.wishlist-delete-btn):not(.wishlist-delete-album-btn):not(.wishlist-delete-btn-small):not(.wishlist-back-btn):not(.alphabet-btn):not(.filter-btn):not(.playlist-modal-close):not(.notif-bell-btn):not(.helper-float-btn):not(.hero-indicator):not(.discover-blacklist-btn):not(.tool-help-button):not(.vst-half):not([data-import-page-result-row]):not([data-import-page-inline-action]):not([data-import-page-pill]):not(.modal-track-play-btn):not(.cancel-track-btn):not(.dash-qs-swatch):not(.watchlist-filter-btn):not(.play-button):not(.stop-button):not(.mini-nav-btn):not(.mini-toggle-btn):not(.expand-hint):not(.sync-tab-button):not(.sync-tab-close):not(.automx-dot):not(.automx-pill):not([data-stats-mark]):not([data-library-v2] button):not(.notif-panel button):not(.notif-history-modal button):not(.toast-compact button):not([data-server-activity] button):not([data-people] button):not([data-ui] button):not([data-player-root] button) {
         min-height: 38px;
     }
 
