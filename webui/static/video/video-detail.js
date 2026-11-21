@@ -1090,6 +1090,13 @@
                 ? (missingEps ? 'Get ' + missingEps + ' missing episode' + (missingEps === 1 ? '' : 's') + '…' : 'Get episodes…')
                 : 'Get show…');
         }
+        // the release picker for a show (#2233): whole series, a season or one
+        // episode, picked inside the modal. the same modal a movie's opens
+        if (d.kind === 'show' && d.source !== 'youtube' && _canDl &&
+                window.VideoDownload && window.VideoDownload.manualSearch) {
+            getMore += moreItem('manualsearch', '⌕', 'Manual search…',
+                'Search every source yourself for the whole series, a season or one episode, and pick the release');
+        }
         if (d.trailer && d.trailer.key) {
             companions = '<button class="vd-trailer-btn" type="button" data-vd-act="trailer">' +
                 '<span class="vd-trailer-ic">▶</span> Trailer</button>' + companions;
@@ -4393,7 +4400,7 @@
             else if (which === 'wishtoggle') toggleMovieWishlist(act);
             else if (which === 'get') openGetModal();
             else if (which === 'subsearch') subSearchMovie();
-            else if (which === 'manualsearch') manualSearchMovie();
+            else if (which === 'manualsearch') { if (data && data.kind === 'show') manualSearchShow(); else manualSearchMovie(); }
             else if (which === 'missing') openGetModal(true);
             else if (which === 'wishlist-missing') wishlistAllMissing(act);
             else if (which === 'poster') openPosterModal();
@@ -4809,7 +4816,25 @@
         if (!window.VideoDownload || !window.VideoDownload.manualSearch || !data) return;
         VideoDownload.manualSearch({ title: data.title, scope: scope, season: selectedSeason, episode: en,
             mediaId: (_dataSource() !== 'tmdb' ? data.id : null), mediaSource: _dataSource(),
-            tmdbId: (data.source === 'tmdb' ? data.id : (data.tmdb_id || null)), year: data.year, poster: _showPoster() });
+            tmdbId: (data.source === 'tmdb' ? data.id : (data.tmdb_id || null)), year: data.year, poster: _showPoster(),
+            seasons: _manualSeasons() });
+    }
+    // the show's seasons for the modal's scope picker (#2233): what each has,
+    // and its episodes where the page has them loaded
+    function _manualSeasons() {
+        if (!data || data.kind !== 'show' || !Array.isArray(data.seasons)) return [];
+        return data.seasons.filter(function (s) { return s && s.season_number != null; }).map(function (s) {
+            return { season: s.season_number, title: s.title || null,
+                total: s.episode_total || (s.episodes ? s.episodes.length : 0), have: s.episode_owned || 0,
+                episodes: (s.episodes || []).filter(function (e) { return e && e.episode_number != null; })
+                    .map(function (e) { return { episode: e.episode_number, title: e.title || e.name || null, have: !!e.owned }; }) };
+        });
+    }
+    // a show's manual search from its ⋯ menu (#2233): opens on the season the
+    // page shows; the modal switches to the whole series or one episode
+    function manualSearchShow() {
+        if (!data || data.kind !== 'show') return;
+        _openManualSearch(seasonByNum(selectedSeason) ? 'season' : 'series');
     }
 
     // A movie's manual search (#2122): a library movie or a tmdb preview, the
