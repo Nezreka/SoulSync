@@ -156,6 +156,8 @@ export interface PlayerState {
   watchedKey: string | null;
   /** episodes played on their own, one after another: is anyone still there? */
   stillWatching: boolean;
+  /** a video plays on into the next (the profile's setting) */
+  autoplayNext: boolean;
 }
 
 /** this many videos in a row with nobody touching anything, then ask before the next */
@@ -261,6 +263,7 @@ export class PlayerEngine {
       subtitleDelay: 0,
       watchedKey: null,
       stillWatching: false,
+      autoplayNext: true,
     };
     this.bindMediaSession();
   }
@@ -900,6 +903,14 @@ export class PlayerEngine {
 
   private autoRun = 0;
 
+  /** the profile's playback settings (player settings): a video plays on into the next, and when to ask */
+  private prefsAuto = { autoplayNext: true, stillWatchingAfter: STILL_WATCHING_AFTER };
+
+  configure(next: { autoplayNext?: boolean; stillWatchingAfter?: number }) {
+    this.prefsAuto = { ...this.prefsAuto, ...next };
+    this.set({ autoplayNext: this.prefsAuto.autoplayNext });
+  }
+
   /** the answer to "are you still watching?": yes, play the next one */
   keepWatching() {
     const to = Q.nextIndex(this.state.queue, true);
@@ -927,8 +938,14 @@ export class PlayerEngine {
       return;
     }
     if (this.state.kind === 'video') {
+      // autoplay off: stop here, the end screen offers the next one
+      if (!this.prefsAuto.autoplayNext) {
+        this.set({ status: 'ended' });
+        return;
+      }
       // a run of videos nobody has touched: ask before the next one
-      if (this.autoRun >= STILL_WATCHING_AFTER) {
+      const ask = this.prefsAuto.stillWatchingAfter;
+      if (ask > 0 && this.autoRun >= ask) {
         this.set({ status: 'ended', stillWatching: true });
         return;
       }

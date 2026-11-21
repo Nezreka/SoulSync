@@ -307,6 +307,78 @@ export const playlistEdits = {
     apiClient.post('user-playlists/liked/remove', { json: { tracks: songBody(songs) } }).json(),
 };
 
+// ── player settings (per profile) and watching now ────────────────────
+
+export interface PlayerSettings {
+  share_activity: boolean;
+  autoplay_next: boolean;
+  still_watching_after: number;
+}
+
+export const playerSettingsQuery = () =>
+  queryOptions({
+    queryKey: ['player', 'settings'],
+    queryFn: async () =>
+      apiClient
+        .get('player/settings')
+        .json<{ settings: PlayerSettings; about: Record<keyof PlayerSettings, string> }>(),
+    staleTime: 5 * MINUTE,
+  });
+
+export async function savePlayerSettings(changes: Partial<PlayerSettings>) {
+  return (
+    await apiClient.put('player/settings', { json: changes }).json<{ settings: PlayerSettings }>()
+  ).settings;
+}
+
+export interface WatchingSession {
+  profile_id: number;
+  profile: { name: string; avatar_color?: string | null; avatar_url?: string | null };
+  item_type: string;
+  item_id: string;
+  position: number;
+  duration: number | null;
+  playing: boolean;
+  live: boolean;
+  channel: { id: string; name: string; number: number | null } | null;
+  meta: ProgressMeta;
+  started: number;
+  seen: number;
+}
+
+export const watchingNowQuery = () =>
+  queryOptions({
+    queryKey: ['player', 'watching-now'],
+    queryFn: async () =>
+      apiClient.get('player/presence').json<{ sessions: WatchingSession[]; sharing: boolean }>(),
+    staleTime: 10_000,
+    refetchInterval: 15_000,
+  });
+
+export interface TogetherPlace {
+  item_type: string;
+  item_id: string;
+  position: number;
+  duration: number | null;
+  finished: boolean;
+  meta: ProgressMeta;
+  updated: number;
+}
+
+export interface TogetherTitle {
+  key: string;
+  mine: TogetherPlace;
+  others: (TogetherPlace & { profile_id: number; profile: WatchingSession['profile'] })[];
+}
+
+export const togetherQuery = () =>
+  queryOptions({
+    queryKey: ['player', 'together'],
+    queryFn: async () =>
+      (await apiClient.get('player/presence/together').json<{ titles: TogetherTitle[] }>()).titles,
+    staleTime: MINUTE,
+  });
+
 // ── lyrics ─────────────────────────────────────────────────────────────
 
 export interface Lyrics {

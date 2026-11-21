@@ -15,6 +15,7 @@ import {
   HomeIcon,
   MovieIcon,
   MusicIcon,
+  PeopleIcon,
   PlaylistIcon,
   PodcastIcon,
   TvIcon,
@@ -85,6 +86,15 @@ export const NAV: NavEntry[] = [
     icon: <WatchlistIcon />,
     visible: (a) => a.video,
   },
+  {
+    to: '/player/watching',
+    label: 'Watching now',
+    short: 'Now',
+    group: 'main',
+    icon: <PeopleIcon />,
+    visible: () => true,
+  },
+
   {
     to: '/player/movies',
     label: 'Movies',

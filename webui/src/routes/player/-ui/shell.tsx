@@ -12,11 +12,12 @@ import { createPortal } from 'react-dom';
 import { useCardSize, type CardSizeRange } from '@/components/card-size';
 import { appURL } from '@/platform/url-base';
 
-import { profilesQuery } from '../-player.api';
-import { BackIcon, ChevronIcon, ExitIcon } from './icons';
+import { profilesQuery, watchingNowQuery } from '../-player.api';
+import { BackIcon, ChevronIcon, ExitIcon, GearIcon } from './icons';
 import { AddToPlaylistHost } from './music/add-to-playlist';
 import { useNowPlaying } from './now-playing';
 import { MusicView } from './playback/music-view';
+import { usePlayerSync } from './playback/presence';
 import { TransportBar } from './playback/transport-bar';
 import { ChannelBanner } from './playback/tuner';
 import { VideoPlayer } from './playback/video-player';
@@ -63,6 +64,8 @@ function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => 
   const sections = useSections();
   const entries = NAV.filter((entry) => entry.visible(sections));
   const current = currentEntry(entries, useRouterState({ select: (r) => r.location.pathname }));
+  // how many others are playing something right now
+  const watching = useQuery(watchingNowQuery()).data?.sessions.length ?? 0;
   return (
     <nav className={s.side} aria-label="Player" data-collapsed={collapsed ? 'true' : undefined}>
       <div className={s.brand}>
@@ -93,6 +96,11 @@ function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => 
               >
                 <span className={s.navIcon}>{entry.icon}</span>
                 <span className={s.navLabel}>{entry.label}</span>
+                {entry.to === '/player/watching' && watching ? (
+                  <span className={s.navBadge} aria-label={`${watching} playing`}>
+                    {watching}
+                  </span>
+                ) : null}
                 {entry.short ? <span className={s.navShort}>{entry.short}</span> : null}
               </Link>
             ))}
@@ -100,6 +108,17 @@ function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => 
         );
       })}
       <div className={s.sideFoot}>
+        <Link
+          to="/player/settings"
+          className={s.managerLink}
+          title={collapsed ? 'Player settings' : undefined}
+          data-nav
+        >
+          <span className={s.navIcon}>
+            <GearIcon />
+          </span>
+          <span className={s.navLabel}>Settings</span>
+        </Link>
         <a
           className={s.managerLink}
           href={appURL('/')}
@@ -139,6 +158,7 @@ export function PlayerShell({ profileId }: { profileId: number | null }) {
   const [gate, setGate] = useState<boolean | null>(null);
 
   useSpatialNav(rootRef);
+  usePlayerSync();
   const nowPlaying = useNowPlaying();
   // the header sits clear over a hero at the top, and goes solid once the
   // page scrolls under it, so nothing reads through the search bar

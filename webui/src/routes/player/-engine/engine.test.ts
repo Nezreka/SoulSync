@@ -649,3 +649,27 @@ describe('a reload keeps the length', () => {
     expect(t.engine.getState().duration).toBe(300);
   });
 });
+
+describe("the profile's playback settings", () => {
+  it('autoplay off stops at the end of an episode; asking can be turned off', async () => {
+    const t = setup({});
+    const eps = ['1', '2', '3', '4', '5', '6'].map((id) => ({
+      ...movie(id),
+      type: 'episode' as const,
+    }));
+    t.engine.configure({ autoplayNext: false });
+    t.engine.playItems(eps);
+    await t.flush();
+    t.media.video!.finish();
+    await t.flush();
+    expect(t.engine.getState().status).toBe('ended');
+    expect(t.engine.getState().queue.index).toBe(0);
+    t.engine.configure({ autoplayNext: true, stillWatchingAfter: 0 });
+    for (let i = 0; i < 5; i++) {
+      t.media.video!.finish();
+      await t.flush();
+    }
+    expect(t.engine.getState().stillWatching).toBe(false);
+    expect(t.engine.getState().queue.index).toBe(5);
+  });
+});

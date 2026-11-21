@@ -677,3 +677,157 @@ def player_playlist(playlist_id):
     if out is None:
         return jsonify({"success": False, "error": "not_found", "message": "No such playlist."}), 404
     return jsonify({"success": True, "playlist": out})
+
+
+# ── player settings (per profile) ────────────────────────────────────────
+
+@bp.route("/api/player/settings", methods=["GET"])
+@self_only
+def get_player_settings():
+    """this profile's player settings, each with what it does"""
+    from core.player import settings
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    try:
+        return jsonify({"success": True, "settings": settings.get(player_db(), pid),
+                        "about": {k: v[2] for k, v in settings.SETTINGS.items()}})
+    except Exception:  # noqa: BLE001
+        return _failed("settings read", "Couldn't load your settings.")
+
+
+@bp.route("/api/player/settings", methods=["PUT"])
+@self_only
+def put_player_settings():
+    """{key: value, ...}: all saved or none. turning sharing off takes you
+    off everyone's watching-now at once"""
+    from core.player import presence, settings
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    try:
+        out = settings.put(player_db(), pid, request.get_json(silent=True))
+    except settings.SettingsError as e:
+        return _bad(e)
+    except Exception:  # noqa: BLE001
+        return _failed("settings save", "Couldn't save that setting.")
+    if not out["share_activity"]:
+        presence.forget_profile(pid)
+    return jsonify({"success": True, "settings": out})
+
+
+# ── watching now (who plays what, live) ─────────────────────────────────
+
+def _shares(profile_id: int) -> bool:
+    from core.player import settings
+    try:
+        return bool(settings.get(player_db(), profile_id)["share_activity"])
+    except Exception:  # noqa: BLE001 - can't tell: don't show it
+        return False
+
+
+def _viewer_may_see(s) -> bool:
+    """the viewer may see this kind of media, and this film or show under
+    its rating cap"""
+    from core.permissions import map_refuses
+    from core.player.presence import KIND_PERMISSIONS
+    perms = KIND_PERMISSIONS.get(s.item_type, ())
+    if not perms or all(map_refuses(p) for p in perms):
+        return False
+    if s.item_type not in ("movie", "episode"):
+        return True
+    try:
+        from api.video import get_video_db
+        from api.video.kids import library_title_allowed, video_cap
+        cap = video_cap()
+        if cap is None:
+            return True
+        if s.item_type == "movie":
+            return library_title_allowed(get_video_db(), "movie", int(s.item_id), cap)
+        show = (s.meta or {}).get("parent_id")
+        return bool(show) and library_title_allowed(get_video_db(), "show", int(show), cap)
+    except Exception:  # noqa: BLE001 - can't tell: don't show it
+        return False
+
+
+_who: dict = {"at": 0.0, "map": {}}
+
+
+def _profiles_by_id() -> dict:
+    """names and colours, kept a minute"""
+    if time.time() - _who["at"] > 60:
+        try:
+            rows = get_database().get_all_profiles() or []
+        except Exception:  # noqa: BLE001
+            rows = []
+        _who["map"] = {int(r["id"]): {"name": r.get("name") or "Someone",
+                                      "avatar_color": r.get("avatar_color"),
+                                      "avatar_url": r.get("avatar_url")} for r in rows if r.get("id")}
+        _who["at"] = time.time()
+    return _who["map"]
+
+
+@bp.route("/api/player/presence", methods=["POST"])
+@self_only
+def presence_beat():
+    """a screen plays something: {session, item_type, item_id, position,
+    duration, playing, live, channel?, meta?}, every few seconds. a profile
+    that doesn't share is never kept (shared: false)"""
+    from core.player import presence
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    if not _shares(pid):
+        return jsonify({"success": True, "shared": False})
+    try:
+        presence.beat(pid, request.get_json(silent=True))
+    except presence.PresenceError as e:
+        return _bad(e)
+    return jsonify({"success": True, "shared": True})
+
+
+@bp.route("/api/player/presence", methods=["DELETE"])
+@self_only
+def presence_stop():
+    from core.player import presence
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    presence.stop(pid, request.args.get("session") or "")
+    return jsonify({"success": True})
+
+
+@bp.route("/api/player/presence", methods=["GET"])
+@self_only
+def presence_list():
+    """what others on this server are watching or listening to right now:
+    profiles that share, things this profile may see"""
+    from core.player import presence
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    rows = presence.visible_to(pid, presence.everyone(), shares=_shares, may_see=_viewer_may_see)
+    who = _profiles_by_id()
+    for r in rows:
+        r["profile"] = who.get(r["profile_id"], {"name": "Someone"})
+    return jsonify({"success": True, "sessions": rows, "sharing": _shares(pid)})
+
+
+@bp.route("/api/player/presence/together", methods=["GET"])
+@self_only
+def presence_together():
+    """titles you and others (that share) have both started lately: your
+    place and theirs. a show is one title, whichever episode you're each on"""
+    from core.player import presence
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    try:
+        rows = presence.together(player_db(), pid, shares=_shares, may_see=_viewer_may_see)
+    except Exception:  # noqa: BLE001
+        return _failed("together", "Couldn't work that out.")
+    who = _profiles_by_id()
+    for r in rows:
+        for o in r["others"]:
+            o["profile"] = who.get(o["profile_id"], {"name": "Someone"})
+    return jsonify({"success": True, "titles": rows})

@@ -165,7 +165,7 @@ function syncWords(ms: number) {
   return `Sound ${Math.abs(ms)} ms ${ms > 0 ? 'later' : 'earlier'}`;
 }
 
-const QUALITY_LABELS: Record<Quality, { label: string; detail: string }> = {
+export const QUALITY_LABELS: Record<Quality, { label: string; detail: string }> = {
   original: { label: 'Original', detail: 'Full quality' },
   '1080p': { label: '1080p', detail: 'Up to 8 Mbps' },
   '720p': { label: '720p', detail: 'Up to 4 Mbps' },

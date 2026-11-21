@@ -39,6 +39,8 @@ import { Route as ImportIndexRouteImport } from './routes/import/index'
 import { Route as AudiobooksIndexRouteImport } from './routes/audiobooks/index'
 import { Route as PodcastsPodcastIdRouteImport } from './routes/podcasts/$podcastId'
 import { Route as PlayerWatchlistRouteImport } from './routes/player/watchlist'
+import { Route as PlayerWatchingRouteImport } from './routes/player/watching'
+import { Route as PlayerSettingsRouteImport } from './routes/player/settings'
 import { Route as PlayerGuideRouteImport } from './routes/player/guide'
 import { Route as LabelDetailIdRouteImport } from './routes/label-detail/$id'
 import { Route as ImportSinglesRouteImport } from './routes/import/singles'
@@ -224,6 +226,16 @@ const PodcastsPodcastIdRoute = PodcastsPodcastIdRouteImport.update({
 const PlayerWatchlistRoute = PlayerWatchlistRouteImport.update({
   id: '/watchlist',
   path: '/watchlist',
+  getParentRoute: () => PlayerRouteRoute,
+} as any)
+const PlayerWatchingRoute = PlayerWatchingRouteImport.update({
+  id: '/watching',
+  path: '/watching',
+  getParentRoute: () => PlayerRouteRoute,
+} as any)
+const PlayerSettingsRoute = PlayerSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
   getParentRoute: () => PlayerRouteRoute,
 } as any)
 const PlayerGuideRoute = PlayerGuideRouteImport.update({
@@ -444,6 +456,8 @@ export interface FileRoutesByFullPath {
   '/import/singles': typeof ImportSinglesRoute
   '/label-detail/$id': typeof LabelDetailIdRoute
   '/player/guide': typeof PlayerGuideRoute
+  '/player/settings': typeof PlayerSettingsRoute
+  '/player/watching': typeof PlayerWatchingRoute
   '/player/watchlist': typeof PlayerWatchlistRoute
   '/podcasts/$podcastId': typeof PodcastsPodcastIdRoute
   '/audiobooks/': typeof AudiobooksIndexRoute
@@ -508,6 +522,8 @@ export interface FileRoutesByTo {
   '/import/singles': typeof ImportSinglesRoute
   '/label-detail/$id': typeof LabelDetailIdRoute
   '/player/guide': typeof PlayerGuideRoute
+  '/player/settings': typeof PlayerSettingsRoute
+  '/player/watching': typeof PlayerWatchingRoute
   '/player/watchlist': typeof PlayerWatchlistRoute
   '/podcasts/$podcastId': typeof PodcastsPodcastIdRoute
   '/audiobooks': typeof AudiobooksIndexRoute
@@ -577,6 +593,8 @@ export interface FileRoutesById {
   '/import/singles': typeof ImportSinglesRoute
   '/label-detail/$id': typeof LabelDetailIdRoute
   '/player/guide': typeof PlayerGuideRoute
+  '/player/settings': typeof PlayerSettingsRoute
+  '/player/watching': typeof PlayerWatchingRoute
   '/player/watchlist': typeof PlayerWatchlistRoute
   '/podcasts/$podcastId': typeof PodcastsPodcastIdRoute
   '/audiobooks/': typeof AudiobooksIndexRoute
@@ -647,6 +665,8 @@ export interface FileRouteTypes {
     | '/import/singles'
     | '/label-detail/$id'
     | '/player/guide'
+    | '/player/settings'
+    | '/player/watching'
     | '/player/watchlist'
     | '/podcasts/$podcastId'
     | '/audiobooks/'
@@ -711,6 +731,8 @@ export interface FileRouteTypes {
     | '/import/singles'
     | '/label-detail/$id'
     | '/player/guide'
+    | '/player/settings'
+    | '/player/watching'
     | '/player/watchlist'
     | '/podcasts/$podcastId'
     | '/audiobooks'
@@ -779,6 +801,8 @@ export interface FileRouteTypes {
     | '/import/singles'
     | '/label-detail/$id'
     | '/player/guide'
+    | '/player/settings'
+    | '/player/watching'
     | '/player/watchlist'
     | '/podcasts/$podcastId'
     | '/audiobooks/'
@@ -1054,6 +1078,20 @@ declare module '@tanstack/react-router' {
       path: '/watchlist'
       fullPath: '/player/watchlist'
       preLoaderRoute: typeof PlayerWatchlistRouteImport
+      parentRoute: typeof PlayerRouteRoute
+    }
+    '/player/watching': {
+      id: '/player/watching'
+      path: '/watching'
+      fullPath: '/player/watching'
+      preLoaderRoute: typeof PlayerWatchingRouteImport
+      parentRoute: typeof PlayerRouteRoute
+    }
+    '/player/settings': {
+      id: '/player/settings'
+      path: '/settings'
+      fullPath: '/player/settings'
+      preLoaderRoute: typeof PlayerSettingsRouteImport
       parentRoute: typeof PlayerRouteRoute
     }
     '/player/guide': {
@@ -1355,6 +1393,8 @@ const ImportRouteRouteWithChildren = ImportRouteRoute._addFileChildren(
 
 interface PlayerRouteRouteChildren {
   PlayerGuideRoute: typeof PlayerGuideRoute
+  PlayerSettingsRoute: typeof PlayerSettingsRoute
+  PlayerWatchingRoute: typeof PlayerWatchingRoute
   PlayerWatchlistRoute: typeof PlayerWatchlistRoute
   PlayerIndexRoute: typeof PlayerIndexRoute
   PlayerAudiobooksAsinRoute: typeof PlayerAudiobooksAsinRoute
@@ -1385,6 +1425,8 @@ interface PlayerRouteRouteChildren {
 
 const PlayerRouteRouteChildren: PlayerRouteRouteChildren = {
   PlayerGuideRoute: PlayerGuideRoute,
+  PlayerSettingsRoute: PlayerSettingsRoute,
+  PlayerWatchingRoute: PlayerWatchingRoute,
   PlayerWatchlistRoute: PlayerWatchlistRoute,
   PlayerIndexRoute: PlayerIndexRoute,
   PlayerAudiobooksAsinRoute: PlayerAudiobooksAsinRoute,

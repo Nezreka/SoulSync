@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Iterator, Optional
 
 TABLES_WITH_PROFILES = ("watch_progress", "player_favorite_channels", "player_home_layout",
-                        "player_watchlist")
+                        "player_watchlist", "player_settings")
 
 
 def default_path() -> str:

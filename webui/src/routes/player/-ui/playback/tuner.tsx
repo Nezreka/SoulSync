@@ -33,6 +33,12 @@ function emit(next: Partial<Tuned>) {
   for (const l of listeners) l();
 }
 
+/** the channel playing, when one is (for watching now) */
+export function currentChannel(): { id: string; name: string; number: number | null } | null {
+  const c = tuned.current?.channel;
+  return c ? { id: c.id, name: c.name, number: c.number ?? null } : null;
+}
+
 /** the guide hands over its channels, in its order */
 export function setLineup(channels: Channel[]) {
   if (
@@ -54,6 +60,12 @@ export function tuneIn(channel: Channel): boolean {
   if (!t) return false;
   play(t);
   return true;
+}
+
+/** tune in a channel from the guide's lineup by id (joining someone on it); false: not known here */
+export function channelByIdTune(id: string): boolean {
+  const channel = tuned.lineup.find((c) => c.id === id);
+  return channel ? tuneIn(channel) : false;
 }
 
 export function channelStep(delta: 1 | -1): boolean {

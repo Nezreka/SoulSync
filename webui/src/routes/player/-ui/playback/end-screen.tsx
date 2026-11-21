@@ -85,7 +85,9 @@ export function EndScreen({ state }: { state: PlayerState }) {
   const left = state.duration - state.position;
   const ended = state.status === 'ended';
   const nearEnd = !!state.duration && left <= UP_NEXT_S && left > 0;
-  const showing = state.stillWatching || (hasNext ? nearEnd && !ended : ended || nearEnd);
+  const auto = state.autoplayNext;
+  const showing =
+    state.stillWatching || (hasNext ? (nearEnd && !ended) || (ended && !auto) : ended || nearEnd);
   const others = useOthers(state, showing);
   if (!showing) return null;
 
@@ -121,7 +123,9 @@ export function EndScreen({ state }: { state: PlayerState }) {
             <img src={(next.backdrop ?? next.artwork)!} alt="" />
           ) : null}
           <div className={s.upNextText}>
-            <span className={s.upNextLabel}>Up next in {Math.ceil(left)}</span>
+            <span className={s.upNextLabel}>
+              {auto && !ended ? `Up next in ${Math.ceil(left)}` : 'Up next'}
+            </span>
             <span className={s.upNextTitle}>{next.title}</span>
             {next.subtitle ? <span className={s.upNextSub}>{next.subtitle}</span> : null}
           </div>
