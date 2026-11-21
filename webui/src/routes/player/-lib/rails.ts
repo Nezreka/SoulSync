@@ -57,7 +57,10 @@ export interface RailCard {
   /** the title this card previews on hover or focus */
   preview?: { kind: 'movie' | 'show'; id: number };
   /** a play button on the art (hover or focus): plays it here, the card still opens its page */
-  play?: { kind: 'album' | 'playlist' | 'movie' | 'show'; id: number };
+  play?:
+    | { kind: 'album' | 'playlist' | 'movie' | 'show'; id: number }
+    /** one of soulsync's discovery playlists (flow, a daily mix) */
+    | { kind: 'discover'; key: string };
 }
 
 /** item types and the shape their artwork is */

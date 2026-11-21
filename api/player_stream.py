@@ -204,7 +204,7 @@ def transcode(item_type, item_id):
     origin = source.path if source.mode == "file" else source.url
     cmd = T.command(ffmpeg, origin, p, start, T.encoder(ffmpeg), T.has_filter(ffmpeg, "zscale"))
     try:
-        body = T.stream(cmd)
+        body = T.stream(cmd, owner=_screen())
     except T.Busy:
         return jsonify({"success": False, "error": "busy",
                         "message": "The server is already converting as many videos as it can. Try again in a moment."}), 503
@@ -213,6 +213,17 @@ def transcode(item_type, item_id):
         return jsonify({"success": False, "error": "failed", "message": "Couldn't start converting this file."}), 500
     return Response(body, mimetype=T.MIME, direct_passthrough=True,
                     headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
+
+
+def _screen():
+    """which screen is asking: this profile's player tab (?ps=). its new
+    conversion stops its last one"""
+    import re
+    ps = request.args.get("ps") or ""
+    if not re.fullmatch(r"[A-Za-z0-9-]{6,64}", ps):
+        return None
+    from core.profile_context import get_current_profile_id
+    return f"{get_current_profile_id()}:{ps}"
 
 
 @bp.route("/api/player/transcode/<item_type>/<path:item_id>/start", methods=["GET"])

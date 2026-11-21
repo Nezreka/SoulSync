@@ -26,6 +26,24 @@ function createMedia(kind: MediaKind): HTMLMediaElement {
   return el;
 }
 
+/**
+ * this screen, to the converter: a new conversion from it stops the one it
+ * was watching before (hopping channels filled every slot, and the next one
+ * came up black)
+ */
+const SCREEN = (() => {
+  try {
+    return crypto.randomUUID();
+  } catch {
+    return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+  }
+})();
+
+function tagScreen(url: string): string {
+  if (!url.includes('/api/player/transcode/')) return url;
+  return `${url}${url.includes('?') ? '&' : '?'}ps=${SCREEN}`;
+}
+
 async function playable(item: PlayItem, quality: Quality, pick: TrackPick): Promise<Playable> {
   if (item.type === 'podcast_episode') {
     if (!item.url) throw new Error('This episode has no audio address.');
@@ -56,8 +74,8 @@ async function playable(item: PlayItem, quality: Quality, pick: TrackPick): Prom
   }
   return {
     ...body,
-    url: appURL(body.url),
-    fallback_url: body.fallback_url ? appURL(body.fallback_url) : undefined,
+    url: tagScreen(appURL(body.url)),
+    fallback_url: body.fallback_url ? tagScreen(appURL(body.fallback_url)) : undefined,
   } as Playable;
 }
 

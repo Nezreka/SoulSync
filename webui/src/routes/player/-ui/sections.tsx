@@ -134,7 +134,7 @@ export const NAV: NavEntry[] = [
     to: '/player/music/playlists',
     label: 'Playlists',
     group: 'listen',
-    also: ['/player/music/playlist'],
+    also: ['/player/music/playlist', '/player/music/discover'],
     icon: <PlaylistIcon />,
     visible: (a) => a.music,
   },

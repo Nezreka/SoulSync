@@ -9,17 +9,26 @@ import type { PlaylistDetail, PlaylistSong, PlaylistSummary, SongRef } from '../
 
 import { albumArtwork, remoteImage } from './images';
 
+/** what a queue needs of a song: a playlist's, or a discovery playlist's */
+export type PlayableSong = Pick<
+  PlaylistSong,
+  'title' | 'artist' | 'album' | 'album_id' | 'duration_ms' | 'image_url' | 'track_id'
+>;
+
 /** the songs this profile can play, in order, as a queue */
-export function playlistItems(p: Pick<PlaylistDetail, 'id' | 'name' | 'songs'>): PlayItem[] {
+export function playlistItems(
+  p: Pick<PlaylistDetail, 'id' | 'name'> & { songs: readonly PlayableSong[] },
+  back = `/player/music/playlist/${p.id}`,
+): PlayItem[] {
   return p.songs
-    .filter((x): x is PlaylistSong & { track_id: number } => x.track_id !== null)
+    .filter((x): x is PlayableSong & { track_id: number } => x.track_id !== null)
     .map((x) => ({
       type: 'track' as const,
       id: String(x.track_id),
       title: x.title,
       subtitle: x.artist || undefined,
       artwork: albumArtwork(x.album_id) ?? remoteImage(x.image_url),
-      href: x.album_id ? `/player/music/album/${x.album_id}` : `/player/music/playlist/${p.id}`,
+      href: x.album_id ? `/player/music/album/${x.album_id}` : back,
       duration: x.duration_ms ? x.duration_ms / 1000 : null,
       parentId: x.album_id ? String(x.album_id) : undefined,
       parentTitle: x.album || undefined,
@@ -40,7 +49,7 @@ export function songFromItem(item: PlayItem): SongRef | null {
 }
 
 /** a playlist song as the routes take it */
-export function songFromRow(x: PlaylistSong): SongRef {
+export function songFromRow(x: PlayableSong): SongRef {
   return {
     title: x.title,
     artist: x.artist,

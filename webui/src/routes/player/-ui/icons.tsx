@@ -195,6 +195,14 @@ export const PlusIcon = () => (
   </Icon>
 );
 
+/** get it: onto the wishlist, soulsync downloads it */
+export const DownloadIcon = () => (
+  <Icon>
+    <path d="M12 4v11M7.5 10.5 12 15l4.5-4.5" />
+    <path d="M5 19h14" />
+  </Icon>
+);
+
 export const WatchlistIcon = () => (
   <Icon>
     <path d="M7 4h10a1 1 0 0 1 1 1v15l-6-3.6L6 20V5a1 1 0 0 1 1-1Z" />

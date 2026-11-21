@@ -9,7 +9,7 @@ import type { RailCard } from '../../-lib/rails';
 
 import { albumItems } from '../../-lib/play-items';
 import { playlistItems } from '../../-lib/playlists';
-import { albumQuery, playlistQuery } from '../../-player.api';
+import { albumQuery, discoverPlaylistQuery, playlistQuery } from '../../-player.api';
 import { usePlayTitle } from './play-title';
 import { playItems } from './use-player';
 
@@ -20,6 +20,15 @@ export function usePlayCard() {
     if (target.kind === 'album') {
       const album = await queryClient.fetchQuery(albumQuery(target.id));
       const queue = album ? albumItems(album) : [];
+      if (queue.length) playItems(queue);
+      return queue.length > 0;
+    }
+    if (target.kind === 'discover') {
+      const list = await queryClient.fetchQuery(discoverPlaylistQuery(target.key));
+      const queue = playlistItems(
+        { id: 0, name: list.name, songs: list.songs },
+        `/player/music/discover/${target.key}`,
+      );
       if (queue.length) playItems(queue);
       return queue.length > 0;
     }

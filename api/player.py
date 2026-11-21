@@ -679,6 +679,74 @@ def player_playlist(playlist_id):
     return jsonify({"success": True, "playlist": out})
 
 
+# ── discovery playlists (what discover made for this profile) ────────────
+
+@bp.route("/api/player/discover-playlists", methods=["GET"])
+# the manager's own discover gate: a profile with discover off sees none
+@requires("music.discover")
+def player_discover_playlists():
+    """this profile's discovery playlists in sections: stored rows only"""
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    from core.player import discovery
+    try:
+        return jsonify({"success": True, "sections": discovery.list_for(get_database(), pid)})
+    except Exception:  # noqa: BLE001
+        return _failed("discover playlists", "Couldn't load your mixes.")
+
+
+@bp.route("/api/player/discover-playlists/<key>", methods=["GET"])
+# the manager's own discover gate: a profile with discover off sees none
+@requires("music.discover")
+def player_discover_playlist(key):
+    """one discovery playlist with its songs, each with the library track it
+    plays (track_id) or why it can't (unplayable)"""
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    from core.player import discovery
+    from core.player.sources.music import _scope, hides_explicit
+    try:
+        out = discovery.detail(get_database(), pid, key, scope=_scope(), hide_explicit=hides_explicit())
+    except Exception:  # noqa: BLE001
+        return _failed("discover playlist", "Couldn't load that mix.")
+    if out is None:
+        return jsonify({"success": False, "error": "not_found", "message": "No such playlist."}), 404
+    return jsonify({"success": True, "playlist": out})
+
+
+@bp.route("/api/player/discover-playlists/<key>/get", methods=["POST"])
+# the manager's own discover gate: a profile with discover off sees none
+@requires("music.discover")
+def player_discover_playlist_get(key):
+    """the songs you don't have onto your wishlist: {positions?: [int]}.
+    the manager's own wishlist add (the same gate as its add-album route,
+    plus music.get: a profile that can't request music is told so)"""
+    from core.permissions import map_refuses, refusal
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    if map_refuses("music.get", "ask"):
+        return refusal("music.get")
+    body = request.get_json(silent=True) or {}
+    positions = body.get("positions")
+    if positions is not None and (not isinstance(positions, list) or not all(
+            isinstance(p, int) and not isinstance(p, bool) and p > 0 for p in positions)):
+        return _bad("positions must be a list of song positions")
+    from api.wishlist_routes import _build_wishlist_route_runtime
+    from core.player import discovery
+    from core.player.sources.music import _scope, hides_explicit
+    try:
+        out = discovery.get_missing(get_database(), pid, key, scope=_scope(), hide_explicit=hides_explicit(),
+                                    runtime=_build_wishlist_route_runtime(), positions=positions)
+    except Exception:  # noqa: BLE001
+        return _failed("discover get", "Couldn't add those to your wishlist.")
+    if out is None:
+        return jsonify({"success": False, "error": "not_found", "message": "No such playlist."}), 404
+    return jsonify({"success": True, **out})
+
+
 @bp.route("/api/player/music/artist/<int:artist_id>/top", methods=["GET"])
 @requires("music.access")
 def artist_top_tracks(artist_id):

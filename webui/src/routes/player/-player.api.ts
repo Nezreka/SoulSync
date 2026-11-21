@@ -244,6 +244,72 @@ export const playlistQuery = (id: number) =>
     staleTime: MINUTE,
   });
 
+// ── discovery playlists: soulsync's own (flow, daily mixes, fresh tape…) ──
+
+export type DiscoverSection = 'made' | 'fresh' | 'picks' | 'listenbrainz';
+
+export interface DiscoverCard {
+  /** stable, url-safe: "flow", "daily-2", "lb-12" */
+  key: string;
+  name: string;
+  blurb: string;
+  section: DiscoverSection;
+  /** every song is in the library */
+  owned: boolean;
+  track_count: number | null;
+  cover_tiles: string[];
+  updated_at: string | null;
+}
+
+export interface DiscoverSong extends Omit<PlaylistSong, 'added_at' | 'artist_id'> {
+  artist_id: number | null;
+  /** already on this profile's wishlist */
+  wanted: boolean;
+}
+
+export interface DiscoverDetail extends DiscoverCard {
+  songs: DiscoverSong[];
+  playable_count: number;
+  hides_explicit: boolean;
+}
+
+export const discoverPlaylistsQuery = () =>
+  queryOptions({
+    queryKey: ['player', 'discover-playlists'],
+    queryFn: async () => {
+      const res = await apiClient.get('player/discover-playlists', { throwHttpErrors: false });
+      // discover turned off for this profile: none, quietly
+      if (res.status === 403) return [];
+      if (!res.ok) throw new Error(`discover playlists: ${res.status}`);
+      const body = await res.json<{
+        sections?: { id: DiscoverSection; label: string; playlists: DiscoverCard[] }[];
+      }>();
+      return body.sections ?? [];
+    },
+    staleTime: 5 * MINUTE,
+  });
+
+export const discoverPlaylistQuery = (key: string) =>
+  queryOptions({
+    queryKey: ['player', 'discover-playlist', key],
+    queryFn: async () =>
+      (
+        await apiClient
+          .get(`player/discover-playlists/${encodeURIComponent(key)}`)
+          .json<{ playlist: DiscoverDetail }>()
+      ).playlist,
+    staleTime: MINUTE,
+  });
+
+/** the songs you don't have, onto your wishlist: soulsync gets them, then they play */
+export async function getDiscoverSongs(key: string, positions?: number[]) {
+  return apiClient
+    .post(`player/discover-playlists/${encodeURIComponent(key)}/get`, {
+      json: positions ? { positions } : {},
+    })
+    .json<{ added: number; already: number; skipped: number }>();
+}
+
 /** a song as the playlist routes take it: by name, with its library track */
 export interface SongRef {
   title: string;

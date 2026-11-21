@@ -105,6 +105,26 @@ def test_slots_are_freed_whether_the_viewer_watches_or_leaves(monkeypatch):
     T.stream(["ffmpeg"]).close()  # the slot came back after the end
 
 
+def test_a_screen_runs_one_conversion_and_hopping_frees_the_last(monkeypatch):
+    """channel hopping on one screen filled every slot and the next channel
+    came up black (503, nov 21 2026). a screen's new conversion stops its
+    last; another screen's keeps running"""
+    procs = []
+    monkeypatch.setattr(T, "_slots", __import__("threading").BoundedSemaphore(2))
+    monkeypatch.setattr(T, "_owners", {})
+    monkeypatch.setattr(T.subprocess, "Popen", lambda *a, **k: procs.append(FakeProc([b"ab"])) or procs[-1])
+    tv = T.stream(["ffmpeg"], owner="1:tv")
+    T.stream(["ffmpeg"], owner="1:phone")
+    for _ in range(5):  # hop, hop, hop: never busy
+        tv = T.stream(["ffmpeg"], owner="1:tv")
+    assert [p.killed for p in procs] == [True, False, True, True, True, True, False]
+    # with no owner, the old rule: busy when full
+    with pytest.raises(T.Busy):
+        T.stream(["ffmpeg"])
+    tv.close()
+    assert T._owners.keys() == {"1:phone"}
+
+
 @pytest.fixture
 def client(monkeypatch, tmp_path):
     import api.player_stream as S
@@ -140,12 +160,12 @@ def test_playable_offers_the_converted_stream_only_when_needed(client):
 
 def test_transcode_streams_and_says_when_it_is_full(client, monkeypatch):
     seen = []
-    monkeypatch.setattr(T, "stream", lambda cmd: seen.append(cmd) or iter([b"mp4"]))
+    monkeypatch.setattr(T, "stream", lambda cmd, owner=None: seen.append(cmd) or iter([b"mp4"]))
     res = client.get("/api/player/transcode/movie/ac3?t=90&q=original")
     assert res.status_code == 200 and res.data == b"mp4" and res.mimetype == "video/mp4"
     assert seen[0][seen[0].index("-ss") + 1] == "90.000"
 
-    def busy(cmd):
+    def busy(cmd, owner=None):
         raise T.Busy()
 
     monkeypatch.setattr(T, "stream", busy)

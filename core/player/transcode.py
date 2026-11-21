@@ -22,7 +22,7 @@ from __future__ import annotations
 import subprocess
 import threading
 from dataclasses import dataclass, field
-from typing import Iterator, List, Optional
+from typing import Any, Dict, Iterator, List, Optional
 
 from utils.logging_config import get_logger
 
@@ -38,6 +38,9 @@ MIME = "video/mp4"
 MAX_DELAY_MS = 10_000
 
 _slots = threading.BoundedSemaphore(MAX_JOBS)
+# each screen's running conversion, so its next one can stop it
+_owners: Dict[str, Any] = {}
+_owners_lock = threading.Lock()
 
 
 class Busy(Exception):
@@ -235,6 +238,7 @@ class _Run:
     def __init__(self, proc: subprocess.Popen):
         self.proc = proc
         self.closed = False
+        self.owner: Optional[str] = None
 
     def __iter__(self):
         return self
@@ -257,9 +261,12 @@ class _Run:
             logger.debug("couldn't read ffmpeg's error output", exc_info=True)
 
     def close(self):
-        if self.closed:
-            return
-        self.closed = True
+        with _owners_lock:
+            if self.closed:
+                return
+            self.closed = True
+            if self.owner and _owners.get(self.owner) is self:
+                del _owners[self.owner]
         try:
             if self.proc.poll() is None:
                 self.proc.kill()
@@ -270,9 +277,18 @@ class _Run:
             _slots.release()
 
 
-def stream(cmd: List[str]) -> Iterator[bytes]:
+def stream(cmd: List[str], owner: Optional[str] = None) -> Iterator[bytes]:
     """run it and hand back its output as it comes (an iterator with a close,
-    for a response body). raises Busy when every slot is taken."""
+    for a response body). raises Busy when every slot is taken.
+
+    owner: the screen asking (profile and player tab). its earlier conversion
+    stops first: a screen watches one thing, and hopping channels used to
+    leave the old ones running until every slot was taken."""
+    if owner:
+        with _owners_lock:
+            before = _owners.get(owner)
+        if before is not None:
+            before.close()
     if not _slots.acquire(blocking=False):
         raise Busy()
     try:
@@ -281,7 +297,12 @@ def stream(cmd: List[str]) -> Iterator[bytes]:
     except Exception:
         _slots.release()
         raise
-    return _Run(proc)
+    run = _Run(proc)
+    if owner:
+        run.owner = owner
+        with _owners_lock:
+            _owners[owner] = run
+    return run
 
 
 def ffprobe_for(ffmpeg: str) -> str:
