@@ -265,9 +265,9 @@ What a request sees is its profile's: its library (own-library rules), less expl
 
 Admin (Settings > Devices > Set up a music app):
 
-- `GET /api/devices/music-apps`: `{profiles: [{id, name}], addresses, bridge: [{id, name, on, active}], transcode_format, formats, ffmpeg}`. `profiles` are the ones with Use music apps.
+- `GET /api/devices/music-apps`: `{profiles: [{id, name}], addresses, bridge: [{id, name, on, active}], transcode_format, transcode_slots, slots_range: [min, max], formats, ffmpeg}`. `profiles` are the ones with Use music apps.
 - `POST /api/devices/music-apps` `{profile_id, name?}`: `201 {device_id, name, server, addresses, username, password, api_key, qr_text}`. A paired device for that profile with its own app password (kept encrypted) and API key, both shown this once. Unpair it like any device; its password goes with it. `400` for a profile without Use music apps.
-- `PUT /api/devices/music-apps/settings` `{bridge?: {plex|jellyfin|navidrome: bool}, transcode_format?: "mp3"|"opus"}`: answers like the GET. Each switch is "Stream files SoulSync can't read through <server>", off by default.
+- `PUT /api/devices/music-apps/settings` `{bridge?: {plex|jellyfin|navidrome: bool}, transcode_format?: "mp3"|"opus", transcode_slots?: 1-16}`: answers like the GET. `transcode_slots` is how many songs convert at once (4 by default); a stream past that waits up to 20 s for a slot, in arrival order, then gets Subsonic error 0 ("busy converting, try again"), never the original file. Each switch is "Stream files SoulSync can't read through <server>", off by default.
 
 ---
 

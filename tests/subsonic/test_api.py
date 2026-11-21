@@ -604,3 +604,53 @@ def test_a_song_this_profile_cant_play_is_never_scrobbled(env, db):
     for tid in (dirty, gone):
         assert body(call("scrobble", key(app), id="tr-%d" % tid))["error"]["code"] == 70
         assert not _history(db, tid)
+
+
+# ── every transcoder busy ────────────────────────────────────────────────
+
+def test_a_stream_that_waited_out_every_busy_transcoder_is_an_error_never_the_bigger_file(env, monkeypatch):
+    from core.subsonic import transcode as X
+    pid, _ = env.profile()
+    app = env.app(pid)
+    tid, _ = env.track("Busy %s" % env.tag)
+    seen = []
+
+    def busy(path, plan, offset=0, **kw):
+        seen.append(kw)
+        raise X.Busy()
+    monkeypatch.setattr(X, "ffmpeg", lambda: "ffmpeg")
+    monkeypatch.setattr(X, "open_stream", busy)
+    r = call("stream", key(app), id="tr-%d" % tid, maxBitRate=64)
+    assert not r.data.startswith(b"ID3")
+    out = body(r)
+    assert out["status"] == "failed" and out["error"]["code"] == 0
+    assert "busy converting" in out["error"]["message"]
+    assert seen and seen[0]["max_jobs"] == X.MAX_JOBS
+    # asking for the file, or for no less than it is, never needs a slot
+    assert call("stream", key(app), id="tr-%d" % tid, format="raw", maxBitRate=64).data.startswith(b"ID3")
+    assert call("stream", key(app), id="tr-%d" % tid, maxBitRate=320).data.startswith(b"ID3")
+    assert len(seen) == 1
+
+
+def test_the_slot_setting_saves_and_reaches_the_stream(env, monkeypatch):
+    from core.subsonic import transcode as X
+    cfg = {}
+    real_get = web_server.config_manager.get
+    monkeypatch.setattr(web_server.config_manager, "get", lambda k, d=None: cfg[k] if k in cfg else real_get(k, d))
+    monkeypatch.setattr(web_server.config_manager, "set", lambda k, v: cfg.__setitem__(k, v))
+    c = _client(1)
+    got = c.get("/api/devices/music-apps").get_json()
+    assert got["transcode_slots"] == X.MAX_JOBS and got["slots_range"] == [X.MIN_JOBS, X.MOST_JOBS]
+    r = c.put("/api/devices/music-apps/settings", json={"transcode_slots": 2})
+    assert r.status_code == 200 and r.get_json()["transcode_slots"] == 2 and cfg["music_apps.transcode_slots"] == 2
+    for bad in (0, 17, "3", True, 2.5):
+        assert c.put("/api/devices/music-apps/settings", json={"transcode_slots": bad}).status_code == 400
+    assert cfg["music_apps.transcode_slots"] == 2
+    pid, _ = env.profile()
+    app = env.app(pid)
+    tid, _ = env.track("Slots %s" % env.tag)
+    seen = []
+    monkeypatch.setattr(X, "ffmpeg", lambda: "ffmpeg")
+    monkeypatch.setattr(X, "open_stream", lambda path, plan, offset=0, **kw: seen.append(kw) or iter([b"converted"]))
+    assert call("stream", key(app), id="tr-%d" % tid, maxBitRate=64).data == b"converted"
+    assert seen[0]["max_jobs"] == 2

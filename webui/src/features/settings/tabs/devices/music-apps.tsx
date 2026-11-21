@@ -6,7 +6,8 @@
  * from Paired devices like any other.
  *
  * Below it, how music apps are served: the format songs are converted to
- * when an app asks for less, and, per media server, whether files SoulSync
+ * when an app asks for less, how many convert at once (one past that waits
+ * its turn, never gets the bigger file instead), and, per media server, whether files SoulSync
  * can't read are played through that server.
  */
 
@@ -185,6 +186,13 @@ export function ShownApp({ app, onDone }: { app: NewMusicApp; onDone: () => void
   );
 }
 
+/** 1 to 8, then a few bigger steps, always with the saved one */
+function slotChoices(info: MusicApps): number[] {
+  const [low, high] = info.slots_range;
+  const picks = new Set([1, 2, 3, 4, 5, 6, 8, 12, 16, info.transcode_slots]);
+  return [...picks].filter((n) => n >= low && n <= high).sort((a, b) => a - b);
+}
+
 function Serving({ info, onSaved }: { info: MusicApps; onSaved: () => void }) {
   const save = async (body: Parameters<typeof saveMusicAppSettings>[0]) => {
     const r = await saveMusicAppSettings(body);
@@ -211,6 +219,18 @@ function Serving({ info, onSaved }: { info: MusicApps; onSaved: () => void }) {
           value={info.transcode_format}
           onChange={(e) => void save({ transcode_format: e.target.value })}
           options={info.formats.map((f) => ({ value: f, label: f === 'opus' ? 'Opus' : 'MP3' }))}
+        />
+      </Row>
+      <Row
+        label="Songs converted at once"
+        htmlFor="music-app-slots"
+        help="A song past this waits up to 20 seconds for its turn, then the app is told to try again. It never gets the bigger file instead. More uses more CPU."
+      >
+        <Select
+          id="music-app-slots"
+          value={String(info.transcode_slots)}
+          onChange={(e) => void save({ transcode_slots: Number(e.target.value) })}
+          options={slotChoices(info).map((n) => ({ value: String(n), label: String(n) }))}
         />
       </Row>
       {servers.map((b) => (

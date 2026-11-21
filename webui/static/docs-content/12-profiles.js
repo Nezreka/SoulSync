@@ -632,7 +632,7 @@ The app shows up under **Paired devices**. **Unpair** it and it stops at once; s
 ## What works
 
 - Browsing by artist, album, genre and folder, album lists (newest, A to Z, by artist, by year, by genre, random, most played, recently played, starred, top rated) and search, including apps that copy the whole library to the phone.
-- Playing and downloading for offline. When an app asks for a lower bitrate, songs are converted on the fly to **MP3** or **Opus** (pick which under **Convert to**; needs ffmpeg). Seeking works.
+- Playing and downloading for offline. When an app asks for a lower bitrate, songs are converted on the fly to **MP3** or **Opus** (pick which under **Convert to**; needs ffmpeg). Seeking works. **Songs converted at once** (4 by default) caps how many convert together; a song past that waits up to 20 seconds for its turn, then the app is told to try again. It never gets the bigger file instead, so an app on mobile data stays on mobile data sizes. An app that asks for the file as it is (or a bitrate the file already fits) always gets it straight away.
 - Cover art, lyrics (the file's own, a .lrc next to it, then LRCLib; synced lyrics stay synced), artist bios, similar songs and top songs.
 - **Starring** a song adds it to the profile's **Liked Songs**. Albums and artists can be starred and rated too. Starring a song the profile doesn't have adds it to the wishlist for a profile that may download, or makes a request for one that may only ask.
 - **Playlists**: the profile's own playlists can be made and edited in the app. Mirrored playlists and the Daily Mixes show up too, read-only.

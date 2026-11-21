@@ -1294,10 +1294,13 @@ def stream(ctx):
     offset = _int("timeOffset", 0)
     if not plan.raw:
         try:
-            chunks = X.open_stream(local, plan, offset)
+            chunks = X.open_stream(local, plan, offset,
+                                   max_jobs=X.clamp_jobs(_cfg("music_apps.transcode_slots", X.MAX_JOBS)))
         except X.Busy:
-            logger.info("music apps: every transcoder busy, sending the file as it is")
-            chunks = None
+            # never the bigger file instead: the app asked for less, often on mobile data
+            logger.info("music apps: every transcoder stayed busy for %ss, asking the app to retry",
+                        int(X.WAIT_SECONDS))
+            raise R.SubsonicError(R.GENERIC, "The server is busy converting other songs. Try again in a moment.") from None
         except OSError as exc:
             logger.warning("music apps: transcode failed to start: %s", exc)
             chunks = None
