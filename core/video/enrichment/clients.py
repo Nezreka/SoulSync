@@ -22,6 +22,16 @@ def _int(val):
         return None
 
 
+_IMDB_ID = re.compile(r"^tt\d{7,}$")
+
+
+def imdb_id_or_none(val):
+    """an IMDb id ('tt' and 7+ digits) or None: what a provider lists is only
+    stored when it looks like one."""
+    text = str(val or "").strip()
+    return text if _IMDB_ID.match(text) else None
+
+
 def tmdb_certification(kind, dr, region="US"):
     """the title's certification out of a tmdb detail response, or None.
 
@@ -102,9 +112,9 @@ def parse_title_identity(kind, d):
     # the ids the indexers search by, for a title that isn't in the library
     # (#2224): a movie's imdb id is on its detail, a show's in external_ids
     ext = d.get("external_ids") if isinstance(d.get("external_ids"), dict) else {}
-    imdb = d.get("imdb_id") or ext.get("imdb_id")
+    imdb = imdb_id_or_none(d.get("imdb_id") or ext.get("imdb_id"))
     if imdb:
-        out["imdb_id"] = str(imdb)
+        out["imdb_id"] = imdb
     if kind != "movie" and ext.get("tvdb_id"):
         out["tvdb_id"] = ext["tvdb_id"]
     if genres:
@@ -1206,9 +1216,6 @@ class TMDBClient:
             "photos": photos, "also_known_as": akas, "credits": credits}
 
 
-_IMDB_ID = re.compile(r"^tt\d{7,}$")
-
-
 def _tvdb_remote_ids(remote_ids) -> dict:
     """imdb_id / tmdb_id from a TVDB series record's remoteIds. A source listed
     with two different values gives neither."""
@@ -1218,11 +1225,17 @@ def _tvdb_remote_ids(remote_ids) -> dict:
             continue
         name = str(r.get("sourceName") or "").strip().lower()
         val = str(r.get("id") or "").strip()
-        if name == "imdb" and _IMDB_ID.match(val):
+        if name == "imdb" and imdb_id_or_none(val):
             found["imdb_id"].add(val)
         elif name == "themoviedb.com" and _int(val) is not None:
             found["tmdb_id"].add(_int(val))
     return {k: next(iter(v)) for k, v in found.items() if len(v) == 1}
+
+
+def _years_agree(ours, theirs) -> bool:
+    """True unless both years are known and more than a year apart."""
+    a, b = _int(ours), _int(str(theirs or "").strip()[:4] or None)
+    return a is None or b is None or abs(a - b) <= 1
 
 
 class TVDBClient:
@@ -1304,7 +1317,11 @@ class TVDBClient:
                 # the ids TVDB links the series to: a show TMDB has no IMDb id
                 # for still gets one, and one the server gave no TMDB id can be
                 # matched by id. enrichment only fills empty columns
-                meta.update(_tvdb_remote_ids(sd.get("remoteIds")))
+                # a series years off the show's own is a different show the
+                # stored tvdb id points at (a title-search guess): its ids
+                # would name the wrong title, so they're left out
+                if _years_agree(year, sd.get("year") or str(sd.get("firstAired") or "")[:4]):
+                    meta.update(_tvdb_remote_ids(sd.get("remoteIds")))
             except Exception:
                 logger.exception("TVDB details fetch failed for %s", title or tvdb_id)
         if tvdb_id is None:

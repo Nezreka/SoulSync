@@ -796,6 +796,18 @@ _VOLATILE_COLS = {
 _FRESH_SOURCES = ("server", "metadata", "ratings")
 
 
+def _ids_disagree(row, metadata: dict) -> bool:
+    """True when a provider's tmdb_id / imdb_id name a different title than
+    the ids the row already holds (either one differing is enough)."""
+    for col in ("tmdb_id", "imdb_id"):
+        have, got = row[col], metadata.get(col)
+        if have in (None, "") or got in (None, ""):
+            continue
+        if str(have).strip().lower() != str(got).strip().lower():
+            return True
+    return False
+
+
 class VideoDatabase:
     """Connection + schema manager for the isolated video library DB."""
 
@@ -1437,8 +1449,17 @@ class VideoDatabase:
             # them, not even to fill a deliberately-blanked value.
             locked = self._locked_fields_set(conn, tbl, item_id)
             had_tmdb = None
-            if service == "tvdb" and tbl == "shows" and (metadata or {}).get("tmdb_id") is not None:
-                had_tmdb = conn.execute("SELECT tmdb_id FROM shows WHERE id=?", (item_id,)).fetchone()
+            if service == "tvdb" and tbl == "shows" and metadata and (
+                    metadata.get("tmdb_id") is not None or metadata.get("imdb_id")):
+                had_tmdb = conn.execute("SELECT tmdb_id, imdb_id FROM shows WHERE id=?",
+                                        (item_id,)).fetchone()
+                # the ids TVDB links the series to only fill a gap when they
+                # agree with the ids the show already has: a series that names
+                # another TMDB or IMDb id is another show (a stored tvdb id that
+                # was a title-search guess), and its other id would be wrong too
+                if had_tmdb is not None and _ids_disagree(had_tmdb, metadata):
+                    metadata = {k: v for k, v in metadata.items() if k not in ("tmdb_id", "imdb_id")}
+                    had_tmdb = None
             sql, params = build(True, locked)
             try:
                 conn.execute(sql, params)
@@ -1449,7 +1470,7 @@ class VideoDatabase:
             # a TMDB id TVDB just filled in: TMDB can now enrich the show by id,
             # so send it back through TMDB's queue rather than wait out a
             # not_found retry
-            if had_tmdb is not None and had_tmdb["tmdb_id"] is None:
+            if had_tmdb is not None and had_tmdb["tmdb_id"] is None and metadata.get("tmdb_id") is not None:
                 conn.execute("UPDATE shows SET tmdb_match_status = NULL, tmdb_last_attempted = NULL "
                              "WHERE id=? AND tmdb_id IS NOT NULL "
                              "AND COALESCE(tmdb_match_status, '') != 'matched'", (item_id,))

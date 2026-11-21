@@ -124,3 +124,48 @@ def test_matched_shows_missing_an_id_are_queued_once(tmp_path):
     conn.close()
     assert status == {gap: None, full: "matched"}
     assert again == {gap: "matched", full: "matched"}
+
+
+# ── review follow-ups ────────────────────────────────────────────────────────
+
+def test_a_series_years_off_the_show_gives_no_ids(monkeypatch):
+    # a stored tvdb id that was a title-search guess can point at a remake:
+    # its linked ids would name the wrong show
+    c = TVDBClient("KEY")
+    monkeypatch.setattr(c, "_authed_get", lambda path, params=None: {"data": {
+        "overview": "O", "year": "1992", "remoteIds": _TENCHI_REMOTE}})
+    assert "imdb_id" not in c.match("show", "Tenchi Muyo!", 2023, known_id=80009)["metadata"]
+    assert c.match("show", "Tenchi Muyo!", 1993, known_id=80009)["metadata"]["imdb_id"] == "tt0105559"
+    assert c.match("show", "Tenchi Muyo!", None, known_id=80009)["metadata"]["tmdb_id"] == 43004
+
+
+def test_linked_ids_that_disagree_with_the_shows_fill_nothing(db):
+    # the show already has TMDB 6; TVDB's record names TMDB 777: it's another
+    # show, so its IMDb id isn't taken either, and TMDB isn't re-queued
+    sid = db.upsert_show_tree("plex", {"server_id": "s1", "title": "S", "tvdb_id": 5, "tmdb_id": 6,
+                                       "seasons": []})
+    with db.connect() as c:
+        c.execute("UPDATE shows SET tmdb_match_status='not_found'")
+        c.commit()
+    db.enrichment_apply("tvdb", "show", sid, matched=True, external_id=5,
+                        metadata={"tmdb_id": 777, "imdb_id": "tt0105559", "overview": "kept"})
+    with db.connect() as c:
+        row = c.execute("SELECT tmdb_id, imdb_id, overview, tmdb_match_status FROM shows").fetchone()
+    assert tuple(row) == (6, None, "kept", "not_found")
+
+
+def test_a_matching_id_lets_the_other_fill(db):
+    sid = db.upsert_show_tree("plex", {"server_id": "s1", "title": "S", "tvdb_id": 5, "tmdb_id": 43004,
+                                       "seasons": []})
+    db.enrichment_apply("tvdb", "show", sid, matched=True, external_id=5,
+                        metadata={"tmdb_id": 43004, "imdb_id": "tt0105559"})
+    with db.connect() as c:
+        assert c.execute("SELECT imdb_id FROM shows").fetchone()[0] == "tt0105559"
+
+
+def test_a_tmdb_title_carries_only_an_imdb_id_that_looks_like_one():
+    from core.video.enrichment.clients import parse_title_identity
+    d = {"id": 1, "title": "X", "release_date": "2000-01-01"}
+    assert parse_title_identity("movie", {**d, "imdb_id": "tt0113277"})["imdb_id"] == "tt0113277"
+    assert "imdb_id" not in parse_title_identity("movie", {**d, "imdb_id": ""})
+    assert "imdb_id" not in parse_title_identity("movie", {**d, "imdb_id": "0113277"})

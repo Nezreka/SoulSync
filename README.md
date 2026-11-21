@@ -415,7 +415,7 @@ A complete video side with its own database, pages and pipeline. Switch sides fr
 
 | Worker | Adds |
 |---|---|
-| **TMDB**, **TVDB** | Core metadata, seasons and episodes |
+| **TMDB**, **TVDB** | Core metadata, seasons and episodes. TVDB also fills a show's missing IMDb and TMDB ids from the ids it links the series to |
 | **OMDb** | IMDb, Rotten Tomatoes and Metacritic ratings |
 | **fanart.tv** | Artwork |
 | **OpenSubtitles** | Subtitles |
@@ -523,7 +523,7 @@ The Library page is your movies and shows three ways: posters, a sortable table 
 - **Overlay Studio**: a Kometa-style visual poster editor. Layers, dynamic fields (resolution, HDR, codecs, ratings, awards, streaming service…) and per-scope rules. Always rendered from a clean base, so overlays never stack and can be undone.
 - **Collection Studio**: smart-filter and list collections from TMDB, IMDb, Trakt and MDBList, with presets, seasonal windows, generated artwork, and wishlisting missing members.
 - **Poster Manager** for TMDB posters, including textless ones.
-- **Maintenance jobs**: broken files, duplicates, naming, quality upgrades, watched cleanup and more, on the same Tools page as music (health score, findings inbox, fix-all in the background). Plus backups and mass rename.
+- **Maintenance jobs**: broken files, duplicates, naming, quality upgrades, watched cleanup and more, on the same Tools page as music (health score, findings inbox, fix-all in the background). Plus backups and mass rename. A name that uses an id the title has none stored for (`{imdb-$imdbid}`) is left alone rather than renamed without its tag, and the naming check says which titles wait on an id.
 - **Server Activity**: what's playing on Plex and Jellyfin in one drawer: the file against what's sent, why a stream is converted in plain words, the transcoder, where a remote viewer is, chapter and whole-book progress for audiobooks, and stop with a message on both servers. SoulSync keeps its own play log (forever by default, with a retention setting and a clear button), so History and Stats (the same drawer, widened) show how long, how well and from where, with Plex's own history filling in the time before. Admins only; its options sit under Settings, Connections.
 - **Watch Together** in chat: vote on a title and watch together.
 
