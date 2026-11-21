@@ -125,7 +125,9 @@ def test_a_deleted_profile_is_swept_from_player_db(db):
     progress.save(db, 3, "movie", "m", 10, 100)
     progress.save(db, 4, "movie", "m", 10, 100)
     favorites.put(db, 3, ["genre-comedy"])
-    assert db.delete_profile_data(3) == 2
+    from core.player import home_layout
+    home_layout.put(db, 3, {"rows": []}, "tv-livingroom")
+    assert db.delete_profile_data(3) == 3
     assert progress.get(db, 3, "movie", "m") is None
     assert favorites.get(db, 3) == []
     assert progress.get(db, 4, "movie", "m") is not None
@@ -259,10 +261,10 @@ def test_every_player_route_declares_its_access():
     app.register_blueprint(player_api.create_blueprint())
     rules = [r for r in app.url_map.iter_rules() if r.rule.startswith("/api/player/")]
     own = [r for r in rules if "/progress" in r.rule or r.rule.endswith("/continue")
-           or "/favorites" in r.rule]
+           or "/favorites" in r.rule or r.rule.endswith("/home-layout")]
     music = [r for r in rules if r.rule.endswith("/music-channels")]
     library = [r for r in rules if r not in own and r not in music]
-    assert len(own) == 8 and len(library) == 7 and len(music) == 1
+    assert len(own) == 11 and len(library) == 7 and len(music) == 1
     assert declared_access(app.view_functions[music[0].endpoint]) == ("perm", "music.library")
     # your own rows: self only
     for rule in own:
@@ -293,3 +295,74 @@ def test_favorites_refuse_junk(client):
     assert client.put("/api/player/guide/favorites", json={"channels": ["x y"]}).status_code == 400
     assert client.put("/api/player/guide/favorites",
                       json={"channels": [f"c{i}" for i in range(101)]}).status_code == 400
+
+
+# ── home layout ──────────────────────────────────────────────────────────
+
+def test_home_layout_is_per_profile_and_checked(client):
+    _as(client, 3)
+    first = client.get("/api/player/home-layout").get_json()
+    assert first["scope"] is None and first["layout"]["rows"][0]["id"] == "continue"
+    assert first["catalog"]["version"] == first["layout"]["version"] == 1
+    layout = {"billboard": False, "rows": [{"id": "top-movies", "style": "ranked", "on": True},
+                                           {"id": "genre:movie:Sci-Fi & Fantasy", "style": "large"}]}
+    saved = client.put("/api/player/home-layout", json={"layout": layout, "device": "*"}).get_json()
+    assert saved["layout"]["rows"][1] == {"id": "genre:movie:Sci-Fi & Fantasy", "style": "large", "on": True}
+    # the rows it left out come back after, off
+    assert all(not r["on"] for r in saved["layout"]["rows"][2:])
+    assert saved["scope"] == "all"
+    got = client.get("/api/player/home-layout?device=tv-livingroom").get_json()
+    assert got["scope"] == "all" and got["layout"]["billboard"] is False
+    # another profile has its own
+    _as(client, 4)
+    assert client.get("/api/player/home-layout").get_json()["scope"] is None
+    # bad shapes are refused
+    bad = [{"layout": {"rows": [{"id": "continue", "style": "huge"}]}},
+           {"layout": {"rows": [{"id": "not-a-row"}]}},
+           {"layout": {"rows": [{"id": "A B"}]}},
+           {"layout": {"rows": [{"id": "continue"}] * 61}},
+           {"layout": {"rows": []}, "device": "../etc"}]
+    for body in bad:
+        assert client.put("/api/player/home-layout", json=body).status_code == 400, body
+
+
+def test_home_layout_per_screen(client):
+    _as(client, 3)
+    shared = {"billboard": True, "rows": [{"id": "continue", "style": "wide"}]}
+    tv = {"billboard": False, "rows": [{"id": "top-movies", "style": "ranked"}]}
+    client.put("/api/player/home-layout", json={"layout": shared, "device": "*"})
+    client.put("/api/player/home-layout", json={"layout": tv, "device": "tv-livingroom"})
+    on_tv = client.get("/api/player/home-layout?device=tv-livingroom").get_json()
+    on_phone = client.get("/api/player/home-layout?device=phone-abcdefgh").get_json()
+    assert on_tv["scope"] == "device" and on_tv["layout"]["billboard"] is False
+    assert on_phone["scope"] == "all" and on_phone["layout"]["rows"][0]["id"] == "continue"
+    # the tv shares its layout with every screen: it follows the shared one after
+    client.put("/api/player/home-layout",
+               json={"layout": tv, "device": "*", "from_device": "tv-livingroom"})
+    assert client.get("/api/player/home-layout?device=tv-livingroom").get_json()["scope"] == "all"
+    assert client.get("/api/player/home-layout?device=phone-abcdefgh").get_json()["layout"]["billboard"] is False
+    # this screen back to shared; then everything back to the default
+    client.put("/api/player/home-layout", json={"layout": shared, "device": "tv-livingroom"})
+    client.delete("/api/player/home-layout?device=tv-livingroom")
+    assert client.get("/api/player/home-layout?device=tv-livingroom").get_json()["scope"] == "all"
+    client.delete("/api/player/home-layout")
+    assert client.get("/api/player/home-layout?device=tv-livingroom").get_json()["scope"] is None
+
+
+def test_the_layout_contract_cleans_what_it_hands_out():
+    from core.player import home_layout as hl
+    out = hl.normalize({"billboard": False, "rows": [
+        {"id": "continue", "style": "ranked"},        # continue can't be ranked
+        {"id": "top-movies", "style": "wide", "on": True},
+        {"id": "top-movies", "style": "large"},        # a duplicate
+        {"id": "gone-row"},                            # a row this build doesn't have
+        {"id": "genre:show:Comedy", "style": "ranked", "on": False}]})
+    assert out["rows"][:3] == [{"id": "continue", "style": "wide", "on": True},
+                               {"id": "top-movies", "style": "wide", "on": True},
+                               {"id": "genre:show:Comedy", "style": "ranked", "on": False}]
+    assert len(out["rows"]) == len(hl.ROWS) + 1
+    assert hl.normalize("junk") == hl.default_layout()
+    cat = hl.catalog()
+    assert [r["id"] for r in cat["rows"]] == [r[0] for r in hl.ROWS]
+    assert {st["id"] for st in cat["styles"]} == {"standard", "large", "wide", "ranked"}
+    assert all(r["style"] in r["styles"] for r in cat["rows"])

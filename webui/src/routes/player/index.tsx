@@ -1,20 +1,23 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createFileRoute } from '@tanstack/react-router';
-import { useMemo } from 'react';
+import { useCallback, useMemo, useState, type ReactNode } from 'react';
 
 import type { RailCard } from './-lib/rails';
-import type { CatalogMovie, CatalogShow } from './-player.types';
+import type { CatalogMovie, CatalogShow, ExtraTitle } from './-player.types';
 
-import { remoteImage } from './-lib/images';
+import { deviceId } from './-lib/device';
+import { parseGenreRow, type HomeLayout, type RowStyle } from './-lib/home-layout';
+import { backdropSet, remoteImage, WIDE_SIZES } from './-lib/images';
 import {
   continueRails,
-  newestFirst,
   movieCard,
+  newestFirst,
   recentAlbumCards,
   recentBookCards,
   recentEpisodeCards,
   recentMovieCards,
   recentYoutubeCards,
+  showCard,
 } from './-lib/rails';
 import { hashSeed, seededShuffle } from './-lib/schedule';
 import { genresOf } from './-lib/video';
@@ -22,26 +25,126 @@ import {
   albumsQuery,
   booksQuery,
   continueQuery,
+  discoverListQuery,
   discoverMoreLikeQuery,
   finishProgress,
+  homeLayoutQuery,
   podcastSubsQuery,
   removeProgress,
+  resetHomeLayout,
+  saveHomeLayout,
   serverResumeQuery,
   videoCatalogQuery,
 } from './-player.api';
 import { Billboard, type Slide } from './-ui/billboard';
-import { extraCard, ownedByTmdb } from './-ui/detail';
-import { CardRail, Empty, SkeletonRail, styles as s } from './-ui/kit';
+import { HomeEditor } from './-ui/home-editor';
+import { CardRail, Empty, SkeletonRail, styles as s, type CardAction } from './-ui/kit';
 import { useSections } from './-ui/sections';
-import { Top10Rail } from './-ui/top10';
+import { RankedRail } from './-ui/top10';
 
 export const Route = createFileRoute('/player/')({
   component: PlayerHome,
 });
 
+const FALLBACK_ROWS = [
+  'continue',
+  'new-episodes',
+  'recent-movies',
+  'recent-music',
+  'youtube',
+  'top-rated',
+  'audiobooks',
+  'podcasts',
+];
+
+const day = () => new Date().toISOString().slice(0, 10);
+
+/** a poster card as a wide still: the title's backdrop when it has one */
+function toWide(card: RailCard): RailCard {
+  if (card.shape === 'wide' || !card.preview) return card;
+  const set = backdropSet(card.preview.kind, card.preview.id);
+  return { ...card, shape: 'wide', art: set.src, artSet: set.srcSet, artSizes: WIDE_SIZES };
+}
+
+function StyledRow({
+  style,
+  title,
+  cards,
+  more,
+  actionsFor,
+}: {
+  style: RowStyle;
+  title: string;
+  cards: RailCard[];
+  more?: { to: string; label?: string };
+  actionsFor?: (card: RailCard) => CardAction[];
+}) {
+  if (!cards.length) return null;
+  if (style === 'ranked') return <RankedRail title={title} cards={cards} />;
+  const shown = style === 'wide' ? cards.map(toWide) : cards;
+  const rail = <CardRail title={title} cards={shown} more={more} actionsFor={actionsFor} />;
+  return style === 'large' ? <div className={s.rowLarge}>{rail}</div> : rail;
+}
+
+/** today's chart from tmdb, narrowed to what you have, as your library's cards */
+function useTopToday(
+  kind: 'movie' | 'show',
+  items: (CatalogMovie | CatalogShow)[] | undefined,
+  on: boolean,
+) {
+  const trending = useQuery({
+    ...discoverListQuery(kind === 'movie' ? 'trending_movies_today' : 'trending_tv_today', 1),
+    enabled: on && !!items,
+  });
+  const popular = useQuery({
+    ...discoverListQuery(kind === 'movie' ? 'popular_movies' : 'popular_shows', 3),
+    enabled: on && !!items,
+  });
+  return useMemo(() => {
+    if (!items) return [];
+    const byTmdb = new Map(items.filter((x) => x.tmdb_id).map((x) => [x.tmdb_id!, x]));
+    const seen = new Set<number>();
+    const out: RailCard[] = [];
+    for (const t of [...(trending.data ?? []), ...(popular.data ?? [])]) {
+      const mine = t.kind === kind ? byTmdb.get(t.tmdb_id) : undefined;
+      if (!mine || seen.has(mine.id)) continue;
+      seen.add(mine.id);
+      out.push(kind === 'movie' ? movieCard(mine as CatalogMovie) : showCard(mine as CatalogShow));
+    }
+    return out.slice(0, 10);
+  }, [items, trending.data, popular.data, kind]);
+}
+
+/** "because you have x": tmdb's picks for a title you own, only the ones you also own */
+function useBecause(
+  movies: CatalogMovie[] | undefined,
+  shows: CatalogShow[] | undefined,
+  on: boolean,
+) {
+  const rows = useQuery({ ...discoverMoreLikeQuery(), enabled: on && !!movies });
+  return useMemo(() => {
+    const byKey = new Map<string, CatalogMovie | CatalogShow>();
+    for (const m of movies ?? []) if (m.tmdb_id) byKey.set(`movie:${m.tmdb_id}`, m);
+    for (const x of shows ?? []) if (x.tmdb_id) byKey.set(`show:${x.tmdb_id}`, x);
+    const card = (t: ExtraTitle) => {
+      const mine = byKey.get(`${t.kind}:${t.tmdb_id}`);
+      if (!mine) return null;
+      return 'episode_count' in mine ? showCard(mine) : movieCard(mine);
+    };
+    return (rows.data ?? [])
+      .map((row) => ({
+        title: row.title.replace(/^More like /, 'Because you have '),
+        cards: row.items.map(card).filter((c): c is RailCard => !!c),
+      }))
+      .filter((row) => row.cards.length >= 4)
+      .slice(0, 2);
+  }, [rows.data, movies, shows]);
+}
+
 function PlayerHome() {
   const sections = useSections();
   const queryClient = useQueryClient();
+  const device = useMemo(() => deviceId(), []);
   const progress = useQuery(continueQuery());
   const resume = useQuery({ ...serverResumeQuery(), enabled: sections.video });
   const catalog = useQuery({ ...videoCatalogQuery(), enabled: sections.video });
@@ -51,6 +154,21 @@ function PlayerHome() {
   });
   const books = useQuery({ ...booksQuery(), enabled: sections.audiobooks });
   const podcasts = useQuery({ ...podcastSubsQuery(), enabled: sections.podcasts });
+  const saved = useQuery(homeLayoutQuery(device));
+  const [draft, setDraft] = useState<HomeLayout | null>(null);
+  const [editing, setEditing] = useState(false);
+  // the server's layout (already clean); while it loads, or if it can't be
+  // read, every row in the order home builds them
+  const layout = useMemo<HomeLayout>(
+    () =>
+      draft ??
+      saved.data?.layout ?? {
+        billboard: true,
+        rows: FALLBACK_ROWS.map((id) => ({ id, style: 'standard', on: true })),
+      },
+    [draft, saved.data],
+  );
+  const isOn = (id: string) => layout.rows.some((r) => r.on && r.id === id);
 
   const refresh = () => void queryClient.invalidateQueries({ queryKey: ['player', 'continue'] });
   const remove = useMutation({
@@ -61,161 +179,209 @@ function PlayerHome() {
     mutationFn: (card: RailCard) => finishProgress(card.source!.itemType, card.source!.itemId),
     onSettled: refresh,
   });
+  const continueActions = (card: RailCard): CardAction[] =>
+    card.source
+      ? [
+          { label: 'Mark as finished', onSelect: () => finish.mutate(card) },
+          { label: 'Remove from this row', onSelect: () => remove.mutate(card) },
+        ]
+      : [];
 
-  const rails = useMemo(
+  const cat = catalog.data;
+  const movies = sections.movies ? cat?.movies : undefined;
+  const shows = sections.tv ? cat?.shows : undefined;
+  const topMovies = useTopToday('movie', movies, isOn('top-movies'));
+  const topShows = useTopToday('show', shows, isOn('top-shows'));
+  const because = useBecause(movies, shows, isOn('because'));
+  const watching = useMemo(
     () => continueRails(progress.data ?? [], resume.data ?? []),
     [progress.data, resume.data],
   );
-  const cat = catalog.data;
 
-  // a library's worth of sorting: once per catalog, not once per render
-  const { recentMovies, topRated } = useMemo(() => {
-    if (!cat || !sections.movies) return { recentMovies: [], topRated: [] };
-    return {
-      recentMovies: recentMovieCards(cat.movies),
-      topRated: cat.movies
-        .filter((m) => (m.rating ?? 0) > 0)
-        .sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0))
-        .slice(0, 20)
-        .map((m) => ({ ...movieCard(m), key: `top:${m.id}` })),
+  // every row home can draw, from the library only
+  const rows = useMemo(() => {
+    const out: Record<string, { title: string; cards: RailCard[]; more?: { to: string } }[]> = {};
+    const one = (id: string, title: string, cards: RailCard[], more?: string) => {
+      out[id] = [{ title, cards, more: more ? { to: more } : undefined }];
     };
-  }, [cat, sections.movies]);
-  const recentEpisodes = cat && sections.tv ? recentEpisodeCards(cat.recent_episodes) : [];
-  const recentVideos = cat ? recentYoutubeCards(cat.youtube) : [];
-  const recentAlbums = recentAlbumCards(albums.data?.albums ?? []);
-  const recentBooks = recentBookCards(books.data ?? []);
-  const podcastCards: RailCard[] = (podcasts.data ?? []).slice(0, 20).map((p) => ({
-    key: `podcast:${p.id}`,
-    title: p.title,
-    subtitle: p.author ?? undefined,
-    art: remoteImage(p.artwork_url),
-    href: `/player/podcasts/${p.id}`,
-    shape: 'square',
-  }));
-
-  const loading = progress.isLoading || catalog.isLoading || albums.isLoading;
-  const nothing =
-    !loading &&
-    !rails.length &&
-    !recentMovies.length &&
-    !recentEpisodes.length &&
-    !recentVideos.length &&
-    !recentAlbums.length &&
-    !recentBooks.length &&
-    !podcastCards.length;
+    out.continue = watching.map((r) => ({ title: r.label, cards: r.cards }));
+    one(
+      'new-episodes',
+      'New episodes',
+      cat && shows ? recentEpisodeCards(cat.recent_episodes) : [],
+      '/player/tv',
+    );
+    one('top-movies', 'Top 10 movies today', topMovies);
+    one(
+      'recent-movies',
+      'Recently added movies',
+      movies ? recentMovieCards(movies) : [],
+      '/player/movies?tab=library',
+    );
+    out.because = because;
+    one('top-shows', 'Top 10 shows today', topShows);
+    one(
+      'recent-shows',
+      'Recently added shows',
+      shows
+        ? newestFirst(shows, (x) => x.added_at)
+            .slice(0, 20)
+            .map(showCard)
+        : [],
+      '/player/tv?tab=library',
+    );
+    one(
+      'recent-music',
+      'Recently added music',
+      recentAlbumCards(albums.data?.albums ?? []),
+      '/player/music',
+    );
+    one('youtube', 'New on YouTube', cat ? recentYoutubeCards(cat.youtube) : [], '/player/youtube');
+    const topGenre = movies ? genresOf(movies)[0] : undefined;
+    one(
+      'genre-picks',
+      topGenre ? `${topGenre} picks for today` : "Today's picks",
+      movies && topGenre
+        ? seededShuffle(
+            movies.filter((m) => m.genres.includes(topGenre) && (m.rating ?? 0) >= 6.5),
+            hashSeed(`home-${topGenre}-${day()}`),
+          )
+            .slice(0, 20)
+            .map(movieCard)
+        : [],
+      topGenre ? `/player/movies?tab=library&genre=${encodeURIComponent(topGenre)}` : undefined,
+    );
+    one(
+      'top-rated',
+      'Top rated in your library',
+      movies
+        ? movies
+            .filter((m) => (m.rating ?? 0) > 0)
+            .sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0))
+            .slice(0, 20)
+            .map(movieCard)
+        : [],
+    );
+    const yearAgo = new Date(Date.now() - 365 * 86_400_000).toISOString();
+    one(
+      'rediscover',
+      'Rediscover',
+      movies
+        ? seededShuffle(
+            movies.filter((m) => m.added_at && m.added_at < yearAgo),
+            hashSeed(`rediscover-${day()}`),
+          )
+            .slice(0, 20)
+            .map(movieCard)
+        : [],
+    );
+    one(
+      'audiobooks',
+      'Recently added audiobooks',
+      recentBookCards(books.data ?? []),
+      '/player/audiobooks',
+    );
+    one(
+      'podcasts',
+      'Your podcasts',
+      (podcasts.data ?? []).slice(0, 20).map((p) => ({
+        key: `podcast:${p.id}`,
+        title: p.title,
+        subtitle: p.author ?? undefined,
+        art: remoteImage(p.artwork_url),
+        href: `/player/podcasts/${p.id}`,
+        shape: 'square' as const,
+      })),
+      '/player/podcasts',
+    );
+    for (const r of layout.rows) {
+      const g = parseGenreRow(r.id);
+      if (!g) continue;
+      const pool: (CatalogMovie | CatalogShow)[] = (g.kind === 'movie' ? movies : shows) ?? [];
+      const picked = pool
+        .filter((x) => x.genres.includes(g.genre))
+        .sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0))
+        .slice(0, 24)
+        .map((x) => ('episode_count' in x ? showCard(x) : movieCard(x)));
+      one(
+        r.id,
+        `${g.genre} ${g.kind === 'movie' ? 'movies' : 'shows'}`,
+        picked,
+        `/player/${g.kind === 'movie' ? 'movies' : 'tv'}?tab=library&genre=${encodeURIComponent(g.genre)}`,
+      );
+    }
+    return out;
+  }, [
+    watching,
+    cat,
+    movies,
+    shows,
+    topMovies,
+    topShows,
+    because,
+    albums.data,
+    books.data,
+    podcasts.data,
+    layout.rows,
+  ]);
 
   // the billboard: the newest films and the shows with new episodes, in turn
   const slides = useMemo<Slide[]>(() => {
     if (!cat) return [];
-    const films = sections.movies
+    const films = movies
       ? newestFirst(
-          cat.movies.filter((m) => m.has_backdrop),
+          movies.filter((m) => m.has_backdrop),
           (m) => m.added_at,
         ).slice(0, 3)
       : [];
     const showIds: number[] = [];
-    if (sections.tv)
+    if (shows)
       for (const e of cat.recent_episodes)
         if (!showIds.includes(e.show_id)) showIds.push(e.show_id);
-    const byId = new Map(cat.shows.map((x) => [x.id, x]));
-    const shows = showIds
+    const byId = new Map((shows ?? []).map((x) => [x.id, x]));
+    const fresh = showIds
       .map((id) => byId.get(id))
       .filter((x): x is CatalogShow => !!x && x.has_backdrop)
       .slice(0, 3);
     const out: Slide[] = [];
     for (let i = 0; i < 3; i++) {
-      if (shows[i]) out.push({ kind: 'show', item: shows[i], why: 'New episodes' });
+      if (fresh[i]) out.push({ kind: 'show', item: fresh[i], why: 'New episodes' });
       if (films[i]) out.push({ kind: 'movie', item: films[i], why: 'Recently added' });
     }
     return out;
-  }, [cat, sections.movies, sections.tv]);
+  }, [cat, movies, shows]);
 
-  // a genre you have plenty of, its best, shuffled for the day
-  const genreRow = useMemo(() => {
-    if (!cat || !sections.movies) return null;
-    const genre = genresOf(cat.movies)[0];
-    if (!genre) return null;
-    const day = new Date().toISOString().slice(0, 10);
-    const pool = cat.movies.filter((m) => m.genres.includes(genre) && (m.rating ?? 0) >= 6.5);
-    return {
-      genre,
-      cards: seededShuffle(pool, hashSeed(`home-${genre}-${day}`))
-        .slice(0, 20)
-        .map((m) => ({ ...movieCard(m), key: `genre:${m.id}` })),
-    };
-  }, [cat, sections.movies]);
+  const loading = progress.isLoading || catalog.isLoading || albums.isLoading;
+  const drawn: ReactNode[] = [];
+  for (const r of layout.rows) {
+    if (!r.on) continue;
+    for (const [i, row] of (rows[r.id] ?? []).entries())
+      drawn.push(
+        <StyledRow
+          key={`${r.id}-${i}`}
+          style={r.style}
+          title={row.title}
+          cards={row.cards}
+          more={row.more}
+          actionsFor={r.id === 'continue' ? continueActions : undefined}
+        />,
+      );
+  }
+  const nothing = !loading && !Object.values(rows).some((list) => list.some((x) => x.cards.length));
+  const billboard = layout.billboard && slides.length > 0;
 
-  const continueRows = rails.map((rail) => (
-    <CardRail
-      key={rail.id}
-      title={rail.label}
-      cards={rail.cards}
-      actionsFor={(card) =>
-        card.source
-          ? [
-              { label: 'Mark as finished', onSelect: () => finish.mutate(card) },
-              { label: 'Remove from this row', onSelect: () => remove.mutate(card) },
-            ]
-          : []
-      }
-    />
-  ));
+  const close = useCallback(() => {
+    setEditing(false);
+    setDraft(null);
+  }, []);
 
   return (
     <>
-      {slides.length ? <Billboard slides={slides} /> : <h1 className={s.pageTitle}>Home</h1>}
+      {billboard ? <Billboard slides={slides} /> : <h1 className={s.pageTitle}>Home</h1>}
 
-      <div className={slides.length ? s.homeRows : undefined}>
-        {continueRows}
+      <div className={billboard ? s.homeRows : undefined}>
+        {drawn}
         {loading ? <SkeletonRail /> : null}
-
-        <CardRail title="New episodes" cards={recentEpisodes} more={{ to: '/player/tv' }} />
-        {cat && sections.movies ? (
-          <Top10Rail
-            title="Top 10 movies today"
-            listKey="trending_movies_today"
-            kind="movie"
-            owned={cat.movies}
-          />
-        ) : null}
-        <CardRail
-          title="Recently added movies"
-          cards={recentMovies}
-          more={{ to: '/player/movies?tab=library' }}
-        />
-        {cat ? <MoreLikeRows movies={cat.movies} shows={cat.shows} /> : null}
-        {cat && sections.tv ? (
-          <Top10Rail
-            title="Top 10 shows today"
-            listKey="trending_tv_today"
-            kind="show"
-            owned={cat.shows}
-          />
-        ) : null}
-        <CardRail
-          title="Recently added music"
-          cards={recentAlbums}
-          more={{ to: '/player/music' }}
-        />
-        <CardRail title="New on YouTube" cards={recentVideos} more={{ to: '/player/youtube' }} />
-        {genreRow && genreRow.cards.length >= 6 ? (
-          <CardRail
-            title={`${genreRow.genre} picks for today`}
-            cards={genreRow.cards}
-            more={{
-              to: `/player/movies?tab=library&genre=${encodeURIComponent(genreRow.genre)}`,
-            }}
-          />
-        ) : null}
-        {sections.movies && cat ? (
-          <CardRail title="Top rated in your library" cards={topRated} />
-        ) : null}
-        <CardRail
-          title="Recently added audiobooks"
-          cards={recentBooks}
-          more={{ to: '/player/audiobooks' }}
-        />
-        <CardRail title="Your podcasts" cards={podcastCards} more={{ to: '/player/podcasts' }} />
 
         {nothing ? (
           <div className={s.rail}>
@@ -225,29 +391,47 @@ function PlayerHome() {
             </Empty>
           </div>
         ) : null}
-      </div>
-    </>
-  );
-}
 
-/** "because you have X": tmdb's picks for a few titles you own, yours first */
-function MoreLikeRows({ movies, shows }: { movies: CatalogMovie[]; shows: CatalogShow[] }) {
-  const rows = useQuery(discoverMoreLikeQuery());
-  const owned = useMemo(() => ownedByTmdb([...movies, ...shows]), [movies, shows]);
-  return (
-    <>
-      {(rows.data ?? []).slice(0, 2).map((row) => {
-        const cards = row.items
-          .map((t) => extraCard(t, owned))
-          .sort((a, b) => Number(!!a.muted) - Number(!!b.muted));
-        return cards.length >= 6 ? (
-          <CardRail
-            key={row.title}
-            title={row.title.replace(/^More like /, 'Because you have ')}
-            cards={cards.slice(0, 24)}
-          />
-        ) : null;
-      })}
+        <div className={s.customizeRow}>
+          <button
+            type="button"
+            className={s.btn}
+            onClick={() => {
+              setDraft(layout);
+              setEditing(true);
+            }}
+            data-nav
+          >
+            Customize home
+          </button>
+        </div>
+      </div>
+
+      {editing && draft ? (
+        <HomeEditor
+          layout={draft}
+          catalog={saved.data?.catalog}
+          scope={saved.data?.scope ?? null}
+          movieGenres={movies ? genresOf(movies) : []}
+          showGenres={shows ? genresOf(shows) : []}
+          onChange={setDraft}
+          onSave={async (where) => {
+            await saveHomeLayout(
+              draft,
+              where === 'all' ? '*' : device,
+              where === 'all' ? device : undefined,
+            );
+            await queryClient.invalidateQueries({ queryKey: ['player', 'home-layout'] });
+          }}
+          onReset={async (what) => {
+            await resetHomeLayout(what === 'device' ? device : undefined);
+            await queryClient.invalidateQueries({ queryKey: ['player', 'home-layout'] });
+            setDraft(null);
+            setEditing(false);
+          }}
+          onClose={close}
+        />
+      ) : null}
     </>
   );
 }

@@ -2,6 +2,7 @@ import { infiniteQueryOptions, queryOptions } from '@tanstack/react-query';
 
 import { apiClient, readJson } from '@/app/api-client';
 
+import type { HomeLayout, LayoutCatalog } from './-lib/home-layout';
 import type { ServerResume } from './-lib/rails';
 import type {
   CatalogBook,
@@ -708,3 +709,31 @@ export const logosQuery = (items: string[]) =>
     staleTime: 60 * MINUTE,
     enabled: items.length > 0,
   });
+
+// ── home layout, per profile and per screen ────────────────────────────
+
+export const homeLayoutQuery = (device: string) =>
+  queryOptions({
+    queryKey: ['player', 'home-layout', device],
+    queryFn: async () =>
+      await apiClient.get('player/home-layout', { searchParams: { device } }).json<{
+        layout?: HomeLayout;
+        scope?: 'device' | 'all' | null;
+        catalog?: LayoutCatalog;
+      }>(),
+    staleTime: 5 * MINUTE,
+  });
+
+/** save for this screen, or for every screen of the profile ('*') */
+export async function saveHomeLayout(layout: unknown, device: string, fromDevice?: string) {
+  await apiClient.put('player/home-layout', {
+    json: { layout, device, ...(fromDevice ? { from_device: fromDevice } : {}) },
+  });
+}
+
+/** this screen follows the shared layout again; without a device, all go to the default */
+export async function resetHomeLayout(device?: string) {
+  await apiClient.delete('player/home-layout', {
+    searchParams: device ? { device } : {},
+  });
+}

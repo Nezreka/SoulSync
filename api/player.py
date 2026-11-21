@@ -398,6 +398,69 @@ def put_favorites():
         return _failed("favorites save")
 
 
+@bp.route("/api/player/home-layout", methods=["GET"])
+@self_only
+def get_home_layout():
+    """this screen's home rows (?device=), else the profile's shared ones,
+    else the default; scope says which (device, all, or null). always clean,
+    and with the catalog of rows and styles (core/player/home_layout.py is
+    the contract every player app follows)."""
+    from core.player import home_layout
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    try:
+        device = home_layout.device(request.args.get("device"))
+        return jsonify({"success": True, **home_layout.get(player_db(), pid, device),
+                        "catalog": home_layout.catalog()})
+    except home_layout.LayoutError as e:
+        return _bad(e)
+    except Exception:  # noqa: BLE001
+        return _failed("home layout read")
+
+
+@bp.route("/api/player/home-layout", methods=["PUT"])
+@self_only
+def put_home_layout():
+    """{layout, device}: device is this screen's id, or '*' for every
+    screen of the profile (which drops this screen's own)"""
+    from core.player import home_layout
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    body = request.get_json(silent=True) or {}
+    try:
+        device = home_layout.device(body.get("device"))
+        db = player_db()
+        saved = home_layout.put(db, pid, body.get("layout"), device)
+        if device == home_layout.ALL and body.get("from_device"):
+            home_layout.reset(db, pid, home_layout.device(body.get("from_device")))
+        return jsonify({"success": True, "layout": saved,
+                        "scope": "all" if device == home_layout.ALL else "device"})
+    except home_layout.LayoutError as e:
+        return _bad(e)
+    except Exception:  # noqa: BLE001
+        return _failed("home layout save")
+
+
+@bp.route("/api/player/home-layout", methods=["DELETE"])
+@self_only
+def reset_home_layout():
+    """?device=: this screen follows the shared layout again. no device:
+    every screen of the profile goes back to the default."""
+    from core.player import home_layout
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    try:
+        home_layout.reset(player_db(), pid, home_layout.device(request.args.get("device")))
+        return jsonify({"success": True})
+    except home_layout.LayoutError as e:
+        return _bad(e)
+    except Exception:  # noqa: BLE001
+        return _failed("home layout reset")
+
+
 KEYWORD_MAX = 80
 
 

@@ -305,6 +305,54 @@ All under `/seerr/api/v1`: `status`, `auth/me`, `user`, `discover/trending`, `di
 
 ---
 
+## Player home layout
+
+The player's home page is laid out per profile and per screen, so a TV and a phone on one profile can each look different. Every player app (web, phone, TV) reads the same layout and draws it the same way. The contract lives in `core/player/home_layout.py`.
+
+These routes use the signed-in session (the player's own), not an API key. Each profile only ever sees and changes its own.
+
+### The layout
+
+```json
+{
+  "version": 1,
+  "billboard": true,
+  "rows": [
+    {"id": "continue", "style": "wide", "on": true},
+    {"id": "top-movies", "style": "ranked", "on": true},
+    {"id": "genre:movie:Horror", "style": "large", "on": true}
+  ]
+}
+```
+
+- `billboard`: the big rotating banner of what's new at the top.
+- `rows`: drawn top to bottom. Skip a row that's `on: false`, one your app doesn't know, or one with nothing to show.
+- `id`: a row from the catalog, or `genre:<movie|show>:<genre name>` for a genre row someone added.
+- `style`: one of the four below. A row only takes the styles the catalog lists for it.
+
+| Style | Draw it as |
+|---|---|
+| `standard` | the row's own cards: posters, squares or stills |
+| `large` | the same cards, bigger |
+| `wide` | 16:9 stills (a title's backdrop) |
+| `ranked` | the first ten as posters, numbered 1 to 10 |
+
+Every row on home is from the profile's own library.
+
+### Routes
+
+- `GET /api/player/home-layout?device=<id>`: `{layout, scope, catalog}`. `scope` is `device` when this screen has its own layout, `all` when it uses the profile's shared one, and `null` for the default. The layout is always clean: rows the server no longer has are dropped, a style a row can't take goes back to its default, and rows added since it was saved come back at the end, turned off.
+- `PUT /api/player/home-layout` with `{layout, device}`: saves it for this screen, or for every screen with `device: "*"`. Add `from_device: "<id>"` with `"*"` to make this screen follow the shared layout from then on. A layout that isn't this shape answers `400`.
+- `DELETE /api/player/home-layout?device=<id>`: this screen goes back to the shared layout. Without `device`, every screen of the profile goes back to the default.
+
+`device` is an id your app makes once and keeps: 8 to 64 letters, numbers, `-` or `_`.
+
+### The catalog
+
+`catalog` comes with every `GET`, so an app never has to hard-code the rows: `{version, styles: [{id, label}], rows: [{id, label, hint, styles, style, on}], genre_row, max_rows}`. Use `label` and `hint` in your editor, `styles` for the style picker, and `style` and `on` as each row's defaults.
+
+---
+
 ## Endpoints
 
 ### System

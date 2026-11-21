@@ -235,7 +235,9 @@ function GuidePage() {
     })),
   ].filter((group) => group.channels.length);
 
-  const loading = catalog.isLoading || playlists.isLoading || musicChannels.isLoading;
+  // the music channels take a library pass the first time; the guide doesn't wait for them
+  const loading = catalog.isLoading || playlists.isLoading;
+  const tuningMusic = musicChannels.isLoading && musicChannels.fetchStatus === 'fetching';
   const genres = genresOf([...(catalog.data?.movies ?? []), ...(catalog.data?.shows ?? [])]);
   const setSearch = (next: { view?: GuideView; filter?: ChannelFilter }) =>
     void navigate({ search: (prev) => ({ ...prev, ...next }), replace: true });
@@ -352,9 +354,14 @@ function GuidePage() {
         />
       ) : null}
 
-      {loading ? <div className={s.skeleton} style={{ height: '50vh' }} /> : null}
+      {loading && !groups.length ? <div className={s.skeleton} style={{ height: '50vh' }} /> : null}
+      {tuningMusic && groups.length ? (
+        <div className={s.guideNote} role="status">
+          Tuning in the music channels…
+        </div>
+      ) : null}
 
-      {!loading && !groups.length ? (
+      {!loading && !tuningMusic && !groups.length ? (
         <Empty title={filter === 'favorites' ? 'No favorite channels yet' : 'No channels yet'}>
           {filter === 'favorites'
             ? 'Star a channel and it lands here, and at the top of the guide, on every screen you use.'
