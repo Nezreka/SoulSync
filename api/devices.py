@@ -12,7 +12,8 @@ import time
 from flask import Blueprint, g, jsonify, request
 
 from core.connect.device_access import device_pick
-from core.permissions import device_only
+from core.permissions import device_only, public
+from core.security.rate_limit import AttemptLimiter
 from core.profile_context import admin_only
 from utils.logging_config import get_logger
 
@@ -57,12 +58,21 @@ def server_identity_view():
                         "Check the server_key file next to the database."}), 500
 
 
+def _pairing(code):
+    """the pairing payload for a code: what the QR carries."""
+    from core.connect.addresses import pairing_payload, payload_text
+    ident = _identity()
+    payload = pairing_payload(lookup_id=ident.lookup_id, fingerprint=ident.fingerprint,
+                              addresses=[], code=code)
+    return {"payload": payload, "payload_text": payload_text(payload), "warnings": []}
+
+
 # ── paired devices (admin) ───────────────────────────────────────────────
 
-def _audit(action, detail=None, target_id=None, target_name=None):
+def _audit(action, detail=None, target_id=None, target_name=None, actor=None):
     try:
         from api.profile_admin import audit
-        audit(action, target_id, target_name, detail)
+        audit(action, target_id, target_name, detail, actor=actor)
     except Exception:  # noqa: BLE001 - the log never fails the action
         logger.debug("device audit failed", exc_info=True)
 
@@ -200,3 +210,98 @@ def device_pick_profile():
                         "message": "No profile was picked in time. Pair this device again."}), 409
     _audit("device_paired", detail=dev.get("name"), target_id=profile_id, target_name=profile.get("name"))
     return jsonify({"success": True, "profile": {"id": profile_id, "name": profile.get("name")}})
+
+
+# ── invite codes (admin) ─────────────────────────────────────────────────
+
+# failed redemptions per address: 10 a minute (PAIRING_SPEC.md 2)
+_redeem_limiter = AttemptLimiter(max_attempts=10, window_seconds=60)
+
+
+def _code_db_secret():
+    return get_database(), _identity().key
+
+
+@bp.route("/api/devices/codes", methods=["GET"])
+@admin_only
+def list_codes():
+    """codes still waiting to be used. never the codes themselves."""
+    from core.connect import invite_codes as C
+    return jsonify({"success": True, "codes": C.live_codes(get_database())})
+
+
+@bp.route("/api/devices/codes", methods=["POST"])
+@admin_only
+def create_code():
+    """{note?} -> the code, shown this once, with its pairing payload."""
+    from core.connect import invite_codes as C
+    from core.profile_context import get_current_profile_id
+    db, secret = _code_db_secret()
+    note = str((request.get_json(silent=True) or {}).get("note") or "")
+    try:
+        code, row = C.create(db, secret, created_by=get_current_profile_id(), note=note)
+    except C.TooManyLive:
+        return jsonify({"success": False, "error": f"{C.MAX_LIVE} codes are already waiting. "
+                        "Cancel one or let it run out."}), 409
+    C.sweep(db)
+    _audit("device_code_created", detail=note.strip()[:80] or None)
+    out = {"success": True, "code": C.display(code), **row}
+    out.update(_pairing(C.display(code)))
+    return jsonify(out), 201
+
+
+@bp.route("/api/devices/codes/<int:code_id>", methods=["DELETE"])
+@admin_only
+def cancel_code(code_id):
+    from core.connect import invite_codes as C
+    if not C.cancel(get_database(), code_id):
+        return jsonify({"success": False, "error": "Not found, used or already cancelled"}), 404
+    return jsonify({"success": True})
+
+
+# ── redemption (the app, with its code) ──────────────────────────────────
+
+def _secure_enough() -> bool:
+    """https, or plain http from this machine or the home network. a code
+    or a token never crosses the internet in the clear."""
+    from core.connect.addresses import is_home_address
+    if request.is_secure:
+        return True
+    ip = request.remote_addr or ""
+    return ip.startswith("127.") or ip == "::1" or is_home_address(ip)
+
+
+@bp.route("/api/devices/redeem", methods=["POST"])
+@public
+def redeem_code():
+    """{code, name, platform?, app?} -> a device token, shown this once.
+    the code is burnt and the device starts unprofiled: it picks its
+    profile next, within 15 minutes. every failure reads the same."""
+    from core.connect import device_tokens as T
+    from core.connect import invite_codes as C
+    from core.connect.server_key import public_view
+    if not _secure_enough():
+        return jsonify({"success": False, "error": "https_required",
+                        "message": "Pair over https, or from your home network."}), 403
+    ip = request.remote_addr or "unknown"
+    now = time.time()
+    locked, retry = _redeem_limiter.is_locked(ip, now)
+    if locked:
+        return (jsonify({"success": False, "error": "rate_limited",
+                         "message": "Too many wrong codes. Wait a minute and try again.",
+                         "retry_after_seconds": retry}), 429, {"Retry-After": str(retry)})
+    body = request.get_json(silent=True) or {}
+    db, secret = _code_db_secret()
+    outcome, code_id = C.redeem(db, secret, body.get("code"), now=now)
+    if outcome != C.REDEEMED:
+        _redeem_limiter.record_failure(ip, now)
+        return jsonify({"success": False, "error": "unknown_or_expired_code",
+                        "message": "That code isn't valid. Ask for a new one."}), 404
+    token, device_id = T.create(db, name=str(body.get("name") or ""), platform=str(body.get("platform") or ""),
+                                app=str(body.get("app") or ""), ip=ip, invite_code_id=code_id, now=now)
+    C.mark_device(db, code_id, device_id)
+    T.sweep_expired(db, now=now)
+    _audit("device_code_used", detail=str(body.get("name") or "")[:80] or None,
+           actor=(None, "a device", False))
+    return jsonify({"success": True, "token": token, "device_id": device_id,
+                    "pick_seconds": T.PICK_WINDOW, "server": public_view(_identity())}), 201

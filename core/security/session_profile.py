@@ -81,6 +81,10 @@ def is_open_profile_path(path: str, method: str) -> bool:
     method = (method or 'GET').upper()
     if path.startswith('/api/invite/') and method in ('GET', 'POST'):
         return True
+    # a device redeeming its pairing code (the code is the credential, an
+    # admin minted it; api/devices.py redeem_code)
+    if path == '/api/devices/redeem' and method == 'POST':
+        return True
     # the video calendar's iCal feed: calendar apps fetch it with no cookie, and
     # the token in the path is the credential (the route refuses unknown ones)
     from core.video.calendar_feed import is_feed_path

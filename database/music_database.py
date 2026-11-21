@@ -5985,8 +5985,9 @@ class MusicDatabase:
 
     def _add_connect_tables(self, cursor):
         try:
-            from core.connect import device_tokens
+            from core.connect import device_tokens, invite_codes
             device_tokens.ensure_tables(cursor)
+            invite_codes.ensure_tables(cursor)
         except Exception as e:
             logger.error(f"Error creating paired device tables: {e}")
 
