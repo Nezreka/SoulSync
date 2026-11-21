@@ -394,6 +394,58 @@ def put_favorites():
 KEYWORD_MAX = 80
 
 
+@bp.route("/api/player/maker", methods=["GET"])
+@requires_any("movies.access", "tv.access")
+def maker_titles():
+    """everything a studio (?kind=studio) or a network (?kind=network) made,
+    by name: its tmdb card and a page of titles (?sort=popular|newest|rated
+    &page=), owned ones stamped with their library id. a profile without
+    movies gets no studio, one without tv no network; rating caps apply."""
+    from api.video.kids import filter_tmdb_items
+    from core.player import makers
+    from core.video.enrichment.engine import get_video_enrichment_engine
+
+    which = request.args.get("kind")
+    name = (request.args.get("name") or "").strip()
+    if which not in ("studio", "network") or not name or len(name) > 200:
+        return _bad("a kind (studio or network) and a name are required")
+    try:
+        page = max(1, min(20, int(request.args.get("page") or 1)))
+    except ValueError:
+        page = 1
+    sort = request.args.get("sort") or "popular"
+    try:
+        sees_movies, sees_shows, _youtube, cap = _video_view()
+        kind = "movie" if which == "studio" else "show"
+        if not (sees_movies if kind == "movie" else sees_shows):
+            return jsonify({"success": False, "error": "That isn't part of your profile"}), 403
+        eng = get_video_enrichment_engine()
+        if kind == "movie":
+            maker = makers.studio_id(eng, name)
+            card = eng.company_detail(maker) if maker else None
+        else:
+            conn = get_video_db()._get_connection()
+            try:
+                ids = [r[0] for r in conn.execute(
+                    "SELECT s.tmdb_id FROM shows s JOIN show_networks sn ON sn.show_id = s.id "
+                    "JOIN networks n ON n.id = sn.network_id "
+                    "WHERE n.name = ? AND s.tmdb_id IS NOT NULL LIMIT 3", (name,))]
+            finally:
+                conn.close()
+            maker = makers.network_id(eng, name, ids)
+            card = makers.network_card(eng, maker) if maker else None
+        if not maker:
+            return jsonify({"success": True, "found": False, "titles": []})
+        items = makers.titles(eng, kind, maker, sort, page)
+        if cap is not None:
+            items = filter_tmdb_items(get_video_db(), items, cap)
+        return jsonify({"success": True, "found": True, "card": card, "titles": items,
+                        "page": page, "has_more": len(items) >= 15})
+    except Exception:  # noqa: BLE001
+        logger.exception("player maker failed for %s %s", which, name)
+        return jsonify({"success": False, "error": "Could not look that up"}), 500
+
+
 @bp.route("/api/player/keyword", methods=["GET"])
 @requires_any("movies.access", "tv.access")
 def keyword_titles():

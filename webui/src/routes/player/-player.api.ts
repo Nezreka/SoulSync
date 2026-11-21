@@ -1,4 +1,4 @@
-import { queryOptions } from '@tanstack/react-query';
+import { infiniteQueryOptions, queryOptions } from '@tanstack/react-query';
 
 import { apiClient, readJson } from '@/app/api-client';
 
@@ -638,4 +638,34 @@ export const studioCollectionsQuery = () =>
           .json<{ collections?: StudioCollection[] }>()
       ).collections ?? [],
     staleTime: 10 * MINUTE,
+  });
+
+export type MakerSort = 'popular' | 'newest' | 'rated';
+
+export interface MakerPage {
+  found?: boolean;
+  card?: {
+    name?: string | null;
+    logo?: string | null;
+    description?: string | null;
+    headquarters?: string | null;
+    origin_country?: string | null;
+  } | null;
+  titles: ExtraTitle[];
+  page?: number;
+  has_more?: boolean;
+}
+
+/** everything a studio or a network made, a page at a time */
+export const makerQuery = (kind: 'studio' | 'network', name: string, sort: MakerSort) =>
+  infiniteQueryOptions({
+    queryKey: ['player', 'maker', kind, name, sort],
+    queryFn: async ({ pageParam }) =>
+      await apiClient
+        .get('player/maker', { searchParams: { kind, name, sort, page: pageParam } })
+        .json<MakerPage>(),
+    initialPageParam: 1,
+    getNextPageParam: (last, all) => (last.has_more ? all.length + 1 : undefined),
+    staleTime: 30 * MINUTE,
+    retry: false,
   });

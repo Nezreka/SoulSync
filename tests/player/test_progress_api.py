@@ -247,7 +247,7 @@ def test_every_player_route_declares_its_access():
            or "/favorites" in r.rule]
     music = [r for r in rules if r.rule.endswith("/music-channels")]
     library = [r for r in rules if r not in own and r not in music]
-    assert len(own) == 8 and len(library) == 5 and len(music) == 1
+    assert len(own) == 8 and len(library) == 6 and len(music) == 1
     assert declared_access(app.view_functions[music[0].endpoint]) == ("perm", "music.library")
     # your own rows: self only
     for rule in own:
