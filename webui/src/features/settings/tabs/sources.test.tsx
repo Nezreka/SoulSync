@@ -251,17 +251,21 @@ describe('the order, drawn', () => {
 describe('the model', () => {
   it('loads the chain as loadHybridSourceOrder did', () => {
     expect(
-      musicFromSettings({ download_source: { hybrid_order: ['tidal', 'amazon', 'youtube'] } }),
+      musicFromSettings({
+        download_source: { mode: 'hybrid', hybrid_order: ['tidal', 'amazon', 'youtube'] },
+      }),
     ).toMatchObject({
       music: ['tidal', 'youtube'],
       cleaned: true,
     });
     // no saved order: the legacy primary + secondary
-    expect(musicFromSettings({ download_source: { hybrid_primary: 'qobuz' } }).music).toEqual([
-      'qobuz',
+    expect(
+      musicFromSettings({ download_source: { mode: 'hybrid', hybrid_primary: 'qobuz' } }).music,
+    ).toEqual(['qobuz', 'youtube']);
+    expect(musicFromSettings({ download_source: { mode: 'hybrid' } }).music).toEqual([
+      'soulseek',
       'youtube',
     ]);
-    expect(musicFromSettings({}).music).toEqual(['soulseek', 'youtube']);
     // a retired mode falls back to soulseek
     expect(
       musicFromSettings({ download_source: { mode: 'amazon', hybrid_order: ['soulseek'] } }),
@@ -272,7 +276,7 @@ describe('the model', () => {
     // unready sources stay in the chain, marked
     expect(
       musicFromSettings({
-        download_source: { hybrid_order: ['usenet'] },
+        download_source: { mode: 'hybrid', hybrid_order: ['usenet'] },
         _source_status: { usenet: false, tidal: false },
       }).unready,
     ).toEqual({ usenet: true });
@@ -297,6 +301,78 @@ describe('the model', () => {
       hybrid_secondary: 'soulseek',
       hybrid_order: ['tidal', 'soulseek'],
     });
+  });
+
+  it('shows the chain the server runs: one source unless the mode is hybrid (#2230)', () => {
+    // a fresh install that skipped onboarding: mode soulseek, the legacy
+    // pair still soulseek + youtube. only soulseek runs
+    const fresh = {
+      download_source: {
+        mode: 'soulseek',
+        hybrid_primary: 'soulseek',
+        hybrid_secondary: 'youtube',
+        hybrid_order: [],
+      },
+    };
+    expect(musicFromSettings(fresh)).toMatchObject({
+      music: ['soulseek'],
+      mode: 'soulseek',
+      cleaned: false,
+    });
+    expect(musicFromSettings({}).music).toEqual(['soulseek']);
+    // a saved order with a single-source mode: the one source runs, and the
+    // order is kept for when the chain is edited
+    expect(
+      musicFromSettings({
+        download_source: { mode: 'youtube', hybrid_order: ['soulseek', 'youtube'] },
+      }),
+    ).toMatchObject({ music: ['youtube'], order: ['soulseek', 'youtube'] });
+  });
+
+  it('the page, the order and the count all say one source on a fresh install (#2230)', async () => {
+    model.load({
+      download_source: {
+        mode: 'soulseek',
+        hybrid_primary: 'soulseek',
+        hybrid_secondary: 'youtube',
+        hybrid_order: [],
+      },
+    });
+    expect(model.getState().music).toEqual(['soulseek']);
+    expect(model.chains()[0]).toEqual({ label: 'Music', order: ['soulseek'] });
+    view();
+    await act(() => model.loadChain());
+    expect(rows()).toEqual(['soulseek']);
+    // nothing was saved behind the person's back
+    expect(store.hasPending()).toBe(false);
+    // adding YouTube makes it the hybrid chain the backend runs
+    fireEvent.click(screen.getByRole('button', { name: 'Use YouTube' }));
+    await waitFor(() => expect(store.hasPending()).toBe(false));
+    expect(saved().download_source).toEqual({
+      mode: 'hybrid',
+      hybrid_primary: 'soulseek',
+      hybrid_secondary: 'youtube',
+      hybrid_order: ['soulseek', 'youtube'],
+    });
+  });
+
+  it('a retired single source falls back to soulseek and keeps the saved order', async () => {
+    shell._suppressSettingsAutoSave = true;
+    try {
+      model.load({
+        download_source: {
+          mode: 'amazon',
+          hybrid_primary: 'qobuz',
+          hybrid_secondary: 'tidal',
+          hybrid_order: ['qobuz', 'tidal'],
+        },
+      });
+    } finally {
+      delete shell._suppressSettingsAutoSave;
+    }
+    expect(model.getState().music).toEqual(['soulseek']);
+    await act(() => store.flush());
+    expect(saved().download_source).toEqual({ mode: 'soulseek', hybrid_order: ['qobuz', 'tidal'] });
   });
 
   it('the hidden selects only knew seven sources', () => {
