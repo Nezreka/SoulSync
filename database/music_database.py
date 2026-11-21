@@ -1694,6 +1694,9 @@ class MusicDatabase:
             # server activity play log (who played what, how, from where)
             from core.server_activity.store import ensure_schema as _ensure_server_activity_schema
             _ensure_server_activity_schema(cursor)
+            # folder overrides: the media server's folder name -> SoulSync's
+            from core.library.path_mappings import ensure_schema as _ensure_path_mappings
+            _ensure_path_mappings(cursor)
 
             # Per-artist auto_download ("follow only") column. MUST run after the
             # profile-support migrations above — those recreate watchlist_artists
