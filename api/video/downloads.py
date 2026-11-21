@@ -396,6 +396,14 @@ def _with_title_identity(db, src) -> dict:
     for key in ("tmdb_id", "imdb_id", "tvdb_id"):
         if not body.get(key) and ident.get(key):
             body[key] = ident[key]
+    # a title you don't own: the get modal names it media_id=<tmdb id>,
+    # media_source=tmdb, manual search sends tmdb_id. reading only the library
+    # row left the get modal's search with no tmdb id, so Choose release never
+    # searched the original title or by id, and Manual search did (#2224).
+    # only an explicit tmdb source: a library id is never a tmdb id
+    if (not body.get("tmdb_id") and tmdb
+            and str(body.get("media_source") or "").lower() == "tmdb"):
+        body["tmdb_id"] = tmdb
     return _with_release_identity(body, scope, ident)
 
 
@@ -420,6 +428,13 @@ def _with_release_identity(body: dict, scope: str, ident: dict) -> dict:
         year = ident.get("year") or tmdb_identity(kind, tmdb).get("year")
         if year:
             body["year"] = year
+    # the ids the indexers can search by, from TMDB when the library has no
+    # row: a title you don't own was searched by tmdb id alone (#2224)
+    if not body.get("imdb_id") or (kind == "show" and not body.get("tvdb_id")):
+        tident = tmdb_identity(kind, tmdb)
+        for key in ("imdb_id", "tvdb_id") if kind == "show" else ("imdb_id",):
+            if not body.get(key) and tident.get(key):
+                body[key] = tident[key]
     title = str(body.get("title") or "").strip()
     if title:
         if not body.get("titles"):
