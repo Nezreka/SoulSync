@@ -2916,18 +2916,6 @@ body.max-performance .nav-button.active:hover {
 /* Accent Color Selector */
 
 
-.accent-preview-swatch {
-    width: 36px;
-    height: 36px;
-    border-radius: var(--radius-control);
-    border: 2px solid var(--white-a15);
-    background: rgb(var(--accent-rgb));
-    flex-shrink: 0;
-    box-shadow: 0 2px 8px var(--black-a30),
-        0 0 12px rgba(var(--accent-rgb), 0.3);
-    transition: all var(--dur-slow) ease;
-}
-
 /* Help Text */
 .help-text {
     color: var(--white-a50);

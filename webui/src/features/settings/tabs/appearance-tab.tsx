@@ -7,7 +7,7 @@
  * Video pages.
  *
  * Same ids, keys and saves as the page it replaces. The accent applies at
- * once (applyAccentColor paints the whole app, and #accent-preview-swatch),
+ * once (applyAccentColor paints the whole app),
  * media-player.js still hears the visualizer select's change event, and the
  * four effect switches show init.js's window flags, which own them.
  */
