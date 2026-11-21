@@ -282,7 +282,14 @@ _META_BOUNDARY = re.compile(
     r"\b(?:2160p|1080[pi]|720[pi]|480[pi]|576[pi]|4k|uhd"
     r"|blu-?ray|bdrip|brrip|web-?dl|web-?rip|web|hdtv|dvdrip|dvd|remux|hdcam|cam|telesync|hdts"
     r"|x264|x265|h\.?264|h\.?265|hevc|avc|av1"
-    r"|s\d{1,3}(?:e\d{1,3})?|season)\b", re.I)
+    r"|s\d{1,3}(?:e\d{1,3})?|season"
+    # a complete-series pack's own words end the title too: 'Show.Complete.Series'
+    # and 'Show.The.Complete.Series' are Show (#2233). bare COMPLETE only right
+    # before a quality or source token, so a title with the word in it stays whole
+    r"|(?:the[ ._-]+)?complete[ ._-]+(?:series|seasons?|collection|box[ ._-]?set)"
+    r"|all[ ._-]+seasons"
+    r"|complete(?=[ ._-]+(?:2160p|1080[pi]|720[pi]|480[pi]|4k|uhd|blu-?ray|web|hdtv|dvd|remux|multi)\b))\b",
+    re.I)
 _ARTICLE = re.compile(r"^(?:the|a|an)\s+")
 # Trailing words that are an edition of the SAME film, not a different title.
 _EDITION_TOKENS = frozenset({

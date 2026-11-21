@@ -2643,6 +2643,12 @@ The video search the web UI runs (`POST /api/video/downloads/search`, `/download
 
 A `query` in the search body (`/downloads/search/start`, `/downloads/search`) is run as typed on every source: one text search, no ids or structured search added. Leave it out for the usual search.
 
+A show's search (#2233) takes `scope` `series` (complete packs), `season` (with `season`) or `episode` (with `season` and `episode`):
+
+- `with_episodes: true` on a `season` search (a `with_episodes=1` query parameter on the poll) judges that season's single episodes as themselves instead of rejecting them as not a season pack, so packs and episodes come back together.
+- each result of a show in your library carries `cover: {have, total}`: the episodes it covers by the library's episode list and how many of them you already have. A Soulseek pack's `files` each get `have: true` for the ones you have.
+- an `episode` search fills in the show's `series_type`, `air_date`, `absolute` and scene numbering (`alt_season`, `alt_episode`) from the library when the body doesn't send them, and searches and judges by them like the wishlist does.
+
 The quality profile (`GET/POST /api/video/downloads/quality` and the named profiles) adds `preferred_movie_gb` and `preferred_episode_gb`: a tie-break, closer ranks higher, in tenths of a GB, `0` = off (the default), clamped to the max size.
 
 #### Video libraries (web UI session API, admin)

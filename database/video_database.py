@@ -12428,6 +12428,55 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def episode_air_date(self, show_tmdb_id, season_number, episode_number):
+        """the episode's air date (YYYY-MM-DD) from the library, or None. a
+        daily show's release is named by it, so a manual search judges by it
+        the way the wishlist does (#2233). never raises."""
+        try:
+            args = (int(show_tmdb_id), int(season_number), int(episode_number))
+        except (TypeError, ValueError):
+            return None
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT e.air_date FROM episodes e JOIN shows s ON s.id = e.show_id "
+                "WHERE s.tmdb_id = ? AND e.season_number = ? AND e.episode_number = ? "
+                "AND e.air_date IS NOT NULL AND e.air_date <> '' LIMIT 1", args).fetchone()
+            return str(row["air_date"])[:10] if row else None
+        except sqlite3.Error:
+            return None
+        finally:
+            conn.close()
+
+    def show_episode_census(self, show_id=None, tmdb_id=None) -> dict:
+        """{(season, episode): have} for every episode the library knows of a
+        show, named by its library id or its tmdb id. every library row of
+        that tmdb id counts, so an episode one server has is had. manual
+        search reads it to say what a pack covers and what you already have
+        (#2233). empty when the show isn't in the library. never raises."""
+        conn = self._get_connection()
+        try:
+            if tmdb_id in (None, "") and show_id not in (None, ""):
+                row = conn.execute("SELECT tmdb_id FROM shows WHERE id=?", (int(show_id),)).fetchone()
+                tmdb_id = row["tmdb_id"] if row else None
+            if tmdb_id not in (None, ""):
+                rows = conn.execute(
+                    "SELECT e.season_number AS s, e.episode_number AS e, MAX(e.has_file) AS have "
+                    "FROM episodes e WHERE e.show_id IN (SELECT id FROM shows WHERE tmdb_id = ?) "
+                    "GROUP BY e.season_number, e.episode_number", (int(tmdb_id),)).fetchall()
+            elif show_id not in (None, ""):
+                rows = conn.execute(
+                    "SELECT season_number AS s, episode_number AS e, has_file AS have "
+                    "FROM episodes WHERE show_id = ?", (int(show_id),)).fetchall()
+            else:
+                return {}
+            return {(int(r["s"]), int(r["e"])): bool(r["have"]) for r in rows
+                    if r["s"] is not None and r["e"] is not None}
+        except (sqlite3.Error, TypeError, ValueError):
+            return {}
+        finally:
+            conn.close()
+
     # ── requests (in-app Overseerr; arr-parity P4) ────────────────────────────
     def add_video_request(self, *, profile_id, requester_name, kind, tmdb_id, title,
                           year=None, poster_url=None, note=None, monitor="future",
