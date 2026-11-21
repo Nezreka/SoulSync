@@ -19,7 +19,9 @@ export interface GuideItem {
   /** for linking the program to its detail page */
   href?: string;
   /** artwork, if the item has any */
-  art?: string;
+  art?: string | null;
+  /** what it is: movie, episode, youtube, track */
+  kind?: string;
 }
 
 export interface GuideProgram extends GuideItem {
@@ -178,4 +180,45 @@ export function nowAiring(
   const program = programs.find((p) => p.start <= now && p.end > now);
   if (!program) return null;
   return { program, offsetSeconds: Math.floor((now - program.start) / 1000) };
+}
+
+export interface GuideBlock {
+  start: number;
+  end: number;
+  items: GuideProgram[];
+}
+
+/**
+ * songs are three minutes; a grid cell that small says nothing. music
+ * channels air in blocks: consecutive songs gathered until the block is at
+ * least ``minSeconds`` long, so a row reads like radio (a half-hour set) and
+ * a block opens into its track list.
+ */
+export function mergeIntoBlocks(
+  programs: readonly GuideProgram[],
+  minSeconds = 1800,
+): GuideBlock[] {
+  const out: GuideBlock[] = [];
+  let current: GuideBlock | null = null;
+  for (const p of programs) {
+    if (!current || current.end !== p.start || current.end - current.start >= minSeconds * 1000) {
+      current = { start: p.start, end: p.end, items: [p] };
+      out.push(current);
+    } else {
+      current.items.push(p);
+      current.end = p.end;
+    }
+  }
+  return out;
+}
+
+/** "Drake, SZA and 9 more" for a block's cell */
+export function blockArtists(block: GuideBlock, show = 2): string {
+  const names: string[] = [];
+  for (const item of block.items) {
+    const n = item.subtitle?.trim();
+    if (n && !names.includes(n)) names.push(n);
+  }
+  if (names.length <= show) return names.join(', ');
+  return `${names.slice(0, show).join(', ')} and ${names.length - show} more`;
 }

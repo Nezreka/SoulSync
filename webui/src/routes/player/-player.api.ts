@@ -443,3 +443,37 @@ export const currentProfileQuery = () =>
     queryFn: () => apiClient.get('profiles/current').json<{ login_mode?: boolean }>(),
     staleTime: 10 * MINUTE,
   });
+
+// ── guide ──────────────────────────────────────────────────────────────
+
+export const musicChannelsQuery = () =>
+  queryOptions({
+    queryKey: ['player', 'music-channels'],
+    queryFn: async () =>
+      (
+        await apiClient
+          .get('player/music-channels')
+          .json<{ channels?: import('./-lib/channels').ServerMusicChannel[] }>()
+      ).channels ?? [],
+    staleTime: 5 * MINUTE,
+    retry: false,
+  });
+
+export const favoritesQuery = () =>
+  queryOptions({
+    queryKey: ['player', 'guide-favorites'],
+    queryFn: async () =>
+      (await apiClient.get('player/guide/favorites').json<{ channels?: string[] }>()).channels ??
+      [],
+    staleTime: 5 * MINUTE,
+  });
+
+export async function saveFavorites(channels: string[]): Promise<string[]> {
+  return (
+    (
+      await readJson<{ channels?: string[] }>(
+        apiClient.put('player/guide/favorites', { json: { channels } }),
+      )
+    ).channels ?? []
+  );
+}

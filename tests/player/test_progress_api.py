@@ -243,9 +243,12 @@ def test_every_player_route_declares_its_access():
     app = Flask(__name__)
     app.register_blueprint(player_api.create_blueprint())
     rules = [r for r in app.url_map.iter_rules() if r.rule.startswith("/api/player/")]
-    own = [r for r in rules if "/progress" in r.rule or r.rule.endswith("/continue")]
-    library = [r for r in rules if r not in own]
-    assert len(own) == 6 and len(library) == 3
+    own = [r for r in rules if "/progress" in r.rule or r.rule.endswith("/continue")
+           or "/favorites" in r.rule]
+    music = [r for r in rules if r.rule.endswith("/music-channels")]
+    library = [r for r in rules if r not in own and r not in music]
+    assert len(own) == 8 and len(library) == 3 and len(music) == 1
+    assert declared_access(app.view_functions[music[0].endpoint]) == ("perm", "music.library")
     # your own rows: self only
     for rule in own:
         assert declared_access(app.view_functions[rule.endpoint]) == ("self", None), rule.rule
@@ -253,3 +256,25 @@ def test_every_player_route_declares_its_access():
     for rule in library:
         assert declared_access(app.view_functions[rule.endpoint]) == (
             "perm_any", ("movies.access", "tv.access")), rule.rule
+
+
+# ── favorites ────────────────────────────────────────────────────────────
+
+def test_favorites_round_trip_per_profile_in_order(client):
+    _as(client, 2)
+    res = client.put("/api/player/guide/favorites", json={"channels": ["genre-comedy", "kids", "Genre-Comedy"]})
+    assert res.get_json()["channels"] == ["genre-comedy", "kids"]
+    assert client.get("/api/player/guide/favorites").get_json()["channels"] == ["genre-comedy", "kids"]
+    _as(client, 3)
+    assert client.get("/api/player/guide/favorites").get_json()["channels"] == []
+    client.put("/api/player/guide/favorites", json={"channels": ["network-hbo"]})
+    _as(client, 2)
+    assert client.get("/api/player/guide/favorites").get_json()["channels"] == ["genre-comedy", "kids"]
+
+
+def test_favorites_refuse_junk(client):
+    _as(client, 2)
+    assert client.put("/api/player/guide/favorites", json={"channels": "kids"}).status_code == 400
+    assert client.put("/api/player/guide/favorites", json={"channels": ["x y"]}).status_code == 400
+    assert client.put("/api/player/guide/favorites",
+                      json={"channels": [f"c{i}" for i in range(101)]}).status_code == 400

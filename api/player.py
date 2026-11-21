@@ -12,7 +12,7 @@ import time
 
 from flask import Blueprint, jsonify, request
 
-from core.permissions import requires_any, self_only
+from core.permissions import requires, requires_any, self_only
 from core.player import catalog, progress
 from core.profile_context import get_current_profile_id
 from utils.logging_config import get_logger
@@ -282,3 +282,71 @@ def youtube_channel(channel_id):
     if data is None:
         return jsonify({"success": False, "error": "Channel not found"}), 404
     return jsonify({"success": True, **data})
+
+
+_music_cache: dict = {}
+
+
+@bp.route("/api/player/music-channels", methods=["GET"])
+@requires("music.library")
+def music_channels():
+    """the guide's genre and vibe channels from the caller's owned tracks.
+    cached a couple of minutes per profile: it is one pass over the tracks."""
+    from contextlib import closing
+
+    from core.player import music_channels as mc
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    key = (pid, str(_session_scope()))
+    now = time.monotonic()
+    hit = _music_cache.get(key)
+    if hit and now - hit[0] < _CACHE_SECONDS:
+        return jsonify({"success": True, "channels": hit[1]})
+    try:
+        with closing(get_database()._get_connection()) as conn:
+            channels = mc.read(conn)
+    except Exception:  # noqa: BLE001
+        logger.exception("player music channels failed")
+        return jsonify({"success": False, "error": "Could not read the music library"}), 500
+    _music_cache[key] = (time.monotonic(), channels)
+    return jsonify({"success": True, "channels": channels})
+
+
+def _session_scope():
+    """the library scope the caller picked (#1199), part of the cache key"""
+    try:
+        from flask import session
+        return session.get("library_scope")
+    except Exception:  # noqa: BLE001
+        return None
+
+
+@bp.route("/api/player/guide/favorites", methods=["GET"])
+@self_only
+def get_favorites():
+    from core.player import favorites
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    try:
+        return jsonify({"success": True, "channels": favorites.get(get_database(), pid)})
+    except Exception:  # noqa: BLE001
+        return _failed("favorites read")
+
+
+@bp.route("/api/player/guide/favorites", methods=["PUT"])
+@self_only
+def put_favorites():
+    from core.player import favorites
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    body = request.get_json(silent=True) or {}
+    try:
+        return jsonify({"success": True,
+                        "channels": favorites.put(get_database(), pid, body.get("channels"))})
+    except favorites.FavoritesError as e:
+        return _bad(e)
+    except Exception:  # noqa: BLE001
+        return _failed("favorites save")

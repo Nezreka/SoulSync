@@ -327,7 +327,7 @@ export function ProfileChip({
       {open ? (
         <div className={s.profileMenu} role="menu" aria-label="Profile">
           <div className={s.menuWho}>
-            {me ? <Avatar profile={me} className={s.menuAvatar} /> : null}
+            {me ? <Avatar profile={me} className={`${s.avatar} ${s.menuAvatar}`} /> : null}
             <div>
               <div className={s.menuName}>{me?.name ?? 'Profile'}</div>
               <div className={s.menuRole}>{me?.is_admin ? 'Admin' : 'Member'}</div>

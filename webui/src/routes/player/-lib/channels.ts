@@ -8,10 +8,23 @@
  * out rather than shown half empty.
  */
 
+import { appURL } from '@/platform/url-base';
+
 import type { CatalogMovie, CatalogShow, CatalogYoutube, VideoCatalog } from '../-player.types';
 import type { GuideItem } from './schedule';
 
-export type ChannelKind = 'type' | 'genre' | 'network' | 'decade' | 'kids' | 'playlist' | 'rule';
+import { posterUrl, proxiedImage } from './rails';
+
+export type ChannelKind =
+  | 'type'
+  | 'genre'
+  | 'network'
+  | 'decade'
+  | 'kids'
+  | 'playlist'
+  | 'rule'
+  | 'music'
+  | 'vibe';
 
 export interface Channel {
   id: string;
@@ -21,6 +34,10 @@ export interface Channel {
   blurb: string;
   pool: GuideItem[];
   ordered?: boolean;
+  /** songs: the grid shows blocks, not three-minute slivers */
+  music?: boolean;
+  /** the classic guide channel number, given once the list is sorted */
+  number?: number;
 }
 
 /** a channel needs this many distinct timed items before it gets a row */
@@ -57,6 +74,8 @@ export function movieItem(movie: CatalogMovie): GuideItem {
     subtitle: movie.year ? String(movie.year) : undefined,
     seconds: movie.runtime_seconds ?? 0,
     href: `/player/movies/${movie.id}`,
+    art: movie.has_poster ? posterUrl('movie', movie.id) : null,
+    kind: 'movie',
   };
 }
 
@@ -67,6 +86,8 @@ export function episodeItems(show: CatalogShow): GuideItem[] {
     subtitle: `S${season} E${episode}${title ? ` · ${title}` : ''}`,
     seconds: seconds ?? 0,
     href: `/player/tv/${show.id}`,
+    art: show.has_poster ? posterUrl('show', show.id) : null,
+    kind: 'episode',
   }));
 }
 
@@ -76,6 +97,8 @@ export function youtubeItem(video: CatalogYoutube): GuideItem {
     title: video.title,
     subtitle: video.channel_title ?? undefined,
     seconds: video.duration_seconds ?? 0,
+    art: proxiedImage(video.thumbnail_url),
+    kind: 'youtube',
     href: video.channel_id
       ? `/player/youtube/${encodeURIComponent(video.channel_id)}`
       : '/player/youtube',
@@ -88,6 +111,7 @@ export interface MusicTrackLike {
   artist?: string | null;
   seconds: number | null;
   href?: string;
+  art?: string | null;
 }
 
 export function trackItem(track: MusicTrackLike): GuideItem {
@@ -97,6 +121,8 @@ export function trackItem(track: MusicTrackLike): GuideItem {
     subtitle: track.artist ?? undefined,
     seconds: track.seconds ?? 0,
     href: track.href,
+    art: track.art ?? null,
+    kind: 'track',
   };
 }
 
@@ -159,6 +185,7 @@ export function autoChannels(
     kind: 'type',
     blurb: 'songs from your library',
     pool: tracks.map(trackItem),
+    music: true,
   });
 
   // genres mix films and episodes
@@ -244,6 +271,7 @@ export function playlistChannel(playlist: PlaylistLike): Channel | null {
     kind: 'playlist',
     blurb: `your playlist · ${playlist.tracks.length} songs`,
     pool: playlist.tracks.map(trackItem),
+    music: true,
   });
   return out[0] ?? null;
 }
@@ -285,12 +313,76 @@ export function ruleChannel(rule: ChannelRule, catalog: VideoCatalog): Channel |
   return out[0] ?? null;
 }
 
+/** a music channel from the server (core/player/music_channels.py) */
+export interface ServerMusicChannel {
+  id: string;
+  name: string;
+  kind: 'genre' | 'vibe';
+  count: number;
+  /** [track id, title, artist, seconds, album id] */
+  tracks: [number, string, string, number, number][];
+}
+
+export function serverMusicChannel(c: ServerMusicChannel): Channel | null {
+  const out: Channel[] = [];
+  add(out, {
+    id: c.id,
+    name: c.name,
+    kind: c.kind === 'vibe' ? 'vibe' : 'music',
+    blurb: `${c.count.toLocaleString()} songs${c.kind === 'vibe' ? ' · by mood' : ''}`,
+    music: true,
+    pool: c.tracks.map(([id, title, artist, seconds, albumId]) =>
+      trackItem({
+        id,
+        title,
+        artist,
+        seconds,
+        href: `/player/music/album/${albumId}`,
+        art: appURL(`/api/library/v2/artwork/album/${albumId}?size=thumb`),
+      }),
+    ),
+  });
+  return out[0] ?? null;
+}
+
+export type ChannelFilter = 'all' | 'favorites' | 'video' | 'music' | 'kids';
+
+export function matchesFilter(
+  channel: Channel,
+  filter: ChannelFilter,
+  favorites: ReadonlySet<string>,
+) {
+  switch (filter) {
+    case 'favorites':
+      return favorites.has(channel.id);
+    case 'music':
+      return !!channel.music;
+    case 'video':
+      return !channel.music;
+    case 'kids':
+      return channel.kind === 'kids' || (channel.kind === 'rule' && channel.blurb.includes('kids'));
+    default:
+      return true;
+  }
+}
+
 export const CHANNEL_GROUPS: { kind: ChannelKind; label: string }[] = [
   { kind: 'type', label: 'Everything' },
   { kind: 'rule', label: 'Your channels' },
   { kind: 'playlist', label: 'Your playlists' },
+  { kind: 'vibe', label: 'Vibes' },
+  { kind: 'music', label: 'Music genres' },
   { kind: 'kids', label: 'Kids' },
-  { kind: 'genre', label: 'Genres' },
+  { kind: 'genre', label: 'Movie and TV genres' },
   { kind: 'network', label: 'Networks' },
   { kind: 'decade', label: 'Decades' },
 ];
+
+/** channel numbers in guide order, from 101: stable while the library is */
+export function numberChannels(channels: readonly Channel[]): Channel[] {
+  const order = new Map(CHANNEL_GROUPS.map((g, i) => [g.kind, i]));
+  return channels
+    .map((c, i) => ({ c, i }))
+    .sort((a, b) => (order.get(a.c.kind) ?? 99) - (order.get(b.c.kind) ?? 99) || a.i - b.i)
+    .map(({ c }, i) => ({ ...c, number: 101 + i }));
+}

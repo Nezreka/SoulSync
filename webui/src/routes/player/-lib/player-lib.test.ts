@@ -539,3 +539,85 @@ describe('trailers', () => {
     expect(playerState({ event: 'x' })).toBeNull();
   });
 });
+
+describe('the guide, round two', () => {
+  const song = (i: number, artist: string): GuideItem => ({
+    key: `t:${i}`,
+    title: `Song ${i}`,
+    subtitle: artist,
+    seconds: 200,
+  });
+
+  it('music airs in blocks of at least half an hour, back to back', async () => {
+    const { mergeIntoBlocks, blockArtists } = await import('./schedule');
+    const programs = scheduleDay(
+      'vibes',
+      Array.from({ length: 40 }, (_, i) => song(i, `A${i % 5}`)),
+      new Date(2026, 10, 20),
+    );
+    const blocks = mergeIntoBlocks(programs);
+    for (const b of blocks.slice(0, -1))
+      expect(b.end - b.start).toBeGreaterThanOrEqual(1800 * 1000);
+    for (let i = 1; i < blocks.length; i++) expect(blocks[i].start).toBe(blocks[i - 1].end);
+    expect(blocks.flatMap((b) => b.items)).toHaveLength(programs.length);
+    expect(blockArtists({ start: 0, end: 1, items: programs.slice(0, 6) }, 2)).toMatch(
+      / and \d+ more$/,
+    );
+  });
+
+  it('numbers channels in guide order from 101 and filters them', async () => {
+    const { numberChannels, matchesFilter } = await import('./channels');
+    const base = { blurb: '', pool: [] as GuideItem[] };
+    const numbered = numberChannels([
+      { ...base, id: 'genre-drama', name: 'Drama', kind: 'genre' },
+      { ...base, id: 'type-movies', name: 'Movies', kind: 'type' },
+      { ...base, id: 'music-vibe-chill', name: 'Chill', kind: 'vibe', music: true },
+    ]);
+    expect(numbered.map((c) => [c.id, c.number])).toEqual([
+      ['type-movies', 101],
+      ['music-vibe-chill', 102],
+      ['genre-drama', 103],
+    ]);
+    const favs = new Set(['genre-drama']);
+    expect(numbered.filter((c) => matchesFilter(c, 'music', favs)).map((c) => c.id)).toEqual([
+      'music-vibe-chill',
+    ]);
+    expect(numbered.filter((c) => matchesFilter(c, 'favorites', favs)).map((c) => c.id)).toEqual([
+      'genre-drama',
+    ]);
+    expect(numbered.filter((c) => matchesFilter(c, 'video', favs))).toHaveLength(2);
+  });
+
+  it('turns a server music channel into a music channel with album art', async () => {
+    const { serverMusicChannel } = await import('./channels');
+    const ch = serverMusicChannel({
+      id: 'music-genre-jazz',
+      name: 'Jazz',
+      kind: 'genre',
+      count: 3,
+      tracks: [
+        [1, 'So What', 'Miles Davis', 545, 9],
+        [2, 'Blue in Green', 'Miles Davis', 337, 9],
+        [3, 'Naima', 'Coltrane', 261, 10],
+      ],
+    })!;
+    expect(ch.kind).toBe('music');
+    expect(ch.music).toBe(true);
+    expect(ch.pool[0]).toMatchObject({
+      key: 'track:1',
+      subtitle: 'Miles Davis',
+      href: '/player/music/album/9',
+    });
+    expect(ch.pool[0].art).toContain('/api/library/v2/artwork/album/9');
+  });
+
+  it('names the window day and moves the window by hours', async () => {
+    const { dayLabel, guideWindow } = await import('./guide');
+    const now = new Date(2026, 10, 20, 20, 10).getTime();
+    expect(dayLabel(now, now)).toBe('Tonight');
+    expect(dayLabel(new Date(2026, 10, 21, 9).getTime(), now)).toBe('Tomorrow');
+    const a = guideWindow(now);
+    const b = guideWindow(now, 2);
+    expect(b.from - a.from).toBe(2 * 3_600_000);
+  });
+});
