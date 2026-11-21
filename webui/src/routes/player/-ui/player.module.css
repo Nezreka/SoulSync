@@ -3818,6 +3818,8 @@ a.crewRow:hover {
   align-items: flex-end;
   height: calc(var(--pl-card-poster) * 1.5);
   padding-left: calc(var(--pl-card-poster) * 0.62);
+  /* the numeral's font box runs past its digits; the digits stay inside */
+  overflow: hidden;
   color: var(--pl-text);
   text-decoration: none;
 }
@@ -3825,7 +3827,7 @@ a.crewRow:hover {
 /* the numeral sits behind the poster's left edge, its foot on the row's floor */
 .top10Num {
   position: absolute;
-  bottom: 0;
+  bottom: calc(var(--pl-card-poster) * 0.035);
   left: 0;
   z-index: 0;
   color: var(--pl-bg);
@@ -3855,11 +3857,27 @@ a.crewRow:hover {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  transition: transform var(--dur-slow) var(--pl-ease);
 }
 
-.top10Item:hover .top10Poster,
-.top10Item:focus-visible .top10Poster {
-  transform: translateY(calc(var(--u) * -0.3));
+.top10Poster::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 2px transparent;
+  pointer-events: none;
+  transition: box-shadow var(--dur-fast) ease;
+}
+
+.top10Item:hover .top10Poster::after,
+.top10Item:focus-visible .top10Poster::after {
+  box-shadow: inset 0 0 0 2px var(--white-a85);
+}
+
+.top10Item:hover .top10Poster img,
+.top10Item:focus-visible .top10Poster img {
+  transform: scale(1.04);
 }
 
 .top10Item:hover .top10Num,
