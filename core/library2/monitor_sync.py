@@ -70,14 +70,8 @@ def _artist_identity_matches(
     """Namespace-aware artist match with conflict-safe name fallback."""
     from core.library2.importer import normalize_name
 
-    candidate = {
-        str(source).lower(): str(value).strip()
-        for source, value in (candidate_ids or {}).items() if str(value or "").strip()
-    }
-    watched = {
-        str(source).lower(): str(value).strip()
-        for source, value in (watchlist_ids or {}).items() if str(value or "").strip()
-    }
+    candidate = _clean_ids(candidate_ids or {})
+    watched = _clean_ids(watchlist_ids or {})
     shared = set(candidate) & set(watched)
     if any(candidate[source] == watched[source] for source in shared):
         return True
@@ -92,8 +86,12 @@ def _artist_identity_matches(
 
 
 def _clean_ids(ids: Mapping[str, Any]) -> Dict[str, str]:
+    """``{provider: id}`` with the blanks and the "Various Artists" ids out: a
+    compilation's id is no artist's, so it never matches a watched one (#2229)"""
+    from core.various_artists_ids import is_various_artists_id
     return {str(source).lower(): str(value).strip()
-            for source, value in (ids or {}).items() if str(value or "").strip()}
+            for source, value in (ids or {}).items()
+            if str(value or "").strip() and not is_various_artists_id(value, source)}
 
 
 class _WatchlistIndex:

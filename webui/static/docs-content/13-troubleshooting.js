@@ -254,6 +254,7 @@ This gives you an \`https://your-device.tailnet.ts.net\` address that satisfies 
 
 - Open the artist in the [Enhanced Library Manager](#lib-enhanced) and check the service match chips — a wrong Spotify or MusicBrainz link poisons everything downstream.
 - Manually search and link the correct ID, then run enrichment again.
+- A compilation track filed and tagged under an artist who isn't on it: an older build could store a compilation's "Various Artists" id on one real artist, and later compilations were found by it. The update takes that id off, gives those tracks back to their own artist, and runs Library Re-tag and Library Reorganize on just those files. The wrong tags and file names show up as findings on the Tools page; nothing is renamed until you apply them.
 
 ## Automation didn't fire
 

@@ -5,6 +5,7 @@ import threading
 from datetime import datetime, timedelta
 from difflib import SequenceMatcher
 from utils.logging_config import get_logger
+from core.various_artists_ids import VARIOUS_ARTISTS_IDS
 from core.musicbrainz_client import MusicBrainzClient
 from core.worker_utils import catalog_overlap_score, pick_artist_by_catalog
 from database.music_database import MusicDatabase
@@ -690,8 +691,8 @@ class MusicBrainzService:
             return featured_match, featured_confidence
         return best_match, best_confidence
 
-    #: MusicBrainz's own "Various Artists" artist
-    VARIOUS_ARTISTS_MBID = '89ad4ac3-39f7-470e-963a-56509c546377'
+    #: MusicBrainz's own "Various Artists" artist (core/various_artists_ids.py)
+    VARIOUS_ARTISTS_MBID = VARIOUS_ARTISTS_IDS['musicbrainz']
     #: what a title-alone match is worth: over the gate, under an artist match
     TITLE_ALONE_CONFIDENCE = 75
     #: a title this short is shared by too many releases to stand alone

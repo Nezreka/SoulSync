@@ -64,6 +64,14 @@ _PLACEHOLDER_IDS = frozenset({"explicit_artist", "from_sync_modal", "unknown", "
                               "null", "undefined", "0"})
 
 
+def _no_id(provider: str, value: str) -> bool:
+    """a placeholder, or a provider's "Various Artists" id: neither says who
+    an artist is. a compilation's spotify id found the one artist holding it
+    and renamed every compilation download after them (#2229)"""
+    from core.various_artists_ids import is_various_artists_id
+    return value.lower() in _PLACEHOLDER_IDS or is_various_artists_id(value, provider)
+
+
 def _get_db():
     from database.music_database import get_database
     return get_database()
@@ -289,7 +297,7 @@ def library_artist_name(name: Any, ids: Optional[Dict[str, Any]] = None) -> Opti
     for provider, value in (ids or {}).items():
         provider = provider_of(provider)
         value = str(value or "").strip()
-        if provider and value and value.lower() not in _PLACEHOLDER_IDS:
+        if provider and value and not _no_id(provider, value):
             clean[provider] = value
     key = (name, tuple(sorted(clean.items())))
     now = time.monotonic()
@@ -360,10 +368,10 @@ def library_names(context: Any, artist: Any = None) -> Dict[str, str]:
                                    or entry.get("provider") or source)
             ids: Dict[str, str] = {}
             value = str(entry.get("id") or "").strip()
-            if provider and value and value.lower() not in _PLACEHOLDER_IDS:
+            if provider and value and not _no_id(provider, value):
                 ids[provider] = value
             mbid = str(entry.get("musicbrainz_id") or entry.get("mbid") or "").strip()
-            if mbid:
+            if mbid and not _no_id("musicbrainz", mbid):
                 ids["musicbrainz"] = mbid
             if ids:
                 # every id this download gives the same name, together
