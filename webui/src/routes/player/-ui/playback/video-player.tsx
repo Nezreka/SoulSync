@@ -19,7 +19,14 @@ import { current, nextIndex } from '../../-engine/queue';
 import { clock } from '../../-engine/timeline';
 import { NextIcon, PauseIcon, PlayIcon } from '../icons';
 import { inPlayer } from '../trailer';
-import { QualityMenu, SleepMenu, SpeedMenu, VolumeControl } from './controls';
+import {
+  AudioMenu,
+  QualityMenu,
+  SleepMenu,
+  SpeedMenu,
+  SubtitleMenu,
+  VolumeControl,
+} from './controls';
 import {
   BackSecondsIcon,
   CloseIcon,
@@ -27,9 +34,12 @@ import {
   ForwardSecondsIcon,
   FullscreenIcon,
   PipIcon,
+  StatsIcon,
 } from './icons';
 import s from './playback.module.css';
 import { SeekBar } from './seek-bar';
+import { StatsOverlay } from './stats';
+import { SubtitleOverlay } from './subtitles';
 import { useLoading } from './use-loading';
 import { getEngine, usePlayer, useVideoOpen } from './use-player';
 
@@ -80,6 +90,7 @@ function FullPlayer({ state, onLeave }: { state: PlayerState; onLeave: () => voi
   const frame = useRef<HTMLDivElement>(null);
   const [idle, setIdle] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
+  const [stats, setStats] = useState(false);
   const loading = useLoading(state);
   const timer = useRef<number | undefined>(undefined);
   useMountVideo(frame, true);
@@ -112,6 +123,8 @@ function FullPlayer({ state, onLeave }: { state: PlayerState; onLeave: () => voi
         'input, textarea, select, [role="menu"]',
       );
       if (typing) return;
+      // a menu is open: its own keys (escape closes it, and only it)
+      if (document.querySelector('[role="menu"]')) return;
       const v = engine.getState();
       const act: Record<string, () => void> = {
         ' ': () => engine.toggle(),
@@ -125,6 +138,11 @@ function FullPlayer({ state, onLeave }: { state: PlayerState; onLeave: () => voi
         f: toggleFullscreen,
         m: () => engine.setMuted(!v.muted),
         n: () => engine.next(),
+        i: () => setStats((v) => !v),
+        c: () => {
+          const first = v.tracks?.subtitles.find((t) => t.kind !== 'unknown');
+          engine.setSubtitle(v.subtitle ? null : (first?.id ?? null));
+        },
         Escape: () => (document.fullscreenElement ? void document.exitFullscreen() : onLeave()),
       };
       const fn = act[e.key];
@@ -216,6 +234,9 @@ function FullPlayer({ state, onLeave }: { state: PlayerState; onLeave: () => voi
         </button>
       </div>
 
+      <SubtitleOverlay state={state} raised={!(idle && playing)} />
+      {stats ? <StatsOverlay state={state} video={video} onClose={() => setStats(false)} /> : null}
+
       <UpNext state={state} />
 
       <div className={s.fullBottom}>
@@ -274,6 +295,8 @@ function FullPlayer({ state, onLeave }: { state: PlayerState; onLeave: () => voi
                 <NextIcon />
               </button>
             ) : null}
+            <AudioMenu state={state} />
+            <SubtitleMenu state={state} />
             <QualityMenu quality={state.quality} />
             <SpeedMenu rate={state.rate} />
             <SleepMenu state={state} />
@@ -288,6 +311,17 @@ function FullPlayer({ state, onLeave }: { state: PlayerState; onLeave: () => voi
                 <PipIcon />
               </button>
             ) : null}
+            <button
+              type="button"
+              className={s.ctl}
+              aria-label="Stats for nerds"
+              aria-pressed={stats}
+              title="Stats for nerds (i)"
+              onClick={() => setStats((v) => !v)}
+              data-nav
+            >
+              <StatsIcon />
+            </button>
             <button
               type="button"
               className={s.ctl}
@@ -307,10 +341,12 @@ function FullPlayer({ state, onLeave }: { state: PlayerState; onLeave: () => voi
 
 function MiniPlayer({ onOpen }: { onOpen: () => void }) {
   const frame = useRef<HTMLDivElement>(null);
+  const state = usePlayer();
   useMountVideo(frame, true);
   return (
     <div className={s.mini}>
       <div ref={frame} className={s.miniFrame} />
+      <SubtitleOverlay state={state} raised={false} />
       <button
         type="button"
         className={s.miniOpen}

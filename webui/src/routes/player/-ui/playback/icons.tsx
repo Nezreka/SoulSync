@@ -137,3 +137,23 @@ export const QualityIcon = () => (
     />
   </Icon>
 );
+
+export const AudioIcon = () => (
+  <Icon>
+    <path d="M3 12h2M7 8v8M11 5v14M15 9v6M19 11v2" />
+  </Icon>
+);
+
+export const SubtitlesIcon = () => (
+  <Icon>
+    <rect x="3" y="5" width="18" height="14" rx="2.5" />
+    <path d="M7 13h4M13 13h4M7 16h7" />
+  </Icon>
+);
+
+export const StatsIcon = () => (
+  <Icon>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 11v5.5M12 7.5v.01" />
+  </Icon>
+);

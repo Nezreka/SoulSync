@@ -17,17 +17,25 @@
  */
 
 import type { Queue } from './queue';
+import type { Tracks, TrackPrefs } from './tracks';
 import type { Chapter, ItemType, MediaKind, Part, PlayItem, RepeatMode } from './types';
+import type { Cue } from './vtt';
 
 import * as Q from './queue';
 import { bookTime, locate, nextChapterStart, previousChapterStart } from './timeline';
+import { pickAudio, pickSubtitle } from './tracks';
 import { LONG_FORM, MEDIA_KIND } from './types';
+import { parseVtt } from './vtt';
 
 export type Status = 'idle' | 'loading' | 'playing' | 'paused' | 'buffering' | 'ended' | 'error';
 
 export interface Verdict {
   verdict: 'yes' | 'maybe' | 'no';
   reasons?: string[];
+  /** what was judged: '.mkv', 'hevc', 'ac3' */
+  container?: string;
+  video?: string;
+  audio?: string;
 }
 
 /** what the server says about how to play an item (GET /api/player/playable/...) */
@@ -57,12 +65,14 @@ export interface Playable {
   via?: string;
   /** how long the server took to find the file (a sleeping drive shows here) */
   took_ms?: number;
+  /** the file version playing, and its facts (for stats for nerds) */
+  file_id?: number;
+  file?: FileFacts;
   mime?: string;
   duration?: number | null;
   parts?: Part[];
   chapters?: Chapter[];
   verdict?: Verdict | null;
-  file_id?: number;
 }
 
 export interface SavedPosition {
@@ -72,7 +82,11 @@ export interface SavedPosition {
 
 export interface EngineDeps {
   createMedia: (kind: MediaKind) => HTMLMediaElement;
-  playable: (item: PlayItem, quality: Quality) => Promise<Playable>;
+  playable: (item: PlayItem, quality: Quality, pick: TrackPick) => Promise<Playable>;
+  /** a video's audio and subtitle tracks */
+  tracks: (item: PlayItem) => Promise<Tracks>;
+  /** a text subtitle as WebVTT */
+  subtitle: (item: PlayItem, id: string) => Promise<string>;
   progress: (item: PlayItem) => Promise<SavedPosition | null>;
   /**
    * where a converted stream with copied video really starts if asked for
@@ -118,6 +132,22 @@ export interface PlayerState {
   transcode: TranscodeInfo | null;
   /** the picked video quality (original: as it is, converted only if it must be) */
   quality: Quality;
+  /** this video's tracks (null until read, or for audio) */
+  tracks: Tracks | null;
+  /** the audio track playing (its number among the file's audio) */
+  audioTrack: number;
+  /** the subtitle showing ('s0', 'x1'), or null */
+  subtitle: string | null;
+  /** a text subtitle's cues, drawn by the player */
+  cues: Cue[];
+  /** reading a subtitle (an embedded one means the whole file, once) */
+  subtitleLoading: boolean;
+}
+
+/** the audio track, and a picture subtitle drawn in by the converter */
+export interface TrackPick {
+  audio: number;
+  burn: number | null;
 }
 
 export type Phase = 'locating' | 'opening' | 'resuming' | 'seeking' | 'buffering' | null;
@@ -125,6 +155,17 @@ export type Phase = 'locating' | 'opening' | 'resuming' | 'seeking' | 'buffering
 export interface SourceInfo {
   via: string;
   tookMs: number | null;
+  /** the file version playing, and what stats for nerds shows about it */
+  fileId?: number | null;
+  file?: FileFacts | null;
+  mime?: string | null;
+}
+
+export interface FileFacts {
+  height?: number | null;
+  size_bytes?: number | null;
+  dynamic_range?: string | null;
+  runtime_seconds?: number | null;
 }
 
 export interface PlayOptions {
@@ -132,6 +173,8 @@ export interface PlayOptions {
   startAt?: number;
   /** a guide channel: no progress saved */
   live?: boolean;
+  /** the same item again (a track, a quality): keep its tracks and picks */
+  keepTracks?: boolean;
 }
 
 const SAVE_EVERY_MS = 10_000;
@@ -154,6 +197,10 @@ export class PlayerEngine {
   private pendingSeek: number | null = null;
   /** a converted stream starts where it was asked to: its own 0 is this far in */
   private streamOffset = 0;
+  /** what the converter is asked for (another audio track, a subtitle drawn in) */
+  private pick: TrackPick = { audio: 0, burn: null };
+  /** the item the tracks above were read for */
+  private tracksFor: string | null = null;
 
   constructor(private readonly deps: EngineDeps) {
     this.state = {
@@ -180,6 +227,11 @@ export class PlayerEngine {
       quality: (QUALITIES as string[]).includes(deps.store.get('quality') ?? '')
         ? (deps.store.get('quality') as Quality)
         : 'original',
+      tracks: null,
+      audioTrack: 0,
+      subtitle: null,
+      cues: [],
+      subtitleLoading: false,
     };
     this.bindMediaSession();
   }
@@ -354,13 +406,57 @@ export class PlayerEngine {
     this.set({ rate: r });
   }
 
+  private prefs(): TrackPrefs {
+    return { audio: this.deps.store.get('audioLang'), subtitle: this.deps.store.get('subLang') };
+  }
+
+  /** another audio track: through the converter (a browser plays the first only), same spot */
+  setAudioTrack(index: number) {
+    const track = this.state.tracks?.audio.find((t) => t.index === index);
+    if (!track || index === this.state.audioTrack) return;
+    if (track.language) this.deps.store.set('audioLang', track.language);
+    this.pick = { ...this.pick, audio: index };
+    this.set({ audioTrack: index });
+    void this.load({ startAt: this.state.position, live: this.state.live, keepTracks: true });
+  }
+
+  /** a subtitle, or none: text is drawn by the player, pictures by the converter */
+  setSubtitle(id: string | null) {
+    const subs = this.state.tracks?.subtitles ?? [];
+    const pick = id ? subs.find((s) => s.id === id) : null;
+    if (id && !pick) return;
+    this.deps.store.set('subLang', pick?.language ?? 'off');
+    const burn = pick?.kind === 'image' && !pick.external ? Number(pick.id.slice(1)) : null;
+    const reload = burn !== this.pick.burn;
+    this.pick = { ...this.pick, burn };
+    this.set({ subtitle: pick?.id ?? null, cues: [] });
+    if (reload)
+      void this.load({ startAt: this.state.position, live: this.state.live, keepTracks: true });
+    if (pick?.kind === 'text') void this.loadCues(pick.id);
+  }
+
+  private async loadCues(id: string) {
+    const item = this.state.item;
+    if (!item) return;
+    this.set({ subtitleLoading: true });
+    try {
+      const cues = parseVtt(await this.deps.subtitle(item, id));
+      if (this.state.item === item && this.state.subtitle === id) this.set({ cues });
+    } catch {
+      if (this.state.item === item && this.state.subtitle === id)
+        this.set({ subtitle: null, cues: [] });
+    } finally {
+      if (this.state.item === item) this.set({ subtitleLoading: false });
+    }
+  }
+
   /** the video quality: kept on this device, applied now at the same spot */
   setQuality(quality: Quality) {
     if (quality === this.state.quality) return;
     this.deps.store.set('quality', quality);
     this.set({ quality });
     if (this.state.kind === 'video' && this.state.item)
-      void this.load({ startAt: this.state.position, live: this.state.live });
+      void this.load({ startAt: this.state.position, live: this.state.live, keepTracks: true });
   }
 
   /** stop after ``minutes``, or at the end of this item (null: off) */
@@ -405,6 +501,11 @@ export class PlayerEngine {
       phaseSince: 0,
       source: null,
       transcode: null,
+      tracks: null,
+      audioTrack: 0,
+      subtitle: null,
+      cues: [],
+      subtitleLoading: false,
     });
   }
 
@@ -451,14 +552,41 @@ export class PlayerEngine {
       live: !!options.live,
       source: null,
       transcode: null,
+      ...(options.keepTracks
+        ? {}
+        : { tracks: null, audioTrack: 0, subtitle: null, cues: [], subtitleLoading: false }),
       rate: this.isLongForm(item) ? this.rateFor(item.type) : 1,
     });
     this.setPhase('locating');
+    const key = `${item.type}:${item.id}:${item.part ?? ''}`;
+    if (!options.keepTracks || this.tracksFor !== key) {
+      this.pick = { audio: 0, burn: null };
+      this.tracksFor = null;
+    }
+    // a video's tracks first: the saved language picks which audio to ask for
+    if (kind === 'video' && this.tracksFor !== key) {
+      const tracks = await this.deps.tracks(item).catch(() => null);
+      if (token !== this.loadToken) return;
+      this.tracksFor = key;
+      if (tracks) {
+        const prefs = this.prefs();
+        const audio = pickAudio(tracks.audio, prefs);
+        const audioLang = tracks.audio.find((t) => t.index === audio)?.language ?? null;
+        const subtitle = pickSubtitle(tracks.subtitles, prefs, audioLang);
+        const sub = tracks.subtitles.find((t) => t.id === subtitle);
+        this.pick = {
+          audio,
+          burn: sub?.kind === 'image' && !sub.external ? Number(sub.id.slice(1)) : null,
+        };
+        this.set({ tracks, audioTrack: audio, subtitle });
+        if (sub?.kind === 'text') void this.loadCues(sub.id);
+      }
+    }
     let playable: Playable;
     let saved: SavedPosition | null = null;
     try {
       [playable, saved] = await Promise.all([
-        this.deps.playable(item, this.state.quality),
+        this.deps.playable(item, this.state.quality, this.pick),
         options.startAt !== undefined || options.live || !this.isLongForm(item)
           ? Promise.resolve(null)
           : this.deps.progress(item).catch(() => null),
@@ -504,7 +632,13 @@ export class PlayerEngine {
       verdict: playable.verdict ?? null,
       duration,
       position: start,
-      source: { via: playable.via ?? 'disk', tookMs: playable.took_ms ?? null },
+      source: {
+        via: playable.via ?? 'disk',
+        tookMs: playable.took_ms ?? null,
+        fileId: playable.file_id ?? null,
+        file: playable.file ?? null,
+        mime: playable.mime ?? null,
+      },
       transcode: playable.transcode ?? null,
     });
     this.setPhase(start > 0 ? 'resuming' : 'opening');

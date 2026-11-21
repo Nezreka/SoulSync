@@ -183,3 +183,14 @@ def test_start_snaps_only_when_the_video_is_copied(client, monkeypatch):
     # converting the video starts frame exact
     fine = client.get("/api/player/transcode/movie/fine/start?t=121&q=480p").get_json()
     assert (fine["start"], fine["seek"]) == (121.0, 121.0)
+
+
+def test_another_audio_track_or_burned_subtitles_always_convert(client, monkeypatch):
+    import api.player_tracks as R
+    tracks = {"audio": [{"codec": "aac"}, {"codec": "ac3"}], "subtitles": []}
+    monkeypatch.setattr(R, "source_tracks", lambda s: (tracks, "x", "ffmpeg", "k"))
+    jp = client.get("/api/player/playable/movie/fine?audio=1").get_json()
+    assert jp["url"].endswith("&audio=1") and jp["transcode"]["audio"] == "aac"
+    assert jp["transcode"]["reasons"] == ["AC3 audio to AAC"]
+    burned = client.get("/api/player/playable/movie/fine?burn=0").get_json()
+    assert burned["url"].endswith("&burn=0") and burned["transcode"]["video"] == "h264"

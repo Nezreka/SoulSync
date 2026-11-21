@@ -49,6 +49,10 @@ class Plan:
     reasons: List[str] = field(default_factory=list)
     quality: str = "original"
     tonemap: bool = False
+    # which audio track (its number among the file's audio), and an image
+    # subtitle to burn into the picture (its number among the subtitles)
+    audio: int = 0
+    burn: Optional[int] = None
 
     @property
     def needed(self) -> bool:
@@ -74,7 +78,7 @@ QUALITIES = {
 
 def plan(video_codec: Optional[str], audio_codec: Optional[str], *,
          quality: str = "original", hdr: Optional[str] = None,
-         height: Optional[int] = None) -> Plan:
+         height: Optional[int] = None, audio: int = 0, burn: Optional[int] = None) -> Plan:
     """copy what a browser plays, convert the rest. unknown counts as
     convert: a guess that fails is a silent picture. a quality below the
     source's own height converts the video too (it has to shrink), and HDR
@@ -83,16 +87,18 @@ def plan(video_codec: Optional[str], audio_codec: Optional[str], *,
     v = stream_verdicts(video_codec, audio_codec)
     max_h = QUALITIES.get(quality, QUALITIES["original"])[0]
     shrink = quality != "original" and (height is None or height > max_h)
-    copy_video = v["video"] == "yes" and not shrink
+    # burning a subtitle in draws on the picture: the video is converted
+    copy_video = v["video"] == "yes" and not shrink and burn is None
     copy_audio = v["audio"] == "yes"
     reasons = []
     if not copy_video:
         reasons.append(f"{(video_codec or 'unknown').upper()} video to H.264"
-                       + (f" at {quality}" if shrink else ""))
+                       + (f" at {quality}" if shrink else "")
+                       + (" with subtitles drawn in" if burn is not None else ""))
     if not copy_audio:
         reasons.append(f"{(audio_codec or 'unknown').upper()} audio to AAC")
     return Plan(copy_video, copy_audio, reasons, quality=quality if quality in QUALITIES else "original",
-                tonemap=bool(hdr) and not copy_video)
+                tonemap=bool(hdr) and not copy_video, audio=max(0, int(audio or 0)), burn=burn)
 
 
 # ── the encoder: the GPU's when it works, else the CPU's ────────────────
@@ -151,7 +157,7 @@ def has_filter(ffmpeg: str, name: str) -> bool:
 def _video_args(enc: tuple, p: Plan, tonemap: bool) -> List[str]:
     name, _label, _pre, tail = enc
     max_h, cap = QUALITIES[p.quality]
-    chain = []
+    chain: List[str] = []
     if tonemap:
         # HDR to SDR: linearise, map the highlights down, back to bt709
         chain.append("zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,"
@@ -159,7 +165,12 @@ def _video_args(enc: tuple, p: Plan, tonemap: bool) -> List[str]:
     # never upscale; anything taller comes down to the quality's height
     chain.append(f"scale=-2:'min({max_h},ih)'")
     chain.append("format=yuv420p")
-    args = ["-vf", ",".join(chain) + tail, "-c:v", name]
+    if p.burn is not None:
+        # the subtitle's pictures over the video, then the same chain
+        graph = f"[0:v:0][0:s:{p.burn}]overlay," + ",".join(chain) + tail + "[v]"
+        args = ["-filter_complex", graph, "-c:v", name]
+    else:
+        args = ["-vf", ",".join(chain) + tail, "-c:v", name]
     if name == "libx264":
         args += ["-preset", "veryfast", "-crf", VIDEO_CRF, "-profile:v", "high"]
     elif name == "h264_nvenc":
@@ -186,8 +197,10 @@ def command(ffmpeg: str, source: str, p: Plan, start: float = 0.0,
         # before -i: a fast seek to the keyframe at or before it
         cmd += ["-ss", f"{start:.3f}"]
     cmd += ["-i", source,
-            # the first video and audio stream; a file with no audio still plays
-            "-map", "0:v:0", "-map", "0:a:0?", "-sn", "-dn"]
+            # the picture (or the burned-in graph's), the picked audio track (a
+            # file with no audio still plays), no subtitle or data streams out
+            "-map", "[v]" if p.burn is not None and not p.copy_video else "0:v:0",
+            "-map", f"0:a:{p.audio}?", "-sn", "-dn"]
     cmd += ["-c:v", "copy"] if p.copy_video else _video_args(enc, p, p.tonemap and can_tonemap)
     if p.copy_audio:
         cmd += ["-c:a", "copy"]

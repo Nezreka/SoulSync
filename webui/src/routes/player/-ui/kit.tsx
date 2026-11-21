@@ -655,21 +655,74 @@ export function Badge({ children, tone }: { children: ReactNode; tone?: PlayVerd
   );
 }
 
-const VERDICT_WORDS: Record<PlayVerdict, { label: string; hint: string }> = {
-  yes: { label: 'Direct play', hint: 'Plays in the browser as is' },
-  maybe: { label: 'May play', hint: 'Depends on the browser' },
-  no: { label: 'Needs converting', hint: 'This browser cannot play the file as is' },
+const VERDICT_WORDS: Record<PlayVerdict, { label: string; hint: string; aria: string }> = {
+  yes: { label: 'Direct play', hint: 'Plays in the browser as it is', aria: 'Direct play' },
+  maybe: {
+    label: 'Possible direct play',
+    hint: 'May play as it is, depending on the browser. If not, it plays through the converter.',
+    aria: 'Possible direct play',
+  },
+  no: {
+    label: 'Direct play',
+    hint: "Can't play in a browser as it is. It plays through the converter.",
+    aria: 'No direct play',
+  },
 };
 
+/** the glyph in the verdict's circle: a check, a cross, a question */
+function VerdictGlyph({ verdict }: { verdict: PlayVerdict }) {
+  return (
+    <svg viewBox="0 0 12 12" aria-hidden="true" focusable="false">
+      {verdict === 'yes' ? (
+        <path
+          d="M3 6.3 5.1 8.4 9 4"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.7"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      ) : verdict === 'no' ? (
+        <path
+          d="M3.8 3.8 8.2 8.2M8.2 3.8 3.8 8.2"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.7"
+          strokeLinecap="round"
+        />
+      ) : (
+        <>
+          <path
+            d="M4.4 4.6a1.7 1.7 0 1 1 2.4 1.5c-.5.3-.8.6-.8 1.2"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+          />
+          <circle cx="6" cy="9" r=".8" fill="currentColor" />
+        </>
+      )}
+    </svg>
+  );
+}
+
+/**
+ * can a browser play this file as it is: direct play with a green check,
+ * direct play with a red cross (it plays through the converter), or
+ * possible direct play. the reasons are on hover.
+ */
 export function VerdictBadge({ verdict, reasons }: { verdict: PlayVerdict; reasons?: string[] }) {
   const words = VERDICT_WORDS[verdict];
   return (
     <span
-      className={s.badge}
+      className={s.verdict}
       data-tone={verdict}
       title={[words.hint, ...(reasons ?? [])].join('\n')}
+      aria-label={[words.aria, ...(reasons ?? [])].join('. ')}
     >
-      <span className={s.badgeDot} />
+      <span className={s.verdictIcon}>
+        <VerdictGlyph verdict={verdict} />
+      </span>
       {words.label}
     </span>
   );

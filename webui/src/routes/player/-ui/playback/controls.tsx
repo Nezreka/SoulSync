@@ -6,10 +6,20 @@
 import type { PlayerState, Quality } from '../../-engine/engine';
 
 import { chapterAt, clock } from '../../-engine/timeline';
-import { ChaptersIcon, QualityIcon, SleepIcon, SpeedIcon, VolumeIcon } from './icons';
+import { audioLabel, subtitleLabel } from '../../-engine/tracks';
+import {
+  AudioIcon,
+  ChaptersIcon,
+  QualityIcon,
+  SleepIcon,
+  SpeedIcon,
+  SubtitlesIcon,
+  VolumeIcon,
+} from './icons';
 import { PopMenu } from './menu';
 import s from './playback.module.css';
 import { getEngine } from './use-player';
+import { setSubtitleStyle, useSubtitleStyle } from './use-subtitle-style';
 
 export const SPEEDS = [0.75, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5];
 
@@ -135,6 +145,74 @@ export function QualityMenu({ quality }: { quality: Quality }) {
         selected: q === quality,
         onSelect: () => getEngine().setQuality(q),
       }))}
+    />
+  );
+}
+
+/** the file's audio tracks by language, channels and codec */
+export function AudioMenu({ state }: { state: PlayerState }) {
+  const audio = state.tracks?.audio ?? [];
+  if (audio.length < 2) return null;
+  return (
+    <PopMenu
+      label="Audio"
+      title="Audio"
+      icon={<AudioIcon />}
+      options={audio.map((t) => {
+        const words = audioLabel(t);
+        return {
+          key: String(t.index),
+          label: words.label,
+          detail: words.detail,
+          selected: t.index === state.audioTrack,
+          onSelect: () => getEngine().setAudioTrack(t.index),
+        };
+      })}
+    />
+  );
+}
+
+/** subtitles: off, each track, and how they look */
+export function SubtitleMenu({ state }: { state: PlayerState }) {
+  const subs = (state.tracks?.subtitles ?? []).filter((t) => t.kind !== 'unknown');
+  const style = useSubtitleStyle();
+  if (!subs.length) return null;
+  return (
+    <PopMenu
+      label="Subtitles"
+      title="Subtitles"
+      icon={<SubtitlesIcon />}
+      badge={state.subtitleLoading ? '…' : state.subtitle ? 'on' : undefined}
+      options={[
+        {
+          key: 'off',
+          label: 'Off',
+          selected: !state.subtitle,
+          onSelect: () => getEngine().setSubtitle(null),
+        },
+        ...subs.map((t) => {
+          const words = subtitleLabel(t);
+          return {
+            key: t.id,
+            label: words.label,
+            detail: words.detail,
+            selected: t.id === state.subtitle,
+            onSelect: () => getEngine().setSubtitle(t.id),
+          };
+        }),
+        ...(['small', 'medium', 'large'] as const).map((size) => ({
+          key: `size-${size}`,
+          label: `Text ${size}`,
+          selected: style.size === size,
+          onSelect: () => setSubtitleStyle({ size }),
+        })),
+        {
+          key: 'box',
+          label: style.box ? 'Dark box behind: on' : 'Dark box behind: off',
+          selected: style.box,
+          onSelect: () => setSubtitleStyle({ box: !style.box }),
+        },
+      ]}
     />
   );
 }

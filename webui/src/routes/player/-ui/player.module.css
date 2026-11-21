@@ -1177,13 +1177,6 @@
   color: var(--danger-light);
 }
 
-.badgeDot {
-  width: calc(var(--u) * 0.4);
-  height: calc(var(--u) * 0.4);
-  border-radius: var(--radius-circle);
-  background: currentColor;
-}
-
 /* ── rails + cards ───────────────────────────────────────────────────── */
 
 .rail {
@@ -4089,4 +4082,61 @@ a.crewRow:hover {
 .row[data-playing='true'] .rowTitle,
 .row[data-playing='true'] .rowNum {
   color: var(--accent-light);
+}
+
+/* can it play as it is: a tinted pill, the answer in a filled circle */
+.verdict {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--u) * 0.4);
+  height: calc(var(--u) * 1.6);
+  padding: 0 calc(var(--u) * 0.6) 0 calc(var(--u) * 0.25);
+  border-radius: var(--radius-pill);
+  font-size: calc(var(--u) * 0.74);
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  cursor: help;
+}
+
+.verdictIcon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: calc(var(--u) * 1.15);
+  height: calc(var(--u) * 1.15);
+  border-radius: var(--radius-circle);
+  color: var(--pl-bg);
+}
+
+.verdictIcon svg {
+  width: 80%;
+  height: 80%;
+}
+
+.verdict[data-tone='yes'] {
+  background: rgba(var(--success-rgb), 0.14);
+  color: var(--success);
+}
+
+.verdict[data-tone='yes'] .verdictIcon {
+  background: var(--success);
+}
+
+.verdict[data-tone='no'] {
+  background: rgba(var(--danger-rgb), 0.14);
+  color: var(--danger-light);
+}
+
+.verdict[data-tone='no'] .verdictIcon {
+  background: var(--danger-light);
+}
+
+.verdict[data-tone='maybe'] {
+  background: rgba(var(--warning-rgb), 0.14);
+  color: var(--warning);
+}
+
+.verdict[data-tone='maybe'] .verdictIcon {
+  background: var(--warning);
 }

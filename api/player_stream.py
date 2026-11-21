@@ -54,11 +54,28 @@ def _transcode_url(item_type: str, item_id: str, part, quality: str) -> str:
     return f"/api/player/transcode/{item_type}/{quote(item_id, safe='')}?" + "&".join(args)
 
 
-def _plan_for(source, quality: str):
+def _plan_for(source, quality: str, audio: int = 0, burn=None):
+    """the plan for this source. a picked audio track other than the first,
+    or a subtitle to burn in, reads the file's tracks for the right codec."""
     from core.player import transcode as T
     info = source.private
-    return T.plan(info.get("video_codec"), info.get("audio_codec"), quality=quality,
-                  hdr=info.get("dynamic_range"), height=info.get("height"))
+    audio_codec = info.get("audio_codec")
+    if audio or burn is not None:
+        from api.player_tracks import source_tracks
+        found = source_tracks(source)
+        tracks = found[0]["audio"] if found else []
+        if audio < len(tracks):
+            audio_codec = tracks[audio]["codec"]
+    return T.plan(info.get("video_codec"), audio_codec, quality=quality,
+                  hdr=info.get("dynamic_range"), height=info.get("height"), audio=audio, burn=burn)
+
+
+def _int_arg(name):
+    try:
+        value = request.args.get(name)
+        return int(value) if value not in (None, "") else None
+    except ValueError:
+        return None
 
 
 def _stream_url(item_type: str, item_id: str, part) -> str:
@@ -90,16 +107,17 @@ def playable(item_type, item_id):
     if out["mode"] == "stream":
         out["url"] = _stream_url(item_type, item_id, part if part is not None else source.extra.get("part"))
     if item_type in VIDEO_TYPES:
-        _offer_transcode(out, source, item_type, item_id, part, request.args.get("q") or "original")
+        _offer_transcode(out, source, item_type, item_id, part, request.args.get("q") or "original",
+                         _int_arg("audio") or 0, _int_arg("burn"))
     return jsonify({"success": True, **out})
 
 
-def _offer_transcode(out, source, item_type, item_id, part, quality):
+def _offer_transcode(out, source, item_type, item_id, part, quality, audio=0, burn=None):
     """a video a browser can't play as it is, or asked for smaller: the
     converted stream's url, and what's converted (copy what plays, convert
     the rest). no ffmpeg: the player says so, as it did before."""
     from core.player import transcode as T
-    p = _plan_for(source, quality)
+    p = _plan_for(source, quality, audio, burn)
     verdict = (source.verdict or {}).get("verdict")
     ffmpeg = T.ffmpeg_path()
     if not ffmpeg:
@@ -108,10 +126,19 @@ def _offer_transcode(out, source, item_type, item_id, part, quality):
         return
     file_part = source.extra.get("file_id") if part in (None, "") else part
     url = _transcode_url(item_type, item_id, file_part, p.quality)
+    if audio:
+        url += f"&audio={int(audio)}"
+    if burn is not None:
+        url += f"&burn={int(burn)}"
+    # the converter's address for this file, to switch audio track or burn in
+    # a subtitle later (the player adds &audio= / &burn= / &t=)
+    out["transcode_url"] = _transcode_url(item_type, item_id, file_part, "original")
     # only a file a browser can't play, or a smaller quality asked for, is
     # converted. a 'maybe' plays as it is, with the converted stream named as
     # the fallback the player switches to if the browser can't after all
-    if verdict != "no" and quality == "original":
+    # another audio track, or pictures drawn in: always the converter (a
+    # browser plays a file's first audio track only)
+    if verdict != "no" and quality == "original" and not audio and burn is None:
         out["fallback_url"] = url
         return
     out["url"] = url
@@ -169,7 +196,7 @@ def transcode(item_type, item_id):
     if not ffmpeg:
         return jsonify({"success": False, "error": "no_ffmpeg",
                         "message": "SoulSync can't find ffmpeg, so it can't convert this file."}), 503
-    p = _plan_for(source, request.args.get("q") or "original")
+    p = _plan_for(source, request.args.get("q") or "original", _int_arg("audio") or 0, _int_arg("burn"))
     origin = source.path if source.mode == "file" else source.url
     cmd = T.command(ffmpeg, origin, p, start, T.encoder(ffmpeg), T.has_filter(ffmpeg, "zscale"))
     try:
@@ -203,7 +230,7 @@ def transcode_start(item_type, item_id):
     except Refused as e:
         return _refused(e)
     ffmpeg = T.ffmpeg_path()
-    p = _plan_for(source, request.args.get("q") or "original")
+    p = _plan_for(source, request.args.get("q") or "original", _int_arg("audio") or 0, _int_arg("burn"))
     if not ffmpeg or not p.copy_video:
         # converting the video starts frame-exact: no snapping needed
         return jsonify({"success": True, "start": t, "seek": t})

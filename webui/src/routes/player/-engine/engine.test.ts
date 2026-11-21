@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import type { EngineDeps, Playable, SavedPosition } from './engine';
+import type { EngineDeps, Playable, SavedPosition, TrackPick } from './engine';
+import type { Tracks } from './tracks';
 import type { MediaKind, PlayItem } from './types';
 
 import { PlayerEngine } from './engine';
@@ -59,7 +60,11 @@ class FakeMedia {
   }
 }
 
-function setup(opts: { playable?: (item: PlayItem) => Playable; saved?: SavedPosition | null }) {
+function setup(opts: {
+  playable?: (item: PlayItem, q?: string, pick?: TrackPick) => Playable;
+  saved?: SavedPosition | null;
+  tracks?: Tracks;
+}) {
   const media: Partial<Record<MediaKind, FakeMedia>> = {};
   const saves: { id: string; position: number; finished: boolean }[] = [];
   const intervals: (() => void)[] = [];
@@ -67,9 +72,11 @@ function setup(opts: { playable?: (item: PlayItem) => Playable; saved?: SavedPos
   let now = 1_000_000;
   const deps: EngineDeps = {
     createMedia: (kind) => (media[kind] = new FakeMedia(kind)) as unknown as HTMLMediaElement,
-    playable: async (item) =>
-      opts.playable?.(item) ?? { url: `/s/${item.type}/${item.id}`, duration: 100 },
+    playable: async (item, q, pick) =>
+      opts.playable?.(item, q, pick) ?? { url: `/s/${item.type}/${item.id}`, duration: 100 },
     progress: async () => opts.saved ?? null,
+    tracks: async () => opts.tracks ?? { audio: [], subtitles: [] },
+    subtitle: async () => 'WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nhi',
     // copied video starts at the keyframe before: here, the whole second below
     transcodeStart: async (_url, t) => ({ start: Math.floor(t), seek: Math.floor(t) + 0.3 }),
     save: (item, position, _d, finished) => saves.push({ id: item.id, position, finished }),
@@ -244,7 +251,7 @@ describe('player engine', () => {
     const slow = new Promise<Playable>((r) => (release = r));
     const deps = (t.engine as unknown as { deps: EngineDeps }).deps;
     const fast = deps.playable;
-    deps.playable = (item, q) => (item.id === 'slow' ? slow : fast(item, q));
+    deps.playable = (item, q, pick) => (item.id === 'slow' ? slow : fast(item, q, pick));
     t.engine.playItems([movie('slow')]);
     t.engine.playItems([movie('fast')]);
     await t.flush();
@@ -269,7 +276,7 @@ describe('what loading is doing', () => {
     t.engine.playItems([movie('1')]);
     await t.flush();
     expect(phases).toEqual([null, 'locating', 'resuming', null]);
-    expect(t.engine.getState().source).toEqual({ via: 'plex', tookMs: 24_000 });
+    expect(t.engine.getState().source).toMatchObject({ via: 'plex', tookMs: 24_000 });
   });
 
   it('a timed out lookup says the drive did not answer', async () => {
@@ -279,6 +286,7 @@ describe('what loading is doing', () => {
     deps.playable = () => new Promise((_r, reject) => (fail = reject));
     t.engine.playItems([movie('1')]);
     expect(t.engine.getState().phase).toBe('locating');
+    await t.flush(); // the tracks first, then the lookup
     const timeout = new Error('Request timed out');
     timeout.name = 'TimeoutError';
     fail(timeout);
@@ -376,5 +384,95 @@ describe('converted video', () => {
     expect(asked).toEqual(['original', '720p']);
     expect(t.media.video!.src).toBe('/t/movie/1?q=720p&t=100.30');
     expect(t.store.get('quality')).toBe('720p');
+  });
+});
+
+describe('tracks', () => {
+  const tracks: Tracks = {
+    audio: [
+      {
+        index: 0,
+        language: 'eng',
+        title: null,
+        codec: 'aac',
+        channels: 2,
+        layout: null,
+        default: true,
+        plays: true,
+      },
+      {
+        index: 1,
+        language: 'jpn',
+        title: null,
+        codec: 'ac3',
+        channels: 6,
+        layout: null,
+        default: false,
+        plays: false,
+      },
+    ],
+    subtitles: [
+      {
+        id: 's0',
+        language: 'eng',
+        title: null,
+        codec: 'subrip',
+        kind: 'text',
+        forced: false,
+        default: false,
+        external: false,
+      },
+      {
+        id: 's1',
+        language: 'eng',
+        title: null,
+        codec: 'hdmv_pgs_subtitle',
+        kind: 'image',
+        forced: false,
+        default: false,
+        external: false,
+      },
+    ],
+  };
+  const playable = (_i: PlayItem, _q?: string, pick?: TrackPick) => ({
+    url: `/s?audio=${pick?.audio ?? 0}&burn=${pick?.burn ?? ''}`,
+    duration: 100,
+  });
+
+  it('starts on the saved language and draws text subtitles itself', async () => {
+    const t = setup({ tracks, playable });
+    t.store.set('audioLang', 'ja');
+    t.store.set('subLang', 'en');
+    t.engine.playItems([movie('1')]);
+    await t.flush();
+    await t.flush();
+    const s = t.engine.getState();
+    expect(s.audioTrack).toBe(1);
+    expect(t.media.video!.src).toBe('/s?audio=1&burn=');
+    expect(s.subtitle).toBe('s0');
+    expect(s.cues).toEqual([{ start: 1, end: 2, text: 'hi' }]);
+  });
+
+  it('switching audio or a picture subtitle reloads at the same spot; text does not', async () => {
+    const t = setup({ tracks, playable });
+    t.engine.playItems([movie('1')]);
+    await t.flush();
+    t.media.video!.tick(40);
+    t.engine.setAudioTrack(1);
+    await t.flush();
+    expect(t.media.video!.src).toBe('/s?audio=1&burn=');
+    expect(t.store.get('audioLang')).toBe('jpn');
+    t.engine.setSubtitle('s1');
+    await t.flush();
+    expect(t.media.video!.src).toBe('/s?audio=1&burn=1');
+    t.engine.setSubtitle(null);
+    await t.flush();
+    expect(t.media.video!.src).toBe('/s?audio=1&burn=');
+    expect(t.store.get('subLang')).toBe('off');
+    const before = t.media.video!.src;
+    t.engine.setSubtitle('s0');
+    await t.flush();
+    expect(t.media.video!.src).toBe(before);
+    expect(t.engine.getState().cues.length).toBe(1);
   });
 });

@@ -8,7 +8,8 @@
 import { apiClient } from '@/app/api-client';
 import { appURL } from '@/platform/url-base';
 
-import type { EngineDeps, Playable, Quality, SavedPosition } from './engine';
+import type { EngineDeps, Playable, Quality, SavedPosition, TrackPick } from './engine';
+import type { Tracks } from './tracks';
 import type { MediaKind, PlayItem } from './types';
 
 import { progressPayload } from '../-lib/progress';
@@ -25,7 +26,7 @@ function createMedia(kind: MediaKind): HTMLMediaElement {
   return el;
 }
 
-async function playable(item: PlayItem, quality: Quality): Promise<Playable> {
+async function playable(item: PlayItem, quality: Quality, pick: TrackPick): Promise<Playable> {
   if (item.type === 'podcast_episode') {
     if (!item.url) throw new Error('This episode has no audio address.');
     // podcast audio lives on the feed's host: the podcast side's checked proxy fetches it
@@ -38,6 +39,8 @@ async function playable(item: PlayItem, quality: Quality): Promise<Playable> {
     searchParams: {
       ...(item.part ? { part: item.part } : {}),
       ...(quality !== 'original' ? { q: quality } : {}),
+      ...(pick.audio ? { audio: pick.audio } : {}),
+      ...(pick.burn !== null ? { burn: pick.burn } : {}),
     },
     throwHttpErrors: false,
     // finding the file can mean a sleeping drive spinning up (half a minute is normal)
@@ -63,6 +66,26 @@ async function progress(item: PlayItem): Promise<SavedPosition | null> {
     .json<{ progress?: { position_seconds: number; finished: boolean } | null }>();
   const row = body.progress;
   return row ? { position: row.position_seconds, finished: row.finished } : null;
+}
+
+async function tracks(item: PlayItem): Promise<Tracks> {
+  const body = await apiClient
+    .get(`player/tracks/${item.type}/${encodeURIComponent(item.id)}`, {
+      searchParams: item.part ? { part: item.part } : {},
+      timeout: 90_000,
+    })
+    .json<Partial<Tracks>>();
+  return { audio: body.audio ?? [], subtitles: body.subtitles ?? [] };
+}
+
+async function subtitle(item: PlayItem, id: string): Promise<string> {
+  // an embedded subtitle is read out of the whole file the first time: give it time
+  return await apiClient
+    .get(`player/subtitle/${item.type}/${encodeURIComponent(item.id)}`, {
+      searchParams: { sub: id, ...(item.part ? { part: item.part } : {}) },
+      timeout: 600_000,
+    })
+    .text();
 }
 
 /** where a converted stream (copied video) really starts if asked for ``t`` */
@@ -130,6 +153,8 @@ export function browserDeps(): EngineDeps {
     playable,
     progress,
     transcodeStart,
+    tracks,
+    subtitle,
     save,
     store,
     now: () => Date.now(),

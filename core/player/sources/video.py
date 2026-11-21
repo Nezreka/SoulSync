@@ -80,7 +80,10 @@ def locate(kind: str, item_id: str, part: Any = None) -> Source:
         raise Refused(404, "no_file", "There's no file for that yet.")
 
     verdict = direct_play_verdict(f["path"], f["video_codec"], f["audio_codec"])
-    extra = {"file_id": f["id"]}
+    # what stats for nerds shows about the file (never where it is)
+    extra = {"file_id": f["id"], "file": {"height": f["height"], "size_bytes": f["size"],
+                                          "dynamic_range": f["dynamic_range"],
+                                          "runtime_seconds": f["runtime"]}}
     private = {"video_codec": f["video_codec"], "audio_codec": f["audio_codec"],
                "height": f["height"], "dynamic_range": f["dynamic_range"]}
     duration = float(f["runtime"]) if f["runtime"] else None
