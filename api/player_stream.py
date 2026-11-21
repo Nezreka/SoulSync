@@ -3,7 +3,8 @@
 every request goes through core/player/playable.resolve, the one check for
 the player's own session and a paired device's token alike.
 
-    GET /api/player/playable/<item_type>/<item_id>   how to play it
+    GET /api/player/playable/<item_type>/<item_id>   how to play it (and how
+                                                      long finding it took)
     GET /api/player/stream/<item_type>/<item_id>     its bytes, Range/206
 
 ``?part=`` picks a video's file version (a media file id) or an audiobook's
@@ -47,8 +48,11 @@ def _stream_url(item_type: str, item_id: str, part) -> str:
 @requires_any(*SECTIONS)
 @device_playback
 def playable(item_type, item_id):
+    import time
+
     from core.player.playable import Refused, resolve
     part = request.args.get("part")
+    started = time.monotonic()
     try:
         source = resolve(item_type, item_id, part)
     except Refused as e:
@@ -57,6 +61,10 @@ def playable(item_type, item_id):
         logger.exception("playable failed for %s %s", item_type, item_id)
         return jsonify({"success": False, "error": "failed", "message": "Couldn't get that ready to play."}), 500
     out = source.public()
+    # how long finding the bytes took (a sleeping drive spinning up shows here),
+    # and where they come from: this box's disk, or the media server
+    out["took_ms"] = round((time.monotonic() - started) * 1000)
+    out.setdefault("via", "disk" if source.mode == "file" else source.extra.get("via") or "media server")
     if out["mode"] == "stream":
         out["url"] = _stream_url(item_type, item_id, part if part is not None else source.extra.get("part"))
     return jsonify({"success": True, **out})

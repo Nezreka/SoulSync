@@ -14,6 +14,7 @@ import type { MediaKind, PlayItem } from './types';
 import { progressPayload } from '../-lib/progress';
 
 const STORE_PREFIX = 'ss-player:';
+const PLAYABLE_TIMEOUT_MS = 90_000;
 
 function createMedia(kind: MediaKind): HTMLMediaElement {
   const el = document.createElement(kind);
@@ -36,6 +37,8 @@ async function playable(item: PlayItem): Promise<Playable> {
   const res = await apiClient.get(`player/playable/${item.type}/${encodeURIComponent(item.id)}`, {
     searchParams: item.part ? { part: item.part } : {},
     throwHttpErrors: false,
+    // finding the file can mean a sleeping drive spinning up (half a minute is normal)
+    timeout: PLAYABLE_TIMEOUT_MS,
   });
   const body = (await res.json().catch(() => ({}))) as Partial<Playable> & {
     success?: boolean;

@@ -29,6 +29,7 @@ import {
 } from './icons';
 import s from './playback.module.css';
 import { SeekBar } from './seek-bar';
+import { useLoading } from './use-loading';
 import { getEngine, usePlayer, useVideoOpen } from './use-player';
 
 const IDLE_MS = 2600;
@@ -78,6 +79,7 @@ function FullPlayer({ state, onLeave }: { state: PlayerState; onLeave: () => voi
   const frame = useRef<HTMLDivElement>(null);
   const [idle, setIdle] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
+  const loading = useLoading(state);
   const timer = useRef<number | undefined>(undefined);
   useMountVideo(frame, true);
 
@@ -161,7 +163,13 @@ function FullPlayer({ state, onLeave }: { state: PlayerState; onLeave: () => voi
       />
 
       {state.status === 'loading' || state.status === 'buffering' ? (
-        <div className={s.spinner} aria-label="Loading" />
+        <div className={s.spinner} aria-hidden="true" />
+      ) : null}
+      {loading ? (
+        <div className={s.waking} role="status">
+          <span className={s.wakingTitle}>{loading.title}</span>
+          {loading.detail ? <span className={s.wakingDetail}>{loading.detail}</span> : null}
+        </div>
       ) : null}
 
       {state.status === 'error' ? (

@@ -26,12 +26,14 @@ import {
 import s from './playback.module.css';
 import { QueuePanel } from './queue-panel';
 import { SeekBar } from './seek-bar';
+import { useLoading } from './use-loading';
 import { getEngine, usePlayer, useVideoOpen } from './use-player';
 
 export function TransportBar() {
   const state = usePlayer();
   const [, setVideoOpen] = useVideoOpen();
   const [queueOpen, setQueueOpen] = useState(false);
+  const loading = useLoading(state);
   const item = current(state.queue);
   if (!item) return null;
   const engine = getEngine();
@@ -40,7 +42,12 @@ export function TransportBar() {
   const chapter = state.chapters.length
     ? state.chapters[chapterAt(state.chapters, state.position)]
     : null;
-  const sub = state.status === 'error' ? state.error : (chapter?.title ?? item.subtitle);
+  const sub =
+    state.status === 'error'
+      ? state.error
+      : loading
+        ? [loading.title, loading.detail].filter(Boolean).join(' · ')
+        : (chapter?.title ?? item.subtitle);
 
   return (
     <section className={s.bar} aria-label="Now playing">

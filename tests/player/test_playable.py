@@ -185,10 +185,13 @@ def client(monkeypatch, tmp_path):
 
 def test_playable_says_how_and_never_where(client):
     body = client.get("/api/player/playable/track/file").get_json()
+    took = body.pop("took_ms")
+    assert isinstance(took, int) and took >= 0
     assert body == {"success": True, "mode": "stream", "mime": "audio/flac", "duration": 200.0,
-                    "url": "/api/player/stream/track/file"}
+                    "url": "/api/player/stream/track/file", "via": "disk"}
     relayed = client.get("/api/player/playable/movie/relay?part=11").get_json()
     assert relayed["url"] == "/api/player/stream/movie/relay?part=11"
+    assert relayed["via"] == "media server"
     assert "secret" not in json.dumps(relayed)
     refused = client.get("/api/player/playable/track/nope")
     assert refused.status_code == 403 and refused.get_json()["error"] == "restricted"
@@ -267,3 +270,24 @@ def test_a_kids_profile_cant_play_explicit_music(mdb, monkeypatch):
         music.locate(str(ids["explicit"]))
     assert e.value.code == "restricted"
     assert music.locate(str(ids["clean"])).mode == "file"
+
+
+
+def test_hides_explicit_reads_the_profile_not_itself(monkeypatch):
+    """unstubbed: an admin hides nothing; a kids profile hides explicit.
+    (it once called itself, fell into its fail-closed branch, and refused
+    every track for everyone; the stubbed tests above couldn't see that.)"""
+    from core.player.sources import music
+    import core.permissions as perms
+    import core.content_filter as cf
+    app = Flask(__name__)
+    with app.test_request_context("/"):
+        g.is_admin, g.profile_id, g.perms = True, 1, {}
+        assert music.hides_explicit() is False
+    monkeypatch.setattr(perms, "restricted", lambda p: p == "music.hide_explicit")
+    with app.test_request_context("/"):
+        assert music.hides_explicit() is True
+    monkeypatch.setattr(perms, "restricted", lambda p: False)
+    monkeypatch.setattr(cf, "current_restrictions", lambda: {"hide_explicit": True})
+    with app.test_request_context("/"):
+        assert music.hides_explicit() is True

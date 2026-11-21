@@ -883,3 +883,26 @@ a.nowTitle:hover {
     animation: none;
   }
 }
+
+.waking {
+  position: absolute;
+  top: calc(50% + var(--u) * 3);
+  left: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: calc(var(--u) * 0.3);
+  width: min(90vw, calc(var(--u) * 30));
+  text-align: center;
+  transform: translateX(-50%);
+}
+
+.wakingTitle {
+  font-size: calc(var(--u) * 1.1);
+  font-weight: 700;
+}
+
+.wakingDetail {
+  color: var(--pl-text-2);
+  font-size: calc(var(--u) * 0.9);
+}

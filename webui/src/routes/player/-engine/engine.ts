@@ -33,6 +33,10 @@ export interface Verdict {
 /** what the server says about how to play an item (GET /api/player/playable/...) */
 export interface Playable {
   url: string;
+  /** where the bytes come from: 'disk', or the media server ('plex', 'jellyfin', 'navidrome') */
+  via?: string;
+  /** how long the server took to find the file (a sleeping drive shows here) */
+  took_ms?: number;
   mime?: string;
   duration?: number | null;
   parts?: Part[];
@@ -80,6 +84,18 @@ export interface PlayerState {
   sleep: Sleep;
   /** joined a guide channel mid-way: nothing is saved as the item's own progress */
   live: boolean;
+  /** what's happening before the picture or sound starts, and since when (describe.ts words it) */
+  phase: Phase;
+  phaseSince: number;
+  /** where this item's bytes come from, once the server has said */
+  source: SourceInfo | null;
+}
+
+export type Phase = 'locating' | 'opening' | 'resuming' | 'seeking' | 'buffering' | null;
+
+export interface SourceInfo {
+  via: string;
+  tookMs: number | null;
 }
 
 export interface PlayOptions {
@@ -126,6 +142,9 @@ export class PlayerEngine {
       verdict: null,
       sleep: null,
       live: false,
+      phase: null,
+      phaseSince: 0,
+      source: null,
     };
     this.bindMediaSession();
   }
@@ -255,6 +274,7 @@ export class PlayerEngine {
       el.currentTime = offset;
     }
     this.set({ position: target });
+    if (!el.paused) this.setPhase('seeking');
   }
 
   skip(delta: number) {
@@ -332,7 +352,14 @@ export class PlayerEngine {
       verdict: null,
       sleep: null,
       live: false,
+      phase: null,
+      phaseSince: 0,
+      source: null,
     });
+  }
+
+  private setPhase(phase: Phase) {
+    if (phase !== this.state.phase) this.set({ phase, phaseSince: this.deps.now() });
   }
 
   // ── loading ──────────────────────────────────────────────────────────
@@ -372,8 +399,10 @@ export class PlayerEngine {
       chapters: [],
       verdict: null,
       live: !!options.live,
+      source: null,
       rate: this.isLongForm(item) ? this.rateFor(item.type) : 1,
     });
+    this.setPhase('locating');
     let playable: Playable;
     let saved: SavedPosition | null = null;
     try {
@@ -385,7 +414,16 @@ export class PlayerEngine {
       ]);
     } catch (error) {
       if (token !== this.loadToken) return;
-      this.set({ status: 'error', error: error instanceof Error ? error.message : String(error) });
+      const timedOut = error instanceof Error && error.name === 'TimeoutError';
+      this.set({
+        status: 'error',
+        phase: null,
+        error: timedOut
+          ? "The drive this is on didn't answer in time. Try again in a moment, it may still be waking up."
+          : error instanceof Error
+            ? error.message
+            : String(error),
+      });
       return;
     }
     if (token !== this.loadToken) return;
@@ -394,6 +432,7 @@ export class PlayerEngine {
       // will change that; until then, say so instead of a silent picture
       this.set({
         status: 'error',
+        phase: null,
         verdict: playable.verdict,
         error:
           "This file's format can't play in a browser yet. Pick another version, or it plays once the transcoder lands.",
@@ -414,7 +453,9 @@ export class PlayerEngine {
       verdict: playable.verdict ?? null,
       duration,
       position: start,
+      source: { via: playable.via ?? 'disk', tookMs: playable.took_ms ?? null },
     });
+    this.setPhase(start > 0 ? 'resuming' : 'opening');
     const at = locate(parts, start);
     await this.loadPart(at.index, at.offset, true, token);
     this.setMediaSessionMetadata(item);
@@ -480,12 +521,26 @@ export class PlayerEngine {
     el.addEventListener('playing', () => {
       if (!mine()) return;
       this.set({ status: 'playing' });
+      this.setPhase(null);
       this.startSaving();
     });
-    el.addEventListener('waiting', () => mine() && this.set({ status: 'buffering' }));
+    el.addEventListener('waiting', () => {
+      if (!mine()) return;
+      this.set({ status: 'buffering' });
+      if (
+        this.state.phase !== 'seeking' &&
+        this.state.phase !== 'resuming' &&
+        this.state.phase !== 'opening'
+      )
+        this.setPhase('buffering');
+    });
+    el.addEventListener('seeked', () => {
+      if (mine() && this.state.phase === 'seeking' && !el.paused) this.setPhase(null);
+    });
     el.addEventListener('pause', () => {
       if (!mine() || el.ended) return;
       this.set({ status: 'paused' });
+      this.setPhase(null);
       this.saveNow();
       this.stopSaving();
     });

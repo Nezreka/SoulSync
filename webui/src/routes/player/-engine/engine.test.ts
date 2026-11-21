@@ -251,3 +251,38 @@ describe('player engine', () => {
     expect(t.engine.getState().item?.id).toBe('fast');
   });
 });
+
+describe('what loading is doing', () => {
+  it('locates, then opens or resumes, then plays; and says where it came from', async () => {
+    const t = setup({
+      saved: { position: 300, finished: false },
+      playable: () => ({ url: '/s', duration: 1000, via: 'plex', took_ms: 24_000 }),
+    });
+    const phases: (string | null)[] = [t.engine.getState().phase];
+    t.engine.subscribe(() => {
+      const p = t.engine.getState().phase;
+      if (phases.at(-1) !== p) phases.push(p);
+    });
+    t.engine.playItems([movie('1')]);
+    await t.flush();
+    expect(phases).toEqual([null, 'locating', 'resuming', null]);
+    expect(t.engine.getState().source).toEqual({ via: 'plex', tookMs: 24_000 });
+  });
+
+  it('a timed out lookup says the drive did not answer', async () => {
+    let fail: (e: Error) => void = () => undefined;
+    const t = setup({});
+    const deps = (t.engine as unknown as { deps: EngineDeps }).deps;
+    deps.playable = () => new Promise((_r, reject) => (fail = reject));
+    t.engine.playItems([movie('1')]);
+    expect(t.engine.getState().phase).toBe('locating');
+    const timeout = new Error('Request timed out');
+    timeout.name = 'TimeoutError';
+    fail(timeout);
+    await t.flush();
+    const s = t.engine.getState();
+    expect(s.status).toBe('error');
+    expect(s.phase).toBeNull();
+    expect(s.error).toMatch(/didn't answer in time/);
+  });
+});

@@ -14,6 +14,9 @@ from typing import Optional
 
 from core.player.playable import Refused, Source
 from core.player.sources import audio_mime
+from utils.logging_config import get_logger
+
+logger = get_logger("player.music")
 
 
 def _track_files(conn, track_id: int):
@@ -63,11 +66,12 @@ def hides_explicit() -> bool:
     unreadable is hidden: a kids guard fails closed."""
     try:
         from core.permissions import restricted
-        if hides_explicit():
+        if restricted("music.hide_explicit"):
             return True
         from core.content_filter import current_restrictions
         return bool(current_restrictions().get("hide_explicit"))
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: BLE001 - said out loud: a silent fail-closed refused every track once
+        logger.exception("player: couldn't read whether this profile hides explicit music")
         return True
 
 
@@ -97,5 +101,7 @@ def locate(item_id: str) -> Source:
                 return Source("file", audio_mime(local), path=local, duration=duration)
         url = _server_stream(conn, track_id)
     if url:
-        return Source("relay", audio_mime(files[0][0]), url=url, duration=duration)
+        from config.settings import config_manager
+        return Source("relay", audio_mime(files[0][0]), url=url, duration=duration,
+                      extra={"via": config_manager.get_active_media_server()})
     raise Refused(404, "no_file", "SoulSync can't reach that track's file.")
