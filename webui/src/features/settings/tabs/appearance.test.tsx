@@ -113,12 +113,11 @@ describe('the Appearance page', () => {
       );
   });
 
-  it('opens with what the page is for, in one line', () => {
+  it('has no line under the subtitle: one view, the subtitle says what it is for', () => {
     store.hydrate({ ui_appearance: { accent_preset: '#8b5cf6' } });
     page();
-    expect(document.querySelector('[data-stg-view="all"] [data-about]')!.textContent).toBe(
-      'How SoulSync looks, on every device and on this one.',
-    );
+    expect(document.querySelector('[data-stg-view="all"]')).not.toBeNull();
+    expect(document.querySelector('[data-stg-view="all"] [data-about]')).toBeNull();
   });
 });
 

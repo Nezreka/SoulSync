@@ -3,15 +3,17 @@
  * call on the hero sentences: a plain description, not the settings read
  * back). Keyed `tab/view`, or `tab/view/kind` where a pill's kinds differ
  * (Library). What needs a look is said on the row or card it is about, not
- * here.
+ * here. A tab with one view (People, Devices, Appearance) has no line: its
+ * subtitle already says what it is for. A pill's line never repeats its
+ * tab's subtitle (about.test.ts holds both).
  */
 
 export const ABOUT: Record<string, string> = {
-  'connections/services': 'Your media server and the services SoulSync connects to.',
+  'connections/services': 'Pick the media server and sign in to each service.',
   'connections/metasync': 'Connect to MetaSync and join a pool to share metadata.',
   'connections/notifications': 'Where SoulSync sends a message when something happens.',
 
-  'downloads/sources': 'Where downloads come from, and in what order.',
+  'downloads/sources': 'The sources SoulSync searches, and the chain that tries them.',
   'downloads/behaviour': 'How downloads run, retry and reach your library.',
   'downloads/filtering': 'Which files a download skips, and which one wins.',
 
@@ -25,26 +27,22 @@ export const ABOUT: Record<string, string> = {
     'Where finished audiobooks go, and the other folders SoulSync reads.',
   'library/folders/podcasts': 'The folder podcast episodes are saved in.',
   'library/folders/video': 'Where video downloads land and where movies and shows live.',
-  'library/naming/music': 'How music files and folders are named.',
-  'library/naming/audiobooks': 'How audiobook files and folders are named.',
-  'library/naming/podcasts': 'How podcast episode files and folders are named.',
-  'library/naming/video': 'How movie and episode files and folders are named.',
+  'library/naming/music': 'The pattern every music file and folder follows.',
+  'library/naming/audiobooks': 'The pattern every audiobook file and folder follows.',
+  'library/naming/podcasts': 'The pattern every podcast episode file and folder follows.',
+  'library/naming/video': 'The pattern every movie and episode file follows.',
   'library/tags/music': 'What is written into music files: tags, artwork and lyrics.',
   'library/tags/audiobooks': 'What is written into audiobooks: tags, covers and sidecars.',
   'library/tags/video': 'What goes with a finished video: subtitles, artwork and NFO files.',
   'library/import/music': 'How the Import page and library scans treat music files.',
   'library/import/audiobooks': 'When a book counts as done, and how its files are joined.',
   'library/import/podcasts': 'Whether podcasts are kept as audio, video or both.',
-  'library/import/video': 'What happens to video files on import, upgrade and delete.',
+  'library/import/video': 'How video files are moved in, upgraded and deleted.',
   'library/subtitles': 'Which subtitles SoulSync fetches, in what languages and from where.',
 
   'discovery/recommendations': 'How new music is picked for you, and what it learns from.',
   'discovery/playlists': 'How playlists sync to your server, and the M3U files.',
   'discovery/import-lists': 'Lists SoulSync watches for new movies and shows to add.',
-
-  'appearance/all': 'How SoulSync looks, on every device and on this one.',
-
-  'devices/all': 'Pair music apps, and how they reach this server.',
 
   'advanced/general': 'How settings save, database workers and the server log level.',
   'advanced/security': 'Who can get into SoulSync, and how they sign in.',

@@ -390,9 +390,6 @@ function ShownCode({
         </div>
         <QrImage className={css.qr} text={code.payload_text} label="Pairing QR code" />
       </div>
-      {code.warnings.map((w) => (
-        <Note key={w}>{w}</Note>
-      ))}
     </div>
   );
 }
@@ -499,18 +496,12 @@ function ThisServer({
           <Note info>No addresses found yet. Add the remote address below.</Note>
         )}
       </Row>
-      {server.warnings.length ? (
-        <div className={css.pad}>
-          {server.warnings.map((w) => (
-            <Note key={w}>{w}</Note>
-          ))}
-        </div>
-      ) : null}
       <Row
         field
         label="Remote address"
         htmlFor="devices-remote-url"
         help="For outside your home: your own domain, a tunnel or a forwarded port."
+        warn={server.warnings.length ? server.warnings.join(' ') : undefined}
       >
         <TextField
           wide
@@ -568,7 +559,7 @@ function ThisServer({
 
         {probe?.url ? (
           <div className={css.phone}>
-            <QrImage text={probe.url} label="Reachability check link" />
+            <QrImage className={css.phoneQr} text={probe.url} label="Reachability check link" />
             <div className={css.stack}>
               <div className={itemClass.dim}>
                 Turn wifi off on your phone and open this link, or scan the square.

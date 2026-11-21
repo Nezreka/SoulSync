@@ -9,7 +9,7 @@ import { type ReactNode, useEffect, useRef, useSyncExternalStore } from 'react';
 
 import type { SettingsTabProps } from '../../host';
 
-import { nav, useNav } from '../../nav';
+import { TABS, nav, useNav } from '../../nav';
 import { Hero, KindBar, KindSay, Segmented } from '../../ui';
 import s from '../../ui/settings.module.css';
 import { aboutOf } from '../about';
@@ -34,7 +34,9 @@ export function ViewPanel({
   open: boolean;
   children: ReactNode;
 }) {
-  const about = aboutOf(tab, view);
+  // a tab with one view says what it is for in its subtitle: no second line
+  const single = TABS.find((t) => t.key === tab)?.views.length === 1;
+  const about = single ? null : aboutOf(tab, view);
   return (
     <div
       className={s.view}

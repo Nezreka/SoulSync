@@ -156,9 +156,14 @@ describe('Settings > Devices', () => {
   });
 
   it('shows the server, its addresses and the plain http warning', async () => {
-    const { findByText, getAllByRole } = tab();
+    const { findByText } = tab();
     await findByText('http://192.168.1.5:8008');
-    expect(getAllByRole('note').some((a) => /plain http/.test(a.textContent || ''))).toBe(true);
+    // once, on the remote address row it is about
+    const warned = [...document.querySelectorAll('[data-row]')].filter((r) =>
+      /plain http/.test(r.textContent || ''),
+    );
+    expect(warned).toHaveLength(1);
+    expect(warned[0].textContent).toContain('Remote address');
     expect(document.body.textContent).toContain('ae03 96a6 68c3');
   });
 
