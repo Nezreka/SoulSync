@@ -10,7 +10,7 @@ import { posterSet, remoteImage } from './-lib/images';
 import { dedupeCredits } from './-lib/people';
 import { backdropUrl } from './-lib/rails';
 import { personQuery } from './-player.api';
-import { CardGrid, CardRail, Hero, Tabs, styles as s } from './-ui/kit';
+import { CardGrid, CardRail, HScroll, Hero, Tabs, styles as s } from './-ui/kit';
 import { NotFound, NotPartOfProfile } from './-ui/not-part';
 import { useSections } from './-ui/sections';
 import { Facts } from './-ui/video-facts';
@@ -117,13 +117,13 @@ function PersonPage() {
           <div className={s.railHead}>
             <h2 className={s.sectionTitle}>Photos</h2>
           </div>
-          <div className={s.people}>
-            {p.photos!.slice(0, 16).map((url) => (
-              <div key={url} className={s.photo}>
-                <img src={remoteImage(url) ?? ''} alt="" loading="lazy" decoding="async" />
+          <HScroll className={s.people}>
+            {p.photos!.slice(0, 16).map((photo) => (
+              <div key={photo.thumb} className={s.photo}>
+                <img src={remoteImage(photo.thumb) ?? ''} alt="" loading="lazy" decoding="async" />
               </div>
             ))}
-          </div>
+          </HScroll>
         </section>
       ) : null}
 

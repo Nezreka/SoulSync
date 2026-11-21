@@ -57,6 +57,7 @@ import { Route as PlayerTvShowIdRouteImport } from './routes/player/tv/$showId'
 import { Route as PlayerPodcastsPodcastIdRouteImport } from './routes/player/podcasts/$podcastId'
 import { Route as PlayerPersonPersonIdRouteImport } from './routes/player/person.$personId'
 import { Route as PlayerMoviesMovieIdRouteImport } from './routes/player/movies/$movieId'
+import { Route as PlayerKeywordNameRouteImport } from './routes/player/keyword.$name'
 import { Route as PlayerAudiobooksAsinRouteImport } from './routes/player/audiobooks/$asin'
 import { Route as ImportMatchKeyRouteImport } from './routes/import/match.$key'
 import { Route as AudiobooksNarratorNameRouteImport } from './routes/audiobooks/narrator/$name'
@@ -309,6 +310,11 @@ const PlayerMoviesMovieIdRoute = PlayerMoviesMovieIdRouteImport.update({
   path: '/movies/$movieId',
   getParentRoute: () => PlayerRouteRoute,
 } as any)
+const PlayerKeywordNameRoute = PlayerKeywordNameRouteImport.update({
+  id: '/keyword/$name',
+  path: '/keyword/$name',
+  getParentRoute: () => PlayerRouteRoute,
+} as any)
 const PlayerAudiobooksAsinRoute = PlayerAudiobooksAsinRouteImport.update({
   id: '/audiobooks/$asin',
   path: '/audiobooks/$asin',
@@ -409,6 +415,7 @@ export interface FileRoutesByFullPath {
   '/audiobooks/narrator/$name': typeof AudiobooksNarratorNameRoute
   '/import/match/$key': typeof ImportMatchKeyRoute
   '/player/audiobooks/$asin': typeof PlayerAudiobooksAsinRoute
+  '/player/keyword/$name': typeof PlayerKeywordNameRoute
   '/player/movies/$movieId': typeof PlayerMoviesMovieIdRoute
   '/player/person/$personId': typeof PlayerPersonPersonIdRoute
   '/player/podcasts/$podcastId': typeof PlayerPodcastsPodcastIdRoute
@@ -466,6 +473,7 @@ export interface FileRoutesByTo {
   '/audiobooks/narrator/$name': typeof AudiobooksNarratorNameRoute
   '/import/match/$key': typeof ImportMatchKeyRoute
   '/player/audiobooks/$asin': typeof PlayerAudiobooksAsinRoute
+  '/player/keyword/$name': typeof PlayerKeywordNameRoute
   '/player/movies/$movieId': typeof PlayerMoviesMovieIdRoute
   '/player/person/$personId': typeof PlayerPersonPersonIdRoute
   '/player/podcasts/$podcastId': typeof PlayerPodcastsPodcastIdRoute
@@ -528,6 +536,7 @@ export interface FileRoutesById {
   '/audiobooks/narrator/$name': typeof AudiobooksNarratorNameRoute
   '/import/match/$key': typeof ImportMatchKeyRoute
   '/player/audiobooks/$asin': typeof PlayerAudiobooksAsinRoute
+  '/player/keyword/$name': typeof PlayerKeywordNameRoute
   '/player/movies/$movieId': typeof PlayerMoviesMovieIdRoute
   '/player/person/$personId': typeof PlayerPersonPersonIdRoute
   '/player/podcasts/$podcastId': typeof PlayerPodcastsPodcastIdRoute
@@ -591,6 +600,7 @@ export interface FileRouteTypes {
     | '/audiobooks/narrator/$name'
     | '/import/match/$key'
     | '/player/audiobooks/$asin'
+    | '/player/keyword/$name'
     | '/player/movies/$movieId'
     | '/player/person/$personId'
     | '/player/podcasts/$podcastId'
@@ -648,6 +658,7 @@ export interface FileRouteTypes {
     | '/audiobooks/narrator/$name'
     | '/import/match/$key'
     | '/player/audiobooks/$asin'
+    | '/player/keyword/$name'
     | '/player/movies/$movieId'
     | '/player/person/$personId'
     | '/player/podcasts/$podcastId'
@@ -709,6 +720,7 @@ export interface FileRouteTypes {
     | '/audiobooks/narrator/$name'
     | '/import/match/$key'
     | '/player/audiobooks/$asin'
+    | '/player/keyword/$name'
     | '/player/movies/$movieId'
     | '/player/person/$personId'
     | '/player/podcasts/$podcastId'
@@ -1095,6 +1107,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PlayerMoviesMovieIdRouteImport
       parentRoute: typeof PlayerRouteRoute
     }
+    '/player/keyword/$name': {
+      id: '/player/keyword/$name'
+      path: '/keyword/$name'
+      fullPath: '/player/keyword/$name'
+      preLoaderRoute: typeof PlayerKeywordNameRouteImport
+      parentRoute: typeof PlayerRouteRoute
+    }
     '/player/audiobooks/$asin': {
       id: '/player/audiobooks/$asin'
       path: '/audiobooks/$asin'
@@ -1221,6 +1240,7 @@ interface PlayerRouteRouteChildren {
   PlayerGuideRoute: typeof PlayerGuideRoute
   PlayerIndexRoute: typeof PlayerIndexRoute
   PlayerAudiobooksAsinRoute: typeof PlayerAudiobooksAsinRoute
+  PlayerKeywordNameRoute: typeof PlayerKeywordNameRoute
   PlayerMoviesMovieIdRoute: typeof PlayerMoviesMovieIdRoute
   PlayerPersonPersonIdRoute: typeof PlayerPersonPersonIdRoute
   PlayerPodcastsPodcastIdRoute: typeof PlayerPodcastsPodcastIdRoute
@@ -1244,6 +1264,7 @@ const PlayerRouteRouteChildren: PlayerRouteRouteChildren = {
   PlayerGuideRoute: PlayerGuideRoute,
   PlayerIndexRoute: PlayerIndexRoute,
   PlayerAudiobooksAsinRoute: PlayerAudiobooksAsinRoute,
+  PlayerKeywordNameRoute: PlayerKeywordNameRoute,
   PlayerMoviesMovieIdRoute: PlayerMoviesMovieIdRoute,
   PlayerPersonPersonIdRoute: PlayerPersonPersonIdRoute,
   PlayerPodcastsPodcastIdRoute: PlayerPodcastsPodcastIdRoute,

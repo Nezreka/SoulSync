@@ -2885,3 +2885,61 @@
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 12;
 }
+
+/* the arrows on a sideways row (HScroll) */
+.hscroll {
+  position: relative;
+  --arrow-inset: var(--pl-gutter);
+}
+
+.detailMain .hscroll {
+  --arrow-inset: 0px;
+}
+
+.hArrow {
+  position: absolute;
+  top: 0;
+  bottom: calc(var(--u) * 1.2);
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  width: max(var(--arrow-inset), calc(var(--u) * 3));
+  padding: 0;
+  border: none;
+  color: var(--pl-text);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--dur-fast) ease;
+}
+
+.hArrow svg {
+  width: calc(var(--u) * 2);
+  height: calc(var(--u) * 2);
+  filter: drop-shadow(0 0 calc(var(--u) * 0.4) var(--black-a80));
+  transition: transform var(--dur-fast) ease;
+}
+
+.hArrow:hover svg {
+  transform: scale(1.2);
+}
+
+.hArrow[data-side='prev'] {
+  left: calc(var(--arrow-inset) * -1);
+  background: linear-gradient(90deg, rgba(var(--pl-ink-rgb), 0.92), transparent);
+}
+
+.hArrow[data-side='next'] {
+  right: calc(var(--arrow-inset) * -1);
+  background: linear-gradient(270deg, rgba(var(--pl-ink-rgb), 0.92), transparent);
+}
+
+.hscroll:hover .hArrow,
+.hArrow:focus-visible {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .hArrow {
+    display: none;
+  }
+}

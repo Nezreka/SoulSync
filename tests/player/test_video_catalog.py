@@ -180,3 +180,35 @@ def test_youtube_channel_lists_its_videos_with_downloaded_flags(conn):
                                           (None, None), ("live", None), ("", None), (90, 90)])
 def test_parse_duration(text, seconds):
     assert youtube.parse_duration(text) == seconds
+
+
+def test_keyword_route_stamps_and_filters(monkeypatch):
+    """the keyword page: ids from the engine, kinds the profile can see, and
+    the rating cap through the kids filter."""
+    from flask import Flask
+    import api.player as player_api
+
+    class Engine:
+        def keyword_id(self, name):
+            return 42 if name == "heist" else None
+
+        def discover_filter(self, kind, keywords=None, page=1):
+            assert keywords == "42"
+            return [{"tmdb_id": page * 10 + (1 if kind == "movie" else 2), "title": f"{kind}{page}",
+                     "library_id": 7 if page == 1 else None}]
+
+    import core.video.enrichment.engine as engine_mod
+    monkeypatch.setattr(engine_mod, "get_video_enrichment_engine", lambda: Engine())
+    monkeypatch.setattr(player_api, "_video_view", lambda: (True, False, True, None))
+    app = Flask(__name__)
+    app.secret_key = "t"
+    app.register_blueprint(player_api.create_blueprint())
+    client = app.test_client()
+    body = client.get("/api/player/keyword?name=heist").get_json()
+    assert body["found"] is True
+    assert [m["title"] for m in body["movies"]] == ["movie1", "movie2"]
+    assert body["movies"][0]["library_id"] == 7 and body["movies"][0]["kind"] == "movie"
+    # a profile without tv sees no shows
+    assert body["shows"] == []
+    assert client.get("/api/player/keyword?name=nope").get_json()["found"] is False
+    assert client.get("/api/player/keyword").status_code == 400

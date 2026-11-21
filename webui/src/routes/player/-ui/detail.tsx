@@ -5,6 +5,7 @@
  * with nothing in them aren't drawn.
  */
 
+import { Link } from '@tanstack/react-router';
 import { useEffect, useState, type ReactNode } from 'react';
 
 import type { RailCard } from '../-lib/rails';
@@ -13,7 +14,7 @@ import type { CatalogMovie, CatalogShow, ExtraTitle, Extras } from '../-player.t
 import { remoteImage, youtubeThumb } from '../-lib/images';
 import { movieCard, showCard } from '../-lib/rails';
 import { PlayIcon } from './icons';
-import { Art, CardRail, styles as s } from './kit';
+import { Art, CardRail, HScroll, styles as s } from './kit';
 import { inPlayer, VideoDialog } from './trailer';
 
 export function DetailLayout({ main, side }: { main: ReactNode; side: ReactNode }) {
@@ -45,14 +46,21 @@ export function InfoPanel({ title, children }: { title: string; children: ReactN
   );
 }
 
+/** a title's tmdb keywords; each opens everything tagged with it */
 export function Keywords({ words }: { words?: string[] }) {
   if (!words?.length) return null;
   return (
     <div className={s.keywords}>
-      {words.slice(0, 12).map((w) => (
-        <span key={w} className={s.keyword}>
+      {words.slice(0, 14).map((w) => (
+        <Link
+          key={w}
+          to="/player/keyword/$name"
+          params={{ name: w }}
+          className={s.keyword}
+          data-nav
+        >
           {w}
-        </span>
+        </Link>
       ))}
     </div>
   );
@@ -64,7 +72,7 @@ export function ExtrasVideos({ videos }: { videos?: Extras['videos'] }) {
   if (!videos?.length) return null;
   return (
     <Section title="Trailers & extras">
-      <div className={s.inlineRail}>
+      <HScroll className={s.inlineRail}>
         {videos.slice(0, 16).map((v) => (
           <button
             key={v.key}
@@ -83,7 +91,7 @@ export function ExtrasVideos({ videos }: { videos?: Extras['videos'] }) {
             {v.type ? <span className={s.cardSub}>{v.type}</span> : null}
           </button>
         ))}
-      </div>
+      </HScroll>
       {playing ? (
         <VideoDialog videoKey={playing.key} title={playing.name} onClose={() => setPlaying(null)} />
       ) : null}
@@ -115,7 +123,7 @@ export function Gallery({ gallery }: { gallery?: Extras['gallery'] }) {
   if (images.length < 2) return null;
   return (
     <Section title="Gallery">
-      <div className={s.inlineRail}>
+      <HScroll className={s.inlineRail}>
         {images.map((img, i) => (
           <button
             key={img.thumb}
@@ -128,7 +136,7 @@ export function Gallery({ gallery }: { gallery?: Extras['gallery'] }) {
             <Art src={remoteImage(img.thumb)} alt="" />
           </button>
         ))}
-      </div>
+      </HScroll>
       {open !== null
         ? inPlayer(
             <div

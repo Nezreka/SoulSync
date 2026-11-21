@@ -5,6 +5,7 @@ import { apiClient, readJson } from '@/app/api-client';
 import type {
   CatalogBook,
   Extras,
+  ExtraTitle,
   LibAlbum,
   LibAlbumDetail,
   LibArtist,
@@ -474,3 +475,14 @@ export async function saveFavorites(channels: string[]): Promise<string[]> {
     ).channels ?? []
   );
 }
+
+export const keywordQuery = (name: string) =>
+  queryOptions({
+    queryKey: ['player', 'keyword', name],
+    queryFn: () =>
+      readJson<{ found?: boolean; movies?: ExtraTitle[]; shows?: ExtraTitle[] }>(
+        apiClient.get('player/keyword', { searchParams: { name } }),
+      ),
+    staleTime: 30 * MINUTE,
+    retry: false,
+  });

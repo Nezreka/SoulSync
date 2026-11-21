@@ -37,7 +37,10 @@ function toBox(rect: DOMRect): Box {
 }
 
 function candidates(root: HTMLElement): HTMLElement[] {
-  return Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(visible);
+  // the rows' scroll arrows are for a mouse; a remote moves focus instead
+  return Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
+    (el) => !el.hasAttribute('data-nav-skip') && visible(el),
+  );
 }
 
 /** the last input was a key press: show focus and move it on page changes */

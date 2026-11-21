@@ -10,7 +10,7 @@ import { useEffect, useRef, useState, type ComponentProps, type ReactNode } from
 import type { RailCard } from '../-lib/rails';
 import type { PlayVerdict } from '../-player.types';
 
-import { MoreIcon, PlayIcon } from './icons';
+import { BackIcon, ChevronIcon, MoreIcon, PlayIcon } from './icons';
 import s from './player.module.css';
 import { usePreview } from './preview';
 
@@ -213,8 +213,73 @@ export function Rail({
           </PlayerLink>
         ) : null}
       </div>
-      <div className={s.railTrack}>{children}</div>
+      <HScroll className={s.railTrack}>{children}</HScroll>
     </section>
+  );
+}
+
+/**
+ * a row that scrolls sideways. scrollbars stay hidden, so a mouse gets
+ * arrows at the ends (only where there is more that way) that page about a
+ * screen at a time; touch swipes, a remote moves focus and the row follows.
+ */
+export function HScroll({ className, children }: { className: string; children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [edges, setEdges] = useState({ start: true, end: true });
+  const update = () => {
+    const el = ref.current;
+    if (!el) return;
+    const next = {
+      start: el.scrollLeft <= 4,
+      end: el.scrollLeft + el.clientWidth >= el.scrollWidth - 4,
+    };
+    setEdges((was) => (was.start === next.start && was.end === next.end ? was : next));
+  };
+  useEffect(() => {
+    update();
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    for (const child of Array.from(el.children).slice(0, 1)) observer.observe(child);
+    return () => observer.disconnect();
+  });
+  const page = (dir: 1 | -1) => {
+    const el = ref.current;
+    if (el) el.scrollBy({ left: dir * el.clientWidth * 0.85, behavior: 'smooth' });
+  };
+  return (
+    <div className={s.hscroll}>
+      <div ref={ref} className={className} onScroll={update}>
+        {children}
+      </div>
+      {edges.start ? null : (
+        <button
+          type="button"
+          className={s.hArrow}
+          data-side="prev"
+          aria-label="Scroll back"
+          tabIndex={-1}
+          data-nav-skip
+          onClick={() => page(-1)}
+        >
+          <BackIcon />
+        </button>
+      )}
+      {edges.end ? null : (
+        <button
+          type="button"
+          className={s.hArrow}
+          data-side="next"
+          aria-label="Scroll on"
+          tabIndex={-1}
+          data-nav-skip
+          onClick={() => page(1)}
+        >
+          <ChevronIcon />
+        </button>
+      )}
+    </div>
   );
 }
 

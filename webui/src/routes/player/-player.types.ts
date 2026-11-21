@@ -233,7 +233,8 @@ export interface Person {
   place_of_birth?: string | null;
   known_for?: string | null;
   photo?: string | null;
-  photos?: string[] | null;
+  /** tmdb profile images, a small and a full copy of each */
+  photos?: { thumb: string; full: string }[] | null;
   also_known_as?: string[] | null;
   credits?: PersonCredit[];
 }

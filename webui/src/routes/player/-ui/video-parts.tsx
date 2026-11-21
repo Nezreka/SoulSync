@@ -7,7 +7,7 @@ import type { CastMember, VideoFile } from '../-player.types';
 
 import { remoteImage } from '../-lib/images';
 import { rankVersions, versionLines, VIDEO_SORTS, type VideoSort } from '../-lib/video';
-import { Art, VerdictBadge, styles as s } from './kit';
+import { Art, HScroll, VerdictBadge, styles as s } from './kit';
 
 export function CastRow({ cast }: { cast?: CastMember[] }) {
   if (!cast?.length) return null;
@@ -16,7 +16,7 @@ export function CastRow({ cast }: { cast?: CastMember[] }) {
       <div className={s.railHead}>
         <h2 className={s.sectionTitle}>Cast</h2>
       </div>
-      <div className={s.people}>
+      <HScroll className={s.people}>
         {cast.slice(0, 24).map((person, index) => {
           const body = (
             <>
@@ -43,7 +43,7 @@ export function CastRow({ cast }: { cast?: CastMember[] }) {
             </div>
           );
         })}
-      </div>
+      </HScroll>
     </section>
   );
 }

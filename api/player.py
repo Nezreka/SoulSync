@@ -350,3 +350,42 @@ def put_favorites():
         return _bad(e)
     except Exception:  # noqa: BLE001
         return _failed("favorites save")
+
+
+KEYWORD_MAX = 80
+
+
+@bp.route("/api/player/keyword", methods=["GET"])
+@requires_any("movies.access", "tv.access")
+def keyword_titles():
+    """a tmdb keyword's titles ('heist', 'based on novel or book'): the
+    video side's own discover, by the keyword's id, owned ones stamped with
+    their library id. kinds and rating caps as everywhere else."""
+    name = (request.args.get("name") or "").strip()
+    if not name or len(name) > KEYWORD_MAX:
+        return _bad("a keyword is required")
+    try:
+        from api.video.kids import filter_tmdb_items
+        from core.video.enrichment.engine import get_video_enrichment_engine
+        sees_movies, sees_shows, _youtube, cap = _video_view()
+        eng = get_video_enrichment_engine()
+        keyword_id = eng.keyword_id(name)
+        if not keyword_id:
+            return jsonify({"success": True, "keyword": name, "found": False, "movies": [], "shows": []})
+        out = {}
+        for kind, sees in (("movie", sees_movies), ("show", sees_shows)):
+            items = []
+            if sees:
+                for page in (1, 2):
+                    items += eng.discover_filter(kind, keywords=str(keyword_id), page=page) or []
+            seen, unique = set(), []
+            for item in items:
+                if item.get("tmdb_id") not in seen:
+                    seen.add(item.get("tmdb_id"))
+                    unique.append({**item, "kind": kind})
+            out[kind] = filter_tmdb_items(get_video_db(), unique, cap) if cap is not None else unique
+        return jsonify({"success": True, "keyword": name, "found": True,
+                        "movies": out["movie"], "shows": out["show"]})
+    except Exception:  # noqa: BLE001
+        logger.exception("player keyword failed for %s", name)
+        return jsonify({"success": False, "error": "Could not look that keyword up"}), 500
