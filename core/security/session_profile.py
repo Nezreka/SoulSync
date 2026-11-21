@@ -85,6 +85,10 @@ def is_open_profile_path(path: str, method: str) -> bool:
     # admin minted it; api/devices.py redeem_code)
     if path == '/api/devices/redeem' and method == 'POST':
         return True
+    # the reachability check's one-time URL (the nonce only lives in this
+    # process and the answer is the nonce itself; api/devices.py)
+    if method == 'GET' and path.startswith('/api/devices/reachability/'):
+        return True
     # the video calendar's iCal feed: calendar apps fetch it with no cookie, and
     # the token in the path is the credential (the route refuses unknown ones)
     from core.video.calendar_feed import is_feed_path

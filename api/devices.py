@@ -59,12 +59,14 @@ def server_identity_view():
 
 
 def _pairing(code):
-    """the pairing payload for a code: what the QR carries."""
-    from core.connect.addresses import pairing_payload, payload_text
+    """the pairing payload for a code: what the QR carries. the addresses
+    are this server's, home ones first, the browser's own among them."""
+    from core.connect.addresses import pairing_payload, payload_text, warnings
     ident = _identity()
+    addrs = _addresses()
     payload = pairing_payload(lookup_id=ident.lookup_id, fingerprint=ident.fingerprint,
-                              addresses=[], code=code)
-    return {"payload": payload, "payload_text": payload_text(payload), "warnings": []}
+                              addresses=addrs, code=code)
+    return {"payload": payload, "payload_text": payload_text(payload), "warnings": warnings(addrs)}
 
 
 # ── paired devices (admin) ───────────────────────────────────────────────
@@ -305,3 +307,103 @@ def redeem_code():
            actor=(None, "a device", False))
     return jsonify({"success": True, "token": token, "device_id": device_id,
                     "pick_seconds": T.PICK_WINDOW, "server": public_view(_identity())}), 201
+
+
+# ── addresses and the reachability check ─────────────────────────────────
+
+def _addresses():
+    from core.connect.addresses import address_list
+    return address_list(config_manager.get, request_host_url=request.host_url)
+
+
+def _server_payload():
+    from core.connect import reachability as R
+    from core.connect.addresses import configured, warnings
+    from core.connect.server_key import public_view
+    addrs = _addresses()
+    conf = configured(config_manager.get)
+    return {**public_view(_identity()), "addresses": addrs, **conf, "warnings": warnings(addrs),
+            "probe": _probe_view(R.latest(), conf["remote_url"]), "guidance": R.GUIDANCE}
+
+
+def _probe_view(probe, remote_url):
+    if not probe:
+        return None
+    return {**probe, "url": (remote_url.rstrip("/") + probe["path"]) if remote_url else None}
+
+
+@bp.route("/api/devices/server", methods=["GET"])
+@admin_only
+def server_view():
+    """this server for Settings > Devices: fingerprint, addresses (local
+    first), the saved remote and extra addresses, plain-http warnings, the
+    last reachability probe and the guidance for getting in from outside."""
+    return jsonify({"success": True, **_server_payload()})
+
+
+@bp.route("/api/devices/addresses", methods=["PUT"])
+@admin_only
+def save_addresses():
+    """{remote_url, custom_urls}: blank remote clears it."""
+    from core.connect.addresses import CUSTOM_KEY, MAX_CUSTOM, REMOTE_KEY, clean_url
+    body = request.get_json(silent=True) or {}
+    remote, why = clean_url(body.get("remote_url"))
+    if why:
+        return jsonify({"success": False, "error": f"Remote address: {why}"}), 400
+    raw = body.get("custom_urls") or []
+    if not isinstance(raw, list):
+        return jsonify({"success": False, "error": "Extra addresses: send a list"}), 400
+    custom = []
+    for item in raw:
+        url, why = clean_url(item)
+        if why:
+            return jsonify({"success": False, "error": f"{item}: {why}"}), 400
+        if url and url not in custom and url != remote:
+            custom.append(url)
+    if len(custom) > MAX_CUSTOM:
+        return jsonify({"success": False, "error": f"At most {MAX_CUSTOM} extra addresses"}), 400
+    config_manager.set(REMOTE_KEY, remote or "")
+    config_manager.set(CUSTOM_KEY, custom)
+    return jsonify({"success": True, **_server_payload()})
+
+
+@bp.route("/api/devices/reachability", methods=["POST"])
+@admin_only
+def check_reachability():
+    """a new one-time probe, and the server fetching its own remote address
+    with it. result is None when no remote address is saved."""
+    from core.connect import reachability as R
+    from core.connect.addresses import configured
+    remote = configured(config_manager.get)["remote_url"]
+    probe = R.start()
+    result = R.self_check(remote, probe["nonce"]) if remote else None
+    probe = R.view(probe["nonce"]) or probe
+    return jsonify({"success": True, "result": result, "probe": _probe_view(probe, remote),
+                    "guidance": R.GUIDANCE})
+
+
+@bp.route("/api/devices/reachability", methods=["GET"])
+@admin_only
+def reachability_status():
+    """the newest probe and who has fetched it (a phone on mobile data)."""
+    from core.connect import reachability as R
+    from core.connect.addresses import configured
+    return jsonify({"success": True,
+                    "probe": _probe_view(R.latest(), configured(config_manager.get)["remote_url"])})
+
+
+@bp.route("/api/devices/reachability/<nonce>", methods=["GET"])
+@public
+def reachability_probe(nonce):
+    """the one-time URL. the nonce is the only thing it gives back, so it
+    proves this very server answered and tells nobody anything else."""
+    from core.connect import reachability as R
+    known = R.record_hit(nonce, request.remote_addr or "",
+                         self_marker=request.headers.get(R.SELF_HEADER, ""))
+    if not known:
+        return jsonify({"success": False, "error": "unknown_probe"}), 404
+    if "text/html" in (request.headers.get("Accept") or ""):
+        return ("<!doctype html><meta name=viewport content='width=device-width'>"
+                "<title>SoulSync</title><p style='font:18px system-ui;padding:24px'>"
+                "SoulSync answered. You can close this page.</p>")
+    return jsonify({"success": True, "soulsync_probe": nonce})
