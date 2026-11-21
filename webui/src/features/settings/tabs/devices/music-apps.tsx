@@ -147,7 +147,7 @@ export function MusicAppsCard({ opened, onMade }: { opened: number; onMade: () =
         ) : null}
         {made ? <ShownApp app={made} onDone={() => setMade(null)} /> : null}
       </div>
-      {info ? <Serving info={info} onSaved={setInfo} /> : null}
+      {info ? <Serving info={info} onSaved={() => void load()} /> : null}
     </Card>
   );
 }
@@ -185,14 +185,15 @@ export function ShownApp({ app, onDone }: { app: NewMusicApp; onDone: () => void
   );
 }
 
-function Serving({ info, onSaved }: { info: MusicApps; onSaved: (m: MusicApps) => void }) {
+function Serving({ info, onSaved }: { info: MusicApps; onSaved: () => void }) {
   const save = async (body: Parameters<typeof saveMusicAppSettings>[0]) => {
     const r = await saveMusicAppSettings(body);
     if (!r.ok) {
       toast(r.message, 'error');
       return;
     }
-    onSaved(r.data);
+    // read the card back from the server rather than trusting the reply's shape
+    onSaved();
   };
   const servers = info.bridge.filter((b: BridgeServer) => b.active || b.on);
   return (
