@@ -843,6 +843,13 @@ def _device_token_gate():
     # one credential per request: a device token never rides with an api key
     if request.headers.get('X-API-Key') or request.args.get('api_key'):
         if subsonic:
+            _vals = request.values
+            if not any(_vals.get(k) for k in ("apiKey", "u", "p", "t", "s")):
+                # only an api key on /rest: not a device asking. step aside so
+                # the api-key gates judge it (a read key gets its 403 for
+                # scope) and the /rest view, which answers only paired
+                # devices, refuses the rest
+                return None
             from core.subsonic.response import CONFLICTING_AUTH
             return _ss.error_response(CONFLICTING_AUTH, "Send one way of signing in, not two.")
         return _device_refusal(400, "device_one_credential", "Send the device token or an API key, not both.")

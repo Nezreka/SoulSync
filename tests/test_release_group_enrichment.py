@@ -309,7 +309,7 @@ def test_old_wishlist_matches_are_checked_again_once(db):
     import json
     with db._get_connection() as conn:
         # a fresh db has run it already; an upgraded one has not
-        conn.execute("DROP TABLE _wishlist_release_groups_rechecked")
+        conn.execute("DROP TABLE IF EXISTS _wishlist_release_groups_rechecked")
         for n, status in enumerate(("matched", "not_found")):
             conn.execute(
                 "INSERT INTO wishlist_tracks (spotify_track_id, spotify_data, profile_id,"
