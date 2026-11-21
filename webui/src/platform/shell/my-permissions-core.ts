@@ -358,6 +358,7 @@ const PART_LABELS: [string, string][] = [
   ['music.watchlist', 'the music watchlist'],
   ['music.videos', 'Music videos'],
   ['music.sample_studio', 'Sample Studio'],
+  ['music.apps', 'music apps'],
 ];
 
 const VIDEO_PART_LABELS: [string, string][] = [
