@@ -21,6 +21,18 @@ def _sweep_video_profile_data(profile_id: int) -> None:
             "video profile sweep failed for %s", profile_id, exc_info=True)
 
 
+def _sweep_player_profile_data(profile_id: int) -> None:
+    """Best-effort: clear the deleted profile's player rows (progress,
+    favorite channels, home layout) from player.db, a separate file."""
+    try:
+        from database.player_database import get_player_database
+        get_player_database().delete_profile_data(profile_id)
+    except Exception:   # noqa: BLE001 - sweep is additive, never fatal
+        import logging
+        logging.getLogger("api_profiles").debug(
+            "player profile sweep failed for %s", profile_id, exc_info=True)
+
+
 def register_routes(bp):
 
     @bp.route("/profiles", methods=["GET"])
@@ -138,6 +150,7 @@ def register_routes(bp):
             ok = db.delete_profile(profile_id)
             if ok:
                 _sweep_video_profile_data(profile_id)
+                _sweep_player_profile_data(profile_id)
                 return api_success({"message": f"Profile {profile_id} deleted."})
             return api_error("NOT_FOUND", f"Profile {profile_id} not found.", 404)
         except Exception as e:

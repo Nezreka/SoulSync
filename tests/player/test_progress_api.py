@@ -7,7 +7,6 @@ starts a worker.
 
 from __future__ import annotations
 
-import sqlite3
 
 import pytest
 from flask import Flask
@@ -16,26 +15,15 @@ import api.player as player_api
 from core.player import progress
 
 
-class _FileDb:
-    """the slice of MusicDatabase the store uses."""
-
-    def __init__(self, path):
-        self.database_path = path
-
-    def _get_connection(self):
-        conn = sqlite3.connect(str(self.database_path))
-        conn.row_factory = sqlite3.Row
-        return conn
-
-
 @pytest.fixture
 def db(tmp_path):
-    return _FileDb(tmp_path / "player.db")
+    from database.player_database import PlayerDatabase
+    return PlayerDatabase(str(tmp_path / "player.db"))
 
 
 @pytest.fixture
 def client(db, monkeypatch):
-    monkeypatch.setattr(player_api, "get_database", lambda: db)
+    monkeypatch.setattr(player_api, "player_db", lambda: db)
     app = Flask(__name__)
     app.secret_key = "test"
     app.register_blueprint(player_api.create_blueprint())
@@ -132,12 +120,39 @@ def test_remove(db):
     assert progress.get(db, 1, "movie", "m") is None
 
 
-def test_the_table_has_a_profile_id_column_so_profile_delete_sweeps_it(db):
-    # MusicDatabase.delete_profile deletes from every table with this column
-    progress.ensure_schema(db)
-    with db._get_connection() as conn:
-        cols = {r[1] for r in conn.execute(f"PRAGMA table_info({progress.TABLE})")}
-    assert "profile_id" in cols
+def test_a_deleted_profile_is_swept_from_player_db(db):
+    from core.player import favorites
+    progress.save(db, 3, "movie", "m", 10, 100)
+    progress.save(db, 4, "movie", "m", 10, 100)
+    favorites.put(db, 3, ["genre-comedy"])
+    assert db.delete_profile_data(3) == 2
+    assert progress.get(db, 3, "movie", "m") is None
+    assert favorites.get(db, 3) == []
+    assert progress.get(db, 4, "movie", "m") is not None
+
+
+def test_profile_delete_route_sweeps_player_db(monkeypatch):
+    import api.profiles as profiles_api
+    swept = []
+
+    class Fake:
+        def delete_profile_data(self, pid):
+            swept.append(pid)
+            return 0
+
+    import database.player_database as pdb
+    monkeypatch.setattr(pdb, "get_player_database", lambda: Fake())
+    profiles_api._sweep_player_profile_data(9)
+    assert swept == [9]
+
+
+def test_player_db_sits_beside_the_music_db_unless_told(monkeypatch):
+    from database.player_database import default_path
+    monkeypatch.delenv("PLAYER_DATABASE_PATH", raising=False)
+    monkeypatch.setenv("DATABASE_PATH", "/app/data/music_library.db")
+    assert default_path().replace("\\", "/") == "/app/data/player.db"
+    monkeypatch.setenv("PLAYER_DATABASE_PATH", "/x/p.db")
+    assert default_path() == "/x/p.db"
 
 
 # ── routes ───────────────────────────────────────────────────────────────

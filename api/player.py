@@ -27,8 +27,15 @@ def create_blueprint():
 
 
 def get_database():
+    """the music library (the guide's music channels read it)"""
     from database.music_database import get_database as _get
     return _get()
+
+
+def player_db():
+    """player.db: progress, favorite channels, home layouts"""
+    from database.player_database import get_player_database
+    return get_player_database()
 
 
 def _profile():
@@ -56,7 +63,7 @@ def get_progress():
     if pid is None:
         return _signed_out()
     try:
-        row = progress.get(get_database(), pid, request.args.get("item_type"),
+        row = progress.get(player_db(), pid, request.args.get("item_type"),
                            request.args.get("item_id"))
     except progress.ProgressError as e:
         return _bad(e)
@@ -76,7 +83,7 @@ def put_progress():
     if finished is not None and not isinstance(finished, bool):
         return _bad("finished must be true or false")
     try:
-        row = progress.save(get_database(), pid, body.get("item_type"), body.get("item_id"),
+        row = progress.save(player_db(), pid, body.get("item_type"), body.get("item_id"),
                             body.get("position_seconds"), body.get("duration_seconds"),
                             finished=finished, meta=body.get("meta"))
     except progress.ProgressError as e:
@@ -95,7 +102,7 @@ def lookup_progress():
         return _signed_out()
     body = request.get_json(silent=True) or {}
     try:
-        rows = progress.lookup(get_database(), pid, body.get("item_type"), body.get("item_ids"))
+        rows = progress.lookup(player_db(), pid, body.get("item_type"), body.get("item_ids"))
     except progress.ProgressError as e:
         return _bad(e)
     except Exception:  # noqa: BLE001
@@ -111,7 +118,7 @@ def finish_progress():
         return _signed_out()
     body = request.get_json(silent=True) or {}
     try:
-        row = progress.finish(get_database(), pid, body.get("item_type"), body.get("item_id"),
+        row = progress.finish(player_db(), pid, body.get("item_type"), body.get("item_id"),
                               body.get("duration_seconds"), meta=body.get("meta"))
     except progress.ProgressError as e:
         return _bad(e)
@@ -127,7 +134,7 @@ def delete_progress():
     if pid is None:
         return _signed_out()
     try:
-        removed = progress.remove(get_database(), pid, request.args.get("item_type"),
+        removed = progress.remove(player_db(), pid, request.args.get("item_type"),
                                   request.args.get("item_id"))
     except progress.ProgressError as e:
         return _bad(e)
@@ -145,7 +152,7 @@ def continue_rail():
     raw = request.args.get("item_type") or ""
     types = [t for t in raw.split(",") if t.strip()]
     try:
-        items = progress.continue_list(get_database(), pid, types, request.args.get("limit"))
+        items = progress.continue_list(player_db(), pid, types, request.args.get("limit"))
     except progress.ProgressError as e:
         return _bad(e)
     except Exception:  # noqa: BLE001
@@ -369,7 +376,7 @@ def get_favorites():
     if pid is None:
         return _signed_out()
     try:
-        return jsonify({"success": True, "channels": favorites.get(get_database(), pid)})
+        return jsonify({"success": True, "channels": favorites.get(player_db(), pid)})
     except Exception:  # noqa: BLE001
         return _failed("favorites read")
 
@@ -384,7 +391,7 @@ def put_favorites():
     body = request.get_json(silent=True) or {}
     try:
         return jsonify({"success": True,
-                        "channels": favorites.put(get_database(), pid, body.get("channels"))})
+                        "channels": favorites.put(player_db(), pid, body.get("channels"))})
     except favorites.FavoritesError as e:
         return _bad(e)
     except Exception:  # noqa: BLE001
