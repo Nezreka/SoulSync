@@ -1058,3 +1058,86 @@ def put_guide_lineup():
     except lineup.LineupError as e:
         return _bad(e)
     return jsonify({"success": True, "entries": entries})
+
+
+# ── the guide's extras: watched, people, reminders ───────────────────────
+
+@bp.route("/api/player/guide/watched", methods=["GET"])
+@requires_any("movies.access", "tv.access")
+def guide_watched():
+    """what this profile has seen, so channels air the unseen first"""
+    from api.video import get_video_db
+    from core.player import guide_data
+    from core.video.watch_scope import current_watcher
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    try:
+        out = guide_data.watched_ids(get_video_db(), current_watcher().rows, player_db(), pid)
+    except Exception:  # noqa: BLE001
+        return _failed("watched read", "Couldn't read what you've watched.")
+    return jsonify({"success": True, **out})
+
+
+@bp.route("/api/player/guide/people", methods=["GET"])
+@requires_any("movies.access", "tv.access")
+def guide_people():
+    """?q=: people in the library by name, for a channel of their work"""
+    from api.video import get_video_db
+    from core.player import guide_data
+    try:
+        return jsonify({"success": True, "people": guide_data.find_people(get_video_db(), request.args.get("q", ""))})
+    except Exception:  # noqa: BLE001
+        return _failed("people search", "Couldn't search people.")
+
+
+@bp.route("/api/player/guide/people/<int:person_id>", methods=["GET"])
+@requires_any("movies.access", "tv.access")
+def guide_person(person_id):
+    """a person's owned films and their shows"""
+    from api.video import get_video_db
+    from core.player import guide_data
+    try:
+        return jsonify({"success": True, **guide_data.person_titles(get_video_db(), person_id)})
+    except guide_data.GuideDataError:
+        return jsonify({"success": False, "error": "not_found", "message": "No such person."}), 404
+
+
+@bp.route("/api/player/guide/reminders", methods=["GET"])
+@self_only
+def guide_reminders():
+    from core.player import guide_data
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    return jsonify({"success": True, "reminders": guide_data.list_reminders(player_db(), pid)})
+
+
+@bp.route("/api/player/guide/reminders", methods=["POST"])
+@self_only
+def add_guide_reminder():
+    """{channel_id, starts_at (seconds), program_key, title, subtitle?, channel_name?}"""
+    from core.player import guide_data
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    try:
+        r = guide_data.add_reminder(player_db(), pid, request.get_json(silent=True))
+    except guide_data.GuideDataError as e:
+        return _bad(e)
+    return jsonify({"success": True, "reminder": r})
+
+
+@bp.route("/api/player/guide/reminders", methods=["DELETE"])
+@self_only
+def remove_guide_reminder():
+    from core.player import guide_data
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    try:
+        starts = float(request.args.get("starts_at", ""))
+    except ValueError:
+        return _bad("starts_at must be a number")
+    guide_data.remove_reminder(player_db(), pid, request.args.get("channel_id", ""), starts)
+    return jsonify({"success": True})

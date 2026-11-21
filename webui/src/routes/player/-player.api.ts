@@ -497,6 +497,71 @@ export const guideEdits = {
     ).entries,
 };
 
+// ── what the guide knows beyond its catalog ───────────────────────────
+
+export const guideWatchedQuery = () =>
+  queryOptions({
+    queryKey: ['player', 'guide', 'watched'],
+    queryFn: async () =>
+      apiClient.get('player/guide/watched').json<{ movies: number[]; episodes: number[] }>(),
+    staleTime: 10 * MINUTE,
+  });
+
+export interface GuidePerson {
+  id: number;
+  name: string;
+  photo_url: string | null;
+  titles: number;
+  job: string | null;
+}
+
+export async function findPeople(q: string): Promise<GuidePerson[]> {
+  return (
+    await apiClient
+      .get('player/guide/people', { searchParams: { q } })
+      .json<{ people: GuidePerson[] }>()
+  ).people;
+}
+
+export const personTitlesQuery = (id: number) =>
+  queryOptions({
+    queryKey: ['player', 'guide', 'person', id],
+    queryFn: async () =>
+      apiClient
+        .get(`player/guide/people/${id}`)
+        .json<{ name: string; movies: number[]; shows: number[] }>(),
+    staleTime: 30 * MINUTE,
+  });
+
+export interface Reminder {
+  channel_id: string;
+  starts_at: number;
+  program_key: string;
+  title: string;
+  subtitle: string | null;
+  channel_name: string | null;
+}
+
+export const remindersQuery = () =>
+  queryOptions({
+    queryKey: ['player', 'guide', 'reminders'],
+    queryFn: async () =>
+      (await apiClient.get('player/guide/reminders').json<{ reminders: Reminder[] }>()).reminders,
+    staleTime: MINUTE,
+  });
+
+export const reminderEdits = {
+  add: async (
+    r: Omit<Reminder, 'subtitle' | 'channel_name'> & { subtitle?: string; channel_name?: string },
+  ) => apiClient.post('player/guide/reminders', { json: r }).json(),
+  remove: async (channelId: string, startsAt: number) =>
+    apiClient
+      .delete('player/guide/reminders', {
+        searchParams: { channel_id: channelId, starts_at: String(startsAt) },
+      })
+      .json(),
+};
+
 // ── lyrics ─────────────────────────────────────────────────────────────
 
 export interface Lyrics {

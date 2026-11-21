@@ -24,6 +24,7 @@ export interface Tuning {
 
 export function tuneAt(channel: Channel, now: number): Tuning | null {
   const programs = programsInWindow(channel.id, channel.pool, now - 6 * HOUR, now + 6 * HOUR, {
+    ...channel.schedule,
     ordered: channel.ordered,
   });
   const program = programs.find((p) => p.start <= now && p.end > now);

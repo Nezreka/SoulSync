@@ -34,12 +34,14 @@ import {
   hashSeed,
   mergeIntoBlocks,
   programsInWindow,
+  startOfLocalDay,
   type GuideItem,
   type GuideProgram,
 } from './-lib/schedule';
 import {
   favoritesQuery,
   guideChannelsQuery,
+  guideWatchedQuery,
   guideEdits,
   lineupQuery,
   showDetailQuery,
@@ -286,7 +288,24 @@ function GuidePage() {
     () => applyLineup(allChannels, lineupQ.data ?? []),
     [allChannels, lineupQ.data],
   );
-  const channels = useMemo(() => numberChannels(lined.filter((c) => !c.hidden)), [lined]);
+  // what this profile has seen: channels air the unseen first, a marathon starts at your next episode
+  const watched = useQuery({ ...guideWatchedQuery(), enabled: sections.video });
+  const seen = useMemo(() => {
+    const out = new Set<string>();
+    for (const id of watched.data?.movies ?? []) out.add(`movie:${id}`);
+    for (const id of watched.data?.episodes ?? []) out.add(`episode:${id}`);
+    return out;
+  }, [watched.data]);
+  const seenKey = String(watched.dataUpdatedAt);
+  const channels = useMemo(
+    () =>
+      numberChannels(lined.filter((c) => !c.hidden)).map((c) =>
+        c.music
+          ? c
+          : { ...c, schedule: { seen, seenKey, daypart: true, today: startOfLocalDay(today) } },
+      ),
+    [lined, seen, seenKey, today],
+  );
   const numbers = useMemo(() => new Map(channels.map((c) => [c.id, c.number])), [channels]);
 
   // channel up / down follow the guide's numbers, from anywhere in the player
@@ -309,7 +328,7 @@ function GuidePage() {
           channel.pool,
           Math.min(from, anchor),
           Math.max(to, anchor + 4 * 3_600_000),
-          { ordered: channel.ordered },
+          { ...channel.schedule, ordered: channel.ordered },
         ),
       );
     return map;

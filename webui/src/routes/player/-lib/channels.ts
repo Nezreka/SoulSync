@@ -11,7 +11,7 @@
 import { appURL } from '@/platform/url-base';
 
 import type { CatalogMovie, CatalogShow, CatalogYoutube, VideoCatalog } from '../-player.types';
-import type { GuideItem } from './schedule';
+import type { GuideItem, ScheduleOptions } from './schedule';
 
 import { youtubeThumb } from './images';
 import { posterUrl } from './rails';
@@ -40,6 +40,8 @@ export interface Channel {
   music?: boolean;
   /** the classic guide channel number, given once the list is sorted */
   number?: number;
+  /** how it's programmed for this profile (what it has seen, day parts): the guide and the tuner alike */
+  schedule?: Omit<ScheduleOptions, 'ordered'>;
 }
 
 /** a channel needs this many distinct timed items before it gets a row */

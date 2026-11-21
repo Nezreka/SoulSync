@@ -120,6 +120,27 @@ export interface ScheduleOptions {
    * episodes in order, picking up where yesterday left off).
    */
   ordered?: boolean;
+  /**
+   * what this profile has seen (item keys, "movie:12"): the unseen air
+   * first each time round, and an in-order channel starts today at the
+   * first one not seen. seenKey names that set, so a day is redone only
+   * when it changes
+   */
+  seen?: ReadonlySet<string>;
+  seenKey?: string;
+  /**
+   * a channel of movies and tv keeps to the clock: episodes by day, films
+   * in the evening (6pm to 2am), the way a channel is programmed
+   */
+  daypart?: boolean;
+  /** today's local midnight: where an in-order channel's "next unseen" starts from */
+  today?: number;
+}
+
+/** evening, film time: 6pm to 2am */
+export function filmHour(at: number): boolean {
+  const h = new Date(at).getHours();
+  return h >= 18 || h < 2;
 }
 
 /**
@@ -136,7 +157,9 @@ export function scheduleDay(
   day: Date,
   options: ScheduleOptions = {},
 ): GuideProgram[] {
-  const key = `${channelId}|${startOfLocalDay(day.getTime())}|${options.ordered ? 1 : 0}`;
+  const key = `${channelId}|${startOfLocalDay(day.getTime())}|${options.ordered ? 1 : 0}|${
+    options.daypart ? 1 : 0
+  }|${options.seenKey ?? ''}|${options.today ?? ''}`;
   let days = dayCache.get(pool);
   if (!days) {
     days = new Map();
@@ -170,10 +193,23 @@ function scheduleDayUncached(
     cursor = end;
   };
 
+  const seen = options.seen;
   if (options.ordered) {
     // days since the epoch in local time, so tomorrow starts further along
     const dayIndex = Math.round(dayStart / 86400000);
     let index = (hashSeed(channelId) + dayIndex * 7) % items.length;
+    // knowing what you've seen: today starts at the first one you haven't,
+    // and each day after carries on from where the day before ran out
+    const firstUnseen =
+      seen && options.today != null ? items.findIndex((x) => !seen.has(x.key)) : -1;
+    if (firstUnseen >= 0) {
+      const avg = items.reduce((n, x) => n + x.seconds, 0) / items.length;
+      const perDay = Math.max(1, Math.round(86400 / avg));
+      const todayIndex = Math.round(options.today! / 86400000);
+      index =
+        (((firstUnseen + (dayIndex - todayIndex) * perDay) % items.length) + items.length) %
+        items.length;
+    }
     while (cursor < dayEnd) {
       push(items[index]);
       index = (index + 1) % items.length;
@@ -181,17 +217,50 @@ function scheduleDayUncached(
     return out;
   }
 
-  // a short pool repeats; each lap draws a fresh order so repeats don't line up
-  let lap = 0;
-  let order = seededOrder(items, seed);
-  while (cursor < dayEnd) {
-    const next = order.next();
-    if (next.done) {
-      lap += 1;
-      order = seededOrder(items, seed + lap);
-      continue;
+  // a draw: the unseen first, then what you've seen; each lap a fresh order
+  // so repeats don't line up
+  const lapOrder = (pool: readonly GuideItem[], lapSeed: number) => {
+    if (!seen) return seededOrder(pool, lapSeed);
+    const fresh = pool.filter((x) => !seen.has(x.key));
+    const old = pool.filter((x) => seen.has(x.key));
+    return (function* () {
+      yield* seededOrder(fresh, lapSeed);
+      yield* seededOrder(old, lapSeed + 7919);
+    })();
+  };
+  const draw = (pool: readonly GuideItem[], salt: number) => {
+    let lap = 0;
+    let order = lapOrder(pool, seed + salt);
+    return () => {
+      for (let tries = 0; tries < 2; tries++) {
+        const next = order.next();
+        if (!next.done) return next.value;
+        lap += 1;
+        order = lapOrder(pool, seed + salt + lap);
+      }
+      return null;
+    };
+  };
+
+  const films = options.daypart ? items.filter((x) => x.kind === 'movie') : [];
+  const shows = options.daypart ? items.filter((x) => x.kind !== 'movie') : [];
+  if (films.length && shows.length) {
+    // a mixed channel keeps to the clock: films in the evening, episodes by day
+    const film = draw(films, 1);
+    const show = draw(shows, 2);
+    while (cursor < dayEnd) {
+      const next = filmHour(cursor) ? film() : show();
+      if (!next) break;
+      push(next);
     }
-    push(next.value);
+    return out;
+  }
+
+  const next = draw(items, 0);
+  while (cursor < dayEnd) {
+    const item = next();
+    if (!item) break;
+    push(item);
   }
   return out;
 }

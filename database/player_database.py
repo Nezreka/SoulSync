@@ -23,7 +23,7 @@ from typing import Iterator, Optional
 
 TABLES_WITH_PROFILES = ("watch_progress", "player_favorite_channels", "player_home_layout",
                         "player_watchlist", "player_settings", "player_notes",
-                        "player_lineup")
+                        "player_lineup", "player_reminders")
 
 
 def default_path() -> str:
