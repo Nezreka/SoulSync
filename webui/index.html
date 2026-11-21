@@ -153,8 +153,10 @@
     <style id="soulsync-player-boot">
         html.ss-player-boot body { background: var(--bg-primary); }
         /* opacity, not visibility: a child can set itself visible again (the
-           manager's nav does), but nothing inside can undo its parent's opacity */
-        html.ss-player-boot body > *:not([data-player-root]):not(#launch-pin-overlay):not(#login-overlay):not(#profile-picker-overlay):not(#toast-container) {
+           manager's nav does), but nothing inside can undo its parent's opacity.
+           the profile layers (a pin pad, a forgotten pin) open over the picker
+           and have to show too: hidden, a pin pad flashed and was gone */
+        html.ss-player-boot body > *:not([data-player-root]):not(#launch-pin-overlay):not(#login-overlay):not(#profile-picker-overlay):not(.pf-layer):not(#toast-container) {
             opacity: 0;
             pointer-events: none;
         }
