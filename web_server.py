@@ -824,24 +824,59 @@ def _device_refusal(status, code, words):
 def _device_token_gate():
     from core.connect.device_access import OK, decide, device_access, request_token
     token = request_token(request.headers)
-    if not token:
+    # music apps (/rest, api/subsonic.py) sign in with their own parameters
+    # (an api key, or a username and app password) and are refused in their
+    # own envelope; a device token in the header stays the normal way
+    from api import subsonic as _ss
+    subsonic = not token and _ss.is_rest_path(request.path)
+    if not token and not subsonic:
         return None
     g.request_start_monotonic = time.perf_counter()
     g.request_start_cpu = time.thread_time()
+
+    def refuse(status, code, words):
+        if subsonic:
+            from core.subsonic.auth import refusal_for
+            return _ss.error_response(*refusal_for(code))
+        return _device_refusal(status, code, words)
+
     # one credential per request: a device token never rides with an api key
     if request.headers.get('X-API-Key') or request.args.get('api_key'):
+        if subsonic:
+            from core.subsonic.response import CONFLICTING_AUTH
+            return _ss.error_response(CONFLICTING_AUTH, "Send one way of signing in, not two.")
         return _device_refusal(400, "device_one_credential", "Send the device token or an API key, not both.")
     from core.connect import device_tokens as _dt
     database = get_database()
     try:
-        row = _dt.find(database, token)
+        if subsonic:
+            row, refusal = _ss.authenticate(database)
+            if refusal is not None:
+                return refusal
+            if row is None:
+                # a public method (getOpenSubsonicExtensions) asked without
+                # credentials: nobody, and the gates below step aside
+                g.device_auth = True
+                g.device = None
+                g.profile_id = None
+                g.is_admin = False
+                g.can_download = False
+                g.profile_name = "Nobody"
+                g.allowed_sides = 'none'
+                g.perms, g.perms_source = None, 'none'
+                return None
+        else:
+            row = _dt.find(database, token)
     except Exception as e:
         logger.warning("device token lookup failed: %s", e)
+        if subsonic:
+            from core.subsonic.response import GENERIC
+            return _ss.error_response(GENERIC, "Couldn't check this app. Try again in a moment.")
         return _device_refusal(503, "device_check_failed", "Couldn't check this device. Try again in a moment.")
     view = app.view_functions.get(request.endpoint) if request.endpoint else None
     status, code, words = decide(row, device_access(view) if view else None, time.time())
     if status != OK:
-        return _device_refusal(status, code, words)
+        return refuse(status, code, words)
     g.device_auth = True
     g.device = {k: row.get(k) for k in ('id', 'name', 'platform', 'app', 'kind', 'profile_id', 'scope')}
     _dt.touch(database, row['id'], request.remote_addr or '')
@@ -859,12 +894,14 @@ def _device_token_gate():
         profile = database.get_profile(pid)
         from core.connect.pick import may_use
         if not may_use(database, profile, row.get('kind') or ''):
-            return _device_refusal(403, "device_profile_not_allowed",
-                                   "This profile can't use this app any more.")
+            return refuse(403, "device_profile_not_allowed", "This profile can't use this app any more.")
         from core.permission_store import effective_for as _perm_effective_for
         g.perms, g.perms_source = _perm_effective_for(database, profile)
     except Exception as e:
         logger.warning("device %s: profile %s unreadable: %s", row.get('id'), pid, e)
+        if subsonic:
+            from core.subsonic.response import GENERIC
+            return _ss.error_response(GENERIC, "Couldn't check this app. Try again in a moment.")
         return _device_refusal(503, "device_check_failed", "Couldn't check this device. Try again in a moment.")
     g.profile_id = pid
     g.profile_name = profile.get('name') or ("Profile %s" % pid)
@@ -873,7 +910,7 @@ def _device_token_gate():
     g.request_limit_days = int(profile.get('request_limit_days') or 7)
     from core.permissions import page_denied
     if page_denied(request.path, profile.get('allowed_pages'), bool(profile.get('is_admin'))):
-        return jsonify({"success": False, "error": "page_not_allowed"}), 403
+        return refuse(403, "page_not_allowed", "This profile can't open that.")
     return None
 
 
@@ -11143,26 +11180,19 @@ def library_log_play():
     /api/library/log-play/eligible once the Last.fm threshold is reached.
     """
     try:
-        from core.playback.play_log import build_play_event
         data = request.get_json(silent=True) or {}
         track = data.get('track') or data
         played_at = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
-        duration_ms = data.get('duration_ms', 0)
-        event = build_play_event(track, played_at, duration_ms)
-        if not event:
-            return jsonify({"success": False, "skipped": True}), 200
-        # the play goes in the listener's pile (#1293). no own listenbrainz
-        # means the shared one, same as before.
-        from core.listening_scope import listening_owner
-        db = get_database()
-        # a private session keeps the play out of everything: taste, blends,
-        # stats and scrobbles. checked here, not trusted to the page
-        from core.personalized.listening_privacy import in_private_session
-        if in_private_session(db, get_current_profile_id()):
+        # the listener's pile (#1293), never during a private session (checked
+        # here, not trusted to the page): the path music apps use too
+        from core.playback.record_play import record_play
+        out = record_play(get_database(), get_current_profile_id(), track if isinstance(track, dict) else {},
+                          played_at=played_at, duration_ms=data.get('duration_ms', 0))
+        if out["private"]:
             return jsonify({"success": True, "skipped": True, "private": True}), 200
-        event['profile_id'] = listening_owner(db, get_current_profile_id())
-        play_id = db.record_web_player_play(event)
-        return jsonify({"success": True, "play_id": play_id})
+        if out["skipped"]:
+            return jsonify({"success": False, "skipped": True}), 200
+        return jsonify({"success": True, "play_id": out["play_id"]})
     except Exception as e:
         logger.debug(f"log-play failed (non-fatal): {e}")
         return jsonify({"success": False, "error": str(e)}), 200
@@ -25127,6 +25157,19 @@ from api.devices import configure as _cfg_dev, create_blueprint as _bp_dev
 _cfg_dev(get_database=get_database, config_manager=config_manager,
          require_login_enabled=_require_login_enabled)
 app.register_blueprint(_bp_dev())
+
+# music apps (api/subsonic.py): the Subsonic / OpenSubsonic api at /rest,
+# on the same paired device tokens
+from api.subsonic import configure as _cfg_subsonic, create_blueprint as _bp_subsonic
+_cfg_subsonic(get_database=get_database, config_manager=config_manager,
+              serve_file=lambda path: _serve_audio_file_with_range(path),
+              resolve_path=lambda path: _resolve_library_file_path(path),
+              proxy_url=lambda url: _proxy_stream_url_with_range(url),
+              media_engine=lambda: media_server_engine,
+              flush_scrobbles=lambda: listening_stats_worker.request_scrobble_flush()
+              if listening_stats_worker is not None else None,
+              version=SOULSYNC_VERSION)
+app.register_blueprint(_bp_subsonic())
 
 # NOTE: the audiobook wishlist is NOT started here. It is drained by the shared
 # automation engine as the 'audiobook_process_wishlist' system automation, the same

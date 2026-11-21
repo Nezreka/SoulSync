@@ -7,6 +7,7 @@ device mark (core.connect.device_access) as well as their inventory mark.
 
 from __future__ import annotations
 
+import json
 import time
 
 from flask import Blueprint, g, jsonify, request
@@ -111,6 +112,7 @@ def revoke_device(device_id):
     row = T.get(db, device_id)
     if not row or not T.revoke(db, device_id):
         return jsonify({"success": False, "error": "Not found or already unpaired"}), 404
+    _drop_app_passwords(db, [device_id])
     _audit("device_unpaired", detail=row.get("name"), target_id=row.get("profile_id"))
     return jsonify({"success": True})
 
@@ -121,7 +123,9 @@ def revoke_profile_devices(profile_id):
     """unpair every device of one profile."""
     from core.connect import device_tokens as T
     db = get_database()
+    ids = [d["id"] for d in T.list_devices(db) if d.get("profile_id") == profile_id]
     n = T.revoke_for_profile(db, profile_id)
+    _drop_app_passwords(db, ids)
     if n:
         _audit("devices_unpaired", detail=f"{n} device(s)", target_id=profile_id,
                target_name=(db.get_profile(profile_id) or {}).get("name"))
@@ -407,3 +411,101 @@ def reachability_probe(nonce):
                 "<title>SoulSync</title><p style='font:18px system-ui;padding:24px'>"
                 "SoulSync answered. You can close this page.</p>")
     return jsonify({"success": True, "soulsync_probe": nonce})
+
+
+# ── music apps (admin): the Subsonic api's app passwords and settings ────
+
+def _drop_app_passwords(db, device_ids):
+    """an unpaired music app's password goes with it."""
+    try:
+        from core.subsonic import store as S
+        for did in device_ids:
+            S.drop_app_password(db, did)
+    except Exception:  # noqa: BLE001 - the device is already refused; this is tidying
+        logger.debug("dropping app passwords failed", exc_info=True)
+
+
+@bp.route("/api/devices/music-apps", methods=["GET"])
+@admin_only
+def music_apps_view():
+    """for "Set up a music app": the profiles that may use one, this
+    server's addresses, the media server switches and the transcoder."""
+    from core.connect.pick import pick_list
+    from core.subsonic import bridge as B
+    from core.subsonic import transcode as X
+    db = get_database()
+    profiles = [{"id": p["id"], "name": p["name"]} for p in pick_list(db, "music", login_mode=False)]
+    active = None
+    try:
+        active = config_manager.get_active_media_server()
+    except Exception:  # noqa: BLE001
+        active = None
+    servers = [{"id": s, "name": B.SOURCE_NAMES[s], "on": B.enabled(config_manager.get, s),
+                "active": s == active} for s in B.SOURCES]
+    return jsonify({"success": True, "profiles": profiles, "addresses": _addresses(),
+                    "bridge": servers, "transcode_format": str(config_manager.get("music_apps.transcode_format",
+                                                                                   "mp3") or "mp3"),
+                    "formats": sorted(X.FORMATS), "ffmpeg": bool(X.ffmpeg())})
+
+
+@bp.route("/api/devices/music-apps", methods=["POST"])
+@admin_only
+def set_up_music_app():
+    """{profile_id, name?} -> a music app, paired to that profile at once:
+    the server address, the username, an app password and an api key, all
+    shown this once (and in the QR). the app shows up under Paired devices
+    and is unpaired from there."""
+    from core.connect import device_tokens as T
+    from core.connect.addresses import payload_text
+    from core.connect.pick import may_use
+    from core.subsonic import store as S
+    body = request.get_json(silent=True) or {}
+    try:
+        profile_id = int(body.get("profile_id") or 0)
+    except (TypeError, ValueError):
+        profile_id = 0
+    db = get_database()
+    profile = db.get_profile(profile_id) if profile_id else None
+    if not profile or not may_use(db, profile, T.KIND_MUSIC):
+        return jsonify({"success": False, "error": "Pick a profile that may use music apps"}), 400
+    name = str(body.get("name") or "").strip()[:80] or "Music app"
+    token, device_id = T.create(db, name=name, platform="", app="Music app", kind=T.KIND_MUSIC,
+                                ip=request.remote_addr or "")
+    if not T.pick_profile(db, device_id, profile_id):
+        T.revoke(db, device_id)
+        return jsonify({"success": False, "error": "Couldn't set the app up. Try again."}), 500
+    password = S.new_app_password()
+    S.save_app_password(db, device_id, profile_id, password, config_manager._encrypt_value)
+    addresses = _addresses()
+    server = next((a["url"] for a in addresses if a["kind"] == "remote"), None) or (
+        addresses[0]["url"] if addresses else request.host_url.rstrip("/"))
+    username = profile.get("name") or ""
+    qr = payload_text({"type": "soulsync-music-app", "server": server, "username": username,
+                       "password": password, "apiKey": token})
+    _audit("music_app_set_up", detail=name, target_id=profile_id, target_name=username)
+    return jsonify({"success": True, "device_id": device_id, "name": name, "server": server,
+                    "addresses": addresses, "username": username, "password": password,
+                    "api_key": token, "qr_text": qr}), 201
+
+
+@bp.route("/api/devices/music-apps/settings", methods=["PUT"])
+@admin_only
+def save_music_app_settings():
+    """{bridge: {plex|jellyfin|navidrome: bool}, transcode_format?}"""
+    from core.subsonic import bridge as B
+    from core.subsonic import transcode as X
+    body = request.get_json(silent=True) or {}
+    bridge = body.get("bridge") or {}
+    if not isinstance(bridge, dict):
+        return jsonify({"success": False, "error": "bridge: send an object"}), 400
+    for source, on in bridge.items():
+        if source not in B.SOURCES:
+            return jsonify({"success": False, "error": f"Unknown media server: {source}"}), 400
+        config_manager.set(B.setting_key(source), bool(on))
+    fmt = body.get("transcode_format")
+    if fmt is not None:
+        if fmt not in X.FORMATS:
+            return jsonify({"success": False, "error": "Pick mp3 or opus"}), 400
+        config_manager.set("music_apps.transcode_format", fmt)
+    _audit("music_apps_settings", detail=json.dumps({"bridge": bridge, "format": fmt}, sort_keys=True)[:200])
+    return music_apps_view()
