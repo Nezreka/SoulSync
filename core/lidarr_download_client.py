@@ -463,6 +463,7 @@ class LidarrDownloadClient(DownloadSourcePlugin):
         staging_dir: str,
         progress_callback=None,
         release_group_id: str = '',
+        release_year: str = '',
         **_kwargs,
     ) -> Dict[str, Any]:
         """Album-bundle flow: have Lidarr fetch the whole album, then copy its
@@ -496,7 +497,7 @@ class LidarrDownloadClient(DownloadSourcePlugin):
             return _fail('Lidarr is not configured', True)
 
         _emit('searching', query=f"{artist_name} {album_name}".strip())
-        album = self._find_album(album_name, artist_name, release_group_id)
+        album = self._find_album(album_name, artist_name, release_group_id, release_year)
         if not album:
             return _fail(f"Lidarr has no album '{album_name}' by '{artist_name}'")
 
@@ -559,32 +560,30 @@ class LidarrDownloadClient(DownloadSourcePlugin):
         return any(str(s).lower() != 'lidarr' for s in order)
 
     def _find_album(self, album_name: str, artist_name: str,
-                    release_group_id: str = '') -> Optional[Dict[str, Any]]:
-        """The Lidarr lookup record for this album, or None.
+                    release_group_id: str = '', release_year: str = '') -> Optional[Dict[str, Any]]:
+        """The Lidarr record for this album, or None.
 
-        By MusicBrainz release-group id when known. Otherwise by artist +
-        album, then by album alone (long terms sometimes get a 503 from
-        Lidarr's metadata proxy), accepting only a result whose artist and
-        title both match: a near miss would grab someone else's album.
+        By MusicBrainz release-group id when known. Otherwise by artist and
+        title: first in Lidarr's own library, then in its metadata search (by
+        artist + album, then by album alone: long terms sometimes get a 503
+        from Lidarr's metadata proxy). A candidate must match both artist and
+        title, since a near miss would grab someone else's album, and
+        ``release_year`` tells same-titled albums apart (a band's self-titled
+        records). None sends the batch to the next source.
         """
         if release_group_id:
-            found = self._api_get('album/lookup', params={'term': f'lidarr:{release_group_id}'})
+            found = self._lookup(f'lidarr:{release_group_id}')
             if found:
-                return found[0] if isinstance(found, list) else found
+                return found[0]
 
         if not album_name or not artist_name:
             return None
+        library = self._pick_album(self._library_albums(artist_name), album_name, artist_name,
+                                   release_year, trust_lone_candidate=False)
+        if library:
+            return library
         for term in (f"{artist_name} {album_name}", album_name):
-            best, best_score = None, 0.0
-            for candidate in (self._api_get('album/lookup', params={'term': term}) or [])[:20]:
-                title_score = self._album_title_score(album_name, candidate.get('title', ''))
-                artist_score = self._name_score(
-                    artist_name, (candidate.get('artist') or {}).get('artistName', ''))
-                if title_score < 0.8 or artist_score < 0.8:
-                    continue
-                score = title_score + artist_score
-                if score > best_score:
-                    best, best_score = candidate, score
+            best = self._pick_album(self._lookup(term)[:20], album_name, artist_name, release_year)
             if best:
                 return best
         return None
@@ -607,6 +606,71 @@ class LidarrDownloadClient(DownloadSourcePlugin):
         if (bare_wanted, bare_candidate) != (wanted, candidate):
             score = max(score, cls._name_score(bare_wanted, bare_candidate))
         return score
+
+    def _lookup(self, term: str) -> List[Dict[str, Any]]:
+        """Lidarr's metadata search, asked twice: its proxy fails transiently."""
+        for attempt in range(2):
+            found = self._api_get('album/lookup', params={'term': term})
+            if found is not None:
+                return found if isinstance(found, list) else [found]
+            if attempt == 0:
+                time.sleep(2)
+        return []
+
+    def _library_albums(self, artist_name: str) -> List[Dict[str, Any]]:
+        """Albums Lidarr already has by this artist.
+
+        Lidarr's metadata search ranks by text relevance, so a short or common
+        artist name ("PISS") buries the album under other artists' records;
+        Lidarr's own library has no such noise.
+        """
+        albums = []
+        for artist in self._api_get('artist') or []:
+            if self._name_score(artist_name, artist.get('artistName', '')) >= 0.8:
+                for album in self._api_get('album', params={'artistId': artist.get('id')}) or []:
+                    album.setdefault('artist', artist)
+                    albums.append(album)
+        return albums
+
+    @staticmethod
+    def _year_of(record: Dict[str, Any]) -> Optional[int]:
+        try:
+            return int(str(record.get('releaseDate') or '')[:4])
+        except ValueError:
+            return None
+
+    def _pick_album(self, candidates, album_name: str, artist_name: str,
+                    release_year: str = '', trust_lone_candidate: bool = True
+                    ) -> Optional[Dict[str, Any]]:
+        """The best candidate matching artist and title.
+
+        With a requested year, a candidate released within a year of it wins.
+        When none is, a lone match is still taken (a reissue keeps its title
+        but not its date), unless ``trust_lone_candidate`` is off: the library
+        holds only the albums someone added, so its lone match may be another
+        record with the same title.
+        """
+        matches = []
+        for candidate in candidates or []:
+            title_score = self._album_title_score(album_name, candidate.get('title', ''))
+            artist_score = self._name_score(
+                artist_name, (candidate.get('artist') or {}).get('artistName', ''))
+            if title_score >= 0.8 and artist_score >= 0.8:
+                matches.append((title_score + artist_score, candidate))
+        if not matches:
+            return None
+        try:
+            year = int(str(release_year or '')[:4])
+        except ValueError:
+            year = None
+        if year:
+            dated = [m for m in matches
+                     if self._year_of(m[1]) is not None and abs(self._year_of(m[1]) - year) <= 1]
+            if dated:
+                matches = dated
+            elif not trust_lone_candidate or len(matches) > 1:
+                return None
+        return max(matches, key=lambda m: m[0])[1]
 
     @classmethod
     def _name_score(cls, wanted: str, candidate: str) -> float:
@@ -633,6 +697,7 @@ class LidarrDownloadClient(DownloadSourcePlugin):
                 str(hint.get('album') or '').strip(),
                 str(hint.get('artist') or '').strip(),
                 self._hint_release_group_id(hint),
+                self._hint_release_year(hint),
             )
             hint['_lidarr_album'] = album
         return [hint['_lidarr_album']] if hint.get('_lidarr_album') else []
@@ -647,6 +712,12 @@ class LidarrDownloadClient(DownloadSourcePlugin):
                 if value:
                     return value
         return ''
+
+    @staticmethod
+    def _hint_release_year(hint: Dict[str, Any]) -> str:
+        info = ((hint.get('catalogue_context') or {}).get('track_info')) or {}
+        album = info.get('album') if isinstance(info.get('album'), dict) else {}
+        return str(album.get('release_date') or info.get('release_date') or '')[:4]
 
     def _album_lock(self, foreign_album_id: str) -> threading.Lock:
         with self._album_locks_guard:
