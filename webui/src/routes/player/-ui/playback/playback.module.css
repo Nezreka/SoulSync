@@ -259,8 +259,11 @@
   z-index: 3;
   display: flex;
   flex-direction: column;
+  width: max-content;
   min-width: calc(var(--u) * 12);
+  max-width: min(calc(100vw - var(--u) * 2), calc(var(--u) * 22));
   max-height: min(60vh, calc(var(--u) * 26));
+  overflow-x: hidden;
   overflow-y: auto;
   padding: calc(var(--u) * 0.4);
   border: 1px solid var(--pl-line);
@@ -281,8 +284,8 @@
 .menuItem {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: calc(var(--u) * 1);
+  gap: calc(var(--u) * 0.8);
+  width: 100%;
   padding: calc(var(--u) * 0.5) calc(var(--u) * 0.6);
   border: none;
   border-radius: var(--radius-md);
@@ -292,6 +295,32 @@
   font-size: calc(var(--u) * 0.88);
   text-align: left;
   cursor: pointer;
+}
+
+.menuText {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.menuLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.menuDetail {
+  color: var(--pl-text-3);
+  font-size: calc(var(--u) * 0.76);
+  font-weight: 400;
+  overflow-wrap: anywhere;
+}
+
+.menuCheck {
+  flex: none;
+  color: var(--accent-light);
+  font-weight: 700;
 }
 
 .menuItem:hover,

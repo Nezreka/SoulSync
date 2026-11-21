@@ -114,11 +114,11 @@ export function VolumeControl({ volume, muted }: { volume: number; muted: boolea
   );
 }
 
-const QUALITY_LABELS: Record<Quality, { label: string; hint: string }> = {
-  original: { label: 'Original', hint: 'as it is, converted only if it must be' },
-  '1080p': { label: '1080p', hint: 'up to 8 Mbps' },
-  '720p': { label: '720p', hint: 'up to 4 Mbps' },
-  '480p': { label: '480p', hint: 'for slow connections' },
+const QUALITY_LABELS: Record<Quality, { label: string; detail: string }> = {
+  original: { label: 'Original', detail: 'Full quality' },
+  '1080p': { label: '1080p', detail: 'Up to 8 Mbps' },
+  '720p': { label: '720p', detail: 'Up to 4 Mbps' },
+  '480p': { label: '480p', detail: 'For slow connections' },
 };
 
 export function QualityMenu({ quality }: { quality: Quality }) {
@@ -131,7 +131,7 @@ export function QualityMenu({ quality }: { quality: Quality }) {
       options={(Object.keys(QUALITY_LABELS) as Quality[]).map((q) => ({
         key: q,
         label: QUALITY_LABELS[q].label,
-        hint: QUALITY_LABELS[q].hint,
+        detail: QUALITY_LABELS[q].detail,
         selected: q === quality,
         onSelect: () => getEngine().setQuality(q),
       }))}

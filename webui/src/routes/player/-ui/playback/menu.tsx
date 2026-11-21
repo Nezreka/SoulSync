@@ -10,7 +10,10 @@ import s from './playback.module.css';
 export interface MenuOption {
   key: string;
   label: string;
+  /** short, on the right: a time, a count */
   hint?: string;
+  /** a line under the label, when the choice needs a word of explanation */
+  detail?: string;
   selected?: boolean;
   onSelect: () => void;
 }
@@ -83,8 +86,16 @@ export function PopMenu({
               }}
               data-nav
             >
-              <span>{o.label}</span>
+              <span className={s.menuText}>
+                <span className={s.menuLabel}>{o.label}</span>
+                {o.detail ? <span className={s.menuDetail}>{o.detail}</span> : null}
+              </span>
               {o.hint ? <span className={s.menuHint}>{o.hint}</span> : null}
+              {o.selected ? (
+                <span className={s.menuCheck} aria-hidden="true">
+                  ✓
+                </span>
+              ) : null}
             </button>
           ))}
         </div>
