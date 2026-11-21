@@ -5,9 +5,11 @@ import { compactCount, plainText } from '../-lib/format';
 import { remoteImage, youtubeThumb } from '../-lib/images';
 import { ytVideoCard } from '../-lib/rails';
 import { youtubeChannelQuery } from '../-player.api';
-import { Badge, CardGrid, Empty, Hero, PlayButton, Tabs, styles as s } from '../-ui/kit';
+import { DetailLayout, InfoPanel, Section } from '../-ui/detail';
+import { Badge, CardGrid, CardRail, Empty, Hero, PlayButton, Tabs, styles as s } from '../-ui/kit';
 import { NotFound, NotPartOfProfile } from '../-ui/not-part';
 import { useSections } from '../-ui/sections';
+import { Facts } from '../-ui/video-facts';
 
 type ChannelTab = 'all' | 'downloaded' | 'embed';
 
@@ -39,6 +41,12 @@ function ChannelPage() {
       : show === 'embed'
         ? videos.filter((v) => !v.downloaded)
         : videos;
+  const about = plainText(channel.description);
+  const latest = videos.filter((v) => v.published_at).slice(0, 16);
+  const popular = [...videos]
+    .filter((v) => v.views)
+    .sort((a, b) => (b.views ?? 0) - (a.views ?? 0))
+    .slice(0, 16);
   const art = remoteImage(channel.banner, 'hero') ?? youtubeThumb(videos[0]?.thumbnail, 'hero');
 
   return (
@@ -68,7 +76,7 @@ function ChannelPage() {
             </div>
           ) : null
         }
-        overview={plainText(channel.description)}
+        overview={about ? about.split('\n')[0] : null}
         actions={
           <>
             <PlayButton label="Play newest" />
@@ -77,33 +85,69 @@ function ChannelPage() {
         }
       />
 
-      <div className={s.rail}>
-        <div className={s.toolbar}>
-          <Tabs
-            label="Show"
-            value={show}
-            options={[
-              { value: 'all', label: `All ${videos.length}` },
-              { value: 'downloaded', label: `Downloaded ${downloaded.length}` },
-              { value: 'embed', label: `Embed ${videos.length - downloaded.length}` },
-            ]}
-            onChange={(next) => void navigate({ search: { show: next }, replace: true })}
-          />
-        </div>
-        {shown.length ? (
-          <CardGrid cards={shown.map((v) => ytVideoCard(v, false))} shape="wide" />
-        ) : (
-          <Empty
-            title={
-              show === 'downloaded' ? 'Nothing downloaded from this channel' : 'No videos here'
-            }
-          >
-            {show === 'downloaded'
-              ? 'Downloads you make from this channel in SoulSync show up here.'
-              : 'SoulSync hasn’t listed this channel’s videos yet.'}
-          </Empty>
-        )}
-      </div>
+      <DetailLayout
+        main={
+          <>
+            {latest.length > 3 ? (
+              <div className={s.detailRail}>
+                <CardRail title="Latest" cards={latest.map((v) => ytVideoCard(v, false))} />
+              </div>
+            ) : null}
+            {popular.length > 3 ? (
+              <div className={s.detailRail}>
+                <CardRail title="Most watched" cards={popular.map((v) => ytVideoCard(v, false))} />
+              </div>
+            ) : null}
+            <Section title="All videos">
+              <div className={s.rail}>
+                <div className={s.toolbar}>
+                  <Tabs
+                    label="Show"
+                    value={show}
+                    options={[
+                      { value: 'all', label: `All ${videos.length}` },
+                      { value: 'downloaded', label: `Downloaded ${downloaded.length}` },
+                      { value: 'embed', label: `Embed ${videos.length - downloaded.length}` },
+                    ]}
+                    onChange={(next) => void navigate({ search: { show: next }, replace: true })}
+                  />
+                </div>
+                {shown.length ? (
+                  <CardGrid cards={shown.map((v) => ytVideoCard(v, false))} shape="wide" />
+                ) : (
+                  <Empty
+                    title={
+                      show === 'downloaded'
+                        ? 'Nothing downloaded from this channel'
+                        : 'No videos here'
+                    }
+                  >
+                    {show === 'downloaded'
+                      ? 'Downloads you make from this channel in SoulSync show up here.'
+                      : 'SoulSync hasn’t listed this channel’s videos yet.'}
+                  </Empty>
+                )}
+              </div>
+            </Section>
+          </>
+        }
+        side={
+          <>
+            <InfoPanel title="About">
+              <Facts
+                rows={[
+                  ['Handle', channel.handle],
+                  ['Subscribers', channel.subscribers ? compactCount(channel.subscribers) : null],
+                  ['Videos', videos.length.toLocaleString()],
+                  ['Downloaded', downloaded.length ? downloaded.length.toLocaleString() : null],
+                  ['Following', channel.followed ? 'Yes' : null],
+                ]}
+              />
+              {about ? <p className={s.aboutText}>{about}</p> : null}
+            </InfoPanel>
+          </>
+        }
+      />
     </>
   );
 }

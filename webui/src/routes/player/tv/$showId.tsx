@@ -6,36 +6,38 @@ import type { DetailEpisode, VideoFile } from '../-player.types';
 
 import { remaining, runtime, shortDate } from '../-lib/format';
 import { backdropSet, stillSet, WIDE_SIZES } from '../-lib/images';
-import {
-  backdropUrl,
-  fraction,
-  moreLikeThis,
-  posterUrl,
-  proxiedImage,
-  showCard,
-} from '../-lib/rails';
+import { backdropUrl, fraction, moreLikeThis, posterUrl, proxiedImage } from '../-lib/rails';
 import { rankVersions, resolutionLabel } from '../-lib/video';
 import {
+  extrasQuery,
   progressLookupQuery,
   showDetailQuery,
   showFilesQuery,
   videoCatalogQuery,
 } from '../-player.api';
 import {
-  Art,
-  Badge,
-  CardRail,
-  Hero,
-  PlayButton,
-  Tabs,
-  VerdictBadge,
-  styles as s,
-} from '../-ui/kit';
+  DetailLayout,
+  ExtrasVideos,
+  Gallery,
+  InfoPanel,
+  Keywords,
+  MoreLikeThis,
+  ownedByTmdb,
+  Section,
+} from '../-ui/detail';
+import { Art, Badge, Hero, PlayButton, Tabs, VerdictBadge, styles as s } from '../-ui/kit';
 import { NetworkLink, PeopleLinks, VideoGenreLinks } from '../-ui/links';
 import { NotFound, NotPartOfProfile } from '../-ui/not-part';
 import { useSections } from '../-ui/sections';
 import { BackgroundTrailer, TrailerButton } from '../-ui/trailer';
-import { Facts, Ratings } from '../-ui/video-facts';
+import {
+  Facts,
+  LanguageSummary,
+  languageName,
+  languageNames,
+  meaningfulAwards,
+  Ratings,
+} from '../-ui/video-facts';
 import { CastRow, VersionPicker } from '../-ui/video-parts';
 
 export const Route = createFileRoute('/player/tv/$showId')({
@@ -139,6 +141,7 @@ function ShowPage() {
   const ok = sections.tv && Number.isFinite(id);
   const detail = useQuery({ ...showDetailQuery(id), enabled: ok, retry: false });
   const catalog = useQuery({ ...videoCatalogQuery(), enabled: ok });
+  const extras = useQuery({ ...extrasQuery('show', id), enabled: ok });
 
   const seasons = useMemo(
     () =>
@@ -190,9 +193,10 @@ function ShowPage() {
       : firstYear;
   const next = show.next_up;
   const creators = show.crew?.filter((c) => c.job === 'Creator');
-  const similar = moreLikeThis(catalog.data?.shows ?? [], { id, genres: show.genres ?? [] }).map(
-    showCard,
-  );
+  const genreMatches = moreLikeThis(catalog.data?.shows ?? [], { id, genres: show.genres ?? [] });
+  const tmdbId = catalog.data?.shows.find((x) => x.id === id)?.tmdb_id ?? null;
+  const owned = ownedByTmdb(catalog.data?.shows ?? []);
+  const subs = languageNames(show.subtitle_langs);
 
   return (
     <>
@@ -240,65 +244,100 @@ function ShowPage() {
         }
       />
 
-      <div className={s.rail}>
-        <Facts
-          rows={[
-            ['Created by', creators?.length ? <PeopleLinks people={creators} /> : null],
-            ['Network', show.network ? <NetworkLink network={show.network} /> : null],
-            [
-              'Episodes',
-              show.episode_total
-                ? `${show.episode_owned ?? 0} of ${show.episode_total} in your library`
-                : null,
-            ],
-            ['Watched', show.watched_episodes ? `${show.watched_episodes} episodes` : null],
-            ['First aired', shortDate(show.first_air_date)],
-            ['Last aired', ended ? shortDate(show.last_air_date) : null],
-            ['Awards', show.awards],
-          ]}
-        />
-      </div>
+      <DetailLayout
+        main={
+          <>
+            <Section title="Episodes">
+              {seasons.length > 1 ? (
+                <div className={s.rail}>
+                  <Tabs
+                    label="Season"
+                    value={String(current?.season_number ?? '')}
+                    options={seasons.map((x) => ({
+                      value: String(x.season_number),
+                      label: x.season_number === 0 ? 'Specials' : `Season ${x.season_number}`,
+                    }))}
+                    onChange={(next) =>
+                      void navigate({ search: { season: Number(next) }, replace: true })
+                    }
+                  />
+                </div>
+              ) : null}
 
-      {seasons.length > 1 ? (
-        <div className={s.rail}>
-          <Tabs
-            label="Season"
-            value={String(current?.season_number ?? '')}
-            options={seasons.map((x) => ({
-              value: String(x.season_number),
-              label: x.season_number === 0 ? 'Specials' : `Season ${x.season_number}`,
-            }))}
-            onChange={(next) => void navigate({ search: { season: Number(next) }, replace: true })}
-          />
-        </div>
-      ) : null}
-
-      <div className={s.list} aria-label="Episodes">
-        {(current?.episodes ?? [])
-          .slice()
-          .sort((a, b) => a.episode_number - b.episode_number)
-          .map((episode) => {
-            const row = progress.data?.[String(episode.id)];
-            return (
-              <EpisodeRow
-                key={episode.id}
-                episode={episode}
-                files={filesByEpisode.get(episode.id) ?? []}
-                position={
-                  row && !row.finished
-                    ? row.position_seconds
-                    : row?.finished
-                      ? (row.duration_seconds ?? undefined)
-                      : undefined
-                }
-                duration={row?.duration_seconds}
+              <div className={s.list} aria-label="Episodes">
+                {(current?.episodes ?? [])
+                  .slice()
+                  .sort((a, b) => a.episode_number - b.episode_number)
+                  .map((episode) => {
+                    const row = progress.data?.[String(episode.id)];
+                    return (
+                      <EpisodeRow
+                        key={episode.id}
+                        episode={episode}
+                        files={filesByEpisode.get(episode.id) ?? []}
+                        position={
+                          row && !row.finished
+                            ? row.position_seconds
+                            : row?.finished
+                              ? (row.duration_seconds ?? undefined)
+                              : undefined
+                        }
+                        duration={row?.duration_seconds}
+                      />
+                    );
+                  })}
+              </div>
+            </Section>
+            <ExtrasVideos videos={extras.data?.videos} />
+            <CastRow cast={show.cast} />
+            <MoreLikeThis
+              extras={extras.data}
+              owned={owned}
+              fallback={genreMatches}
+              selfTmdb={tmdbId}
+            />
+            <Gallery gallery={extras.data?.gallery} />
+          </>
+        }
+        side={
+          <>
+            <InfoPanel title="Details">
+              <Facts
+                rows={[
+                  ['Created by', creators?.length ? <PeopleLinks people={creators} /> : null],
+                  ['Network', show.network ? <NetworkLink network={show.network} /> : null],
+                  ['Status', show.status ? (ended ? 'Ended' : 'Still airing') : null],
+                  ['First aired', shortDate(show.first_air_date)],
+                  ['Last aired', ended ? shortDate(show.last_air_date) : null],
+                  ['Seasons', seasons.filter((x) => x.season_number > 0).length || null],
+                  [
+                    'In your library',
+                    show.episode_total
+                      ? `${show.episode_owned ?? 0} of ${show.episode_total} episodes`
+                      : null,
+                  ],
+                  ['Watched', show.watched_episodes ? `${show.watched_episodes} episodes` : null],
+                  ['Rated', show.content_rating],
+                  ['Country', extras.data?.facts?.countries?.join(', ')],
+                  [
+                    'Language',
+                    extras.data?.facts?.original_language
+                      ? languageName(extras.data.facts.original_language)
+                      : null,
+                  ],
+                  ['Awards', meaningfulAwards(show.awards)],
+                ]}
               />
-            );
-          })}
-      </div>
-
-      <CastRow cast={show.cast} />
-      <CardRail title="More like this" cards={similar} />
+            </InfoPanel>
+            {subs.length ? (
+              <InfoPanel title="Languages">
+                <Facts rows={[['Subtitles', <LanguageSummary key="s" names={subs} />]]} />
+              </InfoPanel>
+            ) : null}
+            <Keywords words={extras.data?.keywords} />
+          </>
+        }
+      />
     </>
   );
 }

@@ -1,6 +1,6 @@
 /** the ratings strip and fact list the movie and show pages share */
 
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 
 import type { VideoDetailBase, VideoFile } from '../-player.types';
 
@@ -47,53 +47,92 @@ export function Ratings({ d }: { d: VideoDetailBase }) {
   );
 }
 
-const LANGS: Record<string, string> = {
-  en: 'English',
-  eng: 'English',
-  es: 'Spanish',
-  spa: 'Spanish',
-  fr: 'French',
-  fre: 'French',
-  fra: 'French',
-  de: 'German',
-  ger: 'German',
-  deu: 'German',
-  it: 'Italian',
-  ita: 'Italian',
-  ja: 'Japanese',
-  jpn: 'Japanese',
-  ko: 'Korean',
-  kor: 'Korean',
-  zh: 'Chinese',
-  chi: 'Chinese',
-  zho: 'Chinese',
-  pt: 'Portuguese',
-  por: 'Portuguese',
-  ru: 'Russian',
-  rus: 'Russian',
-  nl: 'Dutch',
-  dut: 'Dutch',
-  nld: 'Dutch',
-  sv: 'Swedish',
-  swe: 'Swedish',
-  da: 'Danish',
-  dan: 'Danish',
-  no: 'Norwegian',
-  nor: 'Norwegian',
-  fi: 'Finnish',
-  fin: 'Finnish',
-  pl: 'Polish',
-  pol: 'Polish',
-  hi: 'Hindi',
-  hin: 'Hindi',
-  ar: 'Arabic',
-  ara: 'Arabic',
-  tr: 'Turkish',
-  tur: 'Turkish',
+// three-letter codes Intl doesn't name the way people say them
+const THREE: Record<string, string> = {
+  eng: 'en',
+  spa: 'es',
+  fre: 'fr',
+  fra: 'fr',
+  ger: 'de',
+  deu: 'de',
+  ita: 'it',
+  jpn: 'ja',
+  kor: 'ko',
+  chi: 'zh',
+  zho: 'zh',
+  por: 'pt',
+  rus: 'ru',
+  dut: 'nl',
+  nld: 'nl',
+  swe: 'sv',
+  dan: 'da',
+  nor: 'no',
+  fin: 'fi',
+  pol: 'pl',
+  hin: 'hi',
+  ara: 'ar',
+  tur: 'tr',
+  cze: 'cs',
+  ces: 'cs',
+  gre: 'el',
+  ell: 'el',
+  heb: 'he',
+  hun: 'hu',
+  rum: 'ro',
+  ron: 'ro',
+  tha: 'th',
+  vie: 'vi',
+  ind: 'id',
+  may: 'ms',
+  msa: 'ms',
+  per: 'fa',
+  fas: 'fa',
+  hrv: 'hr',
+  ukr: 'uk',
+  bul: 'bg',
+  slo: 'sk',
+  slk: 'sk',
+  slv: 'sl',
+  srp: 'sr',
+  cat: 'ca',
+  est: 'et',
+  lav: 'lv',
+  lit: 'lt',
+  ice: 'is',
+  isl: 'is',
+  tam: 'ta',
+  tel: 'te',
+  ben: 'bn',
+  urd: 'ur',
+  fil: 'fil',
 };
 
-/** 'en,ja' or ['en','ja'] or a json array string, as "English, Japanese" */
-export function languageList(value: unknown): string {
+let names: Intl.DisplayNames | null | undefined;
+
+/** 'cs' -> Czech, 'pt-BR' -> Brazilian Portuguese, 'eng' -> English */
+export function languageName(code: string): string {
+  const raw = code.trim().replace('_', '-');
+  if (!raw) return '';
+  const lower = raw.toLowerCase();
+  const tag = THREE[lower] ?? raw;
+  if (names === undefined) {
+    try {
+      names = new Intl.DisplayNames(['en'], { type: 'language' });
+    } catch {
+      names = null;
+    }
+  }
+  try {
+    const name = names?.of(tag);
+    if (name && name.toLowerCase() !== tag.toLowerCase()) return name;
+  } catch {
+    /* not a language tag */
+  }
+  return raw.toUpperCase();
+}
+
+/** 'en,ja' or ['en','ja'] or a json array string, as distinct language names */
+export function languageNames(value: unknown): string[] {
   let codes: string[] = [];
   if (Array.isArray(value)) codes = value.map(String);
   else if (typeof value === 'string' && value.trim()) {
@@ -107,11 +146,34 @@ export function languageList(value: unknown): string {
       }
     } else codes = text.split(/[,\s]+/);
   }
-  const names = codes
-    .map((c) => c.trim().toLowerCase())
-    .filter(Boolean)
-    .map((c) => LANGS[c] ?? c.toUpperCase());
-  return [...new Set(names)].join(', ');
+  return [...new Set(codes.map(languageName).filter(Boolean))];
+}
+
+/** "English, Japanese" (kept for the short lists) */
+export function languageList(value: unknown): string {
+  return languageNames(value).join(', ');
+}
+
+/** "English, Spanish and 28 more", with the rest a click away */
+export function LanguageSummary({ names: list, show = 3 }: { names: string[]; show?: number }) {
+  const [open, setOpen] = useState(false);
+  if (!list.length) return null;
+  if (open || list.length <= show + 1) return <>{list.join(', ')}</>;
+  return (
+    <>
+      {list.slice(0, show).join(', ')}{' '}
+      <button type="button" className={s.moreLink} onClick={() => setOpen(true)} data-nav>
+        and {list.length - show} more
+      </button>
+    </>
+  );
+}
+
+/** awards text worth showing: not a bare "winner" or "nominee" */
+export function meaningfulAwards(text: string | null | undefined): string | null {
+  const t = (text ?? '').trim();
+  if (t.length < 12 || /^(winner|nominee|nominated|won)\.?$/i.test(t)) return null;
+  return t;
 }
 
 export function Facts({ rows }: { rows: [string, ReactNode | null | undefined | false][] }) {
@@ -130,9 +192,17 @@ export function Facts({ rows }: { rows: [string, ReactNode | null | undefined | 
 }
 
 /** what the best copy sounds like: "English, Japanese" from its tracks */
-export function fileLanguages(file: VideoFile | undefined): { audio: string; subs: string } {
+export function fileLanguages(file: VideoFile | undefined): { audio: string[]; subs: string[] } {
   return {
-    audio: languageList(file?.audio_languages),
-    subs: languageList(file?.subtitle_languages),
+    audio: languageNames(file?.audio_languages),
+    subs: languageNames(file?.subtitle_languages),
   };
+}
+
+/** $356M, $1.2B: budget and box office */
+export function money(n: number | null | undefined): string | null {
+  if (!n || n < 1000) return null;
+  if (n >= 1e9) return `$${(n / 1e9).toFixed(1).replace(/\.0$/, '')}B`;
+  if (n >= 1e6) return `$${Math.round(n / 1e6)}M`;
+  return `$${Math.round(n / 1e3)}K`;
 }

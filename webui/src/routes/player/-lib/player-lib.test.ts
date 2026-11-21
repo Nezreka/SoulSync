@@ -118,6 +118,7 @@ const catalog: VideoCatalog = {
       has_poster: true,
       has_backdrop: true,
       studio: null,
+      tmdb_id: null,
     },
     {
       id: 2,
@@ -131,6 +132,7 @@ const catalog: VideoCatalog = {
       has_poster: true,
       has_backdrop: true,
       studio: null,
+      tmdb_id: null,
     },
     {
       id: 3,
@@ -144,6 +146,7 @@ const catalog: VideoCatalog = {
       has_poster: true,
       has_backdrop: true,
       studio: null,
+      tmdb_id: null,
     },
     {
       id: 4,
@@ -157,6 +160,7 @@ const catalog: VideoCatalog = {
       has_poster: false,
       has_backdrop: false,
       studio: null,
+      tmdb_id: null,
     },
   ],
   shows: [
@@ -176,6 +180,7 @@ const catalog: VideoCatalog = {
         [100, 1, 1, 3000, 'a'],
         [101, 1, 2, 3000, 'b'],
       ],
+      tmdb_id: null,
     },
     {
       id: 11,
@@ -190,6 +195,7 @@ const catalog: VideoCatalog = {
       has_backdrop: true,
       episode_count: 1,
       episodes: [[110, 1, 1, 3000, 'c']],
+      tmdb_id: null,
     },
     {
       id: 12,
@@ -204,6 +210,7 @@ const catalog: VideoCatalog = {
       has_backdrop: true,
       episode_count: 1,
       episodes: [[120, 1, 1, 1500, 'd']],
+      tmdb_id: null,
     },
   ],
   recent_episodes: [],
@@ -406,6 +413,7 @@ describe('catalog decoding', () => {
       id: 5,
       episode_count: 40,
       episodes: [[1, 1, 1, 1800, 'Pilot']],
+      tmdb_id: null,
     });
     expect(out.kinds).toEqual({ movies: false, shows: false, youtube: false });
   });
@@ -482,17 +490,25 @@ describe('round two helpers', () => {
 });
 
 describe('preview placement and languages', () => {
-  it('keeps the preview on screen and wider than the card', async () => {
+  it('grows out of the card, inside the page column, clear of header and bar', async () => {
     const { placePanel } = await import('../-ui/preview');
-    const view = { width: 1000, height: 800 };
-    const mid = placePanel({ left: 400, top: 300, width: 150, height: 225 }, view, 300);
-    expect(mid.width).toBe(300);
-    expect(mid.left).toBe(400 + 75 - 150);
-    const edge = placePanel({ left: 950, top: 300, width: 150, height: 225 }, view, 300);
-    expect(edge.left + edge.width).toBeLessThanOrEqual(988);
-    const left = placePanel({ left: 0, top: 0, width: 150, height: 225 }, view, 300);
-    expect(left.left).toBe(12);
-    expect(left.top).toBe(12);
+    const page = { left: 200, top: 70, right: 1200, bottom: 820 };
+    const mid = placePanel({ left: 600, top: 300, width: 150, height: 225 }, page, 300, 400);
+    expect(mid.width).toBeGreaterThanOrEqual(300);
+    expect(mid.left + mid.width / 2).toBeCloseTo(675, 0);
+    // the first card of a row grows rightward, never over the sidebar
+    const first = placePanel({ left: 210, top: 300, width: 150, height: 225 }, page, 300, 400);
+    expect(first.left).toBe(212);
+    expect(first.origin.startsWith('2')).toBe(true);
+    // the last grows leftward
+    const last = placePanel({ left: 1040, top: 300, width: 150, height: 225 }, page, 300, 400);
+    expect(last.left + last.width).toBe(1188);
+    // near the top it stays under the header, near the bottom above the bar
+    expect(placePanel({ left: 600, top: 40, width: 150, height: 225 }, page, 300, 400).top).toBe(
+      82,
+    );
+    const low = placePanel({ left: 600, top: 760, width: 150, height: 225 }, page, 300, 400);
+    expect(low.top + 400).toBeLessThanOrEqual(808);
   });
 
   it('names languages from codes in any shape', async () => {

@@ -14,7 +14,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 
-import { trailerQuery, videoPrefsQuery } from '../-player.api';
+import { extrasQuery, videoPrefsQuery } from '../-player.api';
 import { PlayIcon } from './icons';
 import { styles as s } from './kit';
 
@@ -115,7 +115,7 @@ export function playerState(data: unknown): number | null {
  */
 export function BackgroundTrailer({ kind, id }: { kind: 'movie' | 'show'; id: number }) {
   const [enabled] = useTrailersSetting();
-  const trailer = useQuery({ ...trailerQuery(kind, id), enabled });
+  const trailer = useQuery({ ...extrasQuery(kind, id), enabled, select: (e) => e.trailer ?? null });
   const [stage, setStage] = useState<'waiting' | 'loading' | 'playing' | 'ended' | 'stopped'>(
     'waiting',
   );
@@ -238,25 +238,62 @@ export function BackgroundTrailer({ kind, id }: { kind: 'movie' | 'show'; id: nu
   );
 }
 
-/** the Trailer button: the whole trailer, with sound, in a dialog */
-export function TrailerButton({ kind, id }: { kind: 'movie' | 'show'; id: number }) {
-  const trailer = useQuery(trailerQuery(kind, id));
-  const [open, setOpen] = useState(false);
+/** a youtube video (a trailer, a clip) full screen, with sound */
+export function VideoDialog({
+  videoKey,
+  title,
+  onClose,
+}: {
+  videoKey: string;
+  title: string;
+  onClose: () => void;
+}) {
   const closeRef = useRef<HTMLButtonElement>(null);
-
   useEffect(() => {
-    if (!open) return;
     closeRef.current?.focus();
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.stopPropagation();
-        setOpen(false);
+        onClose();
       }
     };
     document.addEventListener('keydown', onKey, true);
     return () => document.removeEventListener('keydown', onKey, true);
-  }, [open]);
+  }, [onClose]);
+  return inPlayer(
+    <div
+      className={s.trailerModal}
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div className={s.trailerBox}>
+        <iframe
+          title={title}
+          src={embedUrl(videoKey, false)}
+          allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
+          allowFullScreen
+        />
+        <button
+          ref={closeRef}
+          type="button"
+          className={s.trailerClose}
+          onClick={onClose}
+          aria-label="Close"
+          data-nav
+        >
+          Close
+        </button>
+      </div>
+    </div>,
+  );
+}
 
+/** the Trailer button: the whole trailer, with sound, in a dialog */
+export function TrailerButton({ kind, id }: { kind: 'movie' | 'show'; id: number }) {
+  const trailer = useQuery({ ...extrasQuery(kind, id), select: (e) => e.trailer ?? null });
+  const [open, setOpen] = useState(false);
   if (!trailer.data?.key) return null;
   return (
     <>
@@ -264,36 +301,13 @@ export function TrailerButton({ kind, id }: { kind: 'movie' | 'show'; id: number
         <PlayIcon />
         Trailer
       </button>
-      {open
-        ? inPlayer(
-            <div
-              className={s.trailerModal}
-              role="dialog"
-              aria-modal="true"
-              aria-label={trailer.data.name ?? 'Trailer'}
-              onClick={(e) => e.target === e.currentTarget && setOpen(false)}
-            >
-              <div className={s.trailerBox}>
-                <iframe
-                  title={trailer.data.name ?? 'Trailer'}
-                  src={embedUrl(trailer.data.key, false)}
-                  allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
-                  allowFullScreen
-                />
-                <button
-                  ref={closeRef}
-                  type="button"
-                  className={s.trailerClose}
-                  onClick={() => setOpen(false)}
-                  aria-label="Close trailer"
-                  data-nav
-                >
-                  Close
-                </button>
-              </div>
-            </div>,
-          )
-        : null}
+      {open ? (
+        <VideoDialog
+          videoKey={trailer.data.key}
+          title={trailer.data.name ?? 'Trailer'}
+          onClose={() => setOpen(false)}
+        />
+      ) : null}
     </>
   );
 }

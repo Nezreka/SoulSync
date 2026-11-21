@@ -26,9 +26,9 @@ RECENT_EPISODES = 40
 YOUTUBE_MAX = 3000
 
 MOVIE_FIELDS = ("id", "title", "year", "runtime_seconds", "content_rating", "rating",
-                "genre_ids", "added_at", "has_poster", "has_backdrop", "studio")
+                "genre_ids", "added_at", "has_poster", "has_backdrop", "studio", "tmdb_id")
 SHOW_FIELDS = ("id", "title", "year", "network", "content_rating", "rating", "genre_ids",
-               "added_at", "has_poster", "has_backdrop", "episode_count", "episodes")
+               "added_at", "has_poster", "has_backdrop", "episode_count", "episodes", "tmdb_id")
 
 
 def _genre_map(conn, table: str, key: str) -> Dict[int, List[int]]:
@@ -52,13 +52,13 @@ def owned_movies(conn) -> List[list]:
     out = []
     for r in conn.execute("""
             SELECT id, title, year, runtime_minutes, content_rating, rating, added_at,
-                   poster_url IS NOT NULL, backdrop_url IS NOT NULL, studio
+                   poster_url IS NOT NULL, backdrop_url IS NOT NULL, studio, tmdb_id
             FROM movies WHERE has_file = 1"""):
         file_seconds, file_added = files.get(r[0], (None, None))
         seconds = file_seconds or ((r[3] or 0) * 60) or None
         out.append([r[0], r[1], r[2], int(seconds) if seconds else None, r[4],
                     round(r[5], 1) if r[5] else None, genres.get(r[0], []),
-                    file_added or r[6], 1 if r[7] else 0, 1 if r[8] else 0, r[9]])
+                    file_added or r[6], 1 if r[7] else 0, 1 if r[8] else 0, r[9], r[10]])
     return out
 
 
@@ -79,7 +79,7 @@ def owned_shows(conn, sample: int = EPISODE_SAMPLE) -> List[list]:
     shows: Dict[int, list] = {}
     for r in conn.execute("""
             SELECT id, title, year, network, content_rating, rating, added_at, runtime_minutes,
-                   poster_url IS NOT NULL, backdrop_url IS NOT NULL
+                   poster_url IS NOT NULL, backdrop_url IS NOT NULL, tmdb_id
             FROM shows"""):
         shows[r[0]] = list(r)
     episodes: Dict[int, list] = {}
@@ -99,7 +99,7 @@ def owned_shows(conn, sample: int = EPISODE_SAMPLE) -> List[list]:
                   for e in sample_evenly(eps, sample)]
         out.append([s[0], s[1], s[2], s[3], s[4], round(s[5], 1) if s[5] else None,
                     genres.get(show_id, []), s[6], 1 if s[8] else 0, 1 if s[9] else 0,
-                    len(eps), picked])
+                    len(eps), picked, s[10]])
     return out
 
 

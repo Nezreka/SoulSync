@@ -4,6 +4,7 @@ import { apiClient, readJson } from '@/app/api-client';
 
 import type {
   CatalogBook,
+  Extras,
   LibAlbum,
   LibAlbumDetail,
   LibArtist,
@@ -407,15 +408,11 @@ export interface Trailer {
   name?: string | null;
 }
 
-export const trailerQuery = (kind: 'movie' | 'show', id: number) =>
+/** the title's tmdb extras: trailer, videos, gallery, keywords, collection, picks */
+export const extrasQuery = (kind: 'movie' | 'show', id: number) =>
   queryOptions({
-    queryKey: ['player', 'trailer', kind, id],
-    queryFn: async () =>
-      (
-        await apiClient
-          .get(`video/detail/${kind}/${id}/extras`)
-          .json<{ trailer?: Trailer | null }>()
-      ).trailer ?? null,
+    queryKey: ['player', 'extras', kind, id],
+    queryFn: () => apiClient.get(`video/detail/${kind}/${id}/extras`).json<Extras>(),
     staleTime: 30 * MINUTE,
     retry: false,
   });

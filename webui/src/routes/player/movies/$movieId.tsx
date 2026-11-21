@@ -3,20 +3,41 @@ import { createFileRoute } from '@tanstack/react-router';
 
 import { runtime, shortDate } from '../-lib/format';
 import { backdropSet } from '../-lib/images';
-import { backdropUrl, movieCard, moreLikeThis, posterUrl, proxiedImage } from '../-lib/rails';
+import { backdropUrl, moreLikeThis, posterUrl, proxiedImage } from '../-lib/rails';
 import { rankVersions, resolutionLabel } from '../-lib/video';
 import {
+  extrasQuery,
   movieDetailQuery,
   movieFilesQuery,
   progressLookupQuery,
   videoCatalogQuery,
 } from '../-player.api';
-import { Badge, CardRail, Hero, PlayButton, VerdictBadge, styles as s } from '../-ui/kit';
+import {
+  CollectionRail,
+  DetailLayout,
+  ExtrasVideos,
+  Gallery,
+  InfoPanel,
+  Keywords,
+  MoreLikeThis,
+  ownedByTmdb,
+  Section,
+} from '../-ui/detail';
+import { Badge, Hero, PlayButton, VerdictBadge, styles as s } from '../-ui/kit';
 import { PeopleLinks, StudioLink, VideoGenreLinks } from '../-ui/links';
 import { NotFound, NotPartOfProfile } from '../-ui/not-part';
 import { useSections } from '../-ui/sections';
 import { BackgroundTrailer, TrailerButton } from '../-ui/trailer';
-import { Facts, fileLanguages, languageList, Ratings } from '../-ui/video-facts';
+import {
+  Facts,
+  fileLanguages,
+  LanguageSummary,
+  languageName,
+  languageNames,
+  meaningfulAwards,
+  money,
+  Ratings,
+} from '../-ui/video-facts';
 import { CastRow, VersionPicker } from '../-ui/video-parts';
 
 export const Route = createFileRoute('/player/movies/$movieId')({
@@ -31,6 +52,7 @@ function MoviePage() {
   const files = useQuery({ ...movieFilesQuery(id), enabled: ok, retry: false });
   const saved = useQuery({ ...progressLookupQuery('movie', [String(id)]), enabled: ok });
   const catalog = useQuery({ ...videoCatalogQuery(), enabled: ok });
+  const extras = useQuery({ ...extrasQuery('movie', id), enabled: ok });
 
   if (!sections.movies) return <NotPartOfProfile what="Movies" />;
   if (detail.isLoading)
@@ -47,9 +69,10 @@ function MoviePage() {
   );
   const seconds = best?.runtime_seconds ?? (m.runtime_minutes ? m.runtime_minutes * 60 : null);
   const langs = fileLanguages(best);
-  const similar = moreLikeThis(catalog.data?.movies ?? [], { id, genres: m.genres ?? [] }).map(
-    movieCard,
-  );
+  const subs = langs.subs.length ? langs.subs : languageNames(m.subtitle_langs);
+  const tmdbId = catalog.data?.movies.find((x) => x.id === id)?.tmdb_id ?? null;
+  const owned = ownedByTmdb(catalog.data?.movies ?? []);
+  const genreMatches = moreLikeThis(catalog.data?.movies ?? [], { id, genres: m.genres ?? [] });
   const ends = seconds ? new Date(Date.now() + seconds * 1000) : null;
 
   return (
@@ -100,36 +123,77 @@ function MoviePage() {
         }
       />
 
-      {m.tagline ? <p className={s.tagline}>“{m.tagline}”</p> : null}
-
-      <div className={s.twoCol}>
-        <div className={s.stack}>
-          {files.data?.files?.length ? (
-            <VersionPicker files={files.data.files} />
-          ) : files.isLoading ? null : (
-            <div className={s.notYet}>No file details for this film yet.</div>
-          )}
-        </div>
-        <Facts
-          rows={[
-            ['Directed by', director?.length ? <PeopleLinks people={director} /> : null],
-            ['Written by', writers?.length ? <PeopleLinks people={writers.slice(0, 3)} /> : null],
-            ['Studio', m.studio ? <StudioLink studio={m.studio} /> : null],
-            ['Released', shortDate(m.release_date)],
-            ['Streaming since', shortDate(m.digital_release_date)],
-            ['Audio', langs.audio],
-            ['Subtitles', langs.subs || languageList(m.subtitle_langs)],
-            ['Awards', m.awards],
-            [
-              'After the credits',
-              m.mediastinger ? 'Stay for a scene during or after the credits' : null,
-            ],
-          ]}
-        />
-      </div>
-
-      <CastRow cast={m.cast} />
-      <CardRail title="More like this" cards={similar} />
+      <DetailLayout
+        main={
+          <>
+            {m.tagline || extras.data?.keywords?.length ? (
+              <Section title="About">
+                {m.tagline ? <p className={s.tagline}>“{m.tagline}”</p> : null}
+                <Keywords words={extras.data?.keywords} />
+              </Section>
+            ) : null}
+            <ExtrasVideos videos={extras.data?.videos} />
+            <CastRow cast={m.cast} />
+            <CollectionRail collection={extras.data?.collection} owned={owned} selfTmdb={tmdbId} />
+            <MoreLikeThis
+              extras={extras.data}
+              owned={owned}
+              fallback={genreMatches}
+              selfTmdb={tmdbId}
+            />
+            <Gallery gallery={extras.data?.gallery} />
+          </>
+        }
+        side={
+          <>
+            {files.data?.files?.length ? (
+              <InfoPanel title={files.data.files.length > 1 ? 'Your copies' : 'Your copy'}>
+                <VersionPicker files={files.data.files} bare />
+              </InfoPanel>
+            ) : null}
+            <InfoPanel title="Details">
+              <Facts
+                rows={[
+                  ['Directed by', director?.length ? <PeopleLinks people={director} /> : null],
+                  [
+                    'Written by',
+                    writers?.length ? <PeopleLinks people={writers.slice(0, 3)} /> : null,
+                  ],
+                  ['Studio', m.studio ? <StudioLink studio={m.studio} /> : null],
+                  ['Released', shortDate(m.release_date)],
+                  ['Streaming since', shortDate(m.digital_release_date)],
+                  ['Runtime', seconds ? runtime(seconds) : null],
+                  ['Rated', m.content_rating],
+                  ['Country', extras.data?.facts?.countries?.join(', ')],
+                  [
+                    'Language',
+                    extras.data?.facts?.original_language
+                      ? languageName(extras.data.facts.original_language)
+                      : null,
+                  ],
+                  ['Budget', money(extras.data?.facts?.budget)],
+                  ['Box office', money(extras.data?.facts?.revenue)],
+                  ['Awards', meaningfulAwards(m.awards)],
+                  [
+                    'After the credits',
+                    m.mediastinger ? 'Stay for a scene during or after the credits' : null,
+                  ],
+                ]}
+              />
+            </InfoPanel>
+            {langs.audio.length || subs.length ? (
+              <InfoPanel title="Languages">
+                <Facts
+                  rows={[
+                    ['Audio', langs.audio.length ? <LanguageSummary names={langs.audio} /> : null],
+                    ['Subtitles', subs.length ? <LanguageSummary names={subs} /> : null],
+                  ]}
+                />
+              </InfoPanel>
+            ) : null}
+          </>
+        }
+      />
     </>
   );
 }

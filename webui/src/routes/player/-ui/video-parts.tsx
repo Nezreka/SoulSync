@@ -52,7 +52,7 @@ export function CastRow({ cast }: { cast?: CastMember[] }) {
  * the copies you own of this title. picking one is remembered for when play
  * is pressed (stage b); for now it shows which copy would play and how.
  */
-export function VersionPicker({ files }: { files?: VideoFile[] }) {
+export function VersionPicker({ files, bare }: { files?: VideoFile[]; bare?: boolean }) {
   const ranked = rankVersions(files ?? []);
   const [picked, setPicked] = useState<number | null>(null);
   if (!ranked.length) return null;
@@ -62,7 +62,7 @@ export function VersionPicker({ files }: { files?: VideoFile[] }) {
     const lines = versionLines(only);
     return (
       <div className={s.picker}>
-        <div className={s.pickerLabel}>Your copy</div>
+        {bare ? null : <div className={s.pickerLabel}>Your copy</div>}
         <div className={s.badges}>
           <span className={s.versionName}>{lines.name}</span>
           {only.playable ? (
@@ -75,7 +75,7 @@ export function VersionPicker({ files }: { files?: VideoFile[] }) {
   }
   return (
     <div className={s.picker} role="group" aria-label="Version">
-      <div className={s.pickerLabel}>{ranked.length} versions</div>
+      {bare ? null : <div className={s.pickerLabel}>{ranked.length} versions</div>}
       {ranked.map((file) => {
         const lines = versionLines(file);
         return (

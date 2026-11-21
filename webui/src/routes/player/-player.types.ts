@@ -34,6 +34,7 @@ export interface CatalogMovie {
   has_poster: boolean;
   has_backdrop: boolean;
   studio: string | null;
+  tmdb_id: number | null;
 }
 
 /** [episode id, season, episode, seconds, title] */
@@ -54,6 +55,7 @@ export interface CatalogShow {
   episode_count: number;
   /** a sample of the owned episodes, spread across the run, in airing order */
   episodes: CatalogEpisode[];
+  tmdb_id: number | null;
 }
 
 export interface CatalogRecentEpisode {
@@ -451,4 +453,35 @@ export interface YtVideo {
   views: number | null;
   downloaded: boolean;
   downloaded_at?: string | null;
+}
+
+// ── tmdb extras (the video side's own: trailers, gallery, collection…) ─
+
+export interface ExtraTitle {
+  title: string;
+  tmdb_id: number;
+  kind: 'movie' | 'show';
+  poster?: string | null;
+  year?: string | number | null;
+  /** the library title, when you own it */
+  library_id?: number | null;
+}
+
+export interface Extras {
+  trailer?: { key: string; name?: string | null } | null;
+  videos?: { key: string; name?: string | null; type?: string | null }[];
+  gallery?: {
+    backdrops?: { thumb: string; full: string }[];
+    posters?: { thumb: string; full: string }[];
+  };
+  keywords?: string[];
+  recommendations?: ExtraTitle[];
+  similar?: ExtraTitle[];
+  collection?: {
+    id: number;
+    name?: string | null;
+    poster?: string | null;
+    items?: ExtraTitle[];
+  } | null;
+  facts?: { budget?: number; revenue?: number; original_language?: string; countries?: string[] };
 }

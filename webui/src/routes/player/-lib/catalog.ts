@@ -54,6 +54,7 @@ export function decodeCatalog(wire: CatalogWire): VideoCatalog {
     has_poster: !!m(row, 'has_poster'),
     has_backdrop: !!m(row, 'has_backdrop'),
     studio: str(m(row, 'studio')),
+    tmdb_id: num(m(row, 'tmdb_id')),
   }));
 
   const sh = reader(wire.fields?.show);
@@ -72,6 +73,7 @@ export function decodeCatalog(wire: CatalogWire): VideoCatalog {
       has_backdrop: !!sh(row, 'has_backdrop'),
       episode_count: num(sh(row, 'episode_count')) ?? episodes.length,
       episodes,
+      tmdb_id: num(sh(row, 'tmdb_id')),
     };
   });
 

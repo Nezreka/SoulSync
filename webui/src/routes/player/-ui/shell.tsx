@@ -15,6 +15,7 @@ import { appURL } from '@/platform/url-base';
 import { profilesQuery } from '../-player.api';
 import { BackIcon, ChevronIcon, ExitIcon, NextIcon, PlayIcon, PrevIcon } from './icons';
 import { PLAYBACK_NOT_YET } from './kit';
+import { useNowPlaying } from './now-playing';
 import s from './player.module.css';
 import { gateNeeded, ProfileChip, WhoGate } from './profiles';
 import { Search } from './search';
@@ -146,6 +147,7 @@ export function PlayerShell({ profileId }: { profileId: number | null }) {
   const [gate, setGate] = useState<boolean | null>(null);
 
   useSpatialNav(rootRef);
+  const nowPlaying = useNowPlaying();
   // the header sits clear over a hero at the top, and goes solid once the
   // page scrolls under it, so nothing reads through the search bar
   const [scrolled, setScrolled] = useState(false);
@@ -208,6 +210,7 @@ export function PlayerShell({ profileId }: { profileId: number | null }) {
       className={s.app}
       ref={rootRef}
       data-player-root
+      data-bar={nowPlaying ? 'true' : undefined}
       data-side-collapsed={collapsed ? 'true' : undefined}
       style={{ '--pl-card-scale': cardScale } as CSSProperties}
     >
@@ -228,7 +231,7 @@ export function PlayerShell({ profileId }: { profileId: number | null }) {
           <Outlet />
         </div>
       </main>
-      <TransportBar />
+      {nowPlaying ? <TransportBar /> : null}
       {gate && profiles ? (
         <WhoGate profiles={profiles} currentId={profileId} onDone={() => setGate(false)} />
       ) : null}

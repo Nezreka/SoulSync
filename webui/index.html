@@ -152,8 +152,11 @@
     </style>
     <style id="soulsync-player-boot">
         html.ss-player-boot body { background: var(--bg-primary); }
+        /* opacity, not visibility: a child can set itself visible again (the
+           manager's nav does), but nothing inside can undo its parent's opacity */
         html.ss-player-boot body > *:not([data-player-root]):not(#launch-pin-overlay):not(#login-overlay):not(#profile-picker-overlay):not(#toast-container) {
-            visibility: hidden;
+            opacity: 0;
+            pointer-events: none;
         }
         html.ss-player-boot body::after {
             content: '';
