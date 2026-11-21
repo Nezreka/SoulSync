@@ -253,6 +253,30 @@ function GuidePage() {
     })),
   ].filter((group) => group.channels.length);
 
+  // the guide fits the screen: the panel above and the channels below, the
+  // channels scrolling inside. measured from where the stage starts to the
+  // bottom of the screen (or the top of the playing bar)
+  const stage = useRef<HTMLDivElement>(null);
+  const [stageH, setStageH] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    const measure = () => {
+      const el = stage.current;
+      if (!el) return;
+      const bar = document.querySelector('section[aria-label="Now playing"]');
+      const bottom = bar ? bar.getBoundingClientRect().top : window.innerHeight;
+      const top = el.getBoundingClientRect().top + (el.closest('main')?.scrollTop ?? 0);
+      setStageH(`${Math.max(360, Math.floor(bottom - top - 16))}px`);
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(document.body);
+    window.addEventListener('resize', measure);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', measure);
+    };
+  }, [view, making]);
+
   // the panel above the grid starts on what's on now on the first channel
   const firstChannel = groups[0]?.channels[0];
   const firstOn = useMemo<Picked | null>(() => {
@@ -364,78 +388,89 @@ function GuidePage() {
         />
       ) : null}
 
-      {!picked && view === 'grid' && (preview ?? firstOn) ? (
-        <GuideDetail
-          picked={(preview ?? firstOn)!}
-          schedules={schedules}
-          now={now}
-          favorite={favorites.set.has((preview ?? firstOn)!.channel.id)}
-          onFavorite={favorites.toggle}
-        />
-      ) : null}
+      {/* the panel on top stays put; the channels scroll under it inside the screen */}
+      <div
+        ref={stage}
+        className={s.guideStage}
+        style={{ '--stage-h': stageH } as React.CSSProperties}
+      >
+        {!picked && view === 'grid' && (preview ?? firstOn) ? (
+          <GuideDetail
+            picked={(preview ?? firstOn)!}
+            schedules={schedules}
+            now={now}
+            favorite={favorites.set.has((preview ?? firstOn)!.channel.id)}
+            onFavorite={favorites.toggle}
+          />
+        ) : null}
 
-      {picked ? (
-        <GuideDetail
-          picked={picked}
-          schedules={schedules}
-          now={now}
-          favorite={favorites.set.has(picked.channel.id)}
-          onFavorite={favorites.toggle}
-          onClose={() => setPicked(null)}
-          onRemoveRule={
-            picked.channel.kind === 'rule'
-              ? () => {
-                  const next = rules.filter((r) => `rule-${r.id}` !== picked.channel.id);
-                  setRules(next);
-                  saveRules(profileId, next);
-                  setPicked(null);
-                }
-              : undefined
-          }
-        />
-      ) : null}
+        {picked ? (
+          <GuideDetail
+            picked={picked}
+            schedules={schedules}
+            now={now}
+            favorite={favorites.set.has(picked.channel.id)}
+            onFavorite={favorites.toggle}
+            onClose={() => setPicked(null)}
+            onRemoveRule={
+              picked.channel.kind === 'rule'
+                ? () => {
+                    const next = rules.filter((r) => `rule-${r.id}` !== picked.channel.id);
+                    setRules(next);
+                    saveRules(profileId, next);
+                    setPicked(null);
+                  }
+                : undefined
+            }
+          />
+        ) : null}
 
-      {loading && !groups.length ? <div className={s.skeleton} style={{ height: '50vh' }} /> : null}
-      {tuningMusic && groups.length ? (
-        <div className={s.guideNote} role="status">
-          Tuning in the music channels…
-        </div>
-      ) : null}
+        {loading && !groups.length ? (
+          <div className={s.skeleton} style={{ height: '50vh' }} />
+        ) : null}
+        {tuningMusic && groups.length ? (
+          <div className={s.guideNote} role="status">
+            Tuning in the music channels…
+          </div>
+        ) : null}
 
-      {!loading && !tuningMusic && !groups.length ? (
-        <Empty title={filter === 'favorites' ? 'No favorite channels yet' : 'No channels yet'}>
-          {filter === 'favorites'
-            ? 'Star a channel and it lands here, and at the top of the guide, on every screen you use.'
-            : 'Channels are made from what is in your library: a genre, a network, a decade, a mood. Once a few things with known runtimes are on disk, they appear here.'}
-        </Empty>
-      ) : null}
+        {!loading && !tuningMusic && !groups.length ? (
+          <Empty title={filter === 'favorites' ? 'No favorite channels yet' : 'No channels yet'}>
+            {filter === 'favorites'
+              ? 'Star a channel and it lands here, and at the top of the guide, on every screen you use.'
+              : 'Channels are made from what is in your library: a genre, a network, a decade, a mood. Once a few things with known runtimes are on disk, they appear here.'}
+          </Empty>
+        ) : null}
 
-      {groups.length && view === 'grid' ? (
-        <GuideGrid
-          groups={groups}
-          schedules={schedules}
-          from={from}
-          to={to}
-          now={now}
-          pxPerMinute={PX_PER_MINUTE}
-          favorites={favorites.set}
-          onFavorite={favorites.toggle}
-          onPick={setPicked}
-          onPreview={hoverPreview}
-          label={`Guide, ${GUIDE_WINDOW_HOURS} hours from ${new Date(from).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`}
-        />
-      ) : null}
+        {groups.length && view === 'grid' ? (
+          <GuideGrid
+            groups={groups}
+            schedules={schedules}
+            from={from}
+            to={to}
+            now={now}
+            pxPerMinute={PX_PER_MINUTE}
+            favorites={favorites.set}
+            onFavorite={favorites.toggle}
+            onPick={setPicked}
+            onPreview={hoverPreview}
+            label={`Guide, ${GUIDE_WINDOW_HOURS} hours from ${new Date(from).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`}
+          />
+        ) : null}
 
-      {groups.length && view === 'now' ? (
-        <OnNow
-          channels={[...new Map(groups.flatMap((g) => g.channels).map((c) => [c.id, c])).values()]}
-          schedules={schedules}
-          now={now}
-          favorites={favorites.set}
-          onFavorite={favorites.toggle}
-          onPick={setPicked}
-        />
-      ) : null}
+        {groups.length && view === 'now' ? (
+          <OnNow
+            channels={[
+              ...new Map(groups.flatMap((g) => g.channels).map((c) => [c.id, c])).values(),
+            ]}
+            schedules={schedules}
+            now={now}
+            favorites={favorites.set}
+            onFavorite={favorites.toggle}
+            onPick={setPicked}
+          />
+        ) : null}
+      </div>
     </>
   );
 }

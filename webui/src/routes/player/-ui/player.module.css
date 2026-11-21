@@ -4465,3 +4465,47 @@ button.railMore {
   font-family: inherit;
   cursor: pointer;
 }
+
+/* ── the guide fits the screen: a panel that stays, channels that scroll ── */
+
+.guideStage {
+  display: flex;
+  flex-direction: column;
+  height: var(--stage-h, auto);
+}
+
+.guideStage > .guide,
+.guideStage > .onNow {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+}
+
+.guideStage > .onNow {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: calc(var(--u) * 0.3);
+}
+
+/* the picked program's panel holds one size too, so the channels don't jump */
+.guideStage > .guideDetail {
+  flex: none;
+  max-height: calc(var(--u) * 15);
+  overflow: hidden;
+}
+
+.guideStage .guideDetailSide {
+  max-height: calc(var(--u) * 12.5);
+  overflow-y: auto;
+}
+
+@media (max-width: 768px) {
+  /* a phone scrolls the page as a whole */
+  .guideStage {
+    height: auto;
+  }
+
+  .guideStage > .guideDetail {
+    max-height: none;
+  }
+}
