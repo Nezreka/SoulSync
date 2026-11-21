@@ -765,7 +765,7 @@ class FolderWatchService:
     # -- roots and modes ---------------------------------------------------
 
     def _settings(self) -> Tuple[bool, Dict[str, str], int]:
-        enabled = bool(_get(self.config_manager, ENABLED_KEY, True))
+        enabled = bool(_get(self.config_manager, ENABLED_KEY, False))
         modes = _get(self.config_manager, ROOT_MODES_KEY, {}) or {}
         if not isinstance(modes, dict):
             modes = {}

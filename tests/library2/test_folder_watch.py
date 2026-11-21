@@ -342,7 +342,8 @@ def _service(tmp_path, *, values=None, processed=None, **kwargs):
     (music / "keep.txt").write_text("x")  # populated: a reachable library folder
     (staging / "keep.txt").write_text("x")
     config = {"soulseek.transfer_path": str(music), "import.staging_path": str(staging),
-              "soulseek.download_path": "", "library.music_paths": []}
+              "soulseek.download_path": "", "library.music_paths": [],
+              "library.watch_folders": True}
     config.update(values or {})
     calls = processed if processed is not None else []
 
@@ -617,3 +618,12 @@ def test_real_watchdog_sees_a_file_land(tmp_path):
         if base != tmp_path:
             import shutil
             shutil.rmtree(base, ignore_errors=True)
+
+
+def test_watching_is_off_until_someone_turns_it_on(tmp_path):
+    """3.6.9 ships folder watching off by default: a config without the key
+    watches nothing."""
+    service, _music, _staging, _calls = _service(tmp_path)
+    del service.config_manager.values["library.watch_folders"]
+    service.refresh()
+    assert not service.status().get("enabled")

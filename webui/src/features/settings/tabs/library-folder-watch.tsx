@@ -124,7 +124,7 @@ async function readStatus(refresh = false): Promise<WatchStatus | null> {
 export function FolderWatchSection({ store }: { store: SettingsStore }) {
   const settings = useSettings(store);
   const library = settings.library || {};
-  const enabled = library.watch_folders !== false;
+  const enabled = library.watch_folders === true;
   const modes = (library.watch_root_modes as Record<string, string> | undefined) || {};
   const [status, setStatus] = useState<WatchStatus | null>(null);
   const [now, setNow] = useState(() => Date.now() / 1000);

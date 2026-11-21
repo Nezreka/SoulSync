@@ -40,5 +40,5 @@ def test_settings_defaults_turn_it_on():
     from core.settings import ConfigManager
     defaults = ConfigManager._get_default_config(ConfigManager.__new__(ConfigManager))
     library = defaults["library"]
-    assert library["watch_folders"] is True and library["watch_poll_minutes"] == 15
+    assert library["watch_folders"] is False and library["watch_poll_minutes"] == 15
     assert library["watch_root_modes"] == {}

@@ -130,9 +130,16 @@ describe('the words', () => {
 });
 
 describe('the section', () => {
-  it('shows every watched folder and its mode, on by default', async () => {
+  it('is off until someone turns it on', () => {
     stubStatus(status());
     act(() => store.hydrate({ library: {} }));
+    render(<FolderWatchSection store={store} />);
+    expect((document.getElementById('watch-folders') as HTMLInputElement).checked).toBe(false);
+  });
+
+  it('shows every watched folder and its mode once it is on', async () => {
+    stubStatus(status());
+    act(() => store.hydrate({ library: { watch_folders: true } }));
     render(<FolderWatchSection store={store} />);
     const sw = document.getElementById('watch-folders') as HTMLInputElement;
     expect(sw.checked).toBe(true);
@@ -165,7 +172,9 @@ describe('the section', () => {
 
   it('a folder can be put on a timer or turned off on its own', async () => {
     stubStatus(status());
-    act(() => store.hydrate({ library: { watch_root_modes: { '/other': 'off' } } }));
+    act(() =>
+      store.hydrate({ library: { watch_folders: true, watch_root_modes: { '/other': 'off' } } }),
+    );
     render(<FolderWatchSection store={store} />);
     await waitFor(() => expect(document.getElementById('watch-mode-1')).not.toBeNull());
     fireEvent.change(document.getElementById('watch-mode-1')!, { target: { value: 'off' } });
@@ -191,7 +200,7 @@ describe('the section', () => {
 
   it('a server without watchdog says every folder is on a timer', async () => {
     stubStatus(status({ live_available: false }));
-    act(() => store.hydrate({ library: {} }));
+    act(() => store.hydrate({ library: { watch_folders: true } }));
     render(<FolderWatchSection store={store} />);
     await waitFor(() =>
       expect(document.getElementById('folder-watch-status')!.textContent).toContain(
@@ -205,7 +214,7 @@ describe('the section', () => {
       'fetch',
       vi.fn(() => Promise.reject(new Error('offline'))),
     );
-    act(() => store.hydrate({ library: {} }));
+    act(() => store.hydrate({ library: { watch_folders: true } }));
     render(<FolderWatchSection store={store} />);
     await act(async () => {
       await Promise.resolve();

@@ -217,7 +217,7 @@ Under **System › General**, as Debug / Info / Warning / Error segments; it app
 
 ## Watching for changes
 
-On **Library › Folders**. With it on (the default), music you add, retag, move or delete by hand in a library folder shows up without a scan, and the Import folder starts the auto-import as soon as files land. Local disks are watched live; network shares are checked on a timer (**Check network shares every**, 15 minutes by default). Every folder is listed with how it is watched, and each one can be set to Automatic, Live, On a timer or Off. See [Live Folder Watching](#lib-watch).
+On **Library › Folders**. It starts off; turn it on and music you add, retag, move or delete by hand in a library folder shows up without a scan, and the Import folder starts the auto-import as soon as files land. Local disks are watched live; network shares are checked on a timer (**Check network shares every**, 15 minutes by default). Every folder is listed with how it is watched, and each one can be set to Automatic, Live, On a timer or Off. See [Live Folder Watching](#lib-watch).
 
 ## Additional music libraries
 

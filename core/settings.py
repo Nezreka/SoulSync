@@ -995,7 +995,7 @@ class ConfigManager:
                 # choice ({folder: "auto"|"live"|"polling"|"off"}).
                 # watch_max_live_folders caps the folders watched live before
                 # a library is checked on a timer instead (Linux inotify).
-                "watch_folders": True,
+                "watch_folders": False,
                 "watch_poll_minutes": 15,
                 "watch_root_modes": {},
                 "watch_max_live_folders": 100000,
