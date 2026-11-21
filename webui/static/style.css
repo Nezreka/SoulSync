@@ -69856,7 +69856,8 @@ body.src-modal-open { overflow: hidden; }
 .mm-status-fix:hover { text-decoration: underline; }
 [data-st="in_library"] { --st: #3ccf7a; }
 [data-st="wishlisted"] { --st: #6aa7ff; }
-[data-st="needs_match"] { --st: #e3a63c; }
+[data-st="needs_match"],
+[data-st="not_on_server"] { --st: #e3a63c; }
 [data-st="missing"] { --st: #e0706a; }
 .mm-row-artist { display: flex; align-items: center; gap: 8px; }
 .mm-row-artist-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }

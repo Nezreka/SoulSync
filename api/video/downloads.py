@@ -450,8 +450,22 @@ def _with_release_identity(body: dict, scope: str, ident: dict) -> dict:
 
 def _want_titles(body):
     """the names a hit may carry: the identity set when there is one, else
-    the title the search was made with"""
-    return body.get("titles") or body.get("title")
+    the title the search was made with.
+
+    the words typed into manual search count too (#2234): you searched for
+    "Rocco et ses frères", so a release named that is the film you meant. the
+    year gate still runs on it, and a one-word query only counts with the
+    title's year beside it"""
+    want = body.get("titles") or body.get("title")
+    typed = custom_query(body)
+    if not typed:
+        return want
+    from core.video.release_parse import year_guarded_title
+    extra = year_guarded_title(typed, body.get("year"))
+    if not extra:
+        return want
+    names = [want] if isinstance(want, str) else list(want or [])
+    return [*names, extra] if names else extra
 
 
 def _alt_search_titles(body) -> list:

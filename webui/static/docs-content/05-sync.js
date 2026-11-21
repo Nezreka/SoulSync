@@ -213,6 +213,7 @@ Open a playlist and the line under its title says where its tracks are: **in lib
 
 - Tracks nothing has checked against your library yet show **not checked yet**. Opening the playlist checks them right then (they read **being checked…** meanwhile), so you don't have to sync first
 - A track marked **not downloaded** by that check is looked at again on a later open, so a song you downloaded since shows up as **in library** without a sync
+- **In library** is SoulSync's answer, your server playlist is your server's. After a sync SoulSync reads the server playlist back, and when they differ a second line says so: **not on the Jellyfin playlist** (your server doesn't know that file under the id SoulSync has yet: scan the library on the server, then in SoulSync, then press **Sync again**) and **share a file with another track** (two tracks matched the same file, and a server playlist holds a file once). Click either to see those tracks. A track your server hasn't scanned yet is never sent to it, and in **Find & Add** it shows as **Not on server yet** until it has been scanned
 - **Sync & download** is the one button for the whole job: refresh from the source, identify, push to your server and download what's missing
 
 ## Identification

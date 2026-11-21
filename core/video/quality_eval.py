@@ -230,6 +230,17 @@ def tier_key(source, resolution) -> str:
     return ""
 
 
+def _wanted_names(want_title) -> str:
+    """the names a release was refused against, short: with every language's
+    title in the list (#2234) the whole of it is a wall of text"""
+    if isinstance(want_title, str) or not want_title:
+        return str(want_title or "")
+    names = [str(t) for t in want_title]
+    if len(names) <= 4:
+        return str(names)
+    return "%s +%d more" % (names[:4], len(names) - 4)
+
+
 def _scope_ok(parsed, scope, want_season, want_episode, want_year=None, want_title=None,
               want_date=None, want_absolute=None, want_alt=None):
     from core.video.release_parse import title_region_year
@@ -243,9 +254,9 @@ def _scope_ok(parsed, scope, want_season, want_episode, want_year=None, want_tit
     # an unknown/unisolable title passes through to the scope/year checks below.
     if want_title:
         from core.video.release_parse import extract_title, titles_match
-        if not titles_match(parsed.get("title"), want_title):
+        if not titles_match(parsed.get("title"), want_title, want_year):
             return None, "Wrong title (%s — wanted %s)" % (
-                extract_title(parsed.get("title")) or "?", want_title)
+                extract_title(parsed.get("title")) or "?", _wanted_names(want_title))
     season, episode = parsed.get("season"), parsed.get("episode")
     if scope == "movie":
         if season is not None:

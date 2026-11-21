@@ -159,7 +159,7 @@ def _sync(db, pid):
     status = {f'auto_mirror_{pid}': {
         'tracks_hash': hashlib.md5('sp1'.encode()).hexdigest(),
         'mirror_tracks_hash': hashlib.md5('sp1'.encode()).hexdigest(),
-        'matched_tracks': 1,
+        'matched_tracks': 1, 'unplaced_tracks': 0,
         'quality_profile_id': pl.get('quality_profile_id'),
     }}
     started, calls = threading.Event(), []

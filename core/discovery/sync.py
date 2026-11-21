@@ -383,6 +383,14 @@ async def _database_only_find_track(spotify_track, candidate_pool=None):
 
             if db_track and confidence >= 0.80:
                 logger.info(f"Database match: '{db_track.title}' (confidence: {confidence:.2f})")
+                # #2235: no server id yet means nothing to send and nothing
+                # to cache; the sync reports it as not on the server
+                from core.sync.server_placement import server_item_id
+                if server_item_id(db_track) is None:
+                    from services.sync_service import NotOnServerTrack
+                    logger.info(f"'{db_track.title}' is in the library but {active_server} "
+                                f"has no id for it yet; it can't go on the playlist")
+                    return NotOnServerTrack(db_track), confidence
                 if spotify_id:
                     try:
                         from core.matching_engine import MusicMatchingEngine
@@ -453,6 +461,11 @@ def _record_library_membership(tracks_json, match_details) -> None:
                 # the sync's verdict, so the mirror's library check
                 # (core/playlists/library_check) leaves it alone
                 'library_checked_via': 'sync',
+                # on the server playlist, or why not (#2235). None when the
+                # sync couldn't read the playlist back, so an old answer
+                # never outlives the run that could have changed it
+                'server_placement': detail.get('server_placement') if found else None,
+                'server_placement_with': detail.get('folded_into') if found else None,
             })
             written += 1
         if written:
@@ -1082,6 +1095,9 @@ def _run_sync_task(
             # the mode it ran in, so the next scheduled run sees a mode
             # change as a change (#1704)
             sync_mode=sync_mode,
+            # matched but not on the server playlist (#2235): the next
+            # scheduled run must not skip while any are left
+            unplaced_tracks=getattr(result, 'unplaced_tracks', 0) or 0,
         )
         if _mirror_tracks_hash is not None:
             _status_kwargs['mirror_tracks_hash'] = _mirror_tracks_hash
