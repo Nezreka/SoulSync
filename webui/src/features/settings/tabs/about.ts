@@ -9,13 +9,13 @@
  */
 
 export const ABOUT: Record<string, string> = {
-  'connections/services': 'Pick the media server and sign in to each service.',
+  'connections/services': 'Pick the metadata source, and test each connection.',
   'connections/metasync': 'Connect to MetaSync and join a pool to share metadata.',
   'connections/notifications': 'Where SoulSync sends a message when something happens.',
 
-  'downloads/sources': 'The sources SoulSync searches, and the chain that tries them.',
+  'downloads/sources': 'Connect each one, tune its settings, and test them all.',
   'downloads/behaviour': 'How downloads run, retry and reach your library.',
-  'downloads/filtering': 'Which files a download skips, and which one wins.',
+  'downloads/filtering': 'Explicit versions, size limits, a preferred version and genres.',
 
   'quality/music': 'Which music formats SoulSync takes, and when it upgrades.',
   'quality/audiobooks': 'Which audiobook formats and bitrates SoulSync takes.',
