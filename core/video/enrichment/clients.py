@@ -8,6 +8,8 @@ client. Keys come from video_settings.
 
 from __future__ import annotations
 
+import re
+
 from utils.logging_config import get_logger
 
 logger = get_logger("video_enrichment.clients")
@@ -1204,6 +1206,25 @@ class TMDBClient:
             "photos": photos, "also_known_as": akas, "credits": credits}
 
 
+_IMDB_ID = re.compile(r"^tt\d{7,}$")
+
+
+def _tvdb_remote_ids(remote_ids) -> dict:
+    """imdb_id / tmdb_id from a TVDB series record's remoteIds. A source listed
+    with two different values gives neither."""
+    found = {"imdb_id": set(), "tmdb_id": set()}
+    for r in remote_ids or []:
+        if not isinstance(r, dict):
+            continue
+        name = str(r.get("sourceName") or "").strip().lower()
+        val = str(r.get("id") or "").strip()
+        if name == "imdb" and _IMDB_ID.match(val):
+            found["imdb_id"].add(val)
+        elif name == "themoviedb.com" and _int(val) is not None:
+            found["tmdb_id"].add(_int(val))
+    return {k: next(iter(v)) for k, v in found.items() if len(v) == 1}
+
+
 class TVDBClient:
     BASE = "https://api4.thetvdb.com/v4"
 
@@ -1280,6 +1301,10 @@ class TVDBClient:
                 # Show-level air time (network local time, e.g. "21:00") — drives
                 # the Calendar's per-day time sort. Streaming shows have none.
                 meta["airs_time"] = (sd.get("airsTime") or "").strip() or None
+                # the ids TVDB links the series to: a show TMDB has no IMDb id
+                # for still gets one, and one the server gave no TMDB id can be
+                # matched by id. enrichment only fills empty columns
+                meta.update(_tvdb_remote_ids(sd.get("remoteIds")))
             except Exception:
                 logger.exception("TVDB details fetch failed for %s", title or tvdb_id)
         if tvdb_id is None:

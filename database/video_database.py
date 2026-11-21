@@ -1328,9 +1328,26 @@ class VideoDatabase:
             if requeued:
                 logger.info("trakt: %d title(s) queued once to count their lists", requeued)
 
+        # TVDB now reads a series' remoteIds (its IMDb and TMDB ids), but the
+        # worker only visits a matched show once. send the matched shows still
+        # missing either id back through the queue once; enrichment only fills
+        # empty columns, so nothing a show already has changes
+        if conn.execute("SELECT 1 FROM video_settings WHERE key = ?",
+                        (VideoDatabase._TVDB_REMOTE_IDS_MARKER,)).fetchone() is None:
+            requeued = conn.execute(
+                "UPDATE shows SET tvdb_match_status = NULL "
+                "WHERE tvdb_match_status = 'matched' AND tvdb_id IS NOT NULL "
+                "AND (imdb_id IS NULL OR imdb_id = '' OR tmdb_id IS NULL)").rowcount
+            conn.execute("INSERT INTO video_settings (key, value) VALUES (?, '1') "
+                         "ON CONFLICT(key) DO UPDATE SET value = '1'",
+                         (VideoDatabase._TVDB_REMOTE_IDS_MARKER,))
+            if requeued:
+                logger.info("tvdb: %d show(s) queued once to read their linked ids", requeued)
+
     _SEASON_MONITOR_MARKER = "season_monitor_backfill_done"
     _STREAMING_COUNT_MARKER = "streaming_count_backfill_done"
     _TRAKT_LISTS_MARKER = "trakt_lists_backfill_done"
+    _TVDB_REMOTE_IDS_MARKER = "tvdb_remote_ids_backfill_done"
 
     # ── enrichment plumbing (per-source match status, like music) ─────────────
     def enrichment_next(self, service: str, retry_days: int = 30, priority=None) -> dict | None:
@@ -1419,6 +1436,9 @@ class VideoDatabase:
             # User-locked fields belong to the user — enrichment never touches
             # them, not even to fill a deliberately-blanked value.
             locked = self._locked_fields_set(conn, tbl, item_id)
+            had_tmdb = None
+            if service == "tvdb" and tbl == "shows" and (metadata or {}).get("tmdb_id") is not None:
+                had_tmdb = conn.execute("SELECT tmdb_id FROM shows WHERE id=?", (item_id,)).fetchone()
             sql, params = build(True, locked)
             try:
                 conn.execute(sql, params)
@@ -1426,6 +1446,13 @@ class VideoDatabase:
                 conn.rollback()
                 sql, params = build(False, locked)   # keep existing id, just record status/metadata
                 conn.execute(sql, params)
+            # a TMDB id TVDB just filled in: TMDB can now enrich the show by id,
+            # so send it back through TMDB's queue rather than wait out a
+            # not_found retry
+            if had_tmdb is not None and had_tmdb["tmdb_id"] is None:
+                conn.execute("UPDATE shows SET tmdb_match_status = NULL, tmdb_last_attempted = NULL "
+                             "WHERE id=? AND tmdb_id IS NOT NULL "
+                             "AND COALESCE(tmdb_match_status, '') != 'matched'", (item_id,))
             # Genres backfill — only when the item has none yet (enrichment fills
             # the gap the server didn't). Written to the normalised link tables.
             genres = (metadata or {}).get("genres")
