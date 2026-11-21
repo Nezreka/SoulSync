@@ -4091,3 +4091,37 @@ a.crewRow:hover {
   justify-content: center;
   padding: calc(var(--u) * 2) 0 calc(var(--u) * 1);
 }
+
+/* a round icon button (add to watchlist in a preview) */
+.iconRound {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: calc(var(--u) * 2.9);
+  height: calc(var(--u) * 2.9);
+  padding: 0;
+  border: 1px solid var(--white-a30);
+  border-radius: var(--radius-circle);
+  background: var(--white-a08);
+  color: var(--pl-text);
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) ease,
+    border-color var(--dur-fast) ease;
+}
+
+.iconRound:hover,
+.iconRound:focus-visible {
+  border-color: var(--white-a70);
+  background: var(--white-a15);
+}
+
+.iconRound[aria-pressed='true'] {
+  border-color: var(--accent);
+  color: var(--accent-light);
+}
+
+.iconRound svg {
+  width: calc(var(--u) * 1.2);
+  height: calc(var(--u) * 1.2);
+}

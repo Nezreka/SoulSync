@@ -49,6 +49,7 @@ _SQUARE = ["standard", "large"]
 # the rows, in their default order: (id, label, hint, styles, default style, on by default)
 ROWS = [
     ("continue", "Continue watching", "What you started, here and on your media server", _WIDE, "wide", True),
+    ("watchlist", "Your watchlist", "What you saved to watch later", _POSTER, "standard", True),
     ("new-episodes", "New episodes", "The latest episodes to land", _WIDE, "wide", True),
     ("top-movies", "Top 10 movies today", "Today's most watched films that you have", _POSTER, "ranked", True),
     ("recent-movies", "Recently added movies", "Newest films first", _POSTER, "standard", True),

@@ -127,7 +127,10 @@ def test_a_deleted_profile_is_swept_from_player_db(db):
     favorites.put(db, 3, ["genre-comedy"])
     from core.player import home_layout
     home_layout.put(db, 3, {"rows": []}, "tv-livingroom")
-    assert db.delete_profile_data(3) == 3
+    from core.player import watchlist
+    watchlist.add(db, 3, "movie", "41")
+    assert db.delete_profile_data(3) == 4
+    assert watchlist.list_items(db, 3) == []
     assert progress.get(db, 3, "movie", "m") is None
     assert favorites.get(db, 3) == []
     assert progress.get(db, 4, "movie", "m") is not None
@@ -261,10 +264,11 @@ def test_every_player_route_declares_its_access():
     app.register_blueprint(player_api.create_blueprint())
     rules = [r for r in app.url_map.iter_rules() if r.rule.startswith("/api/player/")]
     own = [r for r in rules if "/progress" in r.rule or r.rule.endswith("/continue")
-           or "/favorites" in r.rule or r.rule.endswith("/home-layout")]
+           or "/favorites" in r.rule or r.rule.endswith("/home-layout")
+           or r.rule.endswith("/watchlist")]
     music = [r for r in rules if r.rule.endswith("/music-channels")]
     library = [r for r in rules if r not in own and r not in music]
-    assert len(own) == 11 and len(library) == 7 and len(music) == 1
+    assert len(own) == 14 and len(library) == 7 and len(music) == 1
     assert declared_access(app.view_functions[music[0].endpoint]) == ("perm", "music.library")
     # your own rows: self only
     for rule in own:
@@ -366,3 +370,50 @@ def test_the_layout_contract_cleans_what_it_hands_out():
     assert [r["id"] for r in cat["rows"]] == [r[0] for r in hl.ROWS]
     assert {st["id"] for st in cat["styles"]} == {"standard", "large", "wide", "ranked"}
     assert all(r["style"] in r["styles"] for r in cat["rows"])
+
+
+# ── watchlist ────────────────────────────────────────────────────────────
+
+def test_watchlist_store(db, monkeypatch):
+    from core.player import watchlist
+    times = iter([100.0, 200.0, 300.0])
+    monkeypatch.setattr(watchlist.time, "time", lambda: next(times))
+    watchlist.add(db, 1, "movie", "41")
+    watchlist.add(db, 1, "youtube", "dQw4w9WgXcQ",
+                  {"title": "A video", "artwork": "https://i.ytimg.com/vi/x/hq.jpg",
+                   "backdrop": "/api/image-cache/abc"})
+    # adding again keeps its place, refreshes the meta
+    again = watchlist.add(db, 1, "movie", "41", {"title": "Alien"})
+    assert again["added_at"] == 100.0 and again["meta"] == {"title": "Alien"}
+    items = watchlist.list_items(db, 1)
+    assert [(i["item_type"], i["item_id"]) for i in items] == [("youtube", "dQw4w9WgXcQ"), ("movie", "41")]
+    # image-cache links expire: never kept
+    assert "backdrop" not in items[0]["meta"]
+    assert watchlist.list_items(db, 2) == []
+    assert watchlist.remove(db, 1, "movie", "41") is True
+    assert watchlist.remove(db, 1, "movie", "41") is False
+    with pytest.raises(watchlist.WatchlistError):
+        watchlist.add(db, 1, "track", "1")
+
+
+def test_watchlist_is_capped(db, monkeypatch):
+    from core.player import watchlist
+    monkeypatch.setattr(watchlist, "MAX_ITEMS", 2)
+    watchlist.add(db, 1, "movie", "1")
+    watchlist.add(db, 1, "movie", "2")
+    with pytest.raises(watchlist.WatchlistError):
+        watchlist.add(db, 1, "movie", "3")
+    # one already on it still saves
+    watchlist.add(db, 1, "movie", "2", {"title": "x"})
+
+
+def test_watchlist_over_http_is_per_profile(client):
+    _as(client, 3)
+    assert client.put("/api/player/watchlist", json={"item_type": "show", "item_id": 9}).status_code == 200
+    assert [i["item_id"] for i in client.get("/api/player/watchlist").get_json()["items"]] == ["9"]
+    assert client.put("/api/player/watchlist", json={"item_type": "album", "item_id": 1}).status_code == 400
+    _as(client, 4)
+    assert client.get("/api/player/watchlist").get_json()["items"] == []
+    assert client.delete("/api/player/watchlist?item_type=show&item_id=9").get_json()["removed"] is False
+    _as(client, 3)
+    assert client.delete("/api/player/watchlist?item_type=show&item_id=9").get_json()["removed"] is True

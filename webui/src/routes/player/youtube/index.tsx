@@ -25,6 +25,7 @@ import {
 } from '../-ui/kit';
 import { NotPartOfProfile } from '../-ui/not-part';
 import { useSections } from '../-ui/sections';
+import { useYoutubeWatchlistActions } from '../-ui/watchlist';
 
 export const Route = createFileRoute('/player/youtube/')({
   validateSearch: (search: Record<string, unknown>): { tab?: BrowseTab } =>
@@ -75,6 +76,7 @@ const CHANNEL_RAILS = 8;
 
 function YoutubeHome() {
   const sections = useSections();
+  const ytActions = useYoutubeWatchlistActions();
   const home = useQuery({ ...youtubeHomeQuery(), enabled: sections.video });
   const tab = Route.useSearch().tab ?? 'foryou';
   const navigate = useNavigate({ from: '/player/youtube/' });
@@ -123,7 +125,12 @@ function YoutubeHome() {
             </span>
             <ViewToggle value={view} onChange={setView} />
           </div>
-          <CardGrid cards={downloads.map((v) => ytVideoCard(v))} shape="wide" view={view} />
+          <CardGrid
+            cards={downloads.map((v) => ytVideoCard(v))}
+            actionsFor={ytActions}
+            shape="wide"
+            view={view}
+          />
         </div>
       ) : (
         <div className={s.rail}>
@@ -143,6 +150,7 @@ function YoutubeHome() {
             key={r.title}
             title={r.title}
             cards={r.videos.slice(0, 30).map((v) => ytVideoCard(v))}
+            actionsFor={ytActions}
           />
         ))}
         {!categories.length ? (
@@ -226,15 +234,21 @@ function YoutubeHome() {
           <CardRail
             title="Latest from your channels"
             cards={latest.slice(0, 30).map((v) => ytVideoCard(v))}
+            actionsFor={ytActions}
           />
           <CardRail title="Your channels" cards={channels.map(ytChannelCard)} round />
-          <CardRail title="Downloaded" cards={downloads.slice(0, 30).map((v) => ytVideoCard(v))} />
+          <CardRail
+            title="Downloaded"
+            cards={downloads.slice(0, 30).map((v) => ytVideoCard(v))}
+            actionsFor={ytActions}
+          />
           {byChannel.map(({ channel, videos }) => (
             <CardRail
               key={channel.id}
               title={channel.title}
               more={{ to: `/player/youtube/${encodeURIComponent(channel.id)}`, label: 'Channel' }}
               cards={videos.map((v) => ytVideoCard(v, false))}
+              actionsFor={ytActions}
             />
           ))}
         </>

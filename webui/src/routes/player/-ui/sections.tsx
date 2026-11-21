@@ -17,6 +17,7 @@ import {
   MusicIcon,
   PodcastIcon,
   TvIcon,
+  WatchlistIcon,
   YoutubeIcon,
 } from './icons';
 
@@ -73,6 +74,13 @@ export const NAV: NavEntry[] = [
     group: 'main',
     icon: <GuideIcon />,
     visible: (a) => a.video || a.music,
+  },
+  {
+    to: '/player/watchlist',
+    label: 'Watchlist',
+    group: 'main',
+    icon: <WatchlistIcon />,
+    visible: (a) => a.video,
   },
   {
     to: '/player/movies',

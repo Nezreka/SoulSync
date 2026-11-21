@@ -188,3 +188,16 @@ export const InfoIcon = () => (
     <path d="M12 11v5.5M12 7.5v.01" />
   </Icon>
 );
+
+export const PlusIcon = () => (
+  <Icon strokeWidth={2.2}>
+    <path d="M12 5v14M5 12h14" />
+  </Icon>
+);
+
+export const WatchlistIcon = () => (
+  <Icon>
+    <path d="M7 4h10a1 1 0 0 1 1 1v15l-6-3.6L6 20V5a1 1 0 0 1 1-1Z" />
+    <path d="M12 8v5M9.5 10.5h5" />
+  </Icon>
+);

@@ -21,6 +21,7 @@ import {
 import { NotFound, NotPartOfProfile } from '../-ui/not-part';
 import { useSections } from '../-ui/sections';
 import { Facts } from '../-ui/video-facts';
+import { useYoutubeWatchlistActions } from '../-ui/watchlist';
 
 type ChannelTab = 'all' | 'downloaded' | 'embed';
 
@@ -34,6 +35,7 @@ export const Route = createFileRoute('/player/youtube/$channelId')({
 
 function ChannelPage() {
   const sections = useSections();
+  const ytActions = useYoutubeWatchlistActions();
   const [view, setView] = useViewMode('channel');
   const { channelId } = Route.useParams();
   const { show = 'all' } = Route.useSearch();
@@ -102,12 +104,20 @@ function ChannelPage() {
           <>
             {latest.length > 3 ? (
               <div className={s.detailRail}>
-                <CardRail title="Latest" cards={latest.map((v) => ytVideoCard(v, false))} />
+                <CardRail
+                  title="Latest"
+                  cards={latest.map((v) => ytVideoCard(v, false))}
+                  actionsFor={ytActions}
+                />
               </div>
             ) : null}
             {popular.length > 3 ? (
               <div className={s.detailRail}>
-                <CardRail title="Most watched" cards={popular.map((v) => ytVideoCard(v, false))} />
+                <CardRail
+                  title="Most watched"
+                  cards={popular.map((v) => ytVideoCard(v, false))}
+                  actionsFor={ytActions}
+                />
               </div>
             ) : null}
             <Section title="All videos">
@@ -128,6 +138,7 @@ function ChannelPage() {
                 {shown.length ? (
                   <CardGrid
                     cards={shown.map((v) => ytVideoCard(v, false))}
+                    actionsFor={ytActions}
                     shape="wide"
                     view={view}
                   />

@@ -347,6 +347,16 @@ Every row on home is from the profile's own library.
 
 `device` is an id your app makes once and keeps: 8 to 64 letters, numbers, `-` or `_`.
 
+### Watchlist
+
+Each profile keeps a watchlist of things to watch later, shared by all its screens, in `player.db`.
+
+- `GET /api/player/watchlist`: `{items: [{item_type, item_id, meta, added_at}]}`, newest first.
+- `PUT /api/player/watchlist` with `{item_type, item_id, meta?}`: adds it, or keeps its place and refreshes `meta` if it's already there. `item_type` is `movie` or `show` (by library id) or `youtube` (by video id). `meta` takes `title`, `subtitle`, `artwork`, `backdrop` and `href`, mostly for YouTube; links from SoulSync's image cache aren't kept, since they expire.
+- `DELETE /api/player/watchlist?item_type=&item_id=`: takes it off.
+
+A watchlist holds up to 1000 titles. Draw only what your catalog has: a title that left the library, or one over a kids profile's rating cap, stays on the list but isn't shown. The home layout's `watchlist` row is this list.
+
 ### The catalog
 
 `catalog` comes with every `GET`, so an app never has to hard-code the rows: `{version, styles: [{id, label}], rows: [{id, label, hint, styles, style, on}], genre_row, max_rows}`. Use `label` and `hint` in your editor, `styles` for the style picker, and `style` and `on` as each row's defaults.

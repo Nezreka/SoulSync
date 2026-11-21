@@ -315,10 +315,13 @@ export function CardGrid({
   shape = 'poster',
   round,
   view = 'grid',
+  actionsFor,
 }: {
   cards: RailCard[];
   shape?: RailCard['shape'];
   round?: boolean;
+  /** a card's own menu (remove from the watchlist) */
+  actionsFor?: (card: RailCard) => CardAction[];
   /** a list reads better for long filmographies and big libraries */
   view?: ViewMode;
 }) {
@@ -336,7 +339,7 @@ export function CardGrid({
       ) : (
         <div className={s.grid} data-shape={shape}>
           {cards.slice(0, shown.count).map((card) => (
-            <Card key={card.key} card={card} round={round} />
+            <Card key={card.key} card={card} round={round} actions={actionsFor?.(card)} />
           ))}
         </div>
       )}

@@ -41,6 +41,7 @@ import { HomeEditor } from './-ui/home-editor';
 import { CardRail, Empty, SkeletonRail, styles as s, type CardAction } from './-ui/kit';
 import { useSections } from './-ui/sections';
 import { RankedRail } from './-ui/top10';
+import { useWatchlist, watchlistCard } from './-ui/watchlist';
 
 export const Route = createFileRoute('/player/')({
   component: PlayerHome,
@@ -48,6 +49,7 @@ export const Route = createFileRoute('/player/')({
 
 const FALLBACK_ROWS = [
   'continue',
+  'watchlist',
   'new-episodes',
   'recent-movies',
   'recent-music',
@@ -193,6 +195,15 @@ function PlayerHome() {
   const topMovies = useTopToday('movie', movies, isOn('top-movies'));
   const topShows = useTopToday('show', shows, isOn('top-shows'));
   const because = useBecause(movies, shows, isOn('because'));
+  const watchlist = useWatchlist();
+  const watchlistCards = useMemo(() => {
+    const byMovie = new Map((movies ?? []).map((m) => [m.id, m]));
+    const byShow = new Map((shows ?? []).map((x) => [x.id, x]));
+    return watchlist.items
+      .map((item) => watchlistCard(item, byMovie, byShow))
+      .filter((c): c is RailCard => !!c)
+      .slice(0, 24);
+  }, [watchlist.items, movies, shows]);
   const watching = useMemo(
     () => continueRails(progress.data ?? [], resume.data ?? []),
     [progress.data, resume.data],
@@ -205,6 +216,7 @@ function PlayerHome() {
       out[id] = [{ title, cards, more: more ? { to: more } : undefined }];
     };
     out.continue = watching.map((r) => ({ title: r.label, cards: r.cards }));
+    one('watchlist', 'Your watchlist', watchlistCards, '/player/watchlist');
     one(
       'new-episodes',
       'New episodes',
@@ -313,6 +325,7 @@ function PlayerHome() {
     return out;
   }, [
     watching,
+    watchlistCards,
     cat,
     movies,
     shows,

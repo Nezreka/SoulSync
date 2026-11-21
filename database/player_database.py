@@ -1,5 +1,5 @@
 """the player's own database (player.db): what each profile has watched and
-how far, its favorite guide channels, its home page layout. kept apart from
+how far, its watchlist, its favorite guide channels, its home page layout. kept apart from
 the library databases because playback writes often (a position every few
 seconds per screen) and none of it should wait on, or hold, the music
 library's write lock.
@@ -21,7 +21,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator, Optional
 
-TABLES_WITH_PROFILES = ("watch_progress", "player_favorite_channels", "player_home_layout")
+TABLES_WITH_PROFILES = ("watch_progress", "player_favorite_channels", "player_home_layout",
+                        "player_watchlist")
 
 
 def default_path() -> str:

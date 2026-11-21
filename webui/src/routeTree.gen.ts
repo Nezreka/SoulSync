@@ -38,6 +38,7 @@ import { Route as PlayerIndexRouteImport } from './routes/player/index'
 import { Route as ImportIndexRouteImport } from './routes/import/index'
 import { Route as AudiobooksIndexRouteImport } from './routes/audiobooks/index'
 import { Route as PodcastsPodcastIdRouteImport } from './routes/podcasts/$podcastId'
+import { Route as PlayerWatchlistRouteImport } from './routes/player/watchlist'
 import { Route as PlayerGuideRouteImport } from './routes/player/guide'
 import { Route as LabelDetailIdRouteImport } from './routes/label-detail/$id'
 import { Route as ImportSinglesRouteImport } from './routes/import/singles'
@@ -217,6 +218,11 @@ const PodcastsPodcastIdRoute = PodcastsPodcastIdRouteImport.update({
   id: '/$podcastId',
   path: '/$podcastId',
   getParentRoute: () => PodcastsRouteRoute,
+} as any)
+const PlayerWatchlistRoute = PlayerWatchlistRouteImport.update({
+  id: '/watchlist',
+  path: '/watchlist',
+  getParentRoute: () => PlayerRouteRoute,
 } as any)
 const PlayerGuideRoute = PlayerGuideRouteImport.update({
   id: '/guide',
@@ -425,6 +431,7 @@ export interface FileRoutesByFullPath {
   '/import/singles': typeof ImportSinglesRoute
   '/label-detail/$id': typeof LabelDetailIdRoute
   '/player/guide': typeof PlayerGuideRoute
+  '/player/watchlist': typeof PlayerWatchlistRoute
   '/podcasts/$podcastId': typeof PodcastsPodcastIdRoute
   '/audiobooks/': typeof AudiobooksIndexRoute
   '/import/': typeof ImportIndexRoute
@@ -486,6 +493,7 @@ export interface FileRoutesByTo {
   '/import/singles': typeof ImportSinglesRoute
   '/label-detail/$id': typeof LabelDetailIdRoute
   '/player/guide': typeof PlayerGuideRoute
+  '/player/watchlist': typeof PlayerWatchlistRoute
   '/podcasts/$podcastId': typeof PodcastsPodcastIdRoute
   '/audiobooks': typeof AudiobooksIndexRoute
   '/import': typeof ImportIndexRoute
@@ -552,6 +560,7 @@ export interface FileRoutesById {
   '/import/singles': typeof ImportSinglesRoute
   '/label-detail/$id': typeof LabelDetailIdRoute
   '/player/guide': typeof PlayerGuideRoute
+  '/player/watchlist': typeof PlayerWatchlistRoute
   '/podcasts/$podcastId': typeof PodcastsPodcastIdRoute
   '/audiobooks/': typeof AudiobooksIndexRoute
   '/import/': typeof ImportIndexRoute
@@ -619,6 +628,7 @@ export interface FileRouteTypes {
     | '/import/singles'
     | '/label-detail/$id'
     | '/player/guide'
+    | '/player/watchlist'
     | '/podcasts/$podcastId'
     | '/audiobooks/'
     | '/import/'
@@ -680,6 +690,7 @@ export interface FileRouteTypes {
     | '/import/singles'
     | '/label-detail/$id'
     | '/player/guide'
+    | '/player/watchlist'
     | '/podcasts/$podcastId'
     | '/audiobooks'
     | '/import'
@@ -745,6 +756,7 @@ export interface FileRouteTypes {
     | '/import/singles'
     | '/label-detail/$id'
     | '/player/guide'
+    | '/player/watchlist'
     | '/podcasts/$podcastId'
     | '/audiobooks/'
     | '/import/'
@@ -1011,6 +1023,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/podcasts/$podcastId'
       preLoaderRoute: typeof PodcastsPodcastIdRouteImport
       parentRoute: typeof PodcastsRouteRoute
+    }
+    '/player/watchlist': {
+      id: '/player/watchlist'
+      path: '/watchlist'
+      fullPath: '/player/watchlist'
+      preLoaderRoute: typeof PlayerWatchlistRouteImport
+      parentRoute: typeof PlayerRouteRoute
     }
     '/player/guide': {
       id: '/player/guide'
@@ -1297,6 +1316,7 @@ const ImportRouteRouteWithChildren = ImportRouteRoute._addFileChildren(
 
 interface PlayerRouteRouteChildren {
   PlayerGuideRoute: typeof PlayerGuideRoute
+  PlayerWatchlistRoute: typeof PlayerWatchlistRoute
   PlayerIndexRoute: typeof PlayerIndexRoute
   PlayerAudiobooksAsinRoute: typeof PlayerAudiobooksAsinRoute
   PlayerCollectionsCollectionIdRoute: typeof PlayerCollectionsCollectionIdRoute
@@ -1324,6 +1344,7 @@ interface PlayerRouteRouteChildren {
 
 const PlayerRouteRouteChildren: PlayerRouteRouteChildren = {
   PlayerGuideRoute: PlayerGuideRoute,
+  PlayerWatchlistRoute: PlayerWatchlistRoute,
   PlayerIndexRoute: PlayerIndexRoute,
   PlayerAudiobooksAsinRoute: PlayerAudiobooksAsinRoute,
   PlayerCollectionsCollectionIdRoute: PlayerCollectionsCollectionIdRoute,

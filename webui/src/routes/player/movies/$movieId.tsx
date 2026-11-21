@@ -39,6 +39,7 @@ import {
   Ratings,
 } from '../-ui/video-facts';
 import { CastRow, VersionPicker } from '../-ui/video-parts';
+import { WatchlistButton } from '../-ui/watchlist';
 
 export const Route = createFileRoute('/player/movies/$movieId')({
   component: MoviePage,
@@ -114,6 +115,7 @@ function MoviePage() {
               label={resuming ? `Resume from ${runtime(resume.position_seconds)}` : 'Play'}
             />
             {resuming ? <PlayButton label="From the start" primary={false} /> : null}
+            <WatchlistButton kind="movie" id={id} />
             <TrailerButton kind="movie" id={id} />
             {ends ? (
               <span className={s.notYet}>

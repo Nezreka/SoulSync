@@ -398,6 +398,54 @@ def put_favorites():
         return _failed("favorites save")
 
 
+@bp.route("/api/player/watchlist", methods=["GET"])
+@self_only
+def get_watchlist():
+    """this profile's watchlist, newest first: [{item_type, item_id, meta, added_at}]"""
+    from core.player import watchlist
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    try:
+        return jsonify({"success": True, "items": watchlist.list_items(player_db(), pid)})
+    except Exception:  # noqa: BLE001
+        return _failed("watchlist read")
+
+
+@bp.route("/api/player/watchlist", methods=["PUT"])
+@self_only
+def add_to_watchlist():
+    """{item_type: movie|show|youtube, item_id, meta?}"""
+    from core.player import watchlist
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    body = request.get_json(silent=True) or {}
+    try:
+        item = watchlist.add(player_db(), pid, body.get("item_type"), body.get("item_id"), body.get("meta"))
+        return jsonify({"success": True, "item": item})
+    except watchlist.WatchlistError as e:
+        return _bad(e)
+    except Exception:  # noqa: BLE001
+        return _failed("watchlist save")
+
+
+@bp.route("/api/player/watchlist", methods=["DELETE"])
+@self_only
+def remove_from_watchlist():
+    from core.player import watchlist
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    try:
+        removed = watchlist.remove(player_db(), pid, request.args.get("item_type"), request.args.get("item_id"))
+        return jsonify({"success": True, "removed": removed})
+    except watchlist.WatchlistError as e:
+        return _bad(e)
+    except Exception:  # noqa: BLE001
+        return _failed("watchlist remove")
+
+
 @bp.route("/api/player/home-layout", methods=["GET"])
 @self_only
 def get_home_layout():

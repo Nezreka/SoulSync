@@ -39,6 +39,7 @@ import {
   Ratings,
 } from '../-ui/video-facts';
 import { CastRow, VersionPicker } from '../-ui/video-parts';
+import { WatchlistButton } from '../-ui/watchlist';
 
 export const Route = createFileRoute('/player/tv/$showId')({
   validateSearch: (search: Record<string, unknown>): { season?: number } => {
@@ -246,6 +247,7 @@ function ShowPage() {
                   : 'Play'
               }
             />
+            <WatchlistButton kind="show" id={id} />
             <TrailerButton kind="show" id={id} />
             {next?.title ? <span className={s.notYet}>Up next: {next.title}</span> : null}
           </>

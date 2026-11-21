@@ -737,3 +737,34 @@ export async function resetHomeLayout(device?: string) {
     searchParams: device ? { device } : {},
   });
 }
+
+// ── watchlist (per profile, in player.db) ──────────────────────────────
+
+export type WatchlistKind = 'movie' | 'show' | 'youtube';
+
+export interface WatchlistItem {
+  item_type: WatchlistKind;
+  item_id: string;
+  meta?: ProgressMeta | null;
+  added_at: number;
+}
+
+export const watchlistQuery = () =>
+  queryOptions({
+    queryKey: ['player', 'watchlist'],
+    queryFn: async () =>
+      (await apiClient.get('player/watchlist').json<{ items?: WatchlistItem[] }>()).items ?? [],
+    staleTime: MINUTE,
+  });
+
+export async function addToWatchlist(
+  item_type: WatchlistKind,
+  item_id: string,
+  meta?: ProgressMeta,
+) {
+  await apiClient.put('player/watchlist', { json: { item_type, item_id, meta } });
+}
+
+export async function removeFromWatchlist(item_type: WatchlistKind, item_id: string) {
+  await apiClient.delete('player/watchlist', { searchParams: { item_type, item_id } });
+}

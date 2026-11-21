@@ -15,6 +15,7 @@ import { backdropUrl, proxiedImage } from '../-lib/rails';
 import { extrasQuery, movieDetailQuery, showDetailQuery } from '../-player.api';
 import { Art, Badge, PlayButton, PlayerLink, styles as s } from './kit';
 import { embedUrl, useTrailersSetting } from './trailer';
+import { WatchlistButton } from './watchlist';
 
 export interface PreviewTarget {
   kind: 'movie' | 'show';
@@ -219,6 +220,7 @@ function PreviewPanel({
         ) : null}
         <div className={s.heroActions}>
           <PlayButton />
+          <WatchlistButton kind={target.kind} id={target.id} compact />
           {href ? (
             <PlayerLink href={href} className={s.btn} data-nav>
               More info
