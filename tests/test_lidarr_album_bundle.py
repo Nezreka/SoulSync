@@ -48,6 +48,7 @@ class FakeLidarr:
         self.posts = []
         self.deleted = []
         self.lock = threading.Lock()
+        self.library = []               # albums already in Lidarr, with artist ids
 
     def get(self, endpoint, params=None):
         params = params or {}
@@ -55,9 +56,13 @@ class FakeLidarr:
             return self.lookup.get(params['term'], [])
         if endpoint == 'artist':
             mbid = params.get('mbId')
+            if mbid is None:
+                return [dict(a['artist']) for a in self.library]
             if mbid in self.artists:
                 return [{'id': self.artists[mbid], 'foreignArtistId': mbid}]
             return []
+        if endpoint == 'album' and 'artistId' in params:
+            return [a for a in self.library if a['artist']['id'] == params['artistId']]
         if endpoint == 'album':
             rec = self.albums.get(params.get('foreignAlbumId'))
             return [rec] if rec else []
@@ -151,6 +156,142 @@ def test_find_album_by_release_group_id_first(client):
     fake = FakeLidarr({'lidarr:rg-piss': [PISS]})
     with patch.object(client, '_api_get', side_effect=fake.get):
         assert client._find_album('anything', 'anyone', 'rg-piss') is PISS
+
+
+def test_find_album_prefers_lidarrs_own_library(client):
+    # Lidarr's metadata search buries a short artist name under other
+    # artists' records; the album Lidarr already has is found by name.
+    in_library = dict(PISS, id=2412, artist=dict(PISS['artist'], id=7))
+    fake = FakeLidarr({'PISS you made me / skin on linen': [DEMOS, OTHER_ARTIST]})
+    fake.library = [in_library]
+    with patch.object(client, '_api_get', side_effect=fake.get):
+        assert client._find_album('you made me / skin on linen', 'PISS') is in_library
+        assert client._find_album('a fourth demo', 'PISS') is None
+
+
+def _af(year, rg):
+    return {'foreignAlbumId': rg, 'title': 'American Football', 'releaseDate': f'{year}-01-01T00:00:00Z',
+            'artist': {'foreignArtistId': 'ar-af', 'artistName': 'American Football'}}
+
+
+def test_same_titled_albums_are_told_apart_by_year(client):
+    fake = FakeLidarr({'American Football American Football': [_af(1999, 'lp1'), _af(2016, 'lp2'), _af(2019, 'lp3')]})
+    with patch.object(client, '_api_get', side_effect=fake.get):
+        assert client._find_album('American Football', 'American Football', '', '2016')['foreignAlbumId'] == 'lp2'
+        # no record from that year: guessing would grab another album
+        assert client._find_album('American Football', 'American Football', '', '2026') is None
+
+
+def test_library_match_from_another_year_is_not_trusted(client):
+    # Lidarr holds only the 2019 record; a 2026 request must not take it.
+    lp3 = dict(_af(2019, 'lp3'), id=5, artist={'id': 3, 'artistName': 'American Football'})
+    fake = FakeLidarr({'American Football American Football': [_af(1999, 'lp1'), _af(2019, 'lp3')]})
+    fake.library = [lp3]
+    with patch.object(client, '_api_get', side_effect=fake.get):
+        assert client._find_album('American Football', 'American Football', '', '2026') is None
+        assert client._find_album('American Football', 'American Football', '', '2019') is lp3
+
+
+def test_a_lone_match_from_another_year_is_a_reissue(client):
+    fake = FakeLidarr({'PISS you made me / skin on linen': [dict(PISS, releaseDate='2025-11-01')]})
+    with patch.object(client, '_api_get', side_effect=fake.get):
+        assert client._find_album('you made me / skin on linen', 'PISS', '', '2026')['foreignAlbumId'] == PISS['foreignAlbumId']
+
+
+def test_lookup_retries_a_failed_metadata_search(client):
+    answers = [None, [PISS]]
+    with patch.object(client, '_api_get', side_effect=lambda *a, **k: answers.pop(0)), \
+            patch('core.lidarr_download_client.time.sleep'):
+        assert client._lookup('PISS you made me / skin on linen') == [PISS]
+
+
+def test_bundle_release_year_of_requires_agreement():
+    from core.downloads.master import bundle_release_year_of
+    assert bundle_release_year_of([{'album': {'release_date': '2026-05-01'}}, {'album': {}}]) == '2026'
+    assert bundle_release_year_of([{'album': {'release_date': '2026-05-01'}},
+                                   {'album': {'release_date': '2019-03-22'}}]) is None
+
+
+def test_the_album_context_year_is_still_read():
+    # the bundle helper first shipped as a second release_year_of, which
+    # replaced this one for every caller: the re-release gate read no year
+    from core.downloads.master import release_year_of
+    assert release_year_of({'name': 'Chaosphere', 'release_date': '2023-11-10'}) == '2023'
+    assert release_year_of({'year': 1998}) == '1998'
+
+
+def test_bundle_release_type_of_requires_agreement():
+    from core.downloads.master import bundle_release_type_of
+    assert bundle_release_type_of([{'album': {'album_type': 'Album'}}, {'album': {}}]) == 'album'
+    assert bundle_release_type_of([{'album': {'album_type': 'album'}},
+                                   {'album': {'album_type': 'single'}}]) is None
+
+
+def _bib(rg, kind):
+    return {'foreignAlbumId': rg, 'title': 'Back in Black', 'albumType': kind,
+            'releaseDate': '1980-07-25T00:00:00Z',
+            'artist': {'foreignArtistId': 'ar-acdc', 'artistName': 'AC/DC'}}
+
+
+def test_a_reissue_year_still_finds_the_album_over_its_title_single(client):
+    # spotify dates the remaster 2003; musicbrainz knows the 1980 album and
+    # the 1980 single. no year fits, so the album type picks the album.
+    fake = FakeLidarr({'AC/DC Back in Black': [_bib('rg-single', 'Single'), _bib('rg-album', 'Album')]})
+    with patch.object(client, '_api_get', side_effect=fake.get):
+        found = client._find_album('Back in Black', 'AC/DC', '', '2003', release_type='album')
+        assert found['foreignAlbumId'] == 'rg-album'
+        assert client._find_album('Back in Black', 'AC/DC', '', '1980', release_type='single'
+                                  )['foreignAlbumId'] == 'rg-single'
+        # with no type to go by, two records and no year is still a refusal
+        assert client._find_album('Back in Black', 'AC/DC', '', '2003') is None
+
+
+def test_the_type_does_not_overrule_the_year(client):
+    # three self-titled albums: the type fits all of them, the year decides
+    records = [dict(_af(y, rg), albumType='Album') for y, rg in ((1999, 'lp1'), (2016, 'lp2'), (2019, 'lp3'))]
+    fake = FakeLidarr({'American Football American Football': records})
+    with patch.object(client, '_api_get', side_effect=fake.get):
+        assert client._find_album('American Football', 'American Football', '', '2026',
+                                  release_type='album') is None
+        assert client._find_album('American Football', 'American Football', '', '2016',
+                                  release_type='album')['foreignAlbumId'] == 'lp2'
+
+
+def test_the_hinted_album_type_reaches_the_lookup(client):
+    fake = FakeLidarr({'AC/DC Back in Black': [_bib('rg-single', 'Single'), _bib('rg-album', 'Album')]})
+    hint = {'title': 'Hells Bells', 'artist': 'AC/DC', 'album': 'Back in Black',
+            'catalogue_context': {'track_info': {'album': {'release_date': '2003-01-01', 'album_type': 'album'}}}}
+    with patch.object(client, '_api_get', side_effect=fake.get), track_hint_context(hint):
+        assert [a['foreignAlbumId'] for a in client._hinted_album_lookup()] == ['rg-album']
+
+
+def test_lidarrs_artist_list_is_read_once_a_minute(client):
+    fake = FakeLidarr({'PISS you made me / skin on linen': [PISS]})
+    calls = []
+
+    def get(endpoint, params=None):
+        calls.append(endpoint)
+        return fake.get(endpoint, params)
+    with patch.object(client, '_api_get', side_effect=get):
+        client._find_album('you made me / skin on linen', 'PISS')
+        client._find_album('you made me / skin on linen', 'PISS')
+    assert calls.count('artist') == 1
+    client.reload_settings()
+    with patch.object(client, '_api_get', side_effect=get):
+        client._find_album('you made me / skin on linen', 'PISS')
+    assert calls.count('artist') == 2
+
+
+def test_wishlist_tracks_carry_the_release_group_id():
+    from core.downloads.master import release_group_id_of
+    from core.wishlist.service import WishlistService
+    row = {'id': 91, 'spotify_track_id': 't1', 'failure_reason': None, 'retry_count': 0,
+           'date_added': None, 'last_attempted': None, 'source_type': 'album',
+           'source_info': {}, 'musicbrainz_release_group_id': 'rg-piss',
+           'spotify_data': {'name': 'toni', 'artists': [{'name': 'PISS'}],
+                            'album': {'name': 'you made me / skin on linen'}}}
+    track = WishlistService.format_track_for_download(row)
+    assert release_group_id_of([track]) == 'rg-piss'
 
 
 def test_find_album_keeps_non_latin_titles(client):

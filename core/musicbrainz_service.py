@@ -10,7 +10,8 @@ from core.musicbrainz_client import MusicBrainzClient
 from core.worker_utils import catalog_overlap_score, pick_artist_by_catalog
 from database.music_database import MusicDatabase
 from core.text.fold import fold_title
-from core.text.title_match import is_trailing_version_qualifier, recording_version_markers
+from core.text.title_match import (base_title_before_dash, is_trailing_version_qualifier,
+                                   recording_version_markers)
 
 logger = get_logger("musicbrainz_service")
 
@@ -705,6 +706,34 @@ class MusicBrainzService:
         text = unicodedata.normalize('NFKC', str(title or '')).casefold()
         return [part for part in re.split(r'\W+', text) if part]
 
+    _TRAILING_BRACKETS = re.compile(r'(?:\s*[\(\[][^\)\]]*[\)\]])+\s*$')
+
+    @classmethod
+    def _track_title_keys(cls, title: Any) -> set:
+        """The ways one track title can be listed: as it is, before spotify's
+        ' - remastered 2011' tail, and without trailing brackets ('(live)',
+        '(2011 remaster)'). a featuring credit never counts. both sides of a
+        track-list check go through this, so 'Never Meant - Remastered' on a
+        wishlist still finds 'Never Meant' on the release."""
+        text = strip_featuring_credit(str(title or ''))
+        forms = {text, base_title_before_dash(text), cls._TRAILING_BRACKETS.sub('', text)}
+        return {tuple(cls._title_words(form)) for form in forms} - {()}
+
+    @classmethod
+    def _tracks_carried(cls, owned_titles: Any, release: Dict[str, Any]) -> tuple:
+        """(how many of the owned titles the release lists, how many owned
+        titles there are). titles that are the same words count once."""
+        listed = set()
+        for medium in release.get('media') or []:
+            for track in medium.get('tracks') or []:
+                listed |= cls._track_title_keys(track.get('title', ''))
+        owned = {}
+        for title in owned_titles or []:
+            keys = cls._track_title_keys(title)
+            if keys:
+                owned.setdefault(tuple(cls._title_words(strip_featuring_credit(str(title)))), set()).update(keys)
+        return sum(1 for keys in owned.values() if keys & listed), len(owned)
+
     #: how many same-titled releases have their track list fetched
     TRACK_LIST_CANDIDATES = 5
     #: the share of the album's own track titles a release has to carry
@@ -759,23 +788,21 @@ class MusicBrainzService:
             return self._release_carrying_tracks(exact, track_titles)
         return None
 
-    def _release_carrying_tracks(self, candidates: list, track_titles: Any) -> Optional[Dict[str, Any]]:
+    def _release_carrying_tracks(self, candidates: list, track_titles: Any,
+                                 share: Optional[float] = None) -> Optional[Dict[str, Any]]:
         """The candidate whose track list carries the album's own tracks, when
         every candidate that does is the same release group. Raises when a
         track list could not be fetched and nothing was decided, so a timeout
         is not written down as "no such release"."""
-        owned = {tuple(self._title_words(title)) for title in track_titles or []} - {()}
-        needed = max(2, -(-len(owned) * int(self.TRACK_LIST_SHARE * 100) // 100))
+        share = self.TRACK_LIST_SHARE if share is None else share
         carrying, unread = [], 0
         for candidate in candidates[:self.TRACK_LIST_CANDIDATES]:
             release = self.mb_client.get_release(candidate.get('id'), includes=['recordings'])
             if not isinstance(release, dict):
                 unread += 1
                 continue
-            listed = {tuple(self._title_words(track.get('title', '')))
-                      for medium in release.get('media') or []
-                      for track in (medium.get('tracks') or [])}
-            if len(owned & listed) >= needed:
+            found, owned = self._tracks_carried(track_titles, release)
+            if found >= max(2, -(-owned * int(share * 100) // 100)):
                 carrying.append(candidate)
         groups = {self.release_group_of(candidate) for candidate in carrying}
         if carrying and len(groups) == 1 and None not in groups:
@@ -2155,6 +2182,42 @@ class MusicBrainzService:
         group = release.get('release-group')
         mbid = group.get('id') if isinstance(group, dict) else None
         return str(mbid).strip().lower() if mbid else None
+
+    #: the share of a wishlist album's track titles its matched release has to carry
+    WISHLIST_TRACK_SHARE = 0.5
+
+    def release_carries_tracks(self, release_mbid: str, track_titles: Any) -> Optional[bool]:
+        """Whether this release's track list carries the album's own tracks.
+
+        A title and an artist do not pin an album down: a band's self-titled
+        records share both, and a record too new for MusicBrainz matches an
+        older namesake. Half of the titles is enough, so a deluxe edition still
+        matches its standard release. None when the track list could not be
+        read, so a timeout is not taken for "a different album".
+        """
+        if not any(self._track_title_keys(title) for title in track_titles or []):
+            return True
+        release = self.mb_client.get_release(release_mbid, includes=['recordings'])
+        if not isinstance(release, dict):
+            return None
+        found, owned = self._tracks_carried(track_titles, release)
+        return found >= owned * self.WISHLIST_TRACK_SHARE
+
+    def release_carrying_wishlist_tracks(self, album_name: str, artist_name: Optional[str],
+                                         track_titles: Any, skip: Any = ()) -> Optional[Dict[str, Any]]:
+        """Another same-titled release that does carry the album's tracks,
+        for when the best-scored one did not: a band's self-titled records
+        tie on title and artist, and the first of them is often the wrong
+        one. None when no candidate does, or when they span release groups.
+        Raises when track lists could not be read and nothing was decided."""
+        wanted = self._title_words(album_name)
+        results = self.mb_client.search_release(album_name, artist_name, limit=8, raise_on_error=True)
+        candidates = [result for result in results or []
+                      if result.get('id') not in set(skip or ())
+                      and self._title_words(result.get('title', '')) == wanted]
+        if not candidates:
+            return None
+        return self._release_carrying_tracks(candidates, track_titles, share=self.WISHLIST_TRACK_SHARE)
 
     def lookup_release_group(self, release_mbid: str) -> Optional[str]:
         """One MusicBrainz lookup: the release group a release belongs to.
