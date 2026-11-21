@@ -86,7 +86,13 @@ export function useSpatialNav(rootRef: RefObject<HTMLElement | null>) {
       const dir = directionForKey(event.key);
       if (!dir) return;
       // left/right inside a text field moves the caret
-      if (isTyping(active) && (dir === 'left' || dir === 'right')) return;
+      // a field moves its own caret left and right; one that lists results
+      // (the search box) moves through them up and down too
+      if (
+        isTyping(active) &&
+        (dir === 'left' || dir === 'right' || active?.closest('[data-own-arrows]'))
+      )
+        return;
 
       const list = candidates(root);
       if (!list.length) return;

@@ -669,3 +669,28 @@ export const makerQuery = (kind: 'studio' | 'network', name: string, sort: Maker
     staleTime: 30 * MINUTE,
     retry: false,
   });
+
+export interface TmdbSearchHit {
+  kind: 'movie' | 'show' | 'person';
+  tmdb_id: number;
+  title: string;
+  year?: string | number | null;
+  poster?: string | null;
+  library_id?: number | null;
+  known_for?: string | null;
+  department?: string | null;
+}
+
+/** tmdb's multi-search, as the video side runs it (owned ones stamped, kids capped) */
+export const tmdbSearchQuery = (q: string) =>
+  queryOptions({
+    queryKey: ['player', 'tmdb-search', q],
+    queryFn: async () =>
+      (
+        await apiClient
+          .get('video/search', { searchParams: { q } })
+          .json<{ results?: TmdbSearchHit[] }>()
+      ).results ?? [],
+    staleTime: 5 * MINUTE,
+    retry: false,
+  });

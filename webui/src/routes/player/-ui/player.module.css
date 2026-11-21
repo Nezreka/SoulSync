@@ -436,9 +436,9 @@
   position: absolute;
   top: calc(100% + var(--u) * 0.5);
   left: 0;
-  right: 0;
   z-index: 9;
-  max-height: min(70vh, calc(var(--u) * 34));
+  width: max(100%, min(calc(var(--u) * 40), calc(100vw - var(--pl-gutter) * 2)));
+  max-height: min(78vh, calc(var(--u) * 44));
   overflow-y: auto;
   padding: calc(var(--u) * 0.6);
   border: 1px solid var(--pl-line);
@@ -470,8 +470,9 @@
   text-decoration: none;
 }
 
-.searchHit:hover {
-  background: var(--white-a06);
+.searchHit:hover,
+.searchHit[data-active='true'] {
+  background: var(--white-a08);
 }
 
 .searchThumb {
@@ -481,6 +482,178 @@
   border-radius: var(--radius-sm);
   background: var(--white-a06);
   object-fit: cover;
+}
+
+.searchThumb[data-round='true'],
+.searchTopThumb[data-round='true'] {
+  border-radius: var(--radius-circle);
+}
+
+/* the top result: bigger art, what it is, the title large */
+.searchTop {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 1);
+  padding: calc(var(--u) * 0.7);
+  border-radius: var(--radius-lg);
+  background: var(--white-a04);
+  color: var(--pl-text);
+  text-decoration: none;
+}
+
+.searchTop:hover,
+.searchTop[data-active='true'] {
+  background: var(--white-a08);
+}
+
+.searchTopThumb {
+  width: calc(var(--u) * 4.4);
+  height: calc(var(--u) * 4.4);
+  flex: none;
+  border-radius: var(--radius-md);
+  background: var(--white-a06);
+  object-fit: cover;
+}
+
+.searchTopType {
+  color: var(--pl-text-3);
+  font-size: calc(var(--u) * 0.72);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.searchTopTitle {
+  overflow: hidden;
+  font-size: calc(var(--u) * 1.3);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.searchGroupHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-right: calc(var(--u) * 0.4);
+}
+
+.searchMore {
+  padding: calc(var(--u) * 0.2) calc(var(--u) * 0.5);
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--pl-text-2);
+  font: inherit;
+  font-size: calc(var(--u) * 0.78);
+  cursor: pointer;
+}
+
+.searchMore:hover {
+  background: var(--white-a06);
+  color: var(--pl-text);
+}
+
+.searchFilters {
+  position: sticky;
+  top: calc(var(--u) * -0.6);
+  z-index: 1;
+  display: flex;
+  gap: calc(var(--u) * 0.35);
+  margin: calc(var(--u) * -0.6) calc(var(--u) * -0.6) 0;
+  padding: calc(var(--u) * 0.6);
+  overflow-x: auto;
+  background: var(--pl-panel-solid);
+  scrollbar-width: none;
+}
+
+.searchFilter {
+  flex: none;
+  height: calc(var(--u) * 1.9);
+  padding: 0 calc(var(--u) * 0.8);
+  border: 1px solid var(--pl-line);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--pl-text-2);
+  font: inherit;
+  font-size: calc(var(--u) * 0.8);
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.searchFilter:hover {
+  color: var(--pl-text);
+}
+
+.searchFilter[aria-selected='true'] {
+  border-color: transparent;
+  background: var(--pl-text);
+  color: var(--pl-bg);
+}
+
+.searchRecent {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 0.7);
+  width: 100%;
+  padding: calc(var(--u) * 0.5) calc(var(--u) * 0.6);
+  border: 0;
+  border-radius: var(--radius-lg);
+  background: transparent;
+  color: var(--pl-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.searchRecent svg {
+  width: calc(var(--u) * 0.95);
+  height: calc(var(--u) * 0.95);
+  color: var(--pl-text-3);
+}
+
+.searchRecent:hover {
+  background: var(--white-a06);
+}
+
+.searchKey {
+  position: absolute;
+  top: 50%;
+  right: calc(var(--u) * 0.8);
+  padding: 0 calc(var(--u) * 0.4);
+  border: 1px solid var(--pl-line);
+  border-radius: var(--radius-sm);
+  color: var(--pl-text-3);
+  font: inherit;
+  font-size: calc(var(--u) * 0.72);
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.searchStatus {
+  padding: calc(var(--u) * 0.4) calc(var(--u) * 0.6);
+  color: var(--pl-text-3);
+  font-size: calc(var(--u) * 0.8);
+}
+
+.searchHint {
+  display: flex;
+  gap: calc(var(--u) * 1.2);
+  margin-top: calc(var(--u) * 0.4);
+  padding: calc(var(--u) * 0.6) calc(var(--u) * 0.6) calc(var(--u) * 0.2);
+  border-top: 1px solid var(--pl-line);
+  color: var(--pl-text-3);
+  font-size: calc(var(--u) * 0.74);
+}
+
+.searchHint kbd {
+  margin-right: calc(var(--u) * 0.2);
+  padding: 0 calc(var(--u) * 0.3);
+  border: 1px solid var(--pl-line);
+  border-radius: var(--radius-sm);
+  font: inherit;
 }
 
 .searchHitText {
