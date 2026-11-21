@@ -74,7 +74,10 @@ describe('movie manual search (#2122)', () => {
 
   it('is in the movie menu and wired to its action', () => {
     expect(SRC).toContain("getMore += moreItem('manualsearch', ");
-    expect(SRC).toContain("else if (which === 'manualsearch') manualSearchMovie();");
+    // a show's ⋯ menu has its own (#2233); a movie's still opens the movie's
+    expect(SRC).toContain(
+      "else if (which === 'manualsearch') { if (data && data.kind === 'show') manualSearchShow(); else manualSearchMovie(); }",
+    );
     // the library tab's bridge goes through the same function
     expect(SRC).toContain("if (scope === 'movie') { manualSearchMovie(); return; }");
   });

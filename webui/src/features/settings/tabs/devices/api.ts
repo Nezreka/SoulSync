@@ -189,6 +189,9 @@ export interface MusicApps {
   addresses: Address[];
   bridge: BridgeServer[];
   transcode_format: string;
+  /** how many songs convert at once; a song past that waits its turn */
+  transcode_slots: number;
+  slots_range: [number, number];
   formats: string[];
   ffmpeg: boolean;
 }
@@ -213,4 +216,5 @@ export const setUpMusicApp = (profile_id: number, name: string) =>
 export const saveMusicAppSettings = (body: {
   bridge?: Partial<Record<BridgeServer['id'], boolean>>;
   transcode_format?: string;
+  transcode_slots?: number;
 }) => call<MusicApps>('/api/devices/music-apps/settings', json('PUT', body));

@@ -195,8 +195,15 @@ After the music library folder moves, these point the library's file records at 
 
 - `POST /api/library/file-locations/preview`: check every record, write nothing. The finished result (on `/status` as `preview`) has `counts` per outcome (`repoint`, `present`, `not_found`, `ambiguous`, `different_file`, `unverified`, `outside_library`, `partial_match`, `claimed`, `old_root_live`) and `groups`: `[{old_root, new_root, count, examples}]`.
 - `POST /api/library/file-locations/apply` `{groups?: [{old_root, new_root}]}`: move the records, every one checked again; `groups` limits it to those folder pairs. An interrupted apply continues in the same run.
-- `GET /api/library/file-locations/status`: `{status, action, checked, total, result, preview, error, runs}`. `runs` lists recent runs, manual and from library scans, with `id`, `kind`, `status`, `repointed` and `groups`.
+- `GET /api/library/file-locations/status`: `{status, action, checked, total, result, preview, error, runs}`. `runs` lists recent runs, manual, from library scans and from folder watching (`kind`: `manual`, `scan`, `watch`), with `id`, `kind`, `status`, `repointed` and `groups`.
 - `POST /api/library/file-locations/runs/<id>/undo`: put a run's records back. A record changed since is left as it is. `POST /api/library/file-locations/stop` stops the running job.
+
+### Live folder watching (web UI routes, admins only)
+
+- `GET /api/library/folder-watch`: `{enabled, running, live_available, watching, last_change, last_change_folder, pending, poll_minutes, roots}`. Each root: `{path, kind: "library"|"import", setting: "auto"|"live"|"polling"|"off", mode: "live"|"polling"|"off", reason, note, reachable, poll_minutes, last_change, last_check, changes, pending}`. Times are Unix seconds. `live_available` is false when the `watchdog` package is missing (every folder is then polled).
+- `POST /api/library/folder-watch/refresh`: read the settings again now (after a save), then the same answer.
+
+Settings: `library.watch_folders` (default true), `library.watch_poll_minutes` (15), `library.watch_root_modes` (`{folder: mode}`), `library.watch_max_live_folders` (100000). A change reaches open pages as the `library:changed` socket event.
 
 ### Library coverage and folder overrides (web UI routes, admins only)
 
@@ -265,9 +272,9 @@ What a request sees is its profile's: its library (own-library rules), less expl
 
 Admin (Settings > Devices > Set up a music app):
 
-- `GET /api/devices/music-apps`: `{profiles: [{id, name}], addresses, bridge: [{id, name, on, active}], transcode_format, formats, ffmpeg}`. `profiles` are the ones with Use music apps.
+- `GET /api/devices/music-apps`: `{profiles: [{id, name}], addresses, bridge: [{id, name, on, active}], transcode_format, transcode_slots, slots_range: [min, max], formats, ffmpeg}`. `profiles` are the ones with Use music apps.
 - `POST /api/devices/music-apps` `{profile_id, name?}`: `201 {device_id, name, server, addresses, username, password, api_key, qr_text}`. A paired device for that profile with its own app password (kept encrypted) and API key, both shown this once. Unpair it like any device; its password goes with it. `400` for a profile without Use music apps.
-- `PUT /api/devices/music-apps/settings` `{bridge?: {plex|jellyfin|navidrome: bool}, transcode_format?: "mp3"|"opus"}`: answers like the GET. Each switch is "Stream files SoulSync can't read through <server>", off by default.
+- `PUT /api/devices/music-apps/settings` `{bridge?: {plex|jellyfin|navidrome: bool}, transcode_format?: "mp3"|"opus", transcode_slots?: 1-16}`: answers like the GET. `transcode_slots` is how many songs convert at once (4 by default); a stream past that waits up to 20 s for a slot, in arrival order, then gets Subsonic error 0 ("busy converting, try again"), never the original file. Each switch is "Stream files SoulSync can't read through <server>", off by default.
 
 ---
 
@@ -2785,6 +2792,12 @@ The video search the web UI runs (`POST /api/video/downloads/search`, `/download
 - `score` is still the total of the three groups, and `format_score` / `formats` are unchanged.
 
 A `query` in the search body (`/downloads/search/start`, `/downloads/search`) is run as typed on every source: one text search, no ids or structured search added. Leave it out for the usual search.
+
+A show's search (#2233) takes `scope` `series` (complete packs), `season` (with `season`) or `episode` (with `season` and `episode`):
+
+- `with_episodes: true` on a `season` search (a `with_episodes=1` query parameter on the poll) judges that season's single episodes as themselves instead of rejecting them as not a season pack, so packs and episodes come back together.
+- each result of a show in your library carries `cover: {have, total}`: the episodes it covers by the library's episode list and how many of them you already have. A Soulseek pack's `files` each get `have: true` for the ones you have.
+- an `episode` search fills in the show's `series_type`, `air_date`, `absolute` and scene numbering (`alt_season`, `alt_episode`) from the library when the body doesn't send them, and searches and judges by them like the wishlist does.
 
 The quality profile (`GET/POST /api/video/downloads/quality` and the named profiles) adds `preferred_movie_gb` and `preferred_episode_gb`: a tie-break, closer ranks higher, in tenths of a GB, `0` = off (the default), clamped to the max size.
 

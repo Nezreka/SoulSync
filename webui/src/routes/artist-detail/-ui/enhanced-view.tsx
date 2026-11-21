@@ -338,7 +338,7 @@ function EnhancedAlbumWrapper({
   /**
    * The canonical tracklist, fetched once the panel opens (library.js:3422).
    * It is what puts the missing rows into the table, and with them the only
-   * way into "I Have This".
+   * way into "Copy a track here" (was "I Have This").
    *
    * Keyed on the album record in STATE, with the loading flag as the marker.
    * Any record without the flags is one the diff has not seen: the first

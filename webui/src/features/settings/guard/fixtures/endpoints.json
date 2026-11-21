@@ -68,6 +68,11 @@
       }
     ],
     "transcode_format": "mp3",
+    "transcode_slots": 4,
+    "slots_range": [
+      1,
+      16
+    ],
     "formats": [
       "mp3",
       "opus"
@@ -185,6 +190,33 @@
     "configured": true,
     "key_rejected": false,
     "message": ""
+  },
+  "/api/library/folder-watch": {
+    "enabled": true,
+    "last_change": null,
+    "last_change_folder": null,
+    "live_available": true,
+    "pending": 0,
+    "poll_minutes": 15,
+    "roots": [
+      {
+        "changes": 0,
+        "kind": "library",
+        "last_change": null,
+        "last_check": null,
+        "mode": "live",
+        "note": "",
+        "path": "/app/Transfer",
+        "pending": 0,
+        "poll_minutes": null,
+        "reachable": true,
+        "reason": "local disk (ext4)",
+        "setting": "auto"
+      }
+    ],
+    "running": true,
+    "success": true,
+    "watching": 1
   },
   "/api/library/coverage": {
     "docker": true,

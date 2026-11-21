@@ -1403,6 +1403,14 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
       'transcode convert mp3 opus bitrate bridge media server plex jellyfin navidrome cant read',
   },
   {
+    label: 'Songs converted at once',
+    tab: 'devices',
+    anchor: id('music-app-slots'),
+    file: 'devices/music-apps.tsx',
+    hint: 'music apps: how many songs convert together, one past that waits its turn',
+    keywords: 'transcode convert slots ffmpeg cpu busy at once mobile data wait',
+  },
+  {
     id: 'setting:devices:remote-address',
     label: 'Remote address',
     tab: 'devices',

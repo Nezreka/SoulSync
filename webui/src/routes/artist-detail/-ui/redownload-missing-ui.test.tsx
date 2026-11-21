@@ -322,7 +322,7 @@ describe('MissingTrackManageModal', () => {
     await waitFor(() => expect(open).toHaveBeenCalledTimes(1));
   });
 
-  it('"I Have This" searches the library, imports the pick, and reports back', async () => {
+  it('"Copy a track here" (was I Have This) searches the library, imports the pick, and reports back', async () => {
     const calls: { url: string; body: Record<string, unknown> | null }[] = [];
     vi.stubGlobal(
       'fetch',
@@ -361,7 +361,7 @@ describe('MissingTrackManageModal', () => {
         onClose={vi.fn()}
       />,
     );
-    fireEvent.click(screen.getByText('I Have This'));
+    fireEvent.click(screen.getByText('Copy a track here'));
     // Auto-search seeded "title artist".
     expect(calls[0].url).toContain('q=Green%20Calx%20Aphex%20Twin');
     await screen.findByText('Green Calx (Live)');
@@ -374,7 +374,7 @@ describe('MissingTrackManageModal', () => {
     fireEvent.click(confirm);
     await waitFor(() =>
       expect(window.showToast).toHaveBeenCalledWith(
-        'Track imported. Original file was left untouched.',
+        'Copied the file into this album. The original stays where it is.',
         'success',
       ),
     );

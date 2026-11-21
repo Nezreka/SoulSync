@@ -100,10 +100,13 @@ export function OwnedTrackMoreMenu({
       title: 'Move a track you already have into this slot: the file moves, nothing is copied',
       onSelect: () => void openMove(),
     });
+    // #2241: both fill the slot from a track you have. Move takes it out of
+    // its old album; Copy keeps it there too (a song on a single and on the
+    // album), so the menu says which one does which.
     items.push({
       key: 'have',
-      label: 'I Have This…',
-      title: 'Use a file already in your library for this missing track',
+      label: 'Copy a track here…',
+      title: 'Copy a track you already have into this slot: the original stays where it is',
       onSelect: () => setDialog('have'),
     });
     if (slotKeeper && track.id != null) {
@@ -198,10 +201,8 @@ export function OwnedTrackMoreMenu({
           }}
           album={{ id: albumId, title: albumTitle }}
           artist={{ id: null, name: artistName, imageUrl: '' }}
-          onImported={() => {
-            window.showToast?.('Imported the existing file into this album', 'success');
-            refresh();
-          }}
+          // the copy modal toasts its own result
+          onImported={refresh}
           onClose={() => setDialog(null)}
         />
       ) : null}

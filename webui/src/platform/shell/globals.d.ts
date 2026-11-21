@@ -722,6 +722,14 @@ declare global {
         mediaId?: number | string | null;
         mediaSource?: string | null;
         tmdbId?: number | string | null;
+        /** a show's seasons: the modal then offers whole series, a season or an episode (#2233) */
+        seasons?: Array<{
+          season: number;
+          title?: string | null;
+          total?: number;
+          have?: number;
+          episodes?: Array<{ episode: number; title?: string | null; have?: boolean }>;
+        }>;
       }) => void;
     };
     /** video-poster-modal.js: the poster manager (search, then pick art). */

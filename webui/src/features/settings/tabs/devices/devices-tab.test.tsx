@@ -74,6 +74,8 @@ const MUSIC_APPS = {
     { id: 'jellyfin', name: 'Jellyfin', on: false, active: false },
   ],
   transcode_format: 'mp3',
+  transcode_slots: 4,
+  slots_range: [1, 16],
   formats: ['mp3', 'opus'],
   ffmpeg: true,
 };
@@ -307,5 +309,27 @@ describe('the words', () => {
     });
     const put = calls.find((c) => c.url === '/api/devices/music-apps/settings');
     expect(put?.body).toEqual({ bridge: { plex: true } });
+  });
+
+  it('saves how many songs convert at once', async () => {
+    const { findByLabelText } = tab();
+    const slots = (await findByLabelText('Songs converted at once')) as HTMLSelectElement;
+    expect(slots.value).toBe('4');
+    expect([...slots.options].map((o) => o.value)).toEqual([
+      '1',
+      '2',
+      '3',
+      '4',
+      '5',
+      '6',
+      '8',
+      '12',
+      '16',
+    ]);
+    await act(async () => {
+      fireEvent.change(slots, { target: { value: '2' } });
+    });
+    const put = calls.find((c) => c.url === '/api/devices/music-apps/settings');
+    expect(put?.body).toEqual({ transcode_slots: 2 });
   });
 });

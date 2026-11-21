@@ -215,6 +215,10 @@ The API pill has three more cards, each a switch that is off by default:
 
 Under **System › General**, as Debug / Info / Warning / Error segments; it applies at once. Controls verbosity: Error, Warning, Info, or Debug. Raise to Debug when troubleshooting; drop back to Info afterward to keep log files small.
 
+## Watching for changes
+
+On **Library › Folders**. With it on (the default), music you add, retag, move or delete by hand in a library folder shows up without a scan, and the Import folder starts the auto-import as soon as files land. Local disks are watched live; network shares are checked on a timer (**Check network shares every**, 15 minutes by default). Every folder is listed with how it is watched, and each one can be set to Automatic, Live, On a timer or Off. See [Live Folder Watching](#lib-watch).
+
 ## Additional music libraries
 
 On **Library › Folders**. Your **Music library folder** is already covered — you don't need to repeat it here. Register only *extra* **music** folders SoulSync should also read and index: a second collection, an archive drive, or a folder your media server sees at a different path than SoulSync can. They're used for tag writing, streaming, and file detection. Podcasts and audiobooks have their own folder fields — don't point an additional library at those.

@@ -56,7 +56,8 @@ function phaseText(state: FileLocationState | null): string {
 
 function runLabel(run: FileLocationRun): string {
   const when = (run.finished_at || run.started_at || '').slice(0, 16).replace('T', ' ');
-  const who = run.kind === 'scan' ? 'library scan' : 'Tools';
+  const who =
+    run.kind === 'scan' ? 'library scan' : run.kind === 'watch' ? 'folder watch' : 'Tools';
   const what = run.status === 'undone' ? 'undone' : files(run.repointed);
   return `${when} · ${who} · ${what}`;
 }

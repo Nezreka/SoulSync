@@ -130,6 +130,9 @@
   "library": {
     "audiobooks_additional_paths": ["/mnt/oldbooks"],
     "redownload_externally_deleted": false,
+    "watch_folders": true,
+    "watch_poll_minutes": 15,
+    "watch_root_modes": {},
     "write_artist_nfo": true
   },
   "lidarr_compat": {

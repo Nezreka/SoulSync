@@ -9,11 +9,12 @@ import {
   searchLibraryTracksRequest,
   wishlistEnhancedMissingTrack,
 } from '../-artist-detail.missing-track';
+import { BodyPortal } from './portal';
 
 /**
  * Missing-track management (openMissingTrackManageModal, library.js:4884):
  * a two-option chooser, then either the shared wishlist-add flow ("Add to
- * Library") or the "I Have This" copy-import modal.
+ * Library") or the "Copy a track here" copy-import modal (was "I Have This").
  */
 export function MissingTrackManageModal({
   track,
@@ -44,77 +45,83 @@ export function MissingTrackManageModal({
   }
 
   return (
-    <div
-      id="enhanced-missing-manage-overlay"
-      className="modal-overlay"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div className="confirm-modal enhanced-missing-manage-modal">
-        <div className="confirm-modal-header">
-          <h2>Manage Missing Track</h2>
-          <button className="confirm-modal-close" type="button" onClick={onClose}>
-            ×
-          </button>
-        </div>
-        <div className="confirm-modal-body enhanced-missing-manage-body">
-          <div className="enhanced-missing-manage-target">
-            <div className="enhanced-have-target-label">Missing album slot</div>
-            <div className="enhanced-have-target-title">
-              #{String(track.track_number || '?')} {String(track.title || 'Unknown Track')}
-            </div>
-            <div className="enhanced-have-target-meta">
-              {artist.name} · {String(album.title || '')}
-            </div>
-          </div>
-          <div className="enhanced-missing-manage-options">
-            <button
-              className="enhanced-missing-option primary"
-              type="button"
-              data-action="library"
-              onClick={() => {
-                onClose();
-                void wishlistEnhancedMissingTrack(track, album, artist, false);
-              }}
-            >
-              <span className="enhanced-missing-option-icon">+</span>
-              <span>
-                <span className="enhanced-missing-option-title">Add to Library</span>
-                <span className="enhanced-missing-option-desc">
-                  Open the normal library-add flow with this exact track context.
-                </span>
-              </span>
-            </button>
-            <button
-              className="enhanced-missing-option"
-              type="button"
-              data-action="have"
-              onClick={() => setHaving(true)}
-            >
-              <span className="enhanced-missing-option-icon">OK</span>
-              <span>
-                <span className="enhanced-missing-option-title">I Have This</span>
-                <span className="enhanced-missing-option-desc">
-                  Copy an existing file and process it into this album slot. The original stays
-                  untouched.
-                </span>
-              </span>
+    <BodyPortal>
+      <div
+        id="enhanced-missing-manage-overlay"
+        className="modal-overlay"
+        onClick={(e) => {
+          if (e.target === e.currentTarget) onClose();
+        }}
+      >
+        <div className="confirm-modal enhanced-missing-manage-modal">
+          <div className="confirm-modal-header">
+            <h2>Manage Missing Track</h2>
+            <button className="confirm-modal-close" type="button" onClick={onClose}>
+              ×
             </button>
           </div>
-        </div>
-        <div className="confirm-modal-actions">
-          <button className="modal-button modal-button--secondary" type="button" onClick={onClose}>
-            Cancel
-          </button>
+          <div className="confirm-modal-body enhanced-missing-manage-body">
+            <div className="enhanced-missing-manage-target">
+              <div className="enhanced-have-target-label">Missing album slot</div>
+              <div className="enhanced-have-target-title">
+                #{String(track.track_number || '?')} {String(track.title || 'Unknown Track')}
+              </div>
+              <div className="enhanced-have-target-meta">
+                {artist.name} · {String(album.title || '')}
+              </div>
+            </div>
+            <div className="enhanced-missing-manage-options">
+              <button
+                className="enhanced-missing-option primary"
+                type="button"
+                data-action="library"
+                onClick={() => {
+                  onClose();
+                  void wishlistEnhancedMissingTrack(track, album, artist, false);
+                }}
+              >
+                <span className="enhanced-missing-option-icon">+</span>
+                <span>
+                  <span className="enhanced-missing-option-title">Add to Library</span>
+                  <span className="enhanced-missing-option-desc">
+                    Open the normal library-add flow with this exact track context.
+                  </span>
+                </span>
+              </button>
+              <button
+                className="enhanced-missing-option"
+                type="button"
+                data-action="have"
+                onClick={() => setHaving(true)}
+              >
+                <span className="enhanced-missing-option-icon">OK</span>
+                <span>
+                  <span className="enhanced-missing-option-title">Copy a track here</span>
+                  <span className="enhanced-missing-option-desc">
+                    Copy a file you already have into this slot. The original stays where it is.
+                  </span>
+                </span>
+              </button>
+            </div>
+          </div>
+          <div className="confirm-modal-actions">
+            <button
+              className="modal-button modal-button--secondary"
+              type="button"
+              onClick={onClose}
+            >
+              Cancel
+            </button>
+          </div>
         </div>
       </div>
-    </div>
+    </BodyPortal>
   );
 }
 
 /**
- * "I Have This" (openHaveMissingTrackModal, library.js:4954): pick an existing
+ * "Copy a track here" (was "I Have This", openHaveMissingTrackModal,
+ * library.js:4954; renamed for #2241 next to "Move a track here"): pick an existing
  * library file; SoulSync copies it, writes the missing track's tags, and
  * places the copy in this album. Closing is blocked while the import runs.
  */
@@ -204,7 +211,10 @@ export function HaveTrackModal({
         detail: 'The copied file is now being shown in this album.',
         tone: 'success',
       });
-      window.showToast?.('Track imported. Original file was left untouched.', 'success');
+      window.showToast?.(
+        'Copied the file into this album. The original stays where it is.',
+        'success',
+      );
       onImported(updatedData);
       setTimeout(onClose, 650);
     } catch (error) {
@@ -220,164 +230,171 @@ export function HaveTrackModal({
     onClose();
   };
 
+  // portaled (#2241): the library page opens this from the ⋯ menu inside the
+  // album table's actions cell, whose right align, nowrap and the missing
+  // row's italic leaked into a dialog rendered in place
   return (
-    <div
-      id="enhanced-have-track-overlay"
-      className="modal-overlay"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) close();
-      }}
-    >
-      <div className="enhanced-manual-match-modal enhanced-have-track-modal">
-        <div className="enhanced-bulk-modal-header">
-          <div>
-            <h3>I Have This Track</h3>
-            <div className="enhanced-have-subtitle">
-              Use an existing file as the source audio. SoulSync will copy it into this album.
+    <BodyPortal>
+      <div
+        id="enhanced-have-track-overlay"
+        className="modal-overlay"
+        onClick={(e) => {
+          if (e.target === e.currentTarget) close();
+        }}
+      >
+        <div className="enhanced-manual-match-modal enhanced-have-track-modal">
+          <div className="enhanced-bulk-modal-header">
+            <div>
+              <h3>Copy a track here</h3>
+              <div className="enhanced-have-subtitle">
+                Pick a track you already have. A copy goes into this album, the original stays where
+                it is.
+              </div>
+            </div>
+            <button
+              className="enhanced-bulk-modal-close"
+              type="button"
+              disabled={importing}
+              onClick={close}
+            >
+              ×
+            </button>
+          </div>
+          <div className="enhanced-have-target">
+            <div className="enhanced-have-target-label">Missing album slot</div>
+            <div className="enhanced-have-target-title">
+              #{String(track.track_number || '?')} {String(track.title || 'Unknown Track')}
+            </div>
+            <div className="enhanced-have-target-meta">
+              {artist.name} · {String(album.title || '')}
             </div>
           </div>
-          <button
-            className="enhanced-bulk-modal-close"
-            type="button"
-            disabled={importing}
-            onClick={close}
-          >
-            ×
-          </button>
-        </div>
-        <div className="enhanced-have-target">
-          <div className="enhanced-have-target-label">Missing album slot</div>
-          <div className="enhanced-have-target-title">
-            #{String(track.track_number || '?')} {String(track.title || 'Unknown Track')}
+          <div className="enhanced-match-search-row">
+            <input
+              className="enhanced-match-search-input"
+              id="enhanced-have-track-search"
+              type="text"
+              value={query}
+              placeholder="Search your library..."
+              disabled={importing}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !importing) void runSearch(query);
+              }}
+            />
+            <button
+              className="enhanced-enrich-btn"
+              id="enhanced-have-track-search-btn"
+              type="button"
+              disabled={importing}
+              onClick={() => void runSearch(query)}
+            >
+              Search
+            </button>
           </div>
-          <div className="enhanced-have-target-meta">
-            {artist.name} · {String(album.title || '')}
-          </div>
-        </div>
-        <div className="enhanced-match-search-row">
-          <input
-            className="enhanced-match-search-input"
-            id="enhanced-have-track-search"
-            type="text"
-            value={query}
-            placeholder="Search your library..."
-            disabled={importing}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !importing) void runSearch(query);
-            }}
-          />
-          <button
-            className="enhanced-enrich-btn"
-            id="enhanced-have-track-search-btn"
-            type="button"
-            disabled={importing}
-            onClick={() => void runSearch(query)}
-          >
-            Search
-          </button>
-        </div>
-        <div className="enhanced-match-results" id="enhanced-have-track-results">
-          {searchError ? (
-            <div className="enhanced-match-results-hint" style={{ color: 'var(--danger-light)' }}>
-              Error: {searchError}
-            </div>
-          ) : results === null ? (
-            <div className="enhanced-loading">Searching...</div>
-          ) : results.length === 0 ? (
-            <div className="enhanced-match-results-hint">
-              {query.trim()
-                ? 'No library tracks found. Try a different search.'
-                : 'Enter a title or artist to search.'}
-            </div>
-          ) : (
-            results
-              .filter((r) => r.id)
-              .map((result) => {
-                const id = String(result.id);
-                const fileName = result.file_path
-                  ? result.file_path.split(/[\\/]/).pop()
-                  : 'No file path';
-                return (
-                  <div
-                    className={`enhanced-have-result-row${selectedId === id ? ' selected' : ''}${importing ? ' disabled' : ''}`}
-                    role="button"
-                    tabIndex={0}
-                    aria-pressed={selectedId === id}
-                    key={id}
-                    onClick={() => {
-                      if (!importing) setSelectedId(id);
-                    }}
-                    onKeyDown={(e) => {
-                      if ((e.key === 'Enter' || e.key === ' ') && !importing) {
-                        e.preventDefault();
-                        setSelectedId(id);
-                      }
-                    }}
-                  >
-                    <span className="enhanced-have-radio" />
-                    <span className="enhanced-have-result-main">
-                      <span className="enhanced-have-result-title">
-                        {result.title || 'Unknown'}
+          <div className="enhanced-match-results" id="enhanced-have-track-results">
+            {searchError ? (
+              <div className="enhanced-match-results-hint" style={{ color: 'var(--danger-light)' }}>
+                Error: {searchError}
+              </div>
+            ) : results === null ? (
+              <div className="enhanced-loading">Searching...</div>
+            ) : results.length === 0 ? (
+              <div className="enhanced-match-results-hint">
+                {query.trim()
+                  ? 'No library tracks found. Try a different search.'
+                  : 'Enter a title or artist to search.'}
+              </div>
+            ) : (
+              results
+                .filter((r) => r.id)
+                .map((result) => {
+                  const id = String(result.id);
+                  const fileName = result.file_path
+                    ? result.file_path.split(/[\\/]/).pop()
+                    : 'No file path';
+                  return (
+                    <div
+                      className={`enhanced-have-result-row${selectedId === id ? ' selected' : ''}${importing ? ' disabled' : ''}`}
+                      role="button"
+                      tabIndex={0}
+                      aria-pressed={selectedId === id}
+                      key={id}
+                      onClick={() => {
+                        if (!importing) setSelectedId(id);
+                      }}
+                      onKeyDown={(e) => {
+                        if ((e.key === 'Enter' || e.key === ' ') && !importing) {
+                          e.preventDefault();
+                          setSelectedId(id);
+                        }
+                      }}
+                    >
+                      <span className="enhanced-have-radio" />
+                      <span className="enhanced-have-result-main">
+                        <span className="enhanced-have-result-title">
+                          {result.title || 'Unknown'}
+                        </span>
+                        <span className="enhanced-have-result-meta">
+                          {result.artist_name || ''}
+                          {result.album_title ? ` · ${result.album_title}` : ''}
+                        </span>
+                        <span className="enhanced-have-result-file">{fileName}</span>
                       </span>
-                      <span className="enhanced-have-result-meta">
-                        {result.artist_name || ''}
-                        {result.album_title ? ` · ${result.album_title}` : ''}
+                      <span className="enhanced-have-result-side">
+                        {result.duration ? <span>{formatClock(result.duration)}</span> : null}
+                        {result.bitrate ? <span>{result.bitrate} kbps</span> : null}
                       </span>
-                      <span className="enhanced-have-result-file">{fileName}</span>
-                    </span>
-                    <span className="enhanced-have-result-side">
-                      {result.duration ? <span>{formatClock(result.duration)}</span> : null}
-                      {result.bitrate ? <span>{result.bitrate} kbps</span> : null}
-                    </span>
-                  </div>
-                );
-              })
-          )}
-        </div>
-        <div className="enhanced-have-selected" id="enhanced-have-selected" hidden={!selected}>
-          <span>Selected</span>
-          <strong>{selectedSummary}</strong>
-        </div>
-        <div className="enhanced-have-note">
-          The selected file stays in its current album/folder. SoulSync copies it, writes the
-          missing track's tags, and places the copy in this album.
-        </div>
-        {status ? (
-          <div
-            className={`enhanced-have-import-status${status.tone === 'error' ? ' error' : ''}${status.tone === 'success' ? ' success' : ''}`}
-            id="enhanced-have-import-status"
-          >
-            <div className="enhanced-have-import-status-top">
-              <span className="enhanced-have-import-spinner" />
-              <span className="enhanced-have-import-title">{status.title}</span>
-              <span className="enhanced-have-import-time">{elapsed}s</span>
-            </div>
-            <div className="enhanced-have-import-detail">{status.detail}</div>
+                    </div>
+                  );
+                })
+            )}
           </div>
-        ) : null}
-        <div className="enhanced-bulk-modal-footer">
-          <button
-            className="btn btn--sm btn--secondary enhanced-bulk-btn"
-            id="enhanced-have-cancel"
-            type="button"
-            disabled={importing}
-            onClick={close}
-          >
-            Cancel
-          </button>
-          <button
-            className="btn btn--sm btn--primary enhanced-bulk-btn"
-            id="enhanced-have-confirm"
-            type="button"
-            disabled={!selectedId || importing}
-            onClick={() => void doImport()}
-          >
-            {importing ? 'Importing...' : 'Import Track'}
-          </button>
+          {selected ? (
+            <div className="enhanced-have-note" id="enhanced-have-selected">
+              Selected: <strong>{selectedSummary}</strong>
+            </div>
+          ) : null}
+          <div className="enhanced-have-note">
+            The selected file stays in its current album/folder. SoulSync copies it, writes the
+            missing track's tags, and places the copy in this album.
+          </div>
+          {status ? (
+            <div
+              className={`enhanced-have-import-status${status.tone === 'error' ? ' error' : ''}${status.tone === 'success' ? ' success' : ''}`}
+              id="enhanced-have-import-status"
+            >
+              <div className="enhanced-have-import-status-top">
+                <span className="enhanced-have-import-spinner" />
+                <span className="enhanced-have-import-title">{status.title}</span>
+                <span className="enhanced-have-import-time">{elapsed}s</span>
+              </div>
+              <div className="enhanced-have-import-detail">{status.detail}</div>
+            </div>
+          ) : null}
+          <div className="enhanced-bulk-modal-footer">
+            <button
+              className="btn btn--sm btn--secondary enhanced-bulk-btn"
+              id="enhanced-have-cancel"
+              type="button"
+              disabled={importing}
+              onClick={close}
+            >
+              Cancel
+            </button>
+            <button
+              className="btn btn--sm btn--primary enhanced-bulk-btn"
+              id="enhanced-have-confirm"
+              type="button"
+              disabled={!selectedId || importing}
+              onClick={() => void doImport()}
+            >
+              {importing ? 'Importing...' : 'Import Track'}
+            </button>
+          </div>
         </div>
       </div>
-    </div>
+    </BodyPortal>
   );
 }
 

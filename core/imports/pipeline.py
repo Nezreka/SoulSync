@@ -1286,6 +1286,8 @@ def _merge_upgraded_album_folder(context, artist_context, album_info, old_album_
                 )
                 continue
             try:
+                from core.library import own_writes
+                own_writes.note(src, dst)
                 shutil.move(src, dst)
             except OSError as e:
                 logger.error("[M5] Upgrade merge: could not move %s -> %s: %s", src, dst, e)

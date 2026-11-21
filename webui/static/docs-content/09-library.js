@@ -31,6 +31,7 @@ The Library page shows every artist in your collection as cards with images, alb
 - **Collection**: each artist card and table row shows owned / expected tracks with a bar, green when complete, amber when tracks are missing. For a Watchlist artist, expected follows their collection settings, so a release they leave out never counts as missing. For anyone else it's the albums you have: every track of each release you hold something of, plus anything you asked for, so one track of a 14 track album reads 1 / 14. An artist whose release sizes were never looked up says **Not checked** instead of complete. Click **N missing** to see those tracks: in Wanted for a Watchlist artist, on the artist's page for anyone else
 - **Leftover rows**: when a retag or re-identify moves a file onto another row of its album, the old row is left with no file at the same position. A library scan and an artist's **Refresh & Scan** fold it into the row that has the file (its plays come along), so the album counts right again. A locked album keeps them until you act, and you can remove one yourself from its **⋯** menu with **Remove This Row**. A row alone at its position is a missing track and stays
 - **Move a track here**: a missing track's **⋯** menu (admins) finds a track you already have somewhere else, a stray single say, and moves it into the slot. Search your library (it starts with the missing title), pick the track by its album, path and quality, and the preview shows where the file goes and which tags change. **Move here** moves the file, it never copies it: the old row goes (its plays, history and playlist spots come along), its album leaves the library when nothing else is on it, the file is retagged for this album and filed into its folder by your naming template (left where it is when file organization is off). A locked album, on either side, has to be unlocked first. **Reassign to another artist** on an album also moves now: the originals go once the re-import lands, with their old row and an album left empty
+- **Copy a track here** (was **I Have This**): the same ⋯ menu, for when you want the track in both places, a song on a single and on the album say. It copies the file through the import pipeline into the slot and leaves the original where it is. Use **Move a track here** when the old copy should go.
 - **Collection filters** live in the Filters menu: complete or incomplete, missing count and completion ranges, and artists only credited on other people's tracks. Sort by completion, missing tracks, could be better or incomplete albums, and turn any sort around with the arrow
 - **Overview** opens a summary above the list: artists, tracks owned, complete and incomplete collections, tracks missing, could be better, and Watchlist artists
 - **Card size** slider in the toolbar, separate for artist and album cards (and posters on the video library), with a reset. The list also remembers its view, sort, filters and scroll when you come back from an artist
@@ -170,6 +171,45 @@ Navidrome doesn't say which folders it uses, so its folders are worked out from 
 When SoulSync can't work out a folder on its own (two mounts that share no folder names), open **SoulSync sees it somewhere else** on that row, type the folder as SoulSync sees it, press **Try it** to sample it, then **Save**. That saves a folder override. Every media server path SoulSync turns into its own asks the overrides first, then what it learned itself. The longest matching folder wins, and an override whose folder is missing is skipped. An override only renames a folder: the drive still has to be mounted into SoulSync.
 
 Help warns when SoulSync can read less than half of the media server's music.
+`
+        },
+        {
+            id: 'lib-watch',
+            title: 'Live Folder Watching',
+            lede: 'Music you add, retag, move or delete by hand shows up on its own, one album at a time.',
+            body: `
+SoulSync watches your music library folders: the Music Library Folder, each profile's own library folder and every **Additional Music Library**. Copy an album in, retag one in another tagger, rename a folder or delete a few tracks, and the Library catches up a few seconds after the copy finishes. No scan needed. An open Library page refreshes by itself.
+
+## What happens on a change
+
+- **One album, one rescan.** Changes are gathered per album folder (a \`CD1\` or \`Disc 2\` folder counts as its album), and the folder is read once it has been quiet for a few seconds and its files have stopped growing. Copying 15 tracks is one rescan, not 15.
+- **New files** are added to the Library in place, with their identity from their tags. Nothing found this way is downloaded, upgraded or added to the Wishlist.
+- **Changed files** (new tags, a better copy) are read again, the same as **Refresh & Scan** on the artist page.
+- **Moved or renamed files keep their record**, so plays, padlocks, history and download records follow them. A move counts when the system reports the rename, or when a file gone from its old place turns up somewhere else with the same size and the same tags (and only one file fits). Every move is listed under **Tools → Update File Locations** and can be undone there.
+- **Deleted files** are marked as possibly missing at once. The next library scan confirms it, the same two-step rule every scan follows.
+- A change in the **Import folder** starts the auto-import right away instead of at its next check.
+
+## What is left alone
+
+- Files SoulSync is writing itself: imports, tag writes, reorganize, repairs and deletes.
+- Half-copied and temp files (\`.part\`, \`.tmp\`, \`~\`, browser and download client partials), hidden files and folders, and NAS system folders like \`@eaDir\` and \`#recycle\`.
+- A folder that disappears as a whole. That is a drive or share that is away, not a deleted library: nothing in it is marked missing, and watching starts again when it is back. Many files vanishing from one album batch at once is held back the same way.
+- Everything while a full library refresh is running; the changes wait for it.
+
+## Live or on a timer
+
+**Settings → Library → Folders → Watching for changes** lists every watched folder and how it is watched:
+
+| It says | Why |
+|---|---|
+| **Live** | A local disk: the system reports changes as they happen |
+| **Checked every 15 min** | A network share (SMB, NFS, a Windows \`\\\\server\\share\` path or mapped drive, Docker Desktop's host folders), where change reports don't arrive reliably. Each check reads the folders' listings, and the sizes and dates of a twelfth of the files, so an edit in place is found within twelve checks |
+| **Not reachable** | The folder or its drive is away |
+| **Off** | Turned off for that folder |
+
+Each folder has its own choice: **Automatic**, **Live**, **On a timer** or **Off**. **Check network shares every** sets the timer. The switch at the top turns watching off everywhere.
+
+A library with more folders than Linux lets one program watch live (\`fs.inotify.max_user_watches\`) is checked on a timer instead, and its row says so. Raise that limit on the host to watch it live. Live watching uses the \`watchdog\` package, which the Docker image includes; without it every folder is checked on a timer.
 `
         },
         {

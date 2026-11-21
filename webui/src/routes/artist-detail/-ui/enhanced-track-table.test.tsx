@@ -615,7 +615,7 @@ describe('row actions', () => {
     click('.enhanced-missing-manage-btn', 2);
     expect(screen.getByText('Manage Missing Track')).toBeTruthy();
     expect(screen.getByText('Add to Library')).toBeTruthy();
-    expect(screen.getByText('I Have This')).toBeTruthy();
+    expect(screen.getByText('Copy a track here')).toBeTruthy();
     cleanup();
 
     renderTable(ALBUM, false);

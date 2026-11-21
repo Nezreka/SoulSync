@@ -1,5 +1,5 @@
 import { QueryClientProvider } from '@tanstack/react-query';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { HttpResponse, http, server } from '@/test/msw';
@@ -8,6 +8,9 @@ import { createShellBridge } from '@/test/shell-bridge';
 
 import { candidateQuality, tagValue } from '../-library-v2.slot-move';
 import { lib2Track } from '../-library-v2.test-fixtures';
+import pageStyles from './library-v2-page.module.css';
+import { isIdTag } from './move-track-here-modal';
+import modalCss from './move-track-here-modal.module.css?raw';
 import { OwnedTrackMoreMenu } from './owned-artist-track-actions';
 
 // #2193: a missing album track takes a track you already have. the file
@@ -74,6 +77,13 @@ const preview = {
   organize: true,
   source_album_left_empty: true,
 };
+
+function tagRows(panel: HTMLElement): string[][] {
+  const table = within(panel).getByRole('table', { name: 'Tags that change' });
+  return [...table.querySelectorAll('tbody tr')].map((row) =>
+    [...row.children].map((cell) => cell.textContent ?? ''),
+  );
+}
 
 function openMove(trackId: number | null = 90) {
   const track = lib2Track({ id: trackId, title: 'Punkrocker', track_number: 32, file: null });
@@ -144,9 +154,13 @@ describe('move a track here (#2193)', () => {
     openMove();
     fireEvent.click(await screen.findByText(song.file_path));
     const panel = await screen.findByTestId('move-track-preview');
-    expect(panel).toHaveTextContent('OST/The Crabjoys/32 - Punkrocker.mp3');
-    expect(panel).toHaveTextContent('Title: Punkrocker (radio edit) → Punkrocker');
-    expect(panel).toHaveTextContent('Album: Punkrocker (radio edit) → The Crabjoys');
+    expect(within(panel).getByTestId('move-track-file')).toHaveTextContent(
+      'From' + preview.path.current + 'To' + preview.path.new,
+    );
+    expect(tagRows(panel)).toEqual([
+      ['Title', 'Punkrocker (radio edit)→Punkrocker'],
+      ['Album', 'Punkrocker (radio edit)→The Crabjoys'],
+    ]);
     expect(panel).toHaveTextContent('leaves your library');
     expect(onMove).not.toHaveBeenCalled();
 
@@ -203,6 +217,140 @@ describe('move a track here (#2193)', () => {
     await screen.findByTestId('move-track-preview');
     expect(materialized).toEqual(expect.objectContaining({ track_number: 32 }));
     expect(previewed).toBe('91');
+  });
+});
+
+// #2241: the dialog mounted inside the album table's actions cell and took
+// its right align and nowrap and the missing row's italic, and the What
+// happens block used a class no sheet defined. long lines ran off the edge.
+describe('move a track here layout (#2241)', () => {
+  const longPath =
+    '/app/Transfer/Compilations/Mercury - Acts 1 & 2/Disc 1/01 - Enemy (from the series Arcane League of Legends).flac';
+  const withIds = {
+    ...preview,
+    tags: {
+      changes: [
+        ...preview.tags.changes,
+        { field: 'DEEZER TRACK ID', from: '919319', to: '3984403641' },
+        { field: 'MUSICBRAINZ RELEASE ID', from: '9760e4be', to: 'b81c17a4' },
+      ],
+    },
+  };
+
+  beforeEach(() => {
+    window.SoulSyncWebShellBridge = createShellBridge();
+    window.showToast = vi.fn();
+    server.use(
+      http.get('/api/library/v2/songs', () =>
+        HttpResponse.json({ success: true, songs: [{ ...song, file_path: longPath }] }),
+      ),
+      http.post('/api/library/v2/tracks/90/move-into/preview', () => HttpResponse.json(withIds)),
+    );
+  });
+  afterEach(() => {
+    window.SoulSyncWebShellBridge = undefined;
+  });
+
+  function openInTable() {
+    const track = lib2Track({ id: 90, title: 'Punkrocker', track_number: 32, file: null });
+    render(
+      <QueryClientProvider client={createTestQueryClient()}>
+        <table>
+          <tbody>
+            <tr className={pageStyles.missingRow}>
+              <td className={pageStyles.trackActions} data-testid="actions-cell">
+                <OwnedTrackMoreMenu
+                  track={track}
+                  albumId={50}
+                  albumTitle="The Crabjoys"
+                  artistName="OST"
+                />
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </QueryClientProvider>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'More for Punkrocker' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Move a track here…' }));
+  }
+
+  it('renders outside the album table, so the row and cell styles cannot reach it', async () => {
+    openInTable();
+    const dialog = await screen.findByRole('dialog', { name: 'Move a track here' });
+    expect(dialog.closest('td, tr, table')).toBeNull();
+    expect(screen.getByTestId('actions-cell')).not.toContainElement(dialog);
+  });
+
+  it('sets its own left aligned, upright, wrapping text', async () => {
+    openInTable();
+    const dialog = await screen.findByRole('dialog', { name: 'Move a track here' });
+    const style = getComputedStyle(dialog);
+    expect(style.textAlign).toBe('left');
+    expect(style.fontStyle).toBe('normal');
+    expect(style.whiteSpace).toBe('normal');
+    // and the sheet says so, whatever jsdom computes
+    const block = modalCss.match(/\.dialog\s*\{([^}]*)\}/)?.[1] ?? '';
+    expect(block).toMatch(/text-align:\s*left/);
+    expect(block).toMatch(/font-style:\s*normal/);
+    expect(block).toMatch(/white-space:\s*normal/);
+  });
+
+  it('cuts long paths and titles with an ellipsis and keeps the full text in a tooltip', async () => {
+    openInTable();
+    const path = await screen.findByText(longPath);
+    expect(path).toHaveAttribute('title', longPath);
+    for (const el of [path, screen.getByText(song.title)]) {
+      const style = getComputedStyle(el);
+      expect(style.overflow).toBe('hidden');
+      expect(style.textOverflow).toBe('ellipsis');
+      expect(style.whiteSpace).toBe('nowrap');
+    }
+    // the move's From and To wrap instead of running off the edge
+    expect(modalCss).toMatch(/\.move dd\s*\{[^}]*overflow-wrap:\s*anywhere/);
+    expect(modalCss).toMatch(/\.tags td\s*\{[^}]*overflow-wrap:\s*anywhere/);
+  });
+
+  it('every class it uses is defined, so nothing falls back to a parent', async () => {
+    openInTable();
+    fireEvent.click(await screen.findByText(longPath));
+    const dialog = await screen.findByRole('dialog', { name: 'Move a track here' });
+    await within(dialog).findByTestId('move-track-preview');
+    const used = new Set(
+      [dialog, ...dialog.querySelectorAll('*')].flatMap((el) => [...el.classList]),
+    );
+    const globals = new Set(['btn', 'btn--sm', 'btn--primary', 'btn--secondary']);
+    for (const name of used) {
+      if (globals.has(name)) continue;
+      // css modules hash each class as _<name>_<hash>
+      const local = /^_([A-Za-z]+)_[a-z0-9]+$/.exec(name)?.[1];
+      expect(local, `class ${name} is not from the dialog's module`).toBeTruthy();
+      expect(modalCss).toMatch(new RegExp(`\\.${local}\\b`));
+    }
+  });
+
+  it('shows the tag changes as a table and keeps the ids behind "and N ids"', async () => {
+    openInTable();
+    fireEvent.click(await screen.findByText(longPath));
+    const panel = await screen.findByTestId('move-track-preview');
+    expect(tagRows(panel).map(([field]) => field)).toEqual(['Title', 'Album']);
+    fireEvent.click(within(panel).getByRole('button', { name: 'and 2 ids' }));
+    expect(tagRows(panel).map(([field]) => field)).toEqual([
+      'Title',
+      'Album',
+      'DEEZER TRACK ID',
+      'MUSICBRAINZ RELEASE ID',
+    ]);
+    fireEvent.click(within(panel).getByRole('button', { name: 'Hide the ids' }));
+    expect(tagRows(panel)).toHaveLength(2);
+  });
+
+  it('tells an id tag from a named one', () => {
+    expect(isIdTag('MUSICBRAINZ ARTIST ID')).toBe(true);
+    expect(isIdTag('Deezer track id')).toBe(true);
+    expect(isIdTag('Title')).toBe(false);
+    expect(isIdTag('Track #')).toBe(false);
+    expect(isIdTag('Lyrics')).toBe(false);
   });
 });
 

@@ -3,14 +3,19 @@ killed when the listener goes away.
 
 ``decide`` says whether a stream goes out as the file (raw) or converted,
 from what the app asked (format, maxBitRate) and what the file is. ``open``
-starts ffmpeg and gives back a generator of chunks; at most MAX_JOBS run
-at once, and a stream past that goes out raw rather than waiting.
+starts ffmpeg and gives back a generator of chunks. at most a few run at
+once (music_apps.transcode_slots, 4 by default); a stream past that waits
+for a free one, first come first served, and after WAIT_SECONDS gets Busy.
+it never goes out as the bigger file instead: an app that asked for less
+is often on mobile data.
 """
 
 from __future__ import annotations
 
 import subprocess
 import threading
+import time
+from collections import deque
 from dataclasses import dataclass
 from typing import Iterator, Optional
 
@@ -25,10 +30,74 @@ FORMATS = {
 }
 DEFAULT_FORMAT = "mp3"
 MAX_JOBS = 4
+MIN_JOBS, MOST_JOBS = 1, 16
+WAIT_SECONDS = 20.0
 CHUNK = 64 * 1024
 BITRATES = (32, 48, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320)
 
-_slots = threading.BoundedSemaphore(MAX_JOBS)
+
+def clamp_jobs(value, default: int = MAX_JOBS) -> int:
+    """the slot setting as a number in range; junk is the default."""
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(MIN_JOBS, min(MOST_JOBS, n))
+
+
+class _Slots:
+    """a counting gate whose size can change, served in arrival order: a
+    stream that has waited longest gets the next free slot."""
+
+    def __init__(self, size: int):
+        self._cond = threading.Condition()
+        self._size = clamp_jobs(size)
+        self._used = 0
+        self._queue: deque = deque()
+
+    def resize(self, size: int) -> None:
+        with self._cond:
+            self._size = clamp_jobs(size, self._size)
+            self._cond.notify_all()
+
+    def acquire(self, timeout: float) -> bool:
+        with self._cond:
+            if not self._queue and self._used < self._size:
+                self._used += 1
+                return True
+            if timeout <= 0:
+                return False
+            ticket = object()
+            self._queue.append(ticket)
+            deadline = time.monotonic() + timeout
+            try:
+                while not (self._queue[0] is ticket and self._used < self._size):
+                    left = deadline - time.monotonic()
+                    if left <= 0:
+                        return False
+                    self._cond.wait(left)
+                self._used += 1
+                return True
+            finally:
+                self._queue.remove(ticket)
+                # the next in line may be free to go now
+                self._cond.notify_all()
+
+    def release(self) -> None:
+        with self._cond:
+            self._used = max(0, self._used - 1)
+            self._cond.notify_all()
+
+    @property
+    def used(self) -> int:
+        return self._used
+
+    @property
+    def waiting(self) -> int:
+        return len(self._queue)
+
+
+_slots = _Slots(MAX_JOBS)
 _ffmpeg_path: Optional[str] = None
 _ffmpeg_checked = False
 _lock = threading.Lock()
@@ -107,17 +176,21 @@ def estimate_length(duration_seconds: int, kbps: int, offset_seconds: int = 0) -
 
 
 class Busy(Exception):
-    """every transcoder slot is taken."""
+    """every transcoder slot stayed taken for the whole wait."""
 
 
-def open_stream(path: str, plan: Plan, offset_seconds: int = 0, *, popen=subprocess.Popen) -> Iterator[bytes]:
-    """start ffmpeg now (raises Busy or OSError) and return the chunks. the
-    process is killed when the generator is closed: a listener that skips
-    or hangs up frees its slot at once."""
+def open_stream(path: str, plan: Plan, offset_seconds: int = 0, *, popen=subprocess.Popen,
+                max_jobs: Optional[int] = None, wait: float = WAIT_SECONDS) -> Iterator[bytes]:
+    """start ffmpeg now and return the chunks. with every slot taken it
+    waits up to ``wait`` seconds for one, in turn, then raises Busy; no
+    ffmpeg raises OSError. the process is killed when the stream is
+    closed: a listener that skips or hangs up frees its slot at once."""
     binary = ffmpeg()
     if not binary:
         raise OSError("ffmpeg not found")
-    if not _slots.acquire(blocking=False):
+    if max_jobs is not None:
+        _slots.resize(max_jobs)
+    if not _slots.acquire(timeout=wait):
         raise Busy()
     try:
         proc = popen(command(binary, path, plan, offset_seconds), stdout=subprocess.PIPE,
@@ -125,35 +198,64 @@ def open_stream(path: str, plan: Plan, offset_seconds: int = 0, *, popen=subproc
     except Exception:
         _slots.release()
         raise
+    return _Stream(proc, _slots)
 
-    def chunks():
+
+class _Stream:
+    """ffmpeg's output in chunks. closing it kills ffmpeg and frees the
+    slot, once, even when nothing was read yet (a generator closed before
+    its first chunk never runs its cleanup)."""
+
+    def __init__(self, proc, gate: "_Slots"):
+        self._proc = proc
+        self._gate = gate
+        self._done = False
+        self._lock = threading.Lock()
+
+    def __iter__(self):
+        return self
+
+    def __next__(self) -> bytes:
+        if self._done:
+            raise StopIteration
+        data = self._proc.stdout.read(CHUNK)
+        if not data:
+            self.close()
+            raise StopIteration
+        return data
+
+    def close(self) -> None:
+        with self._lock:
+            if self._done:
+                return
+            self._done = True
+        proc = self._proc
         try:
-            while True:
-                data = proc.stdout.read(CHUNK)
-                if not data:
-                    break
-                yield data
-        finally:
-            try:
-                if proc.poll() is None:
-                    proc.kill()
-                proc.wait(timeout=5)
-            except Exception:  # noqa: BLE001 - it is going away either way
-                logger.debug("ffmpeg cleanup", exc_info=True)
-            try:
-                proc.stdout.close()
-            except Exception:  # noqa: BLE001, S110
-                pass
-            _slots.release()
-    return chunks()
+            if proc.poll() is None:
+                proc.kill()
+            proc.wait(timeout=5)
+        except Exception:  # noqa: BLE001 - it is going away either way
+            logger.debug("ffmpeg cleanup", exc_info=True)
+        try:
+            proc.stdout.close()
+        except Exception:  # noqa: BLE001, S110
+            pass
+        self._gate.release()
+
+    def __del__(self):
+        # a stream dropped without a close still gives its slot back
+        try:
+            self.close()
+        except Exception:  # noqa: BLE001, S110
+            pass
 
 
 def _reset_for_tests(max_jobs: int = MAX_JOBS) -> None:
     global _slots, _ffmpeg_checked, _ffmpeg_path
-    _slots = threading.BoundedSemaphore(max_jobs)
+    _slots = _Slots(max_jobs)
     _ffmpeg_checked = False
     _ffmpeg_path = None
 
 
-__all__ = ["FORMATS", "DEFAULT_FORMAT", "MAX_JOBS", "Plan", "decide", "command", "estimate_length", "open_stream",
+__all__ = ["FORMATS", "DEFAULT_FORMAT", "MAX_JOBS", "WAIT_SECONDS", "clamp_jobs", "Plan", "decide", "command", "estimate_length", "open_stream",
            "Busy", "ffmpeg"]
