@@ -24791,6 +24791,9 @@ app.register_blueprint(_bp_upl())
 # the /player app's own store: where each profile is in what it plays
 from api.player import create_blueprint as _bp_player
 app.register_blueprint(_bp_player())
+# ...and its playback: how to play an item and its bytes (session or paired device)
+from api.player_stream import create_blueprint as _bp_player_stream
+app.register_blueprint(_bp_player_stream())
 # MetaSync's SIN charts: offered as playlists, opened on demand
 from api.metasync_charts import configure as _cfg_msc, create_blueprint as _bp_msc
 _cfg_msc(get_database=get_database)

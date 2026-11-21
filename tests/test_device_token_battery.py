@@ -25,6 +25,10 @@ OPTED_IN = {
     "devices.device_me": A.PICK,
     "devices.device_pick_list": A.PICK,
     "devices.device_pick_profile": A.PICK,
+    # the player's playback (core/player/playable.py): a music app plays
+    # tracks through these, as its profile
+    "player_stream.playable": A.PLAYBACK,
+    "player_stream.stream": A.PLAYBACK,
 }
 
 IGNORED = {"HEAD", "OPTIONS"}

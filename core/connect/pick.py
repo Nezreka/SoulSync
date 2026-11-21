@@ -19,6 +19,10 @@ logger = logging.getLogger(__name__)
 # the permission each kind of app needs
 KIND_PERMISSION = {T.KIND_MUSIC: "music.apps"}
 
+# what each kind of app may play (core/player/playable.py's item types). a
+# kind missing here plays nothing; a new kind adds its line beside its permission.
+KIND_ITEM_TYPES = {T.KIND_MUSIC: frozenset({"track"})}
+
 
 def may_use(db, profile: Optional[Mapping[str, Any]], kind: str) -> bool:
     """may a device of this kind act as this profile? fails closed."""
