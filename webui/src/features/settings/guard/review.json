@@ -187,6 +187,10 @@
   ],
   "noSave": [
     {
+      "match": "^#music-app-(profile|name)$",
+      "why": "Set up a music app: whose music and the device name are only read when Set up is pressed, which creates the device"
+    },
+    {
       "match": "^#stg-search-input$",
       "why": "the settings search box: it filters the page and saves nothing"
     },

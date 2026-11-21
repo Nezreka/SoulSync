@@ -107,13 +107,17 @@ def _artist_id_sql(service: str) -> Optional[str]:
     return None
 
 
-def _credited(artists: Optional[Iterable[Any]]) -> list:
+def _credited(artists: Optional[Iterable[Any]], service: Optional[str] = None) -> list:
     """``[(provider id, name)]`` in credit order, artists without an id left out."""
+    from core.various_artists_ids import is_various_artists_id
     out = []
     for artist in artists or []:
         if isinstance(artist, dict):
             pid = artist.get("id")
-            if pid not in (None, ""):
+            # "Various Artists" is no artist: left out like one with no id,
+            # or every compilation went to whoever held its id (#2229)
+            if pid not in (None, "") and not is_various_artists_id(
+                    pid, artist.get("source") or service):
                 out.append((str(pid), str(artist.get("name") or "")))
     return out
 
@@ -317,7 +321,7 @@ def link_credited_artists(conn: Any, entity_type: str, entity_id: int,
     sql = _artist_id_sql(service)
     if not sql or entity_type not in ("track", "album") or artists is None:
         return 0
-    credited = _credited(artists)
+    credited = _credited(artists, service)
     drop_source_credits(conn, entity_type, entity_id, service,
                         keep_provider_ids=[pid for pid, _name in credited])
     if len(credited) < 2:

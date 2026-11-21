@@ -2314,6 +2314,7 @@ class MusicDatabase:
             self._wishlist_lib2_album_dates(cursor)
             self._purge_beatport_positional_matches(cursor)
             self._purge_fake_provider_ids(cursor)
+            self._recheck_wishlist_release_groups(cursor)
             # Unify scattered migration state into the ledger + stamp the schema
             # version. Additive backstop — runs last, gates nothing.
             self._sync_migration_ledger(cursor)
@@ -2429,6 +2430,7 @@ class MusicDatabase:
         'wishlist_lib2_album_dates_v2': ('table', '_wishlist_lib2_album_dates_v2'),
         'beatport_positional_purged': ('table', '_beatport_positional_purged'),
         'fake_provider_ids_purged': ('table', '_fake_provider_ids_purged'),
+        'wishlist_release_groups_rechecked': ('table', '_wishlist_release_groups_rechecked'),
         'server_plays_v1':          ('table', 'server_plays'),
     }
 
@@ -5115,6 +5117,35 @@ class MusicDatabase:
             logger.error(f"Error purging beatport positional matches: {e}")
 
 
+    def _recheck_wishlist_release_groups(self, cursor):
+        """one-time: match wishlist albums again with their track lists (#2225).
+
+        the musicbrainz worker matched a wishlist album by title and artist
+        alone, so a band's self-titled records, or a record too new for
+        musicbrainz, got an older namesake's release group. lidarr fetches
+        albums by that id now (#2226), so a wrong one downloads the wrong
+        album. the rows go back in the worker's queue; repeats of one album
+        hit the release cache, and one track-list read checks the album."""
+        try:
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            tables = {r[0] for r in cursor.fetchall()}
+            if '_wishlist_release_groups_rechecked' in tables:
+                return
+            reset = 0
+            if 'wishlist_tracks' in tables:
+                cursor.execute("PRAGMA table_info(wishlist_tracks)")
+                if 'musicbrainz_match_status' in {c[1] for c in cursor.fetchall()}:
+                    cursor.execute(
+                        "UPDATE wishlist_tracks SET musicbrainz_release_group_id = NULL,"
+                        " musicbrainz_match_status = NULL WHERE musicbrainz_match_status = 'matched'")
+                    reset = max(cursor.rowcount, 0)
+            cursor.execute("CREATE TABLE _wishlist_release_groups_rechecked"
+                           " (applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+            self._record_migration(cursor, 'wishlist_release_groups_rechecked')
+            logger.info("wishlist release groups queued for a track-list recheck: %s", reset)
+        except Exception as e:
+            logger.error(f"Error queueing wishlist release groups for a recheck: {e}")
+
     def _purge_fake_provider_ids(self, cursor):
         """one-time: drop provider ids an import filed under the wrong name
         (#1996). 'webui_modal' is a screen, not a provider, and a last.fm page
@@ -5991,6 +6022,8 @@ class MusicDatabase:
             from core.connect import device_tokens, invite_codes
             device_tokens.ensure_tables(cursor)
             invite_codes.ensure_tables(cursor)
+            from core.subsonic import store as subsonic_store
+            subsonic_store.ensure_tables(cursor)
         except Exception as e:
             logger.error(f"Error creating paired device tables: {e}")
 

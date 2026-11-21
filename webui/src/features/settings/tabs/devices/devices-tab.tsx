@@ -58,6 +58,7 @@ import {
   type ServerInfo,
 } from './api';
 import css from './devices.module.css';
+import { MusicAppsCard } from './music-apps';
 import { groupFingerprint } from './server-fingerprint';
 
 export const DEVICES_TAB = 'devices';
@@ -196,6 +197,8 @@ export function DevicesPage({ opened, active }: SettingsTabProps) {
               />
             ) : null}
           </Card>
+
+          <MusicAppsCard opened={opened} onMade={() => void reload()} />
 
           {error ? <Note>{error}</Note> : null}
           {!data && !error ? <StatusWords tone="busy">Loading devices…</StatusWords> : null}

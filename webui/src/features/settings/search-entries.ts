@@ -1385,6 +1385,24 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
       'device devices pair pairing code qr phone app car speaker listen anywhere unpair revoke',
   },
   {
+    label: 'Set up a music app',
+    tab: 'devices',
+    anchor: id('music-app-set-up'),
+    file: 'devices/music-apps.tsx',
+    hint: 'play your library in a Subsonic or OpenSubsonic app',
+    keywords:
+      'music app apps subsonic opensubsonic app password api key username server stream offline symfonium feishin amperfy',
+  },
+  {
+    label: "Stream files SoulSync can't read through your media server",
+    tab: 'devices',
+    anchor: id('music-app-format'),
+    file: 'devices/music-apps.tsx',
+    hint: 'music apps: convert to mp3 or opus, and play through plex, jellyfin or navidrome',
+    keywords:
+      'transcode convert mp3 opus bitrate bridge media server plex jellyfin navidrome cant read',
+  },
+  {
     id: 'setting:devices:remote-address',
     label: 'Remote address',
     tab: 'devices',

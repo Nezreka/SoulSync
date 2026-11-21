@@ -25,6 +25,9 @@ OPTED_IN = {
     "devices.device_me": A.PICK,
     "devices.device_pick_list": A.PICK,
     "devices.device_pick_profile": A.PICK,
+    # music apps: every Subsonic method is one route; the methods themselves
+    # are pinned in tests/subsonic/test_methods.py
+    "subsonic.rest": A.PLAYBACK,
     # the player's playback (core/player/playable.py): a music app plays
     # tracks through these, as its profile
     "player_stream.playable": A.PLAYBACK,

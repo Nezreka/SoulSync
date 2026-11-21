@@ -45,6 +45,35 @@
       }
     ]
   },
+  "/api/devices/music-apps": {
+    "success": true,
+    "profiles": [
+      {
+        "id": 1,
+        "name": "Admin"
+      }
+    ],
+    "addresses": [
+      {
+        "kind": "local",
+        "url": "http://192.168.1.5:8008"
+      }
+    ],
+    "bridge": [
+      {
+        "id": "plex",
+        "name": "Plex",
+        "on": false,
+        "active": true
+      }
+    ],
+    "transcode_format": "mp3",
+    "formats": [
+      "mp3",
+      "opus"
+    ],
+    "ffmpeg": true
+  },
   "/api/devices/codes": {
     "success": true,
     "codes": []

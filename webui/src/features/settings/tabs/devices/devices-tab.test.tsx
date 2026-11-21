@@ -62,6 +62,22 @@ const DEVICES = [
   },
 ];
 
+const MUSIC_APPS = {
+  success: true,
+  profiles: [
+    { id: 1, name: 'Admin' },
+    { id: 3, name: 'Robin' },
+  ],
+  addresses: SERVER.addresses,
+  bridge: [
+    { id: 'plex', name: 'Plex', on: false, active: true },
+    { id: 'jellyfin', name: 'Jellyfin', on: false, active: false },
+  ],
+  transcode_format: 'mp3',
+  formats: ['mp3', 'opus'],
+  ffmpeg: true,
+};
+
 let calls: Array<{ url: string; method: string; body?: unknown }>;
 
 beforeEach(() => {
@@ -112,6 +128,21 @@ beforeEach(() => {
         };
       else if (url === '/api/devices/reachability') data = { success: true, probe: null };
       else if (url === '/api/profiles/invites') data = { success: true, invites: [] };
+      else if (url === '/api/devices/music-apps' && method === 'GET') data = MUSIC_APPS;
+      else if (url === '/api/devices/music-apps' && method === 'POST')
+        data = {
+          success: true,
+          device_id: 5,
+          name: 'Phone',
+          server: 'http://music.example.com',
+          addresses: SERVER.addresses,
+          username: 'Robin',
+          password: 'Abc123Def456Ghi789Jk',
+          api_key: 'sdt_secret',
+          qr_text: '{"type":"soulsync-music-app"}',
+        };
+      else if (url === '/api/devices/music-apps/settings')
+        data = { ...MUSIC_APPS, bridge: [{ ...MUSIC_APPS.bridge[0], on: true }] };
       return Promise.resolve({
         ok: true,
         status: 200,
@@ -242,5 +273,39 @@ describe('the words', () => {
       'Player on Android · seen 5 min ago from 203.0.113.7',
     );
     expect(deviceLine(DEVICES[1] as never, now)).toBe('');
+  });
+
+  it('sets up a music app for a profile and shows its sign-in once', async () => {
+    const { findByLabelText, getByLabelText, getByText, getByRole, queryByLabelText } = tab();
+    const pick = await findByLabelText('Whose music');
+    fireEvent.change(pick, { target: { value: '3' } });
+    fireEvent.change(getByLabelText('Name'), { target: { value: 'Phone' } });
+    await act(async () => {
+      fireEvent.click(getByText('Set it up'));
+    });
+    const post = calls.find((c) => c.url === '/api/devices/music-apps' && c.method === 'POST');
+    expect(post?.body).toEqual({ profile_id: 3, name: 'Phone' });
+    expect(getByText('Abc123Def456Ghi789Jk')).toBeTruthy();
+    expect(getByText('sdt_secret')).toBeTruthy();
+    expect(getByRole('img', { name: 'Music app sign-in QR code' })).toBeTruthy();
+    // the devices list is fetched again so the new app shows up
+    expect(
+      calls.filter((c) => c.url === '/api/devices' && c.method === 'GET').length,
+    ).toBeGreaterThan(1);
+    await act(async () => {
+      fireEvent.click(getByText('Done'));
+    });
+    expect(queryByLabelText('Music app sign-in')).toBeNull();
+  });
+
+  it('the media server switch shows for the active server and saves itself', async () => {
+    const { findByLabelText, queryByLabelText } = tab();
+    const plex = await findByLabelText("Stream files SoulSync can't read through Plex");
+    expect(queryByLabelText("Stream files SoulSync can't read through Jellyfin")).toBeNull();
+    await act(async () => {
+      fireEvent.click(plex);
+    });
+    const put = calls.find((c) => c.url === '/api/devices/music-apps/settings');
+    expect(put?.body).toEqual({ bridge: { plex: true } });
   });
 });

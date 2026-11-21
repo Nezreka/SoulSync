@@ -2,9 +2,10 @@
 stream (navidrome/subsonic hand one out; plex and jellyfin music is read
 from disk).
 
-the track must be one the profile owns in its library scope (the same rule
-every library page uses), and a profile that hides explicit music can't
-play an explicit one (the library's own explicit rule).
+whether the profile may play it is core/connect/may_play.may_play_track,
+the same answer subsonic and paired apps get: a live file in the
+profile's library, and not explicit for a profile that hides explicit
+music. this module only finds the bytes.
 """
 
 from __future__ import annotations
@@ -16,21 +17,21 @@ from core.player.sources import audio_mime
 
 
 def _track_files(conn, track_id: int):
-    """the track's live files, best first (lossless, then bitrate)"""
-    from core.library2.sql_util import owned_sql, scope_visibility_sql
-
-    where = [owned_sql("track", "t")]
-    visible = scope_visibility_sql("track", "t")
-    if visible:
-        where.append(visible)
-    return conn.execute(f"""
+    """the track's imported files, best first (lossless, then bitrate)"""
+    return conn.execute("""
         SELECT f.path, f.format, f.bitrate, t.duration
         FROM lib2_tracks t JOIN lib2_track_files f ON f.track_id = t.id
-        WHERE t.id = ? AND {" AND ".join(where)}
-          AND COALESCE(f.import_status, 'imported') = 'imported'
+        WHERE t.id = ? AND COALESCE(f.import_status, 'imported') = 'imported'
         ORDER BY CASE WHEN f.quality_tier = 'lossless' THEN 0 ELSE 1 END,
                  COALESCE(f.bitrate, 0) DESC
-    """, (track_id,)).fetchall()  # noqa: S608 - the fragments are the library's own sql builders
+    """, (track_id,)).fetchall()
+
+
+def _scope():
+    """the library the profile plays from (its own, or the shared one)"""
+    from core.library_scope import library_scope_for_profile
+    from core.player.playable import current_profile_id
+    return library_scope_for_profile(current_profile_id())
 
 
 def _on_disk(stored: str) -> Optional[str]:
@@ -78,14 +79,17 @@ def locate(item_id: str) -> Source:
     except ValueError:
         raise Refused(400, "bad_id", "That isn't a track id.") from None
     db = get_database()
+    from core.connect.may_play import may_play_track
     with db._get_connection() as conn:
+        scope, hide = _scope(), hides_explicit()
+        if not may_play_track(conn, track_id, scope=scope, hide_explicit=hide):
+            # say which: hidden for this profile, or not in its library
+            if hide and may_play_track(conn, track_id, scope=scope, hide_explicit=False):
+                raise Refused(403, "restricted", "That track isn't available on this profile.")
+            raise Refused(404, "not_found", "That track isn't in your library.")
         files = _track_files(conn, track_id)
         if not files:
-            raise Refused(404, "not_found", "That track isn't in your library.")
-        if hides_explicit():
-            from core.library2.explicit import library_track_is_explicit
-            if library_track_is_explicit(conn, lib2_track_id=track_id):
-                raise Refused(403, "restricted", "That track isn't available on this profile.")
+            raise Refused(404, "no_file", "That track has no file.")
         duration = (files[0][3] or 0) / 1000 or None
         for stored, _fmt, _bitrate, _ in files:
             local = _on_disk(stored)

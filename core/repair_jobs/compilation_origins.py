@@ -31,11 +31,12 @@ from typing import Any, Dict, List, Optional
 from core.repair_jobs import register_job
 from core.repair_jobs.album_release_year_repair import _fold_title, extract_year, song_title
 from core.repair_jobs.base import JobContext, JobResult, RepairJob, artist_scoped_subjects
+from core.various_artists_ids import VARIOUS_ARTISTS_IDS
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_job.compilation_origins")
 
-VARIOUS_ARTISTS_MBID = '89ad4ac3-39f7-470e-963a-56509c546377'
+VARIOUS_ARTISTS_MBID = VARIOUS_ARTISTS_IDS['musicbrainz']
 #: the studio album first, then the EP, then the single
 _TIER = {'album': 0, 'ep': 1, 'single': 2}
 #: pages of a recording's releases read before giving up (100 a page)

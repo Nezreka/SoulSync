@@ -174,3 +174,43 @@ export const checkReachability = () =>
 
 export const getProbe = (signal?: AbortSignal) =>
   call<{ probe: Probe | null }>('/api/devices/reachability', { signal });
+
+// ── music apps (the Subsonic api at /rest) ──
+
+export interface BridgeServer {
+  id: 'plex' | 'jellyfin' | 'navidrome';
+  name: string;
+  on: boolean;
+  active: boolean;
+}
+
+export interface MusicApps {
+  profiles: { id: number; name: string }[];
+  addresses: Address[];
+  bridge: BridgeServer[];
+  transcode_format: string;
+  formats: string[];
+  ffmpeg: boolean;
+}
+
+export interface NewMusicApp {
+  device_id: number;
+  name: string;
+  server: string;
+  addresses: Address[];
+  username: string;
+  password: string;
+  api_key: string;
+  qr_text: string;
+}
+
+export const getMusicApps = (signal?: AbortSignal) =>
+  call<MusicApps>('/api/devices/music-apps', { signal });
+
+export const setUpMusicApp = (profile_id: number, name: string) =>
+  call<NewMusicApp>('/api/devices/music-apps', json('POST', { profile_id, name }));
+
+export const saveMusicAppSettings = (body: {
+  bridge?: Partial<Record<BridgeServer['id'], boolean>>;
+  transcode_format?: string;
+}) => call<MusicApps>('/api/devices/music-apps/settings', json('PUT', body));

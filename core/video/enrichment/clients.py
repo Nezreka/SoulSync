@@ -77,6 +77,14 @@ def parse_title_identity(kind, d):
     kw = d.get("keywords") if isinstance(d.get("keywords"), dict) else {}
     keywords = [str(k.get("name")).strip() for k in (kw.get("keywords") or kw.get("results") or [])
                 if isinstance(k, dict) and k.get("name")]
+    # the ids the indexers search by, for a title that isn't in the library
+    # (#2224): a movie's imdb id is on its detail, a show's in external_ids
+    ext = d.get("external_ids") if isinstance(d.get("external_ids"), dict) else {}
+    imdb = d.get("imdb_id") or ext.get("imdb_id")
+    if imdb:
+        out["imdb_id"] = str(imdb)
+    if kind != "movie" and ext.get("tvdb_id"):
+        out["tvdb_id"] = ext["tvdb_id"]
     if genres:
         out["genres"] = genres
     if keywords:
@@ -570,7 +578,9 @@ class TMDBClient:
         try:
             r = requests.get(self.BASE + path + str(int(tmdb_id)),
                              params={"api_key": self.api_key,
-                                     "append_to_response": "alternative_titles,keywords"}, timeout=12)
+                                     "append_to_response": "alternative_titles,keywords"
+                                     + ("" if kind == "movie" else ",external_ids")},
+                             timeout=12)
             r.raise_for_status()
             d = r.json() or {}
         except Exception:

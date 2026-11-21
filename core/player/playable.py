@@ -114,7 +114,7 @@ KINDS: Dict[str, Kind] = {
 }
 
 
-def _profile_id() -> Optional[int]:
+def current_profile_id() -> Optional[int]:
     from core.profile_context import get_current_profile_id
     try:
         pid = get_current_profile_id()
@@ -141,7 +141,7 @@ def check(item_type: str) -> Kind:
     kind = KINDS.get(item_type)
     if kind is None:
         raise Refused(404, "unknown_kind", "The player can't play that kind of thing.")
-    if _profile_id() is None:
+    if current_profile_id() is None:
         raise Refused(401, "no_profile", "Pick a profile first.")
     device = _device()
     if device is not None:

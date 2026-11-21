@@ -9166,6 +9166,63 @@
       "asked": "guard-probe",
       "noSave": "a filter box over a list on the page: saves nothing (Enter in the genre box adds a genre, pinned by the genreWhitelist composite)"
     },
+    "#music-app-profile": {
+      "sel": "#music-app-profile",
+      "kind": "select",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "1",
+      "to": null,
+      "saves": null,
+      "noSave": "Set up a music app: whose music and the device name are only read when Set up is pressed, which creates the device"
+    },
+    "#music-app-name": {
+      "sel": "#music-app-name",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "guard-probe",
+      "saves": null,
+      "asked": "guard-probe",
+      "noSave": "Set up a music app: whose music and the device name are only read when Set up is pressed, which creates the device"
+    },
+    "#music-app-format": {
+      "sel": "#music-app-format",
+      "kind": "select",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "mp3",
+      "to": "mp3",
+      "saves": {
+        "requests": [
+          {
+            "method": "PUT",
+            "url": "/api/devices/music-apps/settings",
+            "body": "{\"transcode_format\":\"opus\"}"
+          }
+        ]
+      },
+      "asked": "opus"
+    },
+    "#music-app-bridge-plex": {
+      "sel": "#music-app-bridge-plex",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": false,
+      "to": false,
+      "saves": {
+        "requests": [
+          {
+            "method": "PUT",
+            "url": "/api/devices/music-apps/settings",
+            "body": "{\"bridge\":{\"plex\":true}}"
+          }
+        ]
+      },
+      "asked": true
+    },
     "#devices-remote-url": {
       "sel": "#devices-remote-url",
       "kind": "text",
@@ -14228,6 +14285,19 @@
     },
     "#devices-add": {
       "id": "devices-add",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#music-app-set-up": {
+      "id": "music-app-set-up",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#stg-view-devices-all \"More about this setting\"": {
+      "label": "More about this setting",
+      "anchor": "stg-view-devices-all",
       "count": 1,
       "sides": ["music", "video"],
       "scenario": "music"

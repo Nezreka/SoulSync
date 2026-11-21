@@ -1697,6 +1697,7 @@ class RepairWorker:
                 # idle: fill the blank tags the open tag findings point at,
                 # a small batch every few minutes (core/library2/tag_fill)
                 self._maybe_fill_tags()
+                self._maybe_queue_findings_followups()
                 if self._sleep_or_stop(5):
                     break
 
@@ -2010,6 +2011,33 @@ class RepairWorker:
         except Exception as exc:  # noqa: BLE001 - the next pass tries again
             logger.warning("Fill empty tags pass failed: %s", exc, exc_info=True)
             return None
+
+    def _maybe_queue_findings_followups(self) -> int:
+        """Files a library repair changed the catalogue under (#2229), handed
+        to their jobs as a findings-only run: what the file now says wrong
+        shows up to apply, nothing is rewritten or moved on its own. Checked
+        once a minute while idle. Never raises."""
+        now = time.monotonic()
+        if now < getattr(self, '_followups_next', 0.0):
+            return 0
+        self._followups_next = now + 60
+        if self._held or self.db is None:
+            return 0
+        queued = 0
+        try:
+            from core.library2.various_artists_guard import take_findings_followups
+            conn = self.db._get_connection()
+            try:
+                waiting = take_findings_followups(conn)
+                conn.commit()
+            finally:
+                conn.close()
+            for job_id, paths in waiting.items():
+                if self.run_job_now(job_id, scope={'file_paths': paths, 'findings_only': True}):
+                    queued += 1
+        except Exception as exc:  # noqa: BLE001 - the next tick tries again
+            logger.warning("Queueing follow-up findings failed: %s", exc)
+        return queued
 
     def request_tag_fill(self) -> None:
         """Run the blank-tag fill on the next idle tick instead of waiting

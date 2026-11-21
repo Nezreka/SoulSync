@@ -19,7 +19,7 @@ def ctx(monkeypatch):
     app = Flask(__name__)
     state = {"pid": 3, "perms": set(P.KINDS["track"].permissions) | {"movies.access", "tv.access",
                                                                      "books.access"}}
-    monkeypatch.setattr(P, "_profile_id", lambda: state["pid"])
+    monkeypatch.setattr(P, "current_profile_id", lambda: state["pid"])
     monkeypatch.setattr(P, "_may", lambda perm: perm in state["perms"])
     with app.test_request_context("/"):
         yield state
@@ -236,6 +236,7 @@ def mdb(tmp_path, monkeypatch):
     monkeypatch.setattr(mdbmod, "get_database", lambda: Db())
     monkeypatch.setattr(music, "_on_disk", lambda stored: "/local" + stored)
     monkeypatch.setattr(music, "hides_explicit", lambda: False)
+    monkeypatch.setattr(music, "_scope", lambda: "shared")
     return ids, music
 
 

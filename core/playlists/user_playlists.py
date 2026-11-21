@@ -141,6 +141,12 @@ def clean_track(raw: Any) -> Optional[Dict[str, Any]]:
     origin = clean_origin(raw.get('source'), raw.get('source_id'))
     if origin:
         track['extra_data'] = {'origin': origin}
+    # a song picked from the library (a music app) names its library track,
+    # so it never has to be found again by name
+    lib2_id = raw.get('lib2_track_id')
+    if isinstance(lib2_id, int) and not isinstance(lib2_id, bool) and lib2_id > 0:
+        track['extra_data'] = dict(track.get('extra_data') or {}, in_library=True,
+                                   library_track_id=lib2_id, library_track_id_kind='lib2')
     return track
 
 
@@ -330,6 +336,15 @@ def add_tracks(
         } for d in duplicates],
         'track_count': len(current) + len(added),
     }
+
+
+def replace_tracks(db: Any, playlist: Dict[str, Any], raw_tracks: Iterable[Any]) -> int:
+    """the playlist becomes exactly these songs (a music app saving its
+    edit). returns the new count."""
+    incoming = [t for t in (clean_track(r) for r in raw_tracks or []) if t]
+    with _edit_lock:
+        _write(db, playlist, incoming)
+    return len(incoming)
 
 
 def remove_track(db: Any, playlist: Dict[str, Any], position: int) -> int:
