@@ -190,9 +190,14 @@ export function PlayerShell({ profileId }: { profileId: number | null }) {
     const before = document.title;
     document.title = 'SoulSync Player';
     document.body.dataset.playerOpen = '';
+    // index.html marks a /player load before first paint so the manager never
+    // flashes; keep it while the player is up, and drop it on the way out so
+    // Back into a manager page shows the manager
+    document.documentElement.classList.add('ss-player-boot');
     return () => {
       document.title = before;
       delete document.body.dataset.playerOpen;
+      document.documentElement.classList.remove('ss-player-boot');
     };
   }, []);
 
