@@ -37,6 +37,7 @@ import {
   RepeatOneIcon,
 } from './icons';
 import { LyricsPanel } from './lyrics-panel';
+import { MarkButton, useMarks } from './marks';
 import s from './music-view.module.css';
 import { SeekBar } from './seek-bar';
 import { ChannelButtons } from './tuner';
@@ -102,6 +103,7 @@ function View({ state, onClose }: { state: PlayerState; onClose: () => void }) {
   const music = item.type === 'track';
   const long = LONG_FORM.has(item.type);
   const loading = useLoading(state);
+  const marks = useMarks(item);
   const [tab, setTab] = useState<Tab>(
     music ? 'lyrics' : state.chapters.length ? 'chapters' : 'queue',
   );
@@ -229,6 +231,7 @@ function View({ state, onClose }: { state: PlayerState; onClose: () => void }) {
               duration={state.duration}
               buffered={state.buffered}
               chapters={state.chapters}
+              marks={marks}
               onSeek={(t) => engine.seek(t)}
             />
           </div>
@@ -307,6 +310,7 @@ function View({ state, onClose }: { state: PlayerState; onClose: () => void }) {
           </div>
           <div className={s.extras}>
             <ChannelButtons state={state} />
+            <MarkButton item={item} />
             <VolumeControl volume={state.volume} muted={state.muted} />
             {long ? <SpeedMenu rate={state.rate} /> : null}
             <SleepMenu state={state} />

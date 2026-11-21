@@ -197,3 +197,10 @@ export const ChannelDownIcon = () => (
     <path d="m7 10 5 5 5-5" />
   </Icon>
 );
+
+export const MarkIcon = () => (
+  <Icon>
+    <path d="M6 4h12v17l-6-4-6 4V4Z" />
+    <path d="M12 8v5M9.5 10.5h5" />
+  </Icon>
+);

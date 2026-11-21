@@ -7,6 +7,7 @@ import { runtime } from '../-lib/format';
 import { fileQuality } from '../-lib/music';
 import { albumItems } from '../-lib/play-items';
 import { albumQuery } from '../-player.api';
+import { Comments } from '../-ui/comments';
 import { PlusIcon } from '../-ui/icons';
 import { Badge, Hero, PlayButton, PlayerLink, styles as s } from '../-ui/kit';
 import { LabelLink, MusicGenreLinks } from '../-ui/links';
@@ -164,6 +165,7 @@ function AlbumPage() {
         })}
         onPlay={(i) => playTrack(a.tracks[i].id)}
       />
+      <Comments itemType="album" itemId={String(id)} title={a.title} />
     </>
   );
 }

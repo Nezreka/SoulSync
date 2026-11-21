@@ -831,3 +831,116 @@ def presence_together():
         for o in r["others"]:
             o["profile"] = who.get(o["profile_id"], {"name": "Someone"})
     return jsonify({"success": True, "titles": rows})
+
+
+# ── notes: comments on a title, marks on a moment ───────────────────────
+
+NOTE_PERMISSIONS = {"show": ("tv.access",), "album": ("music.access",)}
+
+
+def _may_see_title(item_type: str, item_id: str) -> bool:
+    """the viewer may see this title: its media access, and its rating cap
+    for films and shows (an episode answers for its show)"""
+    from core.permissions import map_refuses
+    from core.player.presence import KIND_PERMISSIONS
+    perms = NOTE_PERMISSIONS.get(item_type) or KIND_PERMISSIONS.get(item_type, ())
+    if not perms or all(map_refuses(p) for p in perms):
+        return False
+    if item_type not in ("movie", "show", "episode"):
+        return True
+    try:
+        from api.video import get_video_db
+        from api.video.kids import library_title_allowed, video_cap
+        cap = video_cap()
+        if cap is None:
+            return True
+        db = get_video_db()
+        if item_type == "episode":
+            with db._get_connection() as conn:
+                row = conn.execute("SELECT show_id FROM episodes WHERE id = ?", (int(item_id),)).fetchone()
+            if not row:
+                return False
+            return library_title_allowed(db, "show", int(row[0]), cap)
+        return library_title_allowed(db, item_type, int(item_id), cap)
+    except Exception:  # noqa: BLE001 - can't tell: no
+        return False
+
+
+def _with_people(notes):
+    who = _profiles_by_id()
+    for n in notes:
+        n["profile"] = who.get(n["profile_id"], {"name": "Someone"})
+    return notes
+
+
+@bp.route("/api/player/notes/<item_type>/<path:item_id>", methods=["GET"])
+@self_only
+def list_notes(item_type, item_id):
+    """a title's comments (newest first) and marks (in time order): yours,
+    and what others shared"""
+    from core.player import notes
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    if not _may_see_title(item_type, item_id):
+        return jsonify({"success": False, "error": "not_found", "message": "Nothing here."}), 404
+    try:
+        return jsonify({"success": True, "notes": _with_people(notes.list_for(player_db(), pid, item_type, item_id))})
+    except notes.NoteError as e:
+        return _bad(e)
+    except Exception:  # noqa: BLE001
+        return _failed("notes read", "Couldn't load the notes.")
+
+
+@bp.route("/api/player/notes/<item_type>/<path:item_id>", methods=["POST"])
+@self_only
+def add_note(item_type, item_id):
+    """{body} a comment; {at, body?, shared?} a mark"""
+    from core.player import notes
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    if not _may_see_title(item_type, item_id):
+        return jsonify({"success": False, "error": "not_found", "message": "Nothing here."}), 404
+    body = request.get_json(silent=True) or {}
+    try:
+        note = notes.add(player_db(), pid, item_type, item_id, body.get("body"), body.get("at"),
+                         body.get("shared"))
+    except notes.NoteError as e:
+        return _bad(e)
+    except Exception:  # noqa: BLE001
+        return _failed("note save", "Couldn't save that.")
+    return jsonify({"success": True, "note": _with_people([note])[0]})
+
+
+@bp.route("/api/player/note/<int:note_id>", methods=["PATCH"])
+@self_only
+def edit_note(note_id):
+    from core.player import notes
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    body = request.get_json(silent=True) or {}
+    try:
+        note = notes.edit(player_db(), pid, note_id, body.get("body"), body.get("shared"))
+    except notes.NoteError as e:
+        return _bad(e)
+    if note is None:
+        return jsonify({"success": False, "error": "not_found", "message": "No such note of yours."}), 404
+    return jsonify({"success": True, "note": _with_people([note])[0]})
+
+
+@bp.route("/api/player/note/<int:note_id>", methods=["DELETE"])
+@self_only
+def delete_note(note_id):
+    """your own note; an admin can take down anyone's shared one"""
+    from flask import g
+
+    from core.player import notes
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    ok = notes.remove(player_db(), pid, note_id, moderator=bool(getattr(g, "is_admin", False)))
+    if not ok:
+        return jsonify({"success": False, "error": "not_found", "message": "No such note of yours."}), 404
+    return jsonify({"success": True})

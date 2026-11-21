@@ -14,6 +14,7 @@ import {
   progressLookupQuery,
   videoCatalogQuery,
 } from '../-player.api';
+import { Comments } from '../-ui/comments';
 import {
   CollectionRail,
   DetailLayout,
@@ -159,6 +160,7 @@ function MoviePage() {
               selfTmdb={tmdbId}
             />
             <Gallery gallery={extras.data?.gallery} />
+            <Comments itemType="movie" itemId={String(id)} title={m.title} />
           </>
         }
         side={

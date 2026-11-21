@@ -463,6 +463,12 @@ A video a browser can't play as it is (an MKV, HEVC, AC3 or DTS sound) is conver
 - `GET /api/player/presence`: what others play right now, `{sessions: [{profile, item_type, item_id, position, duration, playing, live, channel, meta, started, seen}], sharing}`. Only profiles that share, never your own screens, and only what this profile may see (its media access and its rating cap).
 - `GET /api/player/presence/together`: titles you and others (that share) both started in the last two months, your place and theirs. A show counts as one title, whichever episode each of you is on.
 
+#### Comments and marks
+
+- `GET /api/player/notes/<item_type>/<item_id>`: a title's notes: comments (no time; newest first) then marks (a moment in seconds; in time order). Yours, and what others shared. `item_type` is movie, show, episode, track, album, audiobook, youtube or podcast_episode. A title this profile may not see (its media access, its rating cap) is a 404.
+- `POST /api/player/notes/<item_type>/<item_id>` with `{body}` posts a comment (always shared, can't be empty), or with `{at, body?, shared?}` keeps a mark (a note is optional; yours alone unless `shared`). Up to 1000 characters.
+- `PATCH /api/player/note/<id>` with `{body?, shared?}`: your own note. `DELETE /api/player/note/<id>`: your own note, or for an admin anyone's shared one.
+
 #### Watched
 
 - `POST /api/player/watched` with `{item_type, item_id}`: a movie or episode is into its credits (92% of the way): it counts as watched, in SoulSync's video library and on the media server account, for the profile whose watch state it is (the same rules as the detail page's watched toggle). Returns `{watched}`: false for anything else, or a profile that keeps no watch state of its own. `POST /api/player/progress/finish` does the same for a movie or episode played to the end.

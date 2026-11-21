@@ -43,6 +43,7 @@ import {
   PipIcon,
   StatsIcon,
 } from './icons';
+import { MarkButton, useMarks } from './marks';
 import s from './playback.module.css';
 import { SeekBar } from './seek-bar';
 import { StatsOverlay } from './stats';
@@ -89,6 +90,7 @@ function FullPlayer({ state, onLeave }: { state: PlayerState; onLeave: () => voi
   const [fullscreen, setFullscreen] = useState(false);
   const [stats, setStats] = useState(false);
   const [episodes, setEpisodes] = useState(false);
+  const marks = useMarks(item);
   const [finding, setFinding] = useState(false);
   const fit = useFit();
   useEffect(() => {
@@ -269,6 +271,7 @@ function FullPlayer({ state, onLeave }: { state: PlayerState; onLeave: () => voi
           duration={state.duration}
           buffered={state.buffered}
           chapters={state.chapters}
+          marks={marks}
           onSeek={(t) => engine.seek(t)}
         />
         <div className={s.fullRow}>
@@ -335,6 +338,7 @@ function FullPlayer({ state, onLeave }: { state: PlayerState; onLeave: () => voi
                 <EpisodesIcon />
               </button>
             ) : null}
+            <MarkButton item={item} />
             <AudioMenu state={state} />
             <SubtitleMenu
               state={state}

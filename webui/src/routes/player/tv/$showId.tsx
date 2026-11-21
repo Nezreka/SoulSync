@@ -16,6 +16,7 @@ import {
   showFilesQuery,
   videoCatalogQuery,
 } from '../-player.api';
+import { Comments } from '../-ui/comments';
 import {
   DetailLayout,
   ExtrasVideos,
@@ -391,6 +392,7 @@ function ShowPage() {
               selfTmdb={tmdbId}
             />
             <Gallery gallery={extras.data?.gallery} />
+            <Comments itemType="show" itemId={String(id)} title={show.title} />
           </>
         }
         side={

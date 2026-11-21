@@ -24,6 +24,7 @@ import {
   RepeatIcon,
   RepeatOneIcon,
 } from './icons';
+import { useMarks } from './marks';
 import s from './playback.module.css';
 import { QueuePanel } from './queue-panel';
 import { SeekBar } from './seek-bar';
@@ -37,6 +38,7 @@ export function TransportBar() {
   const [queueOpen, setQueueOpen] = useState(false);
   const loading = useLoading(state);
   const item = current(state.queue);
+  const marks = useMarks(item);
   if (!item) return null;
   const engine = getEngine();
   const long = LONG_FORM.has(item.type);
@@ -170,6 +172,7 @@ export function TransportBar() {
           duration={state.duration}
           buffered={state.buffered}
           chapters={state.chapters}
+          marks={marks}
           onSeek={(t) => engine.seek(t)}
         />
       </div>

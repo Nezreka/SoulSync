@@ -379,6 +379,51 @@ export const togetherQuery = () =>
     staleTime: MINUTE,
   });
 
+// ── notes: comments on a title, marks on a moment ─────────────────────
+
+export interface Note {
+  id: number;
+  profile_id: number;
+  profile: WatchingSession['profile'];
+  item_type: string;
+  item_id: string;
+  /** a mark's moment, in seconds; null: a comment */
+  at: number | null;
+  body: string;
+  shared: boolean;
+  mine: boolean;
+  created_at: number;
+  edited_at: number | null;
+}
+
+export const notesQuery = (itemType: string, itemId: string) =>
+  queryOptions({
+    queryKey: ['player', 'notes', itemType, itemId],
+    queryFn: async () =>
+      (
+        await apiClient
+          .get(`player/notes/${itemType}/${encodeURIComponent(itemId)}`)
+          .json<{ notes: Note[] }>()
+      ).notes,
+    staleTime: 30_000,
+  });
+
+export const noteEdits = {
+  add: async (
+    itemType: string,
+    itemId: string,
+    note: { body?: string; at?: number; shared?: boolean },
+  ) =>
+    (
+      await apiClient
+        .post(`player/notes/${itemType}/${encodeURIComponent(itemId)}`, { json: note })
+        .json<{ note: Note }>()
+    ).note,
+  edit: async (id: number, changes: { body?: string; shared?: boolean }) =>
+    (await apiClient.patch(`player/note/${id}`, { json: changes }).json<{ note: Note }>()).note,
+  remove: async (id: number) => apiClient.delete(`player/note/${id}`).json(),
+};
+
 // ── lyrics ─────────────────────────────────────────────────────────────
 
 export interface Lyrics {
