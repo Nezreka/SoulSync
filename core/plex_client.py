@@ -1339,6 +1339,27 @@ class PlexClient(MediaServerBase):
             logger.error(f"Error getting recently updated albums: {exc}")
             return []
 
+    def get_music_library_folders(self) -> List[Dict[str, Any]]:
+        """every music library on the server with its folders, as Plex names
+        them: ``[{library, folders}]``. All of them, not only the selected
+        one: the library coverage check lists everything Plex has."""
+        if not self.ensure_connection() or not self._can_query() or not self.server:
+            return []
+        out: List[Dict[str, Any]] = []
+        try:
+            sections = [s for s in self.server.library.sections() if s.type == 'artist']
+        except Exception as exc:
+            logger.debug(f"Could not list music sections: {exc}")
+            return []
+        for section in sections:
+            try:
+                folders = [str(loc) for loc in (section.locations or []) if loc]
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(f"Could not read locations for section '{getattr(section, 'title', '?')}': {exc}")
+                folders = []
+            out.append({"library": str(getattr(section, 'title', '') or ''), "folders": folders})
+        return out
+
     def get_music_library_locations(self) -> List[str]:
         """Folder roots configured for the music library scope.
 

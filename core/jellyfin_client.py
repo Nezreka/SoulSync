@@ -807,6 +807,21 @@ class JellyfinClient(MediaServerBase):
         logger.info(f"Triggered Jellyfin folder scan of {len(folders)} folder(s)")
         return True
 
+    def get_music_library_folders(self) -> List[Dict[str, Any]]:
+        """every music library with its folders, as jellyfin names them:
+        ``[{library, folders}]``. all of them, for the library coverage check"""
+        if not self.ensure_connection():
+            return []
+        try:
+            folders = self._make_request('/Library/VirtualFolders') or []
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("jellyfin library folders lookup failed: %s", exc)
+            return []
+        return [{"library": str(f.get('Name') or ''),
+                 "folders": [str(loc) for loc in (f.get('Locations') or []) if loc]}
+                for f in folders if isinstance(f, dict)
+                and str(f.get('CollectionType') or '').lower() == 'music']
+
     def get_music_library_locations(self) -> List[str]:
         """the folders behind the music library, as jellyfin sees them.
         the selected library when one is set, every music library otherwise"""

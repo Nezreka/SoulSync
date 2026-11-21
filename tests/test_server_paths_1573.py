@@ -257,12 +257,17 @@ def test_mapping_schema_upgrade_keeps_existing_identities(tmp_path):
     # Existing catalogue and mapping from before the additive path observation.
     from core.library2.schema import ensure_library_v2_schema
     ensure_library_v2_schema(conn)
+    # the old schema had neither the column nor the coverage index built on it
+    conn.execute('DROP INDEX IF EXISTS idx_lib2_media_mappings_track_path')
     conn.execute('ALTER TABLE lib2_media_server_mappings DROP COLUMN server_path')
     conn.execute("INSERT INTO lib2_media_server_mappings(entity_type,entity_id,server_source,server_id) "
                  "VALUES('track',7,'navidrome','nd-old')")
     ensure_media_mapping_schema(conn)
     ensure_media_mapping_schema(conn)
     assert tuple(conn.execute('SELECT server_id, server_path FROM lib2_media_server_mappings').fetchone()) == ('nd-old', None)
+    # and the upgrade builds the coverage index once the column is back
+    assert conn.execute("SELECT 1 FROM sqlite_master WHERE type='index'"
+                        " AND name='idx_lib2_media_mappings_track_path'").fetchone()
     conn.close()
 
 

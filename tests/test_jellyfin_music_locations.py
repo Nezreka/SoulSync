@@ -32,3 +32,17 @@ def test_no_answer_is_no_folders():
     client = _client(_FOLDERS)
     client.ensure_connection = lambda: False
     assert client.get_music_library_locations() == []
+
+
+def test_coverage_lists_every_music_library_with_its_name_even_with_one_selected():
+    assert _client(_FOLDERS, "m2").get_music_library_folders() == [
+        {"library": "Music", "folders": ["/media/music"]},
+        {"library": "Lossless", "folders": ["/media/flac", "/media/music"]},
+    ]
+
+
+def test_coverage_folders_without_an_answer():
+    assert _client(None).get_music_library_folders() == []
+    client = _client(_FOLDERS)
+    client.ensure_connection = lambda: False
+    assert client.get_music_library_folders() == []
