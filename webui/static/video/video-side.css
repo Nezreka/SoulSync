@@ -114,6 +114,51 @@ html[data-sidebar="collapsed"] .side-toggle-btn .side-toggle-icon {
     height: 16px;
 }
 
+/* ── The way into the player, under the toggle ─────────────────────────── */
+.open-player {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin-top: 8px;
+    padding: 8px 10px;
+    border: 1px solid var(--white-a07);
+    border-radius: 11px;
+    background: var(--white-a03);
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-decoration: none;
+    transition: color var(--dur-base) ease, background var(--dur-base) ease, border-color var(--dur-base) ease;
+}
+.open-player:hover,
+.open-player:focus-visible {
+    border-color: rgba(var(--accent-rgb), 0.45);
+    background: rgba(var(--accent-rgb), 0.12);
+    color: var(--text-primary);
+}
+.open-player-icon {
+    width: 13px;
+    height: 13px;
+    flex: none;
+    color: rgb(var(--accent-rgb));
+}
+html[data-sidebar="collapsed"] .open-player {
+    width: 46px;
+    margin-left: auto;
+    margin-right: auto;
+    padding: 9px 0;
+    border-radius: 13px;
+}
+html[data-sidebar="collapsed"] .open-player-label {
+    display: none;
+}
+html[data-sidebar="collapsed"] .open-player-icon {
+    width: 15px;
+    height: 15px;
+}
+
 /* ── Nav swap: music nav vs video nav ──────────────────────────────────── */
 /* The video nav reuses .sidebar-nav layout (same class) — only visibility
    differs. Hidden by default (music side); shown when data-side="video". */
