@@ -15,7 +15,7 @@ internet. This guide covers the safe setup.
 
 By default SoulSync does **not** trust proxy headers (so a direct client can't spoof
 its IP or pretend the connection is HTTPS). If you're behind a proxy that
-terminates TLS, turn on **Settings → Security → "Behind a reverse proxy"** and
+terminates TLS, turn on **Settings → System → Security → "Behind a reverse proxy"** and
 **restart SoulSync** (this option applies at startup).
 
 When enabled, SoulSync:
@@ -110,7 +110,7 @@ Pick one:
 
   SoulSync can **trust the proxy's authenticated-user header** so the launch PIN is
   skipped once the proxy has logged you in. Set the header name in **Settings →
-  Security → "Auth proxy user header"** (e.g. `Remote-User`).
+  System → Security → "Auth proxy user header"** (e.g. `Remote-User`).
 
   The header only counts from your proxy: also fill in **Trusted proxy addresses**
   (the proxy's IP or a range, e.g. `172.18.0.2` or `172.18.0.0/16`, one per line or

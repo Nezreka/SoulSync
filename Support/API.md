@@ -6,7 +6,7 @@ SoulSync includes a full REST API at `/api/v1/` that lets you control everything
 
 ### 1. Generate an API Key
 
-Go to **Settings** in the SoulSync web UI and find the **SoulSync API** section. Click **Generate API Key**, give it a label, and copy the key immediately — it's only shown once.
+Go to **Settings** in the SoulSync web UI and open **System › API**. Under **New API key**, give it a label and click **Generate key**, then copy the key immediately — it's only shown once.
 
 Alternatively, if no keys exist yet, use the bootstrap endpoint. It needs no key, but only the admin may call it: on a single-profile install with no login or launch PIN that's any request, otherwise send your signed-in admin session cookie (or just use Settings).
 
@@ -198,6 +198,52 @@ After the music library folder moves, these point the library's file records at 
 - `GET /api/library/file-locations/status`: `{status, action, checked, total, result, preview, error, runs}`. `runs` lists recent runs, manual and from library scans, with `id`, `kind`, `status`, `repointed` and `groups`.
 - `POST /api/library/file-locations/runs/<id>/undo`: put a run's records back. A record changed since is left as it is. `POST /api/library/file-locations/stop` stops the running job.
 
+### Library coverage and folder overrides (web UI routes, admins only)
+
+How much of the media server's music SoulSync can read directly, folder by folder. Each folder is sampled (up to 40 real files, opened and size-checked), never scanned whole.
+
+- `GET /api/library/coverage`: the last check, or a new one when there is none. `?refresh=1` always runs a new one. `{server, folders_from: "server"|"inferred", relative_paths, total_tracks, outside_folders, reachable_tracks, reachable_pct, docker, folders}`. Each folder: `{library, server_folder, tracks, local_folder, found_by: "override"|"same"|"learned"|"suffix"|null, status: "covered"|"partly_covered"|"not_library"|"not_mounted", library_folder, library_parts, volume_example (Docker, not mounted), sampled, readable, readable_pct, reasons: {reason: count}, examples: [{server_path, local_path, reason, why}], reachable_tracks}`. Reasons: `ok`, `not_mounted`, `missing`, `permission`, `size`, `unreadable`, `not_a_file`, `not_library`. Navidrome doesn't say which folders it uses, so its folders are worked out from its track paths (`folders_from: "inferred"`); `relative_paths: true` means Report Real Path is off.
+- `POST /api/library/coverage/folder` `{server_folder, local_folder?, library?}`: one folder, checked now. With `local_folder` it is checked as if SoulSync saw it there; nothing is saved.
+- `POST /api/library/coverage/check-path` `{path}`: `{exists, is_dir, readable, entries, sample, library_folder}` for a typed folder.
+- `GET /api/library/path-mappings` `?media_type=music|video`: folder overrides, `[{id, media_type, server_kind, server_prefix, local_prefix, enabled, verified_at, verify}]`.
+- `POST /api/library/path-mappings` `{server_prefix, local_prefix, media_type?: "music", server_kind?: "", this_server?: bool}` adds one (the same server folder saves over itself); `PUT /api/library/path-mappings/<id>` changes one; `DELETE` removes it. `this_server: true` limits it to the active media server.
+- `POST /api/library/path-mappings/<id>/verify`: samples the files under it and stores `verify` and `verified_at`.
+
+An override renames a folder: "the server's `/data/music` is `/music` here". It never gives SoulSync access to a drive. Every server path SoulSync turns into its own asks the overrides first (the longest matching server folder wins, Windows paths compare without case), then the mounts it learned itself, then the trailing-folder match against its library folders. An override whose folder is missing is skipped, so it never hides a file.
+
+### Paired devices: listen anywhere (web UI and app routes)
+
+Settings > Devices pairs music apps with this server. A device gets its own token, never an API key. The admin routes are `@admin_only`; the device's own routes take the token in `X-Device-Token: sdt_...` (or `Authorization: Bearer sdt_...`) and no cookie. A request may carry a device token or an API key, not both (`400 device_one_credential`).
+
+A device token reaches only routes that opt in. Everything else answers `403 device_not_allowed` before it runs; an unknown or unpaired token gets `401 device_token_invalid`, one that missed its pick window `401 device_pick_expired`, and an unprofiled one on anything but its pick `403 device_pick_first`. A device never acts as an admin, even when its profile is one.
+
+Admin:
+
+- `GET /api/devices/identity`: `{lookup_id, fingerprint, public_key}`. The server fingerprint is the lookup ID's first 12 characters.
+- `GET /api/devices`: `{devices: [{id, name, platform, app, kind, profile_id, profile_name, scope, created_at, last_seen_at, last_ip, state, pick_seconds_left}]}`. `state` is `live` or `unprofiled` (waiting for its pick; `pick_seconds_left` says how long). Unpaired and expired ones are left off.
+- `PATCH /api/devices/<id>` `{name}`: rename. `DELETE /api/devices/<id>`: unpair now.
+- `POST /api/devices/profiles/<profile_id>/revoke`: unpair every device of a profile, `{revoked}`. Sign out everywhere, a new password and turning a profile off do the same; deleting a profile removes its devices.
+- `GET /api/devices/codes`: `{codes: [{id, note, created_at, expires_at, seconds_left, wrong_tries}]}`, the codes still waiting. Never the codes themselves.
+- `POST /api/devices/codes` `{note?}`: `201 {id, code, code_hash, expires_at, seconds_left, payload, payload_text, warnings}`. `code` is shown this once, as `XXXX-XXXX-XXXX-XXXX` (16 characters of Crockford base32, about 80 bits). It works once, for 10 minutes. `code_hash` is the SHA-256 hex of the code's 16 characters (uppercase, no dashes). `payload` is `{v, lookup_id, fingerprint, addresses, code}` and `payload_text` its compact JSON, what the QR carries. `409` when 20 codes already wait.
+- `DELETE /api/devices/codes/<id>`: cancel a waiting code.
+- `GET /api/devices/server`: `{lookup_id, fingerprint, public_key, addresses: [{kind, url}], remote_url, custom_urls, warnings, probe, guidance}`. `addresses` lists `local` ones first, then `remote`, then `custom`. `warnings` says so for a plain http address outside the home network.
+- `PUT /api/devices/addresses` `{remote_url, custom_urls}`: save the remote address (blank clears it) and up to 5 extra ones. `400` with the reason for an address that won't work. Answers like `GET /api/devices/server`.
+- `POST /api/devices/reachability`: a new one-time probe, and the server fetching its own remote address with it. `{result: {ok, code, words} | null, probe: {nonce, path, url, seconds_left, hits}, guidance}`. `result` is null with no remote address. `code` is `ok`, `not_this_server`, `blocked`, `certificate`, `timeout`, `dns` or `unreachable`.
+- `GET /api/devices/reachability`: `{probe}`, the newest probe and its `hits: [{ip, at, via, from_home}]` (`via` is `self` for the server's own fetch, `outside` for anything else, like a phone on mobile data).
+
+Open, no sign-in (these pass the login, launch PIN and profile gates):
+
+- `POST /api/devices/redeem` `{code, name, platform?, app?}`: `201 {token, device_id, pick_seconds, server: {lookup_id, fingerprint, public_key}}`. Burns the code; the token is shown this once and starts unprofiled. Every bad code answers `404 unknown_or_expired_code` the same way. Wrong codes from one address are held to 10 a minute (`429`, `Retry-After`), and 5 wrong tries on one code lock it. Plain http only works from this machine or the home network; anything else gets `403 https_required`.
+- `GET /api/devices/reachability/<nonce>`: the one-time probe URL. `{soulsync_probe: <nonce>}` (a small page for a browser) while the probe lives, else `404`.
+
+The device itself:
+
+- `GET /api/devices/me`: `{device, server}`: its name, `state`, profile and how long it has left to pick.
+- `GET /api/devices/me/profiles`: `{profiles: [{id, name, avatar_color, avatar_url, needs}]}`, the profiles it may pick. `needs` is `password` in login mode, `pin` for a profile with a PIN, else null. A music app only sees profiles with **Use music apps** (`music.apps`). `409` once it has picked.
+- `POST /api/devices/me/profile` `{profile_id, pin?, password?}`: the pick, once. The same checks as `POST /api/profiles/select` (wrong tries throttled the same way); a profile with a PIN always asks for it here. `404` for a profile that isn't on its list, `409` once picked or past its 15 minutes.
+
+Person invites are the same as Settings > People > Invites: `GET/POST /api/profiles/invites` (admin, or an admin API key). `POST` takes `{preset: {template_id}, note?, expires_hours?}`; a new one lasts a week (168 hours, 1 to 720) unless `expires_hours` says otherwise, works once, and whoever opens it makes their own profile following that template.
+
 ---
 
 ## MCP for AI clients
@@ -206,7 +252,7 @@ SoulSync can act as an MCP server, so an AI app like Claude can search for music
 
 ### Turn it on
 
-Go to **Settings > Advanced > SoulSync API > MCP for AI Clients** and tick **Answer MCP requests at /mcp**. While it's off, `/mcp` answers `404`.
+Go to **Settings > System > API > MCP for AI clients** and tick **Answer MCP requests at /mcp**. While it's off, `/mcp` answers `404`.
 
 ### Connect a client
 
@@ -248,7 +294,7 @@ Some request apps only know how to talk to Lidarr. SoulSync can answer as Lidarr
 
 ### Turn it on
 
-Go to **Settings > Advanced > SoulSync API > Lidarr Compatible API**:
+Go to **Settings > System > API > Lidarr compatible API**:
 
 1. Tick **Answer as Lidarr at /lidarr**. While it's off, every `/lidarr` route answers `404`.
 2. Pick **Requests go to profile**. Requested albums land on that profile's wishlist.
@@ -277,7 +323,7 @@ Apps built for Seerr (Jellyseerr, Overseerr) can use SoulSync's video side inste
 
 ### Turn it on
 
-Go to **Settings > System > SoulSync API > Seerr Compatible API**:
+Go to **Settings > System > API > Seerr compatible API**:
 
 1. Tick **Answer as Seerr at /seerr**. While it's off, every `/seerr` route answers `404`.
 2. Pick **Jellyfin users with no profile request as**.

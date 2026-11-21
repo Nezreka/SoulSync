@@ -1684,6 +1684,10 @@ class MusicDatabase:
             # people and permissions (#2166): templates, policy, personal
             # changes. after every profile column above it reads
             self._add_permission_layers(cursor)
+            # "Use music apps" starts off on the Kids template (listen anywhere)
+            self._music_apps_off_for_kids(cursor)
+            # paired devices and invite codes (core/connect)
+            self._add_connect_tables(cursor)
             # audiobook and podcast episode asks (#2188)
             self._ensure_media_request_schema(cursor)
             self._revoke_stale_device_rows(cursor)
@@ -1694,6 +1698,9 @@ class MusicDatabase:
             # server activity play log (who played what, how, from where)
             from core.server_activity.store import ensure_schema as _ensure_server_activity_schema
             _ensure_server_activity_schema(cursor)
+            # folder overrides: the media server's folder name -> SoulSync's
+            from core.library.path_mappings import ensure_schema as _ensure_path_mappings
+            _ensure_path_mappings(cursor)
 
             # Per-artist auto_download ("follow only") column. MUST run after the
             # profile-support migrations above — those recreate watchlist_artists
@@ -5955,6 +5962,38 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error in permission layers migration: {e}")
 
+    def _music_apps_off_for_kids(self, cursor):
+        """once: the built-in Kids template gets "Use music apps" off. a
+        template saved before the row existed reads it as its default (on),
+        so the built-in is written to say off, unless someone already set
+        it. children who follow Kids follow it there."""
+        try:
+            cursor.execute("SELECT value FROM metadata WHERE key = 'perm_music_apps_v1' LIMIT 1")
+            if cursor.fetchone():
+                return
+            cursor.execute("SELECT id, perms FROM permission_templates WHERE slug = 'kids' AND builtin = 1")
+            row = cursor.fetchone()
+            if row:
+                try:
+                    perms = json.loads(row[1] or "{}")
+                except (TypeError, ValueError):
+                    perms = None
+                if isinstance(perms, dict) and "music.apps" not in perms:
+                    perms["music.apps"] = False
+                    cursor.execute("UPDATE permission_templates SET perms = ?, updated_at = CURRENT_TIMESTAMP "
+                                   "WHERE id = ?", (json.dumps(perms, sort_keys=True), row[0]))
+            cursor.execute("INSERT OR REPLACE INTO metadata (key, value) VALUES ('perm_music_apps_v1', '1')")
+        except Exception as e:
+            logger.error(f"Error in music apps permission migration: {e}")
+
+    def _add_connect_tables(self, cursor):
+        try:
+            from core.connect import device_tokens, invite_codes
+            device_tokens.ensure_tables(cursor)
+            invite_codes.ensure_tables(cursor)
+        except Exception as e:
+            logger.error(f"Error creating paired device tables: {e}")
+
     def _seed_permission_templates(self, cursor):
         """the four built-ins from init.js PROFILE_PRESETS, each with what
         new profiles see today (ui_features_default) as its sidebar."""
@@ -9904,6 +9943,11 @@ class MusicDatabase:
                 cursor.execute("UPDATE profile_devices SET revoked_at = CURRENT_TIMESTAMP "
                                "WHERE owner_id = ? AND revoked_at IS NULL AND id != ?",
                                (int(profile_id), keep_device_id or ''))
+                # and its paired apps (core/connect/device_tokens.py): signed
+                # out everywhere means everywhere
+                self._add_connect_tables(cursor)
+                cursor.execute("UPDATE device_tokens SET revoked_at = CURRENT_TIMESTAMP "
+                               "WHERE profile_id = ? AND revoked_at IS NULL", (int(profile_id),))
                 conn.commit()
                 cursor.execute("SELECT session_epoch FROM profiles WHERE id = ?", (int(profile_id),))
                 row = cursor.fetchone()

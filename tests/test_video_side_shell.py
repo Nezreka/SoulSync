@@ -282,7 +282,8 @@ def test_video_library_mapping_ui_present_and_video_only():
     # React (connections-video-server.tsx, SETTINGS_PORT.md video pass V3b)
     section = (_ROOT / "webui" / "src" / "features" / "settings" / "tabs" /
                "connections-video-server.tsx").read_text(encoding="utf-8")
-    assert '<LibrarySelect kind="movies" />' in section and '<LibrarySelect kind="tv" />' in section
+    # (settings-bic phase 3) a Row per library on the parts
+    assert '<LibraryRow kind="movies" />' in section and '<LibraryRow kind="tv" />' in section
     assert 'data-video-lib-select={kind}' in section
     assert 'data-video-only=""' in section
     css = _CSS_PATH.read_text(encoding="utf-8")
@@ -301,13 +302,15 @@ def test_video_side_hides_music_api_config_and_shows_placeholders():
     # The cards are React (SETTINGS_PORT.md video pass V3a).
     cards = (_ROOT / "webui" / "src" / "features" / "settings" / "tabs" /
              "connections-video-api.tsx").read_text(encoding="utf-8")
-    assert '<div className="api-service-frame stg-service" data-video-service={service}' in cards
+    # (settings-bic phase 3) drawn by ServiceFrame kind="video", which puts
+    # data-video-service on the frame
+    assert '<ServiceFrame\n      kind="video"' in cards
     assert '<Card\n        service="tmdb"' in cards and '<Card\n        service="tvdb"' in cards
     assert 'data-stg-part="api-video"' in _INDEX
     # They must NOT carry the music-hooked data-service attribute.
     assert "data-service=" not in cards
-    # Each connection item has a Test button (like music's connections).
-    assert '<Test spec="tmdb">' in cards and '<Test spec="tvdb">' in cards
+    # Each connection item has a Test (the service sheet's, like music's).
+    assert 'test="tmdb"' in cards and 'test="tvdb"' in cards
 
 
 def test_dashboard_enrichment_buttons_are_delegated():

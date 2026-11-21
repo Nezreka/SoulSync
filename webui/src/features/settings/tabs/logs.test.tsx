@@ -1,7 +1,7 @@
 /**
- * The Logs tab, ported from the vanilla Settings page (SETTINGS_PORT.md,
- * step 3): the same markup as the frozen fixture, and the live log viewer
- * behaving as settings.js's _logViewer* functions did.
+ * System > Logs (the Logs tab until settings-bic phase 6): the live log
+ * viewer on the parts, behaving as settings.js's _logViewer* functions did,
+ * and saying Live only while the socket took the subscription.
  */
 
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -10,7 +10,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SettingsTabProps } from '../host';
 
 import { createSettingsStore } from '../settings-store';
-import { shape, vanilla } from './__fixtures__/shape';
 import {
   LOG_MAX_LINES,
   classifyLogLine,
@@ -66,13 +65,45 @@ const lines = () =>
 const count = () => document.getElementById('log-viewer-line-count')!.textContent;
 const live = (frame: LogLiveFrame) => act(() => subscribed.at(-1)![1](frame));
 
-describe('the Logs tab is the same page it replaced', () => {
-  it('renders the vanilla viewer: same elements, ids, classes and words', () => {
+describe('the viewer on the parts', () => {
+  it('a card: the log, the level as one choice, the filter, the lines, then how they are shown', () => {
     const { container } = render(<LogsTab {...props(false, 0)} />);
-    const want = shape(vanilla('logs.vanilla.html'));
-    const got = shape(container);
-    expect(got.elements).toEqual(want.elements);
-    expect(got.text).toBe(want.text);
+    expect(container.querySelector('[data-card="Live log"]')).not.toBeNull();
+    expect(
+      [...document.querySelectorAll('#log-viewer-source option')].map((o) => o.textContent),
+    ).toEqual(['app.log', 'post_processing.log', 'acoustid.log', 'source_reuse.log']);
+    const levels = document.getElementById('log-viewer-level')!;
+    expect(levels.getAttribute('role')).toBe('radiogroup');
+    expect([...levels.querySelectorAll('[data-level]')].map((b) => b.textContent)).toEqual([
+      'All',
+      'Debug',
+      'Info',
+      'Warn',
+      'Error',
+    ]);
+    expect(screen.getByRole('radio', { name: 'All' }).getAttribute('aria-checked')).toBe('true');
+    expect(document.getElementById('log-viewer-autoscroll')!.getAttribute('role')).toBe('switch');
+    expect((document.getElementById('log-viewer-autoscroll') as HTMLInputElement).checked).toBe(
+      true,
+    );
+    for (const id of ['log-viewer-search', 'log-viewer-terminal', 'log-viewer-line-count'])
+      expect(document.getElementById(id), id).not.toBeNull();
+    // not opened yet, nothing streams: it does not say Live
+    expect(document.getElementById('log-viewer-live-indicator')!.textContent).toBe('Not live');
+  });
+
+  it('says Live only while the socket took the subscription', async () => {
+    const view = render(<LogsTab {...props(true)} />);
+    await waitFor(() =>
+      expect(document.getElementById('log-viewer-live-indicator')!.textContent).toBe('Live'),
+    );
+    view.rerender(<LogsTab {...props(false)} />);
+    expect(document.getElementById('log-viewer-live-indicator')!.textContent).toBe('Not live');
+    view.unmount();
+    connected = false;
+    render(<LogsTab {...props(true)} />);
+    await waitFor(() => expect(lines()).toEqual(tailLines));
+    expect(document.getElementById('log-viewer-live-indicator')!.textContent).toBe('Not live');
   });
 });
 
@@ -132,9 +163,9 @@ describe('the live viewer', () => {
     render(<LogsTab {...props(true)} />);
     await waitFor(() => expect(subscribed).toHaveLength(1));
     tailLines = ['x - ERROR - only errors'];
-    fireEvent.click(screen.getByText('Error'));
-    expect(screen.getByText('Error').classList.contains('active')).toBe(true);
-    expect(screen.getByText('All').classList.contains('active')).toBe(false);
+    fireEvent.click(screen.getByRole('radio', { name: 'Error' }));
+    expect(screen.getByRole('radio', { name: 'Error' }).getAttribute('aria-checked')).toBe('true');
+    expect(screen.getByRole('radio', { name: 'All' }).getAttribute('aria-checked')).toBe('false');
     expect(unsubscribed).toBe(1);
     await waitFor(() => expect(lines()).toEqual(['x - ERROR - only errors']));
     expect(tails.at(-1)).toBe('/api/logs/tail?source=app&lines=300&level=ERROR');

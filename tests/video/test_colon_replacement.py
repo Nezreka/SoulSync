@@ -56,12 +56,14 @@ def test_the_settings_select_offers_every_mode_and_saves_it():
     import re
     from pathlib import Path
     root = Path(__file__).resolve().parents[2]
-    # React (SETTINGS_PORT.md video pass V2b)
+    # Library > Naming, Video (settings-bic phase 4): a select on the parts,
+    # its options a list, saved at once
     tabs = root / "webui" / "src" / "features" / "settings" / "tabs"
     html = (tabs / "library-video-organization.tsx").read_text(encoding="utf-8")
-    select = html[html.index('<Select id="vo-colon-replacement" field="colon_replacement">'):]
-    select = select[:select.index("</Select>")]
-    assert sorted(re.findall(r'value="([a-z_]+)"', select)) == sorted(org.COLON_MODES)
+    select = html[html.index('id="vo-colon-replacement"'):]
+    select = select[:select.index("/>")]
+    assert "onChange={(event) => save('colon_replacement', event.target.value)}" in select
+    assert sorted(re.findall(r"value: '([a-z_]+)'", select)) == sorted(org.COLON_MODES)
     js = (tabs / "video-organization.ts").read_text(encoding="utf-8")
     assert "colon_replacement: s('colon_replacement') || 'delete'" in js
     assert "colon_replacement: text(o.colon_replacement, 'delete')" in js

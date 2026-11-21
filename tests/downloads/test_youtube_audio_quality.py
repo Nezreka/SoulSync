@@ -1808,7 +1808,7 @@ def test_docs_mention_youtube_reencode_default():
         for f in sorted((root / 'webui' / 'static' / 'docs-content').glob('*.js'))
     )
     youtube_docs = _slice_between(docs, 'YouTube settings', 'Downloading Music')
-    transcode_help = _slice_between(index, 'id="youtube-transcode"', 'id="youtube-transcode-options"')
+    transcode_help = _slice_between(index, 'label="Re-encode YouTube audio"', 'id="youtube-transcode-options"')
     assert 'Re-encode YouTube audio' in youtube_docs
     assert 'MP3 320' in youtube_docs
     assert 'Paste cookies.txt' in youtube_docs
@@ -1827,7 +1827,7 @@ def test_quality_profile_help_covers_youtube():
     root = Path(__file__).resolve().parents[2]
     # the YouTube source panel is React now (SETTINGS_PORT.md step 7g)
     index = _youtube_panel(root)
-    transcode_help = _slice_between(index, 'id="youtube-transcode"', 'id="youtube-transcode-options"')
+    transcode_help = _slice_between(index, 'label="Re-encode YouTube audio"', 'id="youtube-transcode-options"')
     assert 'Opus or AAC' in transcode_help
     assert 'quality list' in transcode_help
 
@@ -1844,7 +1844,7 @@ def test_settings_ui_has_no_preferred_youtube_audio_control():
     # re-encode is on unless saved as off, and its options show with it
     assert "const transcode = y.transcode !== false;" in index
     assert 'id="youtube-transcode"' in index and 'checked={transcode}' in index
-    assert "style={{ display: transcode ? 'block' : 'none' }}" in index
+    assert 'id="youtube-transcode-options" hidden={!transcode}' in index
     # The defaults this test is really about: mp3 at 320. The panel saves only
     # what is changed (store.set), so a missing value is never written over the
     # stored one, which is what the _cfgStr accessor protected before.
@@ -1865,7 +1865,7 @@ def test_user_facing_youtube_quality_copy_is_not_internal():
     index = _youtube_panel(root)
 
     other_docs = _slice_between(docs, 'YouTube settings', 'Downloading Music')
-    transcode_help = _slice_between(index, 'id="youtube-transcode"', 'id="youtube-transcode-options"')
+    transcode_help = _slice_between(index, 'label="Re-encode YouTube audio"', 'id="youtube-transcode-options"')
 
     forbidden = ('itag', 'yt-dlp', 'bestaudio', 'extract_flat', 'ladder', 'probe', 'stamp')
     for chunk in (other_docs, transcode_help):

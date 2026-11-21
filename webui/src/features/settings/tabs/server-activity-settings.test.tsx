@@ -60,7 +60,7 @@ describe('server activity settings', () => {
   it('loads what is saved', async () => {
     serve();
     render(<ServerActivitySettingsCard />);
-    expect(await screen.findByLabelText('Upload speed (Mbps)')).toHaveValue(40);
+    expect(await screen.findByLabelText('Upload speed')).toHaveValue(40);
     expect(screen.getByLabelText('Show where remote viewers are')).toBeChecked();
     expect(screen.getByLabelText('Keep plays for')).toHaveValue('0');
     expect(screen.getByRole('list', { name: 'Stop messages', hidden: true })).toHaveTextContent(
@@ -71,7 +71,7 @@ describe('server activity settings', () => {
   it('saves the upload cap on leaving the field, empty meaning no bar', async () => {
     const { posts } = serve();
     render(<ServerActivitySettingsCard />);
-    const field = await screen.findByLabelText('Upload speed (Mbps)');
+    const field = await screen.findByLabelText('Upload speed');
     fireEvent.change(field, { target: { value: '' } });
     fireEvent.blur(field);
     await waitFor(() => expect(posts).toEqual([{ upload_mbps: null }]));
@@ -81,7 +81,7 @@ describe('server activity settings', () => {
     window.showToast = vi.fn();
     serve();
     render(<ServerActivitySettingsCard />);
-    const field = await screen.findByLabelText('Upload speed (Mbps)');
+    const field = await screen.findByLabelText('Upload speed');
     fireEvent.change(field, { target: { value: '-3' } });
     fireEvent.keyDown(field, { key: 'Enter' });
     await waitFor(() =>

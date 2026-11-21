@@ -95,10 +95,6 @@ function applyAccentColor(hex) {
 
     // Store for instant restore on next page load
     localStorage.setItem('soulsync-accent', hex);
-
-    // Update preview swatch if it exists
-    const swatch = document.getElementById('accent-preview-swatch');
-    if (swatch) swatch.style.background = hex;
 }
 
 function applyParticlesSetting(enabled) {
@@ -2435,7 +2431,7 @@ function openInviteCreator() {
         subtitle: 'Whoever opens it picks a name and joins following the template you choose here.',
         size: 'small', layerClass: 'pf-layer--small',
     });
-    let hours = 72;
+    let hours = 168;
 
     // what they start as (#2166): a template, fine-tuned per person later
     const templatePick = pfTemplatePicker({ label: 'They start as' });

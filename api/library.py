@@ -333,8 +333,9 @@ def register_routes(bp):
             # Get recently played with library track IDs for playback.
             # A play is linked to the catalogue by lib2_track_id; the file is
             # the track's primary one.
-            from core.stats.queries import listening_owner, owner_clause
-            scope = owner_clause(listening_owner(db, profile_id), 'lh')
+            from core.listening_scope import stats_owner_clause
+            from core.stats.queries import listening_owner
+            scope = stats_owner_clause(listening_owner(db, profile_id), 'lh')
             conn = db._get_connection()
             try:
                 cursor = conn.cursor()

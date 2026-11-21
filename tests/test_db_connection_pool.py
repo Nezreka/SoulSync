@@ -88,14 +88,23 @@ def test_with_commits_and_does_not_close(db):
 
 
 def test_a_never_closed_connection_comes_back_on_gc(db):
+    from database import connection_pool as cp
     c = db._get_connection()
     raw = c._slot.raw
     c.execute("SELECT 1").fetchone()
+    kept_before = cp.stats["kept_by_cursor"]
     del c
     gc.collect()
-    c2 = db._get_connection()
-    assert c2._slot.raw is raw
-    c2.close()
+    # it went back rather than being kept for a cursor. asserting the next
+    # acquire hands out this exact connection raced with background threads
+    # a previous test left running, which can take it from the pool first
+    assert cp.stats["kept_by_cursor"] == kept_before
+    cp._drain_deferred()
+    with cp._lock:
+        idle = any(s.raw is raw for bucket in cp._idle.values() for s in bucket)
+    taken = any(proxy._slot.raw is raw for proxy in list(cp._checked_out))
+    assert idle or taken
+    raw.execute("SELECT 1")      # never closed
 
 
 def test_a_live_cursor_keeps_its_connection_out_of_the_pool(db):

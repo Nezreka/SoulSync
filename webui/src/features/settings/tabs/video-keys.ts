@@ -9,6 +9,7 @@
 
 import { useSyncExternalStore } from 'react';
 
+import { testResults } from './connections-servers';
 import { onVideoSave, videoShown } from './video-shown';
 
 export const CONFIG_URL = '/api/video/enrichment/config';
@@ -174,6 +175,11 @@ async function testOne(svc: string): Promise<Result> {
 /** video-settings.js testConnection. a keyless card holds several services
  *  behind one button ("tvmaze,anilist,wikidata"): only the ones switched on
  *  are tested, a service you turned off isn't broken */
+const TEST_CARD: Record<string, string> = {
+  'tvmaze,anilist,wikidata': 'nokey',
+  'ryd,sponsorblock,dearrow': 'ytextras',
+};
+
 export async function testVideoServices(spec: string, model: VideoKeys = videoKeys) {
   let svcs = String(spec || '')
     .split(',')
@@ -190,6 +196,18 @@ export async function testVideoServices(spec: string, model: VideoKeys = videoKe
   toast(`Testing ${names.join(', ')}…`, 'info');
   await model.save(true);
   const results = await Promise.all(svcs.map(testOne));
+  // what the Connections tiles and sheet show: by card (the keyless cards
+  // test their switches together)
+  const card = TEST_CARD[spec] || svcs[0];
+  const failed = results.filter((res) => !(res && res.success)).length;
+  testResults.set(card, {
+    tone: failed ? 'bad' : 'ok',
+    text: failed
+      ? results.length === 1
+        ? (results[0] && results[0].error) || 'Connection failed'
+        : `${failed} of ${results.length} failed`
+      : (results.length === 1 && results[0]?.message) || 'Connected',
+  });
   if (results.length === 1) {
     const res = results[0];
     if (res && res.success) toast(res.message || `${names[0]} connection successful`, 'success');

@@ -1,0 +1,251 @@
+/* settings > library > folders > music: your media server's folders */
+
+/* the intro in the overhaul's card (bare): a plain line, not the old boxed help */
+.intro {
+  margin: 0 0 12px;
+  color: var(--white-a70);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.overall {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin: 4px 0 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--white-a08);
+  border-radius: var(--radius-control);
+  background: var(--white-a03);
+  color: var(--white-a80);
+  font-size: 13px;
+}
+
+.overall strong {
+  flex: 0 0 auto;
+  color: var(--text-bright);
+  font-size: 28px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.overall[data-tone='good'] strong {
+  color: var(--success);
+}
+
+.overall[data-tone='warn'] strong {
+  color: var(--warning);
+}
+
+.overall[data-tone='bad'] strong {
+  color: var(--danger-light);
+}
+
+.folders {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.folder {
+  padding: 10px 12px;
+  border: 1px solid var(--white-a08);
+  border-left-width: 3px;
+  border-radius: var(--radius-control);
+  background: var(--white-a02);
+}
+
+.folder[data-tone='good'] {
+  border-left-color: var(--success);
+}
+
+.folder[data-tone='warn'] {
+  border-left-color: var(--warning);
+}
+
+.folder[data-tone='bad'] {
+  border-left-color: var(--danger-light);
+}
+
+.folderHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.folderName {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.folderName code {
+  overflow-wrap: anywhere;
+}
+
+.libraryName {
+  color: var(--text-bright);
+  font-weight: 600;
+}
+
+.folderShare {
+  display: grid;
+  flex: 0 0 auto;
+  justify-items: end;
+  color: var(--text-bright);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.folderShare span,
+.sampleLine {
+  color: var(--white-a50);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.verdict {
+  margin: 6px 0 2px;
+  color: var(--white-a80);
+  font-size: 13px;
+}
+
+.sampleLine {
+  margin: 0;
+}
+
+.howTo {
+  margin-top: 8px;
+  color: var(--white-a70);
+  font-size: 12px;
+}
+
+.howTo pre {
+  margin: 6px 0;
+  padding: 8px 10px;
+  overflow-x: auto;
+  border-radius: var(--radius-sm);
+  background: var(--black-a30);
+  font-family: var(--font-mono);
+}
+
+.examples {
+  margin-top: 6px;
+  color: var(--white-a70);
+  font-size: 12px;
+}
+
+.examples summary {
+  cursor: pointer;
+}
+
+.examples ul {
+  display: grid;
+  gap: 4px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.examples li {
+  display: grid;
+  gap: 2px;
+}
+
+.examples code {
+  overflow-wrap: anywhere;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.elsewhere {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+  color: var(--white-a70);
+  font-size: 12px;
+}
+
+.pathInput {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--white-a12);
+  border-radius: var(--radius-control);
+  background: var(--white-a04);
+  color: var(--text-bright);
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+.pathInput:focus-visible {
+  outline: 2px solid rgba(var(--accent-rgb), 0.85);
+  outline-offset: 1px;
+}
+
+.pathCheck {
+  font-size: 12px;
+}
+
+.pathCheck[data-tone='good'] {
+  color: var(--success);
+}
+
+.pathCheck[data-tone='bad'] {
+  color: var(--danger-light);
+}
+
+.overrides {
+  margin-top: 14px;
+}
+
+.overrides h4 {
+  margin: 0 0 4px;
+}
+
+.overrides ul {
+  display: grid;
+  gap: 6px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.overrides li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.remove {
+  all: unset;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  color: var(--white-a45);
+  cursor: pointer;
+  font-size: 16px;
+}
+
+.remove:hover {
+  background: var(--white-a06);
+  color: var(--danger-light);
+}
+
+.remove:focus-visible {
+  outline: 2px solid rgba(var(--accent-rgb), 0.85);
+}

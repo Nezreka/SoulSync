@@ -202,4 +202,7 @@ def test_the_ui_has_the_picker_and_the_kind_defaults():
     assert "data-vq-kind-default={kind}" in q
     assert re.search(r"\[\s*'movie',\s*'New movies use'", q) and re.search(r"\[\s*'show',\s*'New shows use'", q)
     assert "`${QUALITY_URL}/defaults`" in q
-    assert 'data-stg-react="quality" data-stg-part="video"' in html
+    # (settings-bic phase 3) the Quality tab is one page with a pill per kind
+    assert 'data-stg-react="quality" data-stg-part="page"' in html
+    page = (root / "webui/src/features/settings/tabs/quality/quality-page.tsx").read_text(encoding="utf-8")
+    assert '<ViewPanel tab={TAB} view="video"' in page and "<VideoQualitySections />" in page

@@ -144,6 +144,35 @@ From any album card showing missing tracks, click **Download Missing** to open a
 `
         },
         {
+            id: 'lib-coverage',
+            title: "Your Media Server's Folders",
+            lede: 'Which of your media server\'s music folders SoulSync can read, and what to do about the rest.',
+            body: `
+SoulSync reads your music straight from disk, from its **library folders**: the Music Library Folder and any **Additional Music Libraries**. Your media server may keep music in more places than that. **Settings → Library → Folders → Music → Your media server's folders** lists every music folder Plex, Jellyfin or Navidrome uses and says, for each one, whether SoulSync scans it.
+
+At the top is one number: how much of the media server's music SoulSync can read directly. It is measured, not guessed: up to 40 real files from each folder are opened, and their size is checked against what SoulSync recorded. A big library costs a few lookups per folder, never a full scan.
+
+Each folder is one of these:
+
+| What it says | What it means | What to do |
+|---|---|---|
+| **SoulSync sees this folder as /music, and scans it** | Covered. The names don't have to match: SoulSync finds Plex's \`/data/music\` as its own \`/music\` by the folder names they share | Nothing |
+| **...but only scans part of it** | A library folder sits inside it, the rest isn't scanned | Add the rest, or the whole folder, as a library folder |
+| **...but it isn't one of its library folders** | SoulSync can read it but doesn't scan it | **Add as a library folder** (one click) |
+| **SoulSync can't see this folder** | The drive or share isn't mounted into SoulSync | Mount it. In Docker the row shows the volume line to add to your compose file, then add the right-hand folder as a library folder |
+
+**Why some files failed** lists a few sampled files and the reason: the folder isn't there, the file isn't there (the folder may be the wrong one), SoulSync isn't allowed to read it, or the size doesn't match.
+
+Navidrome doesn't say which folders it uses, so its folders are worked out from its track paths. If Navidrome sends paths that start at the artist folder, turn on **Report Real Path** for the SoulSync user.
+
+### Folder overrides
+
+When SoulSync can't work out a folder on its own (two mounts that share no folder names), open **SoulSync sees it somewhere else** on that row, type the folder as SoulSync sees it, press **Try it** to sample it, then **Save**. That saves a folder override. Every media server path SoulSync turns into its own asks the overrides first, then what it learned itself. The longest matching folder wins, and an override whose folder is missing is skipped. An override only renames a folder: the drive still has to be mounted into SoulSync.
+
+Help warns when SoulSync can read less than half of the media server's music.
+`
+        },
+        {
             id: 'lib-smart-delete',
             needs: 'admin',
             title: 'Remove Entries and Files',

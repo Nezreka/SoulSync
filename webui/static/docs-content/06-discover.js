@@ -119,7 +119,7 @@ Stations turn an artist into endless radio. **Library Radio**, the first card, d
 
 ## Inbox
 
-New & Missing opens with your inbox: new releases from artists you watch, what's coming out, and concerts. Concerts need a Ticketmaster key; set **Concerts near you** in Settings > Concerts (two letters, like US) to keep them to your country.
+New & Missing opens with your inbox: new releases from artists you watch, what's coming out, and concerts. Concerts need a Ticketmaster key; set **Concerts near you** in Settings, Connections (the Concerts service) (two letters, like US) to keep them to your country.
 
 ## ListenBrainz Playlists
 
@@ -189,7 +189,7 @@ The Stats page shows analytics about your music library and listening activity, 
 
 ![Listening Stats with the activity chart, listening heatmap and top artists, albums and tracks](disc-stats.jpg)
 
-Listening data requires **Listening Stats** to be enabled in Settings → Library ("Enable listening stats collection from media server") — it polls play history from your active media server (Plex, Jellyfin, or Navidrome).
+Listening data requires **Listening Stats** to be enabled in Settings → Discovery → Recommendations ("Collect listening stats from your media server") — it polls play history from your active media server (Plex, Jellyfin, or Navidrome).
 
 - **Overview** — total plays, listening time, and unique artists, albums, and tracks
 - **Top artists, albums, and tracks** — ranked by play count
@@ -361,7 +361,7 @@ The DJ is the lexicographically-smallest protocol-capable SoulSync username in t
 Flip the **📻 Auto-DJ** headbar toggle (a shared room toggle — latest sender wins; toast: "📻 Auto-DJ on — the queue keeps itself fed"). When the queue runs dry and at least one listener is tuned in, the DJ requests a pick with the seed title and an avoid-list of recently played tracks: Last.fm similar tracks first, then similar artists, then your local similar-artist graph, falling back to searching the seed title. Auto picks queue marked **📻 auto** with a "why" credit ("similar to X") and stay vote- and skip-able. Cooldown is 25 seconds, and it never runs in an empty, unwatched room — "Auto-DJ is on, but it needs a starting point — add one song and it takes over from there."
 
 > [!TIP]
-> Jukebox needs the same Soulseek connection as chat. If the page shows the "slskd isn't configured" notice, neither rooms nor the Jukebox will work until Settings → Sources is set up.
+> Jukebox needs the same Soulseek connection as chat. If the page shows the "slskd isn't configured" notice, neither rooms nor the Jukebox will work until Soulseek is set up under Settings → Downloads → Sources.
 `
         },
     ]

@@ -182,6 +182,7 @@ Movies and TV shows are separate, so a profile can have just one. A TV-only prof
 ## Music
 
 - **Music side**
+- **Use music apps**: listen from music apps paired in Settings > Devices. On for admins and members, off on the Kids template (see [Devices](#docs/devices))
 - **Music requests**: **Auto-approve**, **Require approval** or **Requests off**. With Require approval, what they add becomes a request (see [Requests](#docs/prof-requests)).
 - **Hide explicit music**: albums and tracks marked explicit are left out
 - **Allowed quality profiles** and **Default quality profile**: the music quality profiles they can pick
@@ -535,6 +536,70 @@ A profile that can only use the video side can't hide it, since it would have no
 Once **every** profile has Podcasts or Audiobooks hidden, an admin sees **Also pause its background jobs** under it. Paused, its scheduled checks and downloads stop. If anyone turns the part back on, they start again by themselves. **Run now** on the Automations page always works. The video side's jobs have their own switch on the video Automations page.
 
 First-run setup asks what SoulSync is for and starts you off with the rest hidden. A music-only install, for example, starts without podcasts, audiobooks and the video side. Profiles that existed before see a one-time card above **Customize** until they pick something (**Keep everything** counts).
+`
+        },
+        {
+            id: 'devices',
+            title: 'Devices: Listen Anywhere',
+            lede: 'Pair a phone, a car or a speaker app with a one-time code. Each device picks a profile and can only play.',
+            body: `
+**Settings > Devices** is where an admin pairs music apps with this server. It is for admins only.
+
+## Add a device
+
+1. Click **Add a device**. SoulSync shows a code like \`7KQ4-M2XD-9FHA-T3VB\` and a QR with the same thing in it.
+2. Type the code into the app, or scan the square. The code works **once**, for **10 minutes**. At most 20 codes wait at a time; cancel one you don't need under **Codes waiting to be used**.
+3. The app shows this server's **fingerprint** (12 characters). Check it matches the one under **This server** (and under Settings > System > Security). That is how you know it found this server and not another.
+4. The app asks which profile it is for. A profile with a PIN asks for it, and in login mode the profile's password is asked for. Wrong tries are slowed down the same way as signing in.
+
+A device that hasn't picked its profile yet shows as **No profile picked yet** with the time it has left. If nobody picks one within 15 minutes, it is dropped and needs a new code.
+
+The code is checked on this server, never stored as itself, and pairing only works over https or from your home network.
+
+## What a paired device can do
+
+It acts as the profile it picked, **only to listen**: browse the library, play, lyrics, artwork, scrobbles and play history, favorites, playlists and the queue. Never settings, downloads, people, API keys or anything for admins, even when the profile is an admin's. Every part of SoulSync a device can reach is on a short list; everything else turns it away.
+
+**Use music apps** is a permission (see [What each permission does](#docs/prof-permissions)). It is on for admins and members and off on the **Kids** template. A profile without it doesn't appear in the app's list, and turning it off stops a device that already picked that profile.
+
+## Unpairing
+
+- **Unpair** next to a device stops it at once.
+- **Sign out everywhere** on a profile, a new password, or turning the profile off unpairs that profile's devices too. Deleting a profile removes its devices.
+
+## Invite a person
+
+**Invite a person** at the bottom is the same list as **Settings > People > Invites**: a link someone opens to make their own profile, following the template you pick. It works once and runs out after the time you choose (a week unless you change it). They then sign in like anyone else and pair their own devices. Person invites never use device codes.
+`
+        },
+        {
+            id: 'devices-remote',
+            title: 'Reaching SoulSync From Outside',
+            lede: 'The addresses a device tries, and how to check the outside world can get in.',
+            body: `
+A paired device is given every address this server answers on, home ones first:
+
+- **Local**: found on their own. The address your browser is using, when it is a home one, and this machine's home-network addresses.
+- **Remote**: one address for outside your home. Type it under **This server** in Settings > Devices.
+- **Extra**: any others, one per line (a Tailscale name, say).
+
+## Ways in from outside
+
+SoulSync doesn't open anything on your router by itself. Pick one:
+
+- **Forward a port** on your router to this server, and put https in front of it (a reverse proxy with a certificate).
+- **Cloudflare Tunnel**: runs next to SoulSync, gives it an https address, no ports opened. Use the tunnel's address as the remote address.
+- **Tailscale**: your phone and this server on one private network. Add the server's Tailscale name as an extra address. Every device that listens needs Tailscale too.
+- **Your own domain** with a reverse proxy (Caddy, nginx, Traefik) and a certificate.
+
+> [!WARNING]
+> A remote address that starts with **http://** gets a loud warning. Over plain http, passwords, tokens and everything you play cross the internet readable by anyone on the way. Use https.
+
+## Check reachability
+
+**Check reachability** makes a one-time link on this server and fetches it through the remote address. An answer that carries the link's secret back proves the address leads to this very server. It runs from the server itself, so it can't prove the wider internet gets in: some routers loop their own public address back inside and some don't.
+
+So it also shows the same link as a QR. Turn wifi off on your phone and open it. The page then says **Reached from** the phone's address, and whether that was outside your network. The link works for 10 minutes.
 `
         },
     ]

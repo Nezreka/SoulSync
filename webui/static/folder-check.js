@@ -52,6 +52,14 @@
     }
 
     function show(input, tone, text) {
+        // a field that draws its own check line (Settings' PathField) hears
+        // the result instead of getting a line put after it
+        if (input.hasAttribute('data-folder-own')) {
+            input.dispatchEvent(new CustomEvent('ss:folder-check', {
+                detail: { tone: tone || '', text: text || '' }
+            }));
+            return;
+        }
         var el = statusEl(input);
         el.dataset.tone = tone || '';
         el.textContent = text || '';

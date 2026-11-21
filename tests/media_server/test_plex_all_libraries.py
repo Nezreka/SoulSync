@@ -542,3 +542,29 @@ def test_get_library_stats_uses_deduped_counts_for_artists_albums():
     stats = client.get_library_stats()
 
     assert stats == {'artists': 2, 'albums': 1, 'tracks': 3}
+
+
+def test_coverage_lists_every_music_section_by_name_even_in_single_library_mode():
+    """the library coverage check lists every folder Plex keeps music in,
+    not only the selected library's, and never a video section"""
+    music = MagicMock(type='artist', title='Music')
+    music.locations = ['/data/music', '/data/archive']
+    kids = MagicMock(type='artist', title='Kids')
+    kids.locations = ['/data/kids']
+    movies = MagicMock(type='movie', title='Movies')
+    movies.locations = ['/data/movies']
+    server = MagicMock()
+    server.library.sections.return_value = [music, movies, kids]
+    client = _make_client(server=server, music_library=music)
+    client.ensure_connection = lambda: True
+
+    assert client.get_music_library_folders() == [
+        {'library': 'Music', 'folders': ['/data/music', '/data/archive']},
+        {'library': 'Kids', 'folders': ['/data/kids']},
+    ]
+
+
+def test_coverage_folders_when_plex_is_down():
+    client = _make_client(server=None)
+    client.ensure_connection = lambda: False
+    assert client.get_music_library_folders() == []

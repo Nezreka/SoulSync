@@ -226,6 +226,11 @@ describe('what you can do', () => {
     expect(can.anyOff).toBe(true);
   });
 
+  it('music apps that are off are listed (a Kids profile)', () => {
+    const can = describePermissions(permsOf({ ...ADULT, 'music.apps': false }));
+    expect(can.never).toEqual(['music apps', 'settings and people']);
+  });
+
   it('can’t request music reads as listen only', () => {
     const can = describePermissions(permsOf(LISTEN_ONLY));
     expect(can.rows.find((r) => r.id === 'music')?.lead).toBe('Listen only');

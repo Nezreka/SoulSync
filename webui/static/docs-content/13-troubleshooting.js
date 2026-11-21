@@ -126,14 +126,14 @@ Logs live in the \`logs/\` directory (in Docker: \`/app/logs/\`):
 | \`acoustid.log\` | AcoustID fingerprinting activity |
 | \`source_reuse.log\` | Source reuse / download source decisions |
 
-The Settings → Logs tab streams live logs with real-time operational diagnostics, so you can watch activity as it happens without SSHing into the box.
+**Settings → System → Logs** streams live logs with real-time operational diagnostics, so you can watch activity as it happens without SSHing into the box.
 
 > [!TIP]
 > When something breaks, start with \`app.log\` — it carries the request and worker trail for nearly every failure. Raise the [log level](#set-other) to Debug first if you need more detail, then drop it back to Info afterward.
 
 ## Downloading logs
 
-Admins can download every log from the **Logs** tile in the Help panel, or with the **Download** button on the Settings › Logs tab. The list shows each log with its older copies (\`app.log.1\`, \`.2\`, \`.3\`), how big each one is and when it was last written. Download one file, one log with all its older copies, or everything as one zip with a README that says what is inside.
+Admins can download every log from the **Logs** tile in the Help panel, or with the **Download** button on Settings › System › Logs. The list shows each log with its older copies (\`app.log.1\`, \`.2\`, \`.3\`), how big each one is and when it was last written. Download one file, one log with all its older copies, or everything as one zip with a README that says what is inside.
 
 **Remove secrets** is on by default: every line has its keys and tokens removed as it downloads. Turning it off asks you once first, because raw logs can contain API keys and tokens.
 `

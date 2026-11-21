@@ -292,6 +292,7 @@ A personal front page shaped by your library, your listening and your watchlist.
 - **Fix a wrong match** by pasting the artist's link or ID from Spotify, Apple Music, Deezer, Discogs, Tidal, Qobuz and more. The watchlist follows the fix.
 - **Artist pages**: full discography with ownership, and live records, compilations, soundtracks, remixes and spoken word in sections of their own. Live completion bars for albums / EPs / singles, a bio, tags and listener numbers (Last.fm first; without a working key, TheAudioDB or Wikipedia, MusicBrainz, ListenBrainz and Deezer fill in and say so), top tracks, a flame on each album's most played tracks (Last.fm), similar artists, a **music video player**, and **concerts** (Ticketmaster dates and Setlist.fm setlists you can play from your own library).
 - **Gap-fill** pulls in releases your other metadata sources know about.
+- **Your media server's folders** (Settings → Library → Folders → Music): every folder Plex, Jellyfin or Navidrome keeps music in, whether SoulSync scans it, and how much of it SoulSync can read directly (a sample of real files from each folder). A folder SoulSync sees but doesn't scan adds as a library folder in one click; one it can't see says why, with the compose volume line in Docker. Names don't have to match: SoulSync finds `/data/music` as its own `/music` on its own, and a folder override covers the rare setup it can't work out. Help warns when SoulSync can read less than half of the server's music.
 - **Label pages**: a label's full catalog with owned / missing filters. Follow a label for new releases or its whole backlog.
 
 <details>
@@ -570,10 +571,12 @@ A visual **WHEN → DO → THEN** builder shared by music and video.
 - **Make SoulSync yours**: every profile picks what shows up, from **Customize** at the bottom of the sidebar (or Settings → Appearance). Start from **Simple** or **Everything**, then switch single parts on or off. Each template has its own Sidebar & look, and admins can set it for one person and lock it.
 - **Own library per profile** (Plex / Jellyfin / Navidrome 0.58+): a profile can have its own folder and server library. On Navidrome the profile picks its library under its own Navidrome login; its scans read only that library and its playlists are written as that user.
 - **Content caps**: G / PG / PG-13 / R per profile for movies, with TV following it or set on its own, and hide explicit music.
+- **Devices** (Settings > Devices): pair a phone, car or speaker app with a one-time code (or its QR). Each device picks a profile, with that profile's PIN or password, and can only play: never settings, downloads or people. Unpair any device at once. **Use music apps** is a permission, off on the Kids template. The page also holds this server's addresses (home ones found on their own, plus your remote address), a reachability check with a phone link for mobile data, and person invites.
 
 ### Security
 
 - An admin PIN with brute-force limits, or full **username/password login** with recovery questions.
+- Each server has its own identity (`server_key` next to the database) and a **server fingerprint** under Settings > System > Security that paired apps show too. Database backups carry it, encrypted: keep backups private, and never run a restored copy next to the original.
 - Sign in with Plex or with your own OIDC provider, or **OIDC only**, which turns every other sign-in off. If the provider is ever down, `SOULSYNC_OIDC_ONLY_OVERRIDE=off` and a restart let the admin back in with their password. Setup and troubleshooting: [docs/guides/OIDC.md](docs/guides/OIDC.md).
 - Or trust a forward-auth header from Authelia, Authentik or oauth2-proxy.
 - Reverse-proxy and sub-path aware.
@@ -614,7 +617,7 @@ Soulseek rooms and private messages through slskd, in a Discord-style layout.
 | **Lidarr compatible API** | `/lidarr`, so request apps that only speak Lidarr (Singarr, MusicSeerr 1.x) can send their album requests to SoulSync instead. |
 | **Seerr compatible API** | `/seerr`, so apps built for Seerr (Jellyseerr, Overseerr), like Litefin's Jellyfin plugin, can browse and request movies and shows through SoulSync's video side. |
 
-The MCP server and the Lidarr and Seerr compatible APIs are off until you turn them on in **Settings → System → SoulSync API**. Full reference: [Support/API.md](Support/API.md), including [MCP for AI clients](Support/API.md#mcp-for-ai-clients).
+The MCP server and the Lidarr and Seerr compatible APIs are off until you turn them on in **Settings → System → API**. Full reference: [Support/API.md](Support/API.md), including [MCP for AI clients](Support/API.md#mcp-for-ai-clients).
 
 ## Help
 
@@ -626,7 +629,7 @@ The MCP server and the Lidarr and Seerr compatible APIs are off until you turn t
 ## Mobile, PWA & theming
 
 - Fully responsive, and installable as a **PWA** (cover art cached for speed, never stale pages).
-- Accent colours (presets or any custom colour), a sidebar visualizer, background particles, worker orbs, and **Reduce Visual Effects** / **Max Performance** switches for low-power devices.
+- Accent colours (presets or any custom colour), a sidebar visualizer, background particles, worker orbs, and **Reduce visual effects** / **Max performance** switches for low-power devices (kept per device).
 
 ## Companion browser extension
 
@@ -828,7 +831,7 @@ cd webui && npm ci && npm run dev
 ### 1. Connect slskd (optional)
 
 1. Add an API key in slskd's `settings.yml` under `web > authentication > api_keys`, then restart slskd.
-2. In SoulSync: **Settings → Connections → Soulseek**, paste the URL and key (or use **Auto-detect**).
+2. In SoulSync: **Settings → Downloads → Sources → Soulseek**, paste the URL and key (or use **Auto-detect**).
 3. **Share some files in slskd.** Leechers get banned by the network.
 
 ### 2. Connect Spotify (optional)
@@ -852,11 +855,11 @@ Everything else lives in **Settings**:
 | Tab | What to set |
 |---|---|
 | **Connections** | Your media server. Use your machine's real IP, not `localhost` (inside Docker that means the container itself). |
-| **Sources / Downloads** | Pick a source or build your hybrid chain. |
+| **Downloads** | Your sources and their order (one source, or a hybrid chain), and how downloads behave. |
 | **Quality** | Pick a preset or build a quality profile. |
 | **Library** | Your folders and file-naming templates. |
 
-Settings save as you change them. If you'd rather press save yourself, turn off **Save settings as I change them** under **System → Saving**.
+Settings save as you change them. If you'd rather press save yourself, turn off **Save settings as I change them** under **System → General**.
 
 ### 4. Docker paths
 
@@ -866,12 +869,14 @@ Settings save as you change them. If you'd rather press save yourself, turn off 
 | Logs | `/app/logs` | |
 | Databases | `/app/data` | Use a **named volume** (`soulsync_database:/app/data`). Bind-mounting a host path here can hide files the app needs. |
 | Downloads | `/app/downloads` | The same folder slskd and your clients download to |
-| Music library folder | `/app/Transfer` | Where organized music is filed. Set Settings → Library → Folders → Music Library Folder to this path |
+| Music library folder | `/app/Transfer` | Where organized music is filed. Set Settings → Library → Folders → Music library folder to this path |
 | Import | `/app/Staging` | Optional, for importing music you already have |
 | Music videos | `/app/MusicVideos` | Optional |
 | Podcasts / audiobooks | `/app/podcasts`, `/app/audiobooks` | Optional |
 | Video | `/media/movies`, `/media/tv`, `/media/youtube` | Optional, for the video side |
 | Video extras | `/media/anime`, `/media/movies-4k`, `/media/tv-4k` | Optional: the anime and 4K libraries, commented out in the compose file |
+
+If your media server keeps music on more drives than SoulSync's library folder, mount those into SoulSync too and add them as library folders. **Settings → Library → Folders → Music → Your media server's folders** lists every folder the server uses and which ones SoulSync can't read yet.
 
 **Environment variables**
 

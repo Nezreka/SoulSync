@@ -1,21 +1,24 @@
 /**
- * Library > Audiobooks (SETTINGS_PORT.md, step 8c): both panels are the markup
- * they replaced, read the way loadSettingsData filled them, and save each key
- * the way the page save collected it.
+ * The Audiobooks kind of the Library tab (settings-bic phase 4): Folders,
+ * Naming, Import and files, Tags and artwork, and the download options drawn
+ * on Downloads > Sources. Read the way loadSettingsData filled them, each key
+ * saved the way the page save collected it.
  */
 
 import { act, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createSettingsStore, type SettingsPayload, type SettingsStore } from '../settings-store';
-import { shape, vanilla } from './__fixtures__/shape';
 import {
-  AudiobookFoldersPanel,
-  AudiobookOrganizationPanel,
+  AudiobookDownloadOptions,
+  AudiobookFolders,
+  AudiobookImport,
+  AudiobookNaming,
+  AudiobookTags,
   audiobooksPath,
   qualitySwitches,
+  resetRoutes,
 } from './library-audiobooks';
-import { OrganizationCard } from './library-organization';
 
 type Shell = Window & Record<string, unknown>;
 const shell = window as unknown as Shell;
@@ -67,47 +70,29 @@ afterEach(async () => {
 });
 
 const input = (id: string) => document.getElementById(id) as HTMLInputElement;
-const folders = () => render(<AudiobookFoldersPanel store={store} hidden={false} />);
+const folders = () => {
+  resetRoutes();
+  return render(
+    <div>
+      <AudiobookFolders store={store} />
+    </div>,
+  );
+};
 const organization = () =>
-  render(<OrganizationCard store={store} part="organization" opened={0} active={false} />);
+  render(
+    <div>
+      <AudiobookNaming store={store} />
+      <AudiobookImport store={store} />
+      <AudiobookTags store={store} />
+      <AudiobookDownloadOptions store={store} />
+    </div>,
+  );
 function saved(): SettingsPayload {
   const merged: SettingsPayload = {};
   for (const body of posted)
     for (const [k, v] of Object.entries(body)) merged[k] = { ...merged[k], ...v };
   return merged;
 }
-
-describe('the panels are the markup they replaced', () => {
-  it('Folders > Audiobooks', () => {
-    const { container } = render(<AudiobookFoldersPanel store={store} hidden />);
-    const want = shape(vanilla('library-audiobook-folders.vanilla.html', { afterInit: true }));
-    expect(shape(container)).toEqual(want);
-  });
-
-  it('Organization > Audiobooks, its words and tick boxes with their spaces', () => {
-    const { container } = render(
-      <AudiobookOrganizationPanel
-        store={store}
-        hidden
-        template={{ value: '', onChange: () => {} }}
-      />,
-    );
-    const old = vanilla('library-audiobook-organization.vanilla.html', { afterInit: true });
-    expect(shape(container)).toEqual(shape(old));
-    const words = (root: Element) =>
-      [...root.querySelectorAll('.setting-help-body, .stg-help-text, .settings-hint, label')].map(
-        (el) => (el.textContent || '').replace(/\s+/g, ' ').trim(),
-      );
-    expect(words(container)).toEqual(words(old));
-    const ticks = (root: Element) =>
-      [...root.querySelectorAll('label:has(> input[type="checkbox"][id])')].map((el) =>
-        (el.textContent || '').replace(/\s+/g, ' ').trimEnd(),
-      );
-    expect(ticks(old)).toHaveLength(9);
-    expect(ticks(old).every((t) => t.startsWith(' '))).toBe(true);
-    expect(ticks(container)).toEqual(ticks(old));
-  });
-});
 
 describe('the rules', () => {
   it('the folder and the switches read as loadSettingsData read them', () => {
@@ -141,20 +126,24 @@ describe('Folders > Audiobooks', () => {
     folders();
     expect(input('audiobooks-path').value).toBe('/books');
     expect(input('audiobooks-path').readOnly).toBe(true);
-    fireEvent.click(input('audiobooks-path').nextElementSibling!);
+    fireEvent.click(input('audiobooks-path').parentElement!.querySelector('[data-lock]')!);
     fireEvent.change(input('audiobooks-path'), { target: { value: '' } });
-    expect(document.querySelectorAll('.audiobook-extra-input')).toHaveLength(1);
-    document
-      .querySelector('.audiobook-extra-row')!
-      .insertAdjacentHTML('afterend', '<div class="folder-check">ok</div>');
-    fireEvent.click(document.querySelector('#audiobooks-extra-paths + button')!);
-    const rows = () => document.querySelectorAll<HTMLInputElement>('.audiobook-extra-input');
+    const rows = () =>
+      document.querySelectorAll<HTMLInputElement>('#audiobooks-extra-paths input[type="text"]');
+    expect(rows()).toHaveLength(1);
+    expect(rows()[0].getAttribute('data-folder-check')).toBe('audiobooks');
+    fireEvent.click(
+      document
+        .getElementById('audiobooks-extra-paths')!
+        .parentElement!.querySelector('button:not([aria-label])')!,
+    );
     expect(rows()).toHaveLength(2);
     await waitFor(() => expect(document.activeElement).toBe(rows()[1]));
     fireEvent.change(rows()[1], { target: { value: ' /mnt/more ' } });
-    fireEvent.click(document.querySelector('.audiobook-extra-row button')!);
+    fireEvent.click(
+      document.querySelector('#audiobooks-extra-paths button[aria-label="Remove /old"]')!,
+    );
     expect(rows()).toHaveLength(1);
-    expect(document.querySelector('.folder-check')).toBeNull();
     await waitFor(() => expect(store.hasPending()).toBe(false));
     expect(saved()).toEqual({
       audiobooks: { download_path: './audiobooks' },
@@ -166,7 +155,9 @@ describe('Folders > Audiobooks', () => {
     routes = [{ label: 'Bluey', route_key: 'bluey' }];
     folders();
     act(() => store.hydrate({}));
-    await waitFor(() => expect(document.querySelector('.abr-row span')!.textContent).toBe('Bluey'));
+    await waitFor(() =>
+      expect(document.querySelector('[data-route-row="bluey"]')!.textContent).toContain('Bluey'),
+    );
     fireEvent.click(document.querySelector('[data-action="move"]')!);
     await waitFor(() =>
       expect(shell.showToast).toHaveBeenCalledWith('Moved 2 album(s)', 'success'),
@@ -179,9 +170,15 @@ describe('Folders > Audiobooks', () => {
     });
     routes = [];
     fireEvent.click(document.querySelector('[data-action="remove"]')!);
+    // taking one off asks first now (settings-bic AUDIT 33)
     await waitFor(() =>
-      expect(document.querySelector('.abr-empty')!.textContent).toBe(
-        'No artists routed. Use “Treat as audiobook” on an artist’s page.',
+      expect(shell.showConfirmDialog).toHaveBeenLastCalledWith(
+        expect.objectContaining({ title: 'Stop filing Bluey as audiobooks?', destructive: true }),
+      ),
+    );
+    await waitFor(() =>
+      expect(document.getElementById('audiobook-routes-list')!.textContent).toBe(
+        "No artists routed. Use “Treat as audiobook” on an artist's page.",
       ),
     );
     expect(
@@ -190,22 +187,18 @@ describe('Folders > Audiobooks', () => {
   });
 });
 
-describe('Organization > Audiobooks', () => {
+describe('Naming, Import and files, Tags and artwork, and the download options', () => {
   it('loads every field with its default', () => {
     act(() => store.hydrate({ audiobooks: {} }));
     organization();
     expect(input('template-audiobook-path').value).toBe('$author/$series/$seriespos - $title');
     expect(input('audiobook-recycle-deletes').checked).toBe(true);
     expect(input('audiobook-recycle-keep-days').value).toBe('7');
-    expect(input('audiobook-format-first').value).toBe('m4b');
-    expect(
-      [...document.querySelectorAll<HTMLInputElement>('#audiobook-allowed-formats input')].every(
-        (b) => b.checked,
-      ),
-    ).toBe(true);
-    expect(input('audiobook-min-bitrate').value).toBe('0');
+    // the quality fields are on Quality > Audiobooks now
+    expect(input('audiobook-format-first')).toBeNull();
     expect(input('audiobook-marketplace').value).toBe('us');
-    expect(input('audiobook-download-mode').value).toBe('hybrid');
+    // the hidden download mode select went: the audiobook order writes that key
+    expect(input('audiobook-download-mode')).toBeNull();
     expect(input('audiobook-torrent-category').value).toBe('audiobooks');
     expect(input('audiobook-prowlarr-categories').value).toBe('3030');
     expect(input('audiobook-completeness-tolerance').value).toBe('92');
@@ -224,16 +217,6 @@ describe('Organization > Audiobooks', () => {
     organization();
     fireEvent.change(input('template-audiobook-path'), { target: { value: '$author/$title' } });
     fireEvent.change(input('audiobook-recycle-keep-days'), { target: { value: '' } });
-    fireEvent.change(input('audiobook-format-first'), { target: { value: 'mp3' } });
-    const format = (v: string) =>
-      document.querySelector<HTMLInputElement>(`#audiobook-allowed-formats input[value="${v}"]`)!;
-    fireEvent.click(format('flac'));
-    fireEvent.click(format('ogg'));
-    const layout = (v: string) =>
-      document.querySelector<HTMLInputElement>(`#audiobook-file-layout input[value="${v}"]`)!;
-    fireEvent.click(layout('multiple'));
-    fireEvent.change(input('audiobook-max-bitrate'), { target: { value: '-5' } });
-    fireEvent.click(input('audiobook-allow-dramatized'));
     fireEvent.change(input('audiobook-marketplace'), { target: { value: 'uk' } });
     fireEvent.change(input('audiobook-torrent-category'), { target: { value: '  ' } });
     expect(input('audiobook-torrent-category').value).toBe('  ');
@@ -249,11 +232,6 @@ describe('Organization > Audiobooks', () => {
       file_organization: { 'templates.audiobook_path': '$author/$title' },
       audiobooks: {
         recycle_keep_days: 0,
-        'quality.format_order': ['mp3', 'm4b', 'm4a', 'opus', 'ogg', 'flac'],
-        'quality.allowed_formats': ['m4b', 'm4a', 'mp3', 'opus'],
-        'quality.file_layout': 'single',
-        'quality.max_bitrate_kbps': 0,
-        'quality.allow_dramatized': false,
         marketplace: 'uk',
         torrent_category: 'audiobooks',
         usenet_category: 'audiobooks',
@@ -266,21 +244,5 @@ describe('Organization > Audiobooks', () => {
     });
     // the rest of the quality dict is the server's still
     expect(store.getState().settings.audiobooks?.quality).toMatchObject({ min_bitrate_kbps: 32 });
-  });
-
-  it('every format switched off stays off on screen, and saves as all allowed', async () => {
-    act(() => store.hydrate({ audiobooks: { quality: { allowed_formats: ['mp3'] } } }));
-    organization();
-    const mp3 = document.querySelector<HTMLInputElement>(
-      '#audiobook-allowed-formats input[value="mp3"]',
-    )!;
-    fireEvent.click(mp3);
-    expect(
-      [...document.querySelectorAll<HTMLInputElement>('#audiobook-allowed-formats input')].some(
-        (b) => b.checked,
-      ),
-    ).toBe(false);
-    await waitFor(() => expect(store.hasPending()).toBe(false));
-    expect(saved().audiobooks).toEqual({ 'quality.allowed_formats': [] });
   });
 });

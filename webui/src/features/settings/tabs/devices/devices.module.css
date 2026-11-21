@@ -1,0 +1,104 @@
+/* settings > devices: what the settings ui kit has no part for. tokens only */
+
+.code {
+  margin: 4px 0;
+  color: var(--text-bright);
+  font-family: var(--font-mono);
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  overflow-wrap: anywhere;
+}
+
+.shown {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 200px;
+  gap: 20px;
+  align-items: center;
+}
+
+.qr {
+  display: block;
+  width: 200px;
+  height: 200px;
+  border-radius: var(--radius-md);
+}
+
+.phone {
+  display: grid;
+  grid-template-columns: 128px minmax(0, 1fr);
+  gap: 16px;
+  align-items: center;
+}
+
+.phoneQr {
+  display: block;
+  width: 128px;
+  height: 128px;
+  border-radius: var(--radius-md);
+}
+
+.mono {
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+.kind {
+  flex: none;
+  width: 56px;
+  color: var(--white-a65);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.guide {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--white-a80);
+  font-size: 13px;
+}
+
+.guide li {
+  margin: 4px 0;
+}
+
+.stack {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.shown > *,
+.phone > * {
+  min-width: 0;
+}
+
+@media (max-width: 768px) {
+  .shown,
+  .phone {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .code {
+    font-size: 22px;
+  }
+}
+
+/* what sits straight in a card and is not a row: the card's own inset */
+.pad {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 0 20px 18px;
+}
+
+.pad > * {
+  min-width: 0;
+}
+
+/* a device's name and line keep a readable width; its tag and buttons go
+   under them on a phone */
+.deviceMain {
+  flex: 1 1 220px;
+}

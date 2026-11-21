@@ -1,15 +1,14 @@
 /**
- * The Appearance tab, ported from the vanilla Settings page (SETTINGS_PORT.md,
- * step 2). The markup it replaced is frozen in __fixtures__ and the React tab
- * has to produce the same elements; the behaviour tests follow what
- * settings.js and init.js did.
+ * The Appearance tab on the parts (settings-bic phase 5): one page, a line
+ * saying what it is for, every control in its card. The behaviour tests
+ * follow what settings.js and init.js did.
  */
 
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { nav } from '../nav';
 import { createSettingsStore, type SettingsPayload, type SettingsStore } from '../settings-store';
-import { shape, vanilla } from './__fixtures__/shape';
 import { applyAppearanceOnLoad, effectFlags, resolveAppearance } from './appearance';
 import { AppearanceTab, weatherStatus } from './appearance-tab';
 
@@ -54,36 +53,71 @@ beforeEach(() => {
   shell._workerOrbsEnabled = true;
   shell._reduceEffectsActive = false;
   shell._maxPerfActive = false;
+  nav.reset();
+  act(() => nav.go('appearance'));
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  nav.reset();
   for (const key of ['_settingsAutosaveOff', '_settingsPayload', 'openFeaturePicker'])
     delete shell[key];
 });
 
-describe('the Appearance tab is the same page it replaced', () => {
-  it('UI Appearance renders the vanilla blocks: same elements, ids, classes and words', () => {
+const page = (opened = 1) =>
+  render(<AppearanceTab store={store} part="page" opened={opened} active />);
+const quiet = () =>
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(() => new Promise(() => {})),
+  );
+
+describe('the Appearance page', () => {
+  it('every control in its card, named without a colon, no folded section', () => {
+    quiet();
     store.hydrate({ ui_appearance: {} });
-    const { container } = render(<AppearanceTab store={store} part="ui" opened={1} active />);
-    const want = shape(vanilla('appearance-ui.vanilla.html'));
-    const got = shape(container);
-    expect(got.elements).toEqual(want.elements);
-    expect(got.text).toBe(want.text);
+    page();
+    const cards: Record<string, string[]> = {
+      'Show only what you use': ['settings-open-feature-picker'],
+      Look: ['accent-preset', 'accent-custom-color', 'sidebar-visualizer-type'],
+      Effects: [
+        'particles-enabled',
+        'worker-orbs-enabled',
+        'reduce-effects-enabled',
+        'max-performance-enabled',
+      ],
+      'Sidebar weather': ['sw-location', 'sw-enabled', 'sw-holidays', 'sw-celsius', 'sw-status'],
+      'Video pages': ['video-billboard-autoplay', 'video-watch-region'],
+    };
+    for (const [card, ids] of Object.entries(cards)) {
+      const el = document.querySelector(`[data-card="${card}"]`)!;
+      expect(el, card).not.toBeNull();
+      for (const id of ids) expect(el.contains(document.getElementById(id)), id).toBe(true);
+    }
+    // the video pages are the video side's own; the weather is open, not folded
+    expect(
+      document.getElementById('video-billboard-autoplay')!.closest('[data-video-only]'),
+    ).not.toBeNull();
+    expect(document.querySelector('.settings-section-header, .form-group')).toBeNull();
+    for (const label of document.querySelectorAll('label'))
+      expect(label.textContent).not.toMatch(/:\s*$/);
+    expect(document.body.textContent).not.toContain('—');
+    // the two switches kept per device say so
+    for (const id of ['reduce-effects-enabled', 'max-performance-enabled'])
+      expect(document.getElementById(id)!.closest('[data-row]')!.textContent).toContain(
+        'This device',
+      );
+    for (const id of ['particles-enabled', 'worker-orbs-enabled'])
+      expect(document.getElementById(id)!.closest('[data-row]')!.textContent).not.toContain(
+        'This device',
+      );
   });
 
-  it('Sidebar Weather renders the vanilla tile, closed, with the same elements and words', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(() => new Promise(() => {})),
-    );
-    const { container } = render(<AppearanceTab store={store} part="weather" opened={1} active />);
-    const want = shape(vanilla('appearance-weather.vanilla.html'));
-    const got = shape(container);
-    expect(got.elements).toEqual(want.elements);
-    expect(got.text).toBe(want.text);
-    const body = container.querySelector('.settings-section-body') as HTMLElement;
-    expect(body.style.display).toBe('none');
+  it('has no line under the subtitle: one view, the subtitle says what it is for', () => {
+    store.hydrate({ ui_appearance: { accent_preset: '#8b5cf6' } });
+    page();
+    expect(document.querySelector('[data-stg-view="all"]')).not.toBeNull();
+    expect(document.querySelector('[data-stg-view="all"] [data-about]')).toBeNull();
   });
 });
 
@@ -140,19 +174,41 @@ describe('what opening Settings applies', () => {
 });
 
 describe('changing the appearance', () => {
-  const ui = () => render(<AppearanceTab store={store} part="ui" opened={1} active />);
+  const ui = () => {
+    quiet();
+    return page();
+  };
 
   it('a preset applies at once and saves only its own key', async () => {
     store.hydrate({ ui_appearance: { accent_preset: '#1db954', accent_color: '#abcdef' } });
     ui();
     const custom = document.getElementById('custom-color-group') as HTMLElement;
-    expect(custom.style.display).toBe('none');
-    fireEvent.change(document.getElementById('accent-preset')!, { target: { value: '#8b5cf6' } });
+    expect(custom.hidden).toBe(true);
+    const swatch = (value: string) =>
+      document.querySelector<HTMLElement>(`#accent-preset [data-value="${value}"]`)!;
+    expect(swatch('#1db954').getAttribute('aria-checked')).toBe('true');
+    // every preset is a named swatch, Custom last
+    expect(
+      [...document.querySelectorAll('#accent-preset [role="radio"]')].map((b) =>
+        b.getAttribute('aria-label'),
+      ),
+    ).toEqual([
+      'Spotify Green',
+      'Ocean Blue',
+      'Purple',
+      'Boulder Purple',
+      'Sunset Orange',
+      'Rose',
+      'Teal',
+      'Custom',
+    ]);
+    fireEvent.click(swatch('#8b5cf6'));
     expect(applied.at(-1)).toEqual(['applyAccentColor', '#8b5cf6']);
     await waitFor(() => expect(posted).toEqual([{ ui_appearance: { accent_preset: '#8b5cf6' } }]));
     // Custom shows the picker and applies the custom colour
-    fireEvent.change(document.getElementById('accent-preset')!, { target: { value: 'custom' } });
-    expect(custom.style.display).toBe('');
+    expect(swatch('#8b5cf6').getAttribute('aria-checked')).toBe('true');
+    fireEvent.click(swatch('custom'));
+    expect(custom.hidden).toBe(false);
     expect(applied.at(-1)).toEqual(['applyAccentColor', '#abcdef']);
     await waitFor(() =>
       expect(posted.at(-1)).toEqual({ ui_appearance: { accent_preset: 'custom' } }),
@@ -207,7 +263,9 @@ describe('changing the appearance', () => {
     for (const id of ['particles-enabled', 'worker-orbs-enabled', 'reduce-effects-enabled']) {
       expect(box(id).checked).toBe(false);
       expect(box(id).disabled).toBe(true);
-      expect(box(id).closest('.form-group')!.classList.contains('setting-overridden')).toBe(true);
+      expect(box(id).closest('[data-row]')!.textContent).toContain(
+        'Off while max performance is on',
+      );
     }
     await waitFor(() => expect(posted).toEqual([{ ui_appearance: { max_performance: true } }]));
     // the person's own choice was never saved as off
@@ -228,7 +286,7 @@ describe('changing the appearance', () => {
       expect(screen.queryByText('Customize SoulSync')).toBeNull();
       expect(screen.queryByText('Show only what you use')).toBeNull();
       // the rest of the tab is still there
-      expect(screen.getByText('UI Appearance')).toBeInTheDocument();
+      expect(screen.getByText('Look')).toBeInTheDocument();
     } finally {
       window.SoulSyncFeatures = features;
     }
@@ -276,8 +334,7 @@ describe('Sidebar Weather', () => {
     );
   });
 
-  const tile = (opened = 1) =>
-    render(<AppearanceTab store={store} part="weather" opened={opened} active />);
+  const tile = (opened = 1) => page(opened);
   const box = (id: string) => document.getElementById(id) as HTMLInputElement;
 
   it('says where, how warm and how fresh, in every state the page had', () => {
@@ -287,17 +344,17 @@ describe('Sidebar Weather', () => {
         snapshot: { fetched_at: '10:30', current: { temp: 61.6 } },
         units: 'celsius',
       }),
-    ).toBe('Medford — 62°C, updated 10:30');
+    ).toBe('Medford, 62°C, updated 10:30');
     expect(weatherStatus({ location: { name: 'Medford' }, snapshot: { current: null } })).toBe(
-      'Medford — waiting for first forecast',
+      'Medford: waiting for the first forecast',
     );
     expect(weatherStatus({ location: { name: 'Medford' }, enabled: false })).toBe(
-      'Medford — weather display off',
+      'Medford: weather display off',
     );
     expect(weatherStatus({ location: { name: 'Medford' } })).toBe(
-      'Medford — forecast unavailable right now',
+      'Medford: forecast unavailable right now',
     );
-    expect(weatherStatus({})).toBe('Off — set a location to turn it on');
+    expect(weatherStatus({})).toBe('Off: set a location to turn it on');
   });
 
   it('loads when the tab is opened, and again each time it is opened', async () => {
@@ -305,31 +362,32 @@ describe('Sidebar Weather', () => {
     const view = tile(0);
     await act(async () => {});
     expect(calls).toEqual([]);
-    view.rerender(<AppearanceTab store={store} part="weather" opened={1} active />);
+    view.rerender(<AppearanceTab store={store} part="page" opened={1} active />);
     await waitFor(() => expect(box('sw-location').value).toBe('97501'));
     expect(box('sw-enabled').checked).toBe(true);
     expect(box('sw-celsius').checked).toBe(false);
     expect(box('sw-holidays').checked).toBe(false);
     expect(document.getElementById('sw-status')!.textContent).toBe(
-      'Medford, Oregon — 62°F, updated 10:30',
+      'Medford, Oregon, 62°F, updated 10:30',
     );
     expect(calls.filter((c) => c.method === 'GET')).toHaveLength(1);
-    view.rerender(<AppearanceTab store={store} part="weather" opened={2} active />);
+    view.rerender(<AppearanceTab store={store} part="page" opened={2} active />);
     await waitFor(() => expect(calls.filter((c) => c.method === 'GET')).toHaveLength(2));
   });
 
-  it('opens and closes like every other tile on the page', async () => {
-    const { container } = tile();
-    const header = container.querySelector('.settings-section-header') as HTMLElement;
-    const body = container.querySelector('.settings-section-body') as HTMLElement;
-    fireEvent.click(header);
-    expect(header.classList.contains('collapsed')).toBe(false);
-    expect(body.classList.contains('collapsed')).toBe(false);
-    expect(body.style.display).toBe('');
-    fireEvent.click(header);
-    expect(body.classList.contains('collapsed')).toBe(true);
-    expect(body.style.display).toBe('none');
-    await act(async () => {});
+  it('is open on the page, with Enter in the field saving like Save', async () => {
+    tile();
+    await waitFor(() => expect(box('sw-location').value).toBe('97501'));
+    expect(box('sw-location').closest('[hidden]')).toBeNull();
+    fireEvent.change(box('sw-location'), { target: { value: 'Ashland' } });
+    fireEvent.keyDown(box('sw-location'), { key: 'Enter' });
+    await waitFor(() =>
+      expect(calls).toContainEqual({
+        url: '/api/weather/location',
+        method: 'PUT',
+        body: { location: 'Ashland' },
+      }),
+    );
   });
 
   it('Save sets the location, says so, reloads and re-reads the sidebar', async () => {
