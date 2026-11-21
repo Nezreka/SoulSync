@@ -463,85 +463,86 @@ def fetch_lyrics_endpoint():
             duration = int(data.get('duration') or 0) or None
         except (TypeError, ValueError):
             duration = None
-        file_path = data.get('file_path') or None
-
-        if not title or not artist:
-            return jsonify({'success': False, 'error': 'title and artist required',
-                            'synced': None, 'plain': None, 'source': None}), 400
-
-        # 1. Local lyrics: the .lrc / .txt sidecar, then the lyrics in the
-        #    file's own tags (USLT/SYLT, Vorbis LYRICS, MP4 lyr). Already
-        #    downloaded tracks should not bounce LRCLib on every play, and
-        #    libraries tagged elsewhere often carry embedded lyrics only.
-        from core import lyrics_local
-        local_path = _lyrics_local_path(file_path)
-        synced, plain, source = lyrics_local.read_local(local_path)
-        if synced or plain:
-            return jsonify({'success': True, 'synced': synced,
-                            'plain': plain, 'source': source})
-
-        # 2. LRClib network lookup via the shared client instance.
-        # Go through the client's tri-state lookup (#1879) instead of
-        # calling the raw api directly: the client paces requests,
-        # retries transient failures honouring Retry-After, and can tell
-        # "LRCLib has no lyrics" (404) apart from "LRCLib rate-limited /
-        # 503 — retry later", which is surfaced as the error here instead
-        # of a misleading 'no lyrics found'.
-        from core.lyrics_client import lyrics_client as _lyrics_client
-        if getattr(_lyrics_client, 'api', None) is None:
-            return jsonify({'success': False, 'error': 'LRCLib unavailable',
-                            'synced': None, 'plain': None, 'source': None}), 200
-
-        # Interactive caller: cap each throttle wait at 10s so a player
-        # request can never park an HTTP worker for the length of a
-        # rate-limit cooldown (which can exceed the gunicorn timeout).
-        # The cap is per reservation, not per request — a lookup that
-        # falls through to search waits at most 10s per strategy.
-        fetch = _lyrics_client.lookup_remote_lyrics(
-            track_name=title, artist_name=artist,
-            album_name=album, duration_seconds=duration,
-            max_wait_seconds=10)
-
-        if fetch is None:
-            # A substituted/legacy client returning the old contract's
-            # None (unknown) — answer with the soft unavailable body,
-            # not a 500 from dereferencing it below.
-            return jsonify({'success': False, 'error': 'LRCLib unavailable',
-                            'synced': None, 'plain': None, 'source': None}), 200
-
-        if fetch.status == 'unknown':
-            # retryable only for genuinely transient kinds — a permanent
-            # query error (other 4xx) won't succeed on a retry (#1879).
-            return jsonify({'success': False, 'error': fetch.reason or 'lrclib lookup failed',
-                            'synced': None, 'plain': None, 'source': None,
-                            'retryable': fetch.error_kind in
-                            ('rate_limited', 'server', 'timeout', 'network')})
-
-        result = fetch.data if fetch.status == 'found' else None
-        if result is None:
-            return jsonify({'success': False, 'error': 'no lyrics found',
-                            'synced': None, 'plain': None, 'source': None})
-
-        synced = getattr(result, 'synced_lyrics', None) or None
-        plain = getattr(result, 'plain_lyrics', None) or None
-        if not synced and not plain:
-            # A record with no lyrics content is a definitive negative,
-            # same as a 404 — say so explicitly instead of returning a
-            # success flag with no error and no lyrics.
-            return jsonify({'success': False, 'error': 'no lyrics found',
-                            'synced': None, 'plain': None, 'source': None})
-        cached = False
-        if local_path:
-            try:
-                cached = lyrics_local.cache_sidecar(local_path, synced, plain, config_manager)
-            except Exception as cache_err:  # noqa: BLE001 - caching never fails playback
-                logger.debug("lyrics sidecar cache skipped: %s", cache_err)
-        return jsonify({'success': True, 'synced': lyrics_local.apply_lrc_offset(synced),
-                        'plain': plain, 'source': 'lrclib', 'cached': cached})
+        out, status = lyrics_answer(title, artist, album, duration,
+                                    _lyrics_local_path(data.get('file_path') or None))
+        return jsonify(out), status
     except Exception as e:
         logger.error("lyrics fetch failed: %s", e)
         return jsonify({'success': False, 'error': str(e),
                         'synced': None, 'plain': None, 'source': None}), 500
+
+
+def lyrics_answer(title, artist, album=None, duration=None, local_path=None):
+    """the lyrics for a song: ``(body, status)`` in the shape the lyrics
+    route answers (see fetch_lyrics_endpoint). ``local_path`` is the
+    library file on this machine, when there is one: its sidecar and tags
+    come first, and an LRCLib hit is cached beside it. shared with the
+    player, which asks by track id instead of sending a path."""
+    none = {'synced': None, 'plain': None, 'source': None}
+    if not title or not artist:
+        return {'success': False, 'error': 'title and artist required', **none}, 400
+
+    # 1. Local lyrics: the .lrc / .txt sidecar, then the lyrics in the
+    #    file's own tags (USLT/SYLT, Vorbis LYRICS, MP4 lyr). Already
+    #    downloaded tracks should not bounce LRCLib on every play, and
+    #    libraries tagged elsewhere often carry embedded lyrics only.
+    from core import lyrics_local
+    synced, plain, source = lyrics_local.read_local(local_path)
+    if synced or plain:
+        return {'success': True, 'synced': synced, 'plain': plain, 'source': source}, 200
+
+    # 2. LRClib network lookup via the shared client instance.
+    # Go through the client's tri-state lookup (#1879) instead of
+    # calling the raw api directly: the client paces requests,
+    # retries transient failures honouring Retry-After, and can tell
+    # "LRCLib has no lyrics" (404) apart from "LRCLib rate-limited /
+    # 503 — retry later", which is surfaced as the error here instead
+    # of a misleading 'no lyrics found'.
+    from core.lyrics_client import lyrics_client as _lyrics_client
+    if getattr(_lyrics_client, 'api', None) is None:
+        return {'success': False, 'error': 'LRCLib unavailable', **none}, 200
+
+    # Interactive caller: cap each throttle wait at 10s so a player
+    # request can never park an HTTP worker for the length of a
+    # rate-limit cooldown (which can exceed the gunicorn timeout).
+    # The cap is per reservation, not per request — a lookup that
+    # falls through to search waits at most 10s per strategy.
+    fetch = _lyrics_client.lookup_remote_lyrics(
+        track_name=title, artist_name=artist,
+        album_name=album, duration_seconds=duration,
+        max_wait_seconds=10)
+
+    if fetch is None:
+        # A substituted/legacy client returning the old contract's
+        # None (unknown) — answer with the soft unavailable body,
+        # not a 500 from dereferencing it below.
+        return {'success': False, 'error': 'LRCLib unavailable', **none}, 200
+
+    if fetch.status == 'unknown':
+        # retryable only for genuinely transient kinds — a permanent
+        # query error (other 4xx) won't succeed on a retry (#1879).
+        return {'success': False, 'error': fetch.reason or 'lrclib lookup failed', **none,
+                'retryable': fetch.error_kind in ('rate_limited', 'server', 'timeout', 'network')}, 200
+
+    result = fetch.data if fetch.status == 'found' else None
+    if result is None:
+        return {'success': False, 'error': 'no lyrics found', **none}, 200
+
+    synced = getattr(result, 'synced_lyrics', None) or None
+    plain = getattr(result, 'plain_lyrics', None) or None
+    if not synced and not plain:
+        # A record with no lyrics content is a definitive negative,
+        # same as a 404 — say so explicitly instead of returning a
+        # success flag with no error and no lyrics.
+        return {'success': False, 'error': 'no lyrics found', **none}, 200
+    cached = False
+    if local_path:
+        try:
+            cached = lyrics_local.cache_sidecar(local_path, synced, plain, config_manager)
+        except Exception as cache_err:  # noqa: BLE001 - caching never fails playback
+            logger.debug("lyrics sidecar cache skipped: %s", cache_err)
+    return {'success': True, 'synced': lyrics_local.apply_lrc_offset(synced),
+            'plain': plain, 'source': 'lrclib', 'cached': cached}, 200
 
 
 @bp.route('/api/stats/resolve-track', methods=['POST'])

@@ -1725,7 +1725,10 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 letter=(request.args.get("letter") or "all").lower(),
                 source_filter=request.args.get("source", ""),
                 # #2223: reviewed (locked) | unreviewed
-                review_filter=request.args.get("review", ""))
+                review_filter=request.args.get("review", ""),
+                # the player's genre and label pages
+                genre=request.args.get("genre", ""),
+                label=request.args.get("label", ""))
         for album in albums:
             _apply_artwork_urls(album, "album")
         total_pages = (total + limit - 1) // limit

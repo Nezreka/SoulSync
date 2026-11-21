@@ -20,6 +20,15 @@
     // DOMContentLoaded) and may rewrite an unknown /video-detail/... URL to
     // /dashboard. This is the real path the user reloaded/deep-linked.
     var BOOT_PATH = (window.SoulSyncURL?.strip(window.location.pathname) ?? window.location.pathname);
+    // the player app (/player) is its own full-screen app over the shell: the
+    // side the manager was last on must never navigate it away.
+    function onPlayerPath(path) {
+        var p = (path || '').replace(/\/+$/, '');
+        return p === '/player' || p.indexOf('/player/') === 0;
+    }
+    function onPlayerNow() {
+        return onPlayerPath(window.SoulSyncURL?.strip(window.location.pathname) ?? window.location.pathname);
+    }
     var BOOT_SEARCH = window.location.search;
 
     var SIDE_KEY = 'soulsync_side';
@@ -629,6 +638,8 @@
         if (!(opts && opts.force) && !sideAllowed(side)) return;
         persistSide(side);
         applySide(side);
+        // the profile-apply force switch runs on /player too: flip the chrome, stay put
+        if (onPlayerNow()) return;
         if (side === 'video') {
             // Land on the last-active video page and give it a real URL.
             var active = document.querySelector('.video-nav .nav-button.active');
@@ -794,7 +805,7 @@
         // a macrotask so every page module's listeners are registered first. Only a
         // genuine page deep link re-asserts its URL against music's boot clobber;
         // the plain last-side-was-video case leaves the URL untouched (as before).
-        if (bootSide === 'video' && !bootDetail) {
+        if (bootSide === 'video' && !bootDetail && !onPlayerPath(BOOT_PATH)) {
             var activeBtn = document.querySelector('.video-nav .nav-button.active');
             var initialPage = bootPage || bootShared || (activeBtn && activeBtn.getAttribute('data-video-page')) || DEFAULT_VIDEO_PAGE;
             setActiveNav(initialPage);

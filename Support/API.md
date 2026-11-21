@@ -383,6 +383,149 @@ All under `/seerr/api/v1`: `status`, `auth/me`, `user`, `discover/trending`, `di
 
 ---
 
+## Player home layout
+
+The player's home page is laid out per profile and per screen, so a TV and a phone on one profile can each look different. Every player app (web, phone, TV) reads the same layout and draws it the same way. The contract lives in `core/player/home_layout.py`.
+
+These routes use the signed-in session (the player's own), not an API key. Each profile only ever sees and changes its own.
+
+### The layout
+
+```json
+{
+  "version": 1,
+  "billboard": true,
+  "rows": [
+    {"id": "continue", "style": "wide", "on": true},
+    {"id": "top-movies", "style": "ranked", "on": true},
+    {"id": "genre:movie:Horror", "style": "large", "on": true}
+  ]
+}
+```
+
+- `billboard`: the big rotating banner of what's new at the top.
+- `rows`: drawn top to bottom. Skip a row that's `on: false`, one your app doesn't know, or one with nothing to show.
+- `id`: a row from the catalog, or `genre:<movie|show>:<genre name>` for a genre row someone added.
+- `style`: one of the four below. A row only takes the styles the catalog lists for it.
+
+| Style | Draw it as |
+|---|---|
+| `standard` | the row's own cards: posters, squares or stills |
+| `large` | the same cards, bigger |
+| `wide` | 16:9 stills (a title's backdrop) |
+| `ranked` | the first ten as posters, numbered 1 to 10 |
+
+Every row on home is from the profile's own library.
+
+### Routes
+
+- `GET /api/player/home-layout?device=<id>`: `{layout, scope, catalog}`. `scope` is `device` when this screen has its own layout, `all` when it uses the profile's shared one, and `null` for the default. The layout is always clean: rows the server no longer has are dropped, a style a row can't take goes back to its default, and rows added since it was saved come back at the end, turned off.
+- `PUT /api/player/home-layout` with `{layout, device}`: saves it for this screen, or for every screen with `device: "*"`. Add `from_device: "<id>"` with `"*"` to make this screen follow the shared layout from then on. A layout that isn't this shape answers `400`.
+- `DELETE /api/player/home-layout?device=<id>`: this screen goes back to the shared layout. Without `device`, every screen of the profile goes back to the default.
+
+`device` is an id your app makes once and keeps: 8 to 64 letters, numbers, `-` or `_`.
+
+### Playback
+
+How the player, and paired apps, play something. Both routes take the signed-in session or a paired device's token (`X-Device-Token`), and both go through one check (`core/player/playable.py`):
+
+1. A profile. Signed out, or a device that hasn't picked a profile, answers `401`.
+2. The section: the profile's permission for that kind of item. A paired app only plays what its kind of app is for; a music app plays tracks.
+3. The item: in the profile's library and inside its limits (a kids rating cap, hidden explicit music), with a file to play.
+
+`item_type` is `track` (library v2 id), `movie` or `episode` (library id), `youtube` (a downloaded video's id) or `audiobook` (its library key). `?part=` picks a movie or episode file version (a media file id), or an audiobook's part (0 based).
+
+- `GET /api/player/playable/<item_type>/<item_id>`: `{mode, url, mime, duration, parts, chapters, verdict}`, how to play it, never where the file is. `parts` and `chapters` are an audiobook's timeline, read from its files: each part's `start` and `duration` in seconds on the book's clock, and each chapter's `start` and `title`. `verdict` is a video file's direct-play verdict (`yes`, `maybe` or `no`, with `reasons`).
+- `GET /api/player/stream/<item_type>/<item_id>`: the bytes, with `Range` support (`206`), so a player can seek. A file SoulSync can't reach is relayed from your media server.
+
+Refusals are `{error, message}`: `403 restricted` for something over the profile's limits, `404` for something not in the library or without a file. Podcast episodes don't come here: they stream from the feed's host through the podcast side's audio proxy.
+
+#### Converting video for a browser
+
+A video a browser can't play as it is (an MKV, HEVC, AC3 or DTS sound) is converted by ffmpeg as it streams. Only what has to change is converted: a stream a browser already plays is copied untouched, so a common H.264 file with AC3 sound only has its sound converted. Video is converted to H.264 (on the GPU when there's one that works: NVIDIA, Intel Quick Sync, VA-API or Apple; the CPU otherwise), at 1080p at most, and HDR is tone mapped so it doesn't come out washed out. Sound becomes stereo AAC.
+
+- `playable` for a movie, episode or YouTube video adds, when it's converted, `transcode: {video, audio, reasons, quality, tonemap, encoder}` (`video` and `audio` are `copy` or what they become; `reasons` reads like "AC3 audio to AAC"), and `url` points at the converted stream. A file that may play (`verdict: maybe`) keeps its direct `url` and adds `fallback_url`, the converted stream to switch to if the browser can't play it. `?q=1080p|720p|480p` asks for a smaller picture, converted. `transcode_unavailable` says why a file that needs converting can't be (no ffmpeg).
+- `GET /api/player/transcode/<item_type>/<item_id>?q=&part=&t=`: the converted stream, fragmented MP4, from `t` seconds. It can't seek by `Range`: to seek, start a new one at the new `t`. A few run at once; past that it answers `503 busy`.
+- `GET /api/player/transcode/<item_type>/<item_id>/start?t=`: where a stream asked to start at `t` really starts, `{start, seek}`. Copied video can only start at a keyframe, so request `t=seek` and count the stream's time from `start`.
+
+#### Playlists (music)
+
+- `GET /api/player/playlists`: this profile's playlists as `{yours, mirrored}`. Yours (Liked Songs first) are the ones made in SoulSync; mirrored ones follow Spotify, Deezer and the rest. Request lists stay out. Each is `{id, name, description, kind, liked, source, owner, track_count, image_url, cover_tiles, updated_at}`.
+- `GET /api/player/playlists/<id>`: one of them with `songs`, each `{position, title, artist, album, album_id, artist_id, duration_ms, image_url, added_at, track_id}`. `track_id` is the library track it plays (the match identify stamped, else the library's own match by name, the same one Subsonic apps get), or null when this profile can't play it (not in its library, or explicit on a profile that hides it). Also `duration_ms` and `playable_count`.
+- Changing your playlists uses the playlist routes the music side already has (`/api/user-playlists`, `/api/mirrored-playlists/<id>/custom-name`, `DELETE /api/mirrored-playlists/<id>`).
+
+#### Discovery playlists
+
+- `GET /api/player/discover-playlists`: what Discover made for this profile, as playlists in `sections`, each `{id, label, playlists}`, in this order (an empty one is left out): `made` "Made for you" (Flow, the daily mixes, On Repeat, Repeat Rewind and blends, the mood mixes), `fresh` "New for you" (Fresh Tape, The Archives, Your Listening Mix, the season's mix), `picks` "Picks" (Hidden Gems, Popular Picks, Discovery Shuffle and the other stored picks, like Time Machine decades), `listenbrainz` "ListenBrainz" (its playlists and Last.fm radio, once cached). Each is `{key, name, blurb, section, owned, track_count, cover_tiles, updated_at}`; `owned` is true when every song is already in the library. The list only reads what's stored: nothing is built or fetched for it. Flow is made when it's opened, so its `track_count` is null. On Repeat and the blends show once Discover (or the player) has made them recently. Artists the profile blocked are left out, the same as on Discover. All three need Discover (`music.discover`), the same as the manager's Discover page: a profile with it off gets `403`.
+- `GET /api/player/discover-playlists/<key>`: one of them with `songs`, each `{position, title, artist, album, duration_ms, image_url, track_id, album_id, artist_id, unplayable, wanted}`, plus `playable_count` and `hides_explicit`. Songs match the library the same way playlist songs do (the library track a mix carries, else by title and artist); `track_id` is the track it plays, or null with `unplayable` saying why (`missing` or `explicit`). `wanted` is true when the song is already on this profile's wishlist. An unknown key is `404 {error: "not_found"}`.
+- `POST /api/player/discover-playlists/<key>/get` with `{positions?: [int]}`: puts the songs you don't have (`unplayable: "missing"`; all of them, or just those positions) on this profile's wishlist, through the same add as the download dialog's Add to Wishlist. Answers `{added, already, skipped}`: `already` were on the wishlist, `skipped` had nothing to key a wishlist row by or were refused. A profile that can't request music gets the usual `403`.
+
+#### An artist's popular songs
+
+- `GET /api/player/music/artist/<artist_id>/top?limit=10`: the artist's most played songs this profile can play (play count, then newest), their own albums and the songs they're credited on. A song on two releases shows once, its most played copy. `[{track_id, title, artist, duration_ms, album_id, album, plays, explicit}]`.
+
+#### Lyrics
+
+- `GET /api/player/lyrics/track/<track_id>`: a library track's lyrics, `{success, synced, plain, source}`, the same answer as `POST /api/lyrics/fetch` (the `.lrc` beside the file and the file's own tags first, then LRCLib). Asked by track id: the server finds the file itself, so a client never sends a path. A track this profile can't play is refused the same way playback refuses it.
+
+#### Player settings
+
+- `GET /api/player/settings`: this profile's player settings and what each does: `share_activity` (others see what you play on Watching now; default on), `autoplay_next` (the next episode plays on its own), `still_watching_after` (episodes in a row nobody touched before asking; 0 never asks). Kept in player.db, the same on every screen of the profile.
+- `PUT /api/player/settings` with `{key: value}`: all saved or none (an unknown key or a bad value is a 400). Turning `share_activity` off takes the profile off Watching now at once.
+
+#### Watching now
+
+- `POST /api/player/presence` with `{session, item_type, item_id, position, duration, playing, live, channel?, meta?}`: a screen is playing something. Sent every 15 seconds and on a start, pause or change; forgotten 75 seconds after the last one. Kept in memory only. A profile that doesn't share gets `{shared: false}` and nothing is kept.
+- `DELETE /api/player/presence?session=`: the screen stopped.
+- `GET /api/player/presence`: what's playing right now, `{sessions: [{profile, item_type, item_id, position, duration, playing, live, channel, meta, started, seen, you}], sharing}`. Your own screens come first with `you: true` (kept only while you share); then others, only profiles that share and only what this profile may see (its media access and its rating cap).
+- `GET /api/player/presence/together`: titles you and others (that share) both started in the last two months, your place and theirs. A show counts as one title, whichever episode each of you is on.
+
+#### Comments and marks
+
+- `GET /api/player/notes/<item_type>/<item_id>`: a title's notes: comments (no time; newest first) then marks (a moment in seconds; in time order). Yours, and what others shared. `item_type` is movie, show, episode, track, album, audiobook, youtube or podcast_episode. A title this profile may not see (its media access, its rating cap) is a 404.
+- `POST /api/player/notes/<item_type>/<item_id>` with `{body}` posts a comment (always shared, can't be empty), or with `{at, body?, shared?}` keeps a mark (a note is optional; yours alone unless `shared`). Up to 1000 characters.
+- `PATCH /api/player/note/<id>` with `{body?, shared?}`: your own note. `DELETE /api/player/note/<id>`: your own note, or for an admin anyone's shared one.
+
+#### Guide channels and your lineup
+
+- `GET /api/player/guide/channels`: the channels people made: `{server: [...], mine: [...], can_edit_server}`. A server channel is an admin's, for everyone; a profile's own only it sees. Each is `{id, scope, spec}`.
+- `POST /api/player/guide/channels` with `{scope: mine|server, spec}`: make one (a server one needs an admin). `PUT /api/player/guide/channels/<id>` with `{spec}` changes it, `DELETE` removes it: your own, or for an admin a server one.
+- A spec: `{name, kinds: [movies, tv], genres, decades, studios, networks, collection, min_score, kids, added_days, show, people: [{id, name}], order: shuffle|in_order}`. `people` (up to five) makes a channel of their films and shows. Lists match any of their values; `show` makes a marathon (one show, start to finish). The guide schedules it from its catalog like the channels it makes itself.
+- `GET /api/player/guide/lineup`: this profile's arrangement, `[{channel_id, position, hidden, name}]`, for any channel (the guide's own too). `PUT` with `{entries: [{channel_id, hidden?, name?}]}` in order replaces it; an empty list puts the guide's order back. Kept in player.db, the same on every screen.
+
+#### What the guide knows beyond its catalog
+
+- `GET /api/player/guide/watched`: `{movies: [ids], episodes: [ids]}` this profile has seen (the library's watch state for whoever's it is, plus what the player saw played through). Channels air the unseen first; a marathon starts at the next unseen episode.
+- `GET /api/player/guide/people?q=`: people in the library by name, the ones in most owned titles first: `[{id, name, photo_url, titles, job}]`. `GET /api/player/guide/people/<id>`: `{name, movies: [ids], shows: [ids]}`, their owned films and their shows.
+- `GET /api/player/guide/reminders`: what this profile asked to be told about, still to come. `POST` with `{channel_id, starts_at (epoch seconds, within two weeks), program_key, title, subtitle?, channel_name?}` adds one; `DELETE ?channel_id=&starts_at=` takes it off. Gone an hour after the start. Whichever screen of the profile is open rings it.
+
+#### Watched
+
+- `POST /api/player/watched` with `{item_type, item_id}`: a movie or episode is into its credits (92% of the way): it counts as watched, in SoulSync's video library and on the media server account, for the profile whose watch state it is (the same rules as the detail page's watched toggle). Returns `{watched}`: false for anything else, or a profile that keeps no watch state of its own. `POST /api/player/progress/finish` does the same for a movie or episode played to the end.
+
+#### Audio and subtitle tracks
+
+- `GET /api/player/tracks/<item_type>/<item_id>?part=`: `{audio, subtitles}`, read from the file (with ffprobe, its header only) and the subtitle files beside it (`Movie.en.srt`, `Movie.es.forced.srt`). An audio track is `{index, language, title, codec, channels, layout, default, plays}`; a subtitle is `{id, language, title, codec, kind, forced, sdh, default, external}`, where `id` is `s<n>` (in the file) or `x<n>` (a file beside it), and `kind` is `text` or `image` (PGS, VobSub).
+- `GET /api/player/subtitle/<item_type>/<item_id>?sub=s0`: a text subtitle as WebVTT. Made once and cached: an embedded one means reading the whole file the first time.
+- To play another audio track, ask `playable` (or `transcode`) with `&audio=<index>`; to draw an image subtitle into the picture, `&burn=<n>` (its number among the file's subtitles). Both go through the converter: a browser only plays a file's first audio track.
+
+
+### Watchlist
+
+Each profile keeps a watchlist of things to watch later, shared by all its screens, in `player.db`.
+
+- `GET /api/player/watchlist`: `{items: [{item_type, item_id, meta, added_at}]}`, newest first.
+- `PUT /api/player/watchlist` with `{item_type, item_id, meta?}`: adds it, or keeps its place and refreshes `meta` if it's already there. `item_type` is `movie` or `show` (by library id) or `youtube` (by video id). `meta` takes `title`, `subtitle`, `artwork`, `backdrop` and `href`, mostly for YouTube; links from SoulSync's image cache aren't kept, since they expire.
+- `DELETE /api/player/watchlist?item_type=&item_id=`: takes it off.
+
+A watchlist holds up to 1000 titles. Draw only what your catalog has: a title that left the library, or one over a kids profile's rating cap, stays on the list but isn't shown. The home layout's `watchlist` row is this list.
+
+### The catalog
+
+`catalog` comes with every `GET`, so an app never has to hard-code the rows: `{version, styles: [{id, label}], rows: [{id, label, hint, styles, style, on}], genre_row, max_rows}`. Use `label` and `hint` in your editor, `styles` for the style picker, and `style` and `on` as each row's defaults.
+
+---
+
 ## Endpoints
 
 ### System

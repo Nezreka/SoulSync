@@ -128,6 +128,15 @@ def direct_play_verdict(path: Any = None, video_codec: Any = None,
             "container": ext, "video": vid, "audio": aud}
 
 
+def stream_verdicts(video_codec: Any = None, audio_codec: Any = None) -> Dict[str, str]:
+    """the video and audio streams judged on their own: ``{"video", "audio"}``,
+    each yes / maybe / no. a transcoder copies a 'yes' stream and converts
+    the rest; unknown is 'maybe', the same rule as the verdict above."""
+    vid, aud = _norm(video_codec), _norm(audio_codec)
+    return {"video": _VIDEO.get(vid, "maybe") if vid else "maybe",
+            "audio": _AUDIO.get(aud, "maybe") if aud else "maybe"}
+
+
 def mime_for(path: Any) -> str:
     """The Content-Type to serve a library file with. Deliberately explicit
     rather than :mod:`mimetypes`, whose table disagrees with itself across
@@ -140,4 +149,4 @@ def mime_for(path: Any) -> str:
     }.get(container_of(path), "application/octet-stream")
 
 
-__all__ = ["direct_play_verdict", "container_of", "mime_for"]
+__all__ = ["direct_play_verdict", "container_of", "mime_for", "stream_verdicts"]

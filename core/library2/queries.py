@@ -434,7 +434,8 @@ def _album_page_ids(conn, members: set, frm: str, where: str, order: str,
 def list_albums(conn, *, search: str = "", sort: str = "title", monitored: str = "all",
                 page: int = 1, limit: int = 75, letter: str = "all",
                 source_filter: str = "",
-                review_filter: str = "") -> Tuple[List[Dict[str, Any]], int]:
+                review_filter: str = "", genre: str = "",
+                label: str = "") -> Tuple[List[Dict[str, Any]], int]:
     """The whole library by release (upstream's album browse, A07).
 
     The releases the artist list counts -- a library row, or one this library
@@ -462,6 +463,17 @@ def list_albums(conn, *, search: str = "", sort: str = "title", monitored: str =
         filters.append(f"{album_monitored} = 1")
     elif monitored == "unmonitored":
         filters.append(f"{album_monitored} = 0")
+    if genre:
+        # the player's genre pages: the release's own genres, else its artist's
+        params["genre"] = str(genre).strip().lower()[:80]
+        filters.append("(EXISTS (SELECT 1 FROM json_each(al.genres) gg"
+                       " WHERE LOWER(gg.value) = :genre)"
+                       " OR EXISTS (SELECT 1 FROM lib2_artists ga, json_each(ga.genres) gg"
+                       " WHERE ga.id = al.primary_artist_id AND LOWER(gg.value) = :genre))")
+    if label:
+        # the player's label pages: releases on that label
+        params["label"] = str(label).strip().lower()[:120]
+        filters.append("LOWER(COALESCE(al.label, '')) = :label")
     if letter and letter != "all":
         # the alphabet bar, by the album's title, same rule as the artists
         from database.music_database import _library_stripped_sql

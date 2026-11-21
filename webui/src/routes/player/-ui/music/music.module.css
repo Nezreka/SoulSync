@@ -1,0 +1,898 @@
+/* music in the player: song lists, playlist covers and pages, the picker */
+
+/* ── a song list ──────────────────────────────────────────────────────── */
+
+.tracks {
+  --track-cols: calc(var(--u) * 2.4) minmax(0, 1fr);
+
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 0.1);
+  margin-top: calc(var(--u) * 1);
+}
+
+.tracks[data-art='true'] {
+  --track-cols: calc(var(--u) * 2.4) calc(var(--u) * 2.8) minmax(0, 1fr);
+}
+
+.tracks[data-album='true'] {
+  --track-cols: calc(var(--u) * 2.4) minmax(0, 1.3fr) minmax(0, 1fr);
+}
+
+.tracks[data-art='true'][data-album='true'] {
+  --track-cols: calc(var(--u) * 2.4) calc(var(--u) * 2.8) minmax(0, 1.3fr) minmax(0, 1fr);
+}
+
+.track {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: calc(var(--u) * 0.6);
+  min-height: calc(var(--u) * 3.5);
+  padding-right: calc(var(--u) * 0.75);
+  border-radius: var(--radius-lg);
+  transition: background var(--dur-fast) ease;
+}
+
+.track:hover,
+.track:focus-within {
+  background: var(--white-a05);
+}
+
+.track[data-playing='true'] {
+  background: rgba(var(--accent-rgb), 0.1);
+}
+
+.track[data-off='true'] {
+  opacity: 0.42;
+}
+
+.track[data-drag='true'] {
+  opacity: 0.35;
+}
+
+.track[data-over='before'] {
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+
+.track[data-over='after'] {
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.track[draggable='true'] {
+  cursor: grab;
+}
+
+.trackHit {
+  display: grid;
+  grid-template-columns: var(--track-cols);
+  align-items: center;
+  gap: calc(var(--u) * 0.9);
+  min-width: 0;
+  padding: calc(var(--u) * 0.45) 0 calc(var(--u) * 0.45) calc(var(--u) * 0.75);
+  border-radius: var(--radius-lg);
+  color: var(--pl-text);
+  cursor: pointer;
+}
+
+.track[data-off='true'] .trackHit {
+  cursor: default;
+}
+
+.trackHit:focus-visible {
+  outline: 2px solid var(--pl-ring);
+  outline-offset: -2px;
+}
+
+.trackNum {
+  position: relative;
+  display: grid;
+  place-items: center end;
+  color: var(--pl-text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.trackNumPlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center end;
+  color: var(--pl-text);
+  opacity: 0;
+}
+
+.trackNumPlay svg {
+  width: calc(var(--u) * 1);
+  height: calc(var(--u) * 1);
+}
+
+.track:hover .trackNumPlay,
+.trackHit:focus-visible .trackNumPlay {
+  opacity: 1;
+}
+
+.track:hover .trackNumText,
+.trackHit:focus-visible .trackNumText {
+  opacity: 0;
+}
+
+.track[data-off='true'] .trackNumText {
+  opacity: 1;
+}
+
+.trackArt {
+  overflow: hidden;
+  aspect-ratio: 1;
+  border-radius: var(--radius-sm);
+  background: var(--white-a06);
+}
+
+.trackArt img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.trackMain {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 0.15);
+  min-width: 0;
+}
+
+.trackTitle {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 0.4);
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.track[data-playing='true'] .trackTitle {
+  color: var(--accent-light);
+}
+
+.explicit {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: calc(var(--u) * 0.95);
+  height: calc(var(--u) * 0.95);
+  border-radius: var(--radius-sm);
+  background: var(--white-a25);
+  color: var(--pl-bg);
+  font-size: calc(var(--u) * 0.6);
+  font-weight: 800;
+}
+
+.trackSub,
+.trackAlbum {
+  overflow: hidden;
+  color: var(--pl-text-3);
+  font-size: calc(var(--u) * 0.85);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trackSub a,
+.trackAlbum a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.trackSub a:hover,
+.trackAlbum a:hover {
+  color: var(--pl-text);
+  text-decoration: underline;
+}
+
+.trackWhy {
+  color: var(--pl-text-3);
+}
+
+.trackActions {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 0.15);
+  opacity: 0;
+  transition: opacity var(--dur-fast) ease;
+}
+
+.track:hover .trackActions,
+.track:focus-within .trackActions {
+  opacity: 1;
+}
+
+.trackBtn {
+  display: grid;
+  place-items: center;
+  width: calc(var(--u) * 2);
+  height: calc(var(--u) * 2);
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-circle);
+  background: none;
+  color: var(--pl-text-2);
+  cursor: pointer;
+}
+
+.trackBtn:hover {
+  background: var(--white-a10);
+  color: var(--pl-text);
+}
+
+.trackBtn svg,
+.trackGrip svg {
+  width: calc(var(--u) * 1.05);
+  height: calc(var(--u) * 1.05);
+}
+
+.trackGrip {
+  display: grid;
+  place-items: center;
+  width: calc(var(--u) * 1.4);
+  color: var(--pl-text-3);
+}
+
+.trackEnd {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: calc(var(--u) * 0.7);
+  min-width: calc(var(--u) * 3);
+  color: var(--pl-text-3);
+  font-size: calc(var(--u) * 0.85);
+  font-variant-numeric: tabular-nums;
+}
+
+/* the song playing: three bars that move to it (still when paused) */
+.eq {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: calc(var(--u) * 0.12);
+  height: calc(var(--u) * 0.95);
+}
+
+.eq span {
+  width: calc(var(--u) * 0.18);
+  height: 100%;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  transform-origin: bottom;
+  animation: eqBar 0.9s ease-in-out infinite;
+}
+
+.eq span:nth-child(2) {
+  animation-delay: -0.3s;
+  animation-duration: 0.7s;
+}
+
+.eq span:nth-child(3) {
+  animation-delay: -0.55s;
+  animation-duration: 1.05s;
+}
+
+.eq[data-paused='true'] span {
+  animation-play-state: paused;
+}
+
+@keyframes eqBar {
+  0%,
+  100% {
+    transform: scaleY(0.3);
+  }
+
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+@media (hover: none) {
+  .trackActions {
+    opacity: 1;
+  }
+}
+
+@media (max-width: 720px) {
+  .tracks[data-album='true'],
+  .tracks[data-art='true'][data-album='true'] {
+    --track-cols: calc(var(--u) * 2.4) minmax(0, 1fr);
+  }
+
+  .tracks[data-art='true'][data-album='true'] {
+    --track-cols: calc(var(--u) * 2.4) calc(var(--u) * 2.8) minmax(0, 1fr);
+  }
+
+  .trackAlbum {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .eq span {
+    animation: none;
+    transform: scaleY(0.7);
+  }
+}
+
+/* ── playlist covers ──────────────────────────────────────────────────── */
+
+.cover {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  aspect-ratio: 1;
+  border-radius: var(--radius-lg);
+  background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.35), var(--white-a06));
+  box-shadow: 0 calc(var(--u) * 0.4) calc(var(--u) * 1.2) var(--black-a40);
+}
+
+.cover[data-size='thumb'] {
+  width: calc(var(--u) * 3);
+  flex: none;
+  border-radius: var(--radius-sm);
+  box-shadow: none;
+}
+
+.cover[data-size='hero'] {
+  width: clamp(calc(var(--u) * 10), 22vw, calc(var(--u) * 15));
+  flex: none;
+  box-shadow: 0 calc(var(--u) * 1) calc(var(--u) * 3) var(--black-a60);
+}
+
+.cover img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.coverTiles {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  width: 100%;
+  height: 100%;
+}
+
+.coverLetter {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  color: var(--white-a50);
+  font-size: calc(var(--u) * 3);
+  font-weight: 800;
+}
+
+.cover[data-size='thumb'] .coverLetter {
+  font-size: calc(var(--u) * 1.1);
+}
+
+.cover[data-liked='true'] {
+  background: linear-gradient(135deg, var(--accent), rgba(var(--accent-rgb), 0.25));
+}
+
+.coverLiked {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  color: var(--pl-text);
+}
+
+.coverLiked svg {
+  width: 38%;
+  height: 38%;
+}
+
+/* ── the playlist picker ─────────────────────────────────────────────── */
+
+.pickList {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 0.15);
+  margin-top: calc(var(--u) * 0.6);
+}
+
+.pickRow {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 0.8);
+  width: 100%;
+  padding: calc(var(--u) * 0.45);
+  border: none;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--pl-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.pickRow:hover:not(:disabled),
+.pickRow:focus-visible {
+  background: var(--white-a08);
+}
+
+.pickRow:disabled {
+  cursor: progress;
+}
+
+.pickPlus {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: calc(var(--u) * 3);
+  aspect-ratio: 1;
+  border-radius: var(--radius-sm);
+  background: var(--white-a10);
+}
+
+.pickPlus svg,
+.pickTick svg {
+  width: calc(var(--u) * 1.1);
+  height: calc(var(--u) * 1.1);
+}
+
+.pickText {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.pickName {
+  overflow: hidden;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pickSub {
+  color: var(--pl-text-3);
+  font-size: calc(var(--u) * 0.8);
+}
+
+.pickTick {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: calc(var(--u) * 1.9);
+  height: calc(var(--u) * 1.9);
+  border: 1px solid var(--white-a25);
+  border-radius: var(--radius-circle);
+  color: var(--pl-text-2);
+}
+
+.pickTick[data-on='true'] {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--pl-bg);
+}
+
+.pickNew {
+  display: flex;
+  gap: calc(var(--u) * 0.5);
+  padding: calc(var(--u) * 0.3) 0;
+}
+
+.pickNote {
+  margin: calc(var(--u) * 0.5) 0;
+  color: var(--pl-text-3);
+}
+
+.pickStatus {
+  margin: calc(var(--u) * 0.8) 0 0;
+  color: var(--accent-light);
+  font-size: calc(var(--u) * 0.88);
+  font-weight: 600;
+}
+
+/* on a card the art box is the frame */
+.cover[data-size='card'] {
+  width: 100%;
+  height: 100%;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+/* ── a playlist's page ────────────────────────────────────────────────── */
+
+.plHero {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  gap: calc(var(--u) * 2);
+  margin: 0 calc(var(--pl-gutter) * -1);
+  padding: calc(var(--u) * 3) var(--pl-gutter) calc(var(--u) * 1.6);
+  overflow: hidden;
+  isolation: isolate;
+}
+
+/* the cover again, blown up and blurred: the page takes its colour */
+.plBackdrop {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  opacity: 0.55;
+  filter: blur(calc(var(--u) * 4)) saturate(1.4);
+  transform: scale(1.4);
+  pointer-events: none;
+}
+
+.plBackdrop > span {
+  width: 100%;
+  height: 100%;
+  border-radius: 0;
+}
+
+.plHero::after {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(to bottom, transparent, var(--pl-bg));
+  content: '';
+}
+
+.plText {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 0.5);
+  min-width: 0;
+}
+
+.plKicker {
+  color: var(--pl-text-2);
+  font-size: calc(var(--u) * 0.78);
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.plTitle {
+  margin: 0;
+  overflow: hidden;
+  font-size: clamp(calc(var(--u) * 2), 5vw, calc(var(--u) * 4.2));
+  font-weight: 850;
+  line-height: 1.02;
+  letter-spacing: -0.03em;
+  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
+}
+
+.plAbout {
+  max-width: 62ch;
+  margin: 0;
+  color: var(--pl-text-2);
+  line-height: 1.5;
+}
+
+.plMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: calc(var(--u) * 0.3) calc(var(--u) * 1);
+  color: var(--pl-text-2);
+  font-size: calc(var(--u) * 0.9);
+}
+
+.plMeta span + span::before {
+  margin-right: calc(var(--u) * 1);
+  color: var(--pl-text-3);
+  content: '·';
+}
+
+.plActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: calc(var(--u) * 0.6);
+  margin-top: calc(var(--u) * 0.6);
+}
+
+.plActions button:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+.plIconBtn {
+  display: grid;
+  place-items: center;
+  width: calc(var(--u) * 2.9);
+  height: calc(var(--u) * 2.9);
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-circle);
+  background: var(--white-a10);
+  color: var(--pl-text);
+  cursor: pointer;
+  transition: background var(--dur-fast) ease;
+}
+
+.plIconBtn:hover {
+  background: var(--white-a16);
+}
+
+.plIconBtn svg {
+  width: calc(var(--u) * 1.15);
+  height: calc(var(--u) * 1.15);
+}
+
+.plNote {
+  margin: calc(var(--u) * 0.5) 0 0;
+  color: var(--accent-light);
+  font-weight: 600;
+}
+
+.plFind {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 0.5);
+  max-width: calc(var(--u) * 20);
+  margin-top: calc(var(--u) * 1.2);
+  padding: 0 calc(var(--u) * 0.8);
+  border: 1px solid var(--white-a12);
+  border-radius: var(--radius-pill);
+  background: var(--white-a05);
+  color: var(--pl-text-3);
+}
+
+.plFind:focus-within {
+  border-color: var(--white-a25);
+}
+
+.plFind svg {
+  width: calc(var(--u) * 1);
+  height: calc(var(--u) * 1);
+  flex: none;
+}
+
+.plFind input {
+  flex: 1;
+  min-width: 0;
+  height: calc(var(--u) * 2.4);
+  border: none;
+  background: none;
+  color: var(--pl-text);
+  font: inherit;
+  outline: none;
+}
+
+@media (max-width: 640px) {
+  .plHero {
+    flex-direction: column;
+    align-items: flex-start;
+    padding-top: calc(var(--u) * 1.5);
+  }
+}
+
+/* a list with notes on the right (plays, a quality): one width for all, so the columns line up */
+.tracks[data-end='true'] .trackEnd {
+  min-width: calc(var(--u) * 7.5);
+}
+
+/* ── the playlists page ─────────────────────────────────────────────── */
+
+.plTools {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 0.7);
+}
+
+.plSort {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 0.45);
+  margin-left: auto;
+  color: var(--pl-text-3);
+  font-size: calc(var(--u) * 0.8);
+}
+
+.plSort select {
+  padding: calc(var(--u) * 0.35) calc(var(--u) * 0.6);
+  border: 1px solid var(--pl-line);
+  border-radius: var(--radius-pill);
+  background: var(--white-a04);
+  color: var(--pl-text);
+  font: inherit;
+}
+
+/* up top: the ones you go back to, and flow */
+.top {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  gap: calc(var(--u) * 1);
+  margin-bottom: calc(var(--u) * 1.6);
+}
+
+@media (max-width: 900px) {
+  .top {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.shortcuts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: calc(var(--u) * 0.55);
+}
+
+.shortcut {
+  position: relative;
+  border-radius: var(--radius-md);
+  background: var(--white-a05);
+  transition: background var(--dur-fast) ease;
+}
+
+.shortcut:hover,
+.shortcut:focus-within {
+  background: var(--white-a10);
+}
+
+.shortcut[data-liked='true'] {
+  background: linear-gradient(100deg, rgba(var(--accent-rgb), 0.32), var(--white-a05) 70%);
+}
+
+.shortcutLink {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 0.8);
+  min-width: 0;
+  padding-right: calc(var(--u) * 3.4);
+  overflow: hidden;
+  border-radius: inherit;
+  color: inherit;
+  text-decoration: none;
+}
+
+.shortcutArt {
+  display: block;
+  flex: none;
+  width: calc(var(--u) * 3.6);
+}
+
+.shortcutArt > span {
+  width: 100%;
+  border-radius: var(--radius-md) 0 0 var(--radius-md);
+}
+
+.shortcutText {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.shortcutName {
+  overflow: hidden;
+  font-size: calc(var(--u) * 0.88);
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shortcutSub {
+  color: var(--pl-text-3);
+  font-size: calc(var(--u) * 0.74);
+}
+
+/* the play button sits at the tile's right end, shown on hover or focus */
+.shortcutPlay {
+  position: absolute;
+  top: 50%;
+  right: calc(var(--u) * 0.5);
+  width: calc(var(--u) * 2.4);
+  height: calc(var(--u) * 2.4);
+  transform: translateY(-50%);
+}
+
+.shortcutPlay > button {
+  right: 0;
+  bottom: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.shortcut:hover .shortcutPlay > button,
+.shortcut:focus-within .shortcutPlay > button,
+.flow:hover .flowPlay > button,
+.flow:focus-within .flowPlay > button {
+  opacity: 1;
+  transform: none;
+}
+
+/* flow: a banner of your own songs, nonstop */
+.flow {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  min-height: calc(var(--u) * 8);
+  overflow: hidden;
+  border-radius: var(--radius-lg);
+  background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.55), var(--pl-panel-solid) 75%);
+  isolation: isolate;
+}
+
+.flowArt {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  opacity: 0.32;
+  filter: saturate(1.2) blur(1px);
+  mask-image: linear-gradient(90deg, transparent, var(--pl-bg) 55%);
+}
+
+.flowArt img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.flowText {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 0.2);
+  padding: calc(var(--u) * 1.2) calc(var(--u) * 4.5) calc(var(--u) * 1.2) calc(var(--u) * 1.3);
+  color: inherit;
+  text-decoration: none;
+}
+
+.flowKicker {
+  color: var(--pl-text-2);
+  font-size: calc(var(--u) * 0.7);
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.flowName {
+  font-size: calc(var(--u) * 2);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+
+.flowBlurb {
+  color: var(--pl-text-2);
+  font-size: calc(var(--u) * 0.88);
+}
+
+.flowPlay {
+  position: absolute;
+  right: calc(var(--u) * 1.2);
+  bottom: calc(var(--u) * 1.2);
+  width: calc(var(--u) * 3.2);
+  height: calc(var(--u) * 3.2);
+}
+
+.flowPlay > button {
+  right: 0;
+  bottom: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 1;
+  transform: none;
+}
+
+/* a discovery playlist with songs you don't have yet */
+.toGetBadge {
+  position: absolute;
+  top: calc(var(--u) * 0.5);
+  left: calc(var(--u) * 0.5);
+  padding: calc(var(--u) * 0.15) calc(var(--u) * 0.5);
+  border-radius: var(--radius-pill);
+  background: var(--black-a60);
+  color: var(--pl-text);
+  font-size: calc(var(--u) * 0.62);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  backdrop-filter: blur(6px);
+}
+
+.plTools .plFind {
+  width: min(calc(var(--u) * 16), 40vw);
+  margin-top: 0;
+}

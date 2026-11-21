@@ -28,6 +28,15 @@ OPTED_IN = {
     # music apps: every Subsonic method is one route; the methods themselves
     # are pinned in tests/subsonic/test_methods.py
     "subsonic.rest": A.PLAYBACK,
+    # the player's playback (core/player/playable.py): a music app plays
+    # tracks through these, as its profile
+    "player_stream.playable": A.PLAYBACK,
+    "player_stream.stream": A.PLAYBACK,
+    "player_stream.transcode": A.PLAYBACK,
+    "player_stream.transcode_start": A.PLAYBACK,
+    "player_tracks.tracks": A.PLAYBACK,
+    "player_tracks.subtitle": A.PLAYBACK,
+    "player_tracks.lyrics": A.PLAYBACK,
 }
 
 IGNORED = {"HEAD", "OPTIONS"}

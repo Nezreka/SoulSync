@@ -548,11 +548,10 @@ def _row_track_id(lib: L.Library, r) -> Optional[int]:
         except (TypeError, ValueError):
             extra = {}
     extra = extra if isinstance(extra, dict) else {}
-    if extra.get("library_track_id") and (extra.get("library_track_id_kind") or "lib2") == "lib2":
-        try:
-            return int(extra["library_track_id"])
-        except (TypeError, ValueError):
-            pass
+    # a stamp only when it can be trusted (see stamped_tracks), else by name
+    stamped = L.stamped_tracks(lib.conn, [{**r, "extra_data": extra}])[0]
+    if stamped:
+        return stamped
     return lib.find_track(r.get("track_name") or "", r.get("artist_name") or "", r.get("album_name") or "")
 
 

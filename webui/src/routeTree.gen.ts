@@ -22,6 +22,7 @@ import { Route as SampleStudioRouteRouteImport } from './routes/sample-studio/ro
 import { Route as RequestsRouteRouteImport } from './routes/requests/route'
 import { Route as PodcastsRouteRouteImport } from './routes/podcasts/route'
 import { Route as PlaylistExplorerRouteRouteImport } from './routes/playlist-explorer/route'
+import { Route as PlayerRouteRouteImport } from './routes/player/route'
 import { Route as LibraryRouteRouteImport } from './routes/library/route'
 import { Route as IssuesRouteRouteImport } from './routes/issues/route'
 import { Route as ImportRouteRouteImport } from './routes/import/route'
@@ -33,9 +34,14 @@ import { Route as AudiobooksRouteRouteImport } from './routes/audiobooks/route'
 import { Route as ActiveDownloadsRouteRouteImport } from './routes/active-downloads/route'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as PodcastsIndexRouteImport } from './routes/podcasts/index'
+import { Route as PlayerIndexRouteImport } from './routes/player/index'
 import { Route as ImportIndexRouteImport } from './routes/import/index'
 import { Route as AudiobooksIndexRouteImport } from './routes/audiobooks/index'
 import { Route as PodcastsPodcastIdRouteImport } from './routes/podcasts/$podcastId'
+import { Route as PlayerWatchlistRouteImport } from './routes/player/watchlist'
+import { Route as PlayerWatchingRouteImport } from './routes/player/watching'
+import { Route as PlayerSettingsRouteImport } from './routes/player/settings'
+import { Route as PlayerGuideRouteImport } from './routes/player/guide'
 import { Route as LabelDetailIdRouteImport } from './routes/label-detail/$id'
 import { Route as ImportSinglesRouteImport } from './routes/import/singles'
 import { Route as ImportAutoRouteImport } from './routes/import/auto'
@@ -43,10 +49,35 @@ import { Route as ImportAlbumRouteImport } from './routes/import/album'
 import { Route as AudiobooksWishlistRouteImport } from './routes/audiobooks/wishlist'
 import { Route as AudiobooksLibraryRouteImport } from './routes/audiobooks/library'
 import { Route as AudiobooksAsinRouteImport } from './routes/audiobooks/$asin'
+import { Route as PlayerYoutubeIndexRouteImport } from './routes/player/youtube/index'
+import { Route as PlayerTvIndexRouteImport } from './routes/player/tv/index'
+import { Route as PlayerPodcastsIndexRouteImport } from './routes/player/podcasts/index'
+import { Route as PlayerMusicIndexRouteImport } from './routes/player/music/index'
+import { Route as PlayerMoviesIndexRouteImport } from './routes/player/movies/index'
+import { Route as PlayerAudiobooksIndexRouteImport } from './routes/player/audiobooks/index'
+import { Route as PlayerYoutubeChannelIdRouteImport } from './routes/player/youtube/$channelId'
+import { Route as PlayerTvShowIdRouteImport } from './routes/player/tv/$showId'
+import { Route as PlayerPodcastsPodcastIdRouteImport } from './routes/player/podcasts/$podcastId'
+import { Route as PlayerPersonPersonIdRouteImport } from './routes/player/person.$personId'
+import { Route as PlayerMusicPlaylistsRouteImport } from './routes/player/music/playlists'
+import { Route as PlayerMoviesMovieIdRouteImport } from './routes/player/movies/$movieId'
+import { Route as PlayerKeywordNameRouteImport } from './routes/player/keyword.$name'
+import { Route as PlayerCollectionsCollectionIdRouteImport } from './routes/player/collections.$collectionId'
+import { Route as PlayerAudiobooksAsinRouteImport } from './routes/player/audiobooks/$asin'
 import { Route as ImportMatchKeyRouteImport } from './routes/import/match.$key'
 import { Route as AudiobooksNarratorNameRouteImport } from './routes/audiobooks/narrator/$name'
 import { Route as AudiobooksAuthorNameRouteImport } from './routes/audiobooks/author/$name'
 import { Route as ArtistDetailSourceIdRouteImport } from './routes/artist-detail/$source/$id'
+import { Route as PlayerTvNetworkNameRouteImport } from './routes/player/tv/network.$name'
+import { Route as PlayerTitleKindTmdbIdRouteImport } from './routes/player/title.$kind.$tmdbId'
+import { Route as PlayerMusicPlaylistPlaylistIdRouteImport } from './routes/player/music/playlist.$playlistId'
+import { Route as PlayerMusicLabelNameRouteImport } from './routes/player/music/label.$name'
+import { Route as PlayerMusicGenreNameRouteImport } from './routes/player/music/genre.$name'
+import { Route as PlayerMusicDiscoverKeyRouteImport } from './routes/player/music/discover.$key'
+import { Route as PlayerMusicArtistArtistIdRouteImport } from './routes/player/music/artist.$artistId'
+import { Route as PlayerMusicAlbumAlbumIdRouteImport } from './routes/player/music/album.$albumId'
+import { Route as PlayerMoviesStudioNameRouteImport } from './routes/player/movies/studio.$name'
+import { Route as PlayerMoviesCollectionCollectionIdRouteImport } from './routes/player/movies/collection.$collectionId'
 
 const LibraryV2Route = LibraryV2RouteImport.update({
   id: '/library-v2',
@@ -113,6 +144,11 @@ const PlaylistExplorerRouteRoute = PlaylistExplorerRouteRouteImport.update({
   path: '/playlist-explorer',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PlayerRouteRoute = PlayerRouteRouteImport.update({
+  id: '/player',
+  path: '/player',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const LibraryRouteRoute = LibraryRouteRouteImport.update({
   id: '/library',
   path: '/library',
@@ -168,6 +204,11 @@ const PodcastsIndexRoute = PodcastsIndexRouteImport.update({
   path: '/',
   getParentRoute: () => PodcastsRouteRoute,
 } as any)
+const PlayerIndexRoute = PlayerIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => PlayerRouteRoute,
+} as any)
 const ImportIndexRoute = ImportIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -182,6 +223,26 @@ const PodcastsPodcastIdRoute = PodcastsPodcastIdRouteImport.update({
   id: '/$podcastId',
   path: '/$podcastId',
   getParentRoute: () => PodcastsRouteRoute,
+} as any)
+const PlayerWatchlistRoute = PlayerWatchlistRouteImport.update({
+  id: '/watchlist',
+  path: '/watchlist',
+  getParentRoute: () => PlayerRouteRoute,
+} as any)
+const PlayerWatchingRoute = PlayerWatchingRouteImport.update({
+  id: '/watching',
+  path: '/watching',
+  getParentRoute: () => PlayerRouteRoute,
+} as any)
+const PlayerSettingsRoute = PlayerSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => PlayerRouteRoute,
+} as any)
+const PlayerGuideRoute = PlayerGuideRouteImport.update({
+  id: '/guide',
+  path: '/guide',
+  getParentRoute: () => PlayerRouteRoute,
 } as any)
 const LabelDetailIdRoute = LabelDetailIdRouteImport.update({
   id: '/label-detail/$id',
@@ -218,6 +279,82 @@ const AudiobooksAsinRoute = AudiobooksAsinRouteImport.update({
   path: '/$asin',
   getParentRoute: () => AudiobooksRouteRoute,
 } as any)
+const PlayerYoutubeIndexRoute = PlayerYoutubeIndexRouteImport.update({
+  id: '/youtube/',
+  path: '/youtube/',
+  getParentRoute: () => PlayerRouteRoute,
+} as any)
+const PlayerTvIndexRoute = PlayerTvIndexRouteImport.update({
+  id: '/tv/',
+  path: '/tv/',
+  getParentRoute: () => PlayerRouteRoute,
+} as any)
+const PlayerPodcastsIndexRoute = PlayerPodcastsIndexRouteImport.update({
+  id: '/podcasts/',
+  path: '/podcasts/',
+  getParentRoute: () => PlayerRouteRoute,
+} as any)
+const PlayerMusicIndexRoute = PlayerMusicIndexRouteImport.update({
+  id: '/music/',
+  path: '/music/',
+  getParentRoute: () => PlayerRouteRoute,
+} as any)
+const PlayerMoviesIndexRoute = PlayerMoviesIndexRouteImport.update({
+  id: '/movies/',
+  path: '/movies/',
+  getParentRoute: () => PlayerRouteRoute,
+} as any)
+const PlayerAudiobooksIndexRoute = PlayerAudiobooksIndexRouteImport.update({
+  id: '/audiobooks/',
+  path: '/audiobooks/',
+  getParentRoute: () => PlayerRouteRoute,
+} as any)
+const PlayerYoutubeChannelIdRoute = PlayerYoutubeChannelIdRouteImport.update({
+  id: '/youtube/$channelId',
+  path: '/youtube/$channelId',
+  getParentRoute: () => PlayerRouteRoute,
+} as any)
+const PlayerTvShowIdRoute = PlayerTvShowIdRouteImport.update({
+  id: '/tv/$showId',
+  path: '/tv/$showId',
+  getParentRoute: () => PlayerRouteRoute,
+} as any)
+const PlayerPodcastsPodcastIdRoute = PlayerPodcastsPodcastIdRouteImport.update({
+  id: '/podcasts/$podcastId',
+  path: '/podcasts/$podcastId',
+  getParentRoute: () => PlayerRouteRoute,
+} as any)
+const PlayerPersonPersonIdRoute = PlayerPersonPersonIdRouteImport.update({
+  id: '/person/$personId',
+  path: '/person/$personId',
+  getParentRoute: () => PlayerRouteRoute,
+} as any)
+const PlayerMusicPlaylistsRoute = PlayerMusicPlaylistsRouteImport.update({
+  id: '/music/playlists',
+  path: '/music/playlists',
+  getParentRoute: () => PlayerRouteRoute,
+} as any)
+const PlayerMoviesMovieIdRoute = PlayerMoviesMovieIdRouteImport.update({
+  id: '/movies/$movieId',
+  path: '/movies/$movieId',
+  getParentRoute: () => PlayerRouteRoute,
+} as any)
+const PlayerKeywordNameRoute = PlayerKeywordNameRouteImport.update({
+  id: '/keyword/$name',
+  path: '/keyword/$name',
+  getParentRoute: () => PlayerRouteRoute,
+} as any)
+const PlayerCollectionsCollectionIdRoute =
+  PlayerCollectionsCollectionIdRouteImport.update({
+    id: '/collections/$collectionId',
+    path: '/collections/$collectionId',
+    getParentRoute: () => PlayerRouteRoute,
+  } as any)
+const PlayerAudiobooksAsinRoute = PlayerAudiobooksAsinRouteImport.update({
+  id: '/audiobooks/$asin',
+  path: '/audiobooks/$asin',
+  getParentRoute: () => PlayerRouteRoute,
+} as any)
 const ImportMatchKeyRoute = ImportMatchKeyRouteImport.update({
   id: '/match/$key',
   path: '/match/$key',
@@ -238,6 +375,59 @@ const ArtistDetailSourceIdRoute = ArtistDetailSourceIdRouteImport.update({
   path: '/artist-detail/$source/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PlayerTvNetworkNameRoute = PlayerTvNetworkNameRouteImport.update({
+  id: '/tv/network/$name',
+  path: '/tv/network/$name',
+  getParentRoute: () => PlayerRouteRoute,
+} as any)
+const PlayerTitleKindTmdbIdRoute = PlayerTitleKindTmdbIdRouteImport.update({
+  id: '/title/$kind/$tmdbId',
+  path: '/title/$kind/$tmdbId',
+  getParentRoute: () => PlayerRouteRoute,
+} as any)
+const PlayerMusicPlaylistPlaylistIdRoute =
+  PlayerMusicPlaylistPlaylistIdRouteImport.update({
+    id: '/music/playlist/$playlistId',
+    path: '/music/playlist/$playlistId',
+    getParentRoute: () => PlayerRouteRoute,
+  } as any)
+const PlayerMusicLabelNameRoute = PlayerMusicLabelNameRouteImport.update({
+  id: '/music/label/$name',
+  path: '/music/label/$name',
+  getParentRoute: () => PlayerRouteRoute,
+} as any)
+const PlayerMusicGenreNameRoute = PlayerMusicGenreNameRouteImport.update({
+  id: '/music/genre/$name',
+  path: '/music/genre/$name',
+  getParentRoute: () => PlayerRouteRoute,
+} as any)
+const PlayerMusicDiscoverKeyRoute = PlayerMusicDiscoverKeyRouteImport.update({
+  id: '/music/discover/$key',
+  path: '/music/discover/$key',
+  getParentRoute: () => PlayerRouteRoute,
+} as any)
+const PlayerMusicArtistArtistIdRoute =
+  PlayerMusicArtistArtistIdRouteImport.update({
+    id: '/music/artist/$artistId',
+    path: '/music/artist/$artistId',
+    getParentRoute: () => PlayerRouteRoute,
+  } as any)
+const PlayerMusicAlbumAlbumIdRoute = PlayerMusicAlbumAlbumIdRouteImport.update({
+  id: '/music/album/$albumId',
+  path: '/music/album/$albumId',
+  getParentRoute: () => PlayerRouteRoute,
+} as any)
+const PlayerMoviesStudioNameRoute = PlayerMoviesStudioNameRouteImport.update({
+  id: '/movies/studio/$name',
+  path: '/movies/studio/$name',
+  getParentRoute: () => PlayerRouteRoute,
+} as any)
+const PlayerMoviesCollectionCollectionIdRoute =
+  PlayerMoviesCollectionCollectionIdRouteImport.update({
+    id: '/movies/collection/$collectionId',
+    path: '/movies/collection/$collectionId',
+    getParentRoute: () => PlayerRouteRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -250,6 +440,7 @@ export interface FileRoutesByFullPath {
   '/import': typeof ImportRouteRouteWithChildren
   '/issues': typeof IssuesRouteRoute
   '/library': typeof LibraryRouteRoute
+  '/player': typeof PlayerRouteRouteWithChildren
   '/playlist-explorer': typeof PlaylistExplorerRouteRoute
   '/podcasts': typeof PodcastsRouteRouteWithChildren
   '/requests': typeof RequestsRouteRoute
@@ -270,14 +461,44 @@ export interface FileRoutesByFullPath {
   '/import/auto': typeof ImportAutoRoute
   '/import/singles': typeof ImportSinglesRoute
   '/label-detail/$id': typeof LabelDetailIdRoute
+  '/player/guide': typeof PlayerGuideRoute
+  '/player/settings': typeof PlayerSettingsRoute
+  '/player/watching': typeof PlayerWatchingRoute
+  '/player/watchlist': typeof PlayerWatchlistRoute
   '/podcasts/$podcastId': typeof PodcastsPodcastIdRoute
   '/audiobooks/': typeof AudiobooksIndexRoute
   '/import/': typeof ImportIndexRoute
+  '/player/': typeof PlayerIndexRoute
   '/podcasts/': typeof PodcastsIndexRoute
   '/artist-detail/$source/$id': typeof ArtistDetailSourceIdRoute
   '/audiobooks/author/$name': typeof AudiobooksAuthorNameRoute
   '/audiobooks/narrator/$name': typeof AudiobooksNarratorNameRoute
   '/import/match/$key': typeof ImportMatchKeyRoute
+  '/player/audiobooks/$asin': typeof PlayerAudiobooksAsinRoute
+  '/player/collections/$collectionId': typeof PlayerCollectionsCollectionIdRoute
+  '/player/keyword/$name': typeof PlayerKeywordNameRoute
+  '/player/movies/$movieId': typeof PlayerMoviesMovieIdRoute
+  '/player/music/playlists': typeof PlayerMusicPlaylistsRoute
+  '/player/person/$personId': typeof PlayerPersonPersonIdRoute
+  '/player/podcasts/$podcastId': typeof PlayerPodcastsPodcastIdRoute
+  '/player/tv/$showId': typeof PlayerTvShowIdRoute
+  '/player/youtube/$channelId': typeof PlayerYoutubeChannelIdRoute
+  '/player/audiobooks/': typeof PlayerAudiobooksIndexRoute
+  '/player/movies/': typeof PlayerMoviesIndexRoute
+  '/player/music/': typeof PlayerMusicIndexRoute
+  '/player/podcasts/': typeof PlayerPodcastsIndexRoute
+  '/player/tv/': typeof PlayerTvIndexRoute
+  '/player/youtube/': typeof PlayerYoutubeIndexRoute
+  '/player/movies/collection/$collectionId': typeof PlayerMoviesCollectionCollectionIdRoute
+  '/player/movies/studio/$name': typeof PlayerMoviesStudioNameRoute
+  '/player/music/album/$albumId': typeof PlayerMusicAlbumAlbumIdRoute
+  '/player/music/artist/$artistId': typeof PlayerMusicArtistArtistIdRoute
+  '/player/music/discover/$key': typeof PlayerMusicDiscoverKeyRoute
+  '/player/music/genre/$name': typeof PlayerMusicGenreNameRoute
+  '/player/music/label/$name': typeof PlayerMusicLabelNameRoute
+  '/player/music/playlist/$playlistId': typeof PlayerMusicPlaylistPlaylistIdRoute
+  '/player/title/$kind/$tmdbId': typeof PlayerTitleKindTmdbIdRoute
+  '/player/tv/network/$name': typeof PlayerTvNetworkNameRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -307,14 +528,44 @@ export interface FileRoutesByTo {
   '/import/auto': typeof ImportAutoRoute
   '/import/singles': typeof ImportSinglesRoute
   '/label-detail/$id': typeof LabelDetailIdRoute
+  '/player/guide': typeof PlayerGuideRoute
+  '/player/settings': typeof PlayerSettingsRoute
+  '/player/watching': typeof PlayerWatchingRoute
+  '/player/watchlist': typeof PlayerWatchlistRoute
   '/podcasts/$podcastId': typeof PodcastsPodcastIdRoute
   '/audiobooks': typeof AudiobooksIndexRoute
   '/import': typeof ImportIndexRoute
+  '/player': typeof PlayerIndexRoute
   '/podcasts': typeof PodcastsIndexRoute
   '/artist-detail/$source/$id': typeof ArtistDetailSourceIdRoute
   '/audiobooks/author/$name': typeof AudiobooksAuthorNameRoute
   '/audiobooks/narrator/$name': typeof AudiobooksNarratorNameRoute
   '/import/match/$key': typeof ImportMatchKeyRoute
+  '/player/audiobooks/$asin': typeof PlayerAudiobooksAsinRoute
+  '/player/collections/$collectionId': typeof PlayerCollectionsCollectionIdRoute
+  '/player/keyword/$name': typeof PlayerKeywordNameRoute
+  '/player/movies/$movieId': typeof PlayerMoviesMovieIdRoute
+  '/player/music/playlists': typeof PlayerMusicPlaylistsRoute
+  '/player/person/$personId': typeof PlayerPersonPersonIdRoute
+  '/player/podcasts/$podcastId': typeof PlayerPodcastsPodcastIdRoute
+  '/player/tv/$showId': typeof PlayerTvShowIdRoute
+  '/player/youtube/$channelId': typeof PlayerYoutubeChannelIdRoute
+  '/player/audiobooks': typeof PlayerAudiobooksIndexRoute
+  '/player/movies': typeof PlayerMoviesIndexRoute
+  '/player/music': typeof PlayerMusicIndexRoute
+  '/player/podcasts': typeof PlayerPodcastsIndexRoute
+  '/player/tv': typeof PlayerTvIndexRoute
+  '/player/youtube': typeof PlayerYoutubeIndexRoute
+  '/player/movies/collection/$collectionId': typeof PlayerMoviesCollectionCollectionIdRoute
+  '/player/movies/studio/$name': typeof PlayerMoviesStudioNameRoute
+  '/player/music/album/$albumId': typeof PlayerMusicAlbumAlbumIdRoute
+  '/player/music/artist/$artistId': typeof PlayerMusicArtistArtistIdRoute
+  '/player/music/discover/$key': typeof PlayerMusicDiscoverKeyRoute
+  '/player/music/genre/$name': typeof PlayerMusicGenreNameRoute
+  '/player/music/label/$name': typeof PlayerMusicLabelNameRoute
+  '/player/music/playlist/$playlistId': typeof PlayerMusicPlaylistPlaylistIdRoute
+  '/player/title/$kind/$tmdbId': typeof PlayerTitleKindTmdbIdRoute
+  '/player/tv/network/$name': typeof PlayerTvNetworkNameRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -328,6 +579,7 @@ export interface FileRoutesById {
   '/import': typeof ImportRouteRouteWithChildren
   '/issues': typeof IssuesRouteRoute
   '/library': typeof LibraryRouteRoute
+  '/player': typeof PlayerRouteRouteWithChildren
   '/playlist-explorer': typeof PlaylistExplorerRouteRoute
   '/podcasts': typeof PodcastsRouteRouteWithChildren
   '/requests': typeof RequestsRouteRoute
@@ -348,14 +600,44 @@ export interface FileRoutesById {
   '/import/auto': typeof ImportAutoRoute
   '/import/singles': typeof ImportSinglesRoute
   '/label-detail/$id': typeof LabelDetailIdRoute
+  '/player/guide': typeof PlayerGuideRoute
+  '/player/settings': typeof PlayerSettingsRoute
+  '/player/watching': typeof PlayerWatchingRoute
+  '/player/watchlist': typeof PlayerWatchlistRoute
   '/podcasts/$podcastId': typeof PodcastsPodcastIdRoute
   '/audiobooks/': typeof AudiobooksIndexRoute
   '/import/': typeof ImportIndexRoute
+  '/player/': typeof PlayerIndexRoute
   '/podcasts/': typeof PodcastsIndexRoute
   '/artist-detail/$source/$id': typeof ArtistDetailSourceIdRoute
   '/audiobooks/author/$name': typeof AudiobooksAuthorNameRoute
   '/audiobooks/narrator/$name': typeof AudiobooksNarratorNameRoute
   '/import/match/$key': typeof ImportMatchKeyRoute
+  '/player/audiobooks/$asin': typeof PlayerAudiobooksAsinRoute
+  '/player/collections/$collectionId': typeof PlayerCollectionsCollectionIdRoute
+  '/player/keyword/$name': typeof PlayerKeywordNameRoute
+  '/player/movies/$movieId': typeof PlayerMoviesMovieIdRoute
+  '/player/music/playlists': typeof PlayerMusicPlaylistsRoute
+  '/player/person/$personId': typeof PlayerPersonPersonIdRoute
+  '/player/podcasts/$podcastId': typeof PlayerPodcastsPodcastIdRoute
+  '/player/tv/$showId': typeof PlayerTvShowIdRoute
+  '/player/youtube/$channelId': typeof PlayerYoutubeChannelIdRoute
+  '/player/audiobooks/': typeof PlayerAudiobooksIndexRoute
+  '/player/movies/': typeof PlayerMoviesIndexRoute
+  '/player/music/': typeof PlayerMusicIndexRoute
+  '/player/podcasts/': typeof PlayerPodcastsIndexRoute
+  '/player/tv/': typeof PlayerTvIndexRoute
+  '/player/youtube/': typeof PlayerYoutubeIndexRoute
+  '/player/movies/collection/$collectionId': typeof PlayerMoviesCollectionCollectionIdRoute
+  '/player/movies/studio/$name': typeof PlayerMoviesStudioNameRoute
+  '/player/music/album/$albumId': typeof PlayerMusicAlbumAlbumIdRoute
+  '/player/music/artist/$artistId': typeof PlayerMusicArtistArtistIdRoute
+  '/player/music/discover/$key': typeof PlayerMusicDiscoverKeyRoute
+  '/player/music/genre/$name': typeof PlayerMusicGenreNameRoute
+  '/player/music/label/$name': typeof PlayerMusicLabelNameRoute
+  '/player/music/playlist/$playlistId': typeof PlayerMusicPlaylistPlaylistIdRoute
+  '/player/title/$kind/$tmdbId': typeof PlayerTitleKindTmdbIdRoute
+  '/player/tv/network/$name': typeof PlayerTvNetworkNameRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -370,6 +652,7 @@ export interface FileRouteTypes {
     | '/import'
     | '/issues'
     | '/library'
+    | '/player'
     | '/playlist-explorer'
     | '/podcasts'
     | '/requests'
@@ -390,14 +673,44 @@ export interface FileRouteTypes {
     | '/import/auto'
     | '/import/singles'
     | '/label-detail/$id'
+    | '/player/guide'
+    | '/player/settings'
+    | '/player/watching'
+    | '/player/watchlist'
     | '/podcasts/$podcastId'
     | '/audiobooks/'
     | '/import/'
+    | '/player/'
     | '/podcasts/'
     | '/artist-detail/$source/$id'
     | '/audiobooks/author/$name'
     | '/audiobooks/narrator/$name'
     | '/import/match/$key'
+    | '/player/audiobooks/$asin'
+    | '/player/collections/$collectionId'
+    | '/player/keyword/$name'
+    | '/player/movies/$movieId'
+    | '/player/music/playlists'
+    | '/player/person/$personId'
+    | '/player/podcasts/$podcastId'
+    | '/player/tv/$showId'
+    | '/player/youtube/$channelId'
+    | '/player/audiobooks/'
+    | '/player/movies/'
+    | '/player/music/'
+    | '/player/podcasts/'
+    | '/player/tv/'
+    | '/player/youtube/'
+    | '/player/movies/collection/$collectionId'
+    | '/player/movies/studio/$name'
+    | '/player/music/album/$albumId'
+    | '/player/music/artist/$artistId'
+    | '/player/music/discover/$key'
+    | '/player/music/genre/$name'
+    | '/player/music/label/$name'
+    | '/player/music/playlist/$playlistId'
+    | '/player/title/$kind/$tmdbId'
+    | '/player/tv/network/$name'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -427,14 +740,44 @@ export interface FileRouteTypes {
     | '/import/auto'
     | '/import/singles'
     | '/label-detail/$id'
+    | '/player/guide'
+    | '/player/settings'
+    | '/player/watching'
+    | '/player/watchlist'
     | '/podcasts/$podcastId'
     | '/audiobooks'
     | '/import'
+    | '/player'
     | '/podcasts'
     | '/artist-detail/$source/$id'
     | '/audiobooks/author/$name'
     | '/audiobooks/narrator/$name'
     | '/import/match/$key'
+    | '/player/audiobooks/$asin'
+    | '/player/collections/$collectionId'
+    | '/player/keyword/$name'
+    | '/player/movies/$movieId'
+    | '/player/music/playlists'
+    | '/player/person/$personId'
+    | '/player/podcasts/$podcastId'
+    | '/player/tv/$showId'
+    | '/player/youtube/$channelId'
+    | '/player/audiobooks'
+    | '/player/movies'
+    | '/player/music'
+    | '/player/podcasts'
+    | '/player/tv'
+    | '/player/youtube'
+    | '/player/movies/collection/$collectionId'
+    | '/player/movies/studio/$name'
+    | '/player/music/album/$albumId'
+    | '/player/music/artist/$artistId'
+    | '/player/music/discover/$key'
+    | '/player/music/genre/$name'
+    | '/player/music/label/$name'
+    | '/player/music/playlist/$playlistId'
+    | '/player/title/$kind/$tmdbId'
+    | '/player/tv/network/$name'
   id:
     | '__root__'
     | '/'
@@ -447,6 +790,7 @@ export interface FileRouteTypes {
     | '/import'
     | '/issues'
     | '/library'
+    | '/player'
     | '/playlist-explorer'
     | '/podcasts'
     | '/requests'
@@ -467,14 +811,44 @@ export interface FileRouteTypes {
     | '/import/auto'
     | '/import/singles'
     | '/label-detail/$id'
+    | '/player/guide'
+    | '/player/settings'
+    | '/player/watching'
+    | '/player/watchlist'
     | '/podcasts/$podcastId'
     | '/audiobooks/'
     | '/import/'
+    | '/player/'
     | '/podcasts/'
     | '/artist-detail/$source/$id'
     | '/audiobooks/author/$name'
     | '/audiobooks/narrator/$name'
     | '/import/match/$key'
+    | '/player/audiobooks/$asin'
+    | '/player/collections/$collectionId'
+    | '/player/keyword/$name'
+    | '/player/movies/$movieId'
+    | '/player/music/playlists'
+    | '/player/person/$personId'
+    | '/player/podcasts/$podcastId'
+    | '/player/tv/$showId'
+    | '/player/youtube/$channelId'
+    | '/player/audiobooks/'
+    | '/player/movies/'
+    | '/player/music/'
+    | '/player/podcasts/'
+    | '/player/tv/'
+    | '/player/youtube/'
+    | '/player/movies/collection/$collectionId'
+    | '/player/movies/studio/$name'
+    | '/player/music/album/$albumId'
+    | '/player/music/artist/$artistId'
+    | '/player/music/discover/$key'
+    | '/player/music/genre/$name'
+    | '/player/music/label/$name'
+    | '/player/music/playlist/$playlistId'
+    | '/player/title/$kind/$tmdbId'
+    | '/player/tv/network/$name'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -488,6 +862,7 @@ export interface RootRouteChildren {
   ImportRouteRoute: typeof ImportRouteRouteWithChildren
   IssuesRouteRoute: typeof IssuesRouteRoute
   LibraryRouteRoute: typeof LibraryRouteRoute
+  PlayerRouteRoute: typeof PlayerRouteRouteWithChildren
   PlaylistExplorerRouteRoute: typeof PlaylistExplorerRouteRoute
   PodcastsRouteRoute: typeof PodcastsRouteRouteWithChildren
   RequestsRouteRoute: typeof RequestsRouteRoute
@@ -598,6 +973,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PlaylistExplorerRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/player': {
+      id: '/player'
+      path: '/player'
+      fullPath: '/player'
+      preLoaderRoute: typeof PlayerRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/library': {
       id: '/library'
       path: '/library'
@@ -675,6 +1057,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PodcastsIndexRouteImport
       parentRoute: typeof PodcastsRouteRoute
     }
+    '/player/': {
+      id: '/player/'
+      path: '/'
+      fullPath: '/player/'
+      preLoaderRoute: typeof PlayerIndexRouteImport
+      parentRoute: typeof PlayerRouteRoute
+    }
     '/import/': {
       id: '/import/'
       path: '/'
@@ -695,6 +1084,34 @@ declare module '@tanstack/react-router' {
       fullPath: '/podcasts/$podcastId'
       preLoaderRoute: typeof PodcastsPodcastIdRouteImport
       parentRoute: typeof PodcastsRouteRoute
+    }
+    '/player/watchlist': {
+      id: '/player/watchlist'
+      path: '/watchlist'
+      fullPath: '/player/watchlist'
+      preLoaderRoute: typeof PlayerWatchlistRouteImport
+      parentRoute: typeof PlayerRouteRoute
+    }
+    '/player/watching': {
+      id: '/player/watching'
+      path: '/watching'
+      fullPath: '/player/watching'
+      preLoaderRoute: typeof PlayerWatchingRouteImport
+      parentRoute: typeof PlayerRouteRoute
+    }
+    '/player/settings': {
+      id: '/player/settings'
+      path: '/settings'
+      fullPath: '/player/settings'
+      preLoaderRoute: typeof PlayerSettingsRouteImport
+      parentRoute: typeof PlayerRouteRoute
+    }
+    '/player/guide': {
+      id: '/player/guide'
+      path: '/guide'
+      fullPath: '/player/guide'
+      preLoaderRoute: typeof PlayerGuideRouteImport
+      parentRoute: typeof PlayerRouteRoute
     }
     '/label-detail/$id': {
       id: '/label-detail/$id'
@@ -745,6 +1162,111 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AudiobooksAsinRouteImport
       parentRoute: typeof AudiobooksRouteRoute
     }
+    '/player/youtube/': {
+      id: '/player/youtube/'
+      path: '/youtube'
+      fullPath: '/player/youtube/'
+      preLoaderRoute: typeof PlayerYoutubeIndexRouteImport
+      parentRoute: typeof PlayerRouteRoute
+    }
+    '/player/tv/': {
+      id: '/player/tv/'
+      path: '/tv'
+      fullPath: '/player/tv/'
+      preLoaderRoute: typeof PlayerTvIndexRouteImport
+      parentRoute: typeof PlayerRouteRoute
+    }
+    '/player/podcasts/': {
+      id: '/player/podcasts/'
+      path: '/podcasts'
+      fullPath: '/player/podcasts/'
+      preLoaderRoute: typeof PlayerPodcastsIndexRouteImport
+      parentRoute: typeof PlayerRouteRoute
+    }
+    '/player/music/': {
+      id: '/player/music/'
+      path: '/music'
+      fullPath: '/player/music/'
+      preLoaderRoute: typeof PlayerMusicIndexRouteImport
+      parentRoute: typeof PlayerRouteRoute
+    }
+    '/player/movies/': {
+      id: '/player/movies/'
+      path: '/movies'
+      fullPath: '/player/movies/'
+      preLoaderRoute: typeof PlayerMoviesIndexRouteImport
+      parentRoute: typeof PlayerRouteRoute
+    }
+    '/player/audiobooks/': {
+      id: '/player/audiobooks/'
+      path: '/audiobooks'
+      fullPath: '/player/audiobooks/'
+      preLoaderRoute: typeof PlayerAudiobooksIndexRouteImport
+      parentRoute: typeof PlayerRouteRoute
+    }
+    '/player/youtube/$channelId': {
+      id: '/player/youtube/$channelId'
+      path: '/youtube/$channelId'
+      fullPath: '/player/youtube/$channelId'
+      preLoaderRoute: typeof PlayerYoutubeChannelIdRouteImport
+      parentRoute: typeof PlayerRouteRoute
+    }
+    '/player/tv/$showId': {
+      id: '/player/tv/$showId'
+      path: '/tv/$showId'
+      fullPath: '/player/tv/$showId'
+      preLoaderRoute: typeof PlayerTvShowIdRouteImport
+      parentRoute: typeof PlayerRouteRoute
+    }
+    '/player/podcasts/$podcastId': {
+      id: '/player/podcasts/$podcastId'
+      path: '/podcasts/$podcastId'
+      fullPath: '/player/podcasts/$podcastId'
+      preLoaderRoute: typeof PlayerPodcastsPodcastIdRouteImport
+      parentRoute: typeof PlayerRouteRoute
+    }
+    '/player/person/$personId': {
+      id: '/player/person/$personId'
+      path: '/person/$personId'
+      fullPath: '/player/person/$personId'
+      preLoaderRoute: typeof PlayerPersonPersonIdRouteImport
+      parentRoute: typeof PlayerRouteRoute
+    }
+    '/player/music/playlists': {
+      id: '/player/music/playlists'
+      path: '/music/playlists'
+      fullPath: '/player/music/playlists'
+      preLoaderRoute: typeof PlayerMusicPlaylistsRouteImport
+      parentRoute: typeof PlayerRouteRoute
+    }
+    '/player/movies/$movieId': {
+      id: '/player/movies/$movieId'
+      path: '/movies/$movieId'
+      fullPath: '/player/movies/$movieId'
+      preLoaderRoute: typeof PlayerMoviesMovieIdRouteImport
+      parentRoute: typeof PlayerRouteRoute
+    }
+    '/player/keyword/$name': {
+      id: '/player/keyword/$name'
+      path: '/keyword/$name'
+      fullPath: '/player/keyword/$name'
+      preLoaderRoute: typeof PlayerKeywordNameRouteImport
+      parentRoute: typeof PlayerRouteRoute
+    }
+    '/player/collections/$collectionId': {
+      id: '/player/collections/$collectionId'
+      path: '/collections/$collectionId'
+      fullPath: '/player/collections/$collectionId'
+      preLoaderRoute: typeof PlayerCollectionsCollectionIdRouteImport
+      parentRoute: typeof PlayerRouteRoute
+    }
+    '/player/audiobooks/$asin': {
+      id: '/player/audiobooks/$asin'
+      path: '/audiobooks/$asin'
+      fullPath: '/player/audiobooks/$asin'
+      preLoaderRoute: typeof PlayerAudiobooksAsinRouteImport
+      parentRoute: typeof PlayerRouteRoute
+    }
     '/import/match/$key': {
       id: '/import/match/$key'
       path: '/match/$key'
@@ -772,6 +1294,76 @@ declare module '@tanstack/react-router' {
       fullPath: '/artist-detail/$source/$id'
       preLoaderRoute: typeof ArtistDetailSourceIdRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/player/tv/network/$name': {
+      id: '/player/tv/network/$name'
+      path: '/tv/network/$name'
+      fullPath: '/player/tv/network/$name'
+      preLoaderRoute: typeof PlayerTvNetworkNameRouteImport
+      parentRoute: typeof PlayerRouteRoute
+    }
+    '/player/title/$kind/$tmdbId': {
+      id: '/player/title/$kind/$tmdbId'
+      path: '/title/$kind/$tmdbId'
+      fullPath: '/player/title/$kind/$tmdbId'
+      preLoaderRoute: typeof PlayerTitleKindTmdbIdRouteImport
+      parentRoute: typeof PlayerRouteRoute
+    }
+    '/player/music/playlist/$playlistId': {
+      id: '/player/music/playlist/$playlistId'
+      path: '/music/playlist/$playlistId'
+      fullPath: '/player/music/playlist/$playlistId'
+      preLoaderRoute: typeof PlayerMusicPlaylistPlaylistIdRouteImport
+      parentRoute: typeof PlayerRouteRoute
+    }
+    '/player/music/label/$name': {
+      id: '/player/music/label/$name'
+      path: '/music/label/$name'
+      fullPath: '/player/music/label/$name'
+      preLoaderRoute: typeof PlayerMusicLabelNameRouteImport
+      parentRoute: typeof PlayerRouteRoute
+    }
+    '/player/music/genre/$name': {
+      id: '/player/music/genre/$name'
+      path: '/music/genre/$name'
+      fullPath: '/player/music/genre/$name'
+      preLoaderRoute: typeof PlayerMusicGenreNameRouteImport
+      parentRoute: typeof PlayerRouteRoute
+    }
+    '/player/music/discover/$key': {
+      id: '/player/music/discover/$key'
+      path: '/music/discover/$key'
+      fullPath: '/player/music/discover/$key'
+      preLoaderRoute: typeof PlayerMusicDiscoverKeyRouteImport
+      parentRoute: typeof PlayerRouteRoute
+    }
+    '/player/music/artist/$artistId': {
+      id: '/player/music/artist/$artistId'
+      path: '/music/artist/$artistId'
+      fullPath: '/player/music/artist/$artistId'
+      preLoaderRoute: typeof PlayerMusicArtistArtistIdRouteImport
+      parentRoute: typeof PlayerRouteRoute
+    }
+    '/player/music/album/$albumId': {
+      id: '/player/music/album/$albumId'
+      path: '/music/album/$albumId'
+      fullPath: '/player/music/album/$albumId'
+      preLoaderRoute: typeof PlayerMusicAlbumAlbumIdRouteImport
+      parentRoute: typeof PlayerRouteRoute
+    }
+    '/player/movies/studio/$name': {
+      id: '/player/movies/studio/$name'
+      path: '/movies/studio/$name'
+      fullPath: '/player/movies/studio/$name'
+      preLoaderRoute: typeof PlayerMoviesStudioNameRouteImport
+      parentRoute: typeof PlayerRouteRoute
+    }
+    '/player/movies/collection/$collectionId': {
+      id: '/player/movies/collection/$collectionId'
+      path: '/movies/collection/$collectionId'
+      fullPath: '/player/movies/collection/$collectionId'
+      preLoaderRoute: typeof PlayerMoviesCollectionCollectionIdRouteImport
+      parentRoute: typeof PlayerRouteRoute
     }
   }
 }
@@ -818,6 +1410,77 @@ const ImportRouteRouteWithChildren = ImportRouteRoute._addFileChildren(
   ImportRouteRouteChildren,
 )
 
+interface PlayerRouteRouteChildren {
+  PlayerGuideRoute: typeof PlayerGuideRoute
+  PlayerSettingsRoute: typeof PlayerSettingsRoute
+  PlayerWatchingRoute: typeof PlayerWatchingRoute
+  PlayerWatchlistRoute: typeof PlayerWatchlistRoute
+  PlayerIndexRoute: typeof PlayerIndexRoute
+  PlayerAudiobooksAsinRoute: typeof PlayerAudiobooksAsinRoute
+  PlayerCollectionsCollectionIdRoute: typeof PlayerCollectionsCollectionIdRoute
+  PlayerKeywordNameRoute: typeof PlayerKeywordNameRoute
+  PlayerMoviesMovieIdRoute: typeof PlayerMoviesMovieIdRoute
+  PlayerMusicPlaylistsRoute: typeof PlayerMusicPlaylistsRoute
+  PlayerPersonPersonIdRoute: typeof PlayerPersonPersonIdRoute
+  PlayerPodcastsPodcastIdRoute: typeof PlayerPodcastsPodcastIdRoute
+  PlayerTvShowIdRoute: typeof PlayerTvShowIdRoute
+  PlayerYoutubeChannelIdRoute: typeof PlayerYoutubeChannelIdRoute
+  PlayerAudiobooksIndexRoute: typeof PlayerAudiobooksIndexRoute
+  PlayerMoviesIndexRoute: typeof PlayerMoviesIndexRoute
+  PlayerMusicIndexRoute: typeof PlayerMusicIndexRoute
+  PlayerPodcastsIndexRoute: typeof PlayerPodcastsIndexRoute
+  PlayerTvIndexRoute: typeof PlayerTvIndexRoute
+  PlayerYoutubeIndexRoute: typeof PlayerYoutubeIndexRoute
+  PlayerMoviesCollectionCollectionIdRoute: typeof PlayerMoviesCollectionCollectionIdRoute
+  PlayerMoviesStudioNameRoute: typeof PlayerMoviesStudioNameRoute
+  PlayerMusicAlbumAlbumIdRoute: typeof PlayerMusicAlbumAlbumIdRoute
+  PlayerMusicArtistArtistIdRoute: typeof PlayerMusicArtistArtistIdRoute
+  PlayerMusicDiscoverKeyRoute: typeof PlayerMusicDiscoverKeyRoute
+  PlayerMusicGenreNameRoute: typeof PlayerMusicGenreNameRoute
+  PlayerMusicLabelNameRoute: typeof PlayerMusicLabelNameRoute
+  PlayerMusicPlaylistPlaylistIdRoute: typeof PlayerMusicPlaylistPlaylistIdRoute
+  PlayerTitleKindTmdbIdRoute: typeof PlayerTitleKindTmdbIdRoute
+  PlayerTvNetworkNameRoute: typeof PlayerTvNetworkNameRoute
+}
+
+const PlayerRouteRouteChildren: PlayerRouteRouteChildren = {
+  PlayerGuideRoute: PlayerGuideRoute,
+  PlayerSettingsRoute: PlayerSettingsRoute,
+  PlayerWatchingRoute: PlayerWatchingRoute,
+  PlayerWatchlistRoute: PlayerWatchlistRoute,
+  PlayerIndexRoute: PlayerIndexRoute,
+  PlayerAudiobooksAsinRoute: PlayerAudiobooksAsinRoute,
+  PlayerCollectionsCollectionIdRoute: PlayerCollectionsCollectionIdRoute,
+  PlayerKeywordNameRoute: PlayerKeywordNameRoute,
+  PlayerMoviesMovieIdRoute: PlayerMoviesMovieIdRoute,
+  PlayerMusicPlaylistsRoute: PlayerMusicPlaylistsRoute,
+  PlayerPersonPersonIdRoute: PlayerPersonPersonIdRoute,
+  PlayerPodcastsPodcastIdRoute: PlayerPodcastsPodcastIdRoute,
+  PlayerTvShowIdRoute: PlayerTvShowIdRoute,
+  PlayerYoutubeChannelIdRoute: PlayerYoutubeChannelIdRoute,
+  PlayerAudiobooksIndexRoute: PlayerAudiobooksIndexRoute,
+  PlayerMoviesIndexRoute: PlayerMoviesIndexRoute,
+  PlayerMusicIndexRoute: PlayerMusicIndexRoute,
+  PlayerPodcastsIndexRoute: PlayerPodcastsIndexRoute,
+  PlayerTvIndexRoute: PlayerTvIndexRoute,
+  PlayerYoutubeIndexRoute: PlayerYoutubeIndexRoute,
+  PlayerMoviesCollectionCollectionIdRoute:
+    PlayerMoviesCollectionCollectionIdRoute,
+  PlayerMoviesStudioNameRoute: PlayerMoviesStudioNameRoute,
+  PlayerMusicAlbumAlbumIdRoute: PlayerMusicAlbumAlbumIdRoute,
+  PlayerMusicArtistArtistIdRoute: PlayerMusicArtistArtistIdRoute,
+  PlayerMusicDiscoverKeyRoute: PlayerMusicDiscoverKeyRoute,
+  PlayerMusicGenreNameRoute: PlayerMusicGenreNameRoute,
+  PlayerMusicLabelNameRoute: PlayerMusicLabelNameRoute,
+  PlayerMusicPlaylistPlaylistIdRoute: PlayerMusicPlaylistPlaylistIdRoute,
+  PlayerTitleKindTmdbIdRoute: PlayerTitleKindTmdbIdRoute,
+  PlayerTvNetworkNameRoute: PlayerTvNetworkNameRoute,
+}
+
+const PlayerRouteRouteWithChildren = PlayerRouteRoute._addFileChildren(
+  PlayerRouteRouteChildren,
+)
+
 interface PodcastsRouteRouteChildren {
   PodcastsPodcastIdRoute: typeof PodcastsPodcastIdRoute
   PodcastsIndexRoute: typeof PodcastsIndexRoute
@@ -843,6 +1506,7 @@ const rootRouteChildren: RootRouteChildren = {
   ImportRouteRoute: ImportRouteRouteWithChildren,
   IssuesRouteRoute: IssuesRouteRoute,
   LibraryRouteRoute: LibraryRouteRoute,
+  PlayerRouteRoute: PlayerRouteRouteWithChildren,
   PlaylistExplorerRouteRoute: PlaylistExplorerRouteRoute,
   PodcastsRouteRoute: PodcastsRouteRouteWithChildren,
   RequestsRouteRoute: RequestsRouteRoute,
