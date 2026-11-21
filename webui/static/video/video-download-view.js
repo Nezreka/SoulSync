@@ -933,7 +933,9 @@
                 (params.media_id != null ? '&media_id=' + encodeURIComponent(params.media_id) +
                     '&media_source=' + encodeURIComponent(params.media_source || '') : '') +
                 (params.tmdb_id != null ? '&tmdb_id=' + encodeURIComponent(params.tmdb_id) : '') +
-                (params.year ? '&year=' + encodeURIComponent(params.year) : '');
+                (params.year ? '&year=' + encodeURIComponent(params.year) : '') +
+                // the typed words are an accepted name for this search (#2234)
+                (params.query ? '&query=' + encodeURIComponent(params.query) : '');
             getJSON('/api/video/downloads/search/poll' + qs).then(function (d) {
                 if (!resultsEl.isConnected) { _setScanning(triggerRows, false); if (onDone) onDone(); return; }
                 var rows = (d && d.results) || [];

@@ -97,8 +97,16 @@ class VideoEnrichmentEngine:
             # library title in another language (#2021) still matches a
             # release named in english or in the original
             ident = self.title_identity(kind, tmdb_id)
+            from core.video.release_parse import year_guarded_title
+            # its title in every other language too (#2234): a french release
+            # of Rocco and His Brothers is "Rocco et ses frères". a one-word
+            # one ("Oben", Up in german) is a common word, so it only counts
+            # with the year beside it
+            translated = [year_guarded_title(t, ident.get("year"))
+                          for t in (ident.get("translations") or [])]
             seen = set()
-            for t in [ident.get("name"), ident.get("original_name"), *(ident.get("aliases") or [])]:
+            for t in [ident.get("name"), ident.get("original_name"), *(ident.get("aliases") or []),
+                      *translated]:
                 t = str(t or "").strip()
                 if t and t.lower() not in seen:
                     seen.add(t.lower())
