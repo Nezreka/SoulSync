@@ -68,6 +68,11 @@
       }
     ],
     "transcode_format": "mp3",
+    "transcode_slots": 4,
+    "slots_range": [
+      1,
+      16
+    ],
     "formats": [
       "mp3",
       "opus"

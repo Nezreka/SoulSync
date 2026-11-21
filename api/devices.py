@@ -445,6 +445,9 @@ def music_apps_view():
     return jsonify({"success": True, "profiles": profiles, "addresses": _addresses(),
                     "bridge": servers, "transcode_format": str(config_manager.get("music_apps.transcode_format",
                                                                                    "mp3") or "mp3"),
+                    "transcode_slots": X.clamp_jobs(config_manager.get("music_apps.transcode_slots",
+                                                                       X.MAX_JOBS)),
+                    "slots_range": [X.MIN_JOBS, X.MOST_JOBS],
                     "formats": sorted(X.FORMATS), "ffmpeg": bool(X.ffmpeg())})
 
 
@@ -491,7 +494,7 @@ def set_up_music_app():
 @bp.route("/api/devices/music-apps/settings", methods=["PUT"])
 @admin_only
 def save_music_app_settings():
-    """{bridge: {plex|jellyfin|navidrome: bool}, transcode_format?}"""
+    """{bridge: {plex|jellyfin|navidrome: bool}, transcode_format?, transcode_slots?}"""
     from core.subsonic import bridge as B
     from core.subsonic import transcode as X
     body = request.get_json(silent=True) or {}
@@ -507,5 +510,12 @@ def save_music_app_settings():
         if fmt not in X.FORMATS:
             return jsonify({"success": False, "error": "Pick mp3 or opus"}), 400
         config_manager.set("music_apps.transcode_format", fmt)
-    _audit("music_apps_settings", detail=json.dumps({"bridge": bridge, "format": fmt}, sort_keys=True)[:200])
+    slots = body.get("transcode_slots")
+    if slots is not None:
+        if isinstance(slots, bool) or not isinstance(slots, int) or not X.MIN_JOBS <= slots <= X.MOST_JOBS:
+            return jsonify({"success": False,
+                            "error": f"Songs converted at once: pick {X.MIN_JOBS} to {X.MOST_JOBS}"}), 400
+        config_manager.set("music_apps.transcode_slots", slots)
+    _audit("music_apps_settings", detail=json.dumps({"bridge": bridge, "format": fmt, "slots": slots},
+                                                    sort_keys=True)[:200])
     return music_apps_view()

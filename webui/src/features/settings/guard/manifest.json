@@ -9205,6 +9205,24 @@
       },
       "asked": "opus"
     },
+    "#music-app-slots": {
+      "sel": "#music-app-slots",
+      "kind": "select",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "4",
+      "to": "4",
+      "saves": {
+        "requests": [
+          {
+            "method": "PUT",
+            "url": "/api/devices/music-apps/settings",
+            "body": "{\"transcode_slots\":1}"
+          }
+        ]
+      },
+      "asked": "1"
+    },
     "#music-app-bridge-plex": {
       "sel": "#music-app-bridge-plex",
       "kind": "checkbox",
@@ -14298,7 +14316,7 @@
     "#stg-view-devices-all \"More about this setting\"": {
       "label": "More about this setting",
       "anchor": "stg-view-devices-all",
-      "count": 1,
+      "count": 2,
       "sides": ["music", "video"],
       "scenario": "music"
     },
