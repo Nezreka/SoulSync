@@ -18,6 +18,7 @@ import { backdropSet, HERO_SIZES } from '../-lib/images';
 import { logosQuery, movieDetailQuery, showDetailQuery } from '../-player.api';
 import { InfoIcon } from './icons';
 import { Art, PlayButton, PlayerLink, styles as s } from './kit';
+import { usePlayTitle } from './playback/play-title';
 import { BackgroundTrailer, type TrailerStage } from './trailer';
 
 export type Slide =
@@ -44,6 +45,7 @@ export function Billboard({ slides }: { slides: Slide[] }) {
   const [index, setIndex] = useState(0);
   const [held, setHeld] = useState(false);
   const [trailer, setTrailer] = useState<TrailerStage>('waiting');
+  const playTitle = usePlayTitle();
   const logos = useQuery(
     logosQuery(slides.filter((x) => x.item.tmdb_id).map((x) => `${x.kind}:${x.item.tmdb_id}`)),
   );
@@ -151,7 +153,7 @@ export function Billboard({ slides }: { slides: Slide[] }) {
         </div>
         <Story slide={slide} />
         <div className={s.billboardActions}>
-          <PlayButton />
+          <PlayButton onPlay={() => void playTitle(slide.kind, item.id)} />
           <PlayerLink href={hrefOf(slide)} className={s.billboardInfo} data-nav>
             <InfoIcon />
             More info

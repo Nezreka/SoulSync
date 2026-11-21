@@ -14,6 +14,7 @@ import { runtime } from '../-lib/format';
 import { backdropUrl, proxiedImage } from '../-lib/rails';
 import { extrasQuery, movieDetailQuery, showDetailQuery } from '../-player.api';
 import { Art, Badge, PlayButton, PlayerLink, styles as s } from './kit';
+import { usePlayTitle } from './playback/play-title';
 import { embedUrl, useTrailersSetting } from './trailer';
 import { WatchlistButton } from './watchlist';
 
@@ -98,6 +99,7 @@ function PreviewPanel({
   onLeave: () => void;
   onClose: () => void;
 }) {
+  const playTitle = usePlayTitle();
   const movie = useQuery({ ...movieDetailQuery(target.id), enabled: target.kind === 'movie' });
   const show = useQuery({ ...showDetailQuery(target.id), enabled: target.kind === 'show' });
   const [trailersOnHere] = useTrailersSetting();
@@ -219,7 +221,12 @@ function PreviewPanel({
           <div className={s.skeleton} style={{ height: '3.2em' }} />
         ) : null}
         <div className={s.heroActions}>
-          <PlayButton />
+          <PlayButton
+            onPlay={() => {
+              onClose();
+              void playTitle(target.kind, target.id);
+            }}
+          />
           <WatchlistButton kind={target.kind} id={target.id} compact />
           {href ? (
             <PlayerLink href={href} className={s.btn} data-nav>

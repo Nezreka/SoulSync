@@ -13,9 +13,10 @@ import { useCardSize, type CardSizeRange } from '@/components/card-size';
 import { appURL } from '@/platform/url-base';
 
 import { profilesQuery } from '../-player.api';
-import { BackIcon, ChevronIcon, ExitIcon, NextIcon, PlayIcon, PrevIcon } from './icons';
-import { PLAYBACK_NOT_YET } from './kit';
+import { BackIcon, ChevronIcon, ExitIcon } from './icons';
 import { useNowPlaying } from './now-playing';
+import { TransportBar } from './playback/transport-bar';
+import { VideoPlayer } from './playback/video-player';
 import s from './player.module.css';
 import { gateNeeded, ProfileChip, WhoGate } from './profiles';
 import { Search } from './search';
@@ -103,42 +104,6 @@ function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => 
  * where the now-playing bar will be. its layout is final; every control is
  * inert and says why, because nothing plays until the player core lands.
  */
-function TransportBar() {
-  return (
-    <section className={s.bar} aria-label="Now playing">
-      <div className={s.barNow}>
-        <div className={s.barArt} aria-hidden="true" />
-        <div className={s.barTitle}>Nothing playing</div>
-      </div>
-      <div className={s.barCenter}>
-        <div className={s.barControls}>
-          <button type="button" aria-disabled="true" aria-label="Previous" title={PLAYBACK_NOT_YET}>
-            <PrevIcon />
-          </button>
-          <button
-            type="button"
-            className={s.barPlay}
-            aria-disabled="true"
-            aria-label="Play"
-            title={PLAYBACK_NOT_YET}
-          >
-            <PlayIcon />
-          </button>
-          <button type="button" aria-disabled="true" aria-label="Next" title={PLAYBACK_NOT_YET}>
-            <NextIcon />
-          </button>
-        </div>
-        <div className={s.barScrub} aria-hidden="true">
-          <span>0:00</span>
-          <span className={s.barTrack} />
-          <span>0:00</span>
-        </div>
-      </div>
-      <div className={s.barEnd}>Playback arrives in the next stage</div>
-    </section>
-  );
-}
-
 export function PlayerShell({ profileId }: { profileId: number | null }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const mainRef = useRef<HTMLElement>(null);
@@ -232,6 +197,7 @@ export function PlayerShell({ profileId }: { profileId: number | null }) {
         </div>
       </main>
       {nowPlaying ? <TransportBar /> : null}
+      <VideoPlayer />
       {gate && profiles ? (
         <WhoGate profiles={profiles} currentId={profileId} onDone={() => setGate(false)} />
       ) : null}

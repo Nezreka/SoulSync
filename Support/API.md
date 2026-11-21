@@ -418,6 +418,21 @@ Every row on home is from the profile's own library.
 
 `device` is an id your app makes once and keeps: 8 to 64 letters, numbers, `-` or `_`.
 
+### Playback
+
+How the player, and paired apps, play something. Both routes take the signed-in session or a paired device's token (`X-Device-Token`), and both go through one check (`core/player/playable.py`):
+
+1. A profile. Signed out, or a device that hasn't picked a profile, answers `401`.
+2. The section: the profile's permission for that kind of item. A paired app only plays what its kind of app is for; a music app plays tracks.
+3. The item: in the profile's library and inside its limits (a kids rating cap, hidden explicit music), with a file to play.
+
+`item_type` is `track` (library v2 id), `movie` or `episode` (library id), `youtube` (a downloaded video's id) or `audiobook` (its library key). `?part=` picks a movie or episode file version (a media file id), or an audiobook's part (0 based).
+
+- `GET /api/player/playable/<item_type>/<item_id>`: `{mode, url, mime, duration, parts, chapters, verdict}`, how to play it, never where the file is. `parts` and `chapters` are an audiobook's timeline, read from its files: each part's `start` and `duration` in seconds on the book's clock, and each chapter's `start` and `title`. `verdict` is a video file's direct-play verdict (`yes`, `maybe` or `no`, with `reasons`).
+- `GET /api/player/stream/<item_type>/<item_id>`: the bytes, with `Range` support (`206`), so a player can seek. A file SoulSync can't reach is relayed from your media server.
+
+Refusals are `{error, message}`: `403 restricted` for something over the profile's limits, `404` for something not in the library or without a file. Podcast episodes don't come here: they stream from the feed's host through the podcast side's audio proxy.
+
 ### Watchlist
 
 Each profile keeps a watchlist of things to watch later, shared by all its screens, in `player.db`.

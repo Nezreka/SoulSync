@@ -19,6 +19,8 @@ import {
   styles as s,
 } from '../-ui/kit';
 import { NotFound, NotPartOfProfile } from '../-ui/not-part';
+import { getEngine } from '../-ui/playback/use-player';
+import { useYoutubePlay } from '../-ui/playback/youtube';
 import { useSections } from '../-ui/sections';
 import { Facts } from '../-ui/video-facts';
 import { useYoutubeWatchlistActions } from '../-ui/watchlist';
@@ -36,6 +38,7 @@ export const Route = createFileRoute('/player/youtube/$channelId')({
 function ChannelPage() {
   const sections = useSections();
   const ytActions = useYoutubeWatchlistActions();
+  const [playYoutube, youtubeDialog] = useYoutubePlay();
   const [view, setView] = useViewMode('channel');
   const { channelId } = Route.useParams();
   const { show = 'all' } = Route.useSearch();
@@ -57,6 +60,10 @@ function ChannelPage() {
         : videos;
   const about = plainText(channel.description);
   const latest = videos.filter((v) => v.published_at).slice(0, 16);
+  // newest first: what "play newest" starts and plays on through
+  const newest = [...videos].sort((a, b) =>
+    (b.published_at ?? '').localeCompare(a.published_at ?? ''),
+  );
   const popular = [...videos]
     .filter((v) => v.views)
     .sort((a, b) => (b.views ?? 0) - (a.views ?? 0))
@@ -93,8 +100,24 @@ function ChannelPage() {
         overview={about ? about.split('\n')[0] : null}
         actions={
           <>
-            <PlayButton label="Play newest" />
-            <PlayButton label="Shuffle" primary={false} />
+            <PlayButton
+              label="Play newest"
+              onPlay={newest.length ? () => playYoutube(newest) : undefined}
+              why="This channel has no videos yet."
+            />
+            <PlayButton
+              label="Shuffle"
+              primary={false}
+              onPlay={
+                newest.some((v) => v.downloaded)
+                  ? () => {
+                      playYoutube(newest.filter((v) => v.downloaded));
+                      getEngine().toggleShuffle();
+                    }
+                  : undefined
+              }
+              why="Shuffle plays your downloaded videos, and none are downloaded yet."
+            />
           </>
         }
       />
@@ -176,6 +199,7 @@ function ChannelPage() {
           </>
         }
       />
+      {youtubeDialog}
     </>
   );
 }

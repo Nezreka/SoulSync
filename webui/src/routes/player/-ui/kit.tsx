@@ -588,27 +588,50 @@ export function Hero({
 
 // ── play affordances (stage a: laid out, not live) ─────────────────────
 
-export const PLAYBACK_NOT_YET = 'Playback is not built yet. It is the next stage of the player.';
+/** what an unwired play button says: honest, never a button that pretends */
+export const PLAYBACK_NOT_YET = "This one can't be played from here yet.";
 
 /**
- * the play button every page shows. until the player core exists it is
- * visibly inert: aria-disabled (still focusable, so a remote can land on it
- * and read why), dimmed, and it says so on hover and to screen readers.
+ * the play button every page shows. with ``onPlay`` it plays; without one
+ * (a kind of thing nothing plays yet) it is visibly inert: aria-disabled
+ * (still focusable, so a remote can land on it and read why), dimmed, and
+ * it says so on hover and to screen readers.
  */
 export function PlayButton({
   label = 'Play',
   primary = true,
+  onPlay,
+  why = PLAYBACK_NOT_YET,
 }: {
   label?: string;
   primary?: boolean;
+  onPlay?: () => void;
+  /** why it can't play, when there's no onPlay */
+  why?: string;
 }) {
+  if (onPlay)
+    return (
+      <button
+        type="button"
+        className={primary ? s.btnPrimary : s.btn}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          onPlay();
+        }}
+        data-nav
+      >
+        <PlayIcon />
+        {label}
+      </button>
+    );
   return (
     <button
       type="button"
       className={primary ? s.btnPrimary : s.btn}
       aria-disabled="true"
-      title={PLAYBACK_NOT_YET}
-      aria-description={PLAYBACK_NOT_YET}
+      title={why}
+      aria-description={why}
       onClick={(event) => event.preventDefault()}
       data-nav
     >

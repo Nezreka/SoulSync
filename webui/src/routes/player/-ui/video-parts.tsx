@@ -52,9 +52,25 @@ export function CastRow({ cast }: { cast?: CastMember[] }) {
  * the copies you own of this title. picking one is remembered for when play
  * is pressed (stage b); for now it shows which copy would play and how.
  */
-export function VersionPicker({ files, bare }: { files?: VideoFile[]; bare?: boolean }) {
+/**
+ * the copies of a title, best first. the page can hold the choice (value /
+ * onChange) so play uses the version picked; left alone it keeps its own.
+ */
+export function VersionPicker({
+  files,
+  bare,
+  value,
+  onChange,
+}: {
+  files?: VideoFile[];
+  bare?: boolean;
+  value?: number | null;
+  onChange?: (fileId: number) => void;
+}) {
   const ranked = rankVersions(files ?? []);
-  const [picked, setPicked] = useState<number | null>(null);
+  const [own, setOwn] = useState<number | null>(null);
+  const picked = value !== undefined ? value : own;
+  const setPicked = (id: number) => (onChange ? onChange(id) : setOwn(id));
   if (!ranked.length) return null;
   const chosen = picked ?? ranked[0].id;
   if (ranked.length === 1) {

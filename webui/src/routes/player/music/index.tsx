@@ -8,18 +8,19 @@ import type { LibAlbum, LibArtist, LibSong, Pagination } from '../-player.types'
 
 import { runtime } from '../-lib/format';
 import { libraryThumb, remoteImage } from '../-lib/images';
+import { songItems } from '../-lib/play-items';
 import {
   CardGrid,
   Empty,
   PageTitle,
   PlayButton,
-  PlayerLink,
   Tabs,
   useViewMode,
   ViewToggle,
   styles as s,
 } from '../-ui/kit';
 import { NotPartOfProfile } from '../-ui/not-part';
+import { playItems, usePlayer } from '../-ui/playback/use-player';
 import { useSections } from '../-ui/sections';
 
 type MusicTab = 'artists' | 'albums' | 'songs';
@@ -81,6 +82,7 @@ function MusicBrowse() {
   const artists = usePaged<LibArtist>('artists', 'name', sections.music && tab === 'artists');
   const albums = usePaged<LibAlbum>('albums', 'added', sections.music && tab === 'albums');
   const songs = usePaged<LibSong>('songs', 'title', sections.music && tab === 'songs');
+  const player = usePlayer();
 
   if (!sections.music) return <NotPartOfProfile what="Music" single />;
 
@@ -151,14 +153,20 @@ function MusicBrowse() {
         songs.data.items.length ? (
           <>
             <div className={s.heroActions}>
-              <PlayButton label="Play all" />
+              <PlayButton label="Play all" onPlay={() => playItems(songItems(songs.data!.items))} />
             </div>
             <div className={s.list}>
               {songs.data.items.map((song, index) => (
-                <PlayerLink
+                <button
                   key={String(song.id)}
-                  href={song.album_id ? `/player/music/album/${song.album_id}` : '/player/music'}
+                  type="button"
                   className={s.row}
+                  data-playing={
+                    player.item?.type === 'track' && player.item.id === String(song.id)
+                      ? 'true'
+                      : undefined
+                  }
+                  onClick={() => playItems(songItems(songs.data!.items), index)}
                   data-nav
                 >
                   <span className={s.rowNum}>{index + 1}</span>
@@ -169,7 +177,7 @@ function MusicBrowse() {
                     </span>
                   </span>
                   <span className={s.rowEnd}>{runtime((song.duration ?? 0) / 1000)}</span>
-                </PlayerLink>
+                </button>
               ))}
             </div>
           </>

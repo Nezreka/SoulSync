@@ -2224,115 +2224,6 @@
 
 /* ── transport bar (inert until playback lands) ──────────────────────── */
 
-.bar {
-  grid-area: bar;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-  align-items: center;
-  gap: calc(var(--u) * 1.5);
-  padding: 0 calc(var(--u) * 1.5);
-  border-top: 1px solid var(--pl-line);
-  background: var(--pl-panel-solid);
-}
-
-.barNow {
-  display: flex;
-  align-items: center;
-  gap: calc(var(--u) * 0.85);
-  min-width: 0;
-}
-
-.barArt {
-  width: calc(var(--u) * 3.4);
-  height: calc(var(--u) * 3.4);
-  flex: none;
-  border-radius: var(--radius-md);
-  background: var(--white-a06);
-}
-
-.barTitle {
-  color: var(--pl-text-2);
-  font-size: calc(var(--u) * 0.92);
-  font-weight: 600;
-}
-
-.barCenter {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: calc(var(--u) * 0.4);
-  width: min(42vw, calc(var(--u) * 34));
-}
-
-.barControls {
-  display: flex;
-  align-items: center;
-  gap: calc(var(--u) * 0.6);
-}
-
-.barControls button {
-  display: grid;
-  place-items: center;
-  width: calc(var(--u) * 2.4);
-  height: calc(var(--u) * 2.4);
-  border: none;
-  border-radius: var(--radius-circle);
-  background: transparent;
-  color: var(--pl-text-3);
-  cursor: not-allowed;
-}
-
-.barControls button svg {
-  width: calc(var(--u) * 1.2);
-  height: calc(var(--u) * 1.2);
-}
-
-.barControls .barPlay {
-  width: calc(var(--u) * 2.8);
-  height: calc(var(--u) * 2.8);
-  background: var(--white-a12);
-}
-
-.barScrub {
-  display: flex;
-  align-items: center;
-  gap: calc(var(--u) * 0.6);
-  width: 100%;
-  color: var(--pl-text-3);
-  font-size: calc(var(--u) * 0.72);
-  font-variant-numeric: tabular-nums;
-}
-
-.barTrack {
-  flex: 1;
-  height: calc(var(--u) * 0.24);
-  border-radius: var(--radius-pill);
-  background: var(--white-a12);
-}
-
-.barEnd {
-  justify-self: end;
-  color: var(--pl-text-3);
-  font-size: calc(var(--u) * 0.8);
-}
-
-@media (max-width: 768px) {
-  .bar {
-    grid-template-columns: 1fr auto;
-    padding: 0 var(--pl-gutter);
-  }
-
-  .barCenter {
-    width: auto;
-  }
-
-  .barScrub,
-  .barEnd,
-  .barControls button:not(.barPlay) {
-    display: none;
-  }
-}
-
 /* ── the guide ───────────────────────────────────────────────────────── */
 
 .guide {
@@ -4124,4 +4015,78 @@ a.crewRow:hover {
 .iconRound svg {
   width: calc(var(--u) * 1.2);
   height: calc(var(--u) * 1.2);
+}
+
+/* an episode's "n versions": opens its version list without playing it */
+.versionsToggle {
+  height: calc(var(--u) * 1.6);
+  padding: 0 calc(var(--u) * 0.6);
+  border: 1px solid var(--pl-line);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--pl-text-2);
+  font: inherit;
+  font-size: calc(var(--u) * 0.74);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.versionsToggle:hover,
+.versionsToggle[aria-expanded='true'] {
+  background: var(--white-a08);
+  color: var(--pl-text);
+}
+
+/* an audiobook's chapters: click one to play from it */
+.chapterList {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chapterRow {
+  display: grid;
+  grid-template-columns: calc(var(--u) * 2.2) 1fr auto;
+  align-items: center;
+  gap: calc(var(--u) * 0.8);
+  width: 100%;
+  padding: calc(var(--u) * 0.55) calc(var(--u) * 0.7);
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--pl-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.chapterRow:hover,
+.chapterRow:focus-visible {
+  background: var(--white-a06);
+}
+
+.chapterRow[data-playing='true'] {
+  color: var(--accent-light);
+}
+
+.chapterNum,
+.chapterTime {
+  color: var(--pl-text-3);
+  font-size: calc(var(--u) * 0.8);
+  font-variant-numeric: tabular-nums;
+}
+
+.chapterTitle {
+  overflow: hidden;
+  font-size: calc(var(--u) * 0.92);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* the row that's playing right now (a track, an episode) */
+.row[data-playing='true'] .rowTitle,
+.row[data-playing='true'] .rowNum {
+  color: var(--accent-light);
 }

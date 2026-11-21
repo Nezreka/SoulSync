@@ -768,3 +768,34 @@ export async function addToWatchlist(
 export async function removeFromWatchlist(item_type: WatchlistKind, item_id: string) {
   await apiClient.delete('player/watchlist', { searchParams: { item_type, item_id } });
 }
+
+export interface ArtistQueueRow {
+  track_id: number;
+  track_title: string;
+  duration?: number | null;
+  album_id: number;
+  album_title?: string | null;
+  album_image_url?: string | null;
+  artist_name?: string | null;
+  file_state: 'active' | 'missing';
+}
+
+/** what an artist's play button queues: their tracks on disk, credits included */
+export async function artistQueue(artistId: number): Promise<ArtistQueueRow[]> {
+  const body = await apiClient
+    .get(`library/v2/artists/${artistId}/play-queue`, { searchParams: { limit: 500 } })
+    .json<{ files?: ArtistQueueRow[] }>();
+  return (body.files ?? []).filter((f) => f.file_state === 'active');
+}
+
+/** how an item plays: its length, parts and chapters (an audiobook's, read from its files) */
+export const playableQuery = (itemType: string, itemId: string) =>
+  queryOptions({
+    queryKey: ['player', 'playable', itemType, itemId],
+    queryFn: async () =>
+      await apiClient
+        .get(`player/playable/${itemType}/${encodeURIComponent(itemId)}`)
+        .json<{ duration?: number; chapters?: { start: number; title: string }[] }>(),
+    staleTime: 10 * MINUTE,
+    retry: false,
+  });

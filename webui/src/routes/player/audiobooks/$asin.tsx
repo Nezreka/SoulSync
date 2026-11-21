@@ -1,11 +1,14 @@
 import { useQuery } from '@tanstack/react-query';
 import { createFileRoute } from '@tanstack/react-router';
 
+import { chapterAt, clock } from '../-engine/timeline';
 import { plainText, remaining, runtime } from '../-lib/format';
+import { bookItem } from '../-lib/play-items';
 import { bookCover } from '../-lib/rails';
-import { booksQuery, catalogBookQuery, progressLookupQuery } from '../-player.api';
+import { booksQuery, catalogBookQuery, playableQuery, progressLookupQuery } from '../-player.api';
 import { Empty, Hero, PlayButton, styles as s } from '../-ui/kit';
 import { NotFound, NotPartOfProfile } from '../-ui/not-part';
+import { getEngine, playItems, usePlayer } from '../-ui/playback/use-player';
 import { useSections } from '../-ui/sections';
 
 export const Route = createFileRoute('/player/audiobooks/$asin')({
@@ -24,6 +27,15 @@ function BookPage() {
   const asin = Route.useParams().asin;
   const books = useQuery({ ...booksQuery(), enabled: sections.audiobooks });
   const book = books.data?.find((b) => b.asin === asin);
+  // the book's own chapters, read from its files (the same timeline the player plays)
+  const timeline = useQuery({
+    ...playableQuery('audiobook', asin),
+    enabled: sections.audiobooks && !!book,
+  });
+  const chapters = timeline.data?.chapters ?? [];
+  const player = usePlayer();
+  const playingThis = player.item?.type === 'audiobook' && player.item.id === asin;
+  const playingChapter = playingThis ? chapterAt(chapters, player.position) : -1;
   const catalogAsin =
     book?.catalog_asin || (book && /^[A-Z0-9]{10}$/.test(book.asin) ? book.asin : '');
   const catalog = useQuery({ ...catalogBookQuery(catalogAsin), enabled: !!catalogAsin });
@@ -67,8 +79,15 @@ function BookPage() {
           <>
             <PlayButton
               label={resuming ? `Resume at ${runtime(resume.position_seconds)}` : 'Play'}
+              onPlay={() => playItems([bookItem(book)])}
             />
-            {resuming ? <PlayButton label="From the start" primary={false} /> : null}
+            {resuming ? (
+              <PlayButton
+                label="From the start"
+                primary={false}
+                onPlay={() => playItems([bookItem(book)], 0, { startAt: 0 })}
+              />
+            ) : null}
           </>
         }
       />
@@ -78,10 +97,38 @@ function BookPage() {
           <div className={s.railHead}>
             <h2 className={s.sectionTitle}>Chapters</h2>
           </div>
-          <Empty title="Chapters come with playback">
-            SoulSync doesn't read chapter marks out of book files yet. They show up here, with speed
-            and a sleep timer, when the player core lands.
-          </Empty>
+          {timeline.isLoading ? <div className={s.skeleton} style={{ height: '12em' }} /> : null}
+          {timeline.isError ? (
+            <Empty title="Chapters aren't available">
+              SoulSync couldn't read this book's files.
+            </Empty>
+          ) : null}
+          {chapters.length ? (
+            <ol className={s.chapterList}>
+              {chapters.map((c, i) => {
+                const end = chapters[i + 1]?.start ?? timeline.data?.duration ?? c.start;
+                return (
+                  <li key={`${c.start}-${i}`}>
+                    <button
+                      type="button"
+                      className={s.chapterRow}
+                      data-playing={i === playingChapter ? 'true' : undefined}
+                      onClick={() =>
+                        playingThis
+                          ? getEngine().seek(c.start)
+                          : playItems([bookItem(book)], 0, { startAt: c.start })
+                      }
+                      data-nav
+                    >
+                      <span className={s.chapterNum}>{i + 1}</span>
+                      <span className={s.chapterTitle}>{c.title}</span>
+                      <span className={s.chapterTime}>{clock(Math.max(0, end - c.start))}</span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ol>
+          ) : null}
         </section>
         <dl className={s.facts}>
           {book.author ? (

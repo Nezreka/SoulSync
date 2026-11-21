@@ -5,10 +5,12 @@ import type { LibTrack } from '../-player.types';
 
 import { runtime } from '../-lib/format';
 import { fileQuality } from '../-lib/music';
+import { albumItems } from '../-lib/play-items';
 import { albumQuery } from '../-player.api';
 import { Badge, Hero, PlayButton, PlayerLink, styles as s } from '../-ui/kit';
 import { LabelLink, MusicGenreLinks } from '../-ui/links';
 import { NotFound, NotPartOfProfile } from '../-ui/not-part';
+import { getEngine, playItems, usePlayer } from '../-ui/playback/use-player';
 import { useSections } from '../-ui/sections';
 
 export const Route = createFileRoute('/player/music/album/$albumId')({
@@ -26,6 +28,8 @@ function AlbumPage() {
   const sections = useSections();
   const id = Number(Route.useParams().albumId);
   const album = useQuery({ ...albumQuery(id), enabled: sections.music && Number.isFinite(id) });
+  const player = usePlayer();
+  const playingId = player.item?.type === 'track' ? player.item.id : null;
 
   if (!sections.music) return <NotPartOfProfile what="Music" single />;
   if (album.isLoading)
@@ -38,6 +42,12 @@ function AlbumPage() {
   const discs = new Set(a.tracks.map((t) => t.disc_number ?? 1)).size;
   const qualities = [...new Set(owned.map((t) => fileQuality(t.file)).filter(Boolean))];
   const albumArtist = a.primary_artist?.name;
+  const queue = albumItems(a);
+  /** a track plays with the rest of the album after it */
+  const playTrack = (trackId: number | null) => {
+    const at = queue.findIndex((x) => x.id === String(trackId));
+    if (at >= 0) playItems(queue, at);
+  };
 
   return (
     <>
@@ -78,8 +88,23 @@ function AlbumPage() {
         }
         actions={
           <>
-            <PlayButton />
-            <PlayButton label="Shuffle" primary={false} />
+            <PlayButton
+              onPlay={queue.length ? () => playItems(queue) : undefined}
+              why="None of this album's tracks are on disk."
+            />
+            <PlayButton
+              label="Shuffle"
+              primary={false}
+              onPlay={
+                queue.length
+                  ? () => {
+                      playItems(queue, Math.floor(Math.random() * queue.length));
+                      getEngine().toggleShuffle();
+                    }
+                  : undefined
+              }
+              why="None of this album's tracks are on disk."
+            />
           </>
         }
       />
@@ -98,9 +123,19 @@ function AlbumPage() {
               <div
                 className={s.row}
                 data-missing={track.is_missing || !track.id ? 'true' : undefined}
+                data-playing={playingId === String(track.id) ? 'true' : undefined}
                 tabIndex={track.is_missing ? -1 : 0}
                 data-nav={track.is_missing ? undefined : true}
                 title={track.is_missing ? 'Not in your library' : undefined}
+                role="button"
+                aria-label={track.is_missing ? undefined : `Play ${track.title}`}
+                onClick={() => playTrack(track.id)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    playTrack(track.id);
+                  }
+                }}
               >
                 <span className={s.rowNum}>{track.track_number ?? index + 1}</span>
                 <span className={s.rowMain}>

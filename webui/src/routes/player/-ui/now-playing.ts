@@ -1,16 +1,17 @@
 /**
- * what is playing, for the shell's transport bar. nothing plays until the
- * player core lands (stage b), and the bar only shows while something does:
- * an idle bar of dead buttons is clutter, not a feature.
+ * what is playing, for the shell: the transport bar's row is there only
+ * while something is (an idle bar of dead buttons is clutter).
  */
+
+import { current } from '../-engine/queue';
+import { usePlayer } from './playback/use-player';
 
 export interface NowPlaying {
   title: string;
   subtitle?: string;
-  art?: string | null;
 }
 
-/** stage b replaces this with the player core's state */
 export function useNowPlaying(): NowPlaying | null {
-  return null;
+  const item = current(usePlayer().queue);
+  return item ? { title: item.title, subtitle: item.subtitle } : null;
 }

@@ -4,10 +4,12 @@ import { useMemo, useState } from 'react';
 
 import { plainText, remaining, runtime, shortDate } from '../-lib/format';
 import { remoteImage } from '../-lib/images';
+import { podcastItems } from '../-lib/play-items';
 import { episodeKey, fraction } from '../-lib/rails';
 import { podcastShowQuery, podcastSubsQuery, progressLookupQuery } from '../-player.api';
 import { Art, Badge, Hero, PlayButton, styles as s } from '../-ui/kit';
 import { NotFound, NotPartOfProfile } from '../-ui/not-part';
+import { playItems, usePlayer } from '../-ui/playback/use-player';
 import { useSections } from '../-ui/sections';
 
 export const Route = createFileRoute('/player/podcasts/$podcastId')({
@@ -31,6 +33,7 @@ function PodcastPage() {
   const episodes = useMemo(() => show.data?.episodes ?? [], [show.data]);
   const visible = episodes.slice(0, shown);
   const keys = visible.map(episodeKey);
+  const player = usePlayer();
   const progress = useQuery({
     ...progressLookupQuery('podcast_episode', keys),
     enabled: keys.length > 0,
@@ -42,6 +45,12 @@ function PodcastPage() {
   if (!sub) return <NotFound what="Podcast" />;
 
   const art = show.data?.artwork_url ?? sub.artwork_url;
+  // newest first, as listed: an episode plays on into the older ones
+  const queue = podcastItems({ id: sub.id, title: sub.title, artwork_url: art }, episodes);
+  const playEpisode = (key: string) => {
+    const at = queue.findIndex((x) => x.id === key);
+    if (at >= 0) playItems(queue, at);
+  };
   const about = plainText(show.data?.description ?? sub.description);
 
   return (
@@ -64,7 +73,13 @@ function PodcastPage() {
           </>
         }
         overview={about}
-        actions={<PlayButton label="Play latest" />}
+        actions={
+          <PlayButton
+            label="Play latest"
+            onPlay={queue.length ? () => playItems(queue) : undefined}
+            why="This feed has no episodes with audio."
+          />
+        }
       />
 
       {show.isLoading ? (
@@ -86,7 +101,23 @@ function PodcastPage() {
               : fraction(row.position_seconds, row.duration_seconds ?? episode.duration_seconds)
             : undefined;
           return (
-            <div key={key} className={s.row} data-media="true" tabIndex={0} data-nav>
+            <div
+              key={key}
+              className={s.row}
+              data-media="true"
+              data-playing={player.item?.id === key ? 'true' : undefined}
+              role="button"
+              aria-label={`Play ${episode.title}`}
+              tabIndex={0}
+              onClick={() => playEpisode(key)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  playEpisode(key);
+                }
+              }}
+              data-nav
+            >
               <div className={s.rowArt} style={{ aspectRatio: '1', width: '5.5em' }}>
                 <Art src={remoteImage(episode.artwork_url ?? art)} alt="" />
                 {done !== undefined ? (

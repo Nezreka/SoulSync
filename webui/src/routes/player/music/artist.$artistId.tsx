@@ -7,11 +7,21 @@ import type { LibRelease } from '../-player.types';
 import { plainText } from '../-lib/format';
 import { libraryThumb, remoteImage } from '../-lib/images';
 import { ownedReleases } from '../-lib/music';
-import { artistQuery } from '../-player.api';
+import { artistItems } from '../-lib/play-items';
+import { artistQuery, artistQueue } from '../-player.api';
 import { CardRail, Empty, Hero, PlayButton, styles as s } from '../-ui/kit';
 import { LabelLink, MusicGenreLinks } from '../-ui/links';
 import { NotFound, NotPartOfProfile } from '../-ui/not-part';
+import { getEngine, playItems } from '../-ui/playback/use-player';
 import { useSections } from '../-ui/sections';
+
+/** everything of theirs on disk, in order or shuffled */
+async function playArtist(artistId: number, shuffle: boolean) {
+  const items = artistItems(await artistQueue(artistId));
+  if (!items.length) return;
+  playItems(items, shuffle ? Math.floor(Math.random() * items.length) : 0);
+  if (shuffle) getEngine().toggleShuffle();
+}
 
 export const Route = createFileRoute('/player/music/artist/$artistId')({
   component: ArtistPage,
@@ -68,8 +78,12 @@ function ArtistPage() {
         overview={about}
         actions={
           <>
-            <PlayButton />
-            <PlayButton label="Shuffle" primary={false} />
+            <PlayButton onPlay={() => void playArtist(a.id, false)} />
+            <PlayButton
+              label="Shuffle"
+              primary={false}
+              onPlay={() => void playArtist(a.id, true)}
+            />
           </>
         }
       />

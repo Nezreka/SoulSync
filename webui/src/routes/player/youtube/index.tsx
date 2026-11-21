@@ -24,6 +24,7 @@ import {
   styles as s,
 } from '../-ui/kit';
 import { NotPartOfProfile } from '../-ui/not-part';
+import { useYoutubePlay } from '../-ui/playback/youtube';
 import { useSections } from '../-ui/sections';
 import { useYoutubeWatchlistActions } from '../-ui/watchlist';
 
@@ -77,6 +78,7 @@ const CHANNEL_RAILS = 8;
 function YoutubeHome() {
   const sections = useSections();
   const ytActions = useYoutubeWatchlistActions();
+  const [playYoutube, youtubeDialog] = useYoutubePlay();
   const home = useQuery({ ...youtubeHomeQuery(), enabled: sections.video });
   const tab = Route.useSearch().tab ?? 'foryou';
   const navigate = useNavigate({ from: '/player/youtube/' });
@@ -209,7 +211,10 @@ function YoutubeHome() {
           }
           actions={
             <>
-              <PlayButton />
+              <PlayButton
+                label={lead.downloaded ? 'Play' : 'Play on YouTube'}
+                onPlay={() => playYoutube([lead])}
+              />
               {lead.channel_id ? (
                 <PlayerLink
                   href={`/player/youtube/${encodeURIComponent(lead.channel_id)}`}
@@ -253,6 +258,7 @@ function YoutubeHome() {
           ))}
         </>
       ) : null}
+      {youtubeDialog}
     </>
   );
 }

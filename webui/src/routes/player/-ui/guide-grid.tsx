@@ -12,8 +12,10 @@ import type { Channel } from '../-lib/channels';
 import type { GuideBlock, GuideProgram } from '../-lib/schedule';
 
 import { clock, runtime } from '../-lib/format';
+import { channelQueue } from '../-lib/play-items';
 import { blockArtists, mergeIntoBlocks } from '../-lib/schedule';
 import { Art, PlayButton, PlayerLink, styles as s, useProgressive } from './kit';
+import { playItems } from './playback/use-player';
 
 export interface Picked {
   channel: Channel;
@@ -308,6 +310,10 @@ export function GuideDetail({
   const live = start <= now && end > now;
   const later = (schedules.get(channel.id) ?? []).filter((p) => p.start >= end).slice(0, 3);
   const airing = block?.items.find((p) => p.start <= now && p.end > now) ?? program;
+  const channelPrograms = schedules.get(channel.id) ?? [];
+  // live: what's airing and the channel after it; from the start: this program (or set) and on
+  const liveQueue = channelQueue(channelPrograms, airing);
+  const startQueue = channelQueue(channelPrograms, block ? block.items[0] : program);
 
   return (
     <section className={s.guideDetail} aria-live="polite" aria-label="Program">
@@ -334,8 +340,31 @@ export function GuideDetail({
           </span>
         ) : null}
         <div className={s.heroActions}>
-          {live ? <PlayButton label="Join live" /> : null}
-          <PlayButton label="Watch from the start" primary={!live} />
+          {live && liveQueue.length ? (
+            <PlayButton
+              label="Join live"
+              onPlay={() => {
+                // in at the minute it's on; a live join saves nothing as the item's own progress
+                playItems(liveQueue, 0, {
+                  startAt: Math.max(0, (now - airing.start) / 1000),
+                  live: true,
+                });
+                onClose();
+              }}
+            />
+          ) : null}
+          <PlayButton
+            label={block ? 'Play this set' : 'Watch from the start'}
+            primary={!live}
+            onPlay={
+              startQueue.length
+                ? () => {
+                    playItems(startQueue);
+                    onClose();
+                  }
+                : undefined
+            }
+          />
           {!block && program.href ? (
             <PlayerLink href={program.href} className={s.btn} data-nav>
               Details

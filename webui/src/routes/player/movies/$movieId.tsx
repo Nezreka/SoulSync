@@ -1,8 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
 import { createFileRoute } from '@tanstack/react-router';
+import { useState } from 'react';
 
 import { runtime, shortDate } from '../-lib/format';
 import { backdropSet } from '../-lib/images';
+import { movieItem } from '../-lib/play-items';
 import { backdropUrl, moreLikeThis, posterUrl, proxiedImage } from '../-lib/rails';
 import { rankVersions, resolutionLabel } from '../-lib/video';
 import {
@@ -26,6 +28,7 @@ import {
 import { Badge, Hero, PlayButton, VerdictBadge, styles as s } from '../-ui/kit';
 import { CrewList, mergeCrew, StudioLink, VideoGenreLinks } from '../-ui/links';
 import { NotFound, NotPartOfProfile } from '../-ui/not-part';
+import { playItems } from '../-ui/playback/use-player';
 import { useSections } from '../-ui/sections';
 import { BackgroundTrailer, TrailerButton } from '../-ui/trailer';
 import {
@@ -54,6 +57,8 @@ function MoviePage() {
   const saved = useQuery({ ...progressLookupQuery('movie', [String(id)]), enabled: ok });
   const catalog = useQuery({ ...videoCatalogQuery(), enabled: ok });
   const extras = useQuery({ ...extrasQuery('movie', id), enabled: ok });
+  // the version play uses: the one picked, else the best
+  const [version, setVersion] = useState<number | null>(null);
 
   if (!sections.movies) return <NotPartOfProfile what="Movies" />;
   if (detail.isLoading)
@@ -62,6 +67,7 @@ function MoviePage() {
   if (!m || detail.isError) return <NotFound what="Movie" />;
 
   const best = rankVersions(files.data?.files ?? [])[0];
+  const playFile = version ?? best?.id ?? null;
   const resume = saved.data?.[String(id)];
   const resuming = !!resume && !resume.finished && resume.position_seconds > 0;
   const director = m.crew?.filter((c) => c.job === 'Director');
@@ -113,8 +119,16 @@ function MoviePage() {
           <>
             <PlayButton
               label={resuming ? `Resume from ${runtime(resume.position_seconds)}` : 'Play'}
+              onPlay={best ? () => playItems([movieItem(m, playFile)]) : undefined}
+              why="There's no file for this yet."
             />
-            {resuming ? <PlayButton label="From the start" primary={false} /> : null}
+            {resuming && best ? (
+              <PlayButton
+                label="From the start"
+                primary={false}
+                onPlay={() => playItems([movieItem(m, playFile)], 0, { startAt: 0 })}
+              />
+            ) : null}
             <WatchlistButton kind="movie" id={id} />
             <TrailerButton kind="movie" id={id} />
             {ends ? (
@@ -151,7 +165,12 @@ function MoviePage() {
           <>
             {files.data?.files?.length ? (
               <InfoPanel title={files.data.files.length > 1 ? 'Your copies' : 'Your copy'}>
-                <VersionPicker files={files.data.files} bare />
+                <VersionPicker
+                  files={files.data.files}
+                  bare
+                  value={version}
+                  onChange={setVersion}
+                />
               </InfoPanel>
             ) : null}
             {crew.length ? (

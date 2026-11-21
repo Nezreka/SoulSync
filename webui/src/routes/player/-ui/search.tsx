@@ -9,7 +9,7 @@
  * - then people and titles you don't have, from tmdb, each one click from
  *   its page or a request
  * - a top result up front, filters by type, arrows and enter to pick, "/"
- *   or ctrl+k from anywhere to start, and the last few searches kept on
+ *   from anywhere to start, and the last few searches kept on
  *   this device
  */
 
@@ -564,17 +564,14 @@ export function Search() {
     return () => document.removeEventListener('mousedown', close);
   }, [open]);
 
-  // "/" or ctrl/cmd+k from anywhere in the player starts a search
+  // "/" from anywhere in the player starts a search (ctrl/cmd+k is the help panel's, app wide)
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       const typing =
         target &&
         (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
-      if (
-        (event.key === 'k' && (event.ctrlKey || event.metaKey)) ||
-        (event.key === '/' && !typing)
-      ) {
+      if (event.key === '/' && !typing && !event.ctrlKey && !event.metaKey) {
         event.preventDefault();
         input.current?.focus();
         input.current?.select();

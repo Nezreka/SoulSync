@@ -6,6 +6,7 @@ import type { DetailEpisode, VideoFile } from '../-player.types';
 
 import { remaining, runtime, shortDate } from '../-lib/format';
 import { backdropSet, stillSet, WIDE_SIZES } from '../-lib/images';
+import { episodeItems } from '../-lib/play-items';
 import { backdropUrl, fraction, moreLikeThis, posterUrl, proxiedImage } from '../-lib/rails';
 import { rankVersions, resolutionLabel } from '../-lib/video';
 import {
@@ -28,6 +29,7 @@ import {
 import { Art, Badge, Hero, HScroll, PlayButton, VerdictBadge, styles as s } from '../-ui/kit';
 import { CrewList, mergeCrew, NetworkLink, VideoGenreLinks } from '../-ui/links';
 import { NotFound, NotPartOfProfile } from '../-ui/not-part';
+import { playItems } from '../-ui/playback/use-player';
 import { useSections } from '../-ui/sections';
 import { BackgroundTrailer, TrailerButton } from '../-ui/trailer';
 import {
@@ -54,11 +56,14 @@ function EpisodeRow({
   files,
   position,
   duration,
+  onPlay,
 }: {
   episode: DetailEpisode;
   files: VideoFile[];
   position?: number;
   duration?: number | null;
+  /** play this episode (and the rest of the show after it), in this version */
+  onPlay?: (fileId?: number) => void;
 }) {
   const [open, setOpen] = useState(false);
   const owned = episode.owned !== false && files.length > 0;
@@ -74,12 +79,13 @@ function EpisodeRow({
         data-missing={owned ? undefined : 'true'}
         role="button"
         tabIndex={0}
-        aria-expanded={files.length > 1 ? open : undefined}
-        onClick={() => files.length > 1 && setOpen((v) => !v)}
+        aria-label={owned ? `Play episode ${episode.episode_number}` : undefined}
+        aria-disabled={owned ? undefined : 'true'}
+        onClick={() => owned && onPlay?.()}
         onKeyDown={(e) => {
-          if ((e.key === 'Enter' || e.key === ' ') && files.length > 1) {
+          if ((e.key === 'Enter' || e.key === ' ') && owned) {
             e.preventDefault();
-            setOpen((v) => !v);
+            onPlay?.();
           }
         }}
         data-nav
@@ -119,7 +125,20 @@ function EpisodeRow({
         <div className={s.rowEnd}>
           {episode.watched ? <Badge tone="yes">Watched</Badge> : null}
           {best?.resolution ? <Badge>{resolutionLabel(best.resolution)}</Badge> : null}
-          {files.length > 1 ? <Badge>{files.length} versions</Badge> : null}
+          {files.length > 1 ? (
+            <button
+              type="button"
+              className={s.versionsToggle}
+              aria-expanded={open}
+              onClick={(e) => {
+                e.stopPropagation();
+                setOpen((v) => !v);
+              }}
+              data-nav
+            >
+              {files.length} versions
+            </button>
+          ) : null}
           {best?.playable ? (
             <VerdictBadge verdict={best.playable.verdict} reasons={best.playable.reasons} />
           ) : null}
@@ -127,7 +146,7 @@ function EpisodeRow({
       </div>
       {open ? (
         <div className={s.rowMore}>
-          <VersionPicker files={files} />
+          <VersionPicker files={files} onChange={(fileId) => onPlay?.(fileId)} />
         </div>
       ) : null}
     </div>
@@ -199,6 +218,20 @@ function ShowPage() {
       ? `${firstYear}–${lastYear}`
       : firstYear;
   const next = show.next_up;
+  // the episode up next (by season and number), else the first one owned
+  const upNextId = next
+    ? seasons
+        .find((x) => x.season_number === next.season_number)
+        ?.episodes.find((e) => e.episode_number === next.episode_number && e.owned !== false)?.id
+    : undefined;
+  const firstOwnedEpisode = episodeItems(show, seasons)[0]?.id;
+  /** play from this episode on: the rest of the show follows */
+  const playFrom = (episodeId?: number | string, fileId?: number) => {
+    const queue = episodeItems(show, seasons, episodeId ? Number(episodeId) : undefined);
+    if (!queue.length) return;
+    if (fileId) queue[0] = { ...queue[0], part: String(fileId) };
+    playItems(queue);
+  };
   const creators = show.crew?.filter((c) => c.job === 'Creator');
   // still airing: when the next one lands
   const nextAir = !ended ? extras.data?.next_episode : null;
@@ -246,6 +279,12 @@ function ShowPage() {
                   ? `${next.resume ? 'Resume' : 'Play'} S${next.season_number} E${next.episode_number}`
                   : 'Play'
               }
+              onPlay={
+                upNextId || firstOwnedEpisode
+                  ? () => playFrom(upNextId ?? firstOwnedEpisode)
+                  : undefined
+              }
+              why="There are no episodes on disk yet."
             />
             <WatchlistButton kind="show" id={id} />
             <TrailerButton kind="show" id={id} />
@@ -330,6 +369,7 @@ function ShowPage() {
                               : undefined
                         }
                         duration={row?.duration_seconds}
+                        onPlay={(fileId) => playFrom(episode.id, fileId)}
                       />
                     );
                   })}
