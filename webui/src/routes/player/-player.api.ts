@@ -237,12 +237,18 @@ export const showDetailQuery = (id: number) =>
     staleTime: 2 * MINUTE,
   });
 
-export const showFilesQuery = (id: number, season: number) =>
+/**
+ * every season's files for a show, in one request. no ?season: naming one
+ * makes the server check each of that season's files on disk (the
+ * manager's library tab wants that), which on a sleeping drive takes
+ * longer than a page should wait. the player only needs what's on record.
+ */
+export const showFilesQuery = (id: number) =>
   queryOptions({
-    queryKey: ['player', 'show-files', id, season],
+    queryKey: ['player', 'show-files', id],
     queryFn: () =>
       apiClient
-        .get(`video/detail/show/${id}/library`, { searchParams: { season } })
+        .get(`video/detail/show/${id}/library`, { timeout: 60_000 })
         .json<ShowLibraryPayload>(),
     staleTime: 2 * MINUTE,
   });

@@ -57,6 +57,7 @@ function EpisodeRow({
   position,
   duration,
   onPlay,
+  filesKnown = true,
 }: {
   episode: DetailEpisode;
   files: VideoFile[];
@@ -64,9 +65,14 @@ function EpisodeRow({
   duration?: number | null;
   /** play this episode (and the rest of the show after it), in this version */
   onPlay?: (fileId?: number) => void;
+  /** the show's file list has arrived (until then, ownership is the show's word) */
+  filesKnown?: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const owned = episode.owned !== false && files.length > 0;
+  // the show says what you own; the file list (versions, quality) only adds
+  // detail. an episode is never greyed out just because that list is late
+  const owned =
+    episode.owned === true || (episode.owned !== false && (files.length > 0 || !filesKnown));
   const best = rankVersions(files)[0];
   const seconds =
     best?.runtime_seconds ?? (episode.runtime_minutes ? episode.runtime_minutes * 60 : null);
@@ -187,8 +193,8 @@ function ShowPage() {
   const [onlyMine, setOnlyMine] = useState(false);
 
   const files = useQuery({
-    ...showFilesQuery(id, current?.season_number ?? 1),
-    enabled: ok && !!current,
+    ...showFilesQuery(id),
+    enabled: ok,
     retry: false,
   });
   const episodeIds = (current?.episodes ?? []).map((e) => String(e.id));
@@ -370,6 +376,7 @@ function ShowPage() {
                         }
                         duration={row?.duration_seconds}
                         onPlay={(fileId) => playFrom(episode.id, fileId)}
+                        filesKnown={!!files.data}
                       />
                     );
                   })}
