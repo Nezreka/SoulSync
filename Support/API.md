@@ -198,6 +198,39 @@ After the music library folder moves, these point the library's file records at 
 - `GET /api/library/file-locations/status`: `{status, action, checked, total, result, preview, error, runs}`. `runs` lists recent runs, manual and from library scans, with `id`, `kind`, `status`, `repointed` and `groups`.
 - `POST /api/library/file-locations/runs/<id>/undo`: put a run's records back. A record changed since is left as it is. `POST /api/library/file-locations/stop` stops the running job.
 
+### Paired devices: listen anywhere (web UI and app routes)
+
+Settings > Devices pairs music apps with this server. A device gets its own token, never an API key. The admin routes are `@admin_only`; the device's own routes take the token in `X-Device-Token: sdt_...` (or `Authorization: Bearer sdt_...`) and no cookie. A request may carry a device token or an API key, not both (`400 device_one_credential`).
+
+A device token reaches only routes that opt in. Everything else answers `403 device_not_allowed` before it runs; an unknown or unpaired token gets `401 device_token_invalid`, one that missed its pick window `401 device_pick_expired`, and an unprofiled one on anything but its pick `403 device_pick_first`. A device never acts as an admin, even when its profile is one.
+
+Admin:
+
+- `GET /api/devices/identity`: `{lookup_id, fingerprint, public_key}`. The server fingerprint is the lookup ID's first 12 characters.
+- `GET /api/devices`: `{devices: [{id, name, platform, app, kind, profile_id, profile_name, scope, created_at, last_seen_at, last_ip, state, pick_seconds_left}]}`. `state` is `live` or `unprofiled` (waiting for its pick; `pick_seconds_left` says how long). Unpaired and expired ones are left off.
+- `PATCH /api/devices/<id>` `{name}`: rename. `DELETE /api/devices/<id>`: unpair now.
+- `POST /api/devices/profiles/<profile_id>/revoke`: unpair every device of a profile, `{revoked}`. Sign out everywhere, a new password and turning a profile off do the same; deleting a profile removes its devices.
+- `GET /api/devices/codes`: `{codes: [{id, note, created_at, expires_at, seconds_left, wrong_tries}]}`, the codes still waiting. Never the codes themselves.
+- `POST /api/devices/codes` `{note?}`: `201 {id, code, code_hash, expires_at, seconds_left, payload, payload_text, warnings}`. `code` is shown this once, as `XXXX-XXXX-XXXX-XXXX` (16 characters of Crockford base32, about 80 bits). It works once, for 10 minutes. `code_hash` is the SHA-256 hex of the code's 16 characters (uppercase, no dashes). `payload` is `{v, lookup_id, fingerprint, addresses, code}` and `payload_text` its compact JSON, what the QR carries. `409` when 20 codes already wait.
+- `DELETE /api/devices/codes/<id>`: cancel a waiting code.
+- `GET /api/devices/server`: `{lookup_id, fingerprint, public_key, addresses: [{kind, url}], remote_url, custom_urls, warnings, probe, guidance}`. `addresses` lists `local` ones first, then `remote`, then `custom`. `warnings` says so for a plain http address outside the home network.
+- `PUT /api/devices/addresses` `{remote_url, custom_urls}`: save the remote address (blank clears it) and up to 5 extra ones. `400` with the reason for an address that won't work. Answers like `GET /api/devices/server`.
+- `POST /api/devices/reachability`: a new one-time probe, and the server fetching its own remote address with it. `{result: {ok, code, words} | null, probe: {nonce, path, url, seconds_left, hits}, guidance}`. `result` is null with no remote address. `code` is `ok`, `not_this_server`, `blocked`, `certificate`, `timeout`, `dns` or `unreachable`.
+- `GET /api/devices/reachability`: `{probe}`, the newest probe and its `hits: [{ip, at, via, from_home}]` (`via` is `self` for the server's own fetch, `outside` for anything else, like a phone on mobile data).
+
+Open, no sign-in (these pass the login, launch PIN and profile gates):
+
+- `POST /api/devices/redeem` `{code, name, platform?, app?}`: `201 {token, device_id, pick_seconds, server: {lookup_id, fingerprint, public_key}}`. Burns the code; the token is shown this once and starts unprofiled. Every bad code answers `404 unknown_or_expired_code` the same way. Wrong codes from one address are held to 10 a minute (`429`, `Retry-After`), and 5 wrong tries on one code lock it. Plain http only works from this machine or the home network; anything else gets `403 https_required`.
+- `GET /api/devices/reachability/<nonce>`: the one-time probe URL. `{soulsync_probe: <nonce>}` (a small page for a browser) while the probe lives, else `404`.
+
+The device itself:
+
+- `GET /api/devices/me`: `{device, server}`: its name, `state`, profile and how long it has left to pick.
+- `GET /api/devices/me/profiles`: `{profiles: [{id, name, avatar_color, avatar_url, needs}]}`, the profiles it may pick. `needs` is `password` in login mode, `pin` for a profile with a PIN, else null. A music app only sees profiles with **Use music apps** (`music.apps`). `409` once it has picked.
+- `POST /api/devices/me/profile` `{profile_id, pin?, password?}`: the pick, once. The same checks as `POST /api/profiles/select` (wrong tries throttled the same way); a profile with a PIN always asks for it here. `404` for a profile that isn't on its list, `409` once picked or past its 15 minutes.
+
+Person invites are the same as Settings > People > Invites: `GET/POST /api/profiles/invites` (admin, or an admin API key). `POST` takes `{preset: {template_id}, note?, expires_hours?}`; a new one lasts a week (168 hours, 1 to 720) unless `expires_hours` says otherwise, works once, and whoever opens it makes their own profile following that template.
+
 ---
 
 ## MCP for AI clients

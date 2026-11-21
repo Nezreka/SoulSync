@@ -52,3 +52,125 @@ export interface ServerIdentity {
 
 export const getIdentity = (signal?: AbortSignal) =>
   call<ServerIdentity>('/api/devices/identity', { signal });
+
+const json = (method: string, body: unknown): RequestInit => ({
+  method,
+  body: JSON.stringify(body),
+});
+
+// ── paired devices ──
+
+export type DeviceState = 'live' | 'unprofiled' | 'expired' | 'revoked';
+
+export interface Device {
+  id: number;
+  name: string;
+  platform: string;
+  app: string;
+  kind: string;
+  profile_id: number | null;
+  profile_name: string | null;
+  created_at: string;
+  last_seen_at: string | null;
+  last_ip: string | null;
+  state: DeviceState;
+  pick_seconds_left: number | null;
+}
+
+export const getDevices = (signal?: AbortSignal) =>
+  call<{ devices: Device[] }>('/api/devices', { signal });
+
+export const revokeDevice = (id: number) =>
+  call<unknown>(`/api/devices/${id}`, { method: 'DELETE' });
+
+export const renameDevice = (id: number, name: string) =>
+  call<unknown>(`/api/devices/${id}`, json('PATCH', { name }));
+
+// ── invite codes ──
+
+export interface LiveCode {
+  id: number;
+  note: string | null;
+  created_at: string;
+  expires_at: number;
+  seconds_left: number;
+  wrong_tries: number;
+}
+
+export interface Address {
+  kind: 'local' | 'remote' | 'custom';
+  url: string;
+}
+
+export interface NewCode {
+  id: number;
+  code: string;
+  code_hash: string;
+  expires_at: number;
+  seconds_left: number;
+  payload: Record<string, unknown>;
+  payload_text: string;
+  warnings: string[];
+}
+
+export const getCodes = (signal?: AbortSignal) =>
+  call<{ codes: LiveCode[] }>('/api/devices/codes', { signal });
+
+export const createCode = (note: string) =>
+  call<NewCode>('/api/devices/codes', json('POST', { note }));
+
+export const cancelCode = (id: number) =>
+  call<unknown>(`/api/devices/codes/${id}`, { method: 'DELETE' });
+
+// ── this server: addresses and reachability ──
+
+export interface Hit {
+  ip: string;
+  at: number;
+  via: 'self' | 'outside';
+  from_home: boolean;
+}
+
+export interface Probe {
+  nonce: string;
+  path: string;
+  url: string | null;
+  seconds_left: number;
+  hits: Hit[];
+}
+
+export interface Guidance {
+  id: string;
+  title: string;
+  body: string;
+}
+
+export interface ServerInfo extends ServerIdentity {
+  addresses: Address[];
+  remote_url: string | null;
+  custom_urls: string[];
+  warnings: string[];
+  probe: Probe | null;
+  guidance: Guidance[];
+}
+
+export interface CheckResult {
+  ok: boolean;
+  code: string;
+  words: string;
+}
+
+export const getServer = (signal?: AbortSignal) =>
+  call<ServerInfo>('/api/devices/server', { signal });
+
+export const saveAddresses = (remote_url: string, custom_urls: string[]) =>
+  call<ServerInfo>('/api/devices/addresses', json('PUT', { remote_url, custom_urls }));
+
+export const checkReachability = () =>
+  call<{ result: CheckResult | null; probe: Probe; guidance: Guidance[] }>(
+    '/api/devices/reachability',
+    json('POST', {}),
+  );
+
+export const getProbe = (signal?: AbortSignal) =>
+  call<{ probe: Probe | null }>('/api/devices/reachability', { signal });

@@ -21,6 +21,7 @@ import { musicbrainzError, syncMetadataSourceSelection } from './tabs/connection
 import { testConnection } from './tabs/connections-servers';
 import { servicesModel } from './tabs/connections-services';
 import { ConnectionsTab } from './tabs/connections-tab';
+import { DevicesTab } from './tabs/devices/devices-tab';
 import { DiscoveryTab } from './tabs/discovery-tab';
 import { DownloadsTab } from './tabs/downloads-tab';
 import { LibraryTab } from './tabs/library-folders';
@@ -40,6 +41,7 @@ export type SettingsTabKey =
   | 'library'
   | 'discovery'
   | 'people'
+  | 'devices'
   | 'appearance'
   | 'advanced'
   | 'logs';
@@ -85,6 +87,7 @@ export const SETTINGS_TABS: Partial<Record<SettingsTabKey, ComponentType<Setting
   advanced: SystemTab,
   appearance: AppearanceTab,
   connections: ConnectionsTab,
+  devices: DevicesTab,
   discovery: DiscoveryTab,
   downloads: DownloadsTab,
   library: LibraryTab,

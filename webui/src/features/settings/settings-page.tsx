@@ -65,6 +65,11 @@ const TABS: Array<[key: string, label: string, path: string]> = [
     'M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z',
   ],
   [
+    'devices',
+    'Devices',
+    'M17 1H7c-1.1 0-2 .9-2 2v18c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2V3c0-1.1-.9-2-2-2zm0 18H7V5h10v14zm-5 3a1 1 0 1 0 0-2 1 1 0 0 0 0 2z',
+  ],
+  [
     'appearance',
     'Appearance',
     'M12 3c-4.97 0-9 4.03-9 9 0 2.12.74 4.07 1.97 5.61L4.35 19.4a1 1 0 0 0 .71 1.6h4.52A8.96 8.96 0 0 0 12 21c4.97 0 9-4.03 9-9s-4.03-9-9-9zm-5 9c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1zm3-4c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1zm4 0c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1zm3 4c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1z',
@@ -154,7 +159,8 @@ export function SettingsPage({
       if (frame) cancelAnimationFrame(frame);
     };
   }, []);
-  // People is for admins only (the page is too, but a member never sees it)
+  // People and Devices are for admins only (the page is too, but a member
+  // never sees them)
   const viewer = useViewer();
   const slot = (tab: string, part?: string) => (
     <Slot key={`${tab}/${part ?? ''}`} tab={tab} part={part} store={store} tabs={tabs} />
@@ -208,7 +214,7 @@ export function SettingsPage({
                   type="button"
                   className={key === 'connections' ? 'stg-tab active' : 'stg-tab'}
                   data-tab={key}
-                  hidden={key === 'people' && !viewer.admin}
+                  hidden={(key === 'people' || key === 'devices') && !viewer.admin}
                   onClick={() => switchSettingsTab(key)}
                 >
                   <span className={`stg-tab-badge badge-${key}`}>
@@ -359,6 +365,7 @@ export function SettingsPage({
               </div>
             </div>
             {slot('people')}
+            {slot('devices')}
             {slot('logs')}
           </div>
         </div>

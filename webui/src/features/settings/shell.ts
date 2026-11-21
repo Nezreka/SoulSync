@@ -340,6 +340,10 @@ export const TAB_TITLES: Record<string, { title: string; sub: string }> = {
     title: 'People',
     sub: 'Who uses SoulSync here, templates, the global policy and invites',
   },
+  devices: {
+    title: 'Devices',
+    sub: 'Pair music apps, the addresses they use and whether outside can reach this server',
+  },
   appearance: {
     title: 'Appearance',
     sub: 'Visual themes, accents, animations, and the sidebar weather',
