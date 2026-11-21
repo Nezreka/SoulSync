@@ -27,7 +27,7 @@ import {
   saveRules,
 } from './-lib/guide';
 import { albumArtwork } from './-lib/images';
-import { hashSeed, programsInWindow, type GuideProgram } from './-lib/schedule';
+import { hashSeed, mergeIntoBlocks, programsInWindow, type GuideProgram } from './-lib/schedule';
 import { genresOf } from './-lib/video';
 import {
   favoritesQuery,
@@ -148,6 +148,14 @@ function GuidePage() {
   const [rules, setRules] = useState<ChannelRule[]>(() => loadRules(profileId));
   const [making, setMaking] = useState(false);
   const [picked, setPicked] = useState<Picked | null>(null);
+  // what the pointer or focus rests on in the grid; settles before the panel follows
+  const [preview, setPreview] = useState<Picked | null>(null);
+  const previewTimer = useRef<number | undefined>(undefined);
+  const hoverPreview = (p: Picked) => {
+    window.clearTimeout(previewTimer.current);
+    previewTimer.current = window.setTimeout(() => setPreview(p), 140);
+  };
+  useEffect(() => () => window.clearTimeout(previewTimer.current), []);
 
   // the query results change identity every render; when their data lands is what matters
   const playlistKey = playlistTracks.map((q) => q.dataUpdatedAt).join(',');
@@ -244,6 +252,19 @@ function GuidePage() {
       channels: shown.filter((c) => c.kind === group.kind),
     })),
   ].filter((group) => group.channels.length);
+
+  // the panel above the grid starts on what's on now on the first channel
+  const firstChannel = groups[0]?.channels[0];
+  const firstOn = useMemo<Picked | null>(() => {
+    if (!firstChannel) return null;
+    const programs = schedules.get(firstChannel.id) ?? [];
+    const program = programs.find((p) => p.start <= now && p.end > now);
+    if (!program) return null;
+    const block = firstChannel.music
+      ? mergeIntoBlocks(programs).find((b) => b.start <= now && b.end > now)
+      : undefined;
+    return { channel: firstChannel, program, block };
+  }, [firstChannel, schedules, now]);
 
   // the music channels take a library pass the first time; the guide doesn't wait for them
   const loading = catalog.isLoading || playlists.isLoading;
@@ -343,6 +364,16 @@ function GuidePage() {
         />
       ) : null}
 
+      {!picked && view === 'grid' && (preview ?? firstOn) ? (
+        <GuideDetail
+          picked={(preview ?? firstOn)!}
+          schedules={schedules}
+          now={now}
+          favorite={favorites.set.has((preview ?? firstOn)!.channel.id)}
+          onFavorite={favorites.toggle}
+        />
+      ) : null}
+
       {picked ? (
         <GuideDetail
           picked={picked}
@@ -390,6 +421,7 @@ function GuidePage() {
           favorites={favorites.set}
           onFavorite={favorites.toggle}
           onPick={setPicked}
+          onPreview={hoverPreview}
           label={`Guide, ${GUIDE_WINDOW_HOURS} hours from ${new Date(from).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`}
         />
       ) : null}

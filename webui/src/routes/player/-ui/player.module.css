@@ -2220,7 +2220,7 @@
 /* ── the guide ───────────────────────────────────────────────────────── */
 
 .guide {
-  --g-chan: calc(var(--u) * 15);
+  --g-chan: calc(var(--u) * 17);
   --g-row: calc(var(--u) * 4.4);
   --g-head: calc(var(--u) * 2.4);
 
@@ -2317,7 +2317,10 @@
 }
 
 .guideNum {
+  position: relative;
+  display: grid;
   flex: none;
+  place-items: center start;
   min-width: calc(var(--u) * 2.1);
   color: var(--pl-text-3);
   font-size: calc(var(--u) * 0.8);
@@ -4242,6 +4245,9 @@ a.crewRow:hover {
 }
 
 .guideTunePlay {
+  position: absolute;
+  top: 50%;
+  left: 0;
   display: grid;
   flex: none;
   place-items: center;
@@ -4251,7 +4257,7 @@ a.crewRow:hover {
   background: var(--accent);
   color: var(--pl-bg);
   opacity: 0;
-  transform: scale(0.85);
+  transform: translateY(-50%) scale(0.85);
   transition:
     opacity var(--dur-fast) ease,
     transform var(--dur-fast) var(--pl-ease);
@@ -4266,7 +4272,18 @@ a.crewRow:hover {
 .guideTune:hover .guideTunePlay,
 .guideTune:focus-visible .guideTunePlay {
   opacity: 1;
-  transform: none;
+  transform: translateY(-50%);
+}
+
+.guideTune:hover .guideNumText,
+.guideTune:focus-visible .guideNumText {
+  opacity: 0;
+}
+
+/* the preview above the grid: it follows the pointer, so it holds its size */
+.guideDetail[data-preview='true'] {
+  min-height: calc(var(--u) * 11);
+  animation: none;
 }
 
 .guideTune:hover .guideChannelName,

@@ -71,13 +71,19 @@ function ChannelCell({
         onClick={() => void tuneIn(channel)}
         data-nav
       >
-        <span className={s.guideNum}>{channel.number}</span>
-        <span className={s.guideChannelText}>
-          <span className={s.guideChannelName}>{channel.name}</span>
-          <span className={s.guideChannelBlurb}>{channel.blurb}</span>
+        <span className={s.guideNum}>
+          <span className={s.guideNumText}>{channel.number}</span>
+          <span className={s.guideTunePlay} aria-hidden="true">
+            <PlayIcon />
+          </span>
         </span>
-        <span className={s.guideTunePlay} aria-hidden="true">
-          <PlayIcon />
+        <span className={s.guideChannelText}>
+          <span className={s.guideChannelName} title={channel.name}>
+            {channel.name}
+          </span>
+          <span className={s.guideChannelBlurb} title={channel.blurb}>
+            {channel.blurb}
+          </span>
         </span>
       </button>
       <StarButton channel={channel} on={favorite} onToggle={onFavorite} />
@@ -95,6 +101,7 @@ export function GuideGrid({
   favorites,
   onFavorite,
   onPick,
+  onPreview,
   label,
 }: {
   groups: { kind: string; label: string; channels: Channel[] }[];
@@ -106,6 +113,8 @@ export function GuideGrid({
   favorites: ReadonlySet<string>;
   onFavorite: (channel: Channel) => void;
   onPick: (picked: Picked) => void;
+  /** a program the pointer or focus rests on: the panel above shows it */
+  onPreview?: (picked: Picked) => void;
   label: string;
 }) {
   const width = ((to - from) / 60000) * pxPerMinute;
@@ -161,8 +170,9 @@ export function GuideGrid({
                     start: block.start,
                     end: block.end,
                     picked: { channel, program: block.items[0], block },
-                    title: `${channel.name} mix`,
-                    sub: blockArtists(block),
+                    // the channel's name is on the left: the cell says who's on
+                    title: blockArtists(block, 2),
+                    sub: `${block.items.length} songs`,
                   }))
                 : programs.map((p) => ({
                     key: `${p.key}-${p.start}`,
@@ -197,6 +207,8 @@ export function GuideGrid({
                           style={{ left: left + 2, width: Math.max(8, right - left - 4) }}
                           title={`${cell.title}${cell.sub ? ` · ${cell.sub}` : ''}\n${clock(cell.start)} – ${clock(cell.end)}`}
                           onClick={() => onPick(cell.picked)}
+                          onMouseEnter={() => onPreview?.(cell.picked)}
+                          onFocus={() => onPreview?.(cell.picked)}
                           data-nav
                         >
                           <span className={s.guideProgramTitle}>{cell.title}</span>
@@ -326,7 +338,8 @@ export function GuideDetail({
   favorite: boolean;
   onFavorite: (channel: Channel) => void;
   onRemoveRule?: () => void;
-  onClose: () => void;
+  /** absent: it's the preview (what the pointer rests on), with nothing to close */
+  onClose?: () => void;
 }) {
   const { channel, program, block } = picked;
   const start = block?.start ?? program.start;
@@ -340,7 +353,12 @@ export function GuideDetail({
   const startQueue = channelQueue(channelPrograms, block ? block.items[0] : program);
 
   return (
-    <section className={s.guideDetail} aria-live="polite" aria-label="Program">
+    <section
+      className={s.guideDetail}
+      data-preview={onClose ? undefined : 'true'}
+      aria-live="polite"
+      aria-label="Program"
+    >
       <div className={s.guideDetailArt}>
         <Art src={(block ? airing : program).art} alt={program.title} />
       </div>
@@ -370,7 +388,7 @@ export function GuideDetail({
               onPlay={() => {
                 // in at the minute it's on, through the tuner: channel up and down work from here
                 tuneIn(channel);
-                onClose();
+                onClose?.();
               }}
             />
           ) : null}
@@ -381,7 +399,7 @@ export function GuideDetail({
               startQueue.length
                 ? () => {
                     playItems(startQueue);
-                    onClose();
+                    onClose?.();
                   }
                 : undefined
             }
@@ -391,17 +409,31 @@ export function GuideDetail({
               Details
             </PlayerLink>
           ) : null}
-          <button type="button" className={s.btn} onClick={() => onFavorite(channel)} data-nav>
-            {favorite ? '★ Favorite' : '☆ Add to favorites'}
+          <button
+            type="button"
+            className={s.btn}
+            aria-pressed={favorite}
+            aria-label={
+              favorite
+                ? `Remove ${channel.name} from favorites`
+                : `Add ${channel.name} to favorites`
+            }
+            title={favorite ? 'A favorite channel' : 'Add to favorites'}
+            onClick={() => onFavorite(channel)}
+            data-nav
+          >
+            {favorite ? '★' : '☆'}
           </button>
           {onRemoveRule ? (
             <button type="button" className={s.btn} onClick={onRemoveRule} data-nav>
               Remove channel
             </button>
           ) : null}
-          <button type="button" className={s.btn} onClick={onClose} data-nav>
-            Close
-          </button>
+          {onClose ? (
+            <button type="button" className={s.btn} onClick={onClose} data-nav>
+              Close
+            </button>
+          ) : null}
         </div>
       </div>
       <div className={s.guideDetailSide}>
