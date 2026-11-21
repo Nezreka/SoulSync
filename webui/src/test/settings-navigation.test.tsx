@@ -23,7 +23,7 @@ afterEach(() => {
 const open = () =>
   document.querySelector('.stg-tab[aria-current="page"]')?.getAttribute('data-tab');
 
-it('uses one category bar of eight tabs', () => {
+it('uses one category bar of nine tabs', () => {
   expect(document.querySelectorAll('.stg-tabbar')).toHaveLength(1);
   // ten became eight: Sources went into Downloads, Logs into System
   expect(
@@ -35,14 +35,16 @@ it('uses one category bar of eight tabs', () => {
     'library',
     'discovery',
     'people',
+    'devices',
     'appearance',
     'advanced',
   ]);
-  // #2166: People is for admins only
+  // #2166: People is for admins only, and so is Devices (listen anywhere)
   expect(document.querySelectorAll('.stg-tab:not([hidden])')).toHaveLength(7);
-  expect(document.querySelector<HTMLButtonElement>('.stg-tab[data-tab="people"]')!.hidden).toBe(
-    true,
-  );
+  for (const tab of ['people', 'devices'])
+    expect(document.querySelector<HTMLButtonElement>(`.stg-tab[data-tab="${tab}"]`)!.hidden).toBe(
+      true,
+    );
   expect(document.querySelector('.stg-nav-rail')).toBeNull();
 });
 

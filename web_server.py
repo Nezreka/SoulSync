@@ -811,6 +811,72 @@ def _require_login_enabled():
         return _last_known_require_login
 
 
+# --- Paired devices (before_request hook) ---
+# Registered ahead of every other gate: a request with a device token is
+# answered here (core/connect/device_access.py). only routes that opt in
+# with @device_pick / @device_playback are reachable, and the login,
+# launch-PIN and profile gates below step aside for it (g.device_auth).
+def _device_refusal(status, code, words):
+    return jsonify({"success": False, "error": code, "message": words}), status
+
+
+@app.before_request
+def _device_token_gate():
+    from core.connect.device_access import OK, decide, device_access, request_token
+    token = request_token(request.headers)
+    if not token:
+        return None
+    g.request_start_monotonic = time.perf_counter()
+    g.request_start_cpu = time.thread_time()
+    # one credential per request: a device token never rides with an api key
+    if request.headers.get('X-API-Key') or request.args.get('api_key'):
+        return _device_refusal(400, "device_one_credential", "Send the device token or an API key, not both.")
+    from core.connect import device_tokens as _dt
+    database = get_database()
+    try:
+        row = _dt.find(database, token)
+    except Exception as e:
+        logger.warning("device token lookup failed: %s", e)
+        return _device_refusal(503, "device_check_failed", "Couldn't check this device. Try again in a moment.")
+    view = app.view_functions.get(request.endpoint) if request.endpoint else None
+    status, code, words = decide(row, device_access(view) if view else None, time.time())
+    if status != OK:
+        return _device_refusal(status, code, words)
+    g.device_auth = True
+    g.device = {k: row.get(k) for k in ('id', 'name', 'platform', 'app', 'kind', 'profile_id', 'scope')}
+    _dt.touch(database, row['id'], request.remote_addr or '')
+    # a device acts as its profile, never as an admin, and never downloads
+    g.is_admin = False
+    g.can_download = False
+    if row.get('profile_id') is None:
+        g.profile_id = None
+        g.profile_name = "Unpaired device"
+        g.allowed_sides = 'none'
+        g.perms, g.perms_source = None, 'none'
+        return None
+    pid = int(row['profile_id'])
+    try:
+        profile = database.get_profile(pid)
+        from core.connect.pick import may_use
+        if not may_use(database, profile, row.get('kind') or ''):
+            return _device_refusal(403, "device_profile_not_allowed",
+                                   "This profile can't use this app any more.")
+        from core.permission_store import effective_for as _perm_effective_for
+        g.perms, g.perms_source = _perm_effective_for(database, profile)
+    except Exception as e:
+        logger.warning("device %s: profile %s unreadable: %s", row.get('id'), pid, e)
+        return _device_refusal(503, "device_check_failed", "Couldn't check this device. Try again in a moment.")
+    g.profile_id = pid
+    g.profile_name = profile.get('name') or ("Profile %s" % pid)
+    g.allowed_sides = profile.get('allowed_sides') or 'music'
+    g.request_limit = int(profile.get('request_limit') or 0)
+    g.request_limit_days = int(profile.get('request_limit_days') or 7)
+    from core.permissions import page_denied
+    if page_denied(request.path, profile.get('allowed_pages'), bool(profile.get('is_admin'))):
+        return jsonify({"success": False, "error": "page_not_allowed"}), 403
+    return None
+
+
 # --- API key scope (before_request hook) ---
 # Registered ahead of the login / launch-PIN / profile gates on purpose: each of
 # them waves a valid key through, so a read-scope key has to be held to its
@@ -829,6 +895,8 @@ def _enforce_login():
     reach the page shell + the login flow + the key-authed public API."""
     if not _require_login_enabled():
         return
+    if g.get('device_auth'):
+        return  # a paired device, answered by _device_token_gate
     # API keys are admin-minted: a valid key gets the same trust as the
     # /api/v1/* path exemption, so key-authed callers without cookie sessions
     # (e.g. the Companion extension's <img> tags on /api/image-proxy) pass.
@@ -867,6 +935,8 @@ def _enforce_launch_pin():
     # owns the gate and this no-ops.
     if _require_login_enabled():
         return
+    if g.get('device_auth'):
+        return  # a paired device, answered by _device_token_gate
     try:
         require_pin = bool(config_manager.get('security.require_pin_on_launch', False)) if config_manager else False
     except Exception:
@@ -934,6 +1004,8 @@ app.config[_PERM_GATE_FLAG] = True
 @app.before_request
 def _set_profile_context():
     """Set g.profile_id from session for every request"""
+    if g.get('device_auth'):
+        return  # a paired device, answered by _device_token_gate
     g.request_start_monotonic = time.perf_counter()
     g.request_start_cpu = time.thread_time()
 
@@ -25014,6 +25086,13 @@ from api.metasync_settings import configure as _cfg_ms, create_blueprint as _bp_
 _cfg_ms(config_manager=config_manager)
 app.register_blueprint(_bp_ms())
 
+# listen anywhere (api/devices.py): this server's identity, paired devices,
+# invite codes and the address list for Settings > Devices
+from api.devices import configure as _cfg_dev, create_blueprint as _bp_dev
+_cfg_dev(get_database=get_database, config_manager=config_manager,
+         require_login_enabled=_require_login_enabled)
+app.register_blueprint(_bp_dev())
+
 # NOTE: the audiobook wishlist is NOT started here. It is drained by the shared
 # automation engine as the 'audiobook_process_wishlist' system automation, the same
 # way music and video drain theirs — so it can be paused, rescheduled or run by hand
@@ -26483,6 +26562,14 @@ def start_runtime_services():
         # Opt-out env for anyone who wants it off.
         if os.environ.get('SOULSYNC_NO_DISCOVER_WARMUP', '0') != '1':
             _start_discover_warmer()
+
+        # the server identity (core/connect/server_key.py): made or restored
+        # now, so its encrypted copy is in the database before any backup
+        try:
+            from core.connect.server_key import server_identity as _server_identity
+            logger.info("Server fingerprint: %s", _server_identity(get_database(), config_manager).fingerprint)
+        except Exception as _ident_err:
+            logger.error("Server identity unavailable: %s", _ident_err)
 
         _runtime_started = True
 

@@ -128,6 +128,12 @@ const PATHS = {
       <path d="M4 9h10a5.5 5.5 0 0 1 0 11h-3" />
     </>
   ),
+  phone: (
+    <>
+      <rect x="7" y="2.5" width="10" height="19" rx="2.2" />
+      <path d="M11 18.5h2" />
+    </>
+  ),
   logs: (
     <>
       <path d="M6 3.500h8l4 4V20.500H6z" />

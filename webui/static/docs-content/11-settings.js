@@ -238,6 +238,9 @@ On **Library › Folders**. Your **Music library folder** is already covered —
 
 Backups don't live in Settings — they're on the **Tools** page, in the **Backup Manager** card: create a backup now, download copies for off-site storage, and restore from any previous backup. Scheduled backups run through the Backup Database system automation.
 
+> [!WARNING]
+> **A backup is a secret.** It holds this server's identity (the key behind the **Server fingerprint** under Settings > System > Security), encrypted with the same \`.encryption_key\` as your saved passwords. Keep backups and that key private. A backup restored on another machine together with its \`.encryption_key\` answers as the same server, so **never run a restored copy next to the original**: shut the old one down first, or paired devices end up talking to whichever one answered last.
+
 ## VACUUM
 
 Over time the database accumulates unused space from deleted rows. **Settings → System → Maintenance** holds these. **Compact database** (in the danger zone, a VACUUM) rewrites the database file to reclaim that space. Back up first: it needs free disk space about the size of the database (SoulSync refuses to start it without that), and the database is locked while it runs, which on a very large library can take a long time. **Incremental vacuum** is a mode you switch on (its **Turn on** button): after a one-time full compact, freed pages are handed back in slices by Cache Maintenance.

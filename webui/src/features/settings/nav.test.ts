@@ -16,7 +16,7 @@ import {
 beforeEach(() => nav.reset());
 
 describe('the tabs', () => {
-  it('are eight, in setup order', () => {
+  it('are nine, in setup order (Devices after People)', () => {
     expect(TABS.map((tab) => tab.label)).toEqual([
       'Connections',
       'Downloads',
@@ -24,6 +24,7 @@ describe('the tabs', () => {
       'Library',
       'Discovery',
       'People',
+      'Devices',
       'Appearance',
       'System',
     ]);

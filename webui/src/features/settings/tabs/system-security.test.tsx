@@ -72,13 +72,14 @@ async function loaded(settings: SettingsPayload = { security: {} }) {
 }
 
 describe('the cards', () => {
-  it('three cards, every control in its own, named without a colon, no emoji or step numbers', () => {
+  it('four cards, every control in its own, named without a colon, no emoji or step numbers', () => {
     const { container } = section();
     const cards = [...container.querySelectorAll<HTMLElement>('[data-card]')];
     expect(cards.map((c) => c.dataset.card)).toEqual([
       'Lock with a PIN',
       'Sign-in',
       'Reverse proxy',
+      'Server identity',
     ]);
     const home: Record<string, string[]> = {
       'Lock with a PIN': ['security-require-pin', 'security-new-pin', 'security-confirm-pin'],
@@ -100,6 +101,7 @@ describe('the cards', () => {
         'security-auth-proxy-header',
         'security-cors-origins',
       ],
+      'Server identity': ['security-server-fingerprint'],
     };
     for (const card of cards)
       for (const id of home[card.dataset.card!]) expect(card.contains(el(id)), id).toBe(true);

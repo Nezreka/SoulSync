@@ -27,6 +27,7 @@ export type SettingsTab =
   | 'library'
   | 'discovery'
   | 'people'
+  | 'devices'
   | 'appearance'
   | 'advanced';
 
@@ -1371,6 +1372,36 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
     open: { people: 'activity' },
     hint: 'who changed what',
     keywords: 'activity audit log history changes',
+  },
+
+  // ── Devices: listen anywhere (devices/devices-tab.tsx) ──
+  {
+    label: 'Add a device',
+    tab: 'devices',
+    anchor: id('devices-add'),
+    file: 'devices/devices-tab.tsx',
+    hint: 'pair a phone, car or speaker app with a code',
+    keywords:
+      'device devices pair pairing code qr phone app car speaker listen anywhere unpair revoke',
+  },
+  {
+    id: 'setting:devices:remote-address',
+    label: 'Remote address',
+    tab: 'devices',
+    anchor: id('devices-remote-url'),
+    file: 'devices/devices-tab.tsx',
+    hint: 'how devices reach this server from outside',
+    keywords:
+      'remote address domain tunnel port forward reachability reachable outside https tailscale',
+  },
+  {
+    id: 'setting:advanced:server-fingerprint',
+    label: 'Server fingerprint',
+    tab: 'advanced',
+    anchor: id('security-server-fingerprint'),
+    file: 'devices/server-fingerprint.tsx',
+    hint: "this server's own ID, shown in paired apps",
+    keywords: 'fingerprint server identity lookup id key server_key',
   },
 
   // ── Logs ──

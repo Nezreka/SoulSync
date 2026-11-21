@@ -571,10 +571,12 @@ A visual **WHEN → DO → THEN** builder shared by music and video.
 - **Make SoulSync yours**: every profile picks what shows up, from **Customize** at the bottom of the sidebar (or Settings → Appearance). Start from **Simple** or **Everything**, then switch single parts on or off. Each template has its own Sidebar & look, and admins can set it for one person and lock it.
 - **Own library per profile** (Plex / Jellyfin / Navidrome 0.58+): a profile can have its own folder and server library. On Navidrome the profile picks its library under its own Navidrome login; its scans read only that library and its playlists are written as that user.
 - **Content caps**: G / PG / PG-13 / R per profile for movies, with TV following it or set on its own, and hide explicit music.
+- **Devices** (Settings > Devices): pair a phone, car or speaker app with a one-time code (or its QR). Each device picks a profile, with that profile's PIN or password, and can only play: never settings, downloads or people. Unpair any device at once. **Use music apps** is a permission, off on the Kids template. The page also holds this server's addresses (home ones found on their own, plus your remote address), a reachability check with a phone link for mobile data, and person invites.
 
 ### Security
 
 - An admin PIN with brute-force limits, or full **username/password login** with recovery questions.
+- Each server has its own identity (`server_key` next to the database) and a **server fingerprint** under Settings > System > Security that paired apps show too. Database backups carry it, encrypted: keep backups private, and never run a restored copy next to the original.
 - Sign in with Plex or with your own OIDC provider, or **OIDC only**, which turns every other sign-in off. If the provider is ever down, `SOULSYNC_OIDC_ONLY_OVERRIDE=off` and a restart let the admin back in with their password. Setup and troubleshooting: [docs/guides/OIDC.md](docs/guides/OIDC.md).
 - Or trust a forward-auth header from Authelia, Authentik or oauth2-proxy.
 - Reverse-proxy and sub-path aware.

@@ -40,6 +40,7 @@ import {
   Value,
 } from '../ui';
 import s from '../ui/settings.module.css';
+import { ServerFingerprint } from './devices/server-fingerprint';
 import { useLoadedDraft } from './library-card';
 import { openPeopleSettings } from './people/people-tab';
 import { text } from './source-panels';
@@ -903,6 +904,9 @@ export function SecurityView({ store }: { store: SettingsStore }) {
             />
           </Row>
         </Card>
+
+        {/* this server's own identity (PAIRING_SPEC.md 1) */}
+        <ServerFingerprint />
       </div>
     </>
   );

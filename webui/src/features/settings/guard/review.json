@@ -171,6 +171,18 @@
     {
       "match": "aria-label=\"Switched on\"",
       "click": ["Save"]
+    },
+    {
+      "match": "^#devices-remote-url$",
+      "value": "https://music2.example.com",
+      "click": ["#devices-save-addresses"],
+      "why": "Devices: the addresses save with their own Save addresses button (PUT /api/devices/addresses), not the settings store"
+    },
+    {
+      "match": "^#devices-extra-urls$",
+      "value": "https://box.tail1234.ts.net",
+      "click": ["#devices-save-addresses"],
+      "why": "Devices: the addresses save with their own Save addresses button (PUT /api/devices/addresses), not the settings store"
     }
   ],
   "noSave": [

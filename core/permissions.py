@@ -475,6 +475,10 @@ CATALOGUE_ROWS: Tuple[Perm, ...] = (
     _p("music.access", BOOL, "music", "Music side", "Library, search and discover.",
        default=True, legacy="allowed_sides",
        enforced_at=("NEW music-side gate (S15)",)),
+    _p("music.apps", BOOL, "music", "Use music apps",
+       "Listen from music apps paired in Settings > Devices.", default=True,
+       needs=("music.access",),
+       enforced_at=("core/connect/pick.py: the pick list and every request a music app makes",)),
     _p("music.get", MODE, "music", "Music requests",
        "Auto-approve, Require approval or Requests off.", default="download", values=MODES,
        needs=("music.access",), legacy="can_download",
@@ -1079,6 +1083,9 @@ def perms_from_legacy(profile: Mapping[str, Any]) -> Tuple[Dict[str, Any], List[
         perms[pid] = "download" if dl else "ask"
     perms["books.get"] = perms["podcasts.get"] = "download" if dl else "none"
     perms["music.hide_explicit"] = bool(profile.get("hide_explicit"))
+    # no column says it. a profile that hides explicit music is a child's
+    # (the Kids preset), and music apps start off for children
+    perms["music.apps"] = not perms["music.hide_explicit"]
     rating = _norm_rating(profile.get("max_rating"))
     if rating is None:
         reasons.append("max_rating %r has no catalogue rating" % (profile.get("max_rating"),))
@@ -1269,6 +1276,7 @@ BUILTIN_TEMPLATES: Tuple[Dict[str, Any], ...] = (
      "perms": _builtin("both", True, False, "any")},
     {"slug": "teen", "name": "Teen", "description": "Movies up to PG-13, asks before downloading.",
      "perms": _builtin("both", False, False, "PG-13")},
+    # music apps start off here (perms_from_legacy: clean music is a child's)
     {"slug": "kids", "name": "Kids", "description": "Clean music, movies up to PG, asks for everything.",
      "perms": _builtin("both", False, True, "PG")},
     {"slug": "guest", "name": "Guest", "description": "Listens to music, nothing else.",
@@ -1582,6 +1590,13 @@ def api_key_only(view_fn):
     """declares a route only an api key reaches (/api/v1, the lidarr shim,
     mcp). marks only; the key check is the route's (api.auth.require_api_key)."""
     return _mark(view_fn, ("api_key", None))
+
+
+def device_only(view_fn):
+    """declares a route only a paired device calls (its pick, who it is).
+    marks only; the device gate (core.connect.device_access) and the route
+    check the device token."""
+    return _mark(view_fn, ("device", None))
 
 
 def declared_access(view_fn) -> Optional[Tuple[str, Any]]:
@@ -1925,6 +1940,7 @@ __all__ = ["profile_can_download", "owner_may_get", "owner_mode", "download_deni
            "floor_map", "perms_from_legacy", "template_from_legacy", "legacy_from_perms",
            "legacy_behaviour", "cache_matches", "match_template", "signup_overrides", "make_context",
            "context_from_g", "can", "may_moderate", "may_see_request", "refusal", "refusal_body",
-           "REFUSAL_STATUS", "NOT_ALLOWED", "requires", "requires_any", "public", "self_only", "declared_access",
+           "REFUSAL_STATUS", "NOT_ALLOWED", "requires", "requires_any", "public", "self_only", "device_only",
+           "declared_access",
            "ACCESS_ATTR", "QualityDecision", "QUALITY_NOT_ALLOWED", "resolve_request_quality",
            "summarize", "catalogue_payload", "is_admin_row"]

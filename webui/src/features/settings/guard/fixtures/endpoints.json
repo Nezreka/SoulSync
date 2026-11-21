@@ -25,6 +25,51 @@
   "/api/dev-mode": {
     "enabled": false
   },
+  "/api/devices": {
+    "success": true,
+    "devices": [
+      {
+        "id": 1,
+        "name": "Car stereo",
+        "platform": "Android",
+        "app": "Music player",
+        "kind": "music",
+        "profile_id": 2,
+        "profile_name": "Mags",
+        "scope": "playback",
+        "created_at": "2026-11-19 18:00:00",
+        "last_seen_at": "2026-11-20 16:40:00",
+        "last_ip": "203.0.113.7",
+        "state": "live",
+        "pick_seconds_left": null
+      }
+    ]
+  },
+  "/api/devices/codes": {
+    "success": true,
+    "codes": []
+  },
+  "/api/devices/server": {
+    "success": true,
+    "lookup_id": "ae0396a668c30000000000000000000000000000000000000000000000000000",
+    "fingerprint": "ae0396a668c3",
+    "public_key": "x",
+    "addresses": [
+      {
+        "kind": "local",
+        "url": "http://192.168.1.5:8008"
+      },
+      {
+        "kind": "remote",
+        "url": "https://music.example.com"
+      }
+    ],
+    "remote_url": "https://music.example.com",
+    "custom_urls": [],
+    "warnings": [],
+    "probe": null,
+    "guidance": []
+  },
   "/api/discovery/hemisphere": {
     "hemisphere": "southern"
   },

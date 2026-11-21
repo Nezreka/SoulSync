@@ -9166,6 +9166,44 @@
       "asked": "guard-probe",
       "noSave": "a filter box over a list on the page: saves nothing (Enter in the genre box adds a genre, pinned by the genreWhitelist composite)"
     },
+    "#devices-remote-url": {
+      "sel": "#devices-remote-url",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "https://music.example.com",
+      "to": "https://music2.example.com",
+      "saves": {
+        "requests": [
+          {
+            "method": "PUT",
+            "url": "/api/devices/addresses",
+            "body": "{\"remote_url\":\"https://music2.example.com\",\"custom_urls\":[]}"
+          }
+        ]
+      },
+      "asked": "https://music2.example.com",
+      "click": ["#devices-save-addresses"]
+    },
+    "#devices-extra-urls": {
+      "sel": "#devices-extra-urls",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "https://box.tail1234.ts.net",
+      "saves": {
+        "requests": [
+          {
+            "method": "PUT",
+            "url": "/api/devices/addresses",
+            "body": "{\"remote_url\":\"https://music.example.com\",\"custom_urls\":[\"https://box.tail1234.ts.net\"]}"
+          }
+        ]
+      },
+      "asked": "https://box.tail1234.ts.net",
+      "click": ["#devices-save-addresses"]
+    },
     "#video-server-pick": {
       "sel": "#video-server-pick",
       "kind": "radiogroup",
@@ -11152,6 +11190,13 @@
     },
     "\"People\"": {
       "label": "People",
+      "anchor": "",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "\"Devices\"": {
+      "label": "Devices",
       "anchor": "",
       "count": 1,
       "sides": ["music", "video"],
@@ -14177,6 +14222,52 @@
     "#ppl-screen-people \"Add person\"": {
       "label": "Add person",
       "anchor": "ppl-screen-people",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#devices-add": {
+      "id": "devices-add",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#stg-view-devices-all \"Rename\"": {
+      "label": "Rename",
+      "anchor": "stg-view-devices-all",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#stg-view-devices-all \"Unpair\"": {
+      "label": "Unpair",
+      "anchor": "stg-view-devices-all",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#devices-save-addresses": {
+      "id": "devices-save-addresses",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#devices-check-reachability": {
+      "id": "devices-check-reachability",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#stg-view-devices-all \"Create invite link\"": {
+      "label": "Create invite link",
+      "anchor": "stg-view-devices-all",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#stg-view-devices-all \"Revoke\"": {
+      "label": "Revoke",
+      "anchor": "stg-view-devices-all",
       "count": 1,
       "sides": ["music", "video"],
       "scenario": "music"

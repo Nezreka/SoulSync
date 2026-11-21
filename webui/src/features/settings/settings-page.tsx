@@ -135,7 +135,7 @@ function TabStrip({
               className={clsx(s.tab, on && s.tabOn, 'stg-tab', on && 'active')}
               data-tab={tab.key}
               aria-current={on ? 'page' : undefined}
-              hidden={tab.key === 'people' && !admin}
+              hidden={(tab.key === 'people' || tab.key === 'devices') && !admin}
               onClick={() => nav.go(tab.key)}
             >
               <span className={s.tabIcon}>
@@ -280,7 +280,8 @@ export function SettingsPage({
 }) {
   const state = useNav();
   const side = useSide();
-  // People is for admins only (the page is too, but a member never sees it)
+  // People and Devices are for admins only (the page is too, but a member
+  // never sees them)
   const viewer = useViewer();
   const attention = useSourcesAttention();
   const key = legacyKey(state);
@@ -349,8 +350,8 @@ export function SettingsPage({
               {def.sub}
             </p>
           </div>
-          {/* People saves each thing with its own button */}
-          <SaveStatus hidden={state.tab === 'people'} />
+          {/* People and Devices save each thing with its own button */}
+          <SaveStatus hidden={state.tab === 'people' || state.tab === 'devices'} />
         </div>
 
         {pills.length > 1 ? (
@@ -384,6 +385,7 @@ export function SettingsPage({
           </div>
         </div>
         {slot('people')}
+        {slot('devices', 'page')}
       </div>
     </div>
   );

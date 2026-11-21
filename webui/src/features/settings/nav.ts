@@ -21,6 +21,7 @@ export type TabKey =
   | 'library'
   | 'discovery'
   | 'people'
+  | 'devices'
   | 'appearance'
   | 'advanced';
 
@@ -120,6 +121,14 @@ export const TABS: TabDef[] = [
     icon: 'people',
     title: 'People',
     sub: 'Who uses SoulSync here, templates, the global policy and invites',
+    views: ONE,
+  },
+  {
+    key: 'devices',
+    label: 'Devices',
+    icon: 'phone',
+    title: 'Devices',
+    sub: 'Pair music apps, the addresses they use and whether outside can reach this server',
     views: ONE,
   },
   {
