@@ -110,7 +110,14 @@ def _schedule_file_recovery(task_id, batch_id, task, deps):
         try:
             download_dir = deps.docker_resolve_path(deps.config_manager.get('soulseek.download_path', './downloads'))
             transfer_dir = deps.docker_resolve_path(deps.config_manager.get('soulseek.transfer_path', './Transfer'))
-            found, _ = deps.find_completed_file(download_dir, identity[3], transfer_dir)
+            found = None
+            if identity[4] and identity[4] != 'soulseek':
+                # a streaming file is named by the source, not the result
+                # title, so ask for the path it reported first (#2231)
+                from core.downloads.streaming_pickup import reported_file_for
+                found = reported_file_for(deps.download_orchestrator, deps.run_async, identity[2])
+            if not found:
+                found, _ = deps.find_completed_file(download_dir, identity[3], transfer_dir)
             with tasks_lock:
                 current = download_tasks.get(task_id)
                 if current is not task or _recovery_identity(current) != identity:
