@@ -16,9 +16,14 @@ from core.connect import addresses as A  # noqa: E402
 from core.connect import reachability as R  # noqa: E402
 
 
-def _as(pid):
+def _as(pid, base_url=None):
+    """a client signed in as ``pid``. the session cookie is set for the host
+    the test then talks to: a cookie set for localhost isn't sent to
+    192.168.1.5, and with no session the request only passed while an
+    earlier test hadn't turned sign-in on (it failed in the full run)."""
     c = web_server.app.test_client()
-    with c.session_transaction() as s:
+    kwargs = {"base_url": base_url} if base_url else {}
+    with c.session_transaction(**kwargs) as s:
         s.clear()
         s["profile_id"] = pid
     return c
@@ -39,7 +44,7 @@ def test_saving_and_reading_the_addresses():
     r = _as(1).put("/api/devices/addresses", json={"remote_url": "https://music.example.com/",
                                                    "custom_urls": ["https://box.tail1.ts.net"]})
     assert r.status_code == 200, r.get_json()
-    view = _as(1).get("/api/devices/server", base_url="http://192.168.1.5:8008").get_json()
+    view = _as(1, "http://192.168.1.5:8008").get("/api/devices/server", base_url="http://192.168.1.5:8008").get_json()
     assert view["remote_url"] == "https://music.example.com"
     assert view["custom_urls"] == ["https://box.tail1.ts.net"]
     kinds = [a["kind"] for a in view["addresses"]]
@@ -65,7 +70,7 @@ def test_plain_http_remote_gets_the_warning():
 
 def test_a_new_code_carries_the_addresses_and_their_warnings():
     _as(1).put("/api/devices/addresses", json={"remote_url": "http://music.example.com", "custom_urls": []})
-    body = _as(1).post("/api/devices/codes", json={}, base_url="http://192.168.1.5:8008").get_json()
+    body = _as(1, "http://192.168.1.5:8008").post("/api/devices/codes", json={}, base_url="http://192.168.1.5:8008").get_json()
     assert body["payload"]["addresses"][0] == {"kind": "local", "url": "http://192.168.1.5:8008"}
     assert {"kind": "remote", "url": "http://music.example.com"} in body["payload"]["addresses"]
     assert body["warnings"] and body["payload"]["code"] == body["code"]
