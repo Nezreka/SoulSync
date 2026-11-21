@@ -20,6 +20,7 @@ import { blockArtists, mergeIntoBlocks } from '../-lib/schedule';
 import { useChannelViewers, ViewerFaces, ViewerPins, ViewersHere } from './channel-viewers';
 import { PlayIcon } from './icons';
 import { Art, PlayButton, PlayerLink, styles as s, useProgressive } from './kit';
+import { CloseIcon } from './playback/icons';
 import { useReminder } from './playback/reminders';
 import { tuneIn } from './playback/tuner';
 import { playItems } from './playback/use-player';
@@ -144,7 +145,7 @@ export function GuideGrid({
   pxPerMinute: number;
   favorites: ReadonlySet<string>;
   onFavorite: (channel: Channel) => void;
-  onPick: (picked: Picked) => void;
+  onPick: (picked: Picked, at?: HTMLElement) => void;
   /** a program the pointer or focus rests on: the panel above shows it */
   onPreview?: (picked: Picked) => void;
   label: string;
@@ -270,7 +271,7 @@ export function GuideGrid({
                           data-premiere={cell.premiere ? 'true' : undefined}
                           style={{ left: left + 2, width: Math.max(8, right - left - 4) }}
                           title={`${cell.premiere ? 'New: ' : ''}${cell.title}${cell.sub ? ` · ${cell.sub}` : ''}\n${clock(cell.start)} – ${clock(cell.end)}`}
-                          onClick={() => onPick(cell.picked)}
+                          onClick={(e) => onPick(cell.picked, e.currentTarget)}
                           onMouseEnter={() => onPreview?.(cell.picked)}
                           onFocus={() => onPreview?.(cell.picked)}
                           data-nav
@@ -326,7 +327,7 @@ export function OnNow({
   now: number;
   favorites: ReadonlySet<string>;
   onFavorite: (channel: Channel) => void;
-  onPick: (picked: Picked) => void;
+  onPick: (picked: Picked, at?: HTMLElement) => void;
 }) {
   return (
     <div className={s.onNow} role="list" aria-label="On now">
@@ -345,7 +346,7 @@ export function OnNow({
             <button
               type="button"
               className={s.onNowMain}
-              onClick={() => onPick({ channel, program: current, block })}
+              onClick={(e) => onPick({ channel, program: current, block }, e.currentTarget)}
               data-nav
             >
               <span className={s.guideNum}>{channel.number}</span>
@@ -437,8 +438,7 @@ export function GuideDetail({
   onRemoveRule?: () => void;
   /** a channel someone made: change what's on it */
   onEditRule?: () => void;
-  /** absent: it's the preview (what the pointer rests on), with nothing to close */
-  onClose?: () => void;
+  onClose: () => void;
 }) {
   const { channel, program, block } = picked;
   const start = block?.start ?? program.start;
@@ -453,12 +453,17 @@ export function GuideDetail({
   const viewers = useChannelViewers().get(channel.id);
 
   return (
-    <section
-      className={s.guideDetail}
-      data-preview={onClose ? undefined : 'true'}
-      aria-live="polite"
-      aria-label="Program"
-    >
+    <section className={s.guideDetail} aria-label="Program">
+      <button
+        type="button"
+        className={s.guideDetailClose}
+        aria-label="Close"
+        title="Close (Esc)"
+        onClick={onClose}
+        data-nav
+      >
+        <CloseIcon />
+      </button>
       <div className={s.guideDetailArt}>
         <Art src={(block ? airing : program).art} alt={program.title} />
       </div>
@@ -467,17 +472,14 @@ export function GuideDetail({
           {channel.number} · {channel.name} · {clock(start)} – {clock(end)}
           {live ? ' · on now' : ''}
         </span>
-        <span className={s.guideDetailTitle}>{block ? `${channel.name} mix` : program.title}</span>
+        <span className={s.guideDetailTitle}>
+          {program.premiere ? <span className={s.guideNew}>New</span> : null}
+          {block ? `${channel.name} mix` : program.title}
+        </span>
         <span className={s.rowSub}>
           {block
             ? `${block.items.length} songs · ${blockArtists(block, 4)}`
-            : [
-                program.premiere ? 'New, premiering' : '',
-                program.subtitle,
-                runtime(program.seconds),
-              ]
-                .filter(Boolean)
-                .join(' · ')}
+            : [program.subtitle, runtime(program.seconds)].filter(Boolean).join(' · ')}
         </span>
         {live ? (
           <span className={s.onNowBar}>
@@ -494,7 +496,7 @@ export function GuideDetail({
               onPlay={() => {
                 // in at the minute it's on, through the tuner: channel up and down work from here
                 tuneIn(channel);
-                onClose?.();
+                onClose();
               }}
             />
           ) : null}
@@ -505,7 +507,7 @@ export function GuideDetail({
               startQueue.length
                 ? () => {
                     playItems(startQueue);
-                    onClose?.();
+                    onClose();
                   }
                 : undefined
             }
@@ -545,11 +547,6 @@ export function GuideDetail({
           {onRemoveRule ? (
             <button type="button" className={s.btn} onClick={onRemoveRule} data-nav>
               Remove channel
-            </button>
-          ) : null}
-          {onClose ? (
-            <button type="button" className={s.btn} onClick={onClose} data-nav>
-              Close
             </button>
           ) : null}
         </div>

@@ -2526,51 +2526,88 @@
 }
 
 .guideDetail {
+  position: relative;
   display: grid;
-  grid-template-columns: calc(var(--u) * 14) minmax(0, 1fr) minmax(0, calc(var(--u) * 22));
-  gap: calc(var(--u) * 1.4);
+  grid-template-columns: calc(var(--u) * 7.5) minmax(0, 1fr);
+  gap: calc(var(--u) * 1) calc(var(--u) * 1.1);
   align-items: start;
-  margin-bottom: calc(var(--u) * 1.2);
   padding: calc(var(--u) * 1.1);
-  border: 1px solid var(--pl-line);
-  border-radius: var(--radius-sheet);
-  background: var(--white-a03);
-  animation: pageIn var(--dur-moderate) var(--pl-ease);
-}
-
-@media (max-width: 1024px) {
-  .guideDetail {
-    grid-template-columns: calc(var(--u) * 9) minmax(0, 1fr);
-  }
-
-  .guideDetailSide {
-    grid-column: 1 / -1;
-  }
 }
 
 .guideDetailArt {
   position: relative;
   overflow: hidden;
-  aspect-ratio: 16 / 10;
-  border-radius: var(--radius-lg);
+  aspect-ratio: 2 / 3;
+  border-radius: var(--radius-md);
   background: var(--white-a05);
+  box-shadow: 0 calc(var(--u) * 0.6) calc(var(--u) * 1.6) var(--black-a40);
 }
 
 .guideDetailBody {
   display: flex;
   flex-direction: column;
-  gap: calc(var(--u) * 0.55);
+  gap: calc(var(--u) * 0.5);
   min-width: 0;
+  padding-right: calc(var(--u) * 1.6);
 }
 
 .guideDetailTitle {
-  font-size: calc(var(--u) * 1.45);
+  font-size: calc(var(--u) * 1.3);
   font-weight: 700;
+  line-height: 1.15;
   letter-spacing: -0.02em;
 }
 
+/* the card's actions wrap in its width; the first one leads */
+.guideDetailBody .heroActions {
+  flex-wrap: wrap;
+  gap: calc(var(--u) * 0.45);
+  margin-top: calc(var(--u) * 0.3);
+}
+
+.guideDetailBody .heroActions > * {
+  min-height: calc(var(--u) * 2.3);
+  padding: 0 calc(var(--u) * 0.95);
+  font-size: calc(var(--u) * 0.82);
+}
+
+.guideDetailClose {
+  position: absolute;
+  z-index: 1;
+  top: calc(var(--u) * 0.6);
+  right: calc(var(--u) * 0.6);
+  display: grid;
+  place-items: center;
+  width: calc(var(--u) * 2);
+  height: calc(var(--u) * 2);
+  border: none;
+  border-radius: var(--radius-circle);
+  background: var(--white-a06);
+  color: var(--pl-text-2);
+  cursor: pointer;
+}
+
+.guideDetailClose:hover,
+.guideDetailClose:focus-visible {
+  background: var(--white-a12);
+  color: var(--pl-text);
+}
+
+.guideDetailClose svg {
+  width: 55%;
+  height: 55%;
+}
+
+/* up next, under the rest, across the card */
 .guideDetailSide {
+  grid-column: 1 / -1;
   min-width: 0;
+  padding-top: calc(var(--u) * 0.8);
+  border-top: 1px solid var(--pl-line);
+}
+
+.guideDetailSide:empty {
+  display: none;
 }
 
 .trackList {
@@ -4336,12 +4373,6 @@ a.crewRow:hover {
   opacity: 0;
 }
 
-/* the preview above the grid: it follows the pointer, so it holds its size */
-.guideDetail[data-preview='true'] {
-  min-height: calc(var(--u) * 11);
-  animation: none;
-}
-
 .guideTune:hover .guideChannelName,
 .guideTune:focus-visible .guideChannelName {
   color: var(--accent-light);
@@ -4506,26 +4537,10 @@ button.railMore {
   padding-right: calc(var(--u) * 0.3);
 }
 
-/* the picked program's panel holds one size too, so the channels don't jump */
-.guideStage > .guideDetail {
-  flex: none;
-  max-height: calc(var(--u) * 15);
-  overflow: hidden;
-}
-
-.guideStage .guideDetailSide {
-  max-height: calc(var(--u) * 12.5);
-  overflow-y: auto;
-}
-
 @media (max-width: 768px) {
   /* a phone scrolls the page as a whole */
   .guideStage {
     height: auto;
-  }
-
-  .guideStage > .guideDetail {
-    max-height: none;
   }
 }
 

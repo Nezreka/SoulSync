@@ -1,0 +1,171 @@
+/* the program card: beside the program, over the guide */
+.pop {
+  position: fixed;
+  z-index: 9;
+  width: min(calc(var(--u) * 30), calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--white-a10);
+  border-radius: var(--radius-sheet);
+  background: var(--pl-panel-solid);
+  box-shadow:
+    0 calc(var(--u) * 1.2) calc(var(--u) * 3.5) var(--black-a60),
+    0 0 0 1px var(--black-a40);
+  animation: popIn var(--dur-fast) var(--pl-ease);
+  transform-origin: top left;
+}
+
+.pop[data-side='above'] {
+  transform-origin: bottom left;
+}
+
+.pop[data-side='center'] {
+  transform-origin: center;
+}
+
+@keyframes popIn {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pop {
+    animation: none;
+  }
+}
+
+/* a phone: up from the bottom, the width of the screen */
+.pop[data-side='sheet'] {
+  right: 0;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  max-height: 85vh;
+  border-radius: var(--radius-sheet) var(--radius-sheet) 0 0;
+  animation-name: sheetUp;
+}
+
+@keyframes sheetUp {
+  from {
+    transform: translateY(100%);
+  }
+}
+
+/* one line above the guide: what the pointer rests on */
+.strip {
+  position: relative;
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: calc(var(--u) * 0.9);
+  min-width: 0;
+  height: calc(var(--u) * 3.6);
+  margin-bottom: calc(var(--u) * 0.8);
+  padding: 0 calc(var(--u) * 1.1) 0 calc(var(--u) * 0.4);
+  overflow: hidden;
+  border: 1px solid var(--pl-line);
+  border-radius: var(--radius-lg);
+  background: var(--white-a03);
+}
+
+.strip[data-premiere='true'] {
+  border-color: rgba(var(--warning-rgb), 0.4);
+}
+
+.stripArt {
+  position: relative;
+  flex: none;
+  width: calc(var(--u) * 4.8);
+  height: calc(var(--u) * 2.8);
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  background: var(--white-a05);
+}
+
+.stripChannel {
+  display: flex;
+  flex: none;
+  align-items: baseline;
+  gap: calc(var(--u) * 0.4);
+  color: var(--pl-text-2);
+  font-size: calc(var(--u) * 0.78);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.stripNum {
+  color: var(--pl-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.stripTitle {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: calc(var(--u) * 1);
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stripSub {
+  color: var(--pl-text-2);
+  font-weight: 500;
+}
+
+.stripNew {
+  margin-right: calc(var(--u) * 0.45);
+  padding: calc(var(--u) * 0.05) calc(var(--u) * 0.35);
+  border-radius: var(--radius-sm);
+  background: var(--warning);
+  color: var(--pl-bg);
+  font-size: calc(var(--u) * 0.6);
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  vertical-align: 0.15em;
+}
+
+.stripTime {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: calc(var(--u) * 0.5);
+  color: var(--pl-text-2);
+  font-size: calc(var(--u) * 0.8);
+  font-variant-numeric: tabular-nums;
+}
+
+.stripLive {
+  padding: calc(var(--u) * 0.1) calc(var(--u) * 0.45);
+  border-radius: var(--radius-sm);
+  background: rgba(var(--accent-rgb), 0.2);
+  color: var(--accent-light);
+  font-weight: 700;
+}
+
+/* how far into it, along the strip's foot */
+.stripBar {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  background: var(--white-a06);
+}
+
+.stripBar > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+@media (max-width: 640px) {
+  .stripChannel {
+    display: none;
+  }
+}

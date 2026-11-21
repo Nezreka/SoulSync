@@ -58,6 +58,7 @@ import {
 } from './-player.api';
 import { ChannelForm } from './-ui/guide-form';
 import { GuideDetail, GuideGrid, OnNow, type Picked } from './-ui/guide-grid';
+import { GuidePop, GuideStrip } from './-ui/guide-pop';
 import { SearchIcon } from './-ui/icons';
 import { Empty, PageTitle, Tabs, styles as s } from './-ui/kit';
 import { LineupEditor } from './-ui/lineup-editor';
@@ -234,7 +235,13 @@ function GuidePage() {
   }, [personIds, personKey]);
   // added-in-the-last-n-days moves once a day, not every tick
   const today = Math.floor(now / 86_400_000) * 86_400_000;
-  const [picked, setPicked] = useState<Picked | null>(null);
+  const [picked, setPickedOnly] = useState<Picked | null>(null);
+  // the program it was picked from: the card pops in beside it
+  const [pickedAt, setPickedAt] = useState<HTMLElement | null>(null);
+  const setPicked = (next: Picked | null, at?: HTMLElement) => {
+    setPickedOnly(next);
+    setPickedAt(at ?? null);
+  };
   // what the pointer or focus rests on in the grid; settles before the panel follows
   const [preview, setPreview] = useState<Picked | null>(null);
   const previewTimer = useRef<number | undefined>(undefined);
@@ -610,35 +617,31 @@ function GuidePage() {
         className={s.guideStage}
         style={{ '--stage-h': stageH } as React.CSSProperties}
       >
-        {!picked && view === 'grid' && (preview ?? firstOn) ? (
-          <GuideDetail
-            picked={(preview ?? firstOn)!}
-            schedules={schedules}
-            now={now}
-            favorite={favorites.set.has((preview ?? firstOn)!.channel.id)}
-            onFavorite={favorites.toggle}
-          />
+        {view === 'grid' && (preview ?? firstOn) ? (
+          <GuideStrip picked={(preview ?? firstOn)!} now={now} />
         ) : null}
 
         {picked ? (
-          <GuideDetail
-            picked={picked}
-            schedules={schedules}
-            now={now}
-            favorite={favorites.set.has(picked.channel.id)}
-            onFavorite={favorites.toggle}
-            onClose={() => setPicked(null)}
-            onRemoveRule={
-              pickedMade && (pickedMade.scope === 'mine' || made.data?.can_edit_server)
-                ? () => setRemoving(pickedMade)
-                : undefined
-            }
-            onEditRule={
-              pickedMade && (pickedMade.scope === 'mine' || made.data?.can_edit_server)
-                ? () => setMaking(pickedMade)
-                : undefined
-            }
-          />
+          <GuidePop anchor={pickedAt} onClose={() => setPicked(null)}>
+            <GuideDetail
+              picked={picked}
+              schedules={schedules}
+              now={now}
+              favorite={favorites.set.has(picked.channel.id)}
+              onFavorite={favorites.toggle}
+              onClose={() => setPicked(null)}
+              onRemoveRule={
+                pickedMade && (pickedMade.scope === 'mine' || made.data?.can_edit_server)
+                  ? () => setRemoving(pickedMade)
+                  : undefined
+              }
+              onEditRule={
+                pickedMade && (pickedMade.scope === 'mine' || made.data?.can_edit_server)
+                  ? () => setMaking(pickedMade)
+                  : undefined
+              }
+            />
+          </GuidePop>
         ) : null}
 
         {loading && !groups.length ? (
