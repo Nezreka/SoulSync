@@ -297,7 +297,7 @@ describe('the album metadata row', () => {
 
 describe('the canonical tracklist on expand', () => {
   // The step the React port dropped: nothing fetched the source tracklist, so
-  // no album ever grew a missing row and "I Have This" was unreachable.
+  // no album ever grew a missing row and "Copy a track here" (was "I Have This") was unreachable.
   const ONE_OF_TWO = {
     albums: [
       {
