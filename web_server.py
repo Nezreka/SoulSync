@@ -11110,26 +11110,19 @@ def library_log_play():
     /api/library/log-play/eligible once the Last.fm threshold is reached.
     """
     try:
-        from core.playback.play_log import build_play_event
         data = request.get_json(silent=True) or {}
         track = data.get('track') or data
         played_at = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
-        duration_ms = data.get('duration_ms', 0)
-        event = build_play_event(track, played_at, duration_ms)
-        if not event:
-            return jsonify({"success": False, "skipped": True}), 200
-        # the play goes in the listener's pile (#1293). no own listenbrainz
-        # means the shared one, same as before.
-        from core.listening_scope import listening_owner
-        db = get_database()
-        # a private session keeps the play out of everything: taste, blends,
-        # stats and scrobbles. checked here, not trusted to the page
-        from core.personalized.listening_privacy import in_private_session
-        if in_private_session(db, get_current_profile_id()):
+        # the listener's pile (#1293), never during a private session (checked
+        # here, not trusted to the page): the path music apps use too
+        from core.playback.record_play import record_play
+        out = record_play(get_database(), get_current_profile_id(), track if isinstance(track, dict) else {},
+                          played_at=played_at, duration_ms=data.get('duration_ms', 0))
+        if out["private"]:
             return jsonify({"success": True, "skipped": True, "private": True}), 200
-        event['profile_id'] = listening_owner(db, get_current_profile_id())
-        play_id = db.record_web_player_play(event)
-        return jsonify({"success": True, "play_id": play_id})
+        if out["skipped"]:
+            return jsonify({"success": False, "skipped": True}), 200
+        return jsonify({"success": True, "play_id": out["play_id"]})
     except Exception as e:
         logger.debug(f"log-play failed (non-fatal): {e}")
         return jsonify({"success": False, "error": str(e)}), 200
