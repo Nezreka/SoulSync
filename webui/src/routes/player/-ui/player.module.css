@@ -336,8 +336,17 @@
   align-items: center;
   gap: calc(var(--u) * 1);
   padding: calc(var(--u) * 1) var(--pl-gutter);
+  border-bottom: 1px solid transparent;
   background: linear-gradient(180deg, rgba(var(--pl-ink-rgb), 0.92), rgba(var(--pl-ink-rgb), 0));
-  backdrop-filter: blur(calc(var(--u) * 0.6));
+  transition:
+    background var(--dur-base) ease,
+    border-color var(--dur-base) ease;
+}
+
+.header[data-scrolled='true'] {
+  border-bottom-color: var(--pl-line);
+  background: rgba(var(--pl-ink-rgb), 0.86);
+  backdrop-filter: blur(calc(var(--u) * 1.2)) saturate(1.4);
 }
 
 .page {

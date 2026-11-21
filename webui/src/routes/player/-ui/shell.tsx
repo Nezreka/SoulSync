@@ -146,6 +146,13 @@ export function PlayerShell({ profileId }: { profileId: number | null }) {
   const [gate, setGate] = useState<boolean | null>(null);
 
   useSpatialNav(rootRef);
+  // the header sits clear over a hero at the top, and goes solid once the
+  // page scrolls under it, so nothing reads through the search bar
+  const [scrolled, setScrolled] = useState(false);
+  const onMainScroll = () => {
+    const next = (mainRef.current?.scrollTop ?? 0) > 4;
+    setScrolled((was) => (was === next ? was : next));
+  };
   // one card size for the whole player on this device, as a percent
   const [cardSize, setCardSize] = useCardSize('ss-player-card-scale', CARD_SCALE_RANGE);
   const cardScale = (cardSize ?? CARD_SCALE_RANGE.base) / 100;
@@ -200,8 +207,8 @@ export function PlayerShell({ profileId }: { profileId: number | null }) {
       style={{ '--pl-card-scale': cardScale } as CSSProperties}
     >
       <Sidebar collapsed={collapsed} onToggle={toggleCollapsed} />
-      <main className={s.main} ref={mainRef}>
-        <div className={s.header}>
+      <main className={s.main} ref={mainRef} onScroll={onMainScroll}>
+        <div className={s.header} data-scrolled={scrolled ? 'true' : undefined}>
           <Search />
           <div className={s.headerEnd}>
             <ProfileChip
