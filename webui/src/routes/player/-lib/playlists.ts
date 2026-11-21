@@ -80,7 +80,12 @@ const SOURCES: Record<string, string> = {
 /** where a mirrored playlist comes from, in words */
 export function sourceName(source: string | null | undefined): string | null {
   if (!source || source === 'soulsync') return null;
-  return SOURCES[source.toLowerCase()] ?? source.charAt(0).toUpperCase() + source.slice(1);
+  const key = source.toLowerCase();
+  // spotify_public, deezer_link: the service is what counts
+  const known = SOURCES[key] ?? SOURCES[key.split(/[_-]/)[0]];
+  if (known) return known;
+  const words = key.replace(/[_-]+/g, ' ').trim();
+  return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
 /** "12 songs · 48 min", "1 song" */

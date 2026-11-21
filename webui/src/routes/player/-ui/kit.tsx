@@ -79,7 +79,13 @@ export function Art({
 // ── cards ──────────────────────────────────────────────────────────────
 
 /** the play button on a card's art: plays it here; the card still opens its page */
-function CardPlay({ target, title }: { target: NonNullable<RailCard['play']>; title: string }) {
+export function CardPlay({
+  target,
+  title,
+}: {
+  target: NonNullable<RailCard['play']>;
+  title: string;
+}) {
   const playCard = usePlayCard();
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);

@@ -15,6 +15,7 @@ import {
   HomeIcon,
   MovieIcon,
   MusicIcon,
+  PlaylistIcon,
   PodcastIcon,
   TvIcon,
   WatchlistIcon,
@@ -56,6 +57,8 @@ export interface NavEntry {
   short?: string;
   icon: ReactNode;
   exact?: boolean;
+  /** other paths that belong to it (a single playlist's page is under Playlists) */
+  also?: string[];
   visible: (access: SectionAccess) => boolean;
 }
 
@@ -104,6 +107,15 @@ export const NAV: NavEntry[] = [
     icon: <MusicIcon />,
     visible: (a) => a.music,
   },
+  {
+    to: '/player/music/playlists',
+    label: 'Playlists',
+    group: 'listen',
+    also: ['/player/music/playlist'],
+    icon: <PlaylistIcon />,
+    visible: (a) => a.music,
+  },
+
   {
     to: '/player/podcasts',
     label: 'Podcasts',

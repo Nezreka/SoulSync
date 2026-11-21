@@ -7,10 +7,13 @@ import { runtime } from '../-lib/format';
 import { fileQuality } from '../-lib/music';
 import { albumItems } from '../-lib/play-items';
 import { albumQuery } from '../-player.api';
+import { PlusIcon } from '../-ui/icons';
 import { Badge, Hero, PlayButton, PlayerLink, styles as s } from '../-ui/kit';
 import { LabelLink, MusicGenreLinks } from '../-ui/links';
+import { openAddToPlaylist } from '../-ui/music/add-to-playlist';
+import { TrackList } from '../-ui/music/track-list';
 import { NotFound, NotPartOfProfile } from '../-ui/not-part';
-import { getEngine, playItems, usePlayer } from '../-ui/playback/use-player';
+import { getEngine, playItems } from '../-ui/playback/use-player';
 import { useSections } from '../-ui/sections';
 
 export const Route = createFileRoute('/player/music/album/$albumId')({
@@ -28,8 +31,6 @@ function AlbumPage() {
   const sections = useSections();
   const id = Number(Route.useParams().albumId);
   const album = useQuery({ ...albumQuery(id), enabled: sections.music && Number.isFinite(id) });
-  const player = usePlayer();
-  const playingId = player.item?.type === 'track' ? player.item.id : null;
 
   if (!sections.music) return <NotPartOfProfile what="Music" single />;
   if (album.isLoading)
@@ -105,57 +106,64 @@ function AlbumPage() {
               }
               why="None of this album's tracks are on disk."
             />
+            {queue.length ? (
+              <button
+                type="button"
+                className={s.btn}
+                onClick={() =>
+                  openAddToPlaylist(
+                    a.tracks
+                      .filter((t) => !t.is_missing && t.id)
+                      .map((t) => ({
+                        title: t.title,
+                        artist: trackArtists(t) || albumArtist || '',
+                        album: a.title,
+                        duration_ms: t.duration ?? null,
+                        lib2_track_id: Number(t.id),
+                      })),
+                  )
+                }
+                data-nav
+              >
+                <PlusIcon />
+                Add to playlist
+              </button>
+            ) : null}
           </>
         }
       />
 
-      <div className={s.list} role="list" aria-label="Tracks">
-        {a.tracks.map((track, index) => {
-          const showDisc =
-            discs > 1 &&
-            (index === 0 || (a.tracks[index - 1].disc_number ?? 1) !== (track.disc_number ?? 1));
+      <TrackList
+        label="Tracks"
+        rows={a.tracks.map((track, index) => {
           const artists = trackArtists(track);
-          return (
-            <div key={track.id ?? `missing-${index}`} role="listitem">
-              {showDisc ? (
-                <div className={s.searchGroupLabel}>Disc {track.disc_number ?? 1}</div>
-              ) : null}
-              <div
-                className={s.row}
-                data-missing={track.is_missing || !track.id ? 'true' : undefined}
-                data-playing={playingId === String(track.id) ? 'true' : undefined}
-                tabIndex={track.is_missing ? -1 : 0}
-                data-nav={track.is_missing ? undefined : true}
-                title={track.is_missing ? 'Not in your library' : undefined}
-                role="button"
-                aria-label={track.is_missing ? undefined : `Play ${track.title}`}
-                onClick={() => playTrack(track.id)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    playTrack(track.id);
-                  }
-                }}
-              >
-                <span className={s.rowNum}>{track.track_number ?? index + 1}</span>
-                <span className={s.rowMain}>
-                  <span className={s.rowTitle}>
-                    {track.title}
-                    {track.explicit ? ' 🅴' : ''}
-                  </span>
-                  {artists && artists !== albumArtist ? (
-                    <span className={s.rowSub}>{artists}</span>
-                  ) : null}
-                </span>
-                <span className={s.rowEnd}>
-                  {track.is_missing ? 'missing' : fileQuality(track.file)}
-                  <span>{runtime((track.duration ?? 0) / 1000)}</span>
-                </span>
-              </div>
-            </div>
-          );
+          const playable = !track.is_missing && !!track.id;
+          return {
+            key: String(track.id ?? `missing-${index}`),
+            title: track.title,
+            trackId: playable ? Number(track.id) : null,
+            number:
+              discs > 1
+                ? `${track.disc_number ?? 1}.${track.track_number ?? index + 1}`
+                : (track.track_number ?? index + 1),
+            artist: artists && artists !== albumArtist ? artists : undefined,
+            duration: track.duration ? track.duration / 1000 : null,
+            explicit: !!track.explicit,
+            end: playable ? fileQuality(track.file) : null,
+            why: 'Not in your library',
+            song: playable
+              ? {
+                  title: track.title,
+                  artist: artists || albumArtist || '',
+                  album: a.title,
+                  duration_ms: track.duration ?? null,
+                  lib2_track_id: Number(track.id),
+                }
+              : null,
+          };
         })}
-      </div>
+        onPlay={(i) => playTrack(a.tracks[i].id)}
+      />
     </>
   );
 }

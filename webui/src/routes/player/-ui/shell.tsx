@@ -14,13 +14,14 @@ import { appURL } from '@/platform/url-base';
 
 import { profilesQuery } from '../-player.api';
 import { BackIcon, ChevronIcon, ExitIcon } from './icons';
+import { AddToPlaylistHost } from './music/add-to-playlist';
 import { useNowPlaying } from './now-playing';
 import { TransportBar } from './playback/transport-bar';
 import { VideoPlayer } from './playback/video-player';
 import s from './player.module.css';
 import { gateNeeded, ProfileChip, WhoGate } from './profiles';
 import { Search } from './search';
-import { NAV, NAV_GROUPS, useSections } from './sections';
+import { NAV, NAV_GROUPS, useSections, type NavEntry } from './sections';
 import { focusFirstIn, useSpatialNav } from './use-spatial-nav';
 
 const CARD_SCALE_RANGE: CardSizeRange = { min: 64, max: 160, base: 100 };
@@ -35,9 +36,31 @@ function readCollapsed(): boolean {
   }
 }
 
+/**
+ * the nav entry a page belongs to: the longest one its path starts with,
+ * so /player/music/playlists is Playlists, not Music too
+ */
+function currentEntry(entries: NavEntry[], path: string): NavEntry | null {
+  let best: NavEntry | null = null;
+  let bestLength = -1;
+  for (const e of entries) {
+    for (const to of [e.to, ...(e.also ?? [])]) {
+      const hit = e.exact
+        ? path === to || path === `${to}/`
+        : path === to || path.startsWith(`${to}/`);
+      if (hit && to.length > bestLength) {
+        best = e;
+        bestLength = to.length;
+      }
+    }
+  }
+  return best;
+}
+
 function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
   const sections = useSections();
   const entries = NAV.filter((entry) => entry.visible(sections));
+  const current = currentEntry(entries, useRouterState({ select: (r) => r.location.pathname }));
   return (
     <nav className={s.side} aria-label="Player" data-collapsed={collapsed ? 'true' : undefined}>
       <div className={s.brand}>
@@ -60,7 +83,9 @@ function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => 
                 key={entry.to}
                 to={entry.to as '/player'}
                 className={s.navLink}
-                activeOptions={{ exact: !!entry.exact }}
+                activeOptions={{ exact: true }}
+                data-current={entry === current ? 'true' : undefined}
+                aria-current={entry === current ? 'page' : undefined}
                 title={collapsed ? entry.label : undefined}
                 data-nav
               >
@@ -198,6 +223,7 @@ export function PlayerShell({ profileId }: { profileId: number | null }) {
       </main>
       {nowPlaying ? <TransportBar /> : null}
       <VideoPlayer />
+      <AddToPlaylistHost />
       {gate && profiles ? (
         <WhoGate profiles={profiles} currentId={profileId} onDone={() => setGate(false)} />
       ) : null}

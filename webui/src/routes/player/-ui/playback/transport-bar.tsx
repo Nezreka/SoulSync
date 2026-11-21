@@ -13,6 +13,7 @@ import { chapterAt } from '../../-engine/timeline';
 import { LONG_FORM } from '../../-engine/types';
 import { NextIcon, PauseIcon, PlayIcon, PrevIcon, ShuffleIcon } from '../icons';
 import { PlayerLink } from '../kit';
+import { SongActions } from '../music/song-actions';
 import { ChapterMenu, SleepMenu, SpeedMenu, VolumeControl } from './controls';
 import {
   BackSecondsIcon,
@@ -82,6 +83,7 @@ export function TransportBar() {
             </span>
           ) : null}
         </div>
+        {item.type === 'track' ? <SongActions item={item} /> : null}
       </div>
 
       <div className={s.center}>

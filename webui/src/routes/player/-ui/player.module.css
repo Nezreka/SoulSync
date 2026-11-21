@@ -187,17 +187,17 @@
   color: var(--pl-text);
 }
 
-.navLink[data-status='active'] {
+.navLink[data-current='true'] {
   background: var(--white-a10);
   color: var(--pl-text);
 }
 
-.navLink[data-status='active'] .navIcon {
+.navLink[data-current='true'] .navIcon {
   color: var(--accent);
 }
 
 /* the active page's accent bar */
-.navLink[data-status='active']::before {
+.navLink[data-current='true']::before {
   content: '';
   position: absolute;
   left: calc(var(--u) * -1);
@@ -242,7 +242,7 @@
   padding-inline: 0;
 }
 
-.side[data-collapsed='true'] .navLink[data-status='active']::before {
+.side[data-collapsed='true'] .navLink[data-current='true']::before {
   left: calc(var(--u) * -0.6);
 }
 
@@ -296,7 +296,7 @@
     display: contents;
   }
 
-  .navLink[data-status='active']::before {
+  .navLink[data-current='true']::before {
     display: none;
   }
 
@@ -326,7 +326,7 @@
     display: none;
   }
 
-  .navLink[data-status='active'] {
+  .navLink[data-current='true'] {
     background: transparent;
   }
 }

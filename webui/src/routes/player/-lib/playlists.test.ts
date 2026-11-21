@@ -77,5 +77,7 @@ describe('playlists', () => {
     expect(sourceName('spotify')).toBe('Spotify');
     expect(sourceName('soulsync')).toBeNull();
     expect(sourceName('napster')).toBe('Napster');
+    expect(sourceName('spotify_public')).toBe('Spotify');
+    expect(sourceName('some_thing')).toBe('Some thing');
   });
 });

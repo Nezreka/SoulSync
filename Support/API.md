@@ -441,6 +441,12 @@ A video a browser can't play as it is (an MKV, HEVC, AC3 or DTS sound) is conver
 - `GET /api/player/transcode/<item_type>/<item_id>?q=&part=&t=`: the converted stream, fragmented MP4, from `t` seconds. It can't seek by `Range`: to seek, start a new one at the new `t`. A few run at once; past that it answers `503 busy`.
 - `GET /api/player/transcode/<item_type>/<item_id>/start?t=`: where a stream asked to start at `t` really starts, `{start, seek}`. Copied video can only start at a keyframe, so request `t=seek` and count the stream's time from `start`.
 
+#### Playlists (music)
+
+- `GET /api/player/playlists`: this profile's playlists as `{yours, mirrored}`. Yours (Liked Songs first) are the ones made in SoulSync; mirrored ones follow Spotify, Deezer and the rest. Request lists stay out. Each is `{id, name, description, kind, liked, source, owner, track_count, image_url, cover_tiles, updated_at}`.
+- `GET /api/player/playlists/<id>`: one of them with `songs`, each `{position, title, artist, album, album_id, artist_id, duration_ms, image_url, added_at, track_id}`. `track_id` is the library track it plays (the match identify stamped, else the library's own match by name, the same one Subsonic apps get), or null when this profile can't play it (not in its library, or explicit on a profile that hides it). Also `duration_ms` and `playable_count`.
+- Changing your playlists uses the playlist routes the music side already has (`/api/user-playlists`, `/api/mirrored-playlists/<id>/custom-name`, `DELETE /api/mirrored-playlists/<id>`).
+
 #### Watched
 
 - `POST /api/player/watched` with `{item_type, item_id}`: a movie or episode is into its credits (92% of the way): it counts as watched, in SoulSync's video library and on the media server account, for the profile whose watch state it is (the same rules as the detail page's watched toggle). Returns `{watched}`: false for anything else, or a profile that keeps no watch state of its own. `POST /api/player/progress/finish` does the same for a movie or episode played to the end.

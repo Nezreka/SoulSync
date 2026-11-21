@@ -1487,3 +1487,18 @@ a.nowTitle:hover {
   font-size: calc(var(--u) * 0.8);
   font-variant-numeric: tabular-nums;
 }
+
+/* a song's heart and add-to-playlist, beside its name */
+.songActions {
+  display: flex;
+  flex: none;
+  align-items: center;
+}
+
+.songActions [data-on='true'] {
+  color: var(--accent);
+}
+
+.songActions button:disabled {
+  opacity: 0.5;
+}

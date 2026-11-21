@@ -201,3 +201,48 @@ export const WatchlistIcon = () => (
     <path d="M12 8v5M9.5 10.5h5" />
   </Icon>
 );
+
+export const PlaylistIcon = () => (
+  <Icon>
+    <path d="M3 6h12M3 11h12M3 16h7" />
+    <circle cx="17" cy="17" r="3" />
+    <path d="M20 17V6l2 1" />
+  </Icon>
+);
+
+export const HeartIcon = ({ filled }: { filled?: boolean }) => (
+  <Icon fill={filled ? 'currentColor' : 'none'}>
+    <path d="M12 20s-7-4.4-9-9.2C1.6 7.3 3.9 4 7.3 4c2 0 3.5 1.1 4.7 2.7C13.2 5.1 14.7 4 16.7 4 20.1 4 22.4 7.3 21 10.8 19 15.6 12 20 12 20Z" />
+  </Icon>
+);
+
+export const TrashIcon = () => (
+  <Icon>
+    <path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" />
+  </Icon>
+);
+
+export const PencilIcon = () => (
+  <Icon>
+    <path d="M4 20h4L19 9l-4-4L4 16v4ZM13.5 6.5l4 4" />
+  </Icon>
+);
+
+export const GripIcon = () => (
+  <Icon>
+    <path d="M9 6h.01M9 12h.01M9 18h.01M15 6h.01M15 12h.01M15 18h.01" strokeWidth={2.6} />
+  </Icon>
+);
+
+export const CopyIcon = () => (
+  <Icon>
+    <rect x="8" y="8" width="12" height="12" rx="2" />
+    <path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3" />
+  </Icon>
+);
+
+export const XIcon = () => (
+  <Icon>
+    <path d="M6 6l12 12M18 6 6 18" />
+  </Icon>
+);
