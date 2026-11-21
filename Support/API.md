@@ -477,8 +477,14 @@ A video a browser can't play as it is (an MKV, HEVC, AC3 or DTS sound) is conver
 
 - `GET /api/player/guide/channels`: the channels people made: `{server: [...], mine: [...], can_edit_server}`. A server channel is an admin's, for everyone; a profile's own only it sees. Each is `{id, scope, spec}`.
 - `POST /api/player/guide/channels` with `{scope: mine|server, spec}`: make one (a server one needs an admin). `PUT /api/player/guide/channels/<id>` with `{spec}` changes it, `DELETE` removes it: your own, or for an admin a server one.
-- A spec: `{name, kinds: [movies, tv], genres, decades, studios, networks, collection, min_score, kids, added_days, show, order: shuffle|in_order}`. Lists match any of their values; `show` makes a marathon (one show, start to finish). The guide schedules it from its catalog like the channels it makes itself.
+- A spec: `{name, kinds: [movies, tv], genres, decades, studios, networks, collection, min_score, kids, added_days, show, people: [{id, name}], order: shuffle|in_order}`. `people` (up to five) makes a channel of their films and shows. Lists match any of their values; `show` makes a marathon (one show, start to finish). The guide schedules it from its catalog like the channels it makes itself.
 - `GET /api/player/guide/lineup`: this profile's arrangement, `[{channel_id, position, hidden, name}]`, for any channel (the guide's own too). `PUT` with `{entries: [{channel_id, hidden?, name?}]}` in order replaces it; an empty list puts the guide's order back. Kept in player.db, the same on every screen.
+
+#### What the guide knows beyond its catalog
+
+- `GET /api/player/guide/watched`: `{movies: [ids], episodes: [ids]}` this profile has seen (the library's watch state for whoever's it is, plus what the player saw played through). Channels air the unseen first; a marathon starts at the next unseen episode.
+- `GET /api/player/guide/people?q=`: people in the library by name, the ones in most owned titles first: `[{id, name, photo_url, titles, job}]`. `GET /api/player/guide/people/<id>`: `{name, movies: [ids], shows: [ids]}`, their owned films and their shows.
+- `GET /api/player/guide/reminders`: what this profile asked to be told about, still to come. `POST` with `{channel_id, starts_at (epoch seconds, within two weeks), program_key, title, subtitle?, channel_name?}` adds one; `DELETE ?channel_id=&starts_at=` takes it off. Gone an hour after the start. Whichever screen of the profile is open rings it.
 
 #### Watched
 

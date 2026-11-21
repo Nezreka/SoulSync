@@ -92,7 +92,8 @@ def clean_spec(raw: Any) -> Dict[str, Any]:
       name, kinds [movies, tv], genres (any of), decades (any of, e.g. 1990),
       studios / networks (any of), collection, min_score (0-10), kids,
       added_days (added in the last n days), show (one show, start to
-      finish), order (shuffle or in_order)"""
+      finish), people ([{id, name}]: their films and shows), order
+      (shuffle or in_order)"""
     if not isinstance(raw, dict):
         raise LineupError("a channel needs a spec")
     name = " ".join(str(raw.get("name") or "").split())[:NAME_MAX]
@@ -100,6 +101,7 @@ def clean_spec(raw: Any) -> Dict[str, Any]:
         raise LineupError("give the channel a name")
     show = _int(raw.get("show"), "show", 1, 2**31)
     kinds = [k for k in _str_list(raw.get("kinds"), "kinds", 2) if k in KINDS]
+    people = _people(raw.get("people"))
     if not kinds and not show:
         raise LineupError("pick movies, tv, or a show")
     decades = [_int(d, "decades", 1900, 2100) for d in (raw.get("decades") or [])]
@@ -127,9 +129,29 @@ def clean_spec(raw: Any) -> Dict[str, Any]:
         "kids": bool(raw.get("kids")),
         "added_days": _int(raw.get("added_days"), "added_days", 1, 3650),
         "show": show,
+        "people": people,
         "order": order,
     }
     return spec
+
+
+def _people(v: Any) -> List[Dict[str, Any]]:
+    """a channel of someone's work: [{id, name}], up to five people"""
+    if v is None:
+        return []
+    if not isinstance(v, list) or len(v) > 5:
+        raise LineupError("people must be a list of up to 5")
+    out, seen = [], set()
+    for p in v:
+        if not isinstance(p, dict):
+            raise LineupError("each person needs an id and a name")
+        pid = _int(p.get("id"), "a person's id", 1, 2**31)
+        name = " ".join(str(p.get("name") or "").split())[:80]
+        if not pid or not name or pid in seen:
+            continue
+        seen.add(pid)
+        out.append({"id": pid, "name": name})
+    return out
 
 
 def _channel_row(r) -> Dict[str, Any]:

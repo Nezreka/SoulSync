@@ -431,7 +431,15 @@ export interface ChannelSpec {
   added_days: number | null;
   /** one show, start to finish (a marathon) */
   show: number | null;
+  /** a channel of these people's work (actors, directors) */
+  people: { id: number; name: string }[];
   order: 'shuffle' | 'in_order';
+}
+
+/** the films and shows a channel's people are in (its people, together) */
+export interface PeopleTitles {
+  movies: ReadonlySet<number>;
+  shows: ReadonlySet<number>;
 }
 
 export interface SavedChannel {
@@ -453,6 +461,7 @@ export const EMPTY_SPEC: ChannelSpec = {
   kids: false,
   added_days: null,
   show: null,
+  people: [],
   order: 'shuffle',
 };
 
@@ -476,7 +485,13 @@ export function specMatches(
   title: (CatalogMovie | CatalogShow) & { studio?: string | null; network?: string | null },
   kind: 'movies' | 'tv',
   now: number,
+  people?: PeopleTitles | null,
 ): boolean {
+  if (spec.people?.length) {
+    // someone's work: only what they're in (nothing until it's known)
+    if (!people) return false;
+    if (!(kind === 'movies' ? people.movies : people.shows).has(title.id)) return false;
+  }
   if (spec.genres.length && !title.genres.some((g) => sameWord(spec.genres, g))) return false;
   if (spec.decades.length && !spec.decades.includes(decadeOf(title.year) ?? -1)) return false;
   if (spec.kids && !isKidSafe(title.content_rating)) return false;
@@ -498,6 +513,7 @@ export function specMatches(
 export function specBlurb(spec: ChannelSpec, showTitle?: string | null): string {
   if (spec.show) return `${showTitle ?? 'one show'}, start to finish`;
   return [
+    (spec.people ?? []).map((p) => p.name).join(', '),
     spec.kinds.map((k) => (k === 'tv' ? 'TV' : 'movies')).join(' + '),
     spec.genres.slice(0, 2).join(', '),
     spec.decades.length ? spec.decades.map((d) => `${d}s`).join(', ') : '',
@@ -512,13 +528,20 @@ export function specBlurb(spec: ChannelSpec, showTitle?: string | null): string 
 }
 
 /** what a spec would air (the builder's live count; the channel's pool) */
-export function specPool(spec: ChannelSpec, catalog: VideoCatalog, now: number): GuideItem[] {
+export function specPool(
+  spec: ChannelSpec,
+  catalog: VideoCatalog,
+  now: number,
+  people?: PeopleTitles | null,
+): GuideItem[] {
   const pool: GuideItem[] = [];
   if (spec.kinds.includes('movies'))
-    pool.push(...catalog.movies.filter((m) => specMatches(spec, m, 'movies', now)).map(movieItem));
+    pool.push(
+      ...catalog.movies.filter((m) => specMatches(spec, m, 'movies', now, people)).map(movieItem),
+    );
   if (spec.kinds.includes('tv'))
     pool.push(
-      ...catalog.shows.filter((x) => specMatches(spec, x, 'tv', now)).flatMap(episodeItems),
+      ...catalog.shows.filter((x) => specMatches(spec, x, 'tv', now, people)).flatMap(episodeItems),
     );
   return pool;
 }
@@ -529,9 +552,10 @@ export function specChannel(
   catalog: VideoCatalog,
   now: number,
   marathon?: { title: string; episodes: GuideItem[] } | null,
+  people?: PeopleTitles | null,
 ): Channel | null {
   const spec = saved.spec;
-  const pool = spec.show ? (marathon?.episodes ?? []) : specPool(spec, catalog, now);
+  const pool = spec.show ? (marathon?.episodes ?? []) : specPool(spec, catalog, now, people);
   const out: Channel[] = [];
   add(out, {
     id: `made-${saved.id}`,
@@ -630,4 +654,29 @@ export function marathonItems(show: {
           kind: 'episode',
         })),
     );
+}
+
+/** a channel's picture: four of its titles' artwork (fewer when that's all it has) */
+const logoCache = new WeakMap<object, string[]>();
+export function channelArt(channel: Pick<Channel, 'pool'>, n = 4): string[] {
+  const hit = logoCache.get(channel.pool);
+  if (hit) return hit;
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const item of channel.pool) {
+    if (!item.art || seen.has(item.art)) continue;
+    seen.add(item.art);
+    out.push(item.art);
+    if (out.length >= n) break;
+  }
+  logoCache.set(channel.pool, out);
+  return out;
+}
+
+/** a channel that fits what's typed in the guide's search: its name, what it's made of, its number */
+export function channelMatches(channel: Channel, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  if (/^\d+$/.test(q)) return String(channel.number ?? '').startsWith(q);
+  return `${channel.name} ${channel.blurb}`.toLowerCase().includes(q);
 }

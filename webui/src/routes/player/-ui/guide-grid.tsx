@@ -13,11 +13,13 @@ import { useEffect, useRef, useState } from 'react';
 import type { Channel } from '../-lib/channels';
 import type { GuideBlock, GuideProgram } from '../-lib/schedule';
 
+import { channelArt } from '../-lib/channels';
 import { clock, runtime } from '../-lib/format';
 import { channelQueue } from '../-lib/play-items';
 import { blockArtists, mergeIntoBlocks } from '../-lib/schedule';
 import { PlayIcon } from './icons';
 import { Art, PlayButton, PlayerLink, styles as s, useProgressive } from './kit';
+import { useReminder } from './playback/reminders';
 import { tuneIn } from './playback/tuner';
 import { playItems } from './playback/use-player';
 
@@ -54,6 +56,29 @@ function StarButton({
   );
 }
 
+/** a channel's picture: four of its titles, tiled */
+function ChannelLogo({ channel }: { channel: Channel }) {
+  const art = channelArt(channel);
+  return (
+    <span
+      className={s.guideLogo}
+      data-count={art.length >= 4 ? 4 : art.length ? 1 : 0}
+      aria-hidden="true"
+    >
+      {(art.length >= 4 ? art.slice(0, 4) : art.slice(0, 1)).map((src) => (
+        <img
+          key={src}
+          src={src}
+          alt=""
+          loading="lazy"
+          decoding="async"
+          onError={(e) => (e.currentTarget.style.visibility = 'hidden')}
+        />
+      ))}
+    </span>
+  );
+}
+
 function ChannelCell({
   channel,
   favorite,
@@ -73,6 +98,7 @@ function ChannelCell({
         onClick={() => void tuneIn(channel)}
         data-nav
       >
+        <ChannelLogo channel={channel} />
         <span className={s.guideNum}>
           <span className={s.guideNumText}>{channel.number}</span>
           <span className={s.guideTunePlay} aria-hidden="true">
@@ -343,6 +369,35 @@ export function OnNow({
   );
 }
 
+/** remind me when this starts: kept for the profile, rung on whichever screen is open */
+function RemindButton({
+  channel,
+  program,
+  start,
+}: {
+  channel: Channel;
+  program: GuideProgram;
+  start: number;
+}) {
+  const { on, toggle } = useReminder(channel.id, Math.round(start / 1000));
+  return (
+    <button
+      type="button"
+      className={s.btn}
+      aria-pressed={on}
+      onClick={() =>
+        void toggle(
+          { key: program.key, title: program.title, subtitle: program.subtitle },
+          channel.name,
+        )
+      }
+      data-nav
+    >
+      {on ? 'Reminder set' : 'Remind me'}
+    </button>
+  );
+}
+
 /** the picked program, its art, how far in, and what comes after */
 export function GuideDetail({
   picked,
@@ -448,6 +503,13 @@ export function GuideDetail({
           >
             {favorite ? '★' : '☆'}
           </button>
+          {start > now ? (
+            <RemindButton
+              channel={channel}
+              program={block ? block.items[0] : program}
+              start={start}
+            />
+          ) : null}
           {onEditRule ? (
             <button type="button" className={s.btn} onClick={onEditRule} data-nav>
               Change channel

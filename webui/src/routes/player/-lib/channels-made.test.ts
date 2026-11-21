@@ -4,6 +4,8 @@ import type { CatalogMovie, CatalogShow, VideoCatalog } from '../-player.types';
 
 import {
   applyLineup,
+  channelArt,
+  channelMatches,
   EMPTY_SPEC,
   marathonItems,
   numberChannels,
@@ -155,5 +157,36 @@ describe('channels people make', () => {
       ['c', 102],
       ['b', 103],
     ]);
+  });
+});
+
+describe('finding a channel, and its picture', () => {
+  const c = (over: Partial<Channel>): Channel => ({
+    id: 'x',
+    name: 'Eighties horror',
+    kind: 'rule',
+    blurb: 'movies · Horror · 1980s',
+    pool: [],
+    number: 117,
+    ...over,
+  });
+
+  it('finds by name, by what it airs, or by number from its start', () => {
+    expect(channelMatches(c({}), 'eighties')).toBe(true);
+    expect(channelMatches(c({}), 'HORROR')).toBe(true);
+    expect(channelMatches(c({}), '11')).toBe(true);
+    expect(channelMatches(c({}), '7')).toBe(false);
+    expect(channelMatches(c({}), 'comedy')).toBe(false);
+    expect(channelMatches(c({}), '  ')).toBe(true);
+  });
+
+  it('a picture of four of its titles, without repeats', () => {
+    const pool = ['a', 'a', 'b', null, 'c', 'd', 'e'].map((art, i) => ({
+      key: `k${i}`,
+      title: 't',
+      seconds: 100,
+      art,
+    }));
+    expect(channelArt(c({ pool }))).toEqual(['a', 'b', 'c', 'd']);
   });
 });

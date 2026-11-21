@@ -1782,3 +1782,51 @@ a.nowTitle:hover {
     max-width: none;
   }
 }
+
+/* a reminder ringing: its program is starting */
+.reminder {
+  position: fixed;
+  right: calc(var(--u) * 1.5);
+  bottom: calc(var(--pl-bar, calc(var(--u) * 5.5)) + var(--u) * 1.2);
+  z-index: 9;
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 0.8);
+  max-width: min(92vw, calc(var(--u) * 30));
+  padding: calc(var(--u) * 0.9) calc(var(--u) * 1);
+  border: 1px solid var(--white-a15);
+  border-radius: var(--radius-lg);
+  background: var(--pl-panel-solid);
+  box-shadow: 0 calc(var(--u) * 0.8) calc(var(--u) * 2.4) var(--black-a60);
+  color: var(--pl-text);
+  animation: bannerIn var(--dur-moderate) var(--pl-ease) both;
+}
+
+.reminderText {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.reminderTune,
+.reminderClose {
+  flex: none;
+  height: calc(var(--u) * 2.3);
+  padding: 0 calc(var(--u) * 0.9);
+  border: none;
+  border-radius: var(--radius-pill);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.reminderTune {
+  background: var(--pl-text);
+  color: var(--pl-bg);
+}
+
+.reminderClose {
+  background: var(--white-a10);
+  color: var(--pl-text);
+}

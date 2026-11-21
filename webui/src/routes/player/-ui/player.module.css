@@ -4501,3 +4501,60 @@ button.railMore {
     max-height: none;
   }
 }
+
+/* a channel's picture in the guide: four of its titles tiled, or one */
+.guideLogo {
+  display: grid;
+  flex: none;
+  grid-template-columns: 1fr 1fr;
+  width: calc(var(--u) * 2.6);
+  height: calc(var(--u) * 2.6);
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  background: var(--white-a06);
+}
+
+.guideLogo[data-count='1'] {
+  grid-template-columns: 1fr;
+}
+
+.guideLogo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* the guide's search: finds channels by name, what they're made of, or number */
+.guideFind {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 0.45);
+  min-width: calc(var(--u) * 12);
+  height: calc(var(--u) * 2.3);
+  padding: 0 calc(var(--u) * 0.8);
+  border: 1px solid var(--white-a12);
+  border-radius: var(--radius-pill);
+  background: var(--white-a04);
+  color: var(--pl-text-3);
+}
+
+.guideFind:focus-within {
+  border-color: var(--white-a25);
+}
+
+.guideFind svg {
+  width: calc(var(--u) * 0.95);
+  height: calc(var(--u) * 0.95);
+  flex: none;
+}
+
+.guideFind input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: none;
+  color: var(--pl-text);
+  font: inherit;
+  font-size: calc(var(--u) * 0.88);
+  outline: none;
+}

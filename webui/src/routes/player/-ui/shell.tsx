@@ -18,6 +18,7 @@ import { AddToPlaylistHost } from './music/add-to-playlist';
 import { useNowPlaying } from './now-playing';
 import { MusicView } from './playback/music-view';
 import { usePlayerSync } from './playback/presence';
+import { ReminderBell } from './playback/reminders';
 import { TransportBar } from './playback/transport-bar';
 import { ChannelBanner } from './playback/tuner';
 import { VideoPlayer } from './playback/video-player';
@@ -317,6 +318,7 @@ export function PlayerShell({ profileId }: { profileId: number | null }) {
       <VideoPlayer />
       <MusicView />
       <ChannelBanner />
+      <ReminderBell />
       <AddToPlaylistHost />
       {gate && profiles ? (
         <WhoGate profiles={profiles} currentId={profileId} onDone={() => setGate(false)} />

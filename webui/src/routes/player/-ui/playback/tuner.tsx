@@ -5,10 +5,12 @@
  * after you leave the guide, so channel up works from anywhere.
  *
  * keys anywhere while a channel plays: page up / page down, and a remote's
- * channel up / channel down.
+ * channel up / channel down; backspace for the last channel. typing a
+ * channel's number (on the guide, or while one plays) tunes it in.
  */
 
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useRouterState } from '@tanstack/react-router';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 
 import type { PlayerState } from '../../-engine/engine';
 import type { Channel } from '../../-lib/channels';
@@ -16,17 +18,21 @@ import type { Channel } from '../../-lib/channels';
 import { runtime } from '../../-lib/format';
 import { stepTuning, tuneAt, type Tuning } from '../../-lib/tuner';
 import { inPlayer } from '../trailer';
-import { ChannelDownIcon, ChannelUpIcon } from './icons';
+import { ChannelDownIcon, ChannelUpIcon, LastChannelIcon, StartOverIcon } from './icons';
 import s from './playback.module.css';
 import { playItems, usePlayer } from './use-player';
 
 interface Tuned {
   lineup: Channel[];
   current: Tuning | null;
+  /** the channel before this one: "last channel" goes back to it */
+  previous: Channel | null;
   at: number;
+  /** a channel number being typed */
+  typing: string;
 }
 
-let tuned: Tuned = { lineup: [], current: null, at: 0 };
+let tuned: Tuned = { lineup: [], current: null, previous: null, at: 0, typing: '' };
 const listeners = new Set<() => void>();
 function emit(next: Partial<Tuned>) {
   tuned = { ...tuned, ...next };
@@ -51,7 +57,37 @@ export function setLineup(channels: Channel[]) {
 
 function play(t: Tuning) {
   playItems(t.queue, 0, { startAt: t.startAt, live: true });
-  emit({ current: t, at: Date.now() });
+  const before = tuned.current?.channel;
+  emit({
+    current: t,
+    at: Date.now(),
+    previous: before && before.id !== t.channel.id ? before : tuned.previous,
+  });
+}
+
+/** back to the channel before this one */
+export function lastChannel(): boolean {
+  const back = tuned.previous;
+  if (!back) return false;
+  const fresh = tuned.lineup.find((c) => c.id === back.id) ?? back;
+  return tuneIn(fresh);
+}
+
+/** the program on now, from its beginning (on the same channel) */
+export function startOver(): boolean {
+  const t = tuned.current;
+  if (!t) return false;
+  const again = tuneAt(t.channel, t.program.start);
+  if (!again) return false;
+  playItems(again.queue, 0, { startAt: 0, live: true });
+  emit({ current: again, at: Date.now() });
+  return true;
+}
+
+/** tune a channel by its number; false: there's no such channel */
+export function tuneNumber(n: number): boolean {
+  const channel = tuned.lineup.find((c) => c.number === n);
+  return channel ? tuneIn(channel) : false;
 }
 
 /** tune a channel in live; false: nothing on it right now */
@@ -99,6 +135,28 @@ export function ChannelButtons({ state, className }: { state: PlayerState; class
       <button
         type="button"
         className={className ?? s.ctl}
+        aria-label="Start over"
+        title="Start this program over"
+        onClick={() => startOver()}
+        data-nav
+      >
+        <StartOverIcon />
+      </button>
+      {t.previous ? (
+        <button
+          type="button"
+          className={className ?? s.ctl}
+          aria-label={`Last channel: ${t.previous.name}`}
+          title={`Last channel: ${t.previous.number ?? ''} ${t.previous.name} (backspace)`}
+          onClick={() => lastChannel()}
+          data-nav
+        >
+          <LastChannelIcon />
+        </button>
+      ) : null}
+      <button
+        type="button"
+        className={className ?? s.ctl}
         aria-label="Channel up"
         title="Channel up (page up)"
         onClick={() => channelStep(1)}
@@ -139,10 +197,44 @@ export function ChannelBanner() {
     return () => window.clearTimeout(timer);
   }, [t.at]);
 
+  const pathname = useRouterState({ select: (r) => r.location.pathname });
+  const onGuide = pathname.startsWith('/player/guide');
+  const typingTimer = useRef<number | undefined>(undefined);
   useEffect(() => {
-    if (!on) return;
+    if (!on && !onGuide) return;
     const onKey = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement | null)?.closest('input, textarea, select')) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      // a channel's number, typed: tuned in a moment after the last digit (or on enter)
+      if (/^[0-9]$/.test(e.key) && tuned.lineup.length) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        const typing = (tuned.typing + e.key).slice(-4);
+        emit({ typing });
+        window.clearTimeout(typingTimer.current);
+        typingTimer.current = window.setTimeout(() => {
+          const n = Number(tuned.typing);
+          emit({ typing: '' });
+          if (n) tuneNumber(n);
+        }, 1400);
+        return;
+      }
+      if (e.key === 'Enter' && tuned.typing) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        window.clearTimeout(typingTimer.current);
+        const n = Number(tuned.typing);
+        emit({ typing: '' });
+        if (n) tuneNumber(n);
+        return;
+      }
+      if (!on) return;
+      if (e.key === 'Backspace' && tuned.previous) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        lastChannel();
+        return;
+      }
       const up = e.key === 'PageUp' || e.key === 'ChannelUp';
       const down = e.key === 'PageDown' || e.key === 'ChannelDown';
       if (!up && !down) return;
@@ -152,7 +244,23 @@ export function ChannelBanner() {
     };
     document.addEventListener('keydown', onKey, true);
     return () => document.removeEventListener('keydown', onKey, true);
-  }, [on]);
+  }, [on, onGuide]);
+
+  if (t.typing) {
+    const n = Number(t.typing);
+    const match = t.lineup.find((c) => c.number === n);
+    return inPlayer(
+      <div className={s.banner} role="status" aria-live="polite">
+        <span className={s.bannerNum}>{t.typing}</span>
+        <span className={s.bannerText}>
+          <span className={s.bannerChannel}>Channel</span>
+          <span className={s.bannerTitle}>
+            {match ? match.name : 'No channel with that number'}
+          </span>
+        </span>
+      </div>,
+    );
+  }
 
   if (!on || !t.current || now - t.at > BANNER_MS) return null;
   const { channel, program } = t.current;

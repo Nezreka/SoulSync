@@ -100,3 +100,11 @@ def test_routes(client):
     assert client.put("/api/player/guide/lineup", json={"entries": [{"channel_id": "kids", "hidden": True}]}
                       ).get_json()["entries"][0]["hidden"] is True
     assert client.put("/api/player/guide/lineup", json={"entries": "x"}).status_code == 400
+
+
+def test_a_channel_of_someones_work():
+    spec = lineup.clean_spec({"name": "De Niro", "kinds": ["movies"],
+                              "people": [{"id": 5, "name": " Robert  De Niro "}, {"id": 5, "name": "again"}]})
+    assert spec["people"] == [{"id": 5, "name": "Robert De Niro"}]
+    with pytest.raises(lineup.LineupError):
+        lineup.clean_spec({"name": "x", "kinds": ["movies"], "people": [{"id": i, "name": "p"} for i in range(1, 8)]})

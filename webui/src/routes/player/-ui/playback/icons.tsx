@@ -204,3 +204,17 @@ export const MarkIcon = () => (
     <path d="M12 8v5M9.5 10.5h5" />
   </Icon>
 );
+
+export const StartOverIcon = () => (
+  <Icon>
+    <path d="M4 5v6h6" />
+    <path d="M5.5 15a7 7 0 1 0 1.6-7.3L4 11" />
+  </Icon>
+);
+
+export const LastChannelIcon = () => (
+  <Icon>
+    <path d="M9 7 4 12l5 5" />
+    <path d="M4 12h10a6 6 0 0 1 6 6" />
+  </Icon>
+);

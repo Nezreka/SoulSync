@@ -188,3 +188,45 @@
   font-weight: 700;
   white-space: nowrap;
 }
+
+/* finding someone for a channel of their work */
+.people {
+  position: relative;
+}
+
+.found {
+  position: absolute;
+  top: calc(100% + var(--u) * 0.3);
+  right: 0;
+  left: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  max-height: calc(var(--u) * 14);
+  overflow-y: auto;
+  padding: calc(var(--u) * 0.3);
+  border: 1px solid var(--white-a15);
+  border-radius: var(--radius-md);
+  background: var(--pl-panel-solid);
+  box-shadow: 0 calc(var(--u) * 0.6) calc(var(--u) * 1.6) var(--black-a60);
+}
+
+.foundRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: calc(var(--u) * 0.8);
+  padding: calc(var(--u) * 0.5) calc(var(--u) * 0.6);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--pl-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.foundRow:hover,
+.foundRow:focus-visible {
+  background: var(--white-a08);
+}

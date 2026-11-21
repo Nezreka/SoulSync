@@ -12,6 +12,7 @@ import {
   musicTypeChannel,
   matchesFilter,
   applyLineup,
+  channelMatches,
   numberChannels,
   playlistChannel,
   serverMusicChannel,
@@ -19,6 +20,7 @@ import {
   specFromRule,
   marathonItems,
   type Channel,
+  type PeopleTitles,
   type SavedChannel,
 } from './-lib/channels';
 import {
@@ -42,6 +44,7 @@ import {
   favoritesQuery,
   guideChannelsQuery,
   guideWatchedQuery,
+  personTitlesQuery,
   guideEdits,
   lineupQuery,
   showDetailQuery,
@@ -54,6 +57,7 @@ import {
 } from './-player.api';
 import { ChannelForm } from './-ui/guide-form';
 import { GuideDetail, GuideGrid, OnNow, type Picked } from './-ui/guide-grid';
+import { SearchIcon } from './-ui/icons';
 import { Empty, PageTitle, Tabs, styles as s } from './-ui/kit';
 import { LineupEditor } from './-ui/lineup-editor';
 import { setLineup } from './-ui/playback/tuner';
@@ -206,6 +210,27 @@ function GuidePage() {
     return map;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [marathonShows, marathonKey]);
+  // a channel of someone's work: their films and shows
+  const personIds = useMemo(
+    () => [...new Set(madeList.flatMap((c) => (c.spec.people ?? []).map((p) => p.id)))],
+    [madeList],
+  );
+  const personTitles = useQueries({
+    queries: personIds.map((id) => ({ ...personTitlesQuery(id), enabled: sections.video })),
+  });
+  const personKey = personTitles.map((q) => q.dataUpdatedAt).join(',');
+  const peopleFor = useMemo(() => {
+    const byId = new Map(personIds.map((id, i) => [id, personTitles[i]?.data]));
+    return (spec: SavedChannel['spec']): PeopleTitles | null => {
+      const all = (spec.people ?? []).map((p) => byId.get(p.id));
+      if (!all.length || all.some((x) => !x)) return null;
+      return {
+        movies: new Set(all.flatMap((x) => x!.movies)),
+        shows: new Set(all.flatMap((x) => x!.shows)),
+      };
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [personIds, personKey]);
   // added-in-the-last-n-days moves once a day, not every tick
   const today = Math.floor(now / 86_400_000) * 86_400_000;
   const [picked, setPicked] = useState<Picked | null>(null);
@@ -267,6 +292,7 @@ function GuidePage() {
         cat,
         today,
         saved.spec.show ? marathons.get(saved.spec.show) : null,
+        peopleFor(saved.spec),
       );
       if (channel) out.push(channel);
     }
@@ -278,6 +304,7 @@ function GuidePage() {
     playlistKey,
     madeList,
     marathons,
+    peopleFor,
     firstPlaylists,
     cat,
     today,
@@ -334,7 +361,10 @@ function GuidePage() {
     return map;
   }, [channels, from, to, halfHour]);
 
-  const shown = channels.filter((c) => matchesFilter(c, filter, favorites.set));
+  const [find, setFind] = useState('');
+  const shown = channels.filter(
+    (c) => matchesFilter(c, filter, favorites.set) && channelMatches(c, find),
+  );
   const groups = [
     ...(filter === 'all' && favorites.list.length
       ? [
@@ -343,7 +373,7 @@ function GuidePage() {
             label: 'Favorites',
             channels: favorites.list
               .map((id) => channels.find((c) => c.id === id))
-              .filter((c): c is Channel => !!c),
+              .filter((c): c is Channel => !!c && channelMatches(c, find)),
           },
         ]
       : []),
@@ -426,6 +456,19 @@ function GuidePage() {
       </div>
 
       <div className={s.guideBar}>
+        <label className={s.guideFind}>
+          <SearchIcon />
+          <input
+            type="search"
+            placeholder="Find a channel"
+            value={find}
+            onChange={(e) => setFind(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') setFind('');
+            }}
+            aria-label="Find a channel by name or number"
+          />
+        </label>
         <div className={s.chips} role="tablist" aria-label="Channels">
           {(
             [
@@ -580,10 +623,20 @@ function GuidePage() {
         ) : null}
 
         {!loading && !tuningMusic && !groups.length ? (
-          <Empty title={filter === 'favorites' ? 'No favorite channels yet' : 'No channels yet'}>
-            {filter === 'favorites'
-              ? 'Star a channel and it lands here, and at the top of the guide, on every screen you use.'
-              : 'Channels are made from what is in your library: a genre, a network, a decade, a mood. Once a few things with known runtimes are on disk, they appear here.'}
+          <Empty
+            title={
+              find.trim()
+                ? `No channel called “${find.trim()}”`
+                : filter === 'favorites'
+                  ? 'No favorite channels yet'
+                  : 'No channels yet'
+            }
+          >
+            {find.trim()
+              ? 'Try part of its name, what it airs (horror, HBO, 1990s) or its number.'
+              : filter === 'favorites'
+                ? 'Star a channel and it lands here, and at the top of the guide, on every screen you use.'
+                : 'Channels are made from what is in your library: a genre, a network, a decade, a mood. Once a few things with known runtimes are on disk, they appear here.'}
           </Empty>
         ) : null}
 

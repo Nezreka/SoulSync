@@ -6,12 +6,19 @@
  * an admin can make it for everyone on the server; anyone can make their own.
  */
 
-import { useMemo, useState, type ReactNode } from 'react';
+import { useQueries } from '@tanstack/react-query';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 
 import type { VideoCatalog } from '../-player.types';
 
-import { EMPTY_SPEC, specPool, type ChannelSpec, type SavedChannel } from '../-lib/channels';
-import { guideEdits } from '../-player.api';
+import {
+  EMPTY_SPEC,
+  specPool,
+  type ChannelSpec,
+  type PeopleTitles,
+  type SavedChannel,
+} from '../-lib/channels';
+import { findPeople, guideEdits, personTitlesQuery, type GuidePerson } from '../-player.api';
 import f from './guide-form.module.css';
 import { Sheet } from './sheet';
 import sh from './sheet.module.css';
@@ -91,7 +98,7 @@ export function ChannelForm({
   onSaved: () => void;
   onCancel: () => void;
 }) {
-  const [spec, setSpec] = useState<ChannelSpec>(editing?.spec ?? EMPTY_SPEC);
+  const [spec, setSpec] = useState<ChannelSpec>({ ...EMPTY_SPEC, ...editing?.spec });
   const [scope, setScope] = useState<'mine' | 'server'>(editing?.scope ?? 'mine');
   const [mode, setMode] = useState<'library' | 'show'>(editing?.spec.show ? 'show' : 'library');
   const [busy, setBusy] = useState(false);
@@ -113,15 +120,43 @@ export function ChannelForm({
     };
   }, [catalog]);
 
+  // someone's work: their films and shows, fetched as they're picked
+  const titles = useQueries({ queries: spec.people.map((p) => personTitlesQuery(p.id)) });
+  const titlesKey = titles.map((q) => q.dataUpdatedAt).join(',');
+  const people = useMemo<PeopleTitles | null>(() => {
+    if (!spec.people.length) return null;
+    if (titles.some((q) => !q.data)) return null;
+    return {
+      movies: new Set(titles.flatMap((q) => q.data!.movies)),
+      shows: new Set(titles.flatMap((q) => q.data!.shows)),
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [titlesKey, spec.people.length]);
+  const [who, setWho] = useState('');
+  const [found, setFound] = useState<GuidePerson[]>([]);
+  useEffect(() => {
+    const q = who.trim();
+    if (q.length < 2) {
+      setFound([]);
+      return;
+    }
+    const t = window.setTimeout(() => {
+      findPeople(q)
+        .then(setFound)
+        .catch(() => setFound([]));
+    }, 250);
+    return () => window.clearTimeout(t);
+  }, [who]);
+
   // what it would air, counted as you choose (episodes are the catalog's sample per show)
   const now = useMemo(() => Date.now(), []);
   const airs = useMemo(() => {
     if (mode === 'show') return null;
-    const pool = specPool({ ...spec, show: null }, catalog, now);
+    const pool = specPool({ ...spec, show: null }, catalog, now, people);
     const movies = pool.filter((p) => p.kind === 'movie').length;
     const shows = new Set(pool.filter((p) => p.kind === 'episode').map((p) => p.href)).size;
     return { movies, shows, total: pool.length };
-  }, [spec, catalog, mode, now]);
+  }, [spec, catalog, mode, now, people]);
 
   const save = async () => {
     const clean: ChannelSpec =
@@ -247,6 +282,65 @@ export function ChannelForm({
                 picked={spec.kinds}
                 onToggle={(v) => set({ kinds: toggle(spec.kinds, v as 'movies' | 'tv') })}
               />
+            </Field>
+            <Field label="People" hint="their films and shows: an actor, a director">
+              {spec.people.length ? (
+                <div className={f.chips}>
+                  {spec.people.map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      className={f.chip}
+                      aria-pressed
+                      title="Take them off"
+                      onClick={() => set({ people: spec.people.filter((x) => x.id !== p.id) })}
+                      data-nav
+                    >
+                      {p.name} ×
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+              {spec.people.length < 5 ? (
+                <div className={f.people}>
+                  <input
+                    className={sh.input}
+                    value={who}
+                    placeholder="Find someone in your library"
+                    onChange={(e) => setWho(e.target.value)}
+                    aria-label="Find someone"
+                  />
+                  {found.length ? (
+                    <div className={f.found} role="listbox" aria-label="People">
+                      {found.map((p) => (
+                        <button
+                          key={p.id}
+                          type="button"
+                          role="option"
+                          aria-selected={false}
+                          className={f.foundRow}
+                          onClick={() => {
+                            if (!spec.people.some((x) => x.id === p.id))
+                              set({
+                                people: [...spec.people, { id: p.id, name: p.name }],
+                                name: spec.name || p.name,
+                              });
+                            setWho('');
+                            setFound([]);
+                          }}
+                          data-nav
+                        >
+                          <span>{p.name}</span>
+                          <span className={f.fieldHint}>
+                            {p.job ? `${p.job} · ` : ''}
+                            {p.titles} in your library
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
             </Field>
             <Field label="Genres" hint="any of these">
               <Chips
