@@ -25007,6 +25007,12 @@ from api.metasync_settings import configure as _cfg_ms, create_blueprint as _bp_
 _cfg_ms(config_manager=config_manager)
 app.register_blueprint(_bp_ms())
 
+# listen anywhere (api/devices.py): this server's identity, paired devices,
+# invite codes and the address list for Settings > Devices
+from api.devices import configure as _cfg_dev, create_blueprint as _bp_dev
+_cfg_dev(get_database=get_database, config_manager=config_manager)
+app.register_blueprint(_bp_dev())
+
 # NOTE: the audiobook wishlist is NOT started here. It is drained by the shared
 # automation engine as the 'audiobook_process_wishlist' system automation, the same
 # way music and video drain theirs — so it can be paused, rescheduled or run by hand
@@ -26476,6 +26482,14 @@ def start_runtime_services():
         # Opt-out env for anyone who wants it off.
         if os.environ.get('SOULSYNC_NO_DISCOVER_WARMUP', '0') != '1':
             _start_discover_warmer()
+
+        # the server identity (core/connect/server_key.py): made or restored
+        # now, so its encrypted copy is in the database before any backup
+        try:
+            from core.connect.server_key import server_identity as _server_identity
+            logger.info("Server fingerprint: %s", _server_identity(get_database(), config_manager).fingerprint)
+        except Exception as _ident_err:
+            logger.error("Server identity unavailable: %s", _ident_err)
 
         _runtime_started = True
 

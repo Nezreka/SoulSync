@@ -19,6 +19,7 @@ import { type ReactNode, useEffect, useRef, useState, useSyncExternalStore } fro
 import type { SettingsTabProps } from '../host';
 import type { SettingsStore } from '../settings-store';
 
+import { ServerFingerprint } from './devices/server-fingerprint';
 import { useLoadedDraft } from './library-card';
 import { Section, SecretInput } from './parts';
 import { openPeopleSettings } from './people/people-tab';
@@ -128,7 +129,7 @@ function useTrimmedField(store: SettingsStore, key: string) {
 const CONNECT_BOX = { __html: CONNECT_HTML };
 const EMPTY_BOX = { __html: '' };
 
-export function SecuritySection({ store }: SettingsTabProps) {
+export function SecuritySection({ store, opened }: SettingsTabProps) {
   const settings = useSettings(store);
   const loads = useLoads(store);
   const sec = (settings.security || {}) as Section_;
@@ -896,6 +897,12 @@ export function SecuritySection({ store }: SettingsTabProps) {
               </>,
             )}
           </div>
+        </div>
+
+        {/* ── this server's own identity (PAIRING_SPEC.md 1) ── */}
+        <div className="security-subgroup">
+          <h4 className="security-subhead">🪪 Server identity</h4>
+          <ServerFingerprint load={opened > 0} />
         </div>
       </div>
     </Section>

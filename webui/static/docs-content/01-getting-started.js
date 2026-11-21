@@ -458,7 +458,7 @@ Requires Python 3.11.
 | Staging | \`/app/Staging\` | (Optional) Drop files here for the Import feature |
 | Config | \`/app/config\` | \`config.json\` — persists settings |
 | Logs | \`/app/logs\` | \`app.log\`, post-processing logs |
-| Database | \`/app/data\` | database + \`.encryption_key\` (sits next to the db, not in config) — **Named volume only** — never a host path |
+| Database | \`/app/data\` | database + \`.encryption_key\` + \`server_key\` (sit next to the db, not in config) — **Named volume only** — never a host path |
 
 > [!WARNING]
 > **Database volume:** always use a named volume (\`soulsync_database:/app/data\`), never a host path mount. Host path mounts can cause SQLite corruption, especially on networked filesystems or when permissions don't align.
