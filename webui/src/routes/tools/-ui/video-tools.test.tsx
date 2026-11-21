@@ -757,6 +757,30 @@ describe('video finding detail', () => {
     expect(document.querySelector('.repair-finding-json')).toBeNull();
   });
 
+  it('a title held on a missing id says which id and how many files, not raw json', () => {
+    render(
+      <VideoFindingDetail
+        finding={vfinding({
+          finding_type: 'naming_id_missing',
+          details: {
+            kind: 'show',
+            title_id: 7,
+            show_id: 7,
+            title: 'Tenchi Muyo!',
+            missing: ['imdbid'],
+            files: 26,
+            example_path: '/tv/Tenchi Muyo! (1992) {imdb-tt0105559}/Season 01/e1.mkv',
+          },
+        })}
+      />,
+    );
+    expect(screen.getByText('no IMDb id')).not.toBeNull();
+    expect(screen.getByText('26 files held')).not.toBeNull();
+    expect(screen.getByText(/TMDB and TVDB/)).not.toBeNull();
+    expect(screen.getByText('View show →')).not.toBeNull();
+    expect(document.querySelector('.repair-finding-json')).toBeNull();
+  });
+
   it('view buttons open the detail page the video way', () => {
     const heard = vi.fn();
     document.addEventListener('soulsync:video-open-detail', heard as EventListener);

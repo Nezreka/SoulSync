@@ -503,6 +503,50 @@ function NamingDetail({ d }: { d: Details }) {
   );
 }
 
+const ID_NAMES: Record<string, string> = {
+  imdbid: 'IMDb id',
+  tmdbid: 'TMDB id',
+  tvdbid: 'TVDB id',
+};
+
+/** a title whose files wait on an id their name uses (one finding per title). */
+function NamingIdMissingDetail({ d }: { d: Details }) {
+  const kind = d.kind === 'movie' ? 'movie' : 'show';
+  const missing: string[] = Array.isArray(d.missing) ? d.missing : [];
+  const files = Number(d.files) || 0;
+  return (
+    <>
+      <div className="vrf-chips">
+        {missing.map((m) => (
+          <span key={m} className="vrf-chip">
+            no {ID_NAMES[m] || m}
+          </span>
+        ))}
+        <span className="vrf-chip">
+          {files} file{files === 1 ? '' : 's'} held
+        </span>
+      </div>
+      {d.example_path ? (
+        <p className="vrf-show-overview">
+          <strong>For example:</strong> {d.example_path}
+        </p>
+      ) : null}
+      <p className="vrf-show-overview">
+        These files keep their names until the id is stored, so the id their names may carry is
+        never stripped. Approving asks {kind === 'show' ? 'TMDB and TVDB' : 'TMDB'} for it again. If
+        no source has it, set it on the title's Manage panel, under Matches.
+      </p>
+      <div className="vrf-actions">
+        <ViewButton
+          kind={kind}
+          id={d.title_id}
+          label={kind === 'show' ? 'View show' : 'View movie'}
+        />
+      </div>
+    </>
+  );
+}
+
 function subLabel(missing: Array<string | boolean | null>): string {
   return (
     (missing[0] ? String(missing[0]) : '?').toUpperCase() +
@@ -898,6 +942,7 @@ export function VideoFindingDetail({ finding, onFixAction }: VideoFindingDetailP
   else if (type === 'watched_cleanup') body = <WatchedDetail d={d} />;
   else if (type === 'shelf_life') body = <ShelfLifeDetail d={d} />;
   else if (type === 'naming_mismatch') body = <NamingDetail d={d} />;
+  else if (type === 'naming_id_missing') body = <NamingIdMissingDetail d={d} />;
   else if (type === 'missing_subtitles') body = <SubtitlesDetail d={d} />;
   else body = <RawDetails d={d} />;
   return (

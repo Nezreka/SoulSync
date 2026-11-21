@@ -171,6 +171,8 @@ export interface RenamePreview {
   total?: number;
   entries?: RenameEntry[];
   unresolved?: number;
+  /** files left alone because an id their name uses isn't stored. */
+  held?: number;
   error?: string;
 }
 

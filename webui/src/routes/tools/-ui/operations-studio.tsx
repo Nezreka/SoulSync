@@ -240,6 +240,7 @@ export const VIDEO_PILLARS: readonly StrategicPillar[] = [
       'duplicate_movie',
       'duplicate_episode',
       'naming_mismatch',
+      'naming_id_missing',
       'watched_cleanup',
       'shelf_life',
       'youtube_ghost',
