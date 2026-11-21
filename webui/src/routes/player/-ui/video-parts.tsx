@@ -1,7 +1,7 @@
 /** pieces the movie and show pages share: cast row, version picker, browse toolbar */
 
 import { Link } from '@tanstack/react-router';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 
 import type { CastMember, VideoFile } from '../-player.types';
 
@@ -109,6 +109,7 @@ export function BrowseToolbar({
   onGenre,
   count,
   noun,
+  extra,
 }: {
   sort: VideoSort;
   onSort: (sort: VideoSort) => void;
@@ -117,6 +118,8 @@ export function BrowseToolbar({
   onGenre: (genre: string) => void;
   count: number;
   noun: string;
+  /** more controls at the end (the grid/list toggle) */
+  extra?: ReactNode;
 }) {
   return (
     <div className={s.toolbar}>
@@ -155,6 +158,7 @@ export function BrowseToolbar({
         <span className={s.notYet}>
           {count.toLocaleString()} {noun}
         </span>
+        {extra}
       </div>
     </div>
   );

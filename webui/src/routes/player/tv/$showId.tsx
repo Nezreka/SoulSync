@@ -25,8 +25,8 @@ import {
   ownedByTmdb,
   Section,
 } from '../-ui/detail';
-import { Art, Badge, Hero, PlayButton, Tabs, VerdictBadge, styles as s } from '../-ui/kit';
-import { NetworkLink, PeopleLinks, VideoGenreLinks } from '../-ui/links';
+import { Art, Badge, Hero, HScroll, PlayButton, VerdictBadge, styles as s } from '../-ui/kit';
+import { CrewList, mergeCrew, NetworkLink, VideoGenreLinks } from '../-ui/links';
 import { NotFound, NotPartOfProfile } from '../-ui/not-part';
 import { useSections } from '../-ui/sections';
 import { BackgroundTrailer, TrailerButton } from '../-ui/trailer';
@@ -157,8 +157,14 @@ function ShowPage() {
     [detail.data],
   );
   // the first season you own anything of, unless the url says otherwise
-  const firstOwned = seasons.find((x) => (x.episode_owned ?? 0) > 0) ?? seasons[0];
+  // where you are: the season up next, else the first one you own anything of
+  const nextSeason = detail.data?.next_up?.season_number;
+  const firstOwned =
+    seasons.find((x) => x.season_number === nextSeason) ??
+    seasons.find((x) => (x.episode_owned ?? 0) > 0) ??
+    seasons[0];
   const current = seasons.find((x) => x.season_number === wanted) ?? firstOwned;
+  const [onlyMine, setOnlyMine] = useState(false);
 
   const files = useQuery({
     ...showFilesQuery(id, current?.season_number ?? 1),
@@ -193,6 +199,8 @@ function ShowPage() {
       : firstYear;
   const next = show.next_up;
   const creators = show.crew?.filter((c) => c.job === 'Creator');
+  // still airing: when the next one lands
+  const nextAir = !ended ? extras.data?.next_episode : null;
   const genreMatches = moreLikeThis(catalog.data?.shows ?? [], { id, genres: show.genres ?? [] });
   const tmdbId = catalog.data?.shows.find((x) => x.id === id)?.tmdb_id ?? null;
   const owned = ownedByTmdb(catalog.data?.shows ?? []);
@@ -249,23 +257,60 @@ function ShowPage() {
           <>
             <Section title="Episodes">
               {seasons.length > 1 ? (
-                <div className={s.rail}>
-                  <Tabs
-                    label="Season"
-                    value={String(current?.season_number ?? '')}
-                    options={seasons.map((x) => ({
-                      value: String(x.season_number),
-                      label: x.season_number === 0 ? 'Specials' : `Season ${x.season_number}`,
-                    }))}
-                    onChange={(next) =>
-                      void navigate({ search: { season: Number(next) }, replace: true })
-                    }
-                  />
+                <HScroll className={s.seasonPicker}>
+                  {seasons.map((x) => {
+                    const owned = x.episode_owned ?? 0;
+                    const total = x.episode_total ?? x.episodes.length;
+                    return (
+                      <button
+                        key={x.season_number}
+                        type="button"
+                        className={s.seasonPill}
+                        aria-pressed={x.season_number === current?.season_number}
+                        data-empty={owned === 0 ? 'true' : undefined}
+                        title={`${owned} of ${total} episodes in your library`}
+                        onClick={() =>
+                          void navigate({ search: { season: x.season_number }, replace: true })
+                        }
+                        data-nav
+                      >
+                        {x.season_number === 0
+                          ? 'Specials'
+                          : seasons.length > 8
+                            ? `S${x.season_number}`
+                            : `Season ${x.season_number}`}
+                      </button>
+                    );
+                  })}
+                </HScroll>
+              ) : null}
+
+              {current ? (
+                <div className={s.seasonHead}>
+                  <span className={s.rowSub}>
+                    {current.season_number === 0 ? 'Specials' : `Season ${current.season_number}`}
+                    {' · '}
+                    {current.episode_owned ?? 0} of{' '}
+                    {current.episode_total ?? current.episodes.length} episodes in your library
+                  </span>
+                  {(current.episode_owned ?? 0) <
+                  (current.episode_total ?? current.episodes.length) ? (
+                    <label className={s.check}>
+                      <input
+                        type="checkbox"
+                        checked={onlyMine}
+                        onChange={(e) => setOnlyMine(e.target.checked)}
+                        data-nav
+                      />{' '}
+                      Only what I have
+                    </label>
+                  ) : null}
                 </div>
               ) : null}
 
               <div className={s.list} aria-label="Episodes">
                 {(current?.episodes ?? [])
+                  .filter((e) => !onlyMine || e.owned !== false)
                   .slice()
                   .sort((a, b) => a.episode_number - b.episode_number)
                   .map((episode) => {
@@ -301,10 +346,20 @@ function ShowPage() {
         }
         side={
           <>
+            {creators?.length ? (
+              <InfoPanel title={creators.length > 1 ? 'Creators' : 'Creator'}>
+                <CrewList people={mergeCrew(creators)} />
+              </InfoPanel>
+            ) : null}
             <InfoPanel title="Details">
               <Facts
                 rows={[
-                  ['Created by', creators?.length ? <PeopleLinks people={creators} /> : null],
+                  [
+                    'Next episode',
+                    nextAir?.air_date
+                      ? `S${nextAir.season_number} E${nextAir.episode_number} · ${shortDate(nextAir.air_date)}`
+                      : null,
+                  ],
                   ['Network', show.network ? <NetworkLink network={show.network} /> : null],
                   ['Status', show.status ? (ended ? 'Ended' : 'Still airing') : null],
                   ['First aired', shortDate(show.first_air_date)],

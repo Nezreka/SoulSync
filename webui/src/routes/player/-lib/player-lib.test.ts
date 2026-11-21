@@ -482,7 +482,7 @@ describe('round two helpers', () => {
       views: 2_000_000,
       downloaded: false,
     });
-    expect(card.flag).toEqual({ label: 'Embed' });
+    expect(card.have).toBeUndefined();
     expect(card.badge).toBe('10:00');
     expect(card.subtitle).toBe('Chan · 2M views');
     expect(card.href).toBe('/player/youtube/UC1');

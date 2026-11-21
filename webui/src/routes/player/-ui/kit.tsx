@@ -10,7 +10,7 @@ import { useEffect, useRef, useState, type ComponentProps, type ReactNode } from
 import type { RailCard } from '../-lib/rails';
 import type { PlayVerdict } from '../-player.types';
 
-import { BackIcon, ChevronIcon, MoreIcon, PlayIcon } from './icons';
+import { BackIcon, CheckIcon, ChevronIcon, GridIcon, ListIcon, MoreIcon, PlayIcon } from './icons';
 import s from './player.module.css';
 import { usePreview } from './preview';
 
@@ -109,9 +109,9 @@ export function Card({
     <>
       <div className={s.art}>
         <Art src={card.art} srcSet={card.artSet} sizes={card.artSizes} alt={card.title} />
-        {card.flag ? (
-          <span className={s.cardFlag} data-tone={card.flag.tone}>
-            {card.flag.label}
+        {card.have ? (
+          <span className={s.cardHave} title={card.have} aria-label={card.have}>
+            <CheckIcon />
           </span>
         ) : null}
         {card.badge ? <span className={s.cardBadge}>{card.badge}</span> : null}
@@ -140,6 +140,8 @@ export function Card({
   return (
     <div
       className={s.cardWrap}
+      data-muted={card.muted ? 'true' : undefined}
+      title={card.muted}
       data-shape={card.shape}
       data-round={round ? 'true' : undefined}
       ref={menuRef}
@@ -306,29 +308,143 @@ export function CardRail({
   );
 }
 
+export type ViewMode = 'grid' | 'list';
+
 export function CardGrid({
   cards,
   shape = 'poster',
   round,
+  view = 'grid',
 }: {
   cards: RailCard[];
   shape?: RailCard['shape'];
   round?: boolean;
+  /** a list reads better for long filmographies and big libraries */
+  view?: ViewMode;
 }) {
   // a library is thousands of titles: render a screenful ahead and grow as
   // the end comes near, instead of putting every card in the page at once
-  const shown = useProgressive(cards.length, `${cards.length}:${cards[0]?.key ?? ''}`);
+  const shown = useProgressive(cards.length, `${view}:${cards.length}:${cards[0]?.key ?? ''}`);
   return (
     <>
-      <div className={s.grid} data-shape={shape}>
-        {cards.slice(0, shown.count).map((card) => (
-          <Card key={card.key} card={card} round={round} />
-        ))}
-      </div>
+      {view === 'list' ? (
+        <div className={s.cardList} role="list">
+          {cards.slice(0, shown.count).map((card) => (
+            <CardRow key={card.key} card={card} round={round} />
+          ))}
+        </div>
+      ) : (
+        <div className={s.grid} data-shape={shape}>
+          {cards.slice(0, shown.count).map((card) => (
+            <Card key={card.key} card={card} round={round} />
+          ))}
+        </div>
+      )}
       {shown.count < cards.length ? (
         <div ref={shown.sentinel} className={s.gridMore} aria-hidden="true" />
       ) : null}
     </>
+  );
+}
+
+/** one card as a list row: small art, the words, the badges */
+export function CardRow({ card, round }: { card: RailCard; round?: boolean }) {
+  const body = (
+    <>
+      <span className={s.rowThumb} data-shape={card.shape} data-round={round ? 'true' : undefined}>
+        <Art src={card.art} alt={card.title} />
+      </span>
+      <span className={s.rowMain}>
+        <span className={s.rowTitle}>{card.title}</span>
+        {card.subtitle ? <span className={s.rowSub}>{card.subtitle}</span> : null}
+      </span>
+      <span className={s.rowEnd}>
+        {card.badge ? <span>{card.badge}</span> : null}
+        {card.have ? (
+          <span className={s.rowHave} title={card.have} aria-label={card.have}>
+            <CheckIcon />
+          </span>
+        ) : null}
+      </span>
+    </>
+  );
+  return (
+    <div
+      role="listitem"
+      data-muted={card.muted ? 'true' : undefined}
+      title={card.muted}
+      className={s.cardRowWrap}
+    >
+      {card.href ? (
+        <PlayerLink href={card.href} className={s.cardRow} data-nav>
+          {body}
+        </PlayerLink>
+      ) : (
+        <div className={s.cardRow} tabIndex={0} data-nav>
+          {body}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** grid or list, remembered per page on this device */
+export function useViewMode(
+  key: string,
+  initial: ViewMode = 'grid',
+): [ViewMode, (v: ViewMode) => void] {
+  const storageKey = `ss-player-view:${key}`;
+  const [view, setView] = useState<ViewMode>(() => {
+    try {
+      const v = localStorage.getItem(storageKey);
+      return v === 'list' || v === 'grid' ? v : initial;
+    } catch {
+      return initial;
+    }
+  });
+  const set = (v: ViewMode) => {
+    setView(v);
+    try {
+      localStorage.setItem(storageKey, v);
+    } catch {
+      /* private mode */
+    }
+  };
+  return [view, set];
+}
+
+export function ViewToggle({
+  value,
+  onChange,
+}: {
+  value: ViewMode;
+  onChange: (v: ViewMode) => void;
+}) {
+  return (
+    <div className={s.viewToggle} role="radiogroup" aria-label="View">
+      <button
+        type="button"
+        role="radio"
+        aria-checked={value === 'grid'}
+        aria-label="Grid"
+        title="Grid"
+        onClick={() => onChange('grid')}
+        data-nav
+      >
+        <GridIcon />
+      </button>
+      <button
+        type="button"
+        role="radio"
+        aria-checked={value === 'list'}
+        aria-label="List"
+        title="List"
+        onClick={() => onChange('list')}
+        data-nav
+      >
+        <ListIcon />
+      </button>
+    </div>
   );
 }
 

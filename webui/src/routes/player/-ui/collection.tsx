@@ -8,7 +8,7 @@ import type { ReactNode } from 'react';
 
 import type { RailCard } from '../-lib/rails';
 
-import { CardGrid, Empty, Hero, styles as s } from './kit';
+import { CardGrid, Empty, Hero, useViewMode, ViewToggle, styles as s } from './kit';
 
 export function CollectionPage({
   kicker,
@@ -32,14 +32,21 @@ export function CollectionPage({
   /** rails between the hero and the grid (a genre's artists) */
   above?: ReactNode;
 }) {
+  const [view, setView] = useViewMode(`collection:${kicker}`);
   return (
     <>
       <Hero backdrop={backdrop} kicker={kicker} title={title} meta={meta} />
       {above}
       <div className={s.rail}>
+        {cards.length ? (
+          <div className={s.toolbar}>
+            <span />
+            <ViewToggle value={view} onChange={setView} />
+          </div>
+        ) : null}
         {loading ? <div className={s.skeleton} style={{ height: '40vh' }} /> : null}
         {!loading && !cards.length ? <Empty title="Nothing here yet">{empty}</Empty> : null}
-        {cards.length ? <CardGrid cards={cards} shape={shape} /> : null}
+        {cards.length ? <CardGrid cards={cards} shape={shape} view={view} /> : null}
       </div>
     </>
   );

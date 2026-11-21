@@ -64,6 +64,7 @@ import { Route as AudiobooksNarratorNameRouteImport } from './routes/audiobooks/
 import { Route as AudiobooksAuthorNameRouteImport } from './routes/audiobooks/author/$name'
 import { Route as ArtistDetailSourceIdRouteImport } from './routes/artist-detail/$source/$id'
 import { Route as PlayerTvNetworkNameRouteImport } from './routes/player/tv/network.$name'
+import { Route as PlayerTitleKindTmdbIdRouteImport } from './routes/player/title.$kind.$tmdbId'
 import { Route as PlayerMusicLabelNameRouteImport } from './routes/player/music/label.$name'
 import { Route as PlayerMusicGenreNameRouteImport } from './routes/player/music/genre.$name'
 import { Route as PlayerMusicArtistArtistIdRouteImport } from './routes/player/music/artist.$artistId'
@@ -345,6 +346,11 @@ const PlayerTvNetworkNameRoute = PlayerTvNetworkNameRouteImport.update({
   path: '/tv/network/$name',
   getParentRoute: () => PlayerRouteRoute,
 } as any)
+const PlayerTitleKindTmdbIdRoute = PlayerTitleKindTmdbIdRouteImport.update({
+  id: '/title/$kind/$tmdbId',
+  path: '/title/$kind/$tmdbId',
+  getParentRoute: () => PlayerRouteRoute,
+} as any)
 const PlayerMusicLabelNameRoute = PlayerMusicLabelNameRouteImport.update({
   id: '/music/label/$name',
   path: '/music/label/$name',
@@ -432,6 +438,7 @@ export interface FileRoutesByFullPath {
   '/player/music/artist/$artistId': typeof PlayerMusicArtistArtistIdRoute
   '/player/music/genre/$name': typeof PlayerMusicGenreNameRoute
   '/player/music/label/$name': typeof PlayerMusicLabelNameRoute
+  '/player/title/$kind/$tmdbId': typeof PlayerTitleKindTmdbIdRoute
   '/player/tv/network/$name': typeof PlayerTvNetworkNameRoute
 }
 export interface FileRoutesByTo {
@@ -490,6 +497,7 @@ export interface FileRoutesByTo {
   '/player/music/artist/$artistId': typeof PlayerMusicArtistArtistIdRoute
   '/player/music/genre/$name': typeof PlayerMusicGenreNameRoute
   '/player/music/label/$name': typeof PlayerMusicLabelNameRoute
+  '/player/title/$kind/$tmdbId': typeof PlayerTitleKindTmdbIdRoute
   '/player/tv/network/$name': typeof PlayerTvNetworkNameRoute
 }
 export interface FileRoutesById {
@@ -553,6 +561,7 @@ export interface FileRoutesById {
   '/player/music/artist/$artistId': typeof PlayerMusicArtistArtistIdRoute
   '/player/music/genre/$name': typeof PlayerMusicGenreNameRoute
   '/player/music/label/$name': typeof PlayerMusicLabelNameRoute
+  '/player/title/$kind/$tmdbId': typeof PlayerTitleKindTmdbIdRoute
   '/player/tv/network/$name': typeof PlayerTvNetworkNameRoute
 }
 export interface FileRouteTypes {
@@ -617,6 +626,7 @@ export interface FileRouteTypes {
     | '/player/music/artist/$artistId'
     | '/player/music/genre/$name'
     | '/player/music/label/$name'
+    | '/player/title/$kind/$tmdbId'
     | '/player/tv/network/$name'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -675,6 +685,7 @@ export interface FileRouteTypes {
     | '/player/music/artist/$artistId'
     | '/player/music/genre/$name'
     | '/player/music/label/$name'
+    | '/player/title/$kind/$tmdbId'
     | '/player/tv/network/$name'
   id:
     | '__root__'
@@ -737,6 +748,7 @@ export interface FileRouteTypes {
     | '/player/music/artist/$artistId'
     | '/player/music/genre/$name'
     | '/player/music/label/$name'
+    | '/player/title/$kind/$tmdbId'
     | '/player/tv/network/$name'
   fileRoutesById: FileRoutesById
 }
@@ -1156,6 +1168,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PlayerTvNetworkNameRouteImport
       parentRoute: typeof PlayerRouteRoute
     }
+    '/player/title/$kind/$tmdbId': {
+      id: '/player/title/$kind/$tmdbId'
+      path: '/title/$kind/$tmdbId'
+      fullPath: '/player/title/$kind/$tmdbId'
+      preLoaderRoute: typeof PlayerTitleKindTmdbIdRouteImport
+      parentRoute: typeof PlayerRouteRoute
+    }
     '/player/music/label/$name': {
       id: '/player/music/label/$name'
       path: '/music/label/$name'
@@ -1257,6 +1276,7 @@ interface PlayerRouteRouteChildren {
   PlayerMusicArtistArtistIdRoute: typeof PlayerMusicArtistArtistIdRoute
   PlayerMusicGenreNameRoute: typeof PlayerMusicGenreNameRoute
   PlayerMusicLabelNameRoute: typeof PlayerMusicLabelNameRoute
+  PlayerTitleKindTmdbIdRoute: typeof PlayerTitleKindTmdbIdRoute
   PlayerTvNetworkNameRoute: typeof PlayerTvNetworkNameRoute
 }
 
@@ -1281,6 +1301,7 @@ const PlayerRouteRouteChildren: PlayerRouteRouteChildren = {
   PlayerMusicArtistArtistIdRoute: PlayerMusicArtistArtistIdRoute,
   PlayerMusicGenreNameRoute: PlayerMusicGenreNameRoute,
   PlayerMusicLabelNameRoute: PlayerMusicLabelNameRoute,
+  PlayerTitleKindTmdbIdRoute: PlayerTitleKindTmdbIdRoute,
   PlayerTvNetworkNameRoute: PlayerTvNetworkNameRoute,
 }
 

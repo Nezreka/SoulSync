@@ -7,7 +7,15 @@ import type { RailCard } from '../-lib/rails';
 import { recentEpisodeCards, showCard } from '../-lib/rails';
 import { genresOf, sortTitles, validateBrowseSearch } from '../-lib/video';
 import { videoCatalogQuery } from '../-player.api';
-import { CardGrid, CardRail, Empty, PageTitle, styles as s } from '../-ui/kit';
+import {
+  CardGrid,
+  CardRail,
+  Empty,
+  PageTitle,
+  useViewMode,
+  ViewToggle,
+  styles as s,
+} from '../-ui/kit';
 import { NotPartOfProfile } from '../-ui/not-part';
 import { useSections } from '../-ui/sections';
 import { BrowseToolbar } from '../-ui/video-parts';
@@ -19,6 +27,7 @@ export const Route = createFileRoute('/player/tv/')({
 
 function TvBrowse() {
   const sections = useSections();
+  const [view, setView] = useViewMode('tv');
   const { sort = 'added', genre = '' } = Route.useSearch();
   const navigate = useNavigate({ from: '/player/tv/' });
   const catalog = useQuery({ ...videoCatalogQuery(), enabled: sections.tv });
@@ -58,6 +67,7 @@ function TvBrowse() {
           }
           count={cards.length}
           noun={cards.length === 1 ? 'show' : 'shows'}
+          extra={<ViewToggle value={view} onChange={setView} />}
         />
       </div>
       {catalog.isLoading ? <div className={s.skeleton} style={{ height: '50vh' }} /> : null}
@@ -71,7 +81,7 @@ function TvBrowse() {
             : 'Shows appear here once at least one episode is downloaded.'}
         </Empty>
       ) : null}
-      {cards.length ? <CardGrid cards={cards} /> : null}
+      {cards.length ? <CardGrid cards={cards} view={view} /> : null}
     </>
   );
 }

@@ -13,7 +13,7 @@ import type { CatalogMovie, CatalogShow, ExtraTitle, Extras } from '../-player.t
 
 import { remoteImage, youtubeThumb } from '../-lib/images';
 import { movieCard, showCard } from '../-lib/rails';
-import { PlayIcon } from './icons';
+import { BackIcon, ChevronIcon, PlayIcon } from './icons';
 import { Art, CardRail, HScroll, styles as s } from './kit';
 import { inPlayer, VideoDialog } from './trailer';
 
@@ -34,6 +34,28 @@ export function Section({ title, children }: { title: string; children: ReactNod
       <h2 className={s.sectionTitle}>{title}</h2>
       {children}
     </section>
+  );
+}
+
+/** long text folded to a few lines, opened in place */
+export function ReadMore({ text, lines = 6 }: { text: string; lines?: number }) {
+  const [open, setOpen] = useState(false);
+  const long = text.length > 420;
+  return (
+    <div className={s.readMore}>
+      <p
+        className={s.readMoreText}
+        style={open || !long ? undefined : { WebkitLineClamp: lines }}
+        data-clamped={!open && long ? 'true' : undefined}
+      >
+        {text}
+      </p>
+      {long ? (
+        <button type="button" className={s.moreLink} onClick={() => setOpen((v) => !v)} data-nav>
+          {open ? 'Show less' : 'Read more'}
+        </button>
+      ) : null}
+    </div>
   );
 }
 
@@ -99,36 +121,96 @@ export function ExtrasVideos({ videos }: { videos?: Extras['videos'] }) {
   );
 }
 
-/** the title's stills and posters; one opens full screen, arrows go through them */
-export function Gallery({ gallery }: { gallery?: Extras['gallery'] }) {
-  const images = gallery?.backdrops ?? [];
-  const [open, setOpen] = useState<number | null>(null);
-
+/**
+ * images full screen: arrows (keys or buttons) go through them, escape or a
+ * click outside closes. the gallery and person photos both open this.
+ */
+export function Lightbox({
+  images,
+  index,
+  onIndex,
+  onClose,
+}: {
+  images: { thumb: string; full: string }[];
+  index: number;
+  onIndex: (index: number) => void;
+  onClose: () => void;
+}) {
+  const go = (step: number) => onIndex((index + step + images.length) % images.length);
   useEffect(() => {
-    if (open === null) return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(null);
-      else if (event.key === 'ArrowRight')
-        setOpen((i) => (i === null ? i : (i + 1) % images.length));
-      else if (event.key === 'ArrowLeft')
-        setOpen((i) => (i === null ? i : (i - 1 + images.length) % images.length));
+      if (event.key === 'Escape') onClose();
+      else if (event.key === 'ArrowRight') go(1);
+      else if (event.key === 'ArrowLeft') go(-1);
       else return;
       event.preventDefault();
       event.stopImmediatePropagation();
     };
     document.addEventListener('keydown', onKey, true);
     return () => document.removeEventListener('keydown', onKey, true);
-  }, [open, images.length]);
+  });
+  return inPlayer(
+    <div
+      className={s.trailerModal}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Images"
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <img
+        className={s.lightboxImg}
+        src={remoteImage(images[index].full, 'hero') ?? ''}
+        alt={`Image ${index + 1} of ${images.length}`}
+      />
+      {images.length > 1 ? (
+        <>
+          <button
+            type="button"
+            className={s.lightboxNav}
+            data-side="prev"
+            onClick={() => go(-1)}
+            aria-label="Previous image"
+          >
+            <BackIcon />
+          </button>
+          <button
+            type="button"
+            className={s.lightboxNav}
+            data-side="next"
+            onClick={() => go(1)}
+            aria-label="Next image"
+          >
+            <ChevronIcon />
+          </button>
+        </>
+      ) : null}
+      <span className={s.lightboxCount}>
+        {index + 1} / {images.length}
+      </span>
+      <button type="button" className={s.lightboxClose} onClick={onClose}>
+        Close
+      </button>
+    </div>,
+  );
+}
 
-  if (images.length < 2) return null;
+/** a row of image tiles that open the lightbox */
+export function ImageRow({
+  images,
+  shape = 'wide',
+}: {
+  images: { thumb: string; full: string }[];
+  shape?: 'wide' | 'portrait';
+}) {
+  const [open, setOpen] = useState<number | null>(null);
   return (
-    <Section title="Gallery">
-      <HScroll className={s.inlineRail}>
+    <>
+      <HScroll className={shape === 'wide' ? s.inlineRail : s.people}>
         {images.map((img, i) => (
           <button
             key={img.thumb}
             type="button"
-            className={s.galleryTile}
+            className={shape === 'wide' ? s.galleryTile : s.photo}
             onClick={() => setOpen(i)}
             aria-label={`Image ${i + 1} of ${images.length}`}
             data-nav
@@ -137,26 +219,20 @@ export function Gallery({ gallery }: { gallery?: Extras['gallery'] }) {
           </button>
         ))}
       </HScroll>
-      {open !== null
-        ? inPlayer(
-            <div
-              className={s.trailerModal}
-              role="dialog"
-              aria-modal="true"
-              aria-label="Gallery"
-              onClick={() => setOpen(null)}
-            >
-              <img
-                className={s.lightboxImg}
-                src={remoteImage(images[open].full, 'hero') ?? ''}
-                alt={`Image ${open + 1} of ${images.length}`}
-              />
-              <span className={s.lightboxCount}>
-                {open + 1} / {images.length} · arrows to browse, esc to close
-              </span>
-            </div>,
-          )
-        : null}
+      {open !== null ? (
+        <Lightbox images={images} index={open} onIndex={setOpen} onClose={() => setOpen(null)} />
+      ) : null}
+    </>
+  );
+}
+
+/** the title's stills; one opens full screen */
+export function Gallery({ gallery }: { gallery?: Extras['gallery'] }) {
+  const images = gallery?.backdrops ?? [];
+  if (images.length < 2) return null;
+  return (
+    <Section title="Gallery">
+      <ImageRow images={images} />
     </Section>
   );
 }
@@ -169,9 +245,13 @@ export function extraCard(t: ExtraTitle, owned: Map<number, number>): RailCard {
     title: t.title,
     subtitle: t.year ? String(t.year) : undefined,
     art: remoteImage(t.poster),
-    href: libraryId ? `/player/${t.kind === 'movie' ? 'movies' : 'tv'}/${libraryId}` : undefined,
+    // yours opens its page; anything else opens a page to ask for it
+    href: libraryId
+      ? `/player/${t.kind === 'movie' ? 'movies' : 'tv'}/${libraryId}`
+      : `/player/title/${t.kind}/${t.tmdb_id}`,
     shape: 'poster',
-    flag: libraryId ? undefined : { label: 'Not in library' },
+    have: libraryId ? 'In your library' : undefined,
+    muted: libraryId ? undefined : 'Not in your library',
     preview: libraryId ? { kind: t.kind, id: libraryId } : undefined,
   };
 }

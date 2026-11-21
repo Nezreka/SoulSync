@@ -1166,10 +1166,11 @@
   text-align: center;
 }
 
-.cardBadge,
-.cardFlag {
+.cardBadge {
   position: absolute;
   z-index: 1;
+  right: calc(var(--u) * 0.45);
+  bottom: calc(var(--u) * 0.45);
   display: inline-flex;
   align-items: center;
   height: calc(var(--u) * 1.4);
@@ -1181,21 +1182,6 @@
   font-weight: 650;
   font-variant-numeric: tabular-nums;
   backdrop-filter: blur(calc(var(--u) * 0.4));
-}
-
-.cardBadge {
-  right: calc(var(--u) * 0.45);
-  bottom: calc(var(--u) * 0.45);
-}
-
-.cardFlag {
-  top: calc(var(--u) * 0.45);
-  left: calc(var(--u) * 0.45);
-}
-
-.cardFlag[data-tone='yes'] {
-  background: rgba(var(--success-rgb), 0.9);
-  color: var(--pl-bg);
 }
 
 .cardWrap:has(.progress) .cardBadge {
@@ -1867,6 +1853,10 @@
 }
 
 .photo {
+  position: relative;
+  padding: 0;
+  border: none;
+  cursor: pointer;
   overflow: hidden;
   aspect-ratio: 2 / 3;
   border-radius: var(--radius-lg);
@@ -2942,4 +2932,323 @@
   .hArrow {
     display: none;
   }
+}
+
+/* you have it: brightness says so; a small check shows on hover or focus */
+.cardHave {
+  position: absolute;
+  top: calc(var(--u) * 0.4);
+  left: calc(var(--u) * 0.4);
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: calc(var(--u) * 1.05);
+  height: calc(var(--u) * 1.05);
+  opacity: 0;
+  transform: scale(0.7);
+  transition:
+    opacity var(--dur-fast) ease,
+    transform var(--dur-fast) var(--pl-ease);
+  border-radius: var(--radius-circle);
+  background: var(--accent);
+  color: var(--pl-bg);
+  box-shadow: 0 0 0 calc(var(--u) * 0.12) var(--black-a40);
+}
+
+.cardHave svg {
+  width: 72%;
+  height: 72%;
+}
+
+.cardWrap:hover .cardHave,
+.cardWrap:focus-within .cardHave {
+  opacity: 1;
+  transform: none;
+}
+
+/* not yours: slightly darker until you point at it */
+.cardWrap[data-muted='true'] .art {
+  filter: brightness(0.6) saturate(0.75);
+}
+
+.cardWrap[data-muted='true']:hover .art,
+.cardWrap[data-muted='true']:focus-within .art {
+  filter: none;
+}
+
+.photo:focus-visible {
+  box-shadow: var(--pl-ring);
+}
+
+.lightboxNav {
+  position: fixed;
+  top: 50%;
+  display: grid;
+  place-items: center;
+  width: calc(var(--u) * 3.4);
+  height: calc(var(--u) * 3.4);
+  border: none;
+  border-radius: var(--radius-circle);
+  background: var(--white-a12);
+  color: var(--pl-text);
+  cursor: pointer;
+  transform: translateY(-50%);
+}
+
+.lightboxNav:hover {
+  background: var(--white-a20);
+}
+
+.lightboxNav svg {
+  width: 50%;
+  height: 50%;
+}
+
+.lightboxNav[data-side='prev'] {
+  left: calc(var(--u) * 1.5);
+}
+
+.lightboxNav[data-side='next'] {
+  right: calc(var(--u) * 1.5);
+}
+
+.lightboxClose {
+  position: fixed;
+  top: calc(var(--u) * 1.5);
+  right: calc(var(--u) * 1.5);
+  height: calc(var(--u) * 2.3);
+  padding: 0 calc(var(--u) * 1);
+  border: none;
+  border-radius: var(--radius-pill);
+  background: var(--white-a12);
+  color: var(--pl-text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* list view (CardGrid view="list") */
+.cardList {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 0.2);
+}
+
+.cardRowWrap[data-muted='true'] .rowThumb {
+  filter: brightness(0.6) saturate(0.75);
+}
+
+.cardRow {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: calc(var(--u) * 1);
+  padding: calc(var(--u) * 0.45) calc(var(--u) * 0.7);
+  border-radius: var(--radius-lg);
+  color: var(--pl-text);
+  text-decoration: none;
+}
+
+.cardRow:hover {
+  background: var(--white-a05);
+}
+
+.rowThumb {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  width: calc(var(--u) * 3.2);
+  aspect-ratio: 2 / 3;
+  border-radius: var(--radius-sm);
+  background: var(--white-a05);
+}
+
+.rowThumb[data-shape='square'] {
+  width: calc(var(--u) * 3.6);
+  aspect-ratio: 1;
+}
+
+.rowThumb[data-shape='wide'] {
+  width: calc(var(--u) * 6.4);
+  aspect-ratio: 16 / 9;
+}
+
+.rowThumb[data-round='true'] {
+  border-radius: var(--radius-circle);
+}
+
+.rowHave {
+  display: grid;
+  place-items: center;
+  width: calc(var(--u) * 1.3);
+  height: calc(var(--u) * 1.3);
+  border-radius: var(--radius-circle);
+  background: var(--accent);
+  color: var(--pl-bg);
+}
+
+.rowHave svg {
+  width: 72%;
+  height: 72%;
+}
+
+.viewToggle {
+  display: inline-flex;
+  gap: calc(var(--u) * 0.2);
+  padding: calc(var(--u) * 0.2);
+  border-radius: var(--radius-pill);
+  background: var(--white-a06);
+}
+
+.viewToggle button {
+  display: grid;
+  place-items: center;
+  width: calc(var(--u) * 2.1);
+  height: calc(var(--u) * 2.1);
+  border: none;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--pl-text-3);
+  cursor: pointer;
+}
+
+.viewToggle button svg {
+  width: 55%;
+  height: 55%;
+}
+
+.viewToggle button[aria-checked='true'] {
+  background: var(--pl-text);
+  color: var(--pl-bg);
+}
+
+.requestWrap {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: calc(var(--u) * 0.7);
+}
+
+.btnPrimary:disabled {
+  cursor: default;
+  opacity: 0.85;
+}
+
+.requestError {
+  color: var(--danger-light);
+  font-size: calc(var(--u) * 0.85);
+}
+
+.readMore {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: calc(var(--u) * 0.5);
+}
+
+.readMoreText {
+  margin: 0;
+  color: var(--pl-text-2);
+  line-height: 1.65;
+  white-space: pre-line;
+}
+
+.readMoreText[data-clamped='true'] {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+}
+
+/* a show's seasons: one scrolling row of pills, never wrapping into the panel */
+.seasonPicker {
+  display: flex;
+  gap: calc(var(--u) * 0.4);
+  padding: calc(var(--u) * 0.2) 0 calc(var(--u) * 0.6);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.seasonPill {
+  flex: none;
+  height: calc(var(--u) * 2.3);
+  padding: 0 calc(var(--u) * 1);
+  border: 1px solid var(--pl-line);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--pl-text-2);
+  font: inherit;
+  font-size: calc(var(--u) * 0.88);
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.seasonPill:hover {
+  background: var(--white-a06);
+  color: var(--pl-text);
+}
+
+.seasonPill[data-empty='true'] {
+  color: var(--pl-text-3);
+}
+
+.seasonPill[aria-pressed='true'] {
+  border-color: transparent;
+  background: var(--pl-text);
+  color: var(--pl-bg);
+}
+
+.seasonHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--u) * 0.8);
+}
+
+.crewList {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 0.3);
+}
+
+.crewRow {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 0.7);
+  padding: calc(var(--u) * 0.3);
+  margin: 0 calc(var(--u) * -0.3);
+  border-radius: var(--radius-lg);
+  color: var(--pl-text);
+  text-decoration: none;
+}
+
+a.crewRow:hover {
+  background: var(--white-a06);
+}
+
+.crewPhoto {
+  position: relative;
+  flex: none;
+  overflow: hidden;
+  width: calc(var(--u) * 2.6);
+  height: calc(var(--u) * 2.6);
+  border-radius: var(--radius-circle);
+  background: var(--white-a08);
+}
+
+.crewText {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.crewName {
+  font-size: calc(var(--u) * 0.9);
+  font-weight: 600;
+}
+
+.crewJob {
+  color: var(--pl-text-3);
+  font-size: calc(var(--u) * 0.76);
 }

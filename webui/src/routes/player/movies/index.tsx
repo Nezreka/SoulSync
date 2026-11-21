@@ -7,7 +7,7 @@ import type { RailCard } from '../-lib/rails';
 import { movieCard } from '../-lib/rails';
 import { genresOf, sortTitles, validateBrowseSearch } from '../-lib/video';
 import { videoCatalogQuery } from '../-player.api';
-import { CardGrid, Empty, PageTitle, styles as s } from '../-ui/kit';
+import { CardGrid, Empty, PageTitle, useViewMode, ViewToggle, styles as s } from '../-ui/kit';
 import { NotPartOfProfile } from '../-ui/not-part';
 import { useSections } from '../-ui/sections';
 import { BrowseToolbar } from '../-ui/video-parts';
@@ -19,6 +19,7 @@ export const Route = createFileRoute('/player/movies/')({
 
 function MoviesBrowse() {
   const sections = useSections();
+  const [view, setView] = useViewMode('movies');
   const { sort = 'added', genre = '' } = Route.useSearch();
   const navigate = useNavigate({ from: '/player/movies/' });
   const catalog = useQuery({ ...videoCatalogQuery(), enabled: sections.movies });
@@ -53,6 +54,7 @@ function MoviesBrowse() {
         }
         count={cards.length}
         noun={cards.length === 1 ? 'film' : 'films'}
+        extra={<ViewToggle value={view} onChange={setView} />}
       />
       {catalog.isLoading ? <div className={s.skeleton} style={{ height: '50vh' }} /> : null}
       {catalog.isError ? (
@@ -65,7 +67,7 @@ function MoviesBrowse() {
             : 'Films you add in SoulSync show up here once they are downloaded.'}
         </Empty>
       ) : null}
-      {cards.length ? <CardGrid cards={cards} /> : null}
+      {cards.length ? <CardGrid cards={cards} view={view} /> : null}
     </>
   );
 }

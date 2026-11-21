@@ -6,7 +6,18 @@ import { remoteImage, youtubeThumb } from '../-lib/images';
 import { ytVideoCard } from '../-lib/rails';
 import { youtubeChannelQuery } from '../-player.api';
 import { DetailLayout, InfoPanel, Section } from '../-ui/detail';
-import { Badge, CardGrid, CardRail, Empty, Hero, PlayButton, Tabs, styles as s } from '../-ui/kit';
+import {
+  Badge,
+  CardGrid,
+  CardRail,
+  Empty,
+  Hero,
+  PlayButton,
+  Tabs,
+  useViewMode,
+  ViewToggle,
+  styles as s,
+} from '../-ui/kit';
 import { NotFound, NotPartOfProfile } from '../-ui/not-part';
 import { useSections } from '../-ui/sections';
 import { Facts } from '../-ui/video-facts';
@@ -23,6 +34,7 @@ export const Route = createFileRoute('/player/youtube/$channelId')({
 
 function ChannelPage() {
   const sections = useSections();
+  const [view, setView] = useViewMode('channel');
   const { channelId } = Route.useParams();
   const { show = 'all' } = Route.useSearch();
   const navigate = useNavigate({ from: '/player/youtube/$channelId' });
@@ -111,9 +123,14 @@ function ChannelPage() {
                     ]}
                     onChange={(next) => void navigate({ search: { show: next }, replace: true })}
                   />
+                  <ViewToggle value={view} onChange={setView} />
                 </div>
                 {shown.length ? (
-                  <CardGrid cards={shown.map((v) => ytVideoCard(v, false))} shape="wide" />
+                  <CardGrid
+                    cards={shown.map((v) => ytVideoCard(v, false))}
+                    shape="wide"
+                    view={view}
+                  />
                 ) : (
                   <Empty
                     title={

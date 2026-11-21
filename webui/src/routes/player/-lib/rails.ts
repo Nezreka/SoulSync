@@ -50,8 +50,10 @@ export interface RailCard {
   artSizes?: string;
   /** a small label over the artwork's corner: a duration, an episode count */
   badge?: string;
-  /** a status mark over the artwork's other corner */
-  flag?: { label: string; tone?: 'yes' | 'maybe' | 'no' };
+  /** you have it: a small check on the art, the words in its tooltip */
+  have?: string;
+  /** not yours: the card is dimmed, the words in its tooltip */
+  muted?: string;
   /** the title this card previews on hover or focus */
   preview?: { kind: 'movie' | 'show'; id: number };
 }
@@ -279,7 +281,7 @@ export function ytVideoCard(v: YtVideo, showChannel = true): RailCard {
     href: v.channel_id ? `/player/youtube/${encodeURIComponent(v.channel_id)}` : undefined,
     shape: 'wide',
     badge: v.duration_seconds ? clockDurationShort(v.duration_seconds) : undefined,
-    flag: v.downloaded ? { label: 'Downloaded', tone: 'yes' } : { label: 'Embed' },
+    have: v.downloaded ? 'Downloaded: plays from your library' : undefined,
   };
 }
 

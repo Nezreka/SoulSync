@@ -5697,7 +5697,7 @@ class VideoDatabase:
         cast = [{"name": r["name"], "character": r["character"], "photo": r["photo_url"],
                  "tmdb_id": r["tmdb_id"]}
                 for r in rows if r["department"] == "cast"][:cast_limit]
-        crew = [{"name": r["name"], "job": r["job"], "tmdb_id": r["tmdb_id"]}
+        crew = [{"name": r["name"], "job": r["job"], "tmdb_id": r["tmdb_id"], "photo": r["photo_url"]}
                 for r in rows if r["department"] == "crew"]
         return {"cast": cast, "crew": crew}
 

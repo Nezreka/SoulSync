@@ -10,7 +10,8 @@ import { posterSet, remoteImage } from './-lib/images';
 import { dedupeCredits } from './-lib/people';
 import { backdropUrl } from './-lib/rails';
 import { personQuery } from './-player.api';
-import { CardGrid, CardRail, HScroll, Hero, Tabs, styles as s } from './-ui/kit';
+import { DetailLayout, ImageRow, InfoPanel, ReadMore, Section } from './-ui/detail';
+import { CardGrid, CardRail, Hero, Tabs, useViewMode, ViewToggle, styles as s } from './-ui/kit';
 import { NotFound, NotPartOfProfile } from './-ui/not-part';
 import { useSections } from './-ui/sections';
 import { Facts } from './-ui/video-facts';
@@ -38,9 +39,13 @@ function creditCard(c: PersonCredit): RailCard {
           artSet: posterSet(c.kind, c.library_id!).srcSet,
         }
       : { art: remoteImage(c.poster) }),
-    href: owned ? `/player/${c.kind === 'movie' ? 'movies' : 'tv'}/${c.library_id}` : undefined,
+    // yours opens its page; anything else opens a page to ask for it
+    href: owned
+      ? `/player/${c.kind === 'movie' ? 'movies' : 'tv'}/${c.library_id}`
+      : `/player/title/${c.kind}/${c.tmdb_id}`,
     shape: 'poster',
-    flag: owned ? { label: 'In your library', tone: 'yes' } : undefined,
+    have: owned ? 'In your library' : undefined,
+    muted: owned ? undefined : 'Not in your library',
     preview: owned ? { kind: c.kind, id: c.library_id! } : undefined,
   };
 }
@@ -50,6 +55,7 @@ function PersonPage() {
   const id = Number(Route.useParams().personId);
   const person = useQuery({ ...personQuery(id), enabled: sections.video && Number.isFinite(id) });
   const [filter, setFilter] = useState<Filter>('all');
+  const [view, setView] = useViewMode('filmography');
 
   const credits = useMemo(() => dedupeCredits(person.data?.credits ?? []), [person.data]);
   if (!sections.video) return <NotPartOfProfile what="Movies and TV" />;
@@ -74,6 +80,12 @@ function PersonPage() {
       )
     : null;
 
+  // tmdb sends credits most-known first: that order is "known for"
+  const knownFor = credits.slice(0, 14);
+  const years = credits.map(yearOf).filter((y) => y > 1800);
+  const active = years.length ? `${Math.min(...years)}–${Math.max(...years)}` : null;
+  const bio = plainText(p.biography);
+
   return (
     <>
       <Hero
@@ -83,68 +95,87 @@ function PersonPage() {
         title={p.name}
         meta={
           <>
+            {active ? <span>{active}</span> : null}
             <span>{plural(credits.length, 'credit')}</span>
             {owned.length ? <span>{owned.length} in your library</span> : null}
           </>
         }
-        overview={plainText(p.biography)}
+        overview={bio ? bio.split('\n')[0] : null}
       />
 
-      <div className={s.rail}>
-        <Facts
-          rows={[
-            ['Known for', p.known_for],
-            [
-              'Born',
-              p.birthday
-                ? `${shortDate(p.birthday)}${!p.deathday && age ? ` (age ${age})` : ''}`
-                : null,
-            ],
-            ['Died', p.deathday ? `${shortDate(p.deathday)}${age ? ` (aged ${age})` : ''}` : null],
-            ['Birthplace', p.place_of_birth],
-            [
-              'Also known as',
-              p.also_known_as?.length ? p.also_known_as.slice(0, 3).join(', ') : null,
-            ],
-          ]}
-        />
-      </div>
-
-      <CardRail title="In your library" cards={owned.map(creditCard)} />
-
-      {(p.photos?.length ?? 0) > 1 ? (
-        <section className={s.rail} aria-label="Photos">
-          <div className={s.railHead}>
-            <h2 className={s.sectionTitle}>Photos</h2>
-          </div>
-          <HScroll className={s.people}>
-            {p.photos!.slice(0, 16).map((photo) => (
-              <div key={photo.thumb} className={s.photo}>
-                <img src={remoteImage(photo.thumb) ?? ''} alt="" loading="lazy" decoding="async" />
+      <DetailLayout
+        main={
+          <>
+            <div className={s.detailRail}>
+              <CardRail title="Known for" cards={knownFor.map(creditCard)} />
+            </div>
+            {owned.length ? (
+              <div className={s.detailRail}>
+                <CardRail title="In your library" cards={owned.map(creditCard)} />
               </div>
-            ))}
-          </HScroll>
-        </section>
-      ) : null}
-
-      <section className={s.rail} aria-label="Filmography">
-        <div className={s.toolbar}>
-          <h2 className={s.sectionTitle}>Filmography</h2>
-          {acting.length && crew.length ? (
-            <Tabs
-              label="Credits"
-              value={filter}
-              options={[
-                { value: 'all', label: `All ${credits.length}` },
-                { value: 'acting', label: `Acting ${acting.length}` },
-                { value: 'crew', label: `Behind the camera ${crew.length}` },
+            ) : null}
+            {bio && bio.includes('\n') ? (
+              <Section title="Biography">
+                <ReadMore text={bio} />
+              </Section>
+            ) : null}
+            {(p.photos?.length ?? 0) > 1 ? (
+              <Section title="Photos">
+                <ImageRow images={p.photos!.slice(0, 20)} shape="portrait" />
+              </Section>
+            ) : null}
+            <section className={s.detailSection} aria-label="Filmography">
+              <div className={s.toolbar}>
+                <h2 className={s.sectionTitle}>Filmography</h2>
+                <div className={s.fieldRow}>
+                  {acting.length && crew.length ? (
+                    <Tabs
+                      label="Credits"
+                      value={filter}
+                      options={[
+                        { value: 'all', label: `All ${credits.length}` },
+                        { value: 'acting', label: `Acting ${acting.length}` },
+                        { value: 'crew', label: `Behind the camera ${crew.length}` },
+                      ]}
+                      onChange={setFilter}
+                    />
+                  ) : null}
+                  <ViewToggle value={view} onChange={setView} />
+                </div>
+              </div>
+              <CardGrid cards={shown.map(creditCard)} view={view} />
+            </section>
+          </>
+        }
+        side={
+          <InfoPanel title="Personal info">
+            <Facts
+              rows={[
+                ['Known for', p.known_for],
+                [
+                  'Born',
+                  p.birthday
+                    ? `${shortDate(p.birthday)}${!p.deathday && age ? ` (age ${age})` : ''}`
+                    : null,
+                ],
+                [
+                  'Died',
+                  p.deathday ? `${shortDate(p.deathday)}${age ? ` (aged ${age})` : ''}` : null,
+                ],
+                ['Birthplace', p.place_of_birth],
+                ['Years active', active],
+                ['Acting', acting.length ? plural(acting.length, 'credit') : null],
+                ['Behind the camera', crew.length ? plural(crew.length, 'credit') : null],
+                ['In your library', owned.length ? plural(owned.length, 'title') : null],
+                [
+                  'Also known as',
+                  p.also_known_as?.length ? p.also_known_as.slice(0, 3).join(', ') : null,
+                ],
               ]}
-              onChange={setFilter}
             />
-          ) : null}
-        </div>
-        <CardGrid cards={shown.map(creditCard)} />
-      </section>
+          </InfoPanel>
+        }
+      />
     </>
   );
 }

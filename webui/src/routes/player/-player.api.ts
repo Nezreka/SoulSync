@@ -486,3 +486,77 @@ export const keywordQuery = (name: string) =>
     staleTime: 30 * MINUTE,
     retry: false,
   });
+
+// ── titles you don't own, and asking for them ──────────────────────────
+
+export interface TmdbTitle extends MovieDetail {
+  redirect?: { source: string; kind: 'movie' | 'show'; id: number };
+  poster_url?: string | null;
+  backdrop_url?: string | null;
+  season_count?: number | null;
+  network?: string | null;
+  trailer?: { key: string; name?: string | null } | null;
+  recommendations?: ExtraTitle[];
+}
+
+/** the video side's tmdb detail (redirects to the library title when owned) */
+export const tmdbTitleQuery = (kind: 'movie' | 'show', tmdbId: number) =>
+  queryOptions({
+    queryKey: ['player', 'tmdb', kind, tmdbId],
+    queryFn: () => readJson<TmdbTitle>(apiClient.get(`video/tmdb/${kind}/${tmdbId}`)),
+    staleTime: 30 * MINUTE,
+    retry: false,
+  });
+
+export type RequestMode = 'download' | 'ask' | 'none';
+
+/** what this profile may do per kind: get it, ask for it, or neither */
+export const requestOptionsQuery = () =>
+  queryOptions({
+    queryKey: ['player', 'request-options'],
+    queryFn: async () =>
+      (
+        await apiClient
+          .get('video/requests/options')
+          .json<{ modes?: { movie?: RequestMode; show?: RequestMode; youtube?: RequestMode } }>()
+      ).modes ?? {},
+    staleTime: 5 * MINUTE,
+  });
+
+export type RequestResult =
+  | { state: 'got' }
+  | { state: 'asked'; already: boolean }
+  | { state: 'on-the-way' }
+  | { state: 'owned' }
+  | { state: 'error'; message: string };
+
+/** file it through the video side's own request route: its rules, its quotas */
+export async function requestTitle(body: {
+  kind: 'movie' | 'show';
+  tmdb_id: number;
+  title: string;
+  year?: number | string | null;
+  poster_url?: string | null;
+}): Promise<RequestResult> {
+  const res = await apiClient.post('video/requests', { json: body, throwHttpErrors: false });
+  let data: {
+    success?: boolean;
+    got?: boolean;
+    asked?: boolean;
+    already?: boolean;
+    on_the_way?: boolean;
+    error?: string;
+    message?: string;
+  } = {};
+  try {
+    data = await res.json();
+  } catch {
+    data = {};
+  }
+  if (data.success && data.got) return { state: 'got' };
+  if (data.success) return { state: 'asked', already: !!data.already };
+  if (data.on_the_way) return { state: 'on-the-way' };
+  if ((data.error ?? '').toLowerCase().includes('already in the library'))
+    return { state: 'owned' };
+  return { state: 'error', message: data.message || data.error || 'Could not ask for it' };
+}

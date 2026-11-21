@@ -8,7 +8,17 @@ import type { LibAlbum, LibArtist, LibSong, Pagination } from '../-player.types'
 
 import { runtime } from '../-lib/format';
 import { libraryThumb, remoteImage } from '../-lib/images';
-import { CardGrid, Empty, PageTitle, PlayButton, PlayerLink, Tabs, styles as s } from '../-ui/kit';
+import {
+  CardGrid,
+  Empty,
+  PageTitle,
+  PlayButton,
+  PlayerLink,
+  Tabs,
+  useViewMode,
+  ViewToggle,
+  styles as s,
+} from '../-ui/kit';
 import { NotPartOfProfile } from '../-ui/not-part';
 import { useSections } from '../-ui/sections';
 
@@ -65,6 +75,7 @@ function MoreButton({
 
 function MusicBrowse() {
   const sections = useSections();
+  const [view, setView] = useViewMode('music');
   const { tab = 'artists' } = Route.useSearch();
   const navigate = useNavigate({ from: '/player/music/' });
   const artists = usePaged<LibArtist>('artists', 'name', sections.music && tab === 'artists');
@@ -107,11 +118,14 @@ function MusicBrowse() {
           ]}
           onChange={(next) => void navigate({ search: { tab: next }, replace: true })}
         />
-        {count ? (
-          <span className={s.notYet}>
-            {count.toLocaleString()} {tab}
-          </span>
-        ) : null}
+        <div className={s.fieldRow}>
+          {count ? (
+            <span className={s.notYet}>
+              {count.toLocaleString()} {tab}
+            </span>
+          ) : null}
+          {tab !== 'songs' ? <ViewToggle value={view} onChange={setView} /> : null}
+        </div>
       </div>
 
       {current.isLoading ? <div className={s.skeleton} style={{ height: '40vh' }} /> : null}
@@ -121,14 +135,14 @@ function MusicBrowse() {
 
       {tab === 'artists' && artists.data ? (
         artistCards.length ? (
-          <CardGrid cards={artistCards} shape="square" round />
+          <CardGrid cards={artistCards} shape="square" round view={view} />
         ) : (
           <Empty title="No artists yet">Artists you add in SoulSync show up here.</Empty>
         )
       ) : null}
       {tab === 'albums' && albums.data ? (
         albumCards.length ? (
-          <CardGrid cards={albumCards} shape="square" />
+          <CardGrid cards={albumCards} shape="square" view={view} />
         ) : (
           <Empty title="No albums yet">Albums you add in SoulSync show up here.</Empty>
         )

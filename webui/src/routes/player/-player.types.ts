@@ -259,7 +259,7 @@ export interface VideoDetailBase {
   has_poster?: boolean;
   has_backdrop?: boolean;
   cast?: CastMember[];
-  crew?: { name: string; job: string; tmdb_id?: number | null }[];
+  crew?: { name: string; job: string; tmdb_id?: number | null; photo?: string | null }[];
   studio?: string | null;
   subtitle_langs?: string[] | string | null;
   watched?: boolean | null;
@@ -485,4 +485,10 @@ export interface Extras {
     items?: ExtraTitle[];
   } | null;
   facts?: { budget?: number; revenue?: number; original_language?: string; countries?: string[] };
+  next_episode?: {
+    season_number?: number | null;
+    episode_number?: number | null;
+    name?: string | null;
+    air_date?: string | null;
+  } | null;
 }

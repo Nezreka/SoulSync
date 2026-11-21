@@ -24,7 +24,7 @@ import {
   Section,
 } from '../-ui/detail';
 import { Badge, Hero, PlayButton, VerdictBadge, styles as s } from '../-ui/kit';
-import { PeopleLinks, StudioLink, VideoGenreLinks } from '../-ui/links';
+import { CrewList, mergeCrew, StudioLink, VideoGenreLinks } from '../-ui/links';
 import { NotFound, NotPartOfProfile } from '../-ui/not-part';
 import { useSections } from '../-ui/sections';
 import { BackgroundTrailer, TrailerButton } from '../-ui/trailer';
@@ -67,6 +67,7 @@ function MoviePage() {
   const writers = m.crew?.filter(
     (c) => c.job === 'Screenplay' || c.job === 'Writer' || c.job === 'Story',
   );
+  const crew = mergeCrew([...(director ?? []), ...(writers ?? []).slice(0, 4)]).slice(0, 6);
   const seconds = best?.runtime_seconds ?? (m.runtime_minutes ? m.runtime_minutes * 60 : null);
   const langs = fileLanguages(best);
   const subs = langs.subs.length ? langs.subs : languageNames(m.subtitle_langs);
@@ -151,14 +152,14 @@ function MoviePage() {
                 <VersionPicker files={files.data.files} bare />
               </InfoPanel>
             ) : null}
+            {crew.length ? (
+              <InfoPanel title="Crew">
+                <CrewList people={crew} />
+              </InfoPanel>
+            ) : null}
             <InfoPanel title="Details">
               <Facts
                 rows={[
-                  ['Directed by', director?.length ? <PeopleLinks people={director} /> : null],
-                  [
-                    'Written by',
-                    writers?.length ? <PeopleLinks people={writers.slice(0, 3)} /> : null,
-                  ],
                   ['Studio', m.studio ? <StudioLink studio={m.studio} /> : null],
                   ['Released', shortDate(m.release_date)],
                   ['Streaming since', shortDate(m.digital_release_date)],
