@@ -658,6 +658,8 @@ def _owned_tracks_for(database, artist_names: Sequence[str],
         count = plays.get(str(tid), 0) if plays else int(server_plays or 0)
         copies.setdefault(song_key(artist, title), []).append({
             "name": title,
+            # the library track, so a music app plays this exact copy
+            "lib2_track_id": int(tid),
             "artists": [{"name": artist}],
             # the art resolves only for tracks that make a mix (see _clean):
             # doing it here registered every owned track's thumb

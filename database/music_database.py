@@ -5991,6 +5991,8 @@ class MusicDatabase:
             from core.connect import device_tokens, invite_codes
             device_tokens.ensure_tables(cursor)
             invite_codes.ensure_tables(cursor)
+            from core.subsonic import store as subsonic_store
+            subsonic_store.ensure_tables(cursor)
         except Exception as e:
             logger.error(f"Error creating paired device tables: {e}")
 
