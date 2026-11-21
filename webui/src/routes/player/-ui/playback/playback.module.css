@@ -773,6 +773,7 @@ a.nowTitle:hover {
   color: var(--pl-text-2);
   font-size: calc(var(--u) * 0.85);
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .full .seekTime {
@@ -1738,4 +1739,46 @@ a.nowTitle:hover {
   font-weight: 700;
   white-space: nowrap;
   pointer-events: none;
+}
+
+/* ── the video's controls on a phone ─────────────────────────────────── */
+
+@media (max-width: 640px) {
+  /* play, skip and the clock on one line; every other control on the next,
+     sliding sideways when they don't all fit (a phone has volume buttons) */
+  .fullRow {
+    flex-wrap: wrap;
+    row-gap: calc(var(--u) * 0.4);
+  }
+
+  .fullRow > .fullGroup:last-child {
+    flex: 1 1 100%;
+    gap: calc(var(--u) * 0.2);
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+  }
+
+  .fullRow > .fullGroup:last-child::-webkit-scrollbar {
+    display: none;
+  }
+
+  .full .volume {
+    display: none;
+  }
+
+  .full .ctl {
+    flex: none;
+  }
+
+  /* a menu in a sliding row would be cut off by it: menus open from the screen's edge */
+  .full .menu,
+  .full .markForm {
+    position: fixed;
+    right: calc(var(--u) * 0.8);
+    bottom: calc(var(--u) * 9);
+    left: calc(var(--u) * 0.8);
+    width: auto;
+    max-width: none;
+  }
 }
