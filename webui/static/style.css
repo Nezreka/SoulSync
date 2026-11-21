@@ -2320,9 +2320,7 @@ body.max-performance .nav-button.active:hover {
     flex-wrap: wrap;
 }
 
-.settings-left-column,
-.settings-right-column,
-.settings-third-column {
+.settings-left-column {
     flex: 1;
     min-width: 380px;
     display: flex;
@@ -2365,32 +2363,6 @@ body.max-performance .nav-button.active:hover {
     letter-spacing: -0.012em;
 }
 
-.settings-section-arrow {
-    font-size: 9px;
-    color: rgba(255, 255, 255, 0.34);
-    transition: transform 240ms var(--ease-decelerate),
-                color 140ms var(--ease-decelerate);
-    flex-shrink: 0;
-}
-.settings-section-header:hover .settings-section-arrow { color: var(--white-a70); }
-
-.settings-section-header.collapsed .settings-section-arrow {
-    transform: rotate(-90deg);
-}
-
-.settings-section-hint {
-    font-size: var(--stg-t-sub, 0.75rem);
-    color: rgba(255, 255, 255, 0.32);
-    margin-left: auto;
-    font-weight: 450;
-    letter-spacing: 0;
-    /* it is a caption, not a second title: it yields first when space runs out */
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
 .settings-section-body {
     transition: all var(--dur-base) ease;
     /* matches the closed-card gap above, so the column keeps its rhythm whether
@@ -2403,47 +2375,6 @@ body.max-performance .nav-button.active:hover {
 .settings-section-body.collapsed {
     display: none;
     margin-bottom: 0;
-}
-
-.settings-experimental-break {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    margin: 28px 0 20px;
-    padding: 0 4px;
-    user-select: none;
-}
-
-.settings-experimental-break__line {
-    flex: 1;
-    height: 1px;
-    background: linear-gradient(
-        90deg,
-        transparent,
-        rgba(245, 166, 35, 0.55) 20%,
-        rgba(245, 166, 35, 0.55) 80%,
-        transparent
-    );
-}
-
-.settings-experimental-break__label {
-    flex-shrink: 0;
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: rgba(245, 180, 80, 0.92);
-    padding: 6px 12px;
-    border-radius: var(--radius-pill);
-    border: 1px solid rgba(245, 166, 35, 0.35);
-    background: rgba(245, 166, 35, 0.08);
-}
-
-.settings-experimental-intro {
-    margin: 0 0 16px;
-    font-size: 13px;
-    line-height: 1.5;
-    color: var(--white-a55);
 }
 
 .experimental-enable-modal .confirm-modal-content p {
@@ -2739,61 +2670,12 @@ body.max-performance .nav-button.active:hover {
 }
 
 /* Server Toggle Buttons - upgraded */
-.server-toggle-container {
-    display: flex;
-    gap: 10px;
-    margin-bottom: 16px;
-}
 
-.server-toggle-btn {
-    flex: 1;
-    padding: 10px 16px;
-    background: linear-gradient(135deg, var(--white-a04), var(--white-a02));
-    border: 1px solid var(--white-a10);
-    border-radius: var(--radius-lg);
-    color: var(--white-a70);
-    font-size: 12px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all var(--dur-slow) var(--ease-standard);
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    justify-content: center;
-    flex-direction: column;
-}
 
 .server-logo {
     width: 100%;
     opacity: 0.7;
     transition: all var(--dur-slow) ease;
-}
-
-.server-toggle-btn.active {
-    background: linear-gradient(135deg,
-            rgba(var(--accent-rgb), 0.2) 0%,
-            rgba(var(--accent-light-rgb), 0.12) 100%);
-    border-color: rgba(var(--accent-rgb), 0.4);
-    color: rgb(var(--accent-light-rgb));
-    font-weight: 600;
-    box-shadow: 0 4px 16px rgba(var(--accent-rgb), 0.15), inset 0 1px 0 var(--white-a05);
-}
-
-.server-toggle-btn:hover {
-    background: var(--white-a08);
-    border-color: var(--white-a15);
-    color: #ffffff;
-    transform: translateY(-1px);
-}
-
-.server-toggle-btn:hover .server-logo {
-    opacity: 1.0;
-}
-
-.server-toggle-btn.active:hover {
-    background: linear-gradient(135deg,
-            rgba(var(--accent-rgb), 0.28) 0%,
-            rgba(var(--accent-light-rgb), 0.18) 100%);
 }
 
 /* SoulSync standalone info section */
@@ -2829,9 +2711,6 @@ body.max-performance .nav-button.active:hover {
     line-height: 1.4;
 }
 
-.server-toggle-btn.active .server-logo {
-    opacity: 1.0;
-}
 
 .server-config-container {
     padding-top: 8px;
@@ -3035,15 +2914,7 @@ body.max-performance .nav-button.active:hover {
 }
 
 /* Accent Color Selector */
-.accent-color-selector {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-}
 
-.accent-color-selector select {
-    flex: 1;
-}
 
 .accent-preview-swatch {
     width: 36px;
@@ -3055,25 +2926,6 @@ body.max-performance .nav-button.active:hover {
     box-shadow: 0 2px 8px var(--black-a30),
         0 0 12px rgba(var(--accent-rgb), 0.3);
     transition: all var(--dur-slow) ease;
-}
-
-#custom-color-group input[type="color"] {
-    width: 100%;
-    height: 40px;
-    border: 1px solid var(--white-a10);
-    border-radius: var(--radius-md);
-    background: var(--white-a05);
-    cursor: pointer;
-    padding: 2px;
-}
-
-#custom-color-group input[type="color"]::-webkit-color-swatch-wrapper {
-    padding: 2px;
-}
-
-#custom-color-group input[type="color"]::-webkit-color-swatch {
-    border: none;
-    border-radius: var(--radius-sm);
 }
 
 /* Help Text */
@@ -3115,24 +2967,6 @@ body.max-performance .nav-button.active:hover {
     border: 1px solid rgba(var(--accent-rgb), 0.12);
     border-radius: var(--radius-md);
     padding: 6px 10px;
-}
-
-/* Post-Processing Settings */
-.post-processing-section {
-    background: var(--white-a02);
-    border: 1px solid var(--white-a06);
-    border-radius: var(--radius-control);
-    padding: 14px 16px;
-    margin-bottom: 12px;
-}
-
-.post-processing-section-title {
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 1.2px;
-    color: rgba(var(--accent-rgb), 0.8);
-    margin-bottom: 10px;
 }
 
 /* Whisper local transcription: model picker + download button + progress */
@@ -3179,25 +3013,6 @@ body.max-performance .nav-button.active:hover {
     gap: 4px 16px;
 }
 /* Tag service group accordion */
-.tag-service-group {
-    border: 1px solid var(--white-a06);
-    border-radius: var(--radius-md);
-    margin-bottom: 6px;
-    overflow: hidden;
-}
-.tag-service-header {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 12px;
-    cursor: pointer;
-    background: var(--white-a02);
-    transition: background var(--dur-fast);
-    user-select: none;
-}
-.tag-service-header:hover {
-    background: var(--white-a04);
-}
 .tag-group-arrow {
     font-size: 10px;
     color: var(--white-a40);
@@ -3208,31 +3023,6 @@ body.max-performance .nav-button.active:hover {
 .tag-group-arrow.open {
     transform: rotate(90deg);
 }
-.tag-service-header .checkbox-label {
-    margin: 0;
-    font-weight: 500;
-    font-size: 13px;
-}
-.tag-service-count {
-    margin-left: auto;
-    font-size: 11px;
-    opacity: 0.4;
-}
-.tag-service-body {
-    padding: 6px 12px 10px 32px;
-    border-top: 1px solid var(--white-a04);
-}
-.tag-service-body .checkbox-label {
-    font-size: 12px;
-    margin-bottom: 3px;
-}
-.tag-service-body .checkbox-label input[type="checkbox"] {
-    margin-right: 6px;
-}
-.tag-service-body .checkbox-label.disabled-tag {
-    opacity: 0.35;
-    pointer-events: none;
-}
 .tag-embed-desc {
     display: block;
     width: 100%;
@@ -3242,16 +3032,6 @@ body.max-performance .nav-button.active:hover {
     margin-left: 22px;
 }
 
-/* Read-only Fields */
-.readonly-field {
-    padding: 8px 12px;
-    background: linear-gradient(135deg, var(--white-a03), rgba(255, 255, 255, 0.01));
-    border: 1px solid var(--white-a06);
-    border-radius: var(--radius-md);
-    color: var(--white-a70);
-    font-size: 12px;
-    font-family: 'SF Mono', 'Courier New', monospace;
-}
 
 /* Form Actions */
 .form-actions {
@@ -4728,24 +4508,6 @@ body.max-performance .nav-button.active:hover {
     background: rgba(50, 187, 79, 1.0);
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 /* Artists Page Styling */
 .artists-grid {
     display: grid;
@@ -5460,7 +5222,14 @@ body.max-performance .nav-button.active:hover {
 body.np-modal-open #gsearch-bar,
 body.np-modal-open #gsearch-aura,
 body.np-modal-open #notif-bell-btn,
-body.np-modal-open #helper-float-btn {
+body.np-modal-open #helper-float-btn,
+/* a settings sheet's foot (Test, Done) sits where the floating buttons do */
+body.src-modal-open #notif-bell-btn,
+body.src-modal-open #helper-float-btn,
+body.src-modal-open #activity-float-btn,
+body.stg-menu-open #notif-bell-btn,
+body.stg-menu-open #helper-float-btn,
+body.stg-menu-open #activity-float-btn {
     display: none !important;
 }
 
@@ -6321,32 +6090,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     display: none !important;
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 .stage-header {
     margin-bottom: 30px;
 }
@@ -6381,24 +6124,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 /* Loading Cards */
 .loading-card {
     width: 220px;
@@ -6425,9 +6150,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     animation: spin 1s linear infinite;
     margin-right: 10px;
 }
-
-
-
 
 .modal-button {
     padding: 12px 24px;
@@ -6476,10 +6198,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     background: rgba(255, 65, 54, 0.2);
     color: #ff6b5a;
 }
-
-
-
-
 
 /* Confirm Dialog Modal */
 /* Confirm dialog must sit above all other modals (playlist, download, etc.) */
@@ -17707,7 +17425,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     display: flex;
     flex-direction: column;
 
-    /* Premium glassmorphic foundation */
 }
 
 .youtube-discovery-modal[data-source="spotify_public"] {
@@ -20474,77 +20191,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 }
 
 /* ── Live Log Viewer ── */
-.log-viewer-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 10px;
-    margin-bottom: 10px;
-}
-
-.log-viewer-controls {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    flex-wrap: wrap;
-}
-
-.log-viewer-select {
-    background: var(--white-a06);
-    border: 1px solid var(--white-a12);
-    border-radius: var(--radius-sm);
-    color: #e0e0e0;
-    padding: 6px 10px;
-    font-size: 13px;
-    font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
-}
-
-.log-viewer-filters {
-    display: flex;
-    gap: 4px;
-}
-
-.log-filter-btn {
-    padding: 4px 10px;
-    border-radius: var(--radius-xs);
-    border: 1px solid var(--white-a10);
-    background: transparent;
-    color: var(--white-a50);
-    font-size: 12px;
-    cursor: pointer;
-    transition: all var(--dur-fast);
-}
-
-.log-filter-btn:hover { background: var(--white-a06); color: #fff; }
-.log-filter-btn.active { background: var(--white-a10); color: #fff; border-color: var(--white-a25); }
-.log-filter-btn.lvl-debug.active { color: #888; border-color: #666; }
-.log-filter-btn.lvl-info.active { color: #4fc3f7; border-color: #4fc3f7; }
-.log-filter-btn.lvl-warning.active { color: #ffd54f; border-color: #ffd54f; }
-.log-filter-btn.lvl-error.active { color: #ef5350; border-color: #ef5350; }
-
-.log-viewer-actions {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    /* The toolbar's content is ~338px wide; on a phone the unwrapped row
-       pushed the last control (the Auto-scroll toggle) off the right edge
-       (batch #2, RC3). Let it wrap instead. */
-    flex-wrap: wrap;
-}
-
-.log-action-btn {
-    padding: 4px 12px;
-    border-radius: var(--radius-xs);
-    border: 1px solid var(--white-a10);
-    background: transparent;
-    color: var(--white-a60);
-    font-size: 12px;
-    cursor: pointer;
-    transition: all var(--dur-fast);
-}
-
-.log-action-btn:hover { background: var(--white-a08); color: #fff; }
 
 .log-viewer-search {
     background: var(--white-a06);
@@ -20558,14 +20204,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 }
 .log-viewer-search:focus { border-color: var(--white-a30); }
 
-.log-autoscroll-label {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    font-size: 12px;
-    color: var(--white-a50);
-    cursor: pointer;
-}
 
 .log-viewer-terminal {
     background: #0a0a14;
@@ -20614,10 +20252,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     color: var(--white-a35);
 }
 
-.log-live-dot {
-    color: #4caf50;
-    animation: log-pulse 2s ease-in-out infinite;
-}
 
 @keyframes log-pulse {
     0%, 100% { opacity: 1; }
@@ -21008,7 +20642,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 .sync-progress-indicator {
     margin-top: 10px;
     display: none;
-    /* Hidden by default */
 }
 
 .progress-bar-sync {
@@ -33257,8 +32890,6 @@ div.artist-hero-badge {
 }
 /* Show all / Show less toggle under a clamped discover-grid. */
 
-
-
 /* ── Adventurousness — living wave dial (Discover page) ──────────────────────
    A draggable orb rides an animated line that waves calmer + greener at the left (safe)
    and wilder + redder at the right (obscure). The path + colours are drawn each frame in
@@ -33581,9 +33212,6 @@ div.artist-hero-badge {
     font-size: 15px !important;
 }
 
-
-
-
 .discovery-zone-head h2 {
     margin: 0;
     color: #fff;
@@ -33598,30 +33226,6 @@ div.artist-hero-badge {
     font-size: 12px;
     line-height: 1.45;
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 .discover-hub-row {
     margin-bottom: 22px;
@@ -33949,16 +33553,6 @@ div.artist-hero-badge {
         max-width: 30ch;
         font-size: 14px;
     }
-
-
-
-
-
-
-
-
-
-
 
     .discovery-zone-head {
         align-items: flex-start;
@@ -47153,8 +46747,6 @@ tr.tag-diff-same {
     opacity: 0.5;
 }
 
-
-
 /* Nav Badge */
 
 .issues-nav-badge {
@@ -48830,44 +48422,6 @@ tr.tag-diff-same {
 }
 .stg-service:last-child { border-bottom: none; }
 
-.stg-service-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 14px 16px;
-    cursor: pointer;
-    transition: background var(--dur-base), padding-left var(--dur-base);
-    user-select: none;
-}
-.stg-service-header:hover {
-    background: var(--white-a04);
-    padding-left: 20px;
-}
-.stg-service-name {
-    font-size: 0.9em;
-    color: rgba(255, 255, 255, 0.88);
-    font-weight: 500;
-}
-.stg-service-chevron {
-    color: var(--white-a25);
-    transition: transform var(--dur-base);
-    font-size: 0.8em;
-}
-.stg-service.expanded .stg-service-chevron {
-    transform: rotate(90deg);
-    color: var(--accent);
-}
-.stg-service.expanded .stg-service-name {
-    color: #fff;
-}
-.stg-service-body {
-    display: none;
-    padding: 0 16px 16px;
-}
-.stg-service.expanded .stg-service-body {
-    display: block;
-    animation: stgSlideIn 0.25s ease-out;
-}
 @keyframes stgSlideIn {
     from { opacity: 0; transform: translateY(-6px); }
     to { opacity: 1; transform: translateY(0); }
@@ -48915,32 +48469,11 @@ tr.tag-diff-same {
 }
 
 /* Tab bar + save action sit on one control row. */
-#settings-page .settings-nav-row {
-    width: 100%;
-    margin: 0 auto 28px;
-}
 
 #settings-page .stg-tabbar {
     flex: 0 1 auto;
     max-width: 100%;
     min-width: 0;
-}
-
-#settings-page .settings-nav-row .header-actions {
-    display: flex;
-    flex: 0 0 auto;
-    justify-content: flex-end;
-    align-items: center;
-    flex-wrap: nowrap;
-    margin-top: 0;
-}
-
-#settings-page .settings-nav-row .save-button {
-    padding: 8px 16px;
-    border-radius: 9px;
-    font-size: var(--stg-t-body, 0.82rem);
-    font-weight: 600;
-    white-space: nowrap;
 }
 
 /* Columns become single centered column */
@@ -48953,16 +48486,11 @@ tr.tag-diff-same {
     min-width: 0;
 }
 
-#settings-page .settings-group[data-stg="logs"] .log-viewer-header,
 #settings-page .settings-group[data-stg="logs"] .log-viewer-terminal,
 #settings-page .settings-group[data-stg="logs"] .log-viewer-status {
     width: 100%;
 }
 
-#settings-page .settings-group[data-stg="logs"] .log-viewer-controls,
-#settings-page .settings-group[data-stg="logs"] .log-viewer-actions {
-    min-width: 0;
-}
 
 /* ── Settings local title — quiet, far-left, no dashboard banner ── */
 #settings-page .dashboard-header.settings-header-compact {
@@ -49149,7 +48677,7 @@ tr.tag-diff-same {
 }
 
 #settings-page .form-group > select,
-#settings-page select {
+#settings-page select:where(:not([data-ui] *)) {
     -webkit-appearance: none;
     -moz-appearance: none;
     appearance: none;
@@ -49168,16 +48696,16 @@ tr.tag-diff-same {
     margin: 0;
     transition: border-color var(--dur-moderate), background-color var(--dur-moderate), box-shadow var(--dur-moderate);
 }
-#settings-page select:hover {
+#settings-page select:where(:not([data-ui] *)):hover {
     background-color: var(--white-a06);
     border-color: var(--white-a10);
 }
-#settings-page select:focus {
+#settings-page select:where(:not([data-ui] *)):focus {
     border-color: rgba(var(--accent-rgb), 0.4);
     outline: none;
     background-color: var(--white-a06);
 }
-#settings-page select option {
+#settings-page select:where(:not([data-ui] *)) option {
     background: #1a1a1e;
     color: #fff;
     padding: 8px;
@@ -49244,27 +48772,6 @@ tr.tag-diff-same {
 }
 
 /* ── Server toggles — pill buttons ── */
-#settings-page .server-toggle-container {
-    padding: 12px 0;
-    display: flex;
-    gap: 8px;
-}
-#settings-page .server-toggle-btn {
-    border-radius: var(--radius-control);
-    padding: 10px 20px;
-    font-size: var(--stg-t-body, 0.82rem);
-    font-weight: 500;
-    border: 1px solid var(--white-a08);
-    transition: all var(--dur-slow) var(--ease-standard);
-}
-#settings-page .server-toggle-btn:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 4px 16px var(--black-a20);
-    border-color: rgba(var(--accent-rgb), 0.25);
-}
-#settings-page .server-toggle-btn:active {
-    transform: translateY(0);
-}
 #settings-page .server-config-container {
     padding: 0;
 }
@@ -49374,25 +48881,6 @@ tr.tag-diff-same {
     gap: 16px;
 }
 
-/* ── Tag service groups ── */
-#settings-page .tag-service-group {
-    background: var(--white-a02);
-    border: 1px solid var(--white-a05);
-    border-radius: var(--radius-lg);
-    margin-bottom: 6px;
-    overflow: hidden;
-    transition: border-color var(--dur-base);
-}
-#settings-page .tag-service-group:hover {
-    border-color: var(--white-a10);
-    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.12);
-}
-#settings-page .tag-service-header {
-    padding: 12px 18px;
-}
-#settings-page .tag-service-body {
-    padding: 0 18px 12px;
-}
 
 /* ── Path input groups (dir paths with Unlock buttons) ── */
 #settings-page .path-input-group {
@@ -49512,7 +49000,6 @@ tr.tag-diff-same {
    inner settings-groups (Folder Paths, File Organization, Retry rows, …) and
    the Security method cards. ── */
 #settings-page .settings-section-body:not(.collapsed) > .settings-group,
-#settings-page .settings-section-body:not(.collapsed) .security-subgroup,
 #settings-page .settings-section-body:not(.collapsed) .settings-subcard,
 #settings-page .settings-section-body:not(.collapsed) [id$="-settings-container"]:not(#hybrid-settings-container) {
     background: rgba(255, 255, 255, 0.045) !important;
@@ -49522,12 +49009,8 @@ tr.tag-diff-same {
     padding: 6px 16px 12px !important;
     margin: 0 0 14px !important;
 }
-#settings-page .settings-section-body:not(.collapsed) > .settings-group:last-child,
-#settings-page .settings-section-body:not(.collapsed) .security-subgroup:last-child {
+#settings-page .settings-section-body:not(.collapsed) > .settings-group:last-child {
     margin-bottom: 0 !important;
-}
-#settings-page .settings-section-body:not(.collapsed) .security-subgroup {
-    padding-top: 14px !important;
 }
 #settings-page .settings-section-body:not(.collapsed) > .settings-group::before { display: none; }
 /* Sub-card title: clean header inside its frame (no accent bar / huge padding). */
@@ -49549,7 +49032,6 @@ tr.tag-diff-same {
    never 3 stacked frames (tile → sub-card → container). The innermost
    interactive items (draggable hybrid rows, tag-embed accordions) keep theirs. */
 #settings-page .settings-section-body:not(.collapsed) .api-service-frame,
-#settings-page .settings-section-body:not(.collapsed) .post-processing-section,
 #settings-page .settings-section-body:not(.collapsed) #hybrid-settings-container {
     border: none !important;
     background: transparent !important;
@@ -49929,38 +49411,6 @@ tr.tag-diff-same {
     transform: none;
 }
 
-#settings-page .stg-service > .stg-service-header {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 13px 18px;
-    cursor: pointer;
-    transition: background var(--dur-base) ease, padding-left var(--dur-moderate) ease;
-    user-select: none;
-}
-#settings-page .stg-service > .stg-service-header:hover {
-    background: rgba(255, 255, 255, 0.035);
-    padding-left: 22px;
-}
-
-/* Override service-title styles inside accordion header */
-#settings-page .stg-service .stg-service-header .service-title {
-    padding: 0 !important;
-    margin: 0 !important;
-    border-bottom: none !important;
-    font-size: 0.88em !important;
-    font-weight: 500;
-    color: var(--white-a70);
-    letter-spacing: 0.02em;
-    text-transform: none;
-    flex: 1;
-    transition: color var(--dur-base);
-}
-#settings-page .stg-service:hover .stg-service-header .service-title,
-#settings-page .stg-service.expanded .stg-service-header .service-title {
-    color: rgba(255, 255, 255, 0.95);
-}
-
 /* "Required" pill on the TMDB/TVDB service headers + the required-keys callout. */
 #settings-page .stg-service .stg-req-pill {
     flex: 0 0 auto;
@@ -49988,52 +49438,6 @@ tr.tag-diff-same {
 }
 #settings-page .stg-required-note strong { color: #ffdca0; }
 
-/* Brand color dot — always glows, glow intensifies on hover/expand */
-#settings-page .stg-service-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: var(--radius-circle);
-    flex-shrink: 0;
-    background: currentColor;
-    opacity: 0.85;
-    box-shadow: 0 0 6px currentColor;
-    transition: opacity var(--dur-moderate), transform var(--dur-moderate), box-shadow var(--dur-moderate);
-}
-#settings-page .stg-service:hover .stg-service-dot {
-    opacity: 1;
-    box-shadow: 0 0 9px currentColor;
-}
-#settings-page .stg-service.expanded .stg-service-dot {
-    opacity: 1;
-    transform: scale(1.25);
-    box-shadow: 0 0 12px currentColor;
-}
-
-/* Chevron */
-#settings-page .stg-service > .stg-service-header > .stg-service-chevron {
-    color: var(--white-a20);
-    font-size: 1.1em;
-    transition: transform var(--dur-moderate) var(--ease-standard), color var(--dur-moderate);
-    flex-shrink: 0;
-    margin-left: auto;
-    line-height: 1;
-}
-#settings-page .stg-service.expanded > .stg-service-header > .stg-service-chevron {
-    transform: rotate(90deg);
-    color: var(--accent);
-}
-
-/* Collapsible body */
-#settings-page .stg-service > .stg-service-body {
-    display: none;
-    padding: 0 0 6px;
-    border-top: 1px solid var(--white-a03);
-}
-#settings-page .stg-service.expanded > .stg-service-body {
-    display: block;
-    animation: stgSlideIn 0.25s ease-out;
-}
-
 /* Expanded state — accent left border + slightly brighter bg */
 #settings-page .api-service-frame.stg-service.expanded {
     border-left: 2px solid rgba(var(--accent-rgb), 0.4);
@@ -50041,88 +49445,11 @@ tr.tag-diff-same {
     box-shadow: 0 4px 20px var(--black-a15), inset 0 1px 0 var(--white-a03);
 }
 
-/* ── Service config-status gradients ──
-   Applied to the header based on whether the user has filled in credentials.
-   Subtle left-to-transparent fade that reads at a glance when scrolling. */
-#settings-page .stg-service-header.status-configured {
-    background-image: linear-gradient(
-        90deg,
-        rgba(46, 204, 113, 0.32) 0%,
-        rgba(46, 204, 113, 0.12) 18%,
-        rgba(46, 204, 113, 0.04) 45%,
-        transparent 80%
-    );
-}
-#settings-page .stg-service-header.status-missing {
-    background-image: linear-gradient(
-        90deg,
-        rgba(241, 196, 15, 0.35) 0%,
-        rgba(241, 196, 15, 0.13) 18%,
-        rgba(241, 196, 15, 0.04) 45%,
-        transparent 80%
-    );
-}
-/* Keep hover subtlety — overlay a gentle highlight without clobbering the gradient */
-#settings-page .stg-service-header.status-configured:hover,
-#settings-page .stg-service-header.status-missing:hover {
-    background-color: rgba(255, 255, 255, 0.035);
-}
 
 /* ── Verify state: spinner badge in the header ──
    Shown while a verify API call is in flight for this service. */
-#settings-page .stg-service-verify-spinner {
-    display: none;
-    width: 12px;
-    height: 12px;
-    border: 2px solid var(--white-a15);
-    border-top-color: var(--white-a65);
-    border-radius: var(--radius-circle);
-    animation: stgSpin 0.9s linear infinite;
-    flex-shrink: 0;
-    margin-left: 6px;
-    margin-right: 6px;
-}
-#settings-page .stg-service-header.status-checking .stg-service-verify-spinner {
-    display: inline-block;
-}
 @keyframes stgSpin {
     to { transform: rotate(360deg); }
-}
-
-/* ── Verify state: status line inside panel body ──
-   "Testing connection…" while verify runs, removed when result arrives. */
-#settings-page .stg-service-verify-status {
-    padding: 10px 18px;
-    font-size: 0.78em;
-    color: var(--white-a45);
-    font-style: italic;
-    letter-spacing: 0.02em;
-}
-
-/* ── Verify failure warning bar at top of expanded panel ──
-   Shown when the verify call failed. Removed on next successful verify. */
-#settings-page .stg-service-warning {
-    display: flex;
-    align-items: flex-start;
-    gap: 10px;
-    margin: 10px 18px;
-    padding: 10px 12px;
-    background: rgba(231, 76, 60, 0.08);
-    border: 1px solid rgba(231, 76, 60, 0.25);
-    border-left: 3px solid rgba(231, 76, 60, 0.65);
-    border-radius: var(--radius-sm);
-    font-size: 0.82em;
-    color: rgba(255, 220, 216, 0.9);
-    line-height: 1.4;
-}
-#settings-page .stg-service-warning .stg-service-warning-icon {
-    flex-shrink: 0;
-    font-size: 1.05em;
-    color: rgba(231, 76, 60, 0.85);
-    line-height: 1.3;
-}
-#settings-page .stg-service-warning .stg-service-warning-text {
-    flex: 1;
 }
 
 /* Expand All / Collapse All toggle button */
@@ -50146,24 +49473,9 @@ tr.tag-diff-same {
     border-color: var(--white-a10);
 }
 
-/* ── Accent color picker ── */
-#settings-page .accent-color-selector {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-}
 
 /* ── Responsive ── */
 @media (max-width: 768px) {
-    #settings-page .settings-nav-row {
-        flex-wrap: wrap;
-        justify-content: flex-start;
-        gap: 10px;
-        padding: 0 8px;
-    }
-    #settings-page .settings-nav-row .header-actions {
-        margin-left: auto;
-    }
     /* Tab bar scrolls horizontally; fade the right edge to signal more tabs */
     #settings-page .stg-tabbar {
         width: 100%;
@@ -50201,9 +49513,6 @@ tr.tag-diff-same {
     #settings-page .api-service-frame .form-group { padding: 8px 12px !important; }
     #settings-page .api-service-frame .callback-info { padding: 2px 12px 10px; }
     #settings-page .api-service-frame .form-actions { padding: 4px 12px 12px; }
-    /* Accordion headers */
-    #settings-page .stg-service > .stg-service-header { padding: 12px 14px; }
-    #settings-page .stg-service > .stg-service-body { padding: 0 0 8px; }
     /* Section titles */
     #settings-page .settings-group > h3 { padding: 24px 0 10px; }
 }
@@ -61289,8 +60598,6 @@ select.ma-input { appearance: auto; }
 
 .adl-client-empty-error { color: #e74c3c; }
 
-
-
 /* lastfm radio: three fixes from the aug 25 report.
    1) .discover-section's content-visibility paint-contains descendants, so
       the absolutely-positioned dropdown was CLIPPED to nothing when the
@@ -61414,64 +60721,10 @@ select.ma-input { appearance: auto; }
 
 /* discover: the library radio play-now card (tools zone) */
 
-
-
-
-
-
-
-/* ── Security settings: grouped sub-sections + dependency visuals ── */
-.security-subgroup {
-    border: 1px solid var(--white-a07);
-    border-radius: var(--radius-control);
-    padding: 14px 16px 4px;
-    margin-bottom: 16px;
-    background: var(--white-a02);
-}
-.security-subhead {
-    margin: 0 0 12px;
-    font-size: 14px;
-    font-weight: 600;
-    display: flex;
-    align-items: baseline;
-    gap: 8px;
-    flex-wrap: wrap;
-}
-.security-subhead-note {
-    font-size: 11px;
-    font-weight: 400;
-    opacity: 0.55;
-    letter-spacing: 0.02em;
-}
-.security-nested {
-    margin-left: 14px;
-    padding-left: 14px;
-    border-left: 2px solid var(--white-a08);
-}
-/* several nested rows that belong together (sign in with oidc's provider
-   settings): one rule down the side and one quiet panel, so they read as a
-   single block. the rows inside keep their own hairline separators */
-.security-nested-block {
-    background: var(--white-a02);
-    border-radius: 0 10px 10px 0;
-    padding: 2px 6px 2px 10px;
-    margin-bottom: 8px;
-}
-.security-nested-block > .form-group {
-    border-radius: 6px;
-}
-/* inside its toggle's row (sign in with oidc): take the full width under the
-   help text, and don't let the row's hover tint wash over the whole block */
-#settings-page .form-group > .security-nested-block {
-    flex: 1 1 100%;
-    margin-top: 4px;
-}
-#settings-page .form-group:has(> .security-nested-block):hover {
-    background: transparent;
-}
 /* the admin's own oidc connection, last row of the block */
 .security-oidc-admin {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 12px;
 }
@@ -61492,7 +60745,7 @@ select.ma-input { appearance: auto; }
     object-fit: contain;
 }
 .security-oidc-admin-text {
-    flex: 1 1 auto;
+    flex: 1 1 200px;
     min-width: 0;
     font-size: 13px;
     color: rgba(255, 255, 255, 0.74);
@@ -61501,18 +60754,6 @@ select.ma-input { appearance: auto; }
     flex-basis: 100%;
     font-size: 12px;
     color: #f0b35a;
-}
-.security-locked {
-    opacity: 0.5;
-}
-.security-locked .toggle-label {
-    cursor: not-allowed;
-}
-.security-saved-status {
-    font-size: 12px;
-    color: #4caf50;
-    font-weight: 500;
-    margin-bottom: 6px;
 }
 
 
@@ -68365,8 +67606,6 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
     transform: none;
 }
 
-
-
 .discover-station-error {
     font-size: 11.5px;
     color: #ff9a9a;
@@ -68471,7 +67710,6 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
    views read as one page. */
 /* Two labelled groups, not one long ragged wrap. Eleven tiles in a single
    auto-fill grid landed 7-then-4 and read as an accident rather than a layout. */
-.src-tile-grid { margin-top: 14px; }
 .src-group + .src-group { margin-top: 26px; }
 .src-group-head {
     display: flex;
@@ -68498,203 +67736,17 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
     font-size: 0.74em;
     color: rgba(255, 255, 255, 0.32);
 }
-.src-tile-row {
-    display: grid;
-    /* auto-fit + a max keeps tiles a sane size instead of stretching four of
-       them across the whole page when a group is small. */
-    grid-template-columns: repeat(auto-fit, minmax(104px, 132px));
-    gap: 9px;
-}
-.src-tile {
-    position: relative;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 6px;
-    padding: 11px 8px 9px;
-    background: rgba(255, 255, 255, 0.055);
-    border: none;
-    border-radius: 13px;
-    cursor: pointer;
-    font-family: inherit;
-    transition: transform var(--stg-tok-fast) var(--stg-tok-ease),
-                background var(--stg-tok-fast) var(--stg-tok-ease),
-                box-shadow var(--stg-tok-fast) var(--stg-tok-ease);
-}
-.src-tile:hover {
-    transform: translateY(-3px);
-    background: rgba(255, 255, 255, 0.095);
-    box-shadow: 0 14px 30px -16px rgba(0, 0, 0, 1);
-}
-.src-tile:active { transform: translateY(0) scale(0.99); }
-.src-tile:focus-visible {
-    outline: 2px solid rgba(var(--accent-rgb), 0.65);
-    outline-offset: 2px;
-}
-/* In the chain reads as the live one; the rest are available, not broken. */
-.src-tile.is-active {
-    background: linear-gradient(180deg, rgba(var(--accent-rgb), 0.13), rgba(var(--accent-rgb), 0.05));
-    box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.2);
-}
-.src-tile.is-active:hover {
-    box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.3),
-                0 10px 24px -14px var(--black-a95);
-}
-/* A source in the chain that is not working is the case worth spotting from
-   across the room - the dot alone is 8px and easy to miss. These tiles carry no
-   border any more, so the alert rides an inset ring instead; it has to outrank
-   the is-active gradient above, which is why it comes after. */
-.src-tile:has(.src-tile-dot.hss-fail) { box-shadow: inset 0 0 0 1px rgba(255, 95, 87, 0.5); }
-.src-tile:has(.src-tile-dot.hss-warn) { box-shadow: inset 0 0 0 1px rgba(240, 180, 41, 0.5); }
-.src-tile:has(.src-tile-dot.hss-fail):hover {
-    box-shadow: inset 0 0 0 1px rgba(255, 95, 87, 0.65),
-                0 10px 24px -14px var(--black-a95);
-}
-.src-tile:has(.src-tile-dot.hss-warn):hover {
-    box-shadow: inset 0 0 0 1px rgba(240, 180, 41, 0.65),
-                0 10px 24px -14px var(--black-a95);
-}
-.src-tile-art {
-    width: 34px;
-    height: 34px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: opacity var(--stg-tok-fast) var(--stg-tok-ease);
-}
-.src-tile-art img { width: 30px; height: 30px; object-fit: contain; border-radius: var(--radius-md); }
-/* Full opacity, and the idle dimming below must not touch these. Tidal, Qobuz
-   and SoundCloud are thin black OUTLINE art (stroke-only, 800px viewBox shown at
-   30px). Inverting gives white hairlines, and the idle rule then multiplied them
-   down to 0.55 x 0.92 = 0.5 - white strokes at half opacity read as grey, which
-   looks exactly like the inversion never happened. It had; it was being eaten. */
-.src-tile-art img.is-inverted { filter: brightness(0) invert(1); opacity: 1; border-radius: 0; }
-.src-tile-art .emoji-icon { font-size: 25px; line-height: 1; }
-/* Sources that are not in the chain are configurable but idle - dim the art
-   rather than the whole tile, so the name and chips stay readable. */
-.src-tile:not(.is-active) .src-tile-art { opacity: 0.55; }
-/* line-art marks cannot afford the idle dimming - they have no fill to lose */
-.src-tile:not(.is-active) .src-tile-art:has(img.is-inverted) { opacity: 0.88; }
-.src-tile:hover .src-tile-art { opacity: 1; }
-.src-tile-name {
-    font-size: 0.79em;
-    font-weight: 600;
-    letter-spacing: -0.006em;
-    color: var(--white-a90);
-    text-align: center;
-    line-height: 1.25;
-}
-.src-tile-chip {
-    font-size: 0.63em;
-    line-height: 1;
-    font-weight: 600;
-    letter-spacing: 0.02em;
-    padding: 4px 7px;
-    border-radius: var(--radius-sm);
-    border: none;
-    background: var(--white-a07);
-    color: var(--white-a35);
-    white-space: nowrap;
-}
-.src-tile-chip--on {
-    background: rgba(125, 211, 252, 0.13);
-    color: #8fd8fc;
-}
-/* one chip per chain a source is in (music, video, audiobooks) */
-.src-tile-chips {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: center;
-    gap: 4px;
-}
-.src-tile-chip--warn {
-    background: rgba(var(--warning-strong-rgb), 0.15);
-    color: #fbcd7a;
-}
-/* Same dot and same colours as the chain rows on the Downloads tab. */
-.src-tile-dot {
-    position: absolute;
-    top: 10px;
-    right: 10px;
-    width: 8px;
-    height: 8px;
-    border-radius: var(--radius-circle);
-    background: var(--white-a18);
-}
-.src-tile-dot.hss-ok      { background: #34d27b; box-shadow: 0 0 6px rgba(52, 210, 123, 0.6); }
-.src-tile-dot.hss-fail    { background: #ff5f57; box-shadow: 0 0 6px rgba(255, 95, 87, 0.5); }
-/* Works, but something wants attention — a broken cookie file on a source that
-   still downloads fine. Red said "this is broken" about the one thing working. */
-.src-tile-dot.hss-warn    { background: #f0b429; box-shadow: 0 0 6px rgba(240, 180, 41, 0.5); }
-.src-tile-dot.hss-na      { background: var(--white-a12); }
-.src-tile-dot.hss-testing { background: #f0b429; animation: hssPulse 0.9s ease-in-out infinite; }
 
 /* ── the config modal ─────────────────────────────────────────────────────── */
-.src-modal-overlay {
-    position: fixed;
-    inset: 0;
-    z-index: 1200;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 24px;
-    background: rgba(0, 0, 0, 0.58);
-    /* 4px reads as a smudge; the 10-20px range is where it reads as glass */
-    backdrop-filter: blur(14px) saturate(1.2);
-    -webkit-backdrop-filter: blur(14px) saturate(1.2);
-    animation: srcModalFade 0.16s cubic-bezier(0.2, 0, 0, 1);
-}
-.src-modal-overlay[hidden] { display: none; }
 @keyframes srcModalFade { from { opacity: 0; } to { opacity: 1; } }
-.src-modal {
-    width: min(760px, 100%);
-    max-height: min(84vh, 900px);
-    display: flex;
-    flex-direction: column;
-    /* elevated surface, per the base/elevated dark pairing - it has to sit
-       clearly above the page behind it without a bright outline doing the work */
-    background: #1a1d23;
-    border: 1px solid var(--white-a06);
-    border-radius: var(--radius-sheet);
-    box-shadow: 0 32px 64px -12px var(--black-a70),
-                0 0 0 1px var(--black-a40);
-    animation: srcModalRise 0.26s cubic-bezier(0.2, 0, 0, 1);
-    overflow: hidden;
-}
 @keyframes srcModalRise {
     from { transform: translateY(12px) scale(0.985); opacity: 0; }
     to   { transform: none; opacity: 1; }
 }
-.src-modal-header {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 16px 18px;
-    border-bottom: 1px solid var(--white-a07);
-    background: var(--white-a02);
-    flex-shrink: 0;
-}
 .src-modal-icon img { width: 28px; height: 28px; object-fit: contain; border-radius: var(--radius-sm); }
 .src-modal-icon .emoji-icon { font-size: 24px; line-height: 1; }
-.src-modal-titles { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
-.src-modal-titles h3 { margin: 0; font-size: 1.02em; font-weight: 600; }
 .src-modal-sub { font-size: 0.76em; color: rgba(255, 255, 255, 0.42); }
 .src-modal-meta { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
-.src-modal-meta .src-tile-dot { position: static; }
-.src-modal-close {
-    flex-shrink: 0;
-    width: 30px;
-    height: 30px;
-    border: none;
-    border-radius: var(--radius-md);
-    background: var(--white-a05);
-    color: var(--white-a55);
-    font-size: 20px;
-    line-height: 1;
-    cursor: pointer;
-    transition: background var(--dur-quick), color var(--dur-quick);
-}
-.src-modal-close:hover { background: var(--white-a10); color: #fff; }
 .src-modal-body {
     padding: 18px;
     overflow-y: auto;
@@ -68736,12 +67788,6 @@ body.src-modal-open { overflow: hidden; }
 .src-modal-result.is-fail    { color: #ff9b95; background: rgba(255, 95, 87, 0.08); }
 .src-modal-result.is-testing { color: var(--white-a60); }
 .src-modal-result.is-na      { color: rgba(255, 255, 255, 0.42); }
-
-@media (max-width: 620px) {
-    .src-tile-row { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
-    .src-modal { max-height: 92vh; max-height: 92dvh; }
-    .src-modal-overlay { padding: 10px; }
-}
 
 /* An inline "this will not work" under a setting, said at the moment of
    choosing rather than when a download fails days later. */
@@ -68803,498 +67849,27 @@ body.src-modal-open { overflow: hidden; }
     max-width: 100%;
     flex-wrap: wrap;
 }
-.dlchain-tab {
-    padding: 7px 18px;
-    border: none;
-    border-radius: 9px;
-    background: transparent;
-    color: var(--white-a60);
-    font-size: 0.82em;
-    font-weight: 600;
-    letter-spacing: -0.005em;
-    font-family: inherit;
-    cursor: pointer;
-    transition: background var(--stg-tok-fast) var(--stg-tok-ease),
-                color var(--stg-tok-fast) var(--stg-tok-ease);
-}
-.dlchain-tab:hover { color: var(--white-a90); }
-.dlchain-tab.active {
-    background: var(--surface-3);
-    color: var(--white-a90);
-    box-shadow: 0 1px 2px var(--black-a35);
-}
-.dlchain-tab:focus-visible {
-    outline: 2px solid rgba(var(--accent-rgb), 0.7);
-    outline-offset: 2px;
-}
-
-#dlchain-help {
-    color: var(--white-a35);
-    font-size: 0.8em;
-    line-height: 1.5;
-    max-width: 68ch;
-    margin-bottom: 4px;
-}
-
-.dlchain-columns {
-    display: grid;
-    /* The chain is a rail, not a canvas. Its cards are one line tall, so a wide
-       column just wrapped them in empty space; the pool has grids to fill and
-       gets the width instead. */
-    grid-template-columns: minmax(0, 1.55fr) minmax(272px, 0.72fr);
-    gap: 28px;
-    margin-top: 16px;
-    align-items: start;
-}
-.dlchain-col-head {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 10px;
-    padding-left: 2px;
-    flex-wrap: wrap;
-}
-/* eleven sources is past the point where scanning a grid is pleasant */
-.dlchain-filter {
-    margin-left: auto;
-    width: 130px;
-    padding: 5px 10px;
-    border: none;
-    border-radius: var(--radius-md);
-    background: var(--black-a30);
-    color: var(--white-a90);
-    font-size: 0.78em;
-    font-family: inherit;
-    transition: background var(--stg-tok-fast) var(--stg-tok-ease),
-                box-shadow var(--stg-tok-fast) var(--stg-tok-ease);
-}
-.dlchain-filter::placeholder { color: var(--white-a35); }
-.dlchain-filter:focus {
-    outline: none;
-    background: var(--black-a45);
-    box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.45);
-}
-.dlchain-col-label {
-    font-size: 0.7em;
-    font-weight: 600;
-    letter-spacing: 0.09em;      /* opened up: small caps on dark need air */
-    text-transform: uppercase;
-    color: var(--white-a60);
-}
-.dlchain-col-hint { font-size: 0.74em; color: var(--white-a35); }
-
-/* ── the pool ── */
-.dlchain-pool {
-    display: flex;
-    flex-direction: column;
-    gap: 11px;
-    padding: 10px;
-    border-radius: var(--radius-xl);
-    background: var(--surface-1);
-    min-height: 96px;
-    transition: background var(--stg-tok-base) var(--stg-tok-ease),
-                box-shadow var(--stg-tok-base) var(--stg-tok-ease);
-}
-.dlchain-pool.drag-over {
-    background: rgba(var(--accent-rgb), 0.07);
-    box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.4);
-}
-.dlchain-group[hidden] { display: none; }
-.dlchain-group-head {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    margin-bottom: 7px;
-    padding-left: 2px;
-}
-.dlchain-group-label {
-    font-size: 0.66em;
-    font-weight: 600;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: var(--white-a35);
-}
-.dlchain-group-count {
-    font-size: 0.62em;
-    font-weight: 600;
-    padding: 1px 6px;
-    border-radius: 20px;
-    background: var(--white-a07);
-    color: var(--white-a35);
-}
-.dlchain-group-row {
-    display: grid;
-    /* capped, not 1fr: on a wide pool 1fr stretched six tiles across the whole
-       column and left a ragged hole wherever a group had fewer than six */
-    grid-template-columns: repeat(auto-fill, minmax(112px, 140px));
-    gap: 10px;
-}
-.dlchain-tile[hidden] { display: none; }
-.dlchain-tile {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 9px;
-    padding: 16px 10px 13px;
-    border: none;
-    border-radius: 11px;
-    background: var(--stg-tok-surf-2);
-    cursor: grab;
-    font-family: inherit;
-    transition: transform var(--stg-tok-fast) var(--stg-tok-ease),
-                background var(--stg-tok-fast) var(--stg-tok-ease),
-                box-shadow var(--stg-tok-fast) var(--stg-tok-ease);
-}
-.dlchain-tile:hover {
-    transform: translateY(-2px);
-    background: var(--surface-3);
-    box-shadow: 0 8px 18px -12px var(--black-a90);
-}
-.dlchain-tile:active { transform: translateY(0) scale(0.985); }
-.dlchain-tile:focus-visible {
-    outline: 2px solid rgba(var(--accent-rgb), 0.7);
-    outline-offset: 2px;
-}
-.dlchain-tile.dragging { opacity: 0.35; cursor: grabbing; }
-.dlchain-tile-art {
-    width: 44px;
-    height: 44px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: 11px;
-    background: rgba(0, 0, 0, 0.22);
-    opacity: 0.85;
-    transition: opacity var(--stg-tok-fast) var(--stg-tok-ease);
-}
-.dlchain-tile:hover .dlchain-tile-art { opacity: 1; }
-.dlchain-tile-art img { width: 30px; height: 30px; object-fit: contain; }
-.dlchain-tile-art .emoji-icon { font-size: 26px; line-height: 1; }
-.dlchain-tile-name {
-    font-size: 0.75em;
-    font-weight: 600;
-    letter-spacing: -0.005em;
-    color: var(--white-a60);
-    text-align: center;
-    line-height: 1.25;
-}
-.dlchain-tile:hover .dlchain-tile-name { color: var(--white-a90); }
-
-/* ── the chain ── */
-.dlchain-list {
-    display: flex;
-    flex-direction: column;
-    padding: 10px 9px;
-    border-radius: var(--radius-xl);
-    background: var(--surface-1);
-    transition: background var(--stg-tok-base) var(--stg-tok-ease),
-                box-shadow var(--stg-tok-base) var(--stg-tok-ease);
-}
-.dlchain-list.drag-over {
-    background: rgba(var(--accent-rgb), 0.06);
-    box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.35);
-}
-.dlchain-step {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    width: 100%;
-    padding: 11px 12px;
-    border: none;
-    border-radius: var(--stg-tok-radius);
-    background: var(--stg-tok-surf-2);
-    cursor: grab;
-    user-select: none;
-    transition: background var(--stg-tok-fast) var(--stg-tok-ease),
-                box-shadow var(--stg-tok-fast) var(--stg-tok-ease),
-                transform var(--stg-tok-fast) var(--stg-tok-ease);
-}
-.dlchain-step:hover {
-    background: var(--surface-3);
-    box-shadow: 0 10px 22px -14px var(--black-a95);
-}
-/* The first link is the one that usually answers. It is the only card that
-   earns the accent, which is what keeps the accent meaning anything. */
-.dlchain-step:first-child {
-    background: linear-gradient(180deg, rgba(var(--accent-rgb), 0.14), rgba(var(--accent-rgb), 0.06));
-    box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.22);
-}
-.dlchain-step:first-child:hover {
-    box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.34),
-                0 10px 22px -14px var(--black-a95);
-}
-.dlchain-step.dragging { opacity: 0.35; cursor: grabbing; }
-.dlchain-step.drag-over { box-shadow: 0 -2px 0 rgba(var(--accent-rgb), 0.9); }
-.dlchain-grip {
-    flex-shrink: 0;
-    color: var(--white-a35);
-    font-size: 13px;
-    line-height: 1;
-    letter-spacing: -2px;
-    cursor: grab;
-}
-.dlchain-step:hover .dlchain-grip { color: var(--white-a60); }
-.dlchain-step-move { display: flex; flex-direction: column; gap: 3px; flex-shrink: 0; }
-.dlchain-move {
-    width: 20px;
-    height: 15px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border: none;
-    border-radius: 5px;
-    background: transparent;
-    color: var(--white-a35);
-    font-size: 8px;
-    line-height: 1;
-    cursor: pointer;
-    font-family: inherit;
-    transition: background var(--stg-tok-fast) var(--stg-tok-ease),
-                color var(--stg-tok-fast) var(--stg-tok-ease);
-}
-.dlchain-move:hover:not(:disabled) { background: var(--white-a10); color: var(--white-a90); }
-.dlchain-move:focus-visible { outline: 2px solid rgba(var(--accent-rgb), 0.7); outline-offset: 1px; }
-.dlchain-move:disabled { opacity: 0.2; cursor: default; }
-.dlchain-step-rank {
-    flex-shrink: 0;
-    width: 24px;
-    height: 24px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: var(--radius-sm);
-    background: var(--black-a25);
-    color: var(--white-a60);
-    font-size: 0.76em;
-    font-weight: 600;
-    font-variant-numeric: tabular-nums;
-}
-.dlchain-step:first-child .dlchain-step-rank {
-    background: rgba(var(--accent-rgb), 0.25);
-    color: #fff;
-}
-.dlchain-step-text {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
-    line-height: 1.2;
-}
-.dlchain-step-name {
-    font-size: 0.92em;
-    font-weight: 600;
-    letter-spacing: -0.01em;
-    color: var(--white-a90);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-.dlchain-step-role {
-    font-size: 0.74em;
-    font-weight: 500;
-    letter-spacing: 0.02em;
-    color: var(--white-a35);
-}
-.dlchain-step:first-child .dlchain-step-role { color: rgba(var(--accent-rgb), 0.95); }
-.dlchain-step-art {
-    flex-shrink: 0;
-    width: 42px;
-    height: 42px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: var(--radius-control);
-    background: rgba(0, 0, 0, 0.22);
-}
-.dlchain-step-art img { width: 28px; height: 28px; object-fit: contain; }
-.dlchain-step-art .emoji-icon { font-size: 24px; line-height: 1; }
-.dlchain-mark.is-inverted { filter: brightness(0) invert(1); opacity: 1; }
-.dlchain-tile-art:has(.dlchain-mark.is-inverted),
-.dlchain-step-art:has(.dlchain-mark.is-inverted) { opacity: 1; }
-
-/* the "then try" between steps */
-/* Deliberately identical to .flow-connector in automations-redesign.css - the
-   automation builder is the other place in this app where you assemble a flow,
-   and two builders that look like two different apps is the failure mode. If
-   one changes, change both. */
-.dlchain-connector {
-    width: 2px;
-    height: 16px;
-    margin: 3px auto;
-    border-radius: 2px;
-    background: linear-gradient(180deg, rgba(var(--accent-rgb), 0.5), rgba(var(--accent-rgb), 0.12));
-    position: relative;
-    flex-shrink: 0;
-}
-.dlchain-connector::after {
-    content: '';
-    position: absolute;
-    bottom: -3px;
-    left: 50%;
-    transform: translateX(-50%);
-    border: 4px solid transparent;
-    border-top-color: rgba(var(--accent-rgb), 0.45);
-}
-
-/* the empty slot IS the instruction */
-.dlchain-slot {
-    width: 100%;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    min-height: 74px;
-    border: 1.5px dashed rgba(255, 255, 255, 0.13);
-    border-radius: var(--stg-tok-radius);
-    padding: 11px 14px;
-    text-align: center;
-    transition: border-color var(--stg-tok-base) var(--stg-tok-ease),
-                background var(--stg-tok-base) var(--stg-tok-ease),
-                box-shadow var(--stg-tok-base) var(--stg-tok-ease);
-}
-.dlchain-slot.first { min-height: 96px; }
-.dlchain-slot-title {
-    font-size: 0.85em;
-    font-weight: 600;
-    letter-spacing: -0.005em;
-    color: var(--white-a60);
-    line-height: 1.4;
-}
-.dlchain-slot-hint {
-    font-size: 0.75em;
-    color: var(--white-a35);
-    max-width: 34ch;
-    line-height: 1.45;
-}
-.dlchain-slot:hover,
-.dlchain-slot.drag-over {
-    border-color: rgba(var(--accent-rgb), 0.5);
-    background: rgba(var(--accent-rgb), 0.05);
-    box-shadow: 0 0 28px -10px rgba(var(--accent-rgb), 0.5);
-}
-.dlchain-slot:hover .dlchain-slot-title,
-.dlchain-slot.drag-over .dlchain-slot-title { color: var(--white-a90); }
-
-.dlchain-btn {
-    flex-shrink: 0;
-    width: 22px;
-    height: 22px;
-    border: none;
-    border-radius: 7px;
-    background: transparent;
-    color: var(--white-a35);
-    font-size: 14px;
-    line-height: 1;
-    cursor: pointer;
-    font-family: inherit;
-    transition: background var(--stg-tok-fast) var(--stg-tok-ease),
-                color var(--stg-tok-fast) var(--stg-tok-ease);
-}
-.dlchain-btn:hover { background: rgba(255, 95, 87, 0.2); color: #ff9b95; }
-.dlchain-btn:focus-visible { outline: 2px solid rgba(var(--accent-rgb), 0.7); outline-offset: 1px; }
-.dlchain-empty {
-    grid-column: 1 / -1;
-    padding: 16px 10px;
-    text-align: center;
-    font-size: 0.78em;
-    color: var(--white-a35);
-}
-/* Below 360px even the slimmed row left the source name a ~34px box for
-   ~63px of text at 320px (batch #2 fold-in). Drop the rank numeral in the
-   same spirit: chain order is still obvious from the row order and the
-   up/down buttons remain. Scoped under 360px so the layout verified at
-   360px is untouched — there the name box is ~86px and names fit. */
-@media (max-width: 359px) {
-    .dlchain-step-rank { display: none; }
-}
-
-/* the rest of the source settings, under the pool */
-.dlchain-extra {
-    margin-top: 18px;
-    padding-top: 18px;
-    border-top: 1px solid var(--white-a07);
-    /* two-up when the column is wide enough, one-up when it is not - no media
-       query needed, and it collapses on its own on a phone */
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-    gap: 2px 20px;
-    align-items: start;
-}
-.dlchain-extra[hidden] { display: none; }
-.dlchain-extra .form-group { margin-bottom: 0; }
-
-@media (max-width: 820px) {
-    .dlchain-columns { grid-template-columns: 1fr; gap: 18px; }
-    /* Grid items default to min-width:auto, so the stacked columns kept
-       their desktop min-content (~273px) and the pool's Filter + source
-       cards stuck out of the panel on phones (batch #2, RC3). Let the
-       columns actually shrink to the panel width. */
-    .dlchain-columns > * { min-width: 0; }
-    .dlchain-pool, .dlchain-list { min-width: 0; }
-}
 
 /* Phones: dragging is not realistic on a touch screen, so the arrows become the
    primary control and take a real tap target. */
 @media (max-width: 560px) {
-    .dlchain-columns { gap: 14px; }
-    .dlchain-pool { gap: 10px; padding: 8px; }
-    .dlchain-group-row { grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 8px; }
-    .dlchain-filter { width: 100%; margin-left: 0; }
-    .dlchain-tile { padding: 11px 6px 9px; }
-    .dlchain-tile-art { width: 36px; height: 36px; }
-    .dlchain-tile-art img { width: 24px; height: 24px; }
-    .dlchain-tile-name { font-size: 0.72em; }
-    .dlchain-list { padding: 12px 10px; }
-    .dlchain-step { width: 100%; padding: 8px; gap: 8px; }
-    /* The row's fixed chrome (grip + rank + art tile + move + remove
-       ≈ 134px plus gaps) left ~20px for the source name at 360px —
-       "Soulseek" ellipsised to almost nothing (batch #2, RC3). The art
-       tile and the drag grip are the expendable pieces on touch; the
-       up/down move buttons below remain. */
-    .dlchain-step-art, .dlchain-grip { display: none; }
-    .dlchain-move { width: 30px; height: 22px; font-size: 10px; }
-    .dlchain-btn { width: 30px; height: 30px; }
     /* these were taller than the desktop rule after the chain was compacted */
-    .dlchain-slot { min-height: 50px; padding: 12px 10px; }
-    .dlchain-slot.first { min-height: 76px; }
-    .dlchain-slot-hint { display: none; }
     .dlchain-tabs { display: flex; width: 100%; }
-    /* The page stacks form rows with flex-direction, which does nothing to these
-       - they are display:grid. Without this they stay a three-column grid with a
-       140px label column on a 360px screen and push the page sideways. */
-    #settings-page .dlchain-behaviour .dlchain-extra { gap: 0; }
-    #settings-page .dlchain-behaviour .form-group {
-        grid-template-columns: 1fr !important;
-        align-items: stretch;
-        gap: 6px;
-        padding: 11px 0 !important;
-    }
-    #settings-page .dlchain-behaviour .form-group > label { font-size: 0.8rem; }
-    #settings-page .dlchain-behaviour .form-group:has(> button) {
-        grid-template-columns: 1fr !important;
-    }
-    .dlchain-behaviour { margin-top: 20px; padding-top: 18px; }
-    .dlchain-tab { flex: 1; padding: 9px 10px; }
 }
 
 /* Drag-and-drop already moves plenty on its own. */
 @media (prefers-reduced-motion: reduce) {
     #download-chain-widget * { transition-duration: 1ms !important; animation-duration: 1ms !important; }
-    .dlchain-tile:hover, .dlchain-tile:active { transform: none; }
 }
 
 /* The settings page animates on hover, drag and open. None of that should run
    for someone who has asked the system to stop moving things. */
 @media (prefers-reduced-motion: reduce) {
-    #settings-page *,
-    .src-modal-overlay,
-    .src-modal {
+    #settings-page * {
         animation-duration: 1ms !important;
         transition-duration: 1ms !important;
     }
-    .src-tile:hover, .stg-tab:hover { transform: none; }
+    .stg-tab:hover { transform: none; }
 }
 
 
@@ -69347,50 +67922,8 @@ body.src-modal-open { overflow: hidden; }
                 inset 0 1px 0 rgba(255, 255, 255, 0.28);
 }
 
-/* ── panels ── */
-#settings-page .dlchain-pool,
-#settings-page .dlchain-list {
-    background: rgba(255, 255, 255, 0.022);
-    box-shadow: inset 0 0 0 1px var(--white-a05);
-}
-
-/* ── cards: gradient fill + inner highlight ── */
-#settings-page .src-tile,
-#settings-page .dlchain-tile,
-#settings-page .dlchain-step {
-    box-shadow: var(--stg-lift), inset 0 0 0 1px var(--white-a05);
-}
-
 /* in the chain, and first in the chain, both mean something - so both glow */
-/* Two of the four places the accent is still allowed. */
-#settings-page .src-tile.is-active {
-    background: linear-gradient(180deg, rgba(var(--accent-rgb), 0.14), rgba(var(--accent-rgb), 0.05));
-    box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.26), var(--stg-lift);
-}
-#settings-page .dlchain-step-rank {
-    background: rgba(0, 0, 0, 0.34);
-    box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.2);
-}
-#settings-page .dlchain-step:first-child .dlchain-step-rank {
-    background: linear-gradient(180deg, rgba(var(--accent-rgb), 0.95), rgba(var(--accent-rgb), 0.7));
-    box-shadow: 0 0 12px -2px rgba(var(--accent-rgb), 0.7);
-}
 
-/* the drop target is an invitation; it should look like one */
-#settings-page .dlchain-slot {
-    border-color: var(--white-a12);
-    background: var(--white-a02);
-    border-style: dashed;
-    border-width: 1px;
-    border-radius: var(--stg-tok-radius);
-}
-#settings-page .dlchain-slot:hover,
-#settings-page .dlchain-slot.drag-over {
-    border-color: rgba(var(--accent-rgb), 0.75);
-    background: linear-gradient(180deg, rgba(var(--accent-rgb), 0.17), rgba(var(--accent-rgb), 0.05));
-    box-shadow: 0 0 34px -8px rgba(var(--accent-rgb), 0.65),
-                inset 0 0 26px -12px rgba(var(--accent-rgb), 0.6);
-}
 
 /* ── rows and fields ── */
 
@@ -69398,25 +67931,18 @@ body.src-modal-open { overflow: hidden; }
 #settings-page .form-group > input[type="password"],
 #settings-page .form-group > input[type="number"],
 #settings-page .form-group > input[type="url"],
-#settings-page select {
+#settings-page select:where(:not([data-ui] *)) {
     background-color: rgba(255, 255, 255, 0.045);
     box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.28);
 }
 #settings-page .form-group > input:focus,
-#settings-page select:focus {
+#settings-page select:where(:not([data-ui] *)):focus {
     box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.18), inset 0 1px 2px rgba(0, 0, 0, 0.28);
 }
 
-/* the filter box sits on a tinted panel now, so it needs its own depth */
-#settings-page .dlchain-filter {
-    background: rgba(0, 0, 0, 0.34);
-    box-shadow: inset 0 1px 2px var(--black-a40);
-}
 
 /* Test-all and other primary buttons pick the bloom up too */
-#settings-page .stg-tab:focus-visible,
-#settings-page .src-tile:focus-visible,
-#settings-page .dlchain-tile:focus-visible {
+#settings-page .stg-tab:focus-visible {
     outline: 2px solid rgba(var(--accent-rgb), 0.85);
     outline-offset: 2px;
 }
@@ -69468,83 +67994,8 @@ body.src-modal-open { overflow: hidden; }
     --svc-server-btn-max: 176px;
 }
 
-/* ── the behaviour group ── */
-/* #dlchain-behaviour is the wrapper (header + body); .dlchain-behaviour is the
-   group inside it. renderDownloadChain() hides the wrapper by id on the Video
-   and Audiobooks tabs, which takes the section header with it. */
-#dlchain-behaviour[hidden] { display: none; }
-/* One grid for the whole group: label column fixed, control column fluid, so
-   every row shares an edge. Two columns of rows on a wide screen, one when narrow. */
-#settings-page .dlchain-behaviour .dlchain-extra {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
-    gap: 2px 34px;
-    align-items: start;
-}
-#settings-page .dlchain-behaviour .form-group {
-    display: grid !important;
-    grid-template-columns: minmax(140px, 0.9fr) minmax(0, 1.1fr) auto;
-    align-items: center;
-    gap: 10px;
-    padding: 9px 0 !important;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.045);
-}
-#settings-page .dlchain-behaviour .form-group > label {
-    font-size: var(--stg-t-label);
-    font-weight: 500;
-    color: rgba(255, 255, 255, 0.72);
-    margin: 0;
-}
-#settings-page .dlchain-behaviour .form-group > select,
-#settings-page .dlchain-behaviour .form-group > input {
-    width: 100% !important;
-    max-width: 100% !important;
-    font-size: var(--stg-t-body);
-}
-/* the help body drops to its own line under the row it explains */
-#settings-page .dlchain-behaviour .setting-help-body,
-#settings-page .dlchain-behaviour .setting-help-text { grid-column: 1 / -1; }
-/* Test-all is an action, not a field - it gets its own line and a real button */
-#settings-page .dlchain-behaviour .form-group:has(> button) {
-    grid-template-columns: auto 1fr;
-    border-bottom: none;
-    padding-top: 14px !important;
-}
 
 /* ── the type scale, applied ── */
-#settings-page .dlchain-col-label {
-    font-size: var(--stg-t-micro);
-    font-weight: 600;
-    letter-spacing: 0.11em;
-    text-transform: uppercase;
-    color: rgba(255, 255, 255, 0.52);
-}
-#settings-page .dlchain-col-hint,
-#settings-page #dlchain-help {
-    font-size: var(--stg-t-sub);
-    color: rgba(255, 255, 255, 0.38);
-}
-#settings-page #dlchain-help { max-width: 74ch; margin: 2px 0 18px; }
-#settings-page .dlchain-group-label {
-    font-size: var(--stg-t-micro);
-    color: var(--white-a40);
-}
-#settings-page .dlchain-tile-name { font-size: var(--stg-t-label); }
-#settings-page .src-tile-name { font-size: var(--stg-t-label); }
-
-/* ── the drop target reads as the next step, not a leftover box ── */
-
-#settings-page .dlchain-slot-title {
-    font-size: var(--stg-t-body);
-    font-weight: 600;
-    color: rgba(255, 255, 255, 0.66);
-}
-#settings-page .dlchain-slot-hint {
-    font-size: var(--stg-t-sub);
-    color: rgba(255, 255, 255, 0.34);
-}
-
-
 
 /* ── Source brand colour ───────────────────────────────────────────────────────
    The page had no colour left in it. Dyeing everything one accent was wrong -
@@ -69560,9 +68011,6 @@ body.src-modal-open { overflow: hidden; }
 
    --brand falls back to the user's accent, so a source with no colour defined
    still looks deliberate rather than broken. */
-#settings-page .dlchain-tile,
-#settings-page .dlchain-step,
-#settings-page .src-tile { --brand: var(--accent-rgb); }
 
 #settings-page [data-src="soulseek"], #settings-page [data-source-id="soulseek"] { --brand: 74, 158, 255; }
 #settings-page [data-src="youtube"], #settings-page [data-source-id="youtube"] { --brand: 255, 60, 50; }
@@ -69576,87 +68024,6 @@ body.src-modal-open { overflow: hidden; }
 #settings-page [data-src="usenet"], #settings-page [data-source-id="usenet"] { --brand: 108, 140, 255; }
 #settings-page [data-src="extto"], #settings-page [data-source-id="extto"] { --brand: 155, 123, 255; }
 #settings-page [data-src="prowlarr"], #settings-page [data-source-id="prowlarr"] { --brand: 255, 176, 32; }
-
-/* the logo sits in a well of its own colour */
-#settings-page .dlchain-tile-art,
-#settings-page .dlchain-step-art,
-#settings-page .src-tile-art {
-    background: linear-gradient(180deg, rgba(var(--brand), 0.22), rgba(var(--brand), 0.07));
-    box-shadow: inset 0 0 0 1px rgba(var(--brand), 0.22);
-    border-radius: var(--radius-lg);
-}
-#settings-page .src-tile-art { border-radius: 13px; }
-
-/* a whisper of it across the card, and a real edge on hover */
-#settings-page .dlchain-tile,
-#settings-page .dlchain-step {
-    background:
-        linear-gradient(180deg, rgba(255, 255, 255, 0.062), var(--white-a03)),
-        linear-gradient(135deg, rgba(var(--brand), 0.1), transparent 62%);
-}
-#settings-page .dlchain-tile:hover,
-#settings-page .dlchain-step:hover,
-#settings-page .src-tile:hover {
-    background:
-        linear-gradient(180deg, var(--white-a09), rgba(255, 255, 255, 0.042)),
-        linear-gradient(135deg, rgba(var(--brand), 0.2), transparent 66%);
-    box-shadow: var(--stg-lift), inset 0 0 0 1px rgba(var(--brand), 0.42),
-                0 12px 28px -16px rgba(0, 0, 0, 1),
-                0 0 26px -10px rgba(var(--brand), 0.5);
-}
-#settings-page .src-tile {
-    background:
-        linear-gradient(180deg, rgba(255, 255, 255, 0.062), var(--white-a03)),
-        linear-gradient(135deg, rgba(var(--brand), 0.09), transparent 60%);
-}
-
-/* The step that runs first keeps the ACCENT, not its brand - that is a state,
-   and state has to look the same whichever source happens to be sitting there. */
-#settings-page .dlchain-step:first-child {
-    background:
-        linear-gradient(180deg, rgba(var(--accent-rgb), 0.17), rgba(var(--accent-rgb), 0.06)),
-        linear-gradient(135deg, rgba(var(--brand), 0.14), transparent 62%);
-    box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.3), var(--stg-lift);
-}
-
-
-/* ── Settings: card groups ─────────────────────────────────────────────────────
-   Ten identical cards in a flat column is a list you scan by reading every
-   label. Three labelled groups is a list you scan by skipping two of them.
-   Same idea as the Sources tab's tile groups, same visual language. */
-.stg-cardgroup {
-    display: flex;
-    align-items: baseline;
-    gap: 10px;
-    flex-wrap: wrap;
-    margin: 30px 0 12px 2px;
-}
-.stg-cardgroup:first-of-type { margin-top: 6px; }
-.stg-cardgroup-label {
-    font-size: 0.72rem;
-    font-weight: 600;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: var(--white-a50);
-}
-.stg-cardgroup-sub {
-    font-size: var(--stg-t-sub, 0.75rem);
-    color: var(--white-a30);
-}
-
-/* A hint showing a LIVE value rather than a static description. Slightly
-   brighter, because it is information about this install rather than a caption
-   telling you what the section contains. */
-#settings-page .settings-section-hint.is-live {
-    color: var(--white-a50);
-    font-weight: 500;
-}
-
-@media (max-width: 560px) {
-    .stg-cardgroup { margin: 22px 0 10px 2px; gap: 4px; }
-    /* the group's own subtitle is the first thing to go when space is short */
-    .stg-cardgroup-sub { display: none; }
-}
 
 /* ── Settings: one row grammar ─────────────────────────────────────────────────
    A settings row reads: what it is on the left, what it is set to on the right.
@@ -69682,140 +68049,9 @@ body.src-modal-open { overflow: hidden; }
    second look for the same idea. Only two things here are new: services without
    a brand logo get a colour blob built from the dot colour the accordion already
    carried, and an open panel is a plain block rather than a collapsed accordion. */
-/* ── Connections: service cards ────────────────────────────────────────────────
-   The mark carries the card. A row of tiles you have to READ is a list with
-   extra steps - you should recognise Spotify or Trakt before your eye reaches
-   the label. So the artwork gets the top two thirds and real size, and the name
-   sits under it as a caption.
-
-   Every card is tinted by its own brand colour, which the accordion already
-   carried as a dot. --svc-brand comes off the element, so a service added later
-   picks its own hue up with no stylesheet change. */
-.svc-tile-row {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(126px, 1fr));
-    gap: 12px;
-}
-.svc-tile {
-    position: relative;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 10px;
-    padding: 20px 12px 14px;
-    border: none;
-    border-radius: var(--radius-xl);
-    cursor: pointer;
-    font-family: inherit;
-    background:
-        linear-gradient(180deg, var(--white-a06), rgba(255, 255, 255, 0.025)),
-        linear-gradient(160deg, color-mix(in srgb, var(--svc-brand) 16%, transparent), transparent 60%);
-    box-shadow: inset 0 1px 0 var(--white-a06),
-                inset 0 0 0 1px var(--white-a05);
-    transition: transform 140ms var(--ease-decelerate),
-                background 140ms var(--ease-decelerate),
-                box-shadow 140ms var(--ease-decelerate);
-}
-.svc-tile:hover {
-    transform: translateY(-3px);
-    background:
-        linear-gradient(180deg, rgba(255, 255, 255, 0.095), var(--white-a04)),
-        linear-gradient(160deg, color-mix(in srgb, var(--svc-brand) 30%, transparent), transparent 62%);
-    box-shadow: inset 0 1px 0 var(--white-a09),
-                inset 0 0 0 1px color-mix(in srgb, var(--svc-brand) 45%, transparent),
-                0 14px 30px -16px rgba(0, 0, 0, 1),
-                0 0 26px -10px color-mix(in srgb, var(--svc-brand) 60%, transparent);
-}
-.svc-tile:active { transform: translateY(-1px) scale(0.99); }
-.svc-tile:focus-visible {
-    outline: 2px solid rgba(var(--accent-rgb), 0.75);
-    outline-offset: 2px;
-}
-/* configured is a state, so it reads in the ACCENT, not the brand - otherwise
-   "set up" would look different for every service and stop reading as a state */
-.svc-tile.is-active {
-    box-shadow: inset 0 1px 0 var(--white-a09),
-                inset 0 0 0 1px rgba(var(--accent-rgb), 0.3);
-}
-
-/* the mark: the biggest thing on the card */
-.svc-tile-art {
-    width: 48px;
-    height: 48px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: 13px;
-    /* the well belongs to the CARD, not to the fallback. before this, a service
-       with artwork drew its logo bare while one without drew a tinted square, so
-       the same grid contained two different kinds of object. */
-    background: linear-gradient(160deg,
-        color-mix(in srgb, var(--svc-brand) 30%, transparent),
-        color-mix(in srgb, var(--svc-brand) 12%, transparent));
-    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.13);
-}
-/* wide marks (TMDB, TVDB) and square ones (Spotify) both have to sit inside the
-   same box without one of them dominating, so cap both axes */
-.svc-tile-art .svc-mark { max-width: 32px; max-height: 30px; object-fit: contain; }
-.svc-tile-art .svc-mark.is-inverted { filter: brightness(0) invert(1); opacity: 0.95; }
-/* A source with no brand art but a glyph the video dashboard already uses for
-   it. Sized to sit exactly where a logo would, on the same tinted well, so a
-   grid mixing logos and glyphs still reads as one set of cards rather than as
-   some cards and some placeholders. */
-/* the glyph and the monogram are now CONTENT inside the shared well above,
-   not wells of their own - otherwise a card would have two nested squares */
-.svc-glyph {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 1.3rem;
-    line-height: 1;
-}
-.src-modal-icon .svc-glyph { width: 30px; height: 30px; border-radius: 9px; }
-.svc-monogram {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 1.2rem;
-    font-weight: 600;
-    letter-spacing: -0.02em;
-    color: #fff;
-}
-.svc-tile-name {
-    font-size: var(--stg-t-label, 0.78rem);
-    font-weight: 600;
-    letter-spacing: -0.006em;
-    color: rgba(255, 255, 255, 0.95);
-    text-align: center;
-    line-height: 1.25;
-}
-#settings-page .svc-tile .src-tile-chip { margin-top: -2px; }
-.src-modal-icon {
-    width: 34px;
-    height: 34px;
-    border-radius: var(--radius-control);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: linear-gradient(160deg,
-        color-mix(in srgb, var(--svc-brand, #8a8a8a) 30%, transparent),
-        color-mix(in srgb, var(--svc-brand, #8a8a8a) 12%, transparent));
-    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.13);
-}
-.src-modal-icon .svc-mark { max-width: 22px; max-height: 22px; object-fit: contain; }
-.src-modal-icon .svc-mark.is-inverted { filter: brightness(0) invert(1); }
-.src-modal-icon .svc-monogram,
-.src-modal-icon .svc-glyph { font-size: 0.95rem; }
+/* (the Connections service tiles are the settings parts' Tile now: ui/settings.module.css) */
 
 @media (max-width: 560px) {
-    .svc-tile-row { grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 9px; }
-    .svc-tile { padding: 15px 8px 11px; gap: 8px; }
-    /* the well is a square, so BOTH axes shrink - setting only height left a
-       48x40 box and the icons stopped being square */
-    .svc-tile-art { width: 40px; height: 40px; border-radius: 11px; }
-    .svc-tile-art .svc-mark { max-width: 26px; max-height: 24px; }
-    .svc-glyph { font-size: 1.05rem; }
-    .svc-monogram { font-size: 1rem; }
 
     /* label above control, so a URL field is not 60px wide next to its label */
     #settings-page .settings-group[data-svc-side] .form-group > select,
@@ -69831,10 +68067,6 @@ body.src-modal-open { overflow: hidden; }
     padding: 0;
     margin: 0;
 }
-/* inside the modal the service IS the content, so its own header would just be
-   the title repeated under the title */
-#settings-page .src-modal-body .stg-service-header { display: none; }
-#settings-page .src-modal-body .stg-service-body { display: block !important; }
 
 /* The two "API Configuration" accordion groups are the OLD entry point. The
    tiles above replace them, but the groups have to stay in the DOM because they
@@ -69843,7 +68075,7 @@ body.src-modal-open { overflow: hidden; }
 
    Hidden rather than deleted, and hidden on the GROUP so that a panel moved into
    the modal is no longer a descendant of it and shows normally. */
-#settings-page .settings-group[data-svc-legacy] { display: none !important; }
+#settings-page [data-svc-legacy] { display: none !important; }
 
 /* The required-keys note, lifted out of the hidden legacy group. The tiles show
    a "required" chip, but a chip cannot say WHY - and "both are free" is the part
@@ -69861,65 +68093,18 @@ body.src-modal-open { overflow: hidden; }
    The remaining difference between the two is not style: the music side has
    auto-detect, OAuth linking and a library picker that video simply does not
    have. That is a feature gap and cannot be closed from a stylesheet. */
-#settings-page .settings-group[data-svc-side] .server-toggle-container {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-    margin: 4px 0 16px;
-}
 #settings-page .settings-group[data-svc-side] .server-config-container {
     padding: 0;
     margin: 0;
 }
 /* the toggles are the same control on both sides, so they get the same metrics */
-#settings-page .settings-group[data-svc-side] .server-toggle-btn {
-    border-radius: var(--radius-lg);
-    /* Capped. .server-logo is width:100% with flex:1 on the button, so with
-       nothing stopping it a four-server row grew ~450px-tall cards - a logo the
-       size of a poster to answer "which server". */
-    flex: 0 1 150px;
-    max-width: var(--svc-server-btn-max, 176px);
-    min-height: 88px;
-    padding: 14px 16px;
-    transition: transform 140ms var(--ease-decelerate),
-                box-shadow 140ms var(--ease-decelerate),
-                background 140ms var(--ease-decelerate);
-}
 #settings-page .settings-group[data-svc-side] .server-logo {
     width: auto;
     max-width: 100%;
     max-height: var(--svc-server-logo-max, 44px);
     object-fit: contain;
 }
-#settings-page .settings-group[data-svc-side] .server-toggle-btn:hover {
-    transform: translateY(-2px);
-}
-#settings-page .settings-group[data-svc-side] .server-toggle-btn:focus-visible {
-    outline: 2px solid rgba(var(--accent-rgb), 0.75);
-    outline-offset: 2px;
-}
-/* the picked server, stated the same way on both sides */
-#settings-page .settings-group[data-svc-side] .server-toggle-btn.active {
-    box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.45),
-                0 0 20px -8px rgba(var(--accent-rgb), 0.6);
-}
-/* Phones: four capped-at-176px buttons in a flex row do not fit a 360px
-   screen, so the row scrolled sideways or squeezed the logos into slivers. Two
-   per line, and the logo cap comes down with them. This has to come after the
-   base rules above, which have the same specificity. The logo cap goes through
-   the token because video-side.css loads last and reads it for the video half. */
-@media (max-width: 560px) {
-    #settings-page .settings-group[data-svc-side] .server-toggle-container {
-        --svc-server-logo-max: 30px;
-        gap: 8px;
-    }
-    #settings-page .settings-group[data-svc-side] .server-toggle-btn {
-        flex: 1 1 calc(50% - 4px);
-        max-width: none;
-        min-height: 66px;
-        padding: 10px 12px;
-    }
-}
+
 
 /* Rows inside a server section follow the page's grammar: one setting per row,
    label left, control right. The video half had two libraries and a caption in
@@ -69928,36 +68113,6 @@ body.src-modal-open { overflow: hidden; }
 #settings-page .settings-group[data-svc-side] .form-group > select,
 #settings-page .settings-group[data-svc-side] .form-group > input {
     margin-left: auto;
-}
-#settings-page .settings-group[data-svc-side] .video-library-note {
-    margin: 2px 0 0;
-}
-/* other TV libraries: one line each, the name then its Scan / Anime ticks */
-#settings-page .settings-group[data-svc-side] .video-library-tv-more {
-    align-items: flex-start;
-}
-/* a grid, so the Scan / Anime toggles line up down the rows whatever the
-   library names' lengths; each item's children sit straight in its cells */
-#settings-page .settings-group[data-svc-side] .video-library-tv-more-list {
-    margin-left: auto;
-    display: grid;
-    grid-template-columns: minmax(0, max-content) max-content max-content;
-    align-items: center;
-    column-gap: 14px;
-    row-gap: 6px;
-    min-width: 0;
-}
-#settings-page .settings-group[data-svc-side] .video-library-tv-more-item {
-    display: contents;
-}
-#settings-page .settings-group[data-svc-side] .video-library-tv-more-item > span {
-    min-width: 10ch;
-    overflow-wrap: anywhere;
-    /* the same type as the Scan / Anime labels beside it (.checkbox-label),
-       a touch heavier so the name still reads as the row's subject */
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--white-a80);
 }
 /* both sides describe their section the same way */
 #settings-page .settings-group[data-svc-side] > .setting-help-text {
@@ -70217,80 +68372,6 @@ body.src-modal-open { overflow: hidden; }
     .dz-ed-search { max-width: none; }
 }
 
-/* Library: shared cards with persistent Music / Video panels. */
-#settings-page .stg-media-card .stg-media-switcher {
-    display: inline-flex;
-    gap: 4px;
-    padding: 4px;
-    margin: 4px 0 20px;
-    border: 1px solid var(--white-a10);
-    border-radius: var(--radius-lg);
-    background: var(--black-a20);
-}
-#settings-page .stg-media-switcher button {
-    min-width: 100px;
-    padding: 9px 22px;
-    border: 0;
-    border-radius: var(--radius-md);
-    background: transparent;
-    color: var(--white-a60);
-    font: inherit;
-    font-size: 13px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: background var(--dur-fast), color var(--dur-fast);
-}
-#settings-page .stg-media-switcher button:hover { color: #fff; background: var(--white-a06); }
-#settings-page .stg-media-switcher button[aria-selected="true"] {
-    background: rgba(var(--accent-rgb),.18);
-    color: var(--accent);
-    box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb),.25);
-}
-#settings-page .stg-media-switcher button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-#settings-page .stg-media-panel[hidden] { display: none !important; }
-#settings-page .stg-media-context { display: flex; flex-direction: column; gap: 5px; margin-bottom: 20px; }
-#settings-page .stg-media-context strong { font-size: 16px; font-weight: 600; color: #eee; }
-#settings-page .stg-media-summary { font-size: 12px; line-height: 1.5; color: var(--white-a50); }
-#settings-page .stg-media-summary.is-live { color: rgba(var(--accent-rgb),.8); }
-@media (max-width: 600px) {
-    #settings-page .stg-media-card .stg-media-switcher { display: flex; }
-    /* Four tabs at 100px each overflow a phone. The old fix shared the row
-       (flex: 1; min-width: 0), which squeezed "Audiobooks" into a 68px tab
-       and let the label paint over "Podcasts" (batch #2, RC2). Instead the
-       tabs keep their content size and the switcher scrolls horizontally,
-       like the app's other tab rails. This rule is ID-scoped and more
-       specific than mobile.css's [role="tablist"] rail rule, so the
-       nowrap/flex-shrink treatment has to be restated here. */
-    #settings-page .stg-media-switcher {
-        flex-wrap: nowrap;
-        overflow-x: auto;
-        overflow-y: hidden;
-        scrollbar-width: none;
-    }
-    #settings-page .stg-media-switcher::-webkit-scrollbar { display: none; }
-    #settings-page .stg-media-switcher button {
-        flex: 0 0 auto;
-        min-width: 0;
-        padding: 9px 14px;
-        white-space: nowrap;
-    }
-}
-#settings-page .stg-media-panel > .settings-group {
-    background: transparent !important;
-    border: 0 !important;
-    border-radius: 0 !important;
-    box-shadow: none !important;
-    padding: 0 !important;
-    margin: 0 0 22px !important;
-}
-#settings-page .stg-media-panel > .settings-group::before { display: none; }
-#settings-page .stg-media-panel > .settings-group > h3 {
-    padding: 12px 0;
-    border-left: 0;
-    border-bottom: 1px solid var(--white-a08);
-    font-size: 13px;
-}
-#settings-page .stg-media-panel > .settings-group:last-child { margin-bottom: 0 !important; }
 
 /* live folder checks (folder-check.js): one quiet line under each folder */
 #settings-page .folder-check {
@@ -70330,27 +68411,6 @@ body.src-modal-open { overflow: hidden; }
 }
 /* the drive map: each server drive, where soulsync reaches it, its check */
 #settings-page .video-drive-map { display: flex; flex-direction: column; gap: 10px; margin: 10px 0 12px; }
-#settings-page .video-drive-row {
-    display: grid;
-    grid-template-columns: minmax(180px, 260px) minmax(0, 1fr);
-    gap: 4px 12px;
-    align-items: center;
-    padding: 10px 12px;
-    border: 1px solid var(--white-a08);
-    border-radius: 10px;
-    background: var(--white-a03);
-}
-#settings-page .video-drive-server { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-#settings-page .video-drive-server code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#settings-page .video-drive-count { color: var(--text-secondary); font-size: 12px; }
-#settings-page .video-drive-status { grid-column: 2; color: var(--text-secondary); font-size: 12px; }
-#settings-page .video-drive-status.is-ok { color: var(--success); }
-#settings-page .video-drive-status.is-bad { color: var(--danger-light); }
-#settings-page .video-drive-row.is-auto { background: transparent; }
-#settings-page .video-drive-known {
-    overflow: hidden; color: var(--text-secondary); font-size: 13px;
-    text-overflow: ellipsis; white-space: nowrap;
-}
 #settings-page .video-extra-heading { margin: 18px 0 4px; font-size: 14px; }
 /* more libraries (#2029): one card per library, its folder, rules and actions */
 #settings-page .video-libraries { display: flex; flex-direction: column; gap: 10px; margin: 10px 0 12px; }
@@ -70372,8 +68432,6 @@ body.src-modal-open { overflow: hidden; }
     overflow: hidden; color: var(--text-secondary); font-size: 13px;
     text-overflow: ellipsis; white-space: nowrap;
 }
-#settings-page .video-library-rules { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-#settings-page .video-library-rules input { min-width: 0; }
 #settings-page .video-library-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 #settings-page .video-library-src {
     padding: 4px 10px; border: 1px solid var(--white-a08); border-radius: var(--radius-pill);
@@ -70383,17 +68441,7 @@ body.src-modal-open { overflow: hidden; }
 #settings-page .video-library-hint { color: var(--text-secondary); font-size: 12px; }
 #settings-page .video-library-indexers summary { cursor: pointer; color: var(--text-secondary); font-size: 13px; }
 #settings-page .video-library-idx-list { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 8px; }
-#settings-page .video-library-field {
-    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
-    color: var(--text-secondary); font-size: 13px;
-}
 #settings-page .video-library-actions .checkbox-label { margin-right: auto; }
-@media (max-width: 600px) {
-    #settings-page .video-drive-row { grid-template-columns: minmax(0, 1fr); }
-    #settings-page .video-drive-status { grid-column: 1; }
-    #settings-page .video-library-rules { grid-template-columns: minmax(0, 1fr); }
-}
-
 
 /* ════════════════════════════════════════════════════════════════════════
    The dashboard (Sept 2026 redesign). Music first, the system beside it.
@@ -71181,8 +69229,6 @@ body.src-modal-open { overflow: hidden; }
     opacity: 0.6;
     cursor: wait;
 }
-
-
 
 /* ── playlists: play, shuffle, queue, sort, add songs, liked (oct 2026) ─────
    the detail modal's hero gets a play row (one big accent play, quiet round

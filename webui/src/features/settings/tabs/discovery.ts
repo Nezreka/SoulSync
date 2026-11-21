@@ -5,23 +5,36 @@
 
 import type { SettingsPayload } from '../settings-store';
 
+/** the server playlist sync modes, each with what it does in a line */
 export const SYNC_MODES = [
-  { value: 'replace', label: 'Replace — recreate the playlist each sync' },
-  { value: 'reconcile', label: 'Reconcile — edit in place, keep image & description (default)' },
-  { value: 'append', label: 'Append — only add new tracks, never remove' },
+  {
+    value: 'replace',
+    label: 'Replace',
+    say: 'Deletes the playlist on your server and makes it again each sync. Its image and description go with it.',
+  },
+  {
+    value: 'reconcile',
+    label: 'Reconcile',
+    say: 'Edits the playlist in place, so its image and description stay. The default.',
+  },
+  {
+    value: 'append',
+    label: 'Append',
+    say: 'Only ever adds new tracks. Nothing is removed.',
+  },
 ] as const;
 
 export const LOOKBACK_PERIODS = [
   { value: '7', label: 'Last 7 days' },
-  { value: '30', label: 'Last 30 days (Default)' },
+  { value: '30', label: 'Last 30 days (default)' },
   { value: '90', label: 'Last 90 days' },
   { value: '180', label: 'Last 6 months' },
   { value: 'all', label: 'Entire discography' },
 ] as const;
 
 export const HEMISPHERES = [
-  { value: 'northern', label: 'Northern Hemisphere' },
-  { value: 'southern', label: 'Southern Hemisphere' },
+  { value: 'northern', label: 'Northern' },
+  { value: 'southern', label: 'Southern' },
 ] as const;
 
 export interface DiscoveryValues {
@@ -52,20 +65,5 @@ export function resolveDiscovery(settings: SettingsPayload): DiscoveryValues {
     statsEnabled: stats.enabled === true,
     statsInterval: (stats.poll_interval as number) || 30,
     adventurousness: typeof adventure === 'number' ? adventure : 0.3,
-  };
-}
-
-/** the section hints settings.js wrote once the settings had loaded */
-export function discoverySummaries(values: DiscoveryValues) {
-  const playlists = [values.m3uExport ? 'M3U export' : '', values.libraryM3u ? 'library M3U' : '']
-    .filter(Boolean)
-    .join(' · ');
-  const n = values.adventurousness;
-  return {
-    playlists: playlists || 'off',
-    stats: values.statsEnabled ? 'collecting play history' : 'off',
-    // ported as it was. the dial runs 0 to 1, so this always reads "plays it
-    // safe": a bug on dev too, listed in SETTINGS_PORT.md, not changed here
-    discovery: n <= 25 ? 'plays it safe' : n <= 60 ? 'balanced' : 'adventurous',
   };
 }

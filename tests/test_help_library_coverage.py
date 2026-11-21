@@ -29,7 +29,7 @@ def test_low_coverage_warns_and_links_to_the_folders():
     assert f["severity"] == "warning" and f["id"] == "paths.library_coverage"
     assert f["title"] == "SoulSync can only read 8% of your Plex music"
     assert "2 of Plex's music folders are not SoulSync library folders yet" in f["detail"]
-    assert f["fix"] == [{"label": "Open library folders", "kind": "settings", "tab": "library"}]
+    assert f["fix"] == [{"label": "Open library folders", "kind": "settings", "tab": "library-folders"}]
     assert "—" not in f["detail"]
 
 

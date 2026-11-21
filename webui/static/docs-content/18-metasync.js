@@ -92,7 +92,7 @@ Nothing else to set up. The system automation **Refresh MetaSync Charts** runs o
 
 Each weekly report covers the **last full week** (Monday to Monday, UTC) and lists that week's events. It never lists your library or your wishlist.
 
-![Step 2 in SoulSync's MetaSync settings explains the SIN signals; the share switches themselves live on the MetaSync node's dashboard](ms-signals.jpg)
+![Step 2 in SoulSync's MetaSync settings: what a pool is, the pool URL and key, and Send pool key; the share switches themselves live on the MetaSync node's dashboard](ms-signals.jpg)
 
 | Signal | What it means | Default |
 |---|---|---|
@@ -230,7 +230,7 @@ Charts also come in **genre and decade editions** ("Trending: Hip Hop", "Trendin
             title: 'Troubleshooting',
             lede: 'The common snags and what each message means.',
             body: `
-![The MetaSync status row in Settings, here reporting that no MetaSync URL is set yet](ms-status.jpg)
+![The MetaSync status card in Settings, with Refresh status and what MetaSync reports](ms-status.jpg)
 
 ## No charts showing
 

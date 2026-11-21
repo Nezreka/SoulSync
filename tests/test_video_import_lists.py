@@ -162,4 +162,8 @@ def test_wiring_and_ui():
     assert 'id="vq-implist-rows"' in ui and "data-vq-implist-add" in ui
     assert "createRows('/api/video/downloads/config/import-lists')" in ui
     assert "void importLists.load('lists');" in ui
-    assert 'data-stg-part="import-lists"' in _INDEX
+    # settings-bic phase 5: its own pill of the Discovery page (one slot)
+    assert 'data-stg-react="discovery" data-stg-part="page"' in _INDEX
+    page = (Path(__file__).resolve().parents[1] / "webui" / "src" / "features" / "settings" /
+            "tabs" / "discovery" / "discovery-page.tsx").read_text(encoding="utf-8")
+    assert 'view="import-lists"' in page and "<ImportListsCard />" in page

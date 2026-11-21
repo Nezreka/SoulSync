@@ -168,19 +168,24 @@ def test_the_video_settings_live_with_their_subject_not_on_one_dumping_tab():
     index = (_WEBUI / "index.html").read_text(encoding="utf-8")
     tabs = _WEBUI / "src" / "features" / "settings" / "tabs"
 
-    # the download folders and the seeding are React (SETTINGS_PORT.md video
-    # pass V2a): the folders in the Folders card's Video panel, on Library
+    # the download folders are Library > Folders, Video (settings-bic phase 4)
     folders = (tabs / "library-video-folders.tsx").read_text(encoding="utf-8")
-    assert "const TAB = 'library';" in folders and 'id="video-download-path"' in folders
-    # what to hunt is a library choice, not a usenet one (Video Preferences,
-    # React: SETTINGS_PORT.md video pass V2c)
+    assert 'id="video-download-path"' in folders
+    page = (tabs / "library" / "library-page.tsx").read_text(encoding="utf-8")
+    assert "<VideoFolders docker=" in page
+    # what to hunt is an acquisition rule (DESIGN 3.3: Monitor Specials on
+    # Downloads > Behaviour, Video), not a usenet one
     prefs = (tabs / "library-video-prefs.tsx").read_text(encoding="utf-8")
-    assert "const TAB = 'library';" in prefs and 'id="video-monitor-specials"' in prefs
+    assert 'id="video-monitor-specials"' in prefs
+    behaviour = (tabs / "downloads" / "behaviour-view.tsx").read_text(encoding="utf-8")
+    assert "<MonitorSpecialsRow />" in behaviour
     # #1822: import lists add to what you discover (React, video pass V3c)
     lists = (tabs / "video-row-lists.tsx").read_text(encoding="utf-8")
-    section = lists.split("export function ImportListsSection(", 1)[1]
-    assert 'tab="discovery"' in section.split("</Section>", 1)[0]
-    assert 'id="video-import-lists"' in section
+    section = lists.split("export function ImportListsCard(", 1)[1]
+    assert 'id="video-import-lists"' in section.split("\nexport function", 1)[0]
+    # settings-bic phase 5: the Import lists pill of the Discovery page
+    discovery = (tabs / "discovery" / "discovery-page.tsx").read_text(encoding="utf-8")
+    assert "const TAB = 'discovery';" in discovery and "<ImportListsCard />" in discovery
 
     # seeding has to be INSIDE the torrent panel, not merely on the same tab
     panels = (tabs / "source-panels-more.tsx").read_text(encoding="utf-8")
@@ -233,36 +238,48 @@ def test_the_downloads_tab_holds_only_download_settings():
     index = index_with_settings_page()
     markup = re.sub(r"<!--.*?-->", "", index, flags=re.S)
 
-    titles = []
-    for m in re.finditer(r'<div class="settings-section-header[^"]*"[^>]*data-stg="downloads"[^>]*>', markup):
-        t = re.search(r"<h3[^>]*>(.*?)</h3>", markup[m.end():m.end() + 900], re.S)
-        if t:
-            titles.append(re.sub(r"<[^>]+>", "", t.group(1)).strip())
-    # Download Behaviour, Retry Logic, Album Publishing and Filtering are React
-    # now (SETTINGS_PORT.md step 5): their cards are rendered from the tab, in
-    # this order, into slots after Source Settings
-    tab = (_WEBUI / "src" / "features" / "settings" / "tabs" / "downloads-tab.tsx").read_text(encoding="utf-8")
-    # Source Settings (the download chain) is React too (step 7a), rendered
-    # into the first slot, ahead of the others
-    chain = (_WEBUI / "src" / "features" / "settings" / "tabs" / "sources-tab.tsx").read_text(encoding="utf-8")
-    assert markup.index('data-stg-part="chain"') < markup.index('data-stg-part="behaviour"')
-    titles += re.findall(r'settings-section-static" data-stg="downloads">\s*<h3>([^<]+)</h3>', chain)
-    titles += re.findall(r'title="([^"]+)"', tab[tab.index("function Behaviour("):])
+    # (settings-bic) Downloads is one page of three pills: Sources (the
+    # download order), Behaviour and Filtering. the pills are nav.ts's, and
+    # each view's cards are all about downloading
+    tabs = _WEBUI / "src" / "features" / "settings" / "tabs" / "downloads"
+    nav = (_WEBUI / "src" / "features" / "settings" / "nav.ts").read_text(encoding="utf-8")
+    downloads = nav[nav.index("key: 'downloads',"):nav.index("key: 'quality',")]
+    assert re.findall(r"\{ key: '(\w+)', label: '(\w+)'", downloads) == [
+        ("sources", "Sources"), ("behaviour", "Behaviour"), ("filtering", "Filtering")]
+    assert 'data-stg-react="downloads" data-stg-part="page"' in markup
+    titles = re.findall(r'title="([^"]+)"', (tabs / "sources-view.tsx").read_text(encoding="utf-8"))
+    titles = [t for t in titles if not t.startswith("Checks")]
+    behaviour = (tabs / "behaviour-view.tsx").read_text(encoding="utf-8")
+    titles += re.findall(r'<Card\s+title="([^"]+)"', behaviour)
     # #1822: Filtering (explicit content, genre whitelist) decides what gets
     # downloaded, so it joined the download cards
-    assert titles == ["Source Settings", "Download Behaviour", "Retry Logic", "Album Publishing",
-                      "Filtering"], titles
+    titles += re.findall(r'<Card\s+title="([^"]+)"', (tabs / "filtering-view.tsx").read_text(encoding="utf-8"))
+    # (settings-bic phase 4) the audiobook download options sit under the
+    # audiobook order; Monitoring joined Behaviour, Video; the genre list went
+    # to Library > Tags and artwork (it filters tags, not downloads). The
+    # wishlist rules and the YouTube follow count are Behaviour cards too,
+    # drawn by components of their own (WishlistRules, YoutubeFollowCount)
+    assert titles == ["Download order", "Audiobook download options", "Indexers",
+                      "Download behaviour", "Retry logic", "Album publishing",
+                      "When a download fails", "Monitoring", "Explicit content",
+                      "Size and version"], titles
+    assert "<WishlistRules store={store} />" in behaviour
+    assert "<YoutubeFollowCount />" in behaviour
 
     # the two that moved must not have crept back
     # #1822: notifications sit with the other connected services, import lists
     # on Discovery; neither belongs on Downloads
     # (both React: video-row-lists.tsx, SETTINGS_PORT.md video pass V3c)
     lists = (_WEBUI / "src" / "features" / "settings" / "tabs" / "video-row-lists.tsx").read_text(encoding="utf-8")
-    for stray, section, home in (("video-notifications", "NotificationsSection", "connections"),
-                                 ("video-import-lists", "ImportListsSection", "discovery")):
+    for stray, section, home, page_file in (
+            ("video-notifications", "NotificationsCard", "connections", ("connections", "connections-page.tsx")),
+            ("video-import-lists", "ImportListsCard", "discovery", ("discovery", "discovery-page.tsx"))):
         body = lists.split(f"export function {section}(", 1)[1].split("\nexport function", 1)[0]
         assert f'id="{stray}"' in body
-        assert f'tab="{home}"' in body, f"{stray} is not on the {home} tab"
+        # each is a pill of its tab's page (settings-bic phases 5 and 6)
+        page = (_WEBUI / "src" / "features" / "settings" / "tabs" / page_file[0] /
+                page_file[1]).read_text(encoding="utf-8")
+        assert f"<{section} />" in page, f"{stray} is not on the {home} tab"
         assert f'data-stg-react="{home}" data-stg-part=' in markup
 
 

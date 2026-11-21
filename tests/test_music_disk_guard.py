@@ -72,7 +72,7 @@ def test_orchestrator_refuses_downloads_when_disk_full(monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_settings_ui_carries_the_guard_knob_and_environment_awareness():
-    # the Folders card is React (SETTINGS_PORT.md step 8a)
+    # Library > Folders, Music (settings-bic phase 4)
     ui = (Path(__file__).resolve().parents[1] / "webui" / "src" / "features" / "settings" / "tabs"
           / "library-folders.tsx").read_text(encoding="utf-8")
     assert 'id="min-free-disk-gb"' in ui
@@ -80,6 +80,7 @@ def test_settings_ui_carries_the_guard_knob_and_environment_awareness():
     assert "settings._environment" in ui
     assert 'data-paths-guide="docker"' in ui
     assert 'data-paths-guide="native"' in ui
-    assert "data-paths-default-warning" in ui
-    # the landmine banner only fires for non-Docker installs still on defaults
-    assert "loads && !docker && defaultOut" in ui
+    # the landmine warning sits on the music library folder's own field, and
+    # only fires for non-Docker installs still on defaults
+    assert "const installDefault = loads && !docker && defaultOut;" in ui
+    assert "Still the install folder default." in ui

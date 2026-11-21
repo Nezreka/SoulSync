@@ -17,19 +17,18 @@
  * only; a member's own things live in My Account (ACCOUNT_ENTRIES).
  */
 
+import { nav, resolveTab } from './nav';
 import { TAB_TITLES } from './shell';
 
 export type SettingsTab =
   | 'connections'
-  | 'sources'
   | 'downloads'
   | 'quality'
   | 'library'
   | 'discovery'
   | 'people'
   | 'appearance'
-  | 'advanced'
-  | 'logs';
+  | 'advanced';
 
 export type Anchor = { id: string } | { heading: string };
 
@@ -82,7 +81,7 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
   {
     label: 'Media server',
     tab: 'connections',
-    anchor: heading('Server Connections'),
+    anchor: heading('Server connections'),
     file: 'connections-servers.tsx',
     hint: 'Plex, Jellyfin, Navidrome or none',
     keywords: 'plex jellyfin emby navidrome music assistant standalone server connect',
@@ -208,7 +207,7 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
   {
     label: 'Video server',
     tab: 'connections',
-    anchor: heading('Server Connection'),
+    anchor: id('stg-video-server-card'),
     file: 'connections-video-server.tsx',
     hint: 'Plex or Jellyfin for movies and TV',
     keywords: 'plex jellyfin emby movies tv shows server connect',
@@ -216,15 +215,15 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
   },
   {
     label: 'Server Activity',
-    tab: 'connections',
-    anchor: heading('Server Activity'),
+    tab: 'advanced',
+    anchor: heading('Now playing'),
     file: 'server-activity-settings.tsx',
     hint: 'who is playing what, upload speed',
     keywords: 'tautulli streams now playing bandwidth',
   },
   {
     label: 'Server Activity upload speed',
-    tab: 'connections',
+    tab: 'advanced',
     anchor: id('sa-upload-mbps'),
     file: 'server-activity-settings.tsx',
     hint: 'Mbps',
@@ -232,7 +231,7 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
   },
   {
     label: 'Keep play history for',
-    tab: 'connections',
+    tab: 'advanced',
     anchor: id('sa-retention'),
     file: 'server-activity-settings.tsx',
     hint: 'Server Activity',
@@ -359,6 +358,16 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
     open: { service: 'listenbrainz' },
   },
   {
+    label: 'ListenBrainz address (self-hosted, Maloja, Koito)',
+    tab: 'connections',
+    anchor: id('listenbrainz-base-url'),
+    file: 'connections-extras.tsx',
+    hint: 'ListenBrainz',
+    keywords: 'listenbrainz maloja koito self-hosted scrobbler api base url server',
+    side: 'music',
+    open: { service: 'listenbrainz' },
+  },
+  {
     label: 'Genius access token',
     tab: 'connections',
     anchor: id('genius-access-token'),
@@ -411,7 +420,7 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
   {
     label: 'MetaSync',
     tab: 'connections',
-    anchor: heading('MetaSync'),
+    anchor: { id: 'metasync-node-url' },
     file: 'connections-metasync.tsx',
     hint: 'the shared metadata network',
     keywords: 'metasync node pool network',
@@ -479,7 +488,7 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
   // ── Sources ──
   {
     label: 'Soulseek (slskd) URL',
-    tab: 'sources',
+    tab: 'downloads',
     anchor: id('soulseek-url'),
     file: 'source-panels.tsx',
     hint: 'slskd',
@@ -488,7 +497,7 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
   },
   {
     label: 'Soulseek (slskd) API key',
-    tab: 'sources',
+    tab: 'downloads',
     anchor: id('soulseek-api-key'),
     file: 'source-panels.tsx',
     hint: 'slskd',
@@ -497,7 +506,7 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
   },
   {
     label: 'Minimum peer upload speed',
-    tab: 'sources',
+    tab: 'downloads',
     anchor: id('soulseek-min-peer-speed'),
     file: 'source-panels.tsx',
     hint: 'Soulseek',
@@ -506,7 +515,7 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
   },
   {
     label: 'Max peer queue length',
-    tab: 'sources',
+    tab: 'downloads',
     anchor: id('soulseek-max-peer-queue'),
     file: 'source-panels.tsx',
     hint: 'Soulseek',
@@ -515,7 +524,7 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
   },
   {
     label: 'slskd cleanup scope',
-    tab: 'sources',
+    tab: 'downloads',
     anchor: id('soulseek-cleanup-scope'),
     file: 'source-panels.tsx',
     hint: 'Soulseek',
@@ -524,7 +533,7 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
   },
   {
     label: 'Lidarr URL',
-    tab: 'sources',
+    tab: 'downloads',
     anchor: id('lidarr-url'),
     file: 'source-panels.tsx',
     hint: 'Lidarr',
@@ -533,7 +542,7 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
   },
   {
     label: 'Qobuz download token',
-    tab: 'sources',
+    tab: 'downloads',
     anchor: id('qobuz-download-token'),
     file: 'source-panels.tsx',
     hint: 'Qobuz downloads',
@@ -542,7 +551,7 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
   },
   {
     label: 'SoundCloud OAuth token',
-    tab: 'sources',
+    tab: 'downloads',
     anchor: id('soundcloud-download-oauth-token'),
     file: 'source-panels.tsx',
     hint: 'SoundCloud',
@@ -551,7 +560,7 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
   },
   {
     label: 'YouTube browser cookies',
-    tab: 'sources',
+    tab: 'downloads',
     anchor: id('youtube-cookies-browser'),
     file: 'source-panels-more.tsx',
     hint: 'YouTube',
@@ -560,7 +569,7 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
   },
   {
     label: 'yt-dlp release channel',
-    tab: 'sources',
+    tab: 'downloads',
     anchor: id('ytdlp-channel'),
     file: 'source-panels-more.tsx',
     hint: 'YouTube',
@@ -569,7 +578,7 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
   },
   {
     label: 'Download whole albums from YouTube Music',
-    tab: 'sources',
+    tab: 'downloads',
     anchor: id('youtube-album-bundle'),
     file: 'source-panels-more.tsx',
     hint: 'YouTube',
@@ -578,7 +587,7 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
   },
   {
     label: 'Prowlarr',
-    tab: 'sources',
+    tab: 'downloads',
     anchor: id('prowlarr-url'),
     file: 'source-panels-more.tsx',
     hint: 'indexers for torrents and usenet',
@@ -587,7 +596,7 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
   },
   {
     label: 'Torrent client',
-    tab: 'sources',
+    tab: 'downloads',
     anchor: id('torrent-client-url'),
     file: 'source-panels-more.tsx',
     hint: 'qBittorrent, Transmission, Deluge',
@@ -596,7 +605,7 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
   },
   {
     label: 'Torrent download folder',
-    tab: 'sources',
+    tab: 'downloads',
     anchor: id('torrent-download-path'),
     file: 'source-panels-more.tsx',
     hint: 'where the client saves',
@@ -605,7 +614,7 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
   },
   {
     label: 'Usenet client',
-    tab: 'sources',
+    tab: 'downloads',
     anchor: id('usenet-client-url'),
     file: 'source-panels-more.tsx',
     hint: 'SABnzbd or NZBGet',
@@ -614,7 +623,7 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
   },
   {
     label: 'Usenet download folder',
-    tab: 'sources',
+    tab: 'downloads',
     anchor: id('usenet-download-path'),
     file: 'source-panels-more.tsx',
     hint: 'where the client saves',
@@ -626,8 +635,8 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
   {
     label: 'Download Behaviour',
     tab: 'downloads',
-    anchor: heading('Download Behaviour'),
-    file: 'downloads-tab.tsx',
+    anchor: heading('Download behaviour'),
+    file: 'downloads/behaviour-view.tsx',
     hint: 'concurrency, timeouts, preview source',
     keywords: 'downloads queue',
   },
@@ -635,7 +644,7 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
     label: 'Concurrent downloads',
     tab: 'downloads',
     anchor: id('max-concurrent-downloads'),
-    file: 'downloads-tab.tsx',
+    file: 'downloads/behaviour-view.tsx',
     hint: 'how many at once',
     keywords: 'parallel simultaneous at once',
   },
@@ -643,7 +652,7 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
     label: 'Source search timeout',
     tab: 'downloads',
     anchor: id('source-search-timeout'),
-    file: 'downloads-tab.tsx',
+    file: 'downloads/behaviour-view.tsx',
     hint: 'seconds per source',
     keywords: 'search slow timeout',
   },
@@ -651,31 +660,31 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
     label: 'Stream and preview source',
     tab: 'downloads',
     anchor: id('stream-source'),
-    file: 'downloads-tab.tsx',
+    file: 'downloads/behaviour-view.tsx',
     hint: 'what plays a preview',
     keywords: 'preview play stream',
   },
   {
     label: 'Retry Logic',
     tab: 'downloads',
-    anchor: heading('Retry Logic'),
-    file: 'downloads-tab.tsx',
+    anchor: heading('Retry logic'),
+    file: 'downloads/behaviour-view.tsx',
     hint: 'next-best candidate, exhaustive retry',
     keywords: 'retry retries failed mismatch exhaustive',
   },
   {
     label: 'Album Publishing',
     tab: 'downloads',
-    anchor: heading('Album Publishing'),
-    file: 'downloads-tab.tsx',
+    anchor: heading('Album publishing'),
+    file: 'downloads/behaviour-view.tsx',
     hint: 'publish albums only when complete',
     keywords: 'atomic complete albums partial',
   },
   {
     label: 'Filtering',
     tab: 'downloads',
-    anchor: heading('Filtering'),
-    file: 'downloads-tab.tsx',
+    anchor: heading('Explicit content'),
+    file: 'downloads/filtering-view.tsx',
     hint: 'explicit, size, genres',
     keywords: 'filter block',
   },
@@ -683,7 +692,7 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
     label: 'Allow explicit content',
     tab: 'downloads',
     anchor: id('allow-explicit'),
-    file: 'downloads-tab.tsx',
+    file: 'downloads/filtering-view.tsx',
     hint: 'Filtering',
     keywords: 'explicit clean parental',
   },
@@ -691,7 +700,7 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
     label: 'Maximum music download size',
     tab: 'downloads',
     anchor: id('music-max-mb-per-minute'),
-    file: 'downloads-tab.tsx',
+    file: 'downloads/filtering-view.tsx',
     hint: 'MB per minute',
     keywords: 'size limit large files',
   },
@@ -699,7 +708,7 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
     label: 'Preferred version',
     tab: 'downloads',
     anchor: id('preferred-version'),
-    file: 'downloads-tab.tsx',
+    file: 'downloads/filtering-view.tsx',
     hint: 'remaster, deluxe, original',
     keywords: 'version remaster deluxe live',
   },
@@ -707,15 +716,15 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
     label: 'Genre whitelist',
     tab: 'downloads',
     anchor: id('genre-whitelist-enabled'),
-    file: 'downloads-tab.tsx',
+    file: 'downloads/filtering-view.tsx',
     hint: 'strict genre filtering',
     keywords: 'genres allow list',
   },
   {
     label: 'Download source order',
     tab: 'downloads',
-    anchor: heading('Source Settings'),
-    file: 'sources-tab.tsx',
+    anchor: heading('Download order'),
+    file: 'downloads/sources-view.tsx',
     hint: 'which source is tried first',
     keywords: 'chain hybrid priority order fallback sources',
   },
@@ -724,7 +733,7 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
   {
     label: 'Music quality profile',
     tab: 'quality',
-    anchor: heading('Music Quality'),
+    anchor: heading('Quality profiles'),
     file: 'quality-tab.tsx',
     hint: 'formats, bit depth, bitrate',
     keywords: 'flac mp3 lossless hires bitrate profile quality',
@@ -788,7 +797,7 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
   {
     label: 'Video quality profiles',
     tab: 'quality',
-    anchor: heading('Video Quality'),
+    anchor: id('vq-profile-select'),
     file: 'video-quality.tsx',
     hint: 'resolutions, sources, custom formats',
     keywords: '1080p 2160p 4k remux bluray web quality profile movies tv',
@@ -796,7 +805,7 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
   {
     label: 'Custom formats',
     tab: 'quality',
-    anchor: heading('Custom Formats'),
+    anchor: heading('Custom formats'),
     file: 'video-quality.tsx',
     hint: 'scores for release tags',
     keywords: 'custom formats score hdr dolby vision x265',
@@ -804,7 +813,7 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
   {
     label: 'YouTube quality',
     tab: 'quality',
-    anchor: heading('YouTube Quality'),
+    anchor: id('yq-resolution'),
     file: 'video-quality.tsx',
     hint: 'channel downloads',
     keywords: 'youtube resolution',
@@ -886,7 +895,7 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
   {
     label: '4K libraries',
     tab: 'library',
-    anchor: heading('4K libraries (optional)'),
+    anchor: heading('4K libraries'),
     file: 'library-video-folders.tsx',
     hint: 'a second copy in 4K',
     keywords: '4k uhd 2160p library',
@@ -982,7 +991,7 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
   {
     label: 'Post-Processing',
     tab: 'library',
-    anchor: heading('Post-Processing'),
+    anchor: id('metadata-enabled'),
     file: 'library-processing.tsx',
     hint: 'tagging, artwork, lyrics',
     keywords: 'tags tagging cover art lyrics replaygain',
@@ -990,7 +999,7 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
   {
     label: 'Import',
     tab: 'library',
-    anchor: heading('Import'),
+    anchor: id('import-folder-artist-override'),
     file: 'library-processing.tsx',
     hint: 'auto-import and matching',
     keywords: 'auto import match',
@@ -1046,9 +1055,9 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
     keywords: 'm3u export playlist file',
   },
   {
-    label: 'Listening Stats',
+    label: 'Listening stats',
     tab: 'discovery',
-    anchor: heading('Listening Stats'),
+    anchor: heading('Listening stats'),
     file: 'discovery-tab.tsx',
     hint: 'poll your server for plays',
     keywords: 'listening history plays stats scrobbles',
@@ -1082,7 +1091,7 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
   {
     label: 'Import lists',
     tab: 'discovery',
-    anchor: heading('Import Lists'),
+    anchor: heading('Import lists'),
     file: 'video-row-lists.tsx',
     hint: 'Trakt, IMDb, Letterboxd lists',
     keywords: 'lists trakt imdb letterboxd mdblist import',
@@ -1153,7 +1162,7 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
     tab: 'advanced',
     anchor: id('settings-autosave-enabled'),
     file: 'system-tab.tsx',
-    hint: 'Saving',
+    hint: 'General',
     keywords: 'save automatically',
   },
   {
@@ -1161,7 +1170,7 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
     tab: 'advanced',
     anchor: id('log-level-select'),
     file: 'system-tab.tsx',
-    hint: 'Logging',
+    hint: 'General, Logging',
     keywords: 'debug verbose logging logs',
   },
   {
@@ -1169,21 +1178,41 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
     tab: 'advanced',
     anchor: id('max-workers'),
     file: 'system-tab.tsx',
-    hint: 'Database Settings',
+    hint: 'General, Database updates',
     keywords: 'workers threads database',
   },
   {
+    // the id it had before settings-bic phase 6: recents remember it
+    id: 'setting:advanced:database-maintenance',
     label: 'Database maintenance',
     tab: 'advanced',
-    anchor: heading('Database Maintenance'),
+    anchor: id('db-maintenance-info'),
     file: 'system-tab.tsx',
-    hint: 'size, vacuum and cleanup',
-    keywords: 'database vacuum sqlite size compact',
+    hint: 'size, tidy up, biggest tables',
+    keywords: 'database vacuum sqlite size compact wal tidy tables',
   },
   {
+    label: 'Compact the database',
+    tab: 'advanced',
+    anchor: id('db-vacuum-btn'),
+    file: 'system-tab.tsx',
+    hint: 'Maintenance, danger zone',
+    keywords: 'vacuum compact shrink database',
+  },
+  {
+    label: 'Clear quarantine',
+    tab: 'advanced',
+    anchor: id('quarantine-clear-btn'),
+    file: 'system-tab.tsx',
+    hint: 'Maintenance, danger zone',
+    keywords: 'quarantine acoustid failed downloads delete',
+  },
+  {
+    // the id it had before settings-bic phase 6: recents remember it
+    id: 'setting:advanced:soulsync-api',
     label: 'API keys',
     tab: 'advanced',
-    anchor: heading('SoulSync API'),
+    anchor: heading('API keys'),
     file: 'system-tab.tsx',
     hint: 'REST keys and inbound endpoints',
     keywords: 'api key rest token lidarr seerr overseerr mcp',
@@ -1191,7 +1220,7 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
   {
     label: 'Artwork cache',
     tab: 'advanced',
-    anchor: heading('Artwork Cache'),
+    anchor: heading('Artwork cache'),
     file: 'system-tab.tsx',
     hint: 'local copies of cover art',
     keywords: 'image cache artwork covers posters size',
@@ -1199,15 +1228,17 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
   {
     label: 'Developer mode',
     tab: 'advanced',
-    anchor: heading('Developer Mode'),
+    anchor: heading('Developer mode'),
     file: 'system-tab.tsx',
     hint: 'advanced log viewer',
     keywords: 'developer debug',
   },
   {
+    // the id it had before settings-bic phase 6: recents remember it
+    id: 'setting:advanced:security-access',
     label: 'Security and access',
     tab: 'advanced',
-    anchor: heading('Security & Access'),
+    anchor: heading('Sign-in'),
     file: 'system-security.tsx',
     hint: 'PIN, passwords, sign-in',
     keywords: 'security pin password login lock sign in',
@@ -1217,7 +1248,7 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
     tab: 'advanced',
     anchor: id('security-new-pin'),
     file: 'system-security.tsx',
-    hint: 'Security & Access',
+    hint: 'Security, Lock with a PIN',
     keywords: 'pin lock code',
   },
   {
@@ -1225,13 +1256,15 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
     tab: 'advanced',
     anchor: id('security-login-password'),
     file: 'system-security.tsx',
-    hint: 'Security & Access',
+    hint: 'Security, Sign-in',
     keywords: 'password login sign in',
   },
   {
+    // the id it had before settings-bic phase 6: recents remember it
+    id: 'setting:advanced:security-oidc-issuer',
     label: 'Single sign-on (OIDC)',
     tab: 'advanced',
-    anchor: id('security-oidc-issuer'),
+    anchor: id('security-oidc-signin'),
     file: 'system-security.tsx',
     hint: 'Authentik, Authelia, Keycloak',
     keywords: 'oidc sso openid authentik authelia keycloak',
@@ -1343,7 +1376,7 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
   // ── Logs ──
   {
     label: 'Live logs',
-    tab: 'logs',
+    tab: 'advanced',
     anchor: id('log-viewer-autoscroll'),
     file: 'logs-tab.tsx',
     hint: 'streaming log viewer',
@@ -1392,6 +1425,13 @@ export const ACCOUNT_ENTRIES: AccountEntry[] = [
     hint: 'My Account',
     keywords: 'weather location rain snow',
     anchor: 'ma-weather-h',
+  },
+  {
+    id: 'account:listening',
+    label: 'Your listening',
+    hint: 'My Account · share listening, private session',
+    keywords: 'share listening blend private session privacy scrobble history',
+    anchor: 'ma-privacy-h',
   },
 ];
 
@@ -1450,8 +1490,25 @@ function visible(el: HTMLElement): boolean {
   return !!(el.offsetParent || el.getClientRects().length);
 }
 
-/** a collapsed section, a closed media tab: open what hides it */
-function reveal(el: HTMLElement): void {
+/** a collapsed section, a closed media tab, another pill, a closed "More
+ *  options": open what hides it */
+export function reveal(el: HTMLElement): void {
+  // a pill of a rebuilt tab: its panel says which
+  const view = el.closest<HTMLElement>('[data-stg-view]');
+  if (view?.hidden && view.dataset.stgTab) nav.go(view.dataset.stgTab, view.dataset.stgView);
+  // anything hidden with a button that controls it: a "More options" body,
+  // a kind's panel (Music / Video)
+  for (
+    let hidden = el.closest<HTMLElement>('[hidden][id]');
+    hidden;
+    hidden = hidden.parentElement?.closest<HTMLElement>('[hidden][id]') ?? null
+  ) {
+    document
+      .querySelector<HTMLElement>(
+        `[aria-controls="${CSS.escape(hidden.id)}"]:not([aria-expanded="true"]):not([aria-selected="true"])`,
+      )
+      ?.click();
+  }
   // the anchor is a section's own header: open it
   const header = el.closest<HTMLElement>('.settings-section-header');
   if (header?.classList.contains('collapsed')) header.click();
@@ -1471,8 +1528,8 @@ function reveal(el: HTMLElement): void {
   }
 }
 
-function flash(el: HTMLElement): void {
-  const target = el.closest<HTMLElement>('.form-group, .settings-group') ?? el;
+export function flash(el: HTMLElement): void {
+  const target = el.closest<HTMLElement>('[data-row], .form-group, .settings-group') ?? el;
   target.scrollIntoView?.({ block: 'center', behavior: 'auto' });
   target.classList.add('stg-search-target');
   window.setTimeout(() => target.classList.remove('stg-search-target'), 2000);
@@ -1495,9 +1552,11 @@ export async function landSetting(entry: SettingsEntry, side: 'music' | 'video')
   } else {
     void window.navigateToPage?.('settings');
   }
+  // an entry may still name a tab by a key that went (a saved recent)
+  const place = resolveTab(entry.tab);
   const ready = await wait(
     () =>
-      !!document.querySelector(`#settings-page .stg-tab[data-tab="${entry.tab}"]`) &&
+      !!document.querySelector(`#settings-page .stg-tab[data-tab="${place.tab}"]`) &&
       typeof window.switchSettingsTab === 'function',
   );
   if (!ready) return false;

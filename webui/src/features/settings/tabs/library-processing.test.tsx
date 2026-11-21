@@ -1,20 +1,21 @@
 /**
- * Library > Post-Processing and Import (SETTINGS_PORT.md, step 8d): the markup
- * they replaced, the summary, the album-art sources, the tag groups and every
- * saved key (a source's tags are saved one dotted key at a time, beside the
- * credentials the vanilla Connections tab saves).
+ * Library > Tags and artwork, Music, and Import and files, Music
+ * (settings-bic phase 4): the album-art sources on the order list, a
+ * service's tags as chips under its row, the counts in words, and
+ * every saved key (a source's tags are saved one dotted key at a time, beside
+ * the credentials Connections saves).
  */
 
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createSettingsStore, type SettingsPayload, type SettingsStore } from '../settings-store';
-import { shape, vanilla } from './__fixtures__/shape';
 import {
+  MusicImport,
+  MusicTags,
   artList,
   fillEmptyTags,
   postProcessingSummary,
-  ProcessingCards,
 } from './library-processing';
 
 let store: SettingsStore;
@@ -44,7 +45,12 @@ afterEach(async () => {
 });
 
 const cards = () =>
-  render(<ProcessingCards store={store} part="processing" opened={0} active={false} />);
+  render(
+    <div>
+      <MusicTags store={store} />
+      <MusicImport store={store} />
+    </div>,
+  );
 const input = (id: string) => document.getElementById(id) as HTMLInputElement;
 const box = (path: string) => document.querySelector<HTMLInputElement>(`[data-config="${path}"]`)!;
 function saved(): SettingsPayload {
@@ -53,23 +59,6 @@ function saved(): SettingsPayload {
     for (const [k, v] of Object.entries(body)) merged[k] = { ...merged[k], ...v };
   return merged;
 }
-
-describe('the cards are the markup they replaced', () => {
-  it('Processing, Post-Processing and Import', () => {
-    const { container } = cards();
-    const old = vanilla('library-processing.vanilla.html', { afterInit: true });
-    expect(shape(container)).toEqual(shape(old));
-    const words = (root: Element) =>
-      [
-        ...root.querySelectorAll('.setting-help-body, .stg-help-text, .settings-hint, .help-text'),
-      ].map((el) => (el.textContent || '').replace(/\s+/g, ' ').trim());
-    expect(words(container)).toEqual(words(old));
-    // the toggle row's words keep their space after the box
-    const row = (root: Element) =>
-      (root.querySelector('.toggle-row')!.textContent || '').replace(/\s+/g, ' ').trimEnd();
-    expect(row(container)).toBe(row(old));
-  });
-});
 
 describe('the rules', () => {
   it('sums the card up, and lists the art sources as loadArtSourceOrder did', () => {
@@ -82,7 +71,7 @@ describe('the rules', () => {
   });
 });
 
-describe('Post-Processing', () => {
+describe('Tags and artwork, and Import', () => {
   it('loads every switch as loadSettingsData did; a master off greys its tags', () => {
     act(() =>
       store.hydrate({
@@ -103,38 +92,40 @@ describe('Post-Processing', () => {
     expect(box('spotify.tags.album_id').checked).toBe(false);
     expect(box('spotify.tags.track_id').checked).toBe(true);
     expect(box('spotify.tags.track_id').disabled).toBe(true);
-    expect(box('spotify.tags.track_id').closest('label')!.className).toBe(
-      'checkbox-label disabled-tag',
-    );
+    // its row says it in words; a count that is counted, not written down
+    const row = (id: string) => input(id).closest('[data-row]')!.textContent;
+    expect(row('embed-spotify')).toContain('Off: none of its 3 tags are written');
+    expect(row('embed-musicbrainz')).toContain('25 of 25 tags written');
     expect(box('deezer.tags.bpm').disabled).toBe(false);
     expect(box('metadata_enhancement.tags.genre_merge').checked).toBe(false);
     expect(input('mb-use-original-date-for-date').checked).toBe(true);
     expect(input('beatport-search-all').checked).toBe(true);
-    expect(
-      document.querySelector('[data-stg-summary="library-post-processing"]')!.textContent,
-    ).toBe('tagging');
   });
 
-  it('a group opens from its header; its master switch does not open it', () => {
+  it("a service's tags open under its row; its switch does not open them", () => {
     cards();
-    const group = input('embed-deezer').closest('.tag-service-group')!;
-    const body = group.querySelector<HTMLElement>('.tag-service-body')!;
-    expect(body.style.display).toBe('none');
+    const row = input('embed-deezer').closest('[data-row]')!;
+    const toggle = row.querySelector<HTMLButtonElement>('[data-tags-toggle="deezer"]')!;
+    const chips = document.getElementById(toggle.getAttribute('aria-controls')!)!;
+    expect(chips.hidden).toBe(true);
+    expect(chips.contains(box('deezer.tags.bpm'))).toBe(true);
     fireEvent.click(input('embed-deezer'));
-    expect(body.style.display).toBe('none');
-    fireEvent.click(group.querySelector('.tag-service-header')!);
-    expect(body.style.display).toBe('block');
-    expect(group.querySelector('.tag-group-arrow')!.className).toBe('tag-group-arrow open');
+    expect(chips.hidden).toBe(true);
+    fireEvent.click(toggle);
+    expect(chips.hidden).toBe(false);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
   });
 
-  it('switching post-processing off hides its options', () => {
+  it('switching post-processing off hides its options, and its row says so in amber', () => {
     act(() => store.hydrate({}));
     cards();
+    const row = () => input('metadata-enabled').closest('[data-row]')!;
+    expect(row().textContent).not.toContain('Post-processing is off');
     fireEvent.click(input('metadata-enabled'));
-    expect(document.getElementById('post-processing-options')!.style.display).toBe('none');
-    expect(
-      document.querySelector('[data-stg-summary="library-post-processing"]')!.textContent,
-    ).toBe('artwork');
+    expect(document.getElementById('post-processing-options')!.hidden).toBe(true);
+    expect(row().textContent).toContain(
+      'Post-processing is off: downloads get no tags, artwork or lyrics.',
+    );
   });
 
   it('each change saves its own key, a tag as one dotted key of its source', async () => {
@@ -175,19 +166,26 @@ describe('Post-Processing', () => {
   it('the art sources: saved first, connected ones after; moves and switches save the order', async () => {
     act(() => store.hydrate({ metadata_enhancement: { album_art_order: ['caa', 'itunes'] } }));
     cards();
-    const names = () =>
-      [...document.querySelectorAll('#art-source-list .hybrid-source-name')].map(
-        (n) => n.textContent,
-      );
+    const rows = () => [...document.querySelectorAll<HTMLElement>('#art-source-list li[data-id]')];
     await waitFor(() =>
-      expect(names()).toEqual(['Cover Art Archive', 'iTunes', 'Deezer', 'Spotify']),
+      expect(rows().map((r) => r.dataset.id)).toEqual(['caa', 'itunes', 'deezer', 'spotify']),
     );
-    const item = (id: string) =>
-      document.querySelector<HTMLElement>(`#art-source-list [data-source-id="${id}"]`)!;
-    expect(item('deezer').className).toBe('hybrid-source-item disabled');
-    expect(item('itunes').querySelector('.hybrid-source-priority')!.textContent).toBe('2');
-    fireEvent.click(item('deezer').querySelector('input')!);
-    fireEvent.click(item('deezer').querySelector('[title="Move up"]')!);
+    const row = (id: string) => rows().find((r) => r.dataset.id === id)!;
+    expect(row('itunes').textContent).toContain('Asked 2nd');
+    expect(row('deezer').textContent).toContain('Off: not asked');
+    // none can be taken out: switched off instead
+    fireEvent.click(row('deezer').querySelector('input[type="checkbox"]')!);
+    expect(row('deezer').textContent).toContain('Asked 3rd');
+    fireEvent.click(document.querySelector('#art-source-list [data-more="deezer"]')!);
+    const menu = document.querySelector('#art-source-list [role="menu"]')!;
+    const stop = [...menu.querySelectorAll('button')].find((b) =>
+      b.textContent!.startsWith('Stop using'),
+    )!;
+    expect(stop.disabled).toBe(true);
+    expect(menu.textContent).toContain('Switch it off instead');
+    fireEvent.click(
+      [...menu.querySelectorAll('button')].find((b) => b.textContent!.startsWith('Move up'))!,
+    );
     await waitFor(() => expect(store.hasPending()).toBe(false));
     expect(saved().metadata_enhancement).toEqual({ album_art_order: ['caa', 'deezer', 'itunes'] });
   });
@@ -201,6 +199,27 @@ describe('Post-Processing', () => {
         'No connected art sources available.',
       ),
     );
+  });
+
+  it('the import settings save their keys', async () => {
+    act(() => store.hydrate({ import: { default_search_source: 'deezer' } }));
+    cards();
+    fireEvent.change(input('import-default-search-source'), { target: { value: '' } });
+    fireEvent.click(input('import-folder-artist-override'));
+    fireEvent.click(input('import-transfer-permanent'));
+    await waitFor(() => expect(store.hasPending()).toBe(false));
+    expect(saved().import).toEqual({
+      default_search_source: '',
+      folder_artist_override: false,
+      transfer_is_permanent: false,
+    });
+  });
+
+  it('the genre list is drawn here now (DESIGN 3.3: from Filtering)', () => {
+    act(() => store.hydrate({ genre_whitelist: { enabled: true, genres: ['jazz'] } }));
+    cards();
+    expect(input('genre-whitelist-enabled').checked).toBe(true);
+    expect(document.querySelector('#genre-whitelist-chips [data-genre="jazz"]')).not.toBeNull();
   });
 });
 
@@ -229,5 +248,11 @@ describe('Fill empty tags automatically', () => {
     fireEvent.change(select(), { target: { value: 'off' } });
     await act(() => store.flush());
     expect(saved().metadata_enhancement).toEqual({ fill_empty_tags: 'off' });
+  });
+
+  it('lives with post-processing: hidden while it is off', () => {
+    act(() => store.hydrate({ metadata_enhancement: { enabled: false } }));
+    cards();
+    expect(select().closest('#post-processing-options')!.hasAttribute('hidden')).toBe(true);
   });
 });

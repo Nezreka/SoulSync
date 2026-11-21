@@ -118,7 +118,7 @@ export const RELEASES: Release[] = [
       },
       {
         title: 'Big libraries stay quick',
-        desc: 'Library search no longer has every request rebuild the same index at once, old MusicBrainz cache rows and long-resolved findings prune themselves, the write-ahead log is trimmed, and Settings, System, Database Maintenance shows the biggest tables with a safe Tidy Up (thanks xcrittpm, #2205).',
+        desc: 'Library search no longer has every request rebuild the same index at once, old MusicBrainz cache rows and long-resolved findings prune themselves, the write-ahead log is trimmed, and Settings, System, Maintenance shows the biggest tables with a safe Tidy up (thanks xcrittpm, #2205).',
         page: 'settings',
       },
       {

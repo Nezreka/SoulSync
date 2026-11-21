@@ -71,10 +71,10 @@ def test_the_hifi_metadata_toggles_persist():
     are read by the tagging pipeline on every download, the settings page has
     checkboxes for them, and the save dropped the lot."""
     assert "hifi" in _persisted_sections()
-    # the toggles are the Post-Processing card's (React, SETTINGS_PORT.md step
-    # 8d), which saves hifi.embed_tags and each hifi.tags key itself
+    # the switches are Library > Tags and artwork's (settings-bic phase 4),
+    # which saves hifi.embed_tags and each hifi.tags key itself
     card = (_ROOT / "webui/src/features/settings/tabs/library-processing.tsx").read_text(
         encoding="utf-8")
     assert "service: 'hifi'" in card
-    assert "store.set(service, 'embed_tags', event.target.checked)" in card
-    assert "store.set(section, rest.join('.'), event.target.checked)" in card
+    assert "store.set(group.service!, 'embed_tags', event.target.checked)" in card
+    assert "store.set(section, `tags.${key}`, value)" in card

@@ -449,7 +449,7 @@ def check_library_coverage() -> List[dict]:
     if not result.get("server") or pct is None or total < COVERAGE_MIN_TRACKS:
         return []
     name = _SERVER_NAMES.get(result["server"], str(result["server"]).title())
-    fix = [fix_settings("Open library folders", "library")]
+    fix = [fix_settings("Open library folders", "library-folders")]
     if pct >= COVERAGE_WARN_PCT:
         return [finding("paths.library_coverage", "ok", "paths",
                         f"SoulSync can read {pct:.0f}% of your {name} music")]
@@ -652,7 +652,7 @@ def check_security() -> List[dict]:
         return []
     return [finding("security.auth_proxy_trusted", "warning", "security",
                     "The auth proxy header is being ignored", problem,
-                    [fix_settings("Open Security settings", "advanced")], "prof-security")]
+                    [fix_settings("Open Security settings", "security")], "prof-security")]
 
 
 # ---------------------------------------------------------------- setup + updates

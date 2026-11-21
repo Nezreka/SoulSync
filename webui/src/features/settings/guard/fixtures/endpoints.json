@@ -1,0 +1,4180 @@
+{
+  "/api/audiobook-routes": {
+    "artists": [
+      {
+        "label": "Bluey",
+        "route_key": "bluey"
+      }
+    ],
+    "audiobook_folder_configured": true
+  },
+  "/api/auth/oidc/available": {
+    "callback_url": "https://sandbox.example/api/auth/oidc/callback"
+  },
+  "/api/auto-import/settings": {
+    "quality_profile_id": 2
+  },
+  "/api/database/maintenance/info": {
+    "auto_vacuum": 0,
+    "auto_vacuum_label": "None",
+    "free_pages": 1200,
+    "free_size_display": "4.7 MB",
+    "success": true,
+    "total_size_display": "976.6 MB"
+  },
+  "/api/dev-mode": {
+    "enabled": false
+  },
+  "/api/discovery/hemisphere": {
+    "hemisphere": "southern"
+  },
+  "/api/discovery/lookback-period": {
+    "period": "90"
+  },
+  "/api/genre-whitelist/defaults": {
+    "genres": ["blues", "pop", "rock"]
+  },
+  "/api/hifi/instances": {
+    "active": "https://a.example",
+    "instances": [
+      {
+        "can_download": true,
+        "url": "https://a.example",
+        "version": "2.4"
+      },
+      {
+        "can_search": true,
+        "url": "https://b.example"
+      },
+      {
+        "status": "timeout",
+        "url": "https://c.example"
+      }
+    ]
+  },
+  "/api/hifi/instances/list": {
+    "instances": [
+      {
+        "enabled": true,
+        "url": "https://a.example"
+      },
+      {
+        "enabled": false,
+        "url": "https://b.example"
+      },
+      {
+        "enabled": true,
+        "url": "https://c.example"
+      }
+    ]
+  },
+  "/api/hifi/status": {
+    "available": true,
+    "version": "2.4"
+  },
+  "/api/hydrabase/status": {
+    "connected": true
+  },
+  "/api/image-cache/status": {
+    "bytes": 314572800,
+    "entries": 1234,
+    "max_bytes": 536870912,
+    "pending": 0,
+    "success": true,
+    "thumbnails": true
+  },
+  "/api/jellyfin/music-libraries": {
+    "libraries": [
+      {
+        "title": "Music"
+      },
+      {
+        "title": "Live"
+      }
+    ],
+    "selected": "Live",
+    "success": true
+  },
+  "/api/jellyfin/users": {
+    "current": "bob",
+    "success": true,
+    "users": [
+      {
+        "name": "ann"
+      },
+      {
+        "name": "bob"
+      }
+    ]
+  },
+  "/api/lastfm/configured": {
+    "configured": true,
+    "key_rejected": false,
+    "message": ""
+  },
+  "/api/library/coverage": {
+    "docker": true,
+    "folders": [
+      {
+        "examples": [],
+        "found_by": "suffix",
+        "library": "Music",
+        "library_folder": "/app/Transfer",
+        "library_parts": [],
+        "local_folder": "/app/Transfer",
+        "reachable_tracks": 600,
+        "readable": 40,
+        "readable_pct": 100,
+        "reasons": { "ok": 40 },
+        "sampled": 40,
+        "server_folder": "/data/music",
+        "status": "covered",
+        "tracks": 600
+      },
+      {
+        "examples": [],
+        "found_by": "same",
+        "library": "Music",
+        "library_folder": null,
+        "library_parts": [],
+        "local_folder": "/archive",
+        "reachable_tracks": 0,
+        "readable": 0,
+        "readable_pct": 0,
+        "reasons": { "not_library": 40 },
+        "sampled": 40,
+        "server_folder": "/data/archive",
+        "status": "not_library",
+        "tracks": 600
+      }
+    ],
+    "folders_from": "server",
+    "outside_folders": 0,
+    "reachable_pct": 50,
+    "reachable_tracks": 600,
+    "relative_paths": false,
+    "server": "plex",
+    "success": true,
+    "total_tracks": 1200
+  },
+  "/api/library/path-mappings": {
+    "mappings": [],
+    "success": true
+  },
+  "/api/logs/tail": {
+    "lines": [
+      "2026-11-15 10:00:00 - soulsync.app - INFO - sample line 0",
+      "2026-11-15 10:01:00 - soulsync.app - DEBUG - sample line 1",
+      "2026-11-15 10:02:00 - soulsync.app - WARNING - sample line 2",
+      "2026-11-15 10:03:00 - soulsync.app - ERROR - sample line 3",
+      "2026-11-15 10:04:00 - soulsync.app - INFO - sample line 4",
+      "2026-11-15 10:05:00 - soulsync.app - INFO - sample line 5"
+    ]
+  },
+  "/api/media-servers": {
+    "servers": [
+      {
+        "name": "plex"
+      },
+      {
+        "name": "jellyfin"
+      },
+      {
+        "name": "navidrome"
+      },
+      {
+        "name": "music_assistant"
+      },
+      {
+        "name": "soulsync"
+      }
+    ]
+  },
+  "/api/metadata/art-sources": {
+    "available": [
+      {
+        "id": "deezer"
+      },
+      {
+        "id": "spotify"
+      },
+      {
+        "id": "caa"
+      }
+    ]
+  },
+  "/api/metasync": {
+    "local_key_set": true,
+    "node_fingerprint": "ab:cd",
+    "node_url": "http://ms:8790",
+    "pool_key_set": true,
+    "pool_url": "https://pool",
+    "success": true
+  },
+  "/api/metasync/status": {
+    "status": {
+      "dry_run": true,
+      "network": {
+        "installs": 3,
+        "publish_threshold": 5,
+        "week": "2026-W45"
+      },
+      "node_fingerprint": "ab:cd",
+      "pools": [
+        {
+          "binding_status": "bound",
+          "name": "SIN",
+          "url": "https://pool"
+        }
+      ],
+      "soulsync_connected": true,
+      "unsent_report": {
+        "signal_count": 12,
+        "week": "2026-W46"
+      },
+      "version": "1.2"
+    },
+    "success": true
+  },
+  "/api/music-assistant/sources": {
+    "selected": "b",
+    "sources": [
+      {
+        "domain": "filesystem",
+        "key": "a",
+        "title": "Local"
+      },
+      {
+        "domain": "smb",
+        "key": "b",
+        "title": "NAS"
+      }
+    ],
+    "success": true
+  },
+  "/api/navidrome/music-folders": {
+    "folders": [
+      {
+        "title": "A"
+      },
+      {
+        "title": "B"
+      }
+    ],
+    "selected": "B",
+    "success": true
+  },
+  "/api/onboarding/environment": {
+    "docker": true
+  },
+  "/api/permissions/asks-used": {
+    "success": true,
+    "used": {}
+  },
+  "/api/permissions/catalogue": {
+    "all": "*",
+    "categories": [
+      {
+        "help": "Their own account, chat and their own automations.",
+        "id": "general",
+        "label": "General & account"
+      },
+      {
+        "help": "Movies, plus the Movies & TV pages they share with TV shows.",
+        "id": "movies",
+        "label": "Movies"
+      },
+      {
+        "help": "Shows and seasons.",
+        "id": "tv",
+        "label": "TV shows"
+      },
+      {
+        "help": "Library, discover, playlists and downloads.",
+        "id": "music",
+        "label": "Music"
+      },
+      {
+        "help": "Books and shows to listen to.",
+        "id": "books",
+        "label": "Audiobooks & podcasts"
+      },
+      {
+        "help": "How many asks, whose requests they see, and who may answer them.",
+        "id": "requests",
+        "label": "Requests & moderation"
+      },
+      {
+        "help": "These belong to admins. Members never get them.",
+        "id": "admin",
+        "label": "Administration"
+      },
+      {
+        "help": "What shows in their sidebar. It only changes what shows, never what they may do.",
+        "id": "look",
+        "label": "Sidebar & look"
+      }
+    ],
+    "follow": "follow",
+    "kinds": [
+      "bool",
+      "restrict",
+      "mode",
+      "rating",
+      "count",
+      "set",
+      "choice",
+      "set_flag",
+      "fixed",
+      "admin",
+      "presentation"
+    ],
+    "modes": ["none", "ask", "download"],
+    "open_policy": {
+      "account.connect": true,
+      "account.own_library": true,
+      "admin.tools": true,
+      "admin.video_tools": true,
+      "automations.personal": true,
+      "books.access": true,
+      "books.get": "download",
+      "chat.use": true,
+      "movies.access": true,
+      "movies.get": "download",
+      "movies.max_rating": "any",
+      "movies.quality": "*",
+      "movies.quality_ask": [],
+      "movies.quality_default": null,
+      "movies.request_limit": {
+        "days": 7,
+        "n": 0
+      },
+      "music.access": true,
+      "music.dashboard": true,
+      "music.discover": true,
+      "music.downloads": true,
+      "music.explorer": true,
+      "music.get": "download",
+      "music.hide_explicit": false,
+      "music.import": true,
+      "music.library": true,
+      "music.playlist_sync": true,
+      "music.quality": "*",
+      "music.quality_default": null,
+      "music.request_limit": {
+        "days": 7,
+        "n": 0
+      },
+      "music.sample_studio": true,
+      "music.search": true,
+      "music.stats": true,
+      "music.videos": true,
+      "music.watchlist": true,
+      "music.wishlist": true,
+      "podcasts.access": true,
+      "podcasts.get": "download",
+      "requests.moderate": true,
+      "requests.see_all": true,
+      "tv.access": true,
+      "tv.get": "download",
+      "tv.max_rating": "follow",
+      "tv.quality": "*",
+      "tv.quality_ask": [],
+      "tv.quality_default": null,
+      "tv.request_limit": {
+        "days": 7,
+        "n": 0
+      },
+      "video.calendar": true,
+      "video.dashboard": true,
+      "video.discover": true,
+      "video.downloads": true,
+      "video.library": true,
+      "video.search": true,
+      "video.watchlist": true,
+      "video.wishlist": true,
+      "video.youtube": true
+    },
+    "quality_tokens": ["4k"],
+    "ratings": ["G", "PG", "PG-13", "R", "any"],
+    "rows": [
+      {
+        "also_in": [],
+        "category": "general",
+        "default": false,
+        "group": "",
+        "help": "Everything, including settings and people.",
+        "id": "account.admin",
+        "kind": "admin",
+        "label": "Admin",
+        "legacy": "is_admin",
+        "media": null,
+        "needs": [],
+        "pages": [],
+        "presentation": false,
+        "scope": "O",
+        "set_row": null,
+        "stored": false,
+        "value_labels": {},
+        "values": []
+      },
+      {
+        "also_in": [],
+        "category": "general",
+        "default": true,
+        "group": "",
+        "help": "Spotify, Tidal, ListenBrainz, Last.fm, their Plex user or Navidrome login.",
+        "id": "account.connect",
+        "kind": "bool",
+        "label": "Connect their own accounts",
+        "legacy": null,
+        "media": null,
+        "needs": [],
+        "pages": [],
+        "presentation": false,
+        "scope": "PTO",
+        "set_row": null,
+        "stored": true,
+        "value_labels": {},
+        "values": []
+      },
+      {
+        "also_in": [],
+        "category": "general",
+        "default": true,
+        "group": "",
+        "help": "Their downloads go to their own folder and server library.",
+        "id": "account.own_library",
+        "kind": "bool",
+        "label": "Own library",
+        "legacy": null,
+        "media": null,
+        "needs": [],
+        "pages": [],
+        "presentation": false,
+        "scope": "PO",
+        "set_row": null,
+        "stored": true,
+        "value_labels": {},
+        "values": []
+      },
+      {
+        "also_in": [],
+        "category": "general",
+        "default": true,
+        "group": "",
+        "help": "Talk with other people here and play games.",
+        "id": "chat.use",
+        "kind": "bool",
+        "label": "Chat & Arcade",
+        "legacy": "allowed_pages",
+        "media": null,
+        "needs": [],
+        "pages": ["chat", "video-chat"],
+        "presentation": false,
+        "scope": "PTO",
+        "set_row": null,
+        "stored": true,
+        "value_labels": {},
+        "values": []
+      },
+      {
+        "also_in": [],
+        "category": "general",
+        "default": true,
+        "group": "",
+        "help": "Playlist pulls, their own scans and notes to themselves. System jobs stay with admins.",
+        "id": "automations.personal",
+        "kind": "bool",
+        "label": "Their own automations",
+        "legacy": "allowed_pages",
+        "media": null,
+        "needs": [],
+        "pages": ["automations"],
+        "presentation": false,
+        "scope": "PTO",
+        "set_row": null,
+        "stored": true,
+        "value_labels": {},
+        "values": []
+      },
+      {
+        "also_in": [],
+        "category": "movies",
+        "default": true,
+        "group": "",
+        "help": "Browse, search, watch and ask for movies.",
+        "id": "movies.access",
+        "kind": "bool",
+        "label": "Movies",
+        "legacy": "allowed_sides",
+        "media": null,
+        "needs": [],
+        "pages": [],
+        "presentation": false,
+        "scope": "PTO",
+        "set_row": null,
+        "stored": true,
+        "value_labels": {},
+        "values": []
+      },
+      {
+        "also_in": [],
+        "category": "movies",
+        "default": "download",
+        "group": "",
+        "help": "Auto-approve, Require approval or Requests off.",
+        "id": "movies.get",
+        "kind": "mode",
+        "label": "Movie requests",
+        "legacy": "can_download",
+        "media": null,
+        "needs": ["movies.access"],
+        "pages": [],
+        "presentation": false,
+        "scope": "PTO",
+        "set_row": null,
+        "stored": true,
+        "value_labels": {
+          "ask": "Require approval",
+          "download": "Auto-approve",
+          "none": "Requests off"
+        },
+        "values": ["none", "ask", "download"]
+      },
+      {
+        "also_in": [],
+        "category": "movies",
+        "default": "any",
+        "group": "",
+        "help": "Titles above it, or with no rating, stay out of sight.",
+        "id": "movies.max_rating",
+        "kind": "rating",
+        "label": "Maximum content rating",
+        "legacy": "max_rating",
+        "media": null,
+        "needs": ["movies.access"],
+        "pages": [],
+        "presentation": false,
+        "scope": "PTO",
+        "set_row": null,
+        "stored": true,
+        "value_labels": {},
+        "values": []
+      },
+      {
+        "also_in": [],
+        "category": "movies",
+        "default": {
+          "days": 7,
+          "n": 0
+        },
+        "group": "",
+        "help": "Movie asks. Movies they get right away are never capped.",
+        "id": "movies.request_limit",
+        "kind": "count",
+        "label": "Request limit",
+        "legacy": "request_limit",
+        "media": null,
+        "needs": ["movies.access"],
+        "pages": [],
+        "presentation": false,
+        "scope": "PTO",
+        "set_row": null,
+        "stored": true,
+        "value_labels": {},
+        "values": []
+      },
+      {
+        "also_in": [],
+        "category": "movies",
+        "default": "*",
+        "group": "",
+        "help": "Only profiles for movies.",
+        "id": "movies.quality",
+        "kind": "set",
+        "label": "Allowed quality profiles",
+        "legacy": null,
+        "media": "movie",
+        "needs": ["movies.access"],
+        "pages": [],
+        "presentation": false,
+        "scope": "PTO",
+        "set_row": null,
+        "stored": true,
+        "value_labels": {},
+        "values": []
+      },
+      {
+        "also_in": [],
+        "category": "movies",
+        "default": null,
+        "group": "",
+        "help": "What a request gets when they don't pick.",
+        "id": "movies.quality_default",
+        "kind": "choice",
+        "label": "Default quality profile",
+        "legacy": null,
+        "media": "movie",
+        "needs": ["movies.access"],
+        "pages": [],
+        "presentation": false,
+        "scope": "PTO",
+        "set_row": "movies.quality",
+        "stored": true,
+        "value_labels": {},
+        "values": []
+      },
+      {
+        "also_in": [],
+        "category": "movies",
+        "default": [],
+        "group": "",
+        "help": "These always come to you first.",
+        "id": "movies.quality_ask",
+        "kind": "set_flag",
+        "label": "Needs my OK",
+        "legacy": null,
+        "media": "movie",
+        "needs": ["movies.access"],
+        "pages": [],
+        "presentation": false,
+        "scope": "PTO",
+        "set_row": null,
+        "stored": true,
+        "value_labels": {},
+        "values": []
+      },
+      {
+        "also_in": ["tv"],
+        "category": "movies",
+        "default": true,
+        "group": "Movies & TV pages",
+        "help": "The movies & TV home page.",
+        "id": "video.dashboard",
+        "kind": "bool",
+        "label": "Dashboard",
+        "legacy": "allowed_pages",
+        "media": null,
+        "needs": ["movies.access", "tv.access"],
+        "pages": ["video-dashboard"],
+        "presentation": false,
+        "scope": "PTO",
+        "set_row": null,
+        "stored": true,
+        "value_labels": {},
+        "values": []
+      },
+      {
+        "also_in": ["tv"],
+        "category": "movies",
+        "default": true,
+        "group": "Movies & TV pages",
+        "help": "Find movies and shows.",
+        "id": "video.search",
+        "kind": "bool",
+        "label": "Search",
+        "legacy": "allowed_pages",
+        "media": null,
+        "needs": ["movies.access", "tv.access"],
+        "pages": ["video-search"],
+        "presentation": false,
+        "scope": "PTO",
+        "set_row": null,
+        "stored": true,
+        "value_labels": {},
+        "values": []
+      },
+      {
+        "also_in": ["tv"],
+        "category": "movies",
+        "default": true,
+        "group": "Movies & TV pages",
+        "help": "What's already on the server.",
+        "id": "video.library",
+        "kind": "bool",
+        "label": "Library",
+        "legacy": "allowed_pages",
+        "media": null,
+        "needs": ["movies.access", "tv.access"],
+        "pages": ["video-library"],
+        "presentation": false,
+        "scope": "PTO",
+        "set_row": null,
+        "stored": true,
+        "value_labels": {},
+        "values": []
+      },
+      {
+        "also_in": ["tv"],
+        "category": "movies",
+        "default": true,
+        "group": "Movies & TV pages",
+        "help": "Trending, upcoming and recommended.",
+        "id": "video.discover",
+        "kind": "bool",
+        "label": "Discover",
+        "legacy": "allowed_pages",
+        "media": null,
+        "needs": ["movies.access", "tv.access"],
+        "pages": ["video-discover"],
+        "presentation": false,
+        "scope": "PTO",
+        "set_row": null,
+        "stored": true,
+        "value_labels": {},
+        "values": []
+      },
+      {
+        "also_in": ["tv"],
+        "category": "movies",
+        "default": true,
+        "group": "Movies & TV pages",
+        "help": "Air dates and releases, plus the iCal feed.",
+        "id": "video.calendar",
+        "kind": "bool",
+        "label": "Calendar",
+        "legacy": "allowed_pages",
+        "media": null,
+        "needs": ["movies.access", "tv.access"],
+        "pages": ["video-calendar"],
+        "presentation": false,
+        "scope": "PTO",
+        "set_row": null,
+        "stored": true,
+        "value_labels": {},
+        "values": []
+      },
+      {
+        "also_in": ["tv"],
+        "category": "movies",
+        "default": true,
+        "group": "Movies & TV pages",
+        "help": "Follow people, studios and channels.",
+        "id": "video.watchlist",
+        "kind": "bool",
+        "label": "Watchlist",
+        "legacy": "allowed_pages",
+        "media": null,
+        "needs": ["movies.access", "tv.access"],
+        "pages": ["video-watchlist"],
+        "presentation": false,
+        "scope": "PTO",
+        "set_row": null,
+        "stored": true,
+        "value_labels": {},
+        "values": []
+      },
+      {
+        "also_in": ["tv"],
+        "category": "movies",
+        "default": true,
+        "group": "Movies & TV pages",
+        "help": "What they're waiting for.",
+        "id": "video.wishlist",
+        "kind": "bool",
+        "label": "Wishlist",
+        "legacy": "allowed_pages",
+        "media": null,
+        "needs": ["movies.access", "tv.access"],
+        "pages": ["video-wishlist"],
+        "presentation": false,
+        "scope": "PTO",
+        "set_row": null,
+        "stored": true,
+        "value_labels": {},
+        "values": []
+      },
+      {
+        "also_in": ["tv"],
+        "category": "movies",
+        "default": true,
+        "group": "Movies & TV pages",
+        "help": "The movies & tv download queue.",
+        "id": "video.downloads",
+        "kind": "bool",
+        "label": "Downloads",
+        "legacy": "allowed_pages",
+        "media": null,
+        "needs": ["movies.access", "tv.access"],
+        "pages": ["video-downloads"],
+        "presentation": false,
+        "scope": "PTO",
+        "set_row": null,
+        "stored": true,
+        "value_labels": {},
+        "values": []
+      },
+      {
+        "also_in": ["tv"],
+        "category": "movies",
+        "default": true,
+        "group": "Movies & TV pages",
+        "help": "Follow channels and get new uploads.",
+        "id": "video.youtube",
+        "kind": "bool",
+        "label": "YouTube channels",
+        "legacy": null,
+        "media": null,
+        "needs": ["movies.access", "tv.access"],
+        "pages": [],
+        "presentation": false,
+        "scope": "PTO",
+        "set_row": null,
+        "stored": true,
+        "value_labels": {},
+        "values": []
+      },
+      {
+        "also_in": [],
+        "category": "tv",
+        "default": true,
+        "group": "",
+        "help": "Browse, search, watch and ask for shows.",
+        "id": "tv.access",
+        "kind": "bool",
+        "label": "TV shows",
+        "legacy": "allowed_sides",
+        "media": null,
+        "needs": [],
+        "pages": [],
+        "presentation": false,
+        "scope": "PTO",
+        "set_row": null,
+        "stored": true,
+        "value_labels": {},
+        "values": []
+      },
+      {
+        "also_in": [],
+        "category": "tv",
+        "default": "download",
+        "group": "",
+        "help": "Auto-approve, Require approval or Requests off. A season or a whole series is one request.",
+        "id": "tv.get",
+        "kind": "mode",
+        "label": "TV show requests",
+        "legacy": "can_download",
+        "media": null,
+        "needs": ["tv.access"],
+        "pages": [],
+        "presentation": false,
+        "scope": "PTO",
+        "set_row": null,
+        "stored": true,
+        "value_labels": {
+          "ask": "Require approval",
+          "download": "Auto-approve",
+          "none": "Requests off"
+        },
+        "values": ["none", "ask", "download"]
+      },
+      {
+        "also_in": [],
+        "category": "tv",
+        "default": "follow",
+        "group": "",
+        "help": "TV ratings follow the movie one unless you set their own: PG-13 allows up to TV-14.",
+        "id": "tv.max_rating",
+        "kind": "rating",
+        "label": "Maximum content rating",
+        "legacy": "max_rating",
+        "media": null,
+        "needs": ["tv.access"],
+        "pages": [],
+        "presentation": false,
+        "scope": "PTO",
+        "set_row": null,
+        "stored": true,
+        "value_labels": {
+          "G": "TV-Y7",
+          "PG": "TV-PG",
+          "PG-13": "TV-14",
+          "R": "TV-MA",
+          "any": "Any"
+        },
+        "values": []
+      },
+      {
+        "also_in": [],
+        "category": "tv",
+        "default": {
+          "days": 7,
+          "n": 0
+        },
+        "group": "",
+        "help": "Show, season, episode and YouTube asks. A season or a whole series is one ask.",
+        "id": "tv.request_limit",
+        "kind": "count",
+        "label": "Request limit",
+        "legacy": "request_limit",
+        "media": null,
+        "needs": ["tv.access"],
+        "pages": [],
+        "presentation": false,
+        "scope": "PTO",
+        "set_row": null,
+        "stored": true,
+        "value_labels": {},
+        "values": []
+      },
+      {
+        "also_in": [],
+        "category": "tv",
+        "default": "*",
+        "group": "",
+        "help": "Only profiles for shows.",
+        "id": "tv.quality",
+        "kind": "set",
+        "label": "Allowed quality profiles",
+        "legacy": null,
+        "media": "tv",
+        "needs": ["tv.access"],
+        "pages": [],
+        "presentation": false,
+        "scope": "PTO",
+        "set_row": null,
+        "stored": true,
+        "value_labels": {},
+        "values": []
+      },
+      {
+        "also_in": [],
+        "category": "tv",
+        "default": null,
+        "group": "",
+        "help": "What a request gets when they don't pick.",
+        "id": "tv.quality_default",
+        "kind": "choice",
+        "label": "Default quality profile",
+        "legacy": null,
+        "media": "tv",
+        "needs": ["tv.access"],
+        "pages": [],
+        "presentation": false,
+        "scope": "PTO",
+        "set_row": "tv.quality",
+        "stored": true,
+        "value_labels": {},
+        "values": []
+      },
+      {
+        "also_in": [],
+        "category": "tv",
+        "default": [],
+        "group": "",
+        "help": "These always come to you first.",
+        "id": "tv.quality_ask",
+        "kind": "set_flag",
+        "label": "Needs my OK",
+        "legacy": null,
+        "media": "tv",
+        "needs": ["tv.access"],
+        "pages": [],
+        "presentation": false,
+        "scope": "PTO",
+        "set_row": null,
+        "stored": true,
+        "value_labels": {},
+        "values": []
+      },
+      {
+        "also_in": [],
+        "category": "music",
+        "default": true,
+        "group": "",
+        "help": "Library, search and discover.",
+        "id": "music.access",
+        "kind": "bool",
+        "label": "Music side",
+        "legacy": "allowed_sides",
+        "media": null,
+        "needs": [],
+        "pages": [],
+        "presentation": false,
+        "scope": "PTO",
+        "set_row": null,
+        "stored": true,
+        "value_labels": {},
+        "values": []
+      },
+      {
+        "also_in": [],
+        "category": "music",
+        "default": "download",
+        "group": "",
+        "help": "Auto-approve, Require approval or Requests off.",
+        "id": "music.get",
+        "kind": "mode",
+        "label": "Music requests",
+        "legacy": "can_download",
+        "media": null,
+        "needs": ["music.access"],
+        "pages": [],
+        "presentation": false,
+        "scope": "PTO",
+        "set_row": null,
+        "stored": true,
+        "value_labels": {
+          "ask": "Require approval",
+          "download": "Auto-approve",
+          "none": "Requests off"
+        },
+        "values": ["none", "ask", "download"]
+      },
+      {
+        "also_in": [],
+        "category": "music",
+        "default": false,
+        "group": "",
+        "help": "Albums and tracks marked explicit are left out.",
+        "id": "music.hide_explicit",
+        "kind": "restrict",
+        "label": "Hide explicit music",
+        "legacy": "hide_explicit",
+        "media": null,
+        "needs": ["music.access"],
+        "pages": [],
+        "presentation": false,
+        "scope": "PTO",
+        "set_row": null,
+        "stored": true,
+        "value_labels": {},
+        "values": []
+      },
+      {
+        "also_in": [],
+        "category": "music",
+        "default": {
+          "days": 7,
+          "n": 0
+        },
+        "group": "",
+        "help": "Album, track and music video asks. Music they get right away is never capped.",
+        "id": "music.request_limit",
+        "kind": "count",
+        "label": "Request limit",
+        "legacy": "request_limit",
+        "media": null,
+        "needs": ["music.access"],
+        "pages": [],
+        "presentation": false,
+        "scope": "PTO",
+        "set_row": null,
+        "stored": true,
+        "value_labels": {},
+        "values": []
+      },
+      {
+        "also_in": [],
+        "category": "music",
+        "default": "*",
+        "group": "",
+        "help": "Music quality profiles.",
+        "id": "music.quality",
+        "kind": "set",
+        "label": "Allowed quality profiles",
+        "legacy": null,
+        "media": "music",
+        "needs": ["music.access"],
+        "pages": [],
+        "presentation": false,
+        "scope": "PTO",
+        "set_row": null,
+        "stored": true,
+        "value_labels": {},
+        "values": []
+      },
+      {
+        "also_in": [],
+        "category": "music",
+        "default": null,
+        "group": "",
+        "help": "What an add gets when they don't pick.",
+        "id": "music.quality_default",
+        "kind": "choice",
+        "label": "Default quality profile",
+        "legacy": null,
+        "media": "music",
+        "needs": ["music.access"],
+        "pages": [],
+        "presentation": false,
+        "scope": "PTO",
+        "set_row": "music.quality",
+        "stored": true,
+        "value_labels": {},
+        "values": []
+      },
+      {
+        "also_in": [],
+        "category": "music",
+        "default": true,
+        "group": "Parts of music",
+        "help": "The music home page.",
+        "id": "music.dashboard",
+        "kind": "bool",
+        "label": "Dashboard",
+        "legacy": "allowed_pages",
+        "media": null,
+        "needs": ["music.access"],
+        "pages": ["dashboard"],
+        "presentation": false,
+        "scope": "PTO",
+        "set_row": null,
+        "stored": true,
+        "value_labels": {},
+        "values": []
+      },
+      {
+        "also_in": [],
+        "category": "music",
+        "default": true,
+        "group": "Parts of music",
+        "help": "Find artists, albums and tracks.",
+        "id": "music.search",
+        "kind": "bool",
+        "label": "Search",
+        "legacy": "allowed_pages",
+        "media": null,
+        "needs": ["music.access"],
+        "pages": ["search"],
+        "presentation": false,
+        "scope": "PTO",
+        "set_row": null,
+        "stored": true,
+        "value_labels": {},
+        "values": []
+      },
+      {
+        "also_in": [],
+        "category": "music",
+        "default": true,
+        "group": "Parts of music",
+        "help": "What's already on the server.",
+        "id": "music.library",
+        "kind": "bool",
+        "label": "Library",
+        "legacy": "allowed_pages",
+        "media": null,
+        "needs": ["music.access"],
+        "pages": ["library"],
+        "presentation": false,
+        "scope": "PTO",
+        "set_row": null,
+        "stored": true,
+        "value_labels": {},
+        "values": []
+      },
+      {
+        "also_in": [],
+        "category": "music",
+        "default": true,
+        "group": "Parts of music",
+        "help": "Picks, mixes and new music made from what they play.",
+        "id": "music.discover",
+        "kind": "bool",
+        "label": "Discover",
+        "legacy": "allowed_pages",
+        "media": null,
+        "needs": ["music.access"],
+        "pages": ["discover"],
+        "presentation": false,
+        "scope": "PTO",
+        "set_row": null,
+        "stored": true,
+        "value_labels": {},
+        "values": []
+      },
+      {
+        "also_in": [],
+        "category": "music",
+        "default": true,
+        "group": "Parts of music",
+        "help": "Mirror playlists from Spotify, Tidal, YouTube and more.",
+        "id": "music.playlist_sync",
+        "kind": "bool",
+        "label": "Playlist sync",
+        "legacy": "allowed_pages",
+        "media": null,
+        "needs": ["music.access"],
+        "pages": ["sync"],
+        "presentation": false,
+        "scope": "PTO",
+        "set_row": null,
+        "stored": true,
+        "value_labels": {},
+        "values": []
+      },
+      {
+        "also_in": [],
+        "category": "music",
+        "default": true,
+        "group": "Parts of music",
+        "help": "Every playlist from every source in one tree.",
+        "id": "music.explorer",
+        "kind": "bool",
+        "label": "Playlist Explorer",
+        "legacy": "allowed_pages",
+        "media": null,
+        "needs": ["music.access"],
+        "pages": ["playlist-explorer"],
+        "presentation": false,
+        "scope": "PTO",
+        "set_row": null,
+        "stored": true,
+        "value_labels": {},
+        "values": []
+      },
+      {
+        "also_in": [],
+        "category": "music",
+        "default": true,
+        "group": "Parts of music",
+        "help": "Bring in music from disk.",
+        "id": "music.import",
+        "kind": "bool",
+        "label": "Import",
+        "legacy": "allowed_pages",
+        "media": null,
+        "needs": ["music.access"],
+        "pages": ["import"],
+        "presentation": false,
+        "scope": "PTO",
+        "set_row": null,
+        "stored": true,
+        "value_labels": {},
+        "values": []
+      },
+      {
+        "also_in": [],
+        "category": "music",
+        "default": true,
+        "group": "Parts of music",
+        "help": "Charts of what they play.",
+        "id": "music.stats",
+        "kind": "bool",
+        "label": "Listening stats",
+        "legacy": "allowed_pages",
+        "media": null,
+        "needs": ["music.access"],
+        "pages": ["stats"],
+        "presentation": false,
+        "scope": "PTO",
+        "set_row": null,
+        "stored": true,
+        "value_labels": {},
+        "values": []
+      },
+      {
+        "also_in": [],
+        "category": "music",
+        "default": true,
+        "group": "Parts of music",
+        "help": "Follow artists for new releases.",
+        "id": "music.watchlist",
+        "kind": "bool",
+        "label": "Watchlist",
+        "legacy": "allowed_pages",
+        "media": null,
+        "needs": ["music.access"],
+        "pages": ["watchlist"],
+        "presentation": false,
+        "scope": "PTO",
+        "set_row": null,
+        "stored": true,
+        "value_labels": {},
+        "values": []
+      },
+      {
+        "also_in": [],
+        "category": "music",
+        "default": true,
+        "group": "Parts of music",
+        "help": "What they're waiting for.",
+        "id": "music.wishlist",
+        "kind": "bool",
+        "label": "Wishlist",
+        "legacy": "allowed_pages",
+        "media": null,
+        "needs": ["music.access"],
+        "pages": ["wishlist"],
+        "presentation": false,
+        "scope": "PTO",
+        "set_row": null,
+        "stored": true,
+        "value_labels": {},
+        "values": []
+      },
+      {
+        "also_in": [],
+        "category": "music",
+        "default": true,
+        "group": "Parts of music",
+        "help": "The music download queue page.",
+        "id": "music.downloads",
+        "kind": "bool",
+        "label": "Downloads",
+        "legacy": "allowed_pages",
+        "media": null,
+        "needs": ["music.access"],
+        "pages": ["active-downloads"],
+        "presentation": false,
+        "scope": "PTO",
+        "set_row": null,
+        "stored": true,
+        "value_labels": {},
+        "values": []
+      },
+      {
+        "also_in": [],
+        "category": "music",
+        "default": true,
+        "group": "Parts of music",
+        "help": "The Videos tab in search and on artist pages.",
+        "id": "music.videos",
+        "kind": "bool",
+        "label": "Music videos",
+        "legacy": null,
+        "media": null,
+        "needs": ["music.access"],
+        "pages": [],
+        "presentation": false,
+        "scope": "PTO",
+        "set_row": null,
+        "stored": true,
+        "value_labels": {},
+        "values": []
+      },
+      {
+        "also_in": [],
+        "category": "music",
+        "default": true,
+        "group": "Parts of music",
+        "help": "Split songs into stems and chop samples.",
+        "id": "music.sample_studio",
+        "kind": "bool",
+        "label": "Sample Studio",
+        "legacy": "allowed_pages",
+        "media": null,
+        "needs": ["music.access"],
+        "pages": ["sample-studio"],
+        "presentation": false,
+        "scope": "PTO",
+        "set_row": null,
+        "stored": true,
+        "value_labels": {},
+        "values": []
+      },
+      {
+        "also_in": [],
+        "category": "books",
+        "default": true,
+        "group": "",
+        "help": "Browse Audible, follow authors and get books.",
+        "id": "books.access",
+        "kind": "bool",
+        "label": "Audiobooks",
+        "legacy": "allowed_pages",
+        "media": null,
+        "needs": [],
+        "pages": ["audiobooks"],
+        "presentation": false,
+        "scope": "PTO",
+        "set_row": null,
+        "stored": true,
+        "value_labels": {},
+        "values": []
+      },
+      {
+        "also_in": [],
+        "category": "books",
+        "default": "download",
+        "group": "",
+        "help": "Auto-approve, Require approval or Requests off.",
+        "id": "books.get",
+        "kind": "mode",
+        "label": "Audiobook requests",
+        "legacy": "can_download",
+        "media": null,
+        "needs": ["books.access"],
+        "pages": [],
+        "presentation": false,
+        "scope": "PTO",
+        "set_row": null,
+        "stored": true,
+        "value_labels": {
+          "ask": "Require approval",
+          "download": "Auto-approve",
+          "none": "Requests off"
+        },
+        "values": ["none", "ask", "download"]
+      },
+      {
+        "also_in": [],
+        "category": "books",
+        "default": true,
+        "group": "",
+        "help": "Subscribe to shows; new episodes arrive on their own.",
+        "id": "podcasts.access",
+        "kind": "bool",
+        "label": "Podcasts",
+        "legacy": "allowed_pages",
+        "media": null,
+        "needs": [],
+        "pages": ["podcasts"],
+        "presentation": false,
+        "scope": "PTO",
+        "set_row": null,
+        "stored": true,
+        "value_labels": {},
+        "values": []
+      },
+      {
+        "also_in": [],
+        "category": "books",
+        "default": "download",
+        "group": "",
+        "help": "Auto-approve, Require approval or Follow only. Subscribing to shows is always allowed.",
+        "id": "podcasts.get",
+        "kind": "mode",
+        "label": "Podcast episode requests",
+        "legacy": "can_download",
+        "media": null,
+        "needs": ["podcasts.access"],
+        "pages": [],
+        "presentation": false,
+        "scope": "PTO",
+        "set_row": null,
+        "stored": true,
+        "value_labels": {
+          "ask": "Require approval",
+          "download": "Auto-approve",
+          "none": "Follow only"
+        },
+        "values": ["none", "ask", "download"]
+      },
+      {
+        "also_in": [],
+        "category": "requests",
+        "default": false,
+        "group": "",
+        "help": "Members see only their own unless this is on.",
+        "id": "requests.see_all",
+        "kind": "bool",
+        "label": "See everyone's requests",
+        "legacy": null,
+        "media": null,
+        "needs": [],
+        "pages": [],
+        "presentation": false,
+        "scope": "PTO",
+        "set_row": null,
+        "stored": true,
+        "value_labels": {},
+        "values": []
+      },
+      {
+        "also_in": [],
+        "category": "requests",
+        "default": false,
+        "group": "",
+        "help": "Approve, decline and manage other people's requests and issues. Never settings, people or tools.",
+        "id": "requests.moderate",
+        "kind": "bool",
+        "label": "Moderator",
+        "legacy": null,
+        "media": null,
+        "needs": [],
+        "pages": [],
+        "presentation": false,
+        "scope": "PTO",
+        "set_row": null,
+        "stored": true,
+        "value_labels": {},
+        "values": []
+      },
+      {
+        "also_in": [],
+        "category": "requests",
+        "default": true,
+        "group": "",
+        "help": "Always on.",
+        "id": "requests.cancel_own",
+        "kind": "fixed",
+        "label": "Cancel their own downloads",
+        "legacy": null,
+        "media": null,
+        "needs": [],
+        "pages": [],
+        "presentation": false,
+        "scope": "",
+        "set_row": null,
+        "stored": false,
+        "value_labels": {},
+        "values": []
+      },
+      {
+        "also_in": [],
+        "category": "requests",
+        "default": true,
+        "group": "",
+        "help": "Issues is always there for everyone.",
+        "id": "issues.report",
+        "kind": "fixed",
+        "label": "Report problems",
+        "legacy": null,
+        "media": null,
+        "needs": [],
+        "pages": [],
+        "presentation": false,
+        "scope": "",
+        "set_row": null,
+        "stored": false,
+        "value_labels": {},
+        "values": []
+      },
+      {
+        "also_in": [],
+        "category": "admin",
+        "default": true,
+        "group": "",
+        "help": "Shows the Tools page. Jobs that change the library still need an admin.",
+        "id": "admin.tools",
+        "kind": "bool",
+        "label": "Tools page",
+        "legacy": "allowed_pages",
+        "media": null,
+        "needs": [],
+        "pages": ["tools"],
+        "presentation": false,
+        "scope": "PTO",
+        "set_row": null,
+        "stored": true,
+        "value_labels": {},
+        "values": []
+      },
+      {
+        "also_in": [],
+        "category": "admin",
+        "default": true,
+        "group": "",
+        "help": "Shows the video Tools page. Jobs that change the library still need an admin.",
+        "id": "admin.video_tools",
+        "kind": "bool",
+        "label": "Movies & TV tools page",
+        "legacy": "allowed_pages",
+        "media": null,
+        "needs": ["movies.access", "tv.access"],
+        "pages": ["video-tools"],
+        "presentation": false,
+        "scope": "PTO",
+        "set_row": null,
+        "stored": true,
+        "value_labels": {},
+        "values": []
+      },
+      {
+        "also_in": [],
+        "category": "admin",
+        "default": false,
+        "group": "",
+        "help": "Admins only, always.",
+        "id": "admin.everything",
+        "kind": "fixed",
+        "label": "Settings, people, tools jobs, automations for everyone, server activity",
+        "legacy": null,
+        "media": null,
+        "needs": [],
+        "pages": [],
+        "presentation": false,
+        "scope": "",
+        "set_row": null,
+        "stored": false,
+        "value_labels": {},
+        "values": []
+      },
+      {
+        "also_in": [],
+        "category": "look",
+        "default": null,
+        "group": "",
+        "help": "Everything or Simple, then one switch per part. Only parts they can use are offered.",
+        "id": "ui.sidebar",
+        "kind": "presentation",
+        "label": "Start from",
+        "legacy": "ui_features",
+        "media": null,
+        "needs": [],
+        "pages": [],
+        "presentation": true,
+        "scope": "TO",
+        "set_row": null,
+        "stored": false,
+        "value_labels": {},
+        "values": []
+      },
+      {
+        "also_in": [],
+        "category": "look",
+        "default": null,
+        "group": "",
+        "help": "Off: they see exactly this and Customize goes away for them.",
+        "id": "ui.locked",
+        "kind": "presentation",
+        "label": "Let them change it",
+        "legacy": "ui_features_locked",
+        "media": null,
+        "needs": [],
+        "pages": [],
+        "presentation": true,
+        "scope": "TO",
+        "set_row": null,
+        "stored": false,
+        "value_labels": {},
+        "values": []
+      },
+      {
+        "also_in": [],
+        "category": "look",
+        "default": null,
+        "group": "",
+        "help": "Only pages they can use.",
+        "id": "ui.home_page",
+        "kind": "presentation",
+        "label": "Opens on",
+        "legacy": "home_page",
+        "media": null,
+        "needs": [],
+        "pages": [],
+        "presentation": true,
+        "scope": "O",
+        "set_row": null,
+        "stored": false,
+        "value_labels": {},
+        "values": []
+      }
+    ],
+    "success": true
+  },
+  "/api/permissions/policy": {
+    "changed": [],
+    "policy": {
+      "account.connect": true,
+      "account.own_library": true,
+      "admin.tools": true,
+      "admin.video_tools": true,
+      "automations.personal": true,
+      "books.access": true,
+      "books.get": "download",
+      "chat.use": true,
+      "movies.access": true,
+      "movies.get": "download",
+      "movies.max_rating": "any",
+      "movies.quality": "*",
+      "movies.quality_ask": [],
+      "movies.quality_default": null,
+      "movies.request_limit": {
+        "days": 7,
+        "n": 0
+      },
+      "music.access": true,
+      "music.dashboard": true,
+      "music.discover": true,
+      "music.downloads": true,
+      "music.explorer": true,
+      "music.get": "download",
+      "music.hide_explicit": false,
+      "music.import": true,
+      "music.library": true,
+      "music.playlist_sync": true,
+      "music.quality": "*",
+      "music.quality_default": null,
+      "music.request_limit": {
+        "days": 7,
+        "n": 0
+      },
+      "music.sample_studio": true,
+      "music.search": true,
+      "music.stats": true,
+      "music.videos": true,
+      "music.watchlist": true,
+      "music.wishlist": true,
+      "podcasts.access": true,
+      "podcasts.get": "download",
+      "requests.moderate": true,
+      "requests.see_all": true,
+      "tv.access": true,
+      "tv.get": "download",
+      "tv.max_rating": "follow",
+      "tv.quality": "*",
+      "tv.quality_ask": [],
+      "tv.quality_default": null,
+      "tv.request_limit": {
+        "days": 7,
+        "n": 0
+      },
+      "video.calendar": true,
+      "video.dashboard": true,
+      "video.discover": true,
+      "video.downloads": true,
+      "video.library": true,
+      "video.search": true,
+      "video.watchlist": true,
+      "video.wishlist": true,
+      "video.youtube": true
+    },
+    "success": true
+  },
+  "/api/permissions/quality-options": {
+    "movies": [
+      {
+        "id": 0,
+        "media_type": null,
+        "name": "Default",
+        "tags": []
+      },
+      {
+        "id": 2,
+        "media_type": "movie",
+        "name": "Movie 1080p Quality",
+        "tags": []
+      },
+      {
+        "id": 3,
+        "media_type": "movie",
+        "name": "Movie 4K Quality",
+        "tags": ["4k"]
+      }
+    ],
+    "music": [
+      {
+        "id": 1,
+        "is_default": true,
+        "name": "Balanced"
+      },
+      {
+        "id": 2,
+        "is_default": false,
+        "name": "Lossless only"
+      }
+    ],
+    "success": true,
+    "tv": [
+      {
+        "id": 0,
+        "media_type": null,
+        "name": "Default",
+        "tags": []
+      },
+      {
+        "id": 4,
+        "media_type": "tv",
+        "name": "TV Show 720p/1080p",
+        "tags": []
+      },
+      {
+        "id": 5,
+        "media_type": null,
+        "name": "TV Show 720p/1080p EXTENDED",
+        "tags": ["extended"]
+      }
+    ]
+  },
+  "/api/permissions/templates": {
+    "signup_template_id": 4,
+    "success": true,
+    "templates": [
+      {
+        "builtin": true,
+        "description": "Music, movies and shows. Gets things right away.",
+        "followers": [
+          {
+            "id": 4,
+            "name": "Priya"
+          },
+          {
+            "id": 7,
+            "name": "Carlos"
+          }
+        ],
+        "id": 1,
+        "name": "Adult",
+        "perms": {
+          "account.connect": true,
+          "account.own_library": true,
+          "admin.tools": true,
+          "admin.video_tools": true,
+          "automations.personal": true,
+          "books.access": true,
+          "books.get": "download",
+          "chat.use": true,
+          "movies.access": true,
+          "movies.get": "download",
+          "movies.max_rating": "any",
+          "movies.quality": "*",
+          "movies.quality_ask": [],
+          "movies.quality_default": null,
+          "movies.request_limit": {
+            "days": 7,
+            "n": 0
+          },
+          "music.access": true,
+          "music.dashboard": true,
+          "music.discover": true,
+          "music.downloads": true,
+          "music.explorer": true,
+          "music.get": "download",
+          "music.hide_explicit": false,
+          "music.import": true,
+          "music.library": true,
+          "music.playlist_sync": true,
+          "music.quality": "*",
+          "music.quality_default": null,
+          "music.request_limit": {
+            "days": 7,
+            "n": 0
+          },
+          "music.sample_studio": true,
+          "music.search": true,
+          "music.stats": true,
+          "music.videos": true,
+          "music.watchlist": true,
+          "music.wishlist": true,
+          "podcasts.access": true,
+          "podcasts.get": "download",
+          "requests.moderate": false,
+          "requests.see_all": false,
+          "tv.access": true,
+          "tv.get": "download",
+          "tv.max_rating": "follow",
+          "tv.quality": "*",
+          "tv.quality_ask": [],
+          "tv.quality_default": null,
+          "tv.request_limit": {
+            "days": 7,
+            "n": 0
+          },
+          "video.calendar": true,
+          "video.dashboard": true,
+          "video.discover": true,
+          "video.downloads": true,
+          "video.library": true,
+          "video.search": true,
+          "video.watchlist": true,
+          "video.wishlist": true,
+          "video.youtube": true
+        },
+        "readable": true,
+        "sidebar": {
+          "locked": false,
+          "off": []
+        },
+        "slug": "adult",
+        "sort": 0,
+        "updated_at": "2026-11-17 22:25:25"
+      },
+      {
+        "builtin": true,
+        "description": "Movies up to PG-13, asks before downloading.",
+        "followers": [
+          {
+            "id": 3,
+            "name": "Maya"
+          }
+        ],
+        "id": 2,
+        "name": "Teen",
+        "perms": {
+          "account.connect": true,
+          "account.own_library": true,
+          "admin.tools": true,
+          "admin.video_tools": true,
+          "automations.personal": true,
+          "books.access": true,
+          "books.get": "none",
+          "chat.use": true,
+          "movies.access": true,
+          "movies.get": "ask",
+          "movies.max_rating": "PG-13",
+          "movies.quality": "*",
+          "movies.quality_ask": [],
+          "movies.quality_default": null,
+          "movies.request_limit": {
+            "days": 7,
+            "n": 0
+          },
+          "music.access": true,
+          "music.dashboard": true,
+          "music.discover": true,
+          "music.downloads": true,
+          "music.explorer": true,
+          "music.get": "ask",
+          "music.hide_explicit": false,
+          "music.import": true,
+          "music.library": true,
+          "music.playlist_sync": true,
+          "music.quality": "*",
+          "music.quality_default": null,
+          "music.request_limit": {
+            "days": 7,
+            "n": 0
+          },
+          "music.sample_studio": true,
+          "music.search": true,
+          "music.stats": true,
+          "music.videos": true,
+          "music.watchlist": true,
+          "music.wishlist": true,
+          "podcasts.access": true,
+          "podcasts.get": "none",
+          "requests.moderate": false,
+          "requests.see_all": false,
+          "tv.access": true,
+          "tv.get": "ask",
+          "tv.max_rating": "follow",
+          "tv.quality": "*",
+          "tv.quality_ask": [],
+          "tv.quality_default": null,
+          "tv.request_limit": {
+            "days": 7,
+            "n": 0
+          },
+          "video.calendar": true,
+          "video.dashboard": true,
+          "video.discover": true,
+          "video.downloads": true,
+          "video.library": true,
+          "video.search": true,
+          "video.watchlist": true,
+          "video.wishlist": true,
+          "video.youtube": true
+        },
+        "readable": true,
+        "sidebar": {
+          "locked": false,
+          "off": []
+        },
+        "slug": "teen",
+        "sort": 1,
+        "updated_at": "2026-11-17 22:25:25"
+      },
+      {
+        "builtin": true,
+        "description": "Clean music, movies up to PG, asks for everything.",
+        "followers": [
+          {
+            "id": 5,
+            "name": "Jonah"
+          }
+        ],
+        "id": 3,
+        "name": "Kids",
+        "perms": {
+          "account.connect": true,
+          "account.own_library": true,
+          "admin.tools": true,
+          "admin.video_tools": true,
+          "automations.personal": true,
+          "books.access": true,
+          "books.get": "none",
+          "chat.use": true,
+          "movies.access": true,
+          "movies.get": "ask",
+          "movies.max_rating": "PG",
+          "movies.quality": "*",
+          "movies.quality_ask": [],
+          "movies.quality_default": null,
+          "movies.request_limit": {
+            "days": 7,
+            "n": 0
+          },
+          "music.access": true,
+          "music.dashboard": true,
+          "music.discover": true,
+          "music.downloads": true,
+          "music.explorer": true,
+          "music.get": "ask",
+          "music.hide_explicit": true,
+          "music.import": true,
+          "music.library": true,
+          "music.playlist_sync": true,
+          "music.quality": "*",
+          "music.quality_default": null,
+          "music.request_limit": {
+            "days": 7,
+            "n": 0
+          },
+          "music.sample_studio": true,
+          "music.search": true,
+          "music.stats": true,
+          "music.videos": true,
+          "music.watchlist": true,
+          "music.wishlist": true,
+          "podcasts.access": true,
+          "podcasts.get": "none",
+          "requests.moderate": false,
+          "requests.see_all": false,
+          "tv.access": true,
+          "tv.get": "ask",
+          "tv.max_rating": "follow",
+          "tv.quality": "*",
+          "tv.quality_ask": [],
+          "tv.quality_default": null,
+          "tv.request_limit": {
+            "days": 7,
+            "n": 0
+          },
+          "video.calendar": true,
+          "video.dashboard": true,
+          "video.discover": true,
+          "video.downloads": true,
+          "video.library": true,
+          "video.search": true,
+          "video.watchlist": true,
+          "video.wishlist": true,
+          "video.youtube": true
+        },
+        "readable": true,
+        "sidebar": {
+          "locked": false,
+          "off": []
+        },
+        "slug": "kids",
+        "sort": 2,
+        "updated_at": "2026-11-17 22:25:25"
+      },
+      {
+        "builtin": true,
+        "description": "Listens to music, nothing else.",
+        "followers": [
+          {
+            "id": 6,
+            "name": "Liam"
+          }
+        ],
+        "id": 4,
+        "name": "Guest",
+        "perms": {
+          "account.connect": true,
+          "account.own_library": true,
+          "admin.tools": true,
+          "admin.video_tools": true,
+          "automations.personal": true,
+          "books.access": true,
+          "books.get": "none",
+          "chat.use": true,
+          "movies.access": false,
+          "movies.get": "ask",
+          "movies.max_rating": "any",
+          "movies.quality": "*",
+          "movies.quality_ask": [],
+          "movies.quality_default": null,
+          "movies.request_limit": {
+            "days": 7,
+            "n": 0
+          },
+          "music.access": true,
+          "music.dashboard": true,
+          "music.discover": true,
+          "music.downloads": true,
+          "music.explorer": true,
+          "music.get": "ask",
+          "music.hide_explicit": false,
+          "music.import": true,
+          "music.library": true,
+          "music.playlist_sync": true,
+          "music.quality": "*",
+          "music.quality_default": null,
+          "music.request_limit": {
+            "days": 7,
+            "n": 0
+          },
+          "music.sample_studio": true,
+          "music.search": true,
+          "music.stats": true,
+          "music.videos": true,
+          "music.watchlist": true,
+          "music.wishlist": true,
+          "podcasts.access": true,
+          "podcasts.get": "none",
+          "requests.moderate": false,
+          "requests.see_all": false,
+          "tv.access": false,
+          "tv.get": "ask",
+          "tv.max_rating": "follow",
+          "tv.quality": "*",
+          "tv.quality_ask": [],
+          "tv.quality_default": null,
+          "tv.request_limit": {
+            "days": 7,
+            "n": 0
+          },
+          "video.calendar": true,
+          "video.dashboard": true,
+          "video.discover": true,
+          "video.downloads": true,
+          "video.library": true,
+          "video.search": true,
+          "video.watchlist": true,
+          "video.wishlist": true,
+          "video.youtube": true
+        },
+        "readable": true,
+        "sidebar": {
+          "locked": false,
+          "off": []
+        },
+        "slug": "guest",
+        "sort": 3,
+        "updated_at": "2026-11-17 22:25:25"
+      }
+    ]
+  },
+  "/api/plex/music-libraries": {
+    "libraries": [
+      {
+        "title": "Podcasts"
+      },
+      {
+        "title": "Music"
+      }
+    ],
+    "selected": "Music",
+    "success": true
+  },
+  "/api/profiles": {
+    "profiles": [
+      {
+        "allowed_pages": null,
+        "allowed_sides": "both",
+        "avatar_color": "#6366f1",
+        "avatar_url": null,
+        "can_download": true,
+        "created_at": "2026-11-17 22:25:24",
+        "disabled": false,
+        "has_listenbrainz": false,
+        "has_password": false,
+        "has_pin": false,
+        "has_recovery": false,
+        "hide_explicit": false,
+        "home_page": null,
+        "id": 1,
+        "is_admin": true,
+        "library_mode": "shared",
+        "max_rating": null,
+        "name": "Boulder",
+        "request_limit": 0,
+        "request_limit_days": 7,
+        "session_epoch": 0,
+        "updated_at": "2026-11-17 22:25:24"
+      },
+      {
+        "allowed_pages": null,
+        "allowed_sides": "both",
+        "avatar_color": "#0ea5e9",
+        "avatar_url": null,
+        "can_download": true,
+        "created_at": "2026-11-17 22:25:25",
+        "disabled": false,
+        "has_listenbrainz": false,
+        "has_password": false,
+        "has_pin": false,
+        "has_recovery": false,
+        "hide_explicit": false,
+        "home_page": null,
+        "id": 2,
+        "is_admin": true,
+        "library_mode": "shared",
+        "max_rating": null,
+        "name": "Sam",
+        "request_limit": 0,
+        "request_limit_days": 7,
+        "session_epoch": 0,
+        "updated_at": "2026-11-17 22:25:25"
+      },
+      {
+        "allowed_pages": null,
+        "allowed_sides": "both",
+        "avatar_color": "#ec4899",
+        "avatar_url": null,
+        "can_download": true,
+        "created_at": "2026-11-17 22:25:25",
+        "disabled": false,
+        "has_listenbrainz": false,
+        "has_password": false,
+        "has_pin": false,
+        "has_recovery": false,
+        "hide_explicit": true,
+        "home_page": null,
+        "id": 3,
+        "is_admin": false,
+        "library_mode": "shared",
+        "max_rating": "PG-13",
+        "name": "Maya",
+        "request_limit": 5,
+        "request_limit_days": 7,
+        "session_epoch": 0,
+        "updated_at": "2026-11-17 22:25:25"
+      },
+      {
+        "allowed_pages": null,
+        "allowed_sides": "both",
+        "avatar_color": "#f59e0b",
+        "avatar_url": null,
+        "can_download": true,
+        "created_at": "2026-11-17 22:25:25",
+        "disabled": false,
+        "has_listenbrainz": false,
+        "has_password": false,
+        "has_pin": false,
+        "has_recovery": false,
+        "hide_explicit": false,
+        "home_page": null,
+        "id": 4,
+        "is_admin": false,
+        "library_mode": "shared",
+        "max_rating": null,
+        "name": "Priya",
+        "request_limit": 0,
+        "request_limit_days": 7,
+        "session_epoch": 0,
+        "updated_at": "2026-11-17 22:25:25"
+      },
+      {
+        "allowed_pages": null,
+        "allowed_sides": "both",
+        "avatar_color": "#22c55e",
+        "avatar_url": null,
+        "can_download": false,
+        "created_at": "2026-11-17 22:25:25",
+        "disabled": false,
+        "has_listenbrainz": false,
+        "has_password": false,
+        "has_pin": false,
+        "has_recovery": false,
+        "hide_explicit": true,
+        "home_page": null,
+        "id": 5,
+        "is_admin": false,
+        "library_mode": "shared",
+        "max_rating": "PG",
+        "name": "Jonah",
+        "request_limit": 3,
+        "request_limit_days": 7,
+        "session_epoch": 0,
+        "updated_at": "2026-11-17 22:25:25"
+      },
+      {
+        "allowed_pages": null,
+        "allowed_sides": "music",
+        "avatar_color": "#14b8a6",
+        "avatar_url": null,
+        "can_download": false,
+        "created_at": "2026-11-17 22:25:25",
+        "disabled": false,
+        "has_listenbrainz": false,
+        "has_password": false,
+        "has_pin": false,
+        "has_recovery": false,
+        "hide_explicit": false,
+        "home_page": null,
+        "id": 6,
+        "is_admin": false,
+        "library_mode": "shared",
+        "max_rating": null,
+        "name": "Liam",
+        "request_limit": 2,
+        "request_limit_days": 7,
+        "session_epoch": 0,
+        "updated_at": "2026-11-17 22:25:25"
+      },
+      {
+        "allowed_pages": null,
+        "allowed_sides": "both",
+        "avatar_color": "#8b5cf6",
+        "avatar_url": null,
+        "can_download": true,
+        "created_at": "2026-11-17 22:25:25",
+        "disabled": true,
+        "has_listenbrainz": false,
+        "has_password": false,
+        "has_pin": false,
+        "has_recovery": false,
+        "hide_explicit": false,
+        "home_page": null,
+        "id": 7,
+        "is_admin": false,
+        "library_mode": "shared",
+        "max_rating": null,
+        "name": "Carlos",
+        "request_limit": 0,
+        "request_limit_days": 7,
+        "session_epoch": 0,
+        "updated_at": "2026-11-17 22:25:25"
+      },
+      {
+        "allowed_pages": null,
+        "allowed_sides": "both",
+        "avatar_color": "#64748b",
+        "avatar_url": null,
+        "can_download": true,
+        "created_at": "2026-11-17 22:25:25",
+        "disabled": false,
+        "has_listenbrainz": false,
+        "has_password": false,
+        "has_pin": false,
+        "has_recovery": false,
+        "hide_explicit": false,
+        "home_page": null,
+        "id": 8,
+        "is_admin": false,
+        "library_mode": "shared",
+        "max_rating": "NC-17",
+        "name": "Odd",
+        "request_limit": 0,
+        "request_limit_days": 7,
+        "session_epoch": 0,
+        "updated_at": "2026-11-17 22:25:25"
+      }
+    ],
+    "success": true
+  },
+  "/api/profiles/1/permissions": {
+    "capped": [],
+    "changed_categories": [],
+    "effective": {
+      "account.connect": true,
+      "account.own_library": true,
+      "admin.tools": true,
+      "admin.video_tools": true,
+      "automations.personal": true,
+      "books.access": true,
+      "books.get": "download",
+      "chat.use": true,
+      "movies.access": true,
+      "movies.get": "download",
+      "movies.max_rating": "any",
+      "movies.quality": "*",
+      "movies.quality_ask": [],
+      "movies.quality_default": null,
+      "movies.request_limit": {
+        "days": 7,
+        "n": 0
+      },
+      "music.access": true,
+      "music.dashboard": true,
+      "music.discover": true,
+      "music.downloads": true,
+      "music.explorer": true,
+      "music.get": "download",
+      "music.hide_explicit": false,
+      "music.import": true,
+      "music.library": true,
+      "music.playlist_sync": true,
+      "music.quality": "*",
+      "music.quality_default": null,
+      "music.request_limit": {
+        "days": 7,
+        "n": 0
+      },
+      "music.sample_studio": true,
+      "music.search": true,
+      "music.stats": true,
+      "music.videos": true,
+      "music.watchlist": true,
+      "music.wishlist": true,
+      "podcasts.access": true,
+      "podcasts.get": "download",
+      "requests.moderate": true,
+      "requests.see_all": true,
+      "tv.access": true,
+      "tv.get": "download",
+      "tv.max_rating": "any",
+      "tv.quality": "*",
+      "tv.quality_ask": [],
+      "tv.quality_default": null,
+      "tv.request_limit": {
+        "days": 7,
+        "n": 0
+      },
+      "video.calendar": true,
+      "video.dashboard": true,
+      "video.discover": true,
+      "video.downloads": true,
+      "video.library": true,
+      "video.search": true,
+      "video.watchlist": true,
+      "video.wishlist": true,
+      "video.youtube": true
+    },
+    "mode": "admin",
+    "needs_look": [],
+    "overrides": {},
+    "profile": {
+      "id": 1,
+      "is_admin": true,
+      "name": "Boulder"
+    },
+    "success": true,
+    "summary": {
+      "lines": [],
+      "never": [],
+      "sentence": "Boulder can use everything, including settings and people."
+    },
+    "template": null
+  },
+  "/api/profiles/2/permissions": {
+    "capped": [],
+    "changed_categories": [],
+    "effective": {
+      "account.connect": true,
+      "account.own_library": true,
+      "admin.tools": true,
+      "admin.video_tools": true,
+      "automations.personal": true,
+      "books.access": true,
+      "books.get": "download",
+      "chat.use": true,
+      "movies.access": true,
+      "movies.get": "download",
+      "movies.max_rating": "any",
+      "movies.quality": "*",
+      "movies.quality_ask": [],
+      "movies.quality_default": null,
+      "movies.request_limit": {
+        "days": 7,
+        "n": 0
+      },
+      "music.access": true,
+      "music.dashboard": true,
+      "music.discover": true,
+      "music.downloads": true,
+      "music.explorer": true,
+      "music.get": "download",
+      "music.hide_explicit": false,
+      "music.import": true,
+      "music.library": true,
+      "music.playlist_sync": true,
+      "music.quality": "*",
+      "music.quality_default": null,
+      "music.request_limit": {
+        "days": 7,
+        "n": 0
+      },
+      "music.sample_studio": true,
+      "music.search": true,
+      "music.stats": true,
+      "music.videos": true,
+      "music.watchlist": true,
+      "music.wishlist": true,
+      "podcasts.access": true,
+      "podcasts.get": "download",
+      "requests.moderate": true,
+      "requests.see_all": true,
+      "tv.access": true,
+      "tv.get": "download",
+      "tv.max_rating": "any",
+      "tv.quality": "*",
+      "tv.quality_ask": [],
+      "tv.quality_default": null,
+      "tv.request_limit": {
+        "days": 7,
+        "n": 0
+      },
+      "video.calendar": true,
+      "video.dashboard": true,
+      "video.discover": true,
+      "video.downloads": true,
+      "video.library": true,
+      "video.search": true,
+      "video.watchlist": true,
+      "video.wishlist": true,
+      "video.youtube": true
+    },
+    "mode": "admin",
+    "needs_look": [],
+    "overrides": {},
+    "profile": {
+      "id": 2,
+      "is_admin": true,
+      "name": "Sam"
+    },
+    "success": true,
+    "summary": {
+      "lines": [],
+      "never": [],
+      "sentence": "Sam can use everything, including settings and people."
+    },
+    "template": null
+  },
+  "/api/profiles/3/permissions": {
+    "capped": [],
+    "changed_categories": ["movies", "music"],
+    "effective": {
+      "account.connect": true,
+      "account.own_library": true,
+      "admin.tools": true,
+      "admin.video_tools": true,
+      "automations.personal": true,
+      "books.access": true,
+      "books.get": "none",
+      "chat.use": true,
+      "movies.access": true,
+      "movies.get": "ask",
+      "movies.max_rating": "PG-13",
+      "movies.quality": "*",
+      "movies.quality_ask": [],
+      "movies.quality_default": null,
+      "movies.request_limit": {
+        "days": 7,
+        "n": 5
+      },
+      "music.access": true,
+      "music.dashboard": true,
+      "music.discover": true,
+      "music.downloads": true,
+      "music.explorer": true,
+      "music.get": "download",
+      "music.hide_explicit": true,
+      "music.import": true,
+      "music.library": true,
+      "music.playlist_sync": true,
+      "music.quality": "*",
+      "music.quality_default": null,
+      "music.request_limit": {
+        "days": 7,
+        "n": 0
+      },
+      "music.sample_studio": true,
+      "music.search": true,
+      "music.stats": true,
+      "music.videos": true,
+      "music.watchlist": true,
+      "music.wishlist": true,
+      "podcasts.access": true,
+      "podcasts.get": "none",
+      "requests.moderate": false,
+      "requests.see_all": false,
+      "tv.access": true,
+      "tv.get": "ask",
+      "tv.max_rating": "PG-13",
+      "tv.quality": "*",
+      "tv.quality_ask": [],
+      "tv.quality_default": null,
+      "tv.request_limit": {
+        "days": 7,
+        "n": 0
+      },
+      "video.calendar": true,
+      "video.dashboard": true,
+      "video.discover": true,
+      "video.downloads": true,
+      "video.library": true,
+      "video.search": true,
+      "video.watchlist": true,
+      "video.wishlist": true,
+      "video.youtube": true
+    },
+    "mode": "template",
+    "needs_look": [],
+    "overrides": {
+      "movies.request_limit": {
+        "days": 7,
+        "n": 5
+      },
+      "music.get": "download",
+      "music.hide_explicit": true
+    },
+    "profile": {
+      "id": 3,
+      "is_admin": false,
+      "name": "Maya"
+    },
+    "success": true,
+    "summary": {
+      "lines": [
+        {
+          "category": "movies",
+          "text": "Movies: asks first, up to PG-13, 5 movie asks a week."
+        },
+        {
+          "category": "tv",
+          "text": "TV shows: asks first, up to TV-14."
+        },
+        {
+          "category": "music",
+          "text": "Music: gets it right away, clean only."
+        },
+        {
+          "category": "books",
+          "text": "Audiobooks: can't request."
+        },
+        {
+          "category": "books",
+          "text": "Podcasts: they follow shows, episodes don't download."
+        }
+      ],
+      "never": [],
+      "sentence": "Maya uses music, movies and TV shows."
+    },
+    "template": {
+      "id": 2,
+      "name": "Teen",
+      "slug": "teen"
+    }
+  },
+  "/api/profiles/4/permissions": {
+    "capped": [],
+    "changed_categories": [],
+    "effective": {
+      "account.connect": true,
+      "account.own_library": true,
+      "admin.tools": true,
+      "admin.video_tools": true,
+      "automations.personal": true,
+      "books.access": true,
+      "books.get": "download",
+      "chat.use": true,
+      "movies.access": true,
+      "movies.get": "download",
+      "movies.max_rating": "any",
+      "movies.quality": "*",
+      "movies.quality_ask": [],
+      "movies.quality_default": null,
+      "movies.request_limit": {
+        "days": 7,
+        "n": 0
+      },
+      "music.access": true,
+      "music.dashboard": true,
+      "music.discover": true,
+      "music.downloads": true,
+      "music.explorer": true,
+      "music.get": "download",
+      "music.hide_explicit": false,
+      "music.import": true,
+      "music.library": true,
+      "music.playlist_sync": true,
+      "music.quality": "*",
+      "music.quality_default": null,
+      "music.request_limit": {
+        "days": 7,
+        "n": 0
+      },
+      "music.sample_studio": true,
+      "music.search": true,
+      "music.stats": true,
+      "music.videos": true,
+      "music.watchlist": true,
+      "music.wishlist": true,
+      "podcasts.access": true,
+      "podcasts.get": "download",
+      "requests.moderate": false,
+      "requests.see_all": false,
+      "tv.access": true,
+      "tv.get": "download",
+      "tv.max_rating": "any",
+      "tv.quality": "*",
+      "tv.quality_ask": [],
+      "tv.quality_default": null,
+      "tv.request_limit": {
+        "days": 7,
+        "n": 0
+      },
+      "video.calendar": true,
+      "video.dashboard": true,
+      "video.discover": true,
+      "video.downloads": true,
+      "video.library": true,
+      "video.search": true,
+      "video.watchlist": true,
+      "video.wishlist": true,
+      "video.youtube": true
+    },
+    "mode": "template",
+    "needs_look": [],
+    "overrides": {},
+    "profile": {
+      "id": 4,
+      "is_admin": false,
+      "name": "Priya"
+    },
+    "success": true,
+    "summary": {
+      "lines": [
+        {
+          "category": "movies",
+          "text": "Movies: gets it right away."
+        },
+        {
+          "category": "tv",
+          "text": "TV shows: gets it right away."
+        },
+        {
+          "category": "music",
+          "text": "Music: gets it right away."
+        },
+        {
+          "category": "books",
+          "text": "Audiobooks: gets it right away."
+        },
+        {
+          "category": "books",
+          "text": "Podcasts: new episodes download on their own."
+        }
+      ],
+      "never": [],
+      "sentence": "Priya uses music, movies and TV shows."
+    },
+    "template": {
+      "id": 1,
+      "name": "Adult",
+      "slug": "adult"
+    }
+  },
+  "/api/profiles/5/permissions": {
+    "capped": [],
+    "changed_categories": ["movies"],
+    "effective": {
+      "account.connect": true,
+      "account.own_library": true,
+      "admin.tools": true,
+      "admin.video_tools": true,
+      "automations.personal": true,
+      "books.access": true,
+      "books.get": "none",
+      "chat.use": true,
+      "movies.access": true,
+      "movies.get": "ask",
+      "movies.max_rating": "PG",
+      "movies.quality": "*",
+      "movies.quality_ask": [],
+      "movies.quality_default": null,
+      "movies.request_limit": {
+        "days": 7,
+        "n": 3
+      },
+      "music.access": true,
+      "music.dashboard": true,
+      "music.discover": true,
+      "music.downloads": true,
+      "music.explorer": true,
+      "music.get": "ask",
+      "music.hide_explicit": true,
+      "music.import": true,
+      "music.library": true,
+      "music.playlist_sync": true,
+      "music.quality": "*",
+      "music.quality_default": null,
+      "music.request_limit": {
+        "days": 7,
+        "n": 0
+      },
+      "music.sample_studio": true,
+      "music.search": true,
+      "music.stats": true,
+      "music.videos": true,
+      "music.watchlist": true,
+      "music.wishlist": true,
+      "podcasts.access": true,
+      "podcasts.get": "none",
+      "requests.moderate": false,
+      "requests.see_all": false,
+      "tv.access": true,
+      "tv.get": "ask",
+      "tv.max_rating": "PG",
+      "tv.quality": "*",
+      "tv.quality_ask": [],
+      "tv.quality_default": null,
+      "tv.request_limit": {
+        "days": 7,
+        "n": 0
+      },
+      "video.calendar": true,
+      "video.dashboard": true,
+      "video.discover": true,
+      "video.downloads": true,
+      "video.library": true,
+      "video.search": true,
+      "video.watchlist": true,
+      "video.wishlist": true,
+      "video.youtube": true
+    },
+    "mode": "template",
+    "needs_look": [],
+    "overrides": {
+      "movies.request_limit": {
+        "days": 7,
+        "n": 3
+      }
+    },
+    "profile": {
+      "id": 5,
+      "is_admin": false,
+      "name": "Jonah"
+    },
+    "success": true,
+    "summary": {
+      "lines": [
+        {
+          "category": "movies",
+          "text": "Movies: asks first, up to PG, 3 movie asks a week."
+        },
+        {
+          "category": "tv",
+          "text": "TV shows: asks first, up to TV-PG."
+        },
+        {
+          "category": "music",
+          "text": "Music: asks first, clean only."
+        },
+        {
+          "category": "books",
+          "text": "Audiobooks: can't request."
+        },
+        {
+          "category": "books",
+          "text": "Podcasts: they follow shows, episodes don't download."
+        }
+      ],
+      "never": [],
+      "sentence": "Jonah uses music, movies and TV shows."
+    },
+    "template": {
+      "id": 3,
+      "name": "Kids",
+      "slug": "kids"
+    }
+  },
+  "/api/profiles/6/permissions": {
+    "capped": [],
+    "changed_categories": ["music"],
+    "effective": {
+      "account.connect": true,
+      "account.own_library": true,
+      "admin.tools": true,
+      "admin.video_tools": true,
+      "automations.personal": true,
+      "books.access": true,
+      "books.get": "none",
+      "chat.use": true,
+      "movies.access": false,
+      "movies.get": "ask",
+      "movies.max_rating": "any",
+      "movies.quality": "*",
+      "movies.quality_ask": [],
+      "movies.quality_default": null,
+      "movies.request_limit": {
+        "days": 7,
+        "n": 0
+      },
+      "music.access": true,
+      "music.dashboard": true,
+      "music.discover": true,
+      "music.downloads": true,
+      "music.explorer": true,
+      "music.get": "ask",
+      "music.hide_explicit": false,
+      "music.import": true,
+      "music.library": true,
+      "music.playlist_sync": true,
+      "music.quality": "*",
+      "music.quality_default": null,
+      "music.request_limit": {
+        "days": 7,
+        "n": 2
+      },
+      "music.sample_studio": true,
+      "music.search": true,
+      "music.stats": true,
+      "music.videos": true,
+      "music.watchlist": true,
+      "music.wishlist": true,
+      "podcasts.access": true,
+      "podcasts.get": "none",
+      "requests.moderate": false,
+      "requests.see_all": false,
+      "tv.access": false,
+      "tv.get": "ask",
+      "tv.max_rating": "any",
+      "tv.quality": "*",
+      "tv.quality_ask": [],
+      "tv.quality_default": null,
+      "tv.request_limit": {
+        "days": 7,
+        "n": 0
+      },
+      "video.calendar": true,
+      "video.dashboard": true,
+      "video.discover": true,
+      "video.downloads": true,
+      "video.library": true,
+      "video.search": true,
+      "video.watchlist": true,
+      "video.wishlist": true,
+      "video.youtube": true
+    },
+    "mode": "template",
+    "needs_look": [],
+    "overrides": {
+      "music.request_limit": {
+        "days": 7,
+        "n": 2
+      }
+    },
+    "profile": {
+      "id": 6,
+      "is_admin": false,
+      "name": "Liam"
+    },
+    "success": true,
+    "summary": {
+      "lines": [
+        {
+          "category": "music",
+          "text": "Music: asks first, 2 music asks a week."
+        },
+        {
+          "category": "books",
+          "text": "Audiobooks: can't request."
+        },
+        {
+          "category": "books",
+          "text": "Podcasts: they follow shows, episodes don't download."
+        }
+      ],
+      "never": ["Movies", "TV shows"],
+      "sentence": "Liam uses music."
+    },
+    "template": {
+      "id": 4,
+      "name": "Guest",
+      "slug": "guest"
+    }
+  },
+  "/api/profiles/7/permissions": {
+    "capped": [],
+    "changed_categories": [],
+    "effective": {
+      "account.connect": true,
+      "account.own_library": true,
+      "admin.tools": true,
+      "admin.video_tools": true,
+      "automations.personal": true,
+      "books.access": true,
+      "books.get": "download",
+      "chat.use": true,
+      "movies.access": true,
+      "movies.get": "download",
+      "movies.max_rating": "any",
+      "movies.quality": "*",
+      "movies.quality_ask": [],
+      "movies.quality_default": null,
+      "movies.request_limit": {
+        "days": 7,
+        "n": 0
+      },
+      "music.access": true,
+      "music.dashboard": true,
+      "music.discover": true,
+      "music.downloads": true,
+      "music.explorer": true,
+      "music.get": "download",
+      "music.hide_explicit": false,
+      "music.import": true,
+      "music.library": true,
+      "music.playlist_sync": true,
+      "music.quality": "*",
+      "music.quality_default": null,
+      "music.request_limit": {
+        "days": 7,
+        "n": 0
+      },
+      "music.sample_studio": true,
+      "music.search": true,
+      "music.stats": true,
+      "music.videos": true,
+      "music.watchlist": true,
+      "music.wishlist": true,
+      "podcasts.access": true,
+      "podcasts.get": "download",
+      "requests.moderate": false,
+      "requests.see_all": false,
+      "tv.access": true,
+      "tv.get": "download",
+      "tv.max_rating": "any",
+      "tv.quality": "*",
+      "tv.quality_ask": [],
+      "tv.quality_default": null,
+      "tv.request_limit": {
+        "days": 7,
+        "n": 0
+      },
+      "video.calendar": true,
+      "video.dashboard": true,
+      "video.discover": true,
+      "video.downloads": true,
+      "video.library": true,
+      "video.search": true,
+      "video.watchlist": true,
+      "video.wishlist": true,
+      "video.youtube": true
+    },
+    "mode": "template",
+    "needs_look": [],
+    "overrides": {},
+    "profile": {
+      "id": 7,
+      "is_admin": false,
+      "name": "Carlos"
+    },
+    "success": true,
+    "summary": {
+      "lines": [
+        {
+          "category": "movies",
+          "text": "Movies: gets it right away."
+        },
+        {
+          "category": "tv",
+          "text": "TV shows: gets it right away."
+        },
+        {
+          "category": "music",
+          "text": "Music: gets it right away."
+        },
+        {
+          "category": "books",
+          "text": "Audiobooks: gets it right away."
+        },
+        {
+          "category": "books",
+          "text": "Podcasts: new episodes download on their own."
+        }
+      ],
+      "never": [],
+      "sentence": "Carlos uses music, movies and TV shows."
+    },
+    "template": {
+      "id": 1,
+      "name": "Adult",
+      "slug": "adult"
+    }
+  },
+  "/api/profiles/8/permissions": {
+    "capped": [],
+    "changed_categories": [],
+    "effective": {
+      "account.connect": true,
+      "account.own_library": true,
+      "admin.tools": true,
+      "admin.video_tools": true,
+      "automations.personal": true,
+      "books.access": true,
+      "books.get": "download",
+      "chat.use": true,
+      "movies.access": true,
+      "movies.get": "download",
+      "movies.max_rating": "G",
+      "movies.quality": "*",
+      "movies.quality_ask": [],
+      "movies.quality_default": null,
+      "movies.request_limit": {
+        "days": 7,
+        "n": 0
+      },
+      "music.access": true,
+      "music.dashboard": true,
+      "music.discover": true,
+      "music.downloads": true,
+      "music.explorer": true,
+      "music.get": "download",
+      "music.hide_explicit": false,
+      "music.import": true,
+      "music.library": true,
+      "music.playlist_sync": true,
+      "music.quality": "*",
+      "music.quality_default": null,
+      "music.request_limit": {
+        "days": 7,
+        "n": 0
+      },
+      "music.sample_studio": true,
+      "music.search": true,
+      "music.stats": true,
+      "music.videos": true,
+      "music.watchlist": true,
+      "music.wishlist": true,
+      "podcasts.access": true,
+      "podcasts.get": "download",
+      "requests.moderate": false,
+      "requests.see_all": false,
+      "tv.access": true,
+      "tv.get": "download",
+      "tv.max_rating": "G",
+      "tv.quality": "*",
+      "tv.quality_ask": [],
+      "tv.quality_default": null,
+      "tv.request_limit": {
+        "days": 7,
+        "n": 0
+      },
+      "video.calendar": true,
+      "video.dashboard": true,
+      "video.discover": true,
+      "video.downloads": true,
+      "video.library": true,
+      "video.search": true,
+      "video.watchlist": true,
+      "video.wishlist": true,
+      "video.youtube": true
+    },
+    "mode": "legacy",
+    "needs_look": [
+      "max_rating 'NC-17' has no catalogue rating",
+      "effective differs on cap, tv.max_rating"
+    ],
+    "overrides": {},
+    "profile": {
+      "id": 8,
+      "is_admin": false,
+      "name": "Odd"
+    },
+    "success": true,
+    "summary": {
+      "lines": [
+        {
+          "category": "movies",
+          "text": "Movies: gets it right away, up to G."
+        },
+        {
+          "category": "tv",
+          "text": "TV shows: gets it right away, up to TV-Y7."
+        },
+        {
+          "category": "music",
+          "text": "Music: gets it right away."
+        },
+        {
+          "category": "books",
+          "text": "Audiobooks: gets it right away."
+        },
+        {
+          "category": "books",
+          "text": "Podcasts: new episodes download on their own."
+        }
+      ],
+      "never": [],
+      "sentence": "Odd uses music, movies and TV shows."
+    },
+    "template": null
+  },
+  "/api/profiles/audit": {
+    "entries": [
+      {
+        "action": "permissions_profile",
+        "actor_id": 1,
+        "actor_name": "Boulder",
+        "created_at": "2026-11-17 18:00:00",
+        "detail": "{\"set\": {\"music.get\": \"download\", \"music.hide_explicit\": true}}",
+        "id": 9,
+        "target_id": 3,
+        "target_name": "Maya"
+      },
+      {
+        "action": "permissions_policy",
+        "actor_id": 1,
+        "actor_name": "Boulder",
+        "created_at": "2026-11-17 12:00:00",
+        "detail": "{\"set\": {\"movies.quality\": [0, 2]}, \"reset\": null}",
+        "id": 8,
+        "target_id": null,
+        "target_name": null
+      },
+      {
+        "action": "invite_created",
+        "actor_id": 1,
+        "actor_name": "Boulder",
+        "created_at": "2026-11-16 20:00:00",
+        "detail": "expires in 72h",
+        "id": 7,
+        "target_id": null,
+        "target_name": null
+      },
+      {
+        "action": "invite_used",
+        "actor_id": 6,
+        "actor_name": "Liam",
+        "created_at": "2026-11-10 10:00:00",
+        "detail": null,
+        "id": 6,
+        "target_id": 6,
+        "target_name": "Liam"
+      }
+    ],
+    "success": true
+  },
+  "/api/profiles/current": {
+    "profile": {
+      "has_password": false,
+      "has_pin": true,
+      "has_recovery": true,
+      "id": 1,
+      "is_admin": true,
+      "name": "Admin",
+      "recovery_question": "What city were you born in?"
+    },
+    "success": true
+  },
+  "/api/profiles/feature-defaults": {
+    "features": [
+      {
+        "desc": "Picks, mixes and new music made from what you play.",
+        "group": "music",
+        "id": "discover",
+        "label": "Discover",
+        "pages": ["discover"]
+      },
+      {
+        "desc": "Mirror playlists from Spotify, Tidal, YouTube and more onto your server.",
+        "group": "music",
+        "id": "playlists",
+        "label": "Playlist sync",
+        "pages": ["sync"]
+      },
+      {
+        "desc": "Bring in music you already have on disk.",
+        "group": "music",
+        "id": "import",
+        "label": "Import",
+        "pages": ["import"]
+      },
+      {
+        "desc": "Charts of what you play.",
+        "group": "music",
+        "id": "stats",
+        "label": "Listening stats",
+        "pages": ["stats"]
+      },
+      {
+        "desc": "Browse Audible, follow authors and fetch new books.",
+        "group": "more",
+        "id": "audiobooks",
+        "label": "Audiobooks",
+        "pages": ["audiobooks"]
+      },
+      {
+        "desc": "The whole video side.",
+        "group": "more",
+        "id": "video",
+        "label": "Movies & TV",
+        "pages": ["video-dashboard", "video-search"]
+      },
+      {
+        "desc": "Talk with other SoulSync users and play games.",
+        "group": "more",
+        "id": "chat",
+        "label": "Chat & Arcade",
+        "pages": ["chat", "video-chat"]
+      },
+      {
+        "desc": "Library maintenance, repair jobs, backups and database tools.",
+        "group": "advanced",
+        "id": "tools",
+        "label": "Tools",
+        "pages": ["tools", "video-tools"]
+      }
+    ],
+    "groups": [
+      {
+        "id": "music",
+        "label": "Music"
+      },
+      {
+        "id": "more",
+        "label": "More than music"
+      },
+      {
+        "id": "advanced",
+        "label": "For tinkerers"
+      }
+    ],
+    "locked": false,
+    "off": [],
+    "presets": [
+      {
+        "desc": "Every part of SoulSync, the way it ships.",
+        "id": "full",
+        "label": "Everything",
+        "off": []
+      },
+      {
+        "desc": "Music, Discover, playlists and import. Everything else tucked away.",
+        "id": "simple",
+        "label": "Simple",
+        "off": ["stats", "audiobooks", "video", "chat", "tools"]
+      }
+    ],
+    "success": true
+  },
+  "/api/profiles/invites": {
+    "invites": [
+      {
+        "created_at": "2026-11-16 20:00:00",
+        "expires_at": "2026-11-19 20:00:00",
+        "id": 3,
+        "note": "For Kim",
+        "preset": {
+          "allowed_sides": "both",
+          "can_download": false,
+          "max_rating": "PG-13",
+          "request_limit": 5,
+          "request_limit_days": 7
+        },
+        "state": "open"
+      },
+      {
+        "created_at": "2026-11-09 10:00:00",
+        "id": 2,
+        "note": null,
+        "preset": {
+          "allowed_sides": "music",
+          "can_download": false
+        },
+        "state": "used",
+        "used_at": "2026-11-10 10:00:00",
+        "used_by": 6
+      }
+    ],
+    "success": true
+  },
+  "/api/profiles/me/features": {
+    "chosen": true,
+    "features": [
+      {
+        "desc": "Picks, mixes and new music made from what you play.",
+        "group": "music",
+        "id": "discover",
+        "label": "Discover",
+        "pages": ["discover"]
+      },
+      {
+        "desc": "Mirror playlists from Spotify, Tidal, YouTube and more onto your server.",
+        "group": "music",
+        "id": "playlists",
+        "label": "Playlist sync",
+        "pages": ["sync"]
+      },
+      {
+        "desc": "Every playlist from every source in one visual tree.",
+        "group": "music",
+        "id": "explorer",
+        "label": "Playlist Explorer",
+        "pages": ["playlist-explorer"]
+      },
+      {
+        "desc": "Bring in music you already have on disk.",
+        "group": "music",
+        "id": "import",
+        "label": "Import",
+        "pages": ["import"]
+      },
+      {
+        "desc": "Charts of what you play, plus the weekly card on the dashboard.",
+        "group": "music",
+        "id": "stats",
+        "label": "Listening stats",
+        "pages": ["stats"]
+      },
+      {
+        "desc": "The Videos tab in search and music videos on artist pages.",
+        "group": "music",
+        "id": "music_videos",
+        "label": "Music videos",
+        "pages": []
+      },
+      {
+        "desc": "Split songs into stems and chop samples.",
+        "group": "music",
+        "id": "sample_studio",
+        "label": "Sample Studio",
+        "pages": ["sample-studio"]
+      },
+      {
+        "desc": "Subscribe to shows and get new episodes on their own.",
+        "group": "more",
+        "id": "podcasts",
+        "label": "Podcasts",
+        "pages": ["podcasts"]
+      },
+      {
+        "desc": "Browse Audible, follow authors and fetch new books.",
+        "group": "more",
+        "id": "audiobooks",
+        "label": "Audiobooks",
+        "pages": ["audiobooks"]
+      },
+      {
+        "desc": "The whole video side: shows, films and YouTube channels.",
+        "group": "more",
+        "id": "video",
+        "label": "Movies & TV",
+        "pages": [
+          "video-dashboard",
+          "video-search",
+          "video-discover",
+          "video-calendar",
+          "video-library",
+          "video-watchlist",
+          "video-wishlist",
+          "video-requests",
+          "video-downloads",
+          "video-automations",
+          "video-chat",
+          "video-tools",
+          "video-settings",
+          "video-issues",
+          "video-help"
+        ]
+      },
+      {
+        "desc": "Trending, upcoming and recommended movies and shows.",
+        "group": "video",
+        "id": "video_discover",
+        "label": "Video Discover",
+        "pages": ["video-discover"]
+      },
+      {
+        "desc": "Episode air dates and movie releases, plus the iCal feed.",
+        "group": "video",
+        "id": "video_calendar",
+        "label": "Calendar",
+        "pages": ["video-calendar"]
+      },
+      {
+        "desc": "Talk with other SoulSync users and play games.",
+        "group": "more",
+        "id": "chat",
+        "label": "Chat & Arcade",
+        "pages": ["chat", "video-chat"]
+      },
+      {
+        "desc": "Build your own schedules and triggers. The built-in jobs keep running either way.",
+        "group": "advanced",
+        "id": "automations",
+        "label": "Automations",
+        "pages": ["automations", "video-automations"]
+      },
+      {
+        "desc": "Library maintenance, repair jobs, backups and database tools.",
+        "group": "advanced",
+        "id": "tools",
+        "label": "Tools",
+        "pages": ["tools", "video-tools"]
+      }
+    ],
+    "follows_default": false,
+    "groups": [
+      {
+        "id": "music",
+        "label": "Music"
+      },
+      {
+        "id": "more",
+        "label": "More than music"
+      },
+      {
+        "id": "video",
+        "label": "Movies & TV"
+      },
+      {
+        "id": "advanced",
+        "label": "For tinkerers"
+      }
+    ],
+    "hidden_pages": [],
+    "locked": false,
+    "off": [],
+    "offered": [
+      "discover",
+      "playlists",
+      "explorer",
+      "import",
+      "stats",
+      "music_videos",
+      "sample_studio",
+      "podcasts",
+      "audiobooks",
+      "video",
+      "video_discover",
+      "video_calendar",
+      "chat",
+      "automations",
+      "tools"
+    ],
+    "preset": "full",
+    "presets": [
+      {
+        "desc": "Every part of SoulSync, the way it ships.",
+        "id": "full",
+        "label": "Everything",
+        "off": []
+      },
+      {
+        "desc": "Music, Discover, playlists and import. Everything else tucked away.",
+        "id": "simple",
+        "label": "Simple",
+        "off": [
+          "explorer",
+          "stats",
+          "music_videos",
+          "sample_studio",
+          "podcasts",
+          "audiobooks",
+          "video",
+          "video_discover",
+          "video_calendar",
+          "chat",
+          "automations",
+          "tools"
+        ]
+      }
+    ],
+    "success": true
+  },
+  "/api/profiles/me/server-library": {
+    "navidrome_username": "listener",
+    "success": true
+  },
+  "/api/prowlarr/indexers": {
+    "indexers": [
+      {
+        "enable": true,
+        "id": 3,
+        "name": "Tracker",
+        "privacy": "private",
+        "protocol": "torrent"
+      },
+      {
+        "enable": false,
+        "id": 7,
+        "name": "NZBs",
+        "protocol": "usenet"
+      }
+    ],
+    "success": true
+  },
+  "/api/qobuz/auth/status": {
+    "authenticated": false
+  },
+  "/api/quality-profile": {
+    "profile": {
+      "acoustid_required": false,
+      "deep_audio_verify": true,
+      "downsample_enabled": false,
+      "fallback_enabled": true,
+      "id": 1,
+      "is_default": true,
+      "lossy_copy_bitrate": "256",
+      "lossy_copy_codec": "mp3",
+      "lossy_copy_delete_original": false,
+      "lossy_copy_enabled": true,
+      "name": "Balanced",
+      "preset": "balanced",
+      "rank_candidates_by_quality": true,
+      "ranked_targets": [
+        {
+          "bit_depth": 24,
+          "format": "flac",
+          "label": "FLAC 24-bit"
+        },
+        {
+          "format": "flac",
+          "label": "FLAC"
+        },
+        {
+          "format": "mp3",
+          "label": "MP3 ≥320kbps",
+          "min_bitrate": 320
+        }
+      ],
+      "release_import_mode": "requested_tracks",
+      "replace_lower_quality": true,
+      "search_mode": "priority",
+      "upgrade_cutoff_index": 1,
+      "upgrade_policy": "until_cutoff",
+      "version": 3
+    },
+    "success": true
+  },
+  "/api/quality-profile/custom": {
+    "profiles": [
+      {
+        "acoustid_required": false,
+        "deep_audio_verify": true,
+        "downsample_enabled": false,
+        "fallback_enabled": true,
+        "id": 1,
+        "is_default": true,
+        "lossy_copy_bitrate": "256",
+        "lossy_copy_codec": "mp3",
+        "lossy_copy_delete_original": false,
+        "lossy_copy_enabled": true,
+        "name": "Balanced",
+        "preset": "balanced",
+        "rank_candidates_by_quality": true,
+        "ranked_targets": "[{\"format\": \"flac\", \"label\": \"FLAC 24-bit\", \"bit_depth\": 24}, {\"format\": \"flac\", \"label\": \"FLAC\"}, {\"format\": \"mp3\", \"label\": \"MP3 \\u2265320kbps\", \"min_bitrate\": 320}]",
+        "release_import_mode": "requested_tracks",
+        "replace_lower_quality": true,
+        "search_mode": "priority",
+        "upgrade_cutoff_index": 1,
+        "upgrade_policy": "until_cutoff",
+        "version": 3
+      },
+      {
+        "acoustid_required": true,
+        "deep_audio_verify": true,
+        "downsample_enabled": false,
+        "fallback_enabled": false,
+        "id": 2,
+        "is_default": false,
+        "lossy_copy_bitrate": "192",
+        "lossy_copy_codec": "opus",
+        "lossy_copy_delete_original": false,
+        "lossy_copy_enabled": true,
+        "name": "Strict",
+        "preset": "custom",
+        "rank_candidates_by_quality": false,
+        "ranked_targets": "[{\"format\": \"flac\", \"label\": \"FLAC\"}]",
+        "release_import_mode": "album_tracks",
+        "replace_lower_quality": true,
+        "search_mode": "best_quality",
+        "upgrade_cutoff_index": 0,
+        "upgrade_policy": "none",
+        "version": 3
+      }
+    ],
+    "success": true
+  },
+  "/api/quality-profile/presets": {
+    "presets": {
+      "audiophile": {
+        "fallback_enabled": false,
+        "preset": "audiophile",
+        "ranked_targets": [
+          {
+            "bit_depth": 24,
+            "format": "flac",
+            "label": "FLAC 24-bit"
+          }
+        ],
+        "version": 3
+      },
+      "balanced": {
+        "fallback_enabled": true,
+        "preset": "balanced",
+        "ranked_targets": [
+          {
+            "bit_depth": 24,
+            "format": "flac",
+            "label": "FLAC 24-bit"
+          },
+          {
+            "format": "flac",
+            "label": "FLAC"
+          },
+          {
+            "format": "mp3",
+            "label": "MP3 ≥320kbps",
+            "min_bitrate": 320
+          }
+        ],
+        "version": 3
+      },
+      "space_saver": {
+        "fallback_enabled": true,
+        "preset": "space_saver",
+        "ranked_targets": [
+          {
+            "format": "mp3",
+            "label": "MP3 ≥192kbps",
+            "min_bitrate": 192
+          }
+        ],
+        "version": 3
+      }
+    },
+    "success": true
+  },
+  "/api/requests/music/counts": {
+    "pending": 2,
+    "success": true
+  },
+  "/api/server-activity/settings": {
+    "ok": true,
+    "settings": {
+      "geo_lookup": true,
+      "retention_days": 90,
+      "stop_presets": ["Server maintenance, back soon."],
+      "upload_mbps": 40
+    }
+  },
+  "/api/settings/config-status": {},
+  "/api/settings/log-level": {
+    "level": "INFO",
+    "success": true
+  },
+  "/api/setup/status": {
+    "setup_complete": true
+  },
+  "/api/soundcloud/status": {
+    "available": true,
+    "reachable": false
+  },
+  "/api/tidal/download/auth/check": {
+    "status": "pending"
+  },
+  "/api/tidal/download/auth/status": {
+    "authenticated": false
+  },
+  "/api/v1/api-keys-internal": {
+    "data": {
+      "keys": [
+        {
+          "created_at": "2026-11-01T00:00:00",
+          "id": "k1",
+          "key_prefix": "sk_ab",
+          "label": "Bot",
+          "scope": "read"
+        }
+      ]
+    }
+  },
+  "/api/video/downloads/config": {
+    "anime_path": "",
+    "download_mode": "hybrid",
+    "download_path": "/downloads",
+    "hybrid_order": ["torrent"],
+    "monitor_specials": false,
+    "movies_4k_enabled": true,
+    "movies_4k_path": "/media/movies-4k",
+    "movies_additional_paths": ["/media/movies2"],
+    "movies_path": "/media/movies",
+    "redownload_failed": true,
+    "seed_mode": "client",
+    "seed_overrides": {},
+    "seed_ratio_goal": 1.5,
+    "seed_remove_data": true,
+    "seed_time_goal_hours": 0,
+    "tv_4k_enabled": false,
+    "tv_4k_path": "",
+    "tv_additional_paths": [],
+    "tv_path": "/media/tv",
+    "usenet_remove_completed": "history",
+    "youtube_path": "/media/youtube"
+  },
+  "/api/video/downloads/config/import-lists": {
+    "lists": [
+      {
+        "enabled": true,
+        "id": 1,
+        "media": "movie",
+        "monitor": "future",
+        "name": "Trending",
+        "ref": "trending_movies",
+        "source": "tmdb_chart"
+      },
+      {
+        "enabled": false,
+        "id": 2,
+        "media": "both",
+        "monitor": "all",
+        "name": "Mine",
+        "ref": "ls123",
+        "source": "imdb_list"
+      }
+    ]
+  },
+  "/api/video/downloads/quality/defaults": {
+    "movie": 0,
+    "show": 3
+  },
+  "/api/video/downloads/quality/formats": {
+    "formats": [
+      {
+        "exclude": [],
+        "id": 7,
+        "include": ["FLUX"],
+        "name": "Trusted",
+        "score": 20
+      }
+    ]
+  },
+  "/api/video/downloads/quality/profiles": {
+    "profiles": [
+      {
+        "id": 0,
+        "name": "Default",
+        "profile": {
+          "audio_language_mode": "prefer",
+          "audio_languages": ["fr"],
+          "cutoff_resolution": "1080p",
+          "format_scores": {
+            "7": 50
+          },
+          "max_movie_gb": 40,
+          "min_format_score": 5,
+          "prefer_audio": "any",
+          "prefer_codec": "hevc",
+          "prefer_hdr": "off",
+          "preferred_episode_gb": 2.5,
+          "rejects": ["cam"],
+          "tiers": [
+            {
+              "enabled": true,
+              "key": "bluray-1080p"
+            },
+            {
+              "enabled": true,
+              "key": "web-1080p"
+            },
+            {
+              "enabled": false,
+              "key": "hdtv-720p"
+            }
+          ]
+        }
+      },
+      {
+        "id": 3,
+        "name": "Anime",
+        "profile": {
+          "audio_language_mode": "prefer",
+          "audio_languages": ["fr"],
+          "cutoff_resolution": "1080p",
+          "format_scores": {
+            "7": 50
+          },
+          "max_movie_gb": 40,
+          "min_format_score": 5,
+          "prefer_audio": "any",
+          "prefer_codec": "av1",
+          "prefer_hdr": "off",
+          "preferred_episode_gb": 2.5,
+          "rejects": ["cam"],
+          "tiers": [
+            {
+              "enabled": true,
+              "key": "bluray-1080p"
+            },
+            {
+              "enabled": true,
+              "key": "web-1080p"
+            },
+            {
+              "enabled": false,
+              "key": "hdtv-720p"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "/api/video/downloads/youtube-quality": {
+    "allow_hdr": false,
+    "container": "mkv",
+    "max_resolution": "1440p",
+    "prefer_60fps": true,
+    "video_codec": "vp9"
+  },
+  "/api/video/enrichment/config": {
+    "anilist_enabled": false,
+    "billboard_autoplay": true,
+    "omdb_api_key": "omdbkey",
+    "tmdb_api_key": "tmdbkey",
+    "tvdb_api_key": "",
+    "watch_region": "JP"
+  },
+  "/api/video/import/folder/settings": {
+    "auto": true,
+    "path": "/media/import"
+  },
+  "/api/video/jellyfin/users": {
+    "selected": "u2",
+    "success": true,
+    "users": [
+      {
+        "admin": true,
+        "id": "u1",
+        "name": "Boss"
+      },
+      {
+        "id": "u2",
+        "name": "Kid"
+      }
+    ]
+  },
+  "/api/video/libraries": {
+    "movies": [
+      {
+        "title": "Movies"
+      },
+      {
+        "title": "Movies 4K"
+      }
+    ],
+    "selected": {
+      "anime": ["TV"],
+      "movies": "Movies",
+      "tv": "TV",
+      "tv_more": ["Kids TV"]
+    },
+    "tv": [
+      {
+        "title": "TV"
+      },
+      {
+        "title": "Anime"
+      },
+      {
+        "title": "Kids TV"
+      }
+    ]
+  },
+  "/api/video/libraries/drives": {
+    "folders": [
+      {
+        "auto": true,
+        "files": 1200,
+        "kind": "movie",
+        "library": "Movies",
+        "local": "/media/movies",
+        "role": "Movies library",
+        "server": "/data/movies"
+      },
+      {
+        "files": 3400,
+        "kind": "episode",
+        "library": "TV",
+        "local": "",
+        "server": "/mnt/easystore/PLEX/TV SHOWS"
+      }
+    ]
+  },
+  "/api/video/libraries/folders": {
+    "genres": ["Comedy", "Documentary"],
+    "libraries": [
+      {
+        "builtin": "main",
+        "enabled": true,
+        "id": 1,
+        "is_default": true,
+        "kind": "movie",
+        "name": "Movies",
+        "path": "/media/movies",
+        "rules": {
+          "genres": [],
+          "keywords": []
+        },
+        "usable": true
+      },
+      {
+        "builtin": "4k",
+        "enabled": true,
+        "id": 2,
+        "is_default": false,
+        "kind": "movie",
+        "name": "Movies 4K",
+        "path": "/media/movies-4k",
+        "rules": {
+          "genres": [],
+          "keywords": []
+        },
+        "usable": true
+      },
+      {
+        "builtin": null,
+        "enabled": true,
+        "id": 5,
+        "is_default": false,
+        "kind": "movie",
+        "name": "Stand-Up",
+        "options": {
+          "sources": ["usenet"],
+          "torrent_category": "su"
+        },
+        "path": "/media/standup",
+        "quality_profile_id": 3,
+        "rules": {
+          "genres": ["Comedy"],
+          "keywords": ["stand-up"]
+        },
+        "usable": true
+      }
+    ]
+  },
+  "/api/video/notifications": {
+    "connections": [
+      {
+        "chat_id": "",
+        "enabled": true,
+        "events": ["video_download_completed"],
+        "id": 4,
+        "name": "Discord",
+        "token": "",
+        "type": "discord",
+        "url": "https://d/hook"
+      },
+      {
+        "chat_id": "42",
+        "enabled": false,
+        "events": [],
+        "id": 5,
+        "name": "TG",
+        "token": "tok",
+        "type": "telegram",
+        "url": ""
+      }
+    ],
+    "events": [
+      "video_download_completed",
+      "video_upgrade_completed",
+      "video_download_failed",
+      "video_watchlist_added"
+    ]
+  },
+  "/api/video/organization": {
+    "carry_subtitles": true,
+    "colon_replacement": "smart",
+    "download_subtitles": true,
+    "episode_template": "$series/Season $season/$series - S$seasonE$episode",
+    "min_free_disk_gb": 20,
+    "movie_template": "",
+    "recycle_deletes": true,
+    "recycle_keep_days": 14,
+    "recycle_path": "",
+    "replace_existing": true,
+    "save_artwork": false,
+    "subtitle_autosync": false,
+    "subtitle_daily_quota": 20,
+    "subtitle_forced": false,
+    "subtitle_hi_forced": "prefer_hi",
+    "subtitle_ignore_ass": false,
+    "subtitle_ignore_pgs": true,
+    "subtitle_ignore_vobsub": false,
+    "subtitle_langs": "en,es",
+    "subtitle_min_score": 30,
+    "subtitle_provider_order": ["subdl", "opensubtitles"],
+    "subtitle_upgrade_min_delta": 15,
+    "subtitle_use_embedded": true,
+    "subtitle_worker_batch": 10,
+    "subtitle_worker_interval_min": 30,
+    "transfer_mode": "copy",
+    "verify_with_ffprobe": true,
+    "whisper_enabled": true,
+    "whisper_model": "base",
+    "whisper_model_downloaded": true,
+    "whisper_model_downloaded_at": "2026-11-01",
+    "whisper_model_path": "/models/base",
+    "whisper_model_size_bytes": 145000000,
+    "write_nfo": true,
+    "youtube_embed_subs": false,
+    "youtube_follow_count": 5,
+    "youtube_sponsorblock": "mark",
+    "youtube_template": ""
+  },
+  "/api/video/repair/jobs": {
+    "jobs": [
+      {
+        "enabled": true,
+        "interval_hours": 168,
+        "job_id": "missing_subtitles",
+        "last_run": {
+          "auto_fixed": 3,
+          "finished_at": "2026-11-10T03:00:00"
+        },
+        "pending_findings_count": 1
+      }
+    ]
+  },
+  "/api/video/requests/counts": {
+    "pending": 1,
+    "success": true
+  },
+  "/api/video/server": {
+    "server": "jellyfin"
+  },
+  "/api/video/server-config": {
+    "jellyfin": {
+      "api_key": "",
+      "base_url": "http://jf:8096",
+      "has_key": false,
+      "inherited": false
+    },
+    "plex": {
+      "base_url": "http://plex:32400",
+      "has_token": true,
+      "inherited": true,
+      "token": "************"
+    }
+  },
+  "/api/video/subtitles/whisper/status": {
+    "download": {
+      "state": "idle"
+    },
+    "downloaded": true,
+    "downloaded_at": "2026-11-01T10:00:00",
+    "enabled": true,
+    "engine": true,
+    "model": "base",
+    "models": {
+      "base": {
+        "blurb": "balanced",
+        "label": "base"
+      },
+      "small": {
+        "blurb": "best, slower",
+        "label": "small"
+      },
+      "tiny": {
+        "blurb": "fastest, rough",
+        "label": "tiny"
+      }
+    },
+    "size_bytes": 145000000
+  },
+  "/api/weather": {
+    "enabled": true,
+    "holidays": true,
+    "location": {
+      "name": "Medford, Oregon",
+      "query": "97501"
+    },
+    "snapshot": {
+      "current": {
+        "temp": 61.6
+      },
+      "fetched_at": "10:30"
+    },
+    "success": true,
+    "units": "fahrenheit"
+  },
+  "/api/ytdlp/status": {
+    "behind": true,
+    "installed": "2026.11.01",
+    "latest": "2026.11.10"
+  },
+  "/status": {
+    "media_server": {
+      "type": "plex"
+    },
+    "metadata_source": {
+      "source": "deezer"
+    },
+    "soulseek": {},
+    "spotify": {
+      "authenticated": false,
+      "free_installed": true
+    }
+  }
+}

@@ -657,5 +657,10 @@ if (typeof document !== 'undefined') {
     void videoOrganization.load();
     void videoOrganization.loadJob();
   });
-  document.addEventListener('soulsync:library-settings-shown', () => void videoOrganization.load());
+  // the Missing Subtitles job's line too: it was blank when Library opened
+  // from the music side (settings-bic AUDIT 36)
+  document.addEventListener('soulsync:library-settings-shown', () => {
+    void videoOrganization.load();
+    void videoOrganization.loadJob();
+  });
 }

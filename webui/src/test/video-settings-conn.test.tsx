@@ -1,7 +1,10 @@
 import { act, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { VideoServerConnection } from '@/features/settings/tabs/connections-video-server';
+import {
+  VideoServerConnection as Card,
+  VideoServerFields,
+} from '@/features/settings/tabs/connections-video-server';
 import { videoServer } from '@/features/settings/tabs/video-server';
 
 /**
@@ -18,6 +21,16 @@ import { videoServer } from '@/features/settings/tabs/video-server';
  * (React since SETTINGS_PORT.md video pass V3b: connections-video-server.tsx,
  * video-server.ts) with the same cases and a stubbed fetch.
  */
+
+/** the card and the fields its sheet holds (settings-bic phase 3) */
+function VideoServerConnection() {
+  return (
+    <>
+      <Card />
+      <VideoServerFields />
+    </>
+  );
+}
 
 let calls: Array<{ url: string; init?: RequestInit }>;
 function respond(body: unknown) {
@@ -71,7 +84,7 @@ describe('video settings — server connection', () => {
     await loadConn();
     expect(field('jellyfin-url').value).toBe('http://jf:8096');
     expect(noteText('jellyfin')).toBe('Add the API key to finish this connection.');
-    expect(noteText('plex')).toBe('Not connected — add a server URL and token.');
+    expect(noteText('plex')).toBe('Not connected: add a server URL and token.');
   });
 
   it('says what is missing when only the key was entered', async () => {
@@ -112,7 +125,7 @@ describe('video settings — server connection', () => {
     });
     await loadConn();
     expect(noteText('plex')).toBe(
-      'Inherited from your Music Plex connection — edit to use a different server for video.',
+      'Inherited from your music Plex connection. Change it to use a different server for video.',
     );
   });
 

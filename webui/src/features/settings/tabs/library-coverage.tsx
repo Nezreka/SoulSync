@@ -450,7 +450,10 @@ export function ServerFoldersSection({
   return (
     <div className={bare ? undefined : 'settings-group'} id="library-coverage" data-stg={stg}>
       {bare ? null : <h3>Your media server's folders</h3>}
-      <div className="help-text" style={{ marginBottom: '12px' }}>
+      <div
+        className={bare ? styles.intro : 'help-text'}
+        style={bare ? undefined : { marginBottom: '12px' }}
+      >
         SoulSync reads your music straight from disk, from its library folders. This compares the
         folders your media server keeps music in with the ones SoulSync can see. The names don't
         have to match, but the drives do have to be mounted into SoulSync.

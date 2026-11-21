@@ -521,12 +521,16 @@ def test_the_video_setting_is_on_the_settings_page_and_saved():
     tabs = _ROOT / "webui" / "src" / "features" / "settings" / "tabs"
     html = (tabs / "video-source-blocks.tsx").read_text(encoding="utf-8")
     i = html.index('id="video-usenet-remove-completed"')
-    group = html.rfind('<div className="form-group"', 0, i)
-    # the Sources tab is shared: no side gating, the label says which side
+    group = html.rfind('<Row', 0, i)
+    # the Sources tab is shared: no side gating; the sheet's group says which side
     assert "data-video-only" not in html[group:i] and "data-music-only" not in html[group:i]
-    assert "(video)" in html[group:i]
-    for value in ('value="off"', 'value="history"', 'value="files"'):
-        assert value in html[i:i + 800]
+    panel = (tabs / "source-panels-more.tsx").read_text(encoding="utf-8")
+    usenet = panel.split("export function UsenetPanel(", 1)[1].split("\nexport function", 1)[0]
+    assert '<SheetGroup title="For video" />\n      <VideoUsenetBlocks />' in usenet
+    assert "options={USENET_REMOVE}" in html[i:i + 800]
+    choices = html.split("export const USENET_REMOVE = [", 1)[1].split("];", 1)[0]
+    for value in ("value: 'off'", "value: 'history'", "value: 'files'"):
+        assert value in choices
     assert "videoDownloads.change({ usenet_remove_completed: event.target.value })" in html
     js = (tabs / "video-downloads.ts").read_text(encoding="utf-8")
     assert "usenet_remove_completed: str('usenet_remove_completed') || 'off'" in js

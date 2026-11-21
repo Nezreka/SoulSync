@@ -8,6 +8,7 @@ import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createSettingsHost, mountSettingsHost, type SettingsTabProps } from './host';
+import { nav } from './nav';
 import { pageTabs } from './page-tabs';
 import { SettingsPage } from './settings-page';
 import { createSettingsStore } from './settings-store';
@@ -31,13 +32,13 @@ describe('the settings host', () => {
     host.hydrate({ ui_appearance: { sidebar_visualizer: 'wave' } });
     render(<SettingsPage store={store} tabs={{ appearance: Appearance }} />);
     await act(async () => host.show('appearance'));
-    const slot = document.querySelector('[data-stg-react="appearance"][data-stg-part="ui"]')!;
+    const slot = document.querySelector('[data-stg-react="appearance"][data-stg-part="page"]')!;
     expect(slot.textContent).toBe('visualizer wave');
     const first = slot.firstElementChild;
     await act(async () => host.show('appearance'));
     expect(slot.firstElementChild).toBe(first);
     await act(async () => host.show('logs'));
-    expect(document.querySelector('[data-stg-react="logs"]')!.innerHTML).toBe('');
+    expect(document.querySelector('[data-stg-react="advanced"]')!.innerHTML).toBe('');
     expect(host.ported()).toEqual(['appearance']);
   });
 
@@ -45,20 +46,20 @@ describe('the settings host', () => {
     const Part = ({ part, opened, active }: SettingsTabProps) => (
       <p>{`${part ?? 'whole'} ${opened}${active ? ' open' : ''}`}</p>
     );
-    const tabs = { appearance: Part, logs: Part };
+    const tabs = { appearance: Part, advanced: Part };
     const host = createSettingsHost({ tabs, effects: [] });
     render(<SettingsPage tabs={tabs} />);
     const text = () =>
-      [...document.querySelectorAll('[data-stg-react="appearance"], [data-stg-react="logs"]')].map(
-        (el) => el.textContent,
-      );
-    // opening Logs leaves Appearance on the page too: the settings search reads
+      [
+        ...document.querySelectorAll('[data-stg-react="appearance"], [data-stg-react="advanced"]'),
+      ].map((el) => el.textContent);
+    // opening System leaves Appearance on the page too: the settings search reads
     // every tab, and the shell is about to hide what is not the open tab
-    await act(async () => host.show('logs'));
-    expect(text()).toEqual(['ui 0', 'weather 0', 'whole 1 open']);
+    await act(async () => host.show('advanced'));
+    expect(text()).toEqual(['page 0', 'page 1 open']);
     // opening a tab again tells it so (the weather tile reloads on arrival)
     await act(async () => host.show('appearance'));
-    expect(text()).toEqual(['ui 1 open', 'weather 1 open', 'whole 1']);
+    expect(text()).toEqual(['page 1 open', 'page 1']);
   });
 
   it('a new visit mounts its tabs closed, not as the last visit left them', async () => {
@@ -67,26 +68,25 @@ describe('the settings host', () => {
       seen.push(`${part ?? 'whole'} ${opened}${active ? ' open' : ''}`);
       return null;
     };
-    const tabs = { logs: Part };
+    const tabs = { advanced: Part };
     const host = createSettingsHost({ tabs, effects: [] });
     const first = render(<SettingsPage tabs={tabs} />);
-    await act(async () => host.show('logs'));
+    await act(async () => host.show('advanced'));
     first.unmount();
     seen.length = 0;
     render(<SettingsPage tabs={tabs} />);
-    expect(seen[0]).toBe('whole 0');
+    expect(seen[0]).toBe('page 0');
   });
 
   it("the page's buttons call the shell bundle's functions, one copy of its state", () => {
     const w = window as unknown as Record<string, unknown>;
-    w.switchSettingsTab = vi.fn();
     w.saveSettings = vi.fn(() => Promise.resolve());
     render(<SettingsPage tabs={{}} />);
-    (document.querySelector('[data-tab="logs"]') as HTMLButtonElement).click();
-    expect(w.switchSettingsTab).toHaveBeenCalledWith('logs');
+    // a tab moves the page's one place (nav.ts), which the address follows
+    act(() => (document.querySelector('[data-tab="advanced"]') as HTMLButtonElement).click());
+    expect(nav.get().tab).toBe('advanced');
     (document.getElementById('save-settings') as HTMLButtonElement).click();
     expect(w.saveSettings).toHaveBeenCalledWith(false);
-    delete w.switchSettingsTab;
     delete w.saveSettings;
   });
 
@@ -145,10 +145,8 @@ describe('the settings host', () => {
     delete (window as Window & { _settingsAutosaveOff?: boolean })._settingsAutosaveOff;
   });
 
-  it('a bad Playlist File Naming holds the autosave and says why, as the quiet save did', async () => {
+  it('a bad Playlist File Naming is held back on its own; everything else autosaves', async () => {
     const posted: unknown[] = [];
-    const toast = vi.fn();
-    window.showToast = toast;
     const store = createSettingsStore({
       post: (body) => {
         posted.push(body);
@@ -156,20 +154,27 @@ describe('the settings host', () => {
       },
       delay: 0,
     });
-    createSettingsHost({ tabs: { library: () => null }, store });
+    const host = createSettingsHost({ tabs: { library: () => null }, store });
+    // set as a whole dict, or as its own key: either way it is not sent
     store.set('file_organization', 'templates', { playlist_item: '$position - $artist' });
-    await vi.waitFor(() =>
-      expect(toast).toHaveBeenCalledWith(
-        'Playlist File Naming must include $title so every file has a name.',
-        'error',
-      ),
-    );
-    expect(posted).toEqual([]);
+    store.set('ui_appearance', 'sidebar_visualizer', 'wave');
+    await vi.waitFor(() => expect(posted).toHaveLength(1));
+    expect(posted).toEqual([{ ui_appearance: { sidebar_visualizer: 'wave' } }]);
     expect(store.hasPending()).toBe(true);
+    // the save status says why, and that it is not saved
+    expect(host.blockers()).toEqual([
+      {
+        message:
+          'Playlist File Naming must include $title so every file has a name. It is not saved until it is fixed.',
+      },
+    ]);
     store.set('file_organization', 'templates', { playlist_item: '$position - $title' });
     expect(await store.flush()).toBe(true);
-    expect(posted).toHaveLength(1);
-    delete window.showToast;
+    expect(posted).toHaveLength(2);
+    expect(posted[1]).toEqual({
+      file_organization: { templates: { playlist_item: '$position - $title' } },
+    });
+    expect(store.hasPending()).toBe(false);
   });
 
   it('catches up when the page loaded its settings before this bundle ran', () => {

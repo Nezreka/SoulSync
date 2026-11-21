@@ -1,5 +1,13 @@
 /* settings > library > folders > music: your media server's folders */
 
+/* the intro in the overhaul's card (bare): a plain line, not the old boxed help */
+.intro {
+  margin: 0 0 12px;
+  color: var(--white-a70);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 .overall {
   display: flex;
   align-items: baseline;
@@ -169,7 +177,20 @@
 }
 
 .pathInput {
+  box-sizing: border-box;
   width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--white-a12);
+  border-radius: var(--radius-control);
+  background: var(--white-a04);
+  color: var(--text-bright);
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+.pathInput:focus-visible {
+  outline: 2px solid rgba(var(--accent-rgb), 0.85);
+  outline-offset: 1px;
 }
 
 .pathCheck {

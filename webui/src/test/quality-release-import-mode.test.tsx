@@ -10,7 +10,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 import { createSettingsStore, type SettingsStore } from '@/features/settings/settings-store';
 import { EMPTY_LADDER, ladderFrom } from '@/features/settings/tabs/quality';
-import { QualityTab } from '@/features/settings/tabs/quality-tab';
+import { MusicQualityTab } from '@/features/settings/tabs/quality-tab';
 
 type Profile = Record<string, unknown>;
 const shell = window as unknown as Record<string, unknown>;
@@ -57,17 +57,20 @@ afterEach(async () => {
 });
 
 const mode = () => document.getElementById('quality-release-import-mode') as HTMLSelectElement;
+const cards = () => [
+  ...document.querySelectorAll<HTMLElement>('#qp-profile-list [data-profile-id]'),
+];
 
 async function open(id?: number) {
-  render(<QualityTab store={store} opened={1} active />);
+  render(<MusicQualityTab store={store} opened={1} active />);
   act(() => store.hydrate({}));
-  await waitFor(() => expect(document.querySelectorAll('.qp-profile-row')).toHaveLength(3));
+  await waitFor(() => expect(cards()).toHaveLength(3));
   if (id) await view(id);
 }
 
 async function view(id: number) {
-  const name = rows.find((r) => r.id === id)!.name;
-  fireEvent.click(screen.getByText(name));
+  // the profile's card (settings-bic phase 3: the profiles are cards)
+  fireEvent.click(document.querySelector(`[data-profile-id="${id}"] button`)!);
   const want = profiles[id].release_import_mode as string;
   await waitFor(() => expect(mode().value).toBe(want));
 }
@@ -100,16 +103,17 @@ it('saves an explicit opt-out after viewing an opted-in profile', async () => {
 it('offers both policies in a profile card of Quality and explains the normal import pipeline', async () => {
   await open();
   const select = mode();
-  expect(select.closest('[data-stg]')?.getAttribute('data-stg')).toBe('quality');
-  const body = select.closest('.settings-section-body');
-  const header = body?.previousElementSibling;
-  expect(header?.querySelector('h3')?.textContent).toBe('Album Releases');
-  expect(header?.querySelector('.qp-governed-badge')).not.toBeNull();
+  // on Quality > Music, behind "Checks and imports" with the profile's other checks
+  expect(select.closest('[data-music-quality]')).not.toBeNull();
+  expect(select.closest('[data-more-body]')).not.toBeNull();
+  expect(screen.getByRole('button', { name: /Checks and imports/ }).textContent).toContain(
+    'album releases',
+  );
   expect([...select.options].map((option) => option.value)).toEqual([
     'requested_tracks',
     'album_tracks',
   ]);
-  const help = select.closest('.form-group')?.textContent || '';
+  const help = select.closest('[data-row]')?.textContent || '';
   expect(help).toContain('this quality');
   expect(help).toContain('normal import pipeline');
   expect(help).toContain('quarantined on its own');
