@@ -153,7 +153,7 @@ def detail(db: Any, profile_id: int, playlist_id: int, *, scope: Any,
         facts = _facts(conn, [i for i in ids if i in ok])
     songs = []
     total_ms = 0
-    for n, (r, tid) in enumerate(zip(rows, ids), start=1):
+    for n, (r, tid) in enumerate(zip(rows, ids, strict=True), start=1):
         f = facts.get(tid) if tid in ok else None
         length = (f or {}).get("duration_ms") or int(r.get("duration_ms") or 0)
         total_ms += length
