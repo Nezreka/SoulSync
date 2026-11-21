@@ -3426,14 +3426,6 @@ a.crewRow:hover {
   font-size: calc(var(--u) * 0.76);
 }
 
-/* home: what you're part-way through comes first; the spotlight follows */
-.homeLead {
-  padding-top: calc(var(--u) * 0.5);
-}
-
-.homeLead ~ .hero {
-  margin-top: calc(var(--u) * 1.5);
-}
 
 /* ── browse tabs + category tiles ────────────────────────────────────── */
 
@@ -3511,4 +3503,369 @@ a.crewRow:hover {
   display: flex;
   justify-content: center;
   padding: calc(var(--u) * 1.5) 0 0;
+}
+
+/* ── home billboard ──────────────────────────────────────────────────── */
+
+.billboard {
+  position: relative;
+  z-index: 0;
+  isolation: isolate;
+  display: flex;
+  align-items: center;
+  min-height: min(86vh, calc(var(--u) * 52));
+  margin: calc(var(--u) * -4.75) calc(var(--pl-gutter) * -1) 0;
+  padding: calc(var(--u) * 6) var(--pl-gutter) calc(var(--u) * 12);
+  overflow: hidden;
+}
+
+.billboardArt {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  container-type: size;
+}
+
+.billboardFrame {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity 1.1s ease;
+}
+
+.billboardFrame[data-on='true'] {
+  opacity: 1;
+}
+
+.billboardFrame img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 20%;
+}
+
+/* a slow push in on the art on show, like a camera settling */
+.billboardFrame[data-on='true'] img {
+  animation: billboardDrift 18s ease-out both;
+}
+
+@keyframes billboardDrift {
+  from {
+    transform: scale(1.08);
+  }
+  to {
+    transform: scale(1);
+  }
+}
+
+.billboardArt .heroTrailer {
+  z-index: 1;
+}
+
+.billboardShade {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  background:
+    linear-gradient(
+      77deg,
+      rgba(var(--pl-ink-rgb), 0.9) 0%,
+      rgba(var(--pl-ink-rgb), 0.55) 32%,
+      rgba(var(--pl-ink-rgb), 0.05) 62%,
+      transparent 80%
+    ),
+    linear-gradient(
+      0deg,
+      rgba(var(--pl-ink-rgb), 1) 0%,
+      rgba(var(--pl-ink-rgb), 0.6) 14%,
+      transparent 38%
+    ),
+    linear-gradient(180deg, rgba(var(--pl-ink-rgb), 0.55) 0%, transparent 16%);
+}
+
+.billboardArt .trailerControls {
+  top: 58%;
+  right: calc(var(--pl-gutter) + var(--u) * 5.5);
+  bottom: auto;
+  z-index: 3;
+}
+
+.billboardBody {
+  position: relative;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 0.9);
+  width: min(100%, calc(var(--u) * 38));
+  animation: billboardIn var(--dur-slowest) var(--pl-ease) both;
+}
+
+@keyframes billboardIn {
+  from {
+    opacity: 0;
+    transform: translateY(calc(var(--u) * 0.8));
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.billboardWhy {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--u) * 0.5);
+  color: var(--pl-text-2);
+  font-size: calc(var(--u) * 0.85);
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.billboardWhy::before {
+  content: '';
+  width: calc(var(--u) * 1.4);
+  height: 2px;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+}
+
+.billboardLogo {
+  display: block;
+  width: auto;
+  max-width: min(100%, calc(var(--u) * 30));
+  max-height: calc(var(--u) * 10);
+  object-fit: contain;
+  object-position: left bottom;
+  filter: drop-shadow(0 calc(var(--u) * 0.2) calc(var(--u) * 1.2) var(--black-a60));
+}
+
+.billboardTitle {
+  margin: 0;
+  font-size: clamp(calc(var(--u) * 2.6), 5vw, calc(var(--u) * 4.4));
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.035em;
+  text-wrap: balance;
+}
+
+.billboardTitle[data-long='true'] {
+  font-size: clamp(calc(var(--u) * 2.1), 3.4vw, calc(var(--u) * 3.1));
+}
+
+.billboardMeta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: calc(var(--u) * 0.3) calc(var(--u) * 0.9);
+  color: var(--pl-text-2);
+  font-size: calc(var(--u) * 0.95);
+  font-weight: 500;
+}
+
+.billboardScore {
+  color: var(--accent-light);
+  font-weight: 700;
+}
+
+.billboardOverview {
+  display: -webkit-box;
+  min-height: calc(var(--u) * 1.6 * 3);
+  margin: 0;
+  overflow: hidden;
+  color: var(--pl-text);
+  font-size: calc(var(--u) * 1.05);
+  line-height: 1.55;
+  text-shadow: 0 1px calc(var(--u) * 0.6) var(--black-a60);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.billboardActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: calc(var(--u) * 0.7);
+  margin-top: calc(var(--u) * 0.4);
+}
+
+.billboardActions .btnPrimary {
+  background: var(--pl-text);
+  color: var(--pl-bg);
+}
+
+.billboardInfo {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--u) * 0.55);
+  height: calc(var(--u) * 2.9);
+  padding: 0 calc(var(--u) * 1.4);
+  border-radius: var(--radius-pill);
+  background: var(--white-a20);
+  color: var(--pl-text);
+  font-size: calc(var(--u) * 0.98);
+  font-weight: 600;
+  text-decoration: none;
+  backdrop-filter: blur(8px);
+  transition: background var(--dur-fast) ease;
+}
+
+.billboardInfo:hover,
+.billboardInfo:focus-visible {
+  background: var(--white-a30);
+}
+
+.billboardInfo svg {
+  width: calc(var(--u) * 1.2);
+  height: calc(var(--u) * 1.2);
+}
+
+/* the age rating, flush to the right edge with a bar, like a broadcast */
+.billboardRating {
+  position: absolute;
+  top: 58%;
+  right: 0;
+  z-index: 4;
+  padding: calc(var(--u) * 0.35) calc(var(--pl-gutter) + var(--u) * 0.2) calc(var(--u) * 0.35)
+    calc(var(--u) * 0.8);
+  border-left: 3px solid var(--white-a60);
+  background: var(--black-a40);
+  color: var(--pl-text);
+  font-size: calc(var(--u) * 0.95);
+  font-weight: 600;
+}
+
+.billboardDots {
+  position: absolute;
+  right: var(--pl-gutter);
+  bottom: calc(var(--u) * 13);
+  z-index: 4;
+  display: flex;
+  gap: calc(var(--u) * 0.35);
+}
+
+.billboardDot {
+  position: relative;
+  width: calc(var(--u) * 1.4);
+  height: 4px;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--white-a30);
+  cursor: pointer;
+  transition: width var(--dur-fast) var(--pl-ease);
+}
+
+.billboardDot[aria-selected='true'] {
+  width: calc(var(--u) * 3);
+}
+
+.billboardDotFill {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--pl-text);
+  transform-origin: left;
+  transform: scaleX(1);
+}
+
+.billboardDotFill[data-running='true'] {
+  animation: billboardFill 10s linear both;
+}
+
+@keyframes billboardFill {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+/* the rows start over the billboard's fade, the way a streaming home does */
+.homeRows {
+  position: relative;
+  /* over the billboard, under the header */
+  z-index: 1;
+  margin-top: calc(var(--u) * -10);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .billboardFrame[data-on='true'] img,
+  .billboardBody,
+  .billboardDotFill[data-running='true'] {
+    animation: none;
+  }
+}
+
+/* ── top 10 ──────────────────────────────────────────────────────────── */
+
+.top10Row {
+  display: flex;
+  gap: calc(var(--u) * 0.6);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.top10Item {
+  position: relative;
+  display: flex;
+  flex: none;
+  align-items: flex-end;
+  width: calc(var(--pl-card-poster) * 1.55);
+  color: var(--pl-text);
+  text-decoration: none;
+}
+
+.top10Num {
+  position: relative;
+  z-index: 0;
+  margin-right: calc(var(--pl-card-poster) * -0.22);
+  color: var(--pl-bg);
+  font-size: calc(var(--pl-card-poster) * 0.95);
+  font-weight: 900;
+  line-height: 0.78;
+  letter-spacing: -0.08em;
+  -webkit-text-stroke: 3px var(--white-a50);
+  paint-order: stroke fill;
+  transition: -webkit-text-stroke-color var(--dur-fast) ease;
+}
+
+.top10Poster {
+  position: relative;
+  z-index: 1;
+  flex: none;
+  width: var(--pl-card-poster);
+  overflow: hidden;
+  aspect-ratio: 2 / 3;
+  border-radius: var(--radius-lg);
+  background: var(--white-a06);
+  box-shadow: 0 calc(var(--u) * 0.6) calc(var(--u) * 1.6) var(--black-a60);
+  transition: transform var(--dur-fast) var(--pl-ease);
+}
+
+.top10Poster img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.top10Item[data-muted='true'] .top10Poster img {
+  filter: brightness(0.6) saturate(0.75);
+}
+
+.top10Item:hover .top10Poster,
+.top10Item:focus-visible .top10Poster {
+  transform: translateY(calc(var(--u) * -0.3));
+}
+
+.top10Item:hover .top10Poster img,
+.top10Item:focus-visible .top10Poster img {
+  filter: none;
+}
+
+.top10Item:hover .top10Num,
+.top10Item:focus-visible .top10Num {
+  -webkit-text-stroke-color: var(--white-a85);
 }

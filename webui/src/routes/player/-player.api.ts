@@ -694,3 +694,17 @@ export const tmdbSearchQuery = (q: string) =>
     staleTime: 5 * MINUTE,
     retry: false,
   });
+
+/** tmdb title logos for a few titles ("movie:603") */
+export const logosQuery = (items: string[]) =>
+  queryOptions({
+    queryKey: ['player', 'logos', items],
+    queryFn: async () =>
+      (
+        await apiClient
+          .get('player/logos', { searchParams: { items: items.join(',') } })
+          .json<{ logos?: Record<string, string | null> }>()
+      ).logos ?? {},
+    staleTime: 60 * MINUTE,
+    enabled: items.length > 0,
+  });

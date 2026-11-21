@@ -72,3 +72,15 @@ def test_the_rating_cap_and_the_kinds_hold(monkeypatch):
     # no tv on this profile: no network page
     assert client.get("/api/player/maker?kind=network&name=HBO").status_code == 403
     assert client.get("/api/player/maker?kind=label&name=x").status_code == 400
+
+
+def test_logos_route_takes_a_short_clean_list(monkeypatch):
+    class Logos:
+        def title_logo(self, kind, tmdb_id):
+            return f"https://img/{kind}{tmdb_id}.png" if tmdb_id != 2 else ""
+
+    client = _client(monkeypatch, (True, True, True, None), Logos())
+    body = client.get("/api/player/logos?items=movie:1,show:2,bad:3,movie:x").get_json()
+    assert body["logos"] == {"movie:1": "https://img/movie1.png", "show:2": None}
+    many = ",".join(f"movie:{i}" for i in range(1, 30))
+    assert len(client.get(f"/api/player/logos?items={many}").get_json()["logos"]) == 12

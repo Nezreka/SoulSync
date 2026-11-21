@@ -181,3 +181,10 @@ export const ListIcon = () => (
     <circle cx="4.5" cy="18" r="1" fill="currentColor" />
   </Icon>
 );
+
+export const InfoIcon = () => (
+  <Icon>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 11v5.5M12 7.5v.01" />
+  </Icon>
+);

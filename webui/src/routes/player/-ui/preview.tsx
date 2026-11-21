@@ -21,8 +21,9 @@ export interface PreviewTarget {
   id: number;
 }
 
-const OPEN_MS_POINTER = 450;
-const OPEN_MS_FOCUS = 900;
+// a second of resting on a card: passing over a row never opens one
+const OPEN_MS_POINTER = 1000;
+const OPEN_MS_FOCUS = 1200;
 const CLOSE_MS = 140;
 
 function canHover(): boolean {

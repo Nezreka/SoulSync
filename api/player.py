@@ -446,6 +446,36 @@ def maker_titles():
         return jsonify({"success": False, "error": "Could not look that up"}), 500
 
 
+LOGO_MAX = 12
+
+
+@bp.route("/api/player/logos", methods=["GET"])
+@requires_any("movies.access", "tv.access")
+def title_logos():
+    """tmdb title logos (the wordmark art) for a few titles at once, for the
+    home billboard: ?items=movie:603,show:1399 (up to 12). the engine keeps
+    each a day, a miss included; a cold set is fetched side by side."""
+    import concurrent.futures
+
+    from core.video.enrichment.engine import get_video_enrichment_engine
+    wanted = []
+    for part in (request.args.get("items") or "").split(",")[:LOGO_MAX]:
+        kind, _, ident = part.partition(":")
+        if kind in ("movie", "show") and ident.isdigit():
+            wanted.append((kind, int(ident)))
+    if not wanted:
+        return jsonify({"success": True, "logos": {}})
+    try:
+        eng = get_video_enrichment_engine()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=6) as ex:
+            found = list(ex.map(lambda w: eng.title_logo(w[0], w[1]), wanted))
+        return jsonify({"success": True,
+                        "logos": {f"{k}:{i}": (url or None) for (k, i), url in zip(wanted, found, strict=True)}})
+    except Exception:  # noqa: BLE001 - the billboard falls back to the text title
+        logger.exception("player logos failed")
+        return jsonify({"success": True, "logos": {}})
+
+
 @bp.route("/api/player/keyword", methods=["GET"])
 @requires_any("movies.access", "tv.access")
 def keyword_titles():

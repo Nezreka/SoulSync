@@ -113,12 +113,22 @@ export function playerState(data: unknown): number | null {
  * embed that fades in over the backdrop once youtube says it is playing, and
  * fades back out when it ends.
  */
-export function BackgroundTrailer({ kind, id }: { kind: 'movie' | 'show'; id: number }) {
+export type TrailerStage = 'waiting' | 'loading' | 'playing' | 'ended' | 'stopped';
+
+export function BackgroundTrailer({
+  kind,
+  id,
+  onStage,
+}: {
+  kind: 'movie' | 'show';
+  id: number;
+  /** told each time the trailer starts, ends or is stopped (the billboard waits for it) */
+  onStage?: (stage: TrailerStage) => void;
+}) {
   const [enabled] = useTrailersSetting();
   const trailer = useQuery({ ...extrasQuery(kind, id), enabled, select: (e) => e.trailer ?? null });
-  const [stage, setStage] = useState<'waiting' | 'loading' | 'playing' | 'ended' | 'stopped'>(
-    'waiting',
-  );
+  const [stage, setStage] = useState<TrailerStage>('waiting');
+  useEffect(() => onStage?.(stage), [stage, onStage]);
   const [muted, setMuted] = useState(true);
   const frameRef = useRef<HTMLIFrameElement>(null);
   const key = trailer.data?.key;
