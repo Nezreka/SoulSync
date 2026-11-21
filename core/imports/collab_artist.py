@@ -245,6 +245,19 @@ def kept_whole_keys(config=None) -> set:
     return {name.casefold() for name in kept_whole_artist_names(config)}
 
 
+def credit_lead_artist(credit: str, known_names=(), library_has=None) -> str:
+    """the first artist of a credit line given as one name, when it is
+    provably a list (#2240). the library files a release under an artist,
+    never under a whole credit: "12th Planet, BARELY ALIVE & PhaseOne" made
+    an artist of its own. '' when it stays one name: a name the user keeps
+    whole (#2150), or nothing proves its parts are artists ("Earth, Wind &
+    Fire"). same proof as the folder's first-listed rule (split_credit_primary)."""
+    credit = str(credit or "").strip()
+    if not credit or " ".join(credit.split()).casefold() in kept_whole_keys():
+        return ""
+    return split_credit_primary(credit, known_names, library_has)
+
+
 def library_has_identified_artist(name: str, conn=None) -> bool:
     """does the library hold an artist by exactly this name that a provider
     identified, or one the user said is one artist. False on any doubt."""
