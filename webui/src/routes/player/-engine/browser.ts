@@ -41,6 +41,7 @@ async function playable(item: PlayItem, quality: Quality, pick: TrackPick): Prom
       ...(quality !== 'original' ? { q: quality } : {}),
       ...(pick.audio ? { audio: pick.audio } : {}),
       ...(pick.burn !== null ? { burn: pick.burn } : {}),
+      ...(pick.delay ? { delay: pick.delay } : {}),
     },
     throwHttpErrors: false,
     // finding the file can mean a sleeping drive spinning up (half a minute is normal)
@@ -147,12 +148,38 @@ const store = {
   },
 };
 
+/**
+ * past full volume: the element's sound through a web audio gain. made the
+ * first time it's needed (a person turning it up, so the audio context may
+ * start) and kept, since an element can be wired to only one.
+ */
+const gains = new WeakMap<HTMLMediaElement, { ctx: AudioContext; gain: GainNode }>();
+
+function boost(el: HTMLMediaElement, gain: number) {
+  let node = gains.get(el);
+  if (!node) {
+    if (gain <= 1 || typeof AudioContext === 'undefined') return;
+    try {
+      const ctx = new AudioContext();
+      const g = ctx.createGain();
+      ctx.createMediaElementSource(el).connect(g).connect(ctx.destination);
+      node = { ctx, gain: g };
+      gains.set(el, node);
+    } catch {
+      return; // no web audio: it stops at full volume
+    }
+  }
+  if (node.ctx.state === 'suspended') void node.ctx.resume();
+  node.gain.gain.value = gain;
+}
+
 export function browserDeps(): EngineDeps {
   return {
     createMedia,
     playable,
     progress,
     transcodeStart,
+    boost,
     tracks,
     subtitle,
     save,

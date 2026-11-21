@@ -96,6 +96,8 @@ export interface EngineDeps {
   save: (item: PlayItem, position: number, duration: number | null, finished: boolean) => void;
   store: { get: (key: string) => string | null; set: (key: string, value: string) => void };
   now: () => number;
+  /** amplify an element past full volume (a web audio gain); absent: no boost */
+  boost?: (el: HTMLMediaElement, gain: number) => void;
   /** the lock screen / media keys (navigator.mediaSession), when there is one */
   mediaSession?: MediaSession | null;
   setInterval: (fn: () => void, ms: number) => unknown;
@@ -142,13 +144,20 @@ export interface PlayerState {
   cues: Cue[];
   /** reading a subtitle (an embedded one means the whole file, once) */
   subtitleLoading: boolean;
+  /** audio sync for this item, in ms (later +, earlier -) */
+  audioDelay: number;
 }
 
 /** the audio track, and a picture subtitle drawn in by the converter */
 export interface TrackPick {
   audio: number;
   burn: number | null;
+  /** audio sync: the sound moved this many ms (later +, earlier -) */
+  delay?: number;
 }
+
+/** how loud it can go: past 1, the sound is amplified (a gain node) */
+export const MAX_VOLUME = 1.5;
 
 export type Phase = 'locating' | 'opening' | 'resuming' | 'seeking' | 'buffering' | null;
 
@@ -182,7 +191,7 @@ const SAVE_EVERY_MS = 10_000;
 const RESUME_MIN = 15;
 
 function clampVolume(v: number) {
-  return Math.min(1, Math.max(0, Number.isFinite(v) ? v : 1));
+  return Math.min(MAX_VOLUME, Math.max(0, Number.isFinite(v) ? v : 1));
 }
 
 export class PlayerEngine {
@@ -232,6 +241,7 @@ export class PlayerEngine {
       subtitle: null,
       cues: [],
       subtitleLoading: false,
+      audioDelay: 0,
     };
     this.bindMediaSession();
   }
@@ -384,11 +394,34 @@ export class PlayerEngine {
 
   setVolume(volume: number) {
     const v = clampVolume(volume);
-    for (const el of Object.values(this.media)) if (el) el.volume = v;
+    for (const el of Object.values(this.media)) if (el) this.applyVolume(el, v);
     this.deps.store.set('volume', String(v));
     this.set({ volume: v });
     // turning it up is turning it on
     if (v > 0 && this.state.muted) this.setMuted(false);
+  }
+
+  /** an element at ``v``: up to full on the element, past it through the boost */
+  private applyVolume(el: HTMLMediaElement, v: number) {
+    el.volume = Math.min(1, v);
+    if (v > 1 || this.boosted.has(el)) {
+      this.deps.boost?.(el, Math.max(1, v));
+      this.boosted.add(el);
+    }
+  }
+
+  private readonly boosted = new Set<HTMLMediaElement>();
+
+  /** audio sync for this video: kept for it, applied at the same spot (through the converter) */
+  setAudioDelay(ms: number) {
+    const item = this.state.item;
+    if (!item || this.state.kind !== 'video') return;
+    const delay = Math.max(-10_000, Math.min(10_000, Math.round(ms)));
+    if (delay === (this.pick.delay ?? 0)) return;
+    this.deps.store.set(`delay:${item.type}:${item.id}`, String(delay));
+    this.pick = { ...this.pick, delay };
+    this.set({ audioDelay: delay });
+    void this.load({ startAt: this.state.position, live: this.state.live, keepTracks: true });
   }
 
   setMuted(muted: boolean) {
@@ -560,8 +593,10 @@ export class PlayerEngine {
     this.setPhase('locating');
     const key = `${item.type}:${item.id}:${item.part ?? ''}`;
     if (!options.keepTracks || this.tracksFor !== key) {
-      this.pick = { audio: 0, burn: null };
+      const saved = Number(this.deps.store.get(`delay:${item.type}:${item.id}`)) || 0;
+      this.pick = { audio: 0, burn: null, delay: kind === 'video' ? saved : 0 };
       this.tracksFor = null;
+      this.set({ audioDelay: this.pick.delay ?? 0 });
     }
     // a video's tracks first: the saved language picks which audio to ask for
     if (kind === 'video' && this.tracksFor !== key) {
@@ -575,6 +610,7 @@ export class PlayerEngine {
         const subtitle = pickSubtitle(tracks.subtitles, prefs, audioLang);
         const sub = tracks.subtitles.find((t) => t.id === subtitle);
         this.pick = {
+          ...this.pick,
           audio,
           burn: sub?.kind === 'image' && !sub.external ? Number(sub.id.slice(1)) : null,
         };
@@ -655,7 +691,7 @@ export class PlayerEngine {
     const el = this.element(this.state.kind);
     this.partIndex = index;
     const multi = (playable.parts?.length ?? 0) > 1;
-    el.volume = this.state.volume;
+    this.applyVolume(el, this.state.volume);
     el.muted = this.state.muted;
     if (playable.transcode) {
       // the converted stream is made from ``offset`` on: its 0 is that far in.

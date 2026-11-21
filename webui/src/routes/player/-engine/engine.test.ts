@@ -476,3 +476,42 @@ describe('tracks', () => {
     expect(t.engine.getState().cues.length).toBe(1);
   });
 });
+
+describe('louder than full, and audio sync', () => {
+  it('goes to 150%: the element at full, the rest through the boost', async () => {
+    const gains: number[] = [];
+    const t = setup({});
+    const deps = (t.engine as unknown as { deps: EngineDeps }).deps;
+    deps.boost = (_el, g) => gains.push(g);
+    t.engine.playItems([movie('1')]);
+    await t.flush();
+    t.engine.setVolume(1.4);
+    expect(t.media.video!.volume).toBe(1);
+    expect(gains.at(-1)).toBe(1.4);
+    t.engine.setVolume(0.5);
+    expect(t.media.video!.volume).toBe(0.5);
+    expect(gains.at(-1)).toBe(1); // the boost stays wired, back to 1
+    t.engine.setVolume(9);
+    expect(t.engine.getState().volume).toBe(1.5);
+  });
+
+  it('audio sync asks for the moved sound at the same spot and is kept for the title', async () => {
+    const asked: (number | undefined)[] = [];
+    const t = setup({
+      playable: (_i, _q, pick) => (asked.push(pick?.delay), { url: '/s', duration: 100 }),
+    });
+    t.engine.playItems([movie('1')]);
+    await t.flush();
+    t.media.video!.tick(30);
+    t.engine.setAudioDelay(-150);
+    await t.flush();
+    expect(asked).toEqual([0, -150]);
+    expect(t.engine.getState().audioDelay).toBe(-150);
+    t.engine.playItems([movie('1')]);
+    await t.flush();
+    expect(asked.at(-1)).toBe(-150);
+    t.engine.playItems([movie('2')]);
+    await t.flush();
+    expect(asked.at(-1)).toBe(0);
+  });
+});

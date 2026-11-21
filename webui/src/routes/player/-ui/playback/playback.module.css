@@ -217,16 +217,46 @@
 }
 
 .volumeRange {
-  width: calc(var(--u) * 5.5);
+  width: calc(var(--u) * 6.5);
   height: calc(var(--u) * 0.24);
   border-radius: var(--radius-pill);
-  background: linear-gradient(
-    to right,
-    var(--pl-text) 0 var(--fill),
-    var(--white-a15) var(--fill) 100%
-  );
+  /* the played part, a notch where full volume is, then the boost room */
+  background:
+    linear-gradient(
+      to right,
+      transparent calc(var(--full) - 1px),
+      var(--white-a50) calc(var(--full) - 1px),
+      var(--white-a50) calc(var(--full) + 1px),
+      transparent calc(var(--full) + 1px)
+    ),
+    linear-gradient(to right, var(--pl-text) 0 var(--fill), var(--white-a15) var(--fill) 100%);
   appearance: none;
   cursor: pointer;
+}
+
+.volume[data-boost='true'] .volumeRange {
+  background:
+    linear-gradient(
+      to right,
+      transparent calc(var(--full) - 1px),
+      var(--white-a50) calc(var(--full) - 1px),
+      var(--white-a50) calc(var(--full) + 1px),
+      transparent calc(var(--full) + 1px)
+    ),
+    linear-gradient(
+      to right,
+      var(--pl-text) 0 var(--full),
+      var(--warning) var(--full) var(--fill),
+      var(--white-a15) var(--fill) 100%
+    );
+}
+
+.volumeBoost {
+  min-width: calc(var(--u) * 2.6);
+  color: var(--warning);
+  font-size: calc(var(--u) * 0.72);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 
 .volumeRange::-webkit-slider-thumb {

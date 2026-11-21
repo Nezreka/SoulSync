@@ -21,6 +21,7 @@ import { NextIcon, PauseIcon, PlayIcon } from '../icons';
 import { inPlayer } from '../trailer';
 import {
   AudioMenu,
+  PictureMenu,
   QualityMenu,
   SleepMenu,
   SpeedMenu,
@@ -41,6 +42,7 @@ import { SeekBar } from './seek-bar';
 import { StatsOverlay } from './stats';
 import { SubtitleOverlay } from './subtitles';
 import { useLoading } from './use-loading';
+import { brightnessFilter, useBrightness } from './use-picture';
 import { getEngine, usePlayer, useVideoOpen } from './use-player';
 
 const IDLE_MS = 2600;
@@ -91,6 +93,7 @@ function FullPlayer({ state, onLeave }: { state: PlayerState; onLeave: () => voi
   const [idle, setIdle] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [stats, setStats] = useState(false);
+  const brightness = useBrightness();
   const loading = useLoading(state);
   const timer = useRef<number | undefined>(undefined);
   useMountVideo(frame, true);
@@ -177,6 +180,7 @@ function FullPlayer({ state, onLeave }: { state: PlayerState; onLeave: () => voi
       <div
         ref={frame}
         className={s.fullFrame}
+        style={{ filter: brightnessFilter(brightness) }}
         onClick={() => engine.toggle()}
         onDoubleClick={toggleFullscreen}
       />
@@ -298,6 +302,7 @@ function FullPlayer({ state, onLeave }: { state: PlayerState; onLeave: () => voi
             <AudioMenu state={state} />
             <SubtitleMenu state={state} />
             <QualityMenu quality={state.quality} />
+            <PictureMenu />
             <SpeedMenu rate={state.rate} />
             <SleepMenu state={state} />
             {canPip ? (
@@ -342,10 +347,11 @@ function FullPlayer({ state, onLeave }: { state: PlayerState; onLeave: () => voi
 function MiniPlayer({ onOpen }: { onOpen: () => void }) {
   const frame = useRef<HTMLDivElement>(null);
   const state = usePlayer();
+  const brightness = useBrightness();
   useMountVideo(frame, true);
   return (
     <div className={s.mini}>
-      <div ref={frame} className={s.miniFrame} />
+      <div ref={frame} className={s.miniFrame} style={{ filter: brightnessFilter(brightness) }} />
       <SubtitleOverlay state={state} raised={false} />
       <button
         type="button"

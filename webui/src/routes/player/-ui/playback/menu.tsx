@@ -15,6 +15,8 @@ export interface MenuOption {
   /** a line under the label, when the choice needs a word of explanation */
   detail?: string;
   selected?: boolean;
+  /** stays open after it's picked (a step you press several times) */
+  keepOpen?: boolean;
   onSelect: () => void;
 }
 
@@ -82,7 +84,7 @@ export function PopMenu({
               className={s.menuItem}
               onClick={() => {
                 o.onSelect();
-                setOpen(false);
+                if (!o.keepOpen) setOpen(false);
               }}
               data-nav
             >

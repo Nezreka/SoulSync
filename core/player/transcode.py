@@ -34,6 +34,8 @@ MAX_HEIGHT = 1080
 VIDEO_CRF = "21"
 AUDIO_KBPS = "192k"
 MIME = "video/mp4"
+# audio sync goes this far either way
+MAX_DELAY_MS = 10_000
 
 _slots = threading.BoundedSemaphore(MAX_JOBS)
 
@@ -53,6 +55,8 @@ class Plan:
     # subtitle to burn into the picture (its number among the subtitles)
     audio: int = 0
     burn: Optional[int] = None
+    # audio sync: the sound moved this many milliseconds (later +, earlier -)
+    delay_ms: int = 0
 
     @property
     def needed(self) -> bool:
@@ -78,7 +82,8 @@ QUALITIES = {
 
 def plan(video_codec: Optional[str], audio_codec: Optional[str], *,
          quality: str = "original", hdr: Optional[str] = None,
-         height: Optional[int] = None, audio: int = 0, burn: Optional[int] = None) -> Plan:
+         height: Optional[int] = None, audio: int = 0, burn: Optional[int] = None,
+         delay_ms: int = 0) -> Plan:
     """copy what a browser plays, convert the rest. unknown counts as
     convert: a guess that fails is a silent picture. a quality below the
     source's own height converts the video too (it has to shrink), and HDR
@@ -97,8 +102,12 @@ def plan(video_codec: Optional[str], audio_codec: Optional[str], *,
                        + (" with subtitles drawn in" if burn is not None else ""))
     if not copy_audio:
         reasons.append(f"{(audio_codec or 'unknown').upper()} audio to AAC")
+    delay_ms = max(-MAX_DELAY_MS, min(MAX_DELAY_MS, int(delay_ms or 0)))
+    if delay_ms:
+        reasons.append(f"sound moved {'later' if delay_ms > 0 else 'earlier'} by {abs(delay_ms)} ms")
     return Plan(copy_video, copy_audio, reasons, quality=quality if quality in QUALITIES else "original",
-                tonemap=bool(hdr) and not copy_video, audio=max(0, int(audio or 0)), burn=burn)
+                tonemap=bool(hdr) and not copy_video, audio=max(0, int(audio or 0)), burn=burn,
+                delay_ms=delay_ms)
 
 
 # ── the encoder: the GPU's when it works, else the CPU's ────────────────
@@ -196,15 +205,22 @@ def command(ffmpeg: str, source: str, p: Plan, start: float = 0.0,
     if start > 0:
         # before -i: a fast seek to the keyframe at or before it
         cmd += ["-ss", f"{start:.3f}"]
-    cmd += ["-i", source,
+    cmd += ["-i", source]
+    cmd += [
             # the picture (or the burned-in graph's), the picked audio track (a
             # file with no audio still plays), no subtitle or data streams out
             "-map", "[v]" if p.burn is not None and not p.copy_video else "0:v:0",
             "-map", f"0:a:{p.audio}?", "-sn", "-dn"]
     cmd += ["-c:v", "copy"] if p.copy_video else _video_args(enc, p, p.tonemap and can_tonemap)
-    if p.copy_audio:
+    if p.copy_audio and not p.delay_ms:
         cmd += ["-c:a", "copy"]
     else:
+        if p.delay_ms > 0:
+            # audio sync, later: silence in front (a muxer would undo a timestamp shift)
+            cmd += ["-af", f"adelay={p.delay_ms}:all=1"]
+        elif p.delay_ms < 0:
+            # earlier: the first part of the sound cut off
+            cmd += ["-af", f"atrim=start={-p.delay_ms / 1000:.3f},asetpts=PTS-STARTPTS"]
         cmd += ["-c:a", "aac", "-b:a", AUDIO_KBPS, "-ac", "2"]
     cmd += ["-movflags", "frag_keyframe+empty_moov+default_base_moof",
             "-f", "mp4", "pipe:1"]

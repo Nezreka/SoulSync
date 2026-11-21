@@ -3,12 +3,16 @@
  * button behaves the same everywhere: speed, sleep timer, chapters, volume.
  */
 
+import { useEffect, useState } from 'react';
+
 import type { PlayerState, Quality } from '../../-engine/engine';
 
+import { MAX_VOLUME } from '../../-engine/engine';
 import { chapterAt, clock } from '../../-engine/timeline';
 import { audioLabel, subtitleLabel } from '../../-engine/tracks';
 import {
   AudioIcon,
+  BrightnessIcon,
   ChaptersIcon,
   QualityIcon,
   SleepIcon,
@@ -18,6 +22,7 @@ import {
 } from './icons';
 import { PopMenu } from './menu';
 import s from './playback.module.css';
+import { BRIGHTNESS_STEPS, setBrightness, useBrightness } from './use-picture';
 import { getEngine } from './use-player';
 import { setSubtitleStyle, useSubtitleStyle } from './use-subtitle-style';
 
@@ -97,8 +102,10 @@ export function ChapterMenu({ state }: { state: PlayerState }) {
 
 export function VolumeControl({ volume, muted }: { volume: number; muted: boolean }) {
   const level = muted || volume === 0 ? 0 : volume < 0.5 ? 1 : 2;
+  const shown = muted ? 0 : volume;
+  const pct = Math.round(shown * 100);
   return (
-    <div className={s.volume}>
+    <div className={s.volume} data-boost={shown > 1 ? 'true' : undefined}>
       <button
         type="button"
         className={s.ctl}
@@ -113,15 +120,42 @@ export function VolumeControl({ volume, muted }: { volume: number; muted: boolea
         className={s.volumeRange}
         type="range"
         min={0}
-        max={1}
+        max={MAX_VOLUME}
         step={0.02}
-        value={muted ? 0 : volume}
+        value={shown}
         aria-label="Volume"
+        aria-valuetext={`${pct}%`}
+        title={`${pct}%${shown > 1 ? ' (boosted)' : ''}`}
         onChange={(e) => getEngine().setVolume(Number(e.target.value))}
-        style={{ '--fill': `${(muted ? 0 : volume) * 100}%` } as React.CSSProperties}
+        style={
+          {
+            '--fill': `${(shown / MAX_VOLUME) * 100}%`,
+            '--full': `${(1 / MAX_VOLUME) * 100}%`,
+          } as React.CSSProperties
+        }
       />
+      {shown > 1 ? <span className={s.volumeBoost}>{pct}%</span> : null}
     </div>
   );
+}
+
+/** audio sync: the sound earlier or later, in 50 ms steps (applied once you stop pressing) */
+function useDelaySteps(applied: number): [number, (next: number) => void] {
+  const [pending, setPending] = useState<number | null>(null);
+  useEffect(() => {
+    if (pending === null) return;
+    const t = window.setTimeout(() => {
+      getEngine().setAudioDelay(pending);
+      setPending(null);
+    }, 800);
+    return () => window.clearTimeout(t);
+  }, [pending]);
+  return [pending ?? applied, setPending];
+}
+
+function syncWords(ms: number) {
+  if (!ms) return 'In sync';
+  return `Sound ${Math.abs(ms)} ms ${ms > 0 ? 'later' : 'earlier'}`;
 }
 
 const QUALITY_LABELS: Record<Quality, { label: string; detail: string }> = {
@@ -149,25 +183,70 @@ export function QualityMenu({ quality }: { quality: Quality }) {
   );
 }
 
-/** the file's audio tracks by language, channels and codec */
+/** the file's audio tracks by language, channels and codec, and audio sync */
 export function AudioMenu({ state }: { state: PlayerState }) {
   const audio = state.tracks?.audio ?? [];
-  if (audio.length < 2) return null;
+  const [delay, setDelay] = useDelaySteps(state.audioDelay);
+  if (state.kind !== 'video') return null;
+  const tracks =
+    audio.length > 1
+      ? audio.map((t) => {
+          const words = audioLabel(t);
+          return {
+            key: String(t.index),
+            label: words.label,
+            detail: words.detail,
+            selected: t.index === state.audioTrack,
+            onSelect: () => getEngine().setAudioTrack(t.index),
+          };
+        })
+      : [];
   return (
     <PopMenu
       label="Audio"
-      title="Audio"
+      title={`Audio · ${syncWords(delay)}`}
       icon={<AudioIcon />}
-      options={audio.map((t) => {
-        const words = audioLabel(t);
-        return {
-          key: String(t.index),
-          label: words.label,
-          detail: words.detail,
-          selected: t.index === state.audioTrack,
-          onSelect: () => getEngine().setAudioTrack(t.index),
-        };
-      })}
+      badge={delay ? `${delay > 0 ? '+' : ''}${delay}` : undefined}
+      options={[
+        ...tracks,
+        {
+          key: 'earlier',
+          label: 'Sound earlier',
+          detail: 'If voices come after the lips move',
+          keepOpen: true,
+          onSelect: () => setDelay(delay - 50),
+        },
+        {
+          key: 'later',
+          label: 'Sound later',
+          detail: 'If voices come before the lips move',
+          keepOpen: true,
+          onSelect: () => setDelay(delay + 50),
+        },
+        ...(delay
+          ? [{ key: 'reset', label: 'Back in sync', keepOpen: true, onSelect: () => setDelay(0) }]
+          : []),
+      ]}
+    />
+  );
+}
+
+/** brightness: dim the picture (for watching in bed) */
+export function PictureMenu() {
+  const brightness = useBrightness();
+  return (
+    <PopMenu
+      label="Brightness"
+      title="Brightness"
+      icon={<BrightnessIcon />}
+      badge={brightness < 1 ? `${Math.round(brightness * 100)}%` : undefined}
+      options={BRIGHTNESS_STEPS.map((v) => ({
+        key: String(v),
+        label: v === 1 ? 'Full' : `${Math.round(v * 100)}%`,
+        detail: v === 0.15 ? 'Barely there' : v <= 0.45 ? 'Dim' : undefined,
+        selected: Math.abs(v - brightness) < 0.01,
+        onSelect: () => setBrightness(v),
+      }))}
     />
   );
 }

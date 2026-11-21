@@ -194,3 +194,21 @@ def test_another_audio_track_or_burned_subtitles_always_convert(client, monkeypa
     assert jp["transcode"]["reasons"] == ["AC3 audio to AAC"]
     burned = client.get("/api/player/playable/movie/fine?burn=0").get_json()
     assert burned["url"].endswith("&burn=0") and burned["transcode"]["video"] == "h264"
+
+
+def test_audio_sync_moves_the_sound():
+    cpu = ("libx264", "CPU", [], "")
+    p = T.plan("h264", "aac", delay_ms=250)
+    assert p.copy_video and "sound moved later by 250 ms" in p.reasons
+    cmd = T.command("ffmpeg", "x.mkv", p, 60, cpu)
+    # the sound itself moves (a timestamp shift would be undone by the muxer)
+    assert cmd[cmd.index("-af") + 1] == "adelay=250:all=1"
+    assert cmd[cmd.index("-c:a") + 1] == "aac" and cmd[cmd.index("-c:v") + 1] == "copy"
+    early = T.command("ffmpeg", "x.mkv", T.plan("h264", "aac", delay_ms=-400), 0, cpu)
+    assert early[early.index("-af") + 1] == "atrim=start=0.400,asetpts=PTS-STARTPTS"
+    assert T.plan("h264", "aac", delay_ms=-999_999).delay_ms == -10_000
+
+
+def test_audio_sync_always_converts(client):
+    body = client.get("/api/player/playable/movie/fine?delay=-300").get_json()
+    assert body["url"].endswith("&delay=-300") and "sound moved earlier by 300 ms" in body["transcode"]["reasons"]
