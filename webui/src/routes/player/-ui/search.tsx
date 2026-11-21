@@ -250,6 +250,7 @@ export function Search() {
             sub: [a.artist_name, a.year].filter(Boolean).join(' · ') || 'Album',
             art: libraryThumb(a.image_url) ?? remoteImage(a.remote_image_url),
             href: `/player/music/album/${a.id}`,
+            play: { kind: 'album' as const, id: Number(a.id) },
             type: 'Album',
           }),
         ),

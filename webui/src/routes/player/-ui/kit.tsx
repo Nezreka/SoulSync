@@ -11,6 +11,7 @@ import type { RailCard } from '../-lib/rails';
 import type { PlayVerdict } from '../-player.types';
 
 import { BackIcon, CheckIcon, ChevronIcon, GridIcon, ListIcon, MoreIcon, PlayIcon } from './icons';
+import { usePlayCard } from './playback/play-card';
 import s from './player.module.css';
 import { usePreview } from './preview';
 
@@ -77,19 +78,62 @@ export function Art({
 
 // ── cards ──────────────────────────────────────────────────────────────
 
+/** the play button on a card's art: plays it here; the card still opens its page */
+function CardPlay({ target, title }: { target: NonNullable<RailCard['play']>; title: string }) {
+  const playCard = usePlayCard();
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
+  return (
+    <button
+      type="button"
+      className={s.cardPlay}
+      data-busy={busy ? 'true' : undefined}
+      aria-label={`Play ${title}`}
+      title={failed ? 'Nothing here you can play' : `Play ${title}`}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (busy) return;
+        setBusy(true);
+        setFailed(false);
+        playCard(target)
+          .then((ok) => setFailed(!ok))
+          .catch(() => setFailed(true))
+          .finally(() => setBusy(false));
+      }}
+      data-nav
+    >
+      <PlayIcon />
+    </button>
+  );
+}
+
 export interface CardAction {
   label: string;
   onSelect: () => void;
+}
+
+/** a card that does something here instead of opening a page (play a video) */
+export type CardOpen = (card: RailCard) => void;
+
+function openKeys(open: () => void) {
+  return (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      open();
+    }
+  };
 }
 
 export function Card({
   card,
   round,
   actions,
+  onOpen,
 }: {
   card: RailCard;
   round?: boolean;
   actions?: CardAction[];
+  onOpen?: CardOpen;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -146,7 +190,20 @@ export function Card({
       data-round={round ? 'true' : undefined}
       ref={menuRef}
     >
-      {card.href ? (
+      {onOpen ? (
+        <div
+          className={s.card}
+          role="button"
+          tabIndex={0}
+          aria-label={card.title}
+          onClick={() => onOpen(card)}
+          onKeyDown={openKeys(() => onOpen(card))}
+          data-nav
+          {...handlers}
+        >
+          {body}
+        </div>
+      ) : card.href ? (
         <PlayerLink href={card.href} className={s.card} data-nav {...handlers}>
           {body}
         </PlayerLink>
@@ -156,6 +213,13 @@ export function Card({
         </div>
       )}
       {panel}
+      {card.play ? (
+        // over the art but outside the link: a click inside a link is the page's
+        // before react can stop it, and opened the album as well as playing it
+        <div className={s.cardPlaySlot}>
+          <CardPlay target={card.play} title={card.title} />
+        </div>
+      ) : null}
       {actions?.length ? (
         <>
           <button
@@ -291,18 +355,26 @@ export function CardRail({
   more,
   round,
   actionsFor,
+  onOpen,
 }: {
   title: string;
   cards: RailCard[];
   more?: { to: string; label?: string };
   round?: boolean;
   actionsFor?: (card: RailCard) => CardAction[];
+  onOpen?: CardOpen;
 }) {
   if (!cards.length) return null;
   return (
     <Rail title={title} more={more}>
       {cards.map((card) => (
-        <Card key={card.key} card={card} round={round} actions={actionsFor?.(card)} />
+        <Card
+          key={card.key}
+          card={card}
+          round={round}
+          actions={actionsFor?.(card)}
+          onOpen={onOpen}
+        />
       ))}
     </Rail>
   );
@@ -316,6 +388,7 @@ export function CardGrid({
   round,
   view = 'grid',
   actionsFor,
+  onOpen,
 }: {
   cards: RailCard[];
   shape?: RailCard['shape'];
@@ -324,6 +397,7 @@ export function CardGrid({
   actionsFor?: (card: RailCard) => CardAction[];
   /** a list reads better for long filmographies and big libraries */
   view?: ViewMode;
+  onOpen?: CardOpen;
 }) {
   // a library is thousands of titles: render a screenful ahead and grow as
   // the end comes near, instead of putting every card in the page at once
@@ -333,13 +407,19 @@ export function CardGrid({
       {view === 'list' ? (
         <div className={s.cardList} role="list">
           {cards.slice(0, shown.count).map((card) => (
-            <CardRow key={card.key} card={card} round={round} />
+            <CardRow key={card.key} card={card} round={round} onOpen={onOpen} />
           ))}
         </div>
       ) : (
         <div className={s.grid} data-shape={shape}>
           {cards.slice(0, shown.count).map((card) => (
-            <Card key={card.key} card={card} round={round} actions={actionsFor?.(card)} />
+            <Card
+              key={card.key}
+              card={card}
+              round={round}
+              actions={actionsFor?.(card)}
+              onOpen={onOpen}
+            />
           ))}
         </div>
       )}
@@ -351,7 +431,15 @@ export function CardGrid({
 }
 
 /** one card as a list row: small art, the words, the badges */
-export function CardRow({ card, round }: { card: RailCard; round?: boolean }) {
+export function CardRow({
+  card,
+  round,
+  onOpen,
+}: {
+  card: RailCard;
+  round?: boolean;
+  onOpen?: CardOpen;
+}) {
   const body = (
     <>
       <span className={s.rowThumb} data-shape={card.shape} data-round={round ? 'true' : undefined}>
@@ -378,7 +466,18 @@ export function CardRow({ card, round }: { card: RailCard; round?: boolean }) {
       title={card.muted}
       className={s.cardRowWrap}
     >
-      {card.href ? (
+      {onOpen ? (
+        <div
+          className={s.cardRow}
+          role="button"
+          tabIndex={0}
+          onClick={() => onOpen(card)}
+          onKeyDown={openKeys(() => onOpen(card))}
+          data-nav
+        >
+          {body}
+        </div>
+      ) : card.href ? (
         <PlayerLink href={card.href} className={s.cardRow} data-nav>
           {body}
         </PlayerLink>

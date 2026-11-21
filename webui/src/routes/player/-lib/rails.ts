@@ -56,6 +56,8 @@ export interface RailCard {
   muted?: string;
   /** the title this card previews on hover or focus */
   preview?: { kind: 'movie' | 'show'; id: number };
+  /** a play button on the art (hover or focus): plays it here, the card still opens its page */
+  play?: { kind: 'album' | 'playlist' | 'movie' | 'show'; id: number };
 }
 
 /** item types and the shape their artwork is */
@@ -308,6 +310,7 @@ export function recentAlbumCards(albums: readonly LibAlbum[], limit = 20): RailC
     subtitle: a.artist_name ?? undefined,
     art: libraryThumb(a.image_url) ?? remoteImage(a.remote_image_url),
     href: `/player/music/album/${a.id}`,
+    play: { kind: 'album', id: Number(a.id) },
     shape: 'square' as const,
   }));
 }

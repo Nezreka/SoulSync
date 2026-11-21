@@ -100,6 +100,7 @@ function MusicBrowse() {
     subtitle: [a.artist_name, a.year].filter(Boolean).join(' · '),
     art: libraryThumb(a.image_url) ?? remoteImage(a.remote_image_url),
     href: `/player/music/album/${a.id}`,
+    play: { kind: 'album' as const, id: Number(a.id) },
     shape: 'square',
   }));
 

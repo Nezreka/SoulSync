@@ -8,12 +8,26 @@
 import { useState, type ReactNode } from 'react';
 
 import type { YtVideo } from '../../-player.types';
+import type { CardOpen } from '../kit';
 
 import { youtubeItems } from '../../-lib/play-items';
 import { VideoDialog } from '../trailer';
 import { playItems } from './use-player';
 
-export function useYoutubePlay(): [(videos: YtVideo[], start?: number) => void, ReactNode] {
+type PlayYoutube = (videos: YtVideo[], start?: number) => void;
+
+/**
+ * a video card's click: play that video, the list's downloaded ones after
+ * it. (its href is the channel, which is the page you may already be on.)
+ */
+export function openVideoFrom(play: PlayYoutube, videos: YtVideo[]): CardOpen {
+  return (card) => {
+    const at = videos.findIndex((v) => `yt:${v.id}` === card.key);
+    if (at >= 0) play(videos, at);
+  };
+}
+
+export function useYoutubePlay(): [PlayYoutube, ReactNode] {
   const [embed, setEmbed] = useState<YtVideo | null>(null);
   const play = (videos: YtVideo[], start = 0) => {
     const first = videos[start];

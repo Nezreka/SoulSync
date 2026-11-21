@@ -26,15 +26,16 @@ import {
   PX_PER_MINUTE,
   saveRules,
 } from './-lib/guide';
+import { albumArtwork } from './-lib/images';
 import { hashSeed, programsInWindow, type GuideProgram } from './-lib/schedule';
 import { genresOf } from './-lib/video';
 import {
   favoritesQuery,
   musicChannelsQuery,
-  playlistTracksQuery,
+  playlistQuery,
   saveFavorites,
   songsQuery,
-  userPlaylistsQuery,
+  playlistsQuery,
   videoCatalogQuery,
 } from './-player.api';
 import { ChannelForm } from './-ui/guide-form';
@@ -131,15 +132,15 @@ function GuidePage() {
   const now = useNow();
   const [offset, setOffset] = useState(0);
   const catalog = useQuery({ ...videoCatalogQuery(), enabled: sections.video });
-  const playlists = useQuery({ ...userPlaylistsQuery(), enabled: sections.music });
+  const playlists = useQuery({ ...playlistsQuery(), enabled: sections.music });
   const musicChannels = useQuery({ ...musicChannelsQuery(), enabled: sections.music });
   const firstPlaylists = useMemo(
     () =>
-      (playlists.data ?? []).filter((p) => (p.track_count ?? 0) > 2).slice(0, PLAYLIST_CHANNELS),
+      (playlists.data?.yours ?? []).filter((p) => p.track_count > 2).slice(0, PLAYLIST_CHANNELS),
     [playlists.data],
   );
   const playlistTracks = useQueries({
-    queries: firstPlaylists.map((p) => ({ ...playlistTracksQuery(p.id), enabled: sections.music })),
+    queries: firstPlaylists.map((p) => ({ ...playlistQuery(p.id), enabled: sections.music })),
   });
   const musicPool = useMusicPool(sections.music);
   const favorites = useFavorites();
@@ -174,15 +175,17 @@ function GuidePage() {
     const out: Channel[] = [...videoChannels];
     if (musicChannel) out.splice(Math.min(3, out.length), 0, musicChannel);
     firstPlaylists.forEach((p, i) => {
-      const tracks = playlistData.current[i]?.data ?? [];
+      // only songs this profile can play, by their library track (a row id plays nothing)
+      const songs = (playlistData.current[i]?.data?.songs ?? []).filter((t) => t.track_id !== null);
       const channel = playlistChannel({
         id: p.id,
         name: p.name,
-        tracks: tracks.map((t) => ({
-          id: t.id,
-          title: t.track_name,
-          artist: t.artist_name,
+        tracks: songs.map((t) => ({
+          id: t.track_id!,
+          title: t.title,
+          artist: t.artist,
           seconds: t.duration_ms ? t.duration_ms / 1000 : null,
+          art: t.album_id ? albumArtwork(t.album_id) : null,
         })),
       });
       if (channel) out.push(channel);

@@ -34,6 +34,7 @@ function releaseCards(releases: LibRelease[]): RailCard[] {
     subtitle: r.year ? String(r.year) : undefined,
     art: libraryThumb(r.image_url) ?? remoteImage(r.remote_image_url),
     href: `/player/music/album/${r.id}`,
+    play: { kind: 'album' as const, id: Number(r.id) },
     shape: 'square',
   }));
 }

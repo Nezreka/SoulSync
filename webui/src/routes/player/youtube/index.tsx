@@ -24,7 +24,7 @@ import {
   styles as s,
 } from '../-ui/kit';
 import { NotPartOfProfile } from '../-ui/not-part';
-import { useYoutubePlay } from '../-ui/playback/youtube';
+import { openVideoFrom, useYoutubePlay } from '../-ui/playback/youtube';
 import { useSections } from '../-ui/sections';
 import { useYoutubeWatchlistActions } from '../-ui/watchlist';
 
@@ -129,6 +129,7 @@ function YoutubeHome() {
           </div>
           <CardGrid
             cards={downloads.map((v) => ytVideoCard(v))}
+            onOpen={openVideoFrom(playYoutube, downloads)}
             actionsFor={ytActions}
             shape="wide"
             view={view}
@@ -152,6 +153,7 @@ function YoutubeHome() {
             key={r.title}
             title={r.title}
             cards={r.videos.slice(0, 30).map((v) => ytVideoCard(v))}
+            onOpen={openVideoFrom(playYoutube, r.videos.slice(0, 30))}
             actionsFor={ytActions}
           />
         ))}
@@ -239,12 +241,14 @@ function YoutubeHome() {
           <CardRail
             title="Latest from your channels"
             cards={latest.slice(0, 30).map((v) => ytVideoCard(v))}
+            onOpen={openVideoFrom(playYoutube, latest.slice(0, 30))}
             actionsFor={ytActions}
           />
           <CardRail title="Your channels" cards={channels.map(ytChannelCard)} round />
           <CardRail
             title="Downloaded"
             cards={downloads.slice(0, 30).map((v) => ytVideoCard(v))}
+            onOpen={openVideoFrom(playYoutube, downloads.slice(0, 30))}
             actionsFor={ytActions}
           />
           {byChannel.map(({ channel, videos }) => (
@@ -253,6 +257,7 @@ function YoutubeHome() {
               title={channel.title}
               more={{ to: `/player/youtube/${encodeURIComponent(channel.id)}`, label: 'Channel' }}
               cards={videos.map((v) => ytVideoCard(v, false))}
+              onOpen={openVideoFrom(playYoutube, videos)}
               actionsFor={ytActions}
             />
           ))}

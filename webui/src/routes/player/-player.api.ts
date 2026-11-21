@@ -182,37 +182,130 @@ export const albumQuery = (id: number) =>
     staleTime: 2 * MINUTE,
   });
 
-export interface UserPlaylist {
+// ── playlists (music): yours and mirrored ─────────────────────────────
+
+export interface PlaylistSummary {
   id: number;
   name: string;
-  track_count?: number;
-  image_url?: string | null;
+  description: string | null;
+  /** yours: you made it (editable); mirrored: from spotify, deezer and the rest */
+  kind: 'yours' | 'mirrored';
+  liked: boolean;
+  source: string | null;
+  owner: string | null;
+  track_count: number;
+  image_url: string | null;
+  cover_tiles: string[];
+  updated_at: string | null;
 }
 
-export const userPlaylistsQuery = () =>
+export interface PlaylistSong {
+  /** 1-based, in order: what remove and reorder take */
+  position: number;
+  title: string;
+  artist: string;
+  album: string;
+  album_id: number | null;
+  artist_id: number | null;
+  duration_ms: number;
+  image_url: string | null;
+  added_at: string | null;
+  /** the library track it plays; null: not in your library, or hidden from this profile */
+  track_id: number | null;
+}
+
+export interface PlaylistDetail extends PlaylistSummary {
+  songs: PlaylistSong[];
+  duration_ms: number;
+  playable_count: number;
+}
+
+export const playlistsQuery = () =>
   queryOptions({
     queryKey: ['player', 'playlists'],
-    queryFn: async () =>
-      (await apiClient.get('user-playlists').json<{ playlists?: UserPlaylist[] }>()).playlists ??
-      [],
-    staleTime: 5 * MINUTE,
+    queryFn: async () => {
+      const body = await apiClient
+        .get('player/playlists')
+        .json<{ yours?: PlaylistSummary[]; mirrored?: PlaylistSummary[] }>();
+      return { yours: body.yours ?? [], mirrored: body.mirrored ?? [] };
+    },
+    staleTime: 2 * MINUTE,
   });
 
-export interface PlaylistTrack {
-  id: number;
-  track_name: string;
-  artist_name?: string | null;
-  duration_ms?: number | null;
-}
-
-export const playlistTracksQuery = (id: number) =>
+export const playlistQuery = (id: number) =>
   queryOptions({
     queryKey: ['player', 'playlist', id],
     queryFn: async () =>
-      (await apiClient.get(`mirrored-playlists/${id}`).json<{ tracks?: PlaylistTrack[] }>())
-        .tracks ?? [],
-    staleTime: 5 * MINUTE,
+      (await apiClient.get(`player/playlists/${id}`).json<{ playlist: PlaylistDetail }>()).playlist,
+    staleTime: MINUTE,
   });
+
+/** a song as the playlist routes take it: by name, with its library track */
+export interface SongRef {
+  title: string;
+  artist: string;
+  album?: string | null;
+  duration_ms?: number | null;
+  lib2_track_id?: number | null;
+}
+
+function songBody(songs: SongRef[]) {
+  return songs.map((x) => ({
+    title: x.title,
+    artist: x.artist,
+    album: x.album ?? undefined,
+    duration_ms: x.duration_ms ?? undefined,
+    ...(x.lib2_track_id ? { lib2_track_id: x.lib2_track_id } : {}),
+  }));
+}
+
+/** your playlists: every edit the manager's playlists page has */
+export const playlistEdits = {
+  create: async (name: string, songs: SongRef[] = []) =>
+    apiClient
+      .post('user-playlists', {
+        json: { name, ...(songs.length ? { tracks: songBody(songs) } : {}) },
+      })
+      .json<{ id: number; added?: number }>(),
+  add: async (id: number, songs: SongRef[], allowDuplicates = false) =>
+    apiClient
+      .post(`user-playlists/${id}/tracks`, {
+        json: { tracks: songBody(songs), allow_duplicates: allowDuplicates },
+      })
+      .json<{ added: number; duplicates: unknown[]; track_count: number }>(),
+  /** untick in the picker: these songs, wherever they are in it */
+  removeSongs: async (id: number, songs: SongRef[]) =>
+    apiClient
+      .post(`user-playlists/${id}/tracks/remove`, { json: { tracks: songBody(songs) } })
+      .json(),
+  removeAt: async (id: number, position: number) =>
+    apiClient.delete(`user-playlists/${id}/tracks/${position}`).json(),
+  reorder: async (id: number, order: number[]) =>
+    apiClient.put(`user-playlists/${id}/order`, { json: { order } }).json(),
+  rename: async (id: number, name: string) =>
+    apiClient.patch(`mirrored-playlists/${id}/custom-name`, { json: { custom_name: name } }).json(),
+  describe: async (id: number, description: string) =>
+    apiClient.patch(`user-playlists/${id}`, { json: { description } }).json(),
+  duplicate: async (id: number, name?: string) =>
+    apiClient
+      .post(`user-playlists/${id}/duplicate`, { json: name ? { name } : {} })
+      .json<{ id: number }>(),
+  remove: async (id: number) => apiClient.delete(`mirrored-playlists/${id}`).json(),
+  /** a mirrored playlist made yours: an editable copy, the mirror keeps syncing */
+  copyMirror: async (id: number, name?: string) =>
+    apiClient
+      .post(`user-playlists/from-mirror/${id}`, { json: name ? { name } : {} })
+      .json<{ id: number }>(),
+  /** which of your playlists already hold these songs */
+  membership: async (songs: SongRef[]) =>
+    apiClient
+      .post('user-playlists/membership', { json: { tracks: songBody(songs) } })
+      .json<{ total: number; playlists: Record<string, number> }>(),
+  like: async (songs: SongRef[]) =>
+    apiClient.post('user-playlists/liked', { json: { tracks: songBody(songs) } }).json(),
+  unlike: async (songs: SongRef[]) =>
+    apiClient.post('user-playlists/liked/remove', { json: { tracks: songBody(songs) } }).json(),
+};
 
 // ── video ──────────────────────────────────────────────────────────────
 

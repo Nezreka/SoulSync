@@ -4140,3 +4140,84 @@ a.crewRow:hover {
 .verdict[data-tone='maybe'] .verdictIcon {
   background: var(--warning);
 }
+
+/* ── a card's play button: on the art, on hover or focus ─────────────── */
+
+/* a box the art's size over the card, so the button sits on the art's corner */
+.cardPlaySlot {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: 2;
+  aspect-ratio: 2 / 3;
+  pointer-events: none;
+}
+
+.cardWrap[data-shape='square'] .cardPlaySlot {
+  aspect-ratio: 1;
+}
+
+.cardWrap[data-shape='wide'] .cardPlaySlot {
+  aspect-ratio: 16 / 9;
+}
+
+.cardPlay {
+  pointer-events: auto;
+  position: absolute;
+  right: calc(var(--u) * 0.6);
+  bottom: calc(var(--u) * 0.6);
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: calc(var(--u) * 3);
+  height: calc(var(--u) * 3);
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-circle);
+  background: var(--accent);
+  color: var(--pl-bg);
+  box-shadow: 0 calc(var(--u) * 0.4) calc(var(--u) * 1) var(--black-a60);
+  cursor: pointer;
+  opacity: 0;
+  transform: translateY(calc(var(--u) * 0.5)) scale(0.92);
+  transition:
+    opacity var(--dur-fast) ease,
+    transform var(--dur-moderate) var(--pl-ease);
+}
+
+.cardPlay svg {
+  width: calc(var(--u) * 1.2);
+  height: calc(var(--u) * 1.2);
+  margin-left: calc(var(--u) * 0.12);
+}
+
+.cardWrap:hover .cardPlay,
+.cardWrap:focus-within .cardPlay,
+.cardPlay[data-busy='true'] {
+  opacity: 1;
+  transform: none;
+}
+
+.cardPlay:hover {
+  background: var(--accent-light);
+  transform: scale(1.06);
+}
+
+.cardPlay[data-busy='true'] {
+  animation: cardPlayBusy 0.9s ease-in-out infinite;
+}
+
+@keyframes cardPlayBusy {
+  50% {
+    opacity: 0.6;
+  }
+}
+
+@media (hover: none) {
+  /* a touch screen has no hover: the button always shows */
+  .cardPlay {
+    opacity: 1;
+    transform: none;
+  }
+}

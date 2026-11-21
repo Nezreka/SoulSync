@@ -51,9 +51,9 @@ def _bad(message):
     return jsonify({"success": False, "error": str(message)}), 400
 
 
-def _failed(what):
+def _failed(what, message="Something went wrong saving your place"):
     logger.exception("player %s failed", what)
-    return jsonify({"success": False, "error": "Something went wrong saving your place"}), 500
+    return jsonify({"success": False, "error": message}), 500
 
 
 @bp.route("/api/player/progress", methods=["GET"])
@@ -641,3 +641,39 @@ def keyword_titles():
     except Exception:  # noqa: BLE001
         logger.exception("player keyword failed for %s", name)
         return jsonify({"success": False, "error": "Could not look that keyword up"}), 500
+
+
+# ── playlists (music) ────────────────────────────────────────────────────
+
+@bp.route("/api/player/playlists", methods=["GET"])
+@requires("music.access")
+def player_playlists():
+    """this profile's music playlists: yours (Liked Songs first) and mirrored"""
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    from core.player import playlists
+    try:
+        return jsonify({"success": True, **playlists.list_for(get_database(), pid)})
+    except Exception:  # noqa: BLE001
+        return _failed("playlists", "Couldn't load your playlists.")
+
+
+@bp.route("/api/player/playlists/<int:playlist_id>", methods=["GET"])
+@requires("music.access")
+def player_playlist(playlist_id):
+    """one of this profile's playlists with its songs, each with the library
+    track it plays (track_id) or null when this profile can't play it"""
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    from core.player import playlists
+    from core.player.sources.music import _scope, hides_explicit
+    try:
+        out = playlists.detail(get_database(), pid, playlist_id, scope=_scope(),
+                               hide_explicit=hides_explicit())
+    except Exception:  # noqa: BLE001
+        return _failed("playlist", "Couldn't load that playlist.")
+    if out is None:
+        return jsonify({"success": False, "error": "not_found", "message": "No such playlist."}), 404
+    return jsonify({"success": True, "playlist": out})

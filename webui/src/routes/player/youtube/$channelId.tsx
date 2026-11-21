@@ -20,7 +20,7 @@ import {
 } from '../-ui/kit';
 import { NotFound, NotPartOfProfile } from '../-ui/not-part';
 import { getEngine } from '../-ui/playback/use-player';
-import { useYoutubePlay } from '../-ui/playback/youtube';
+import { openVideoFrom, useYoutubePlay } from '../-ui/playback/youtube';
 import { useSections } from '../-ui/sections';
 import { Facts } from '../-ui/video-facts';
 import { useYoutubeWatchlistActions } from '../-ui/watchlist';
@@ -130,6 +130,7 @@ function ChannelPage() {
                 <CardRail
                   title="Latest"
                   cards={latest.map((v) => ytVideoCard(v, false))}
+                  onOpen={openVideoFrom(playYoutube, latest)}
                   actionsFor={ytActions}
                 />
               </div>
@@ -139,6 +140,7 @@ function ChannelPage() {
                 <CardRail
                   title="Most watched"
                   cards={popular.map((v) => ytVideoCard(v, false))}
+                  onOpen={openVideoFrom(playYoutube, popular)}
                   actionsFor={ytActions}
                 />
               </div>
@@ -161,6 +163,7 @@ function ChannelPage() {
                 {shown.length ? (
                   <CardGrid
                     cards={shown.map((v) => ytVideoCard(v, false))}
+                    onOpen={openVideoFrom(playYoutube, shown)}
                     actionsFor={ytActions}
                     shape="wide"
                     view={view}
