@@ -13,6 +13,7 @@ import {
 import { Badge, CardRail, Hero, PlayButton, VerdictBadge, styles as s } from '../-ui/kit';
 import { NotFound, NotPartOfProfile } from '../-ui/not-part';
 import { useSections } from '../-ui/sections';
+import { BackgroundTrailer, TrailerButton } from '../-ui/trailer';
 import { Facts, fileLanguages, languageList, Ratings } from '../-ui/video-facts';
 import { CastRow, VersionPicker } from '../-ui/video-parts';
 
@@ -55,6 +56,7 @@ function MoviePage() {
         backdrop={m.has_backdrop !== false ? backdropUrl('movie', id) : null}
         poster={m.has_poster !== false ? posterUrl('movie', id, 500) : null}
         title={m.title}
+        trailer={<BackgroundTrailer kind="movie" id={id} />}
         logo={m.logo ? proxiedImage(m.logo) : null}
         meta={
           <>
@@ -87,6 +89,7 @@ function MoviePage() {
               label={resuming ? `Resume from ${runtime(resume.position_seconds)}` : 'Play'}
             />
             {resuming ? <PlayButton label="From the start" primary={false} /> : null}
+            <TrailerButton kind="movie" id={id} />
             {ends ? (
               <span className={s.notYet}>
                 Ends at {ends.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}

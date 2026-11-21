@@ -394,3 +394,31 @@ export const youtubeChannelQuery = (channelId: string) =>
     staleTime: 2 * MINUTE,
     retry: false,
   });
+
+// ── trailers (the video side's own extras + its billboard setting) ─────
+
+export interface Trailer {
+  key: string;
+  name?: string | null;
+}
+
+export const trailerQuery = (kind: 'movie' | 'show', id: number) =>
+  queryOptions({
+    queryKey: ['player', 'trailer', kind, id],
+    queryFn: async () =>
+      (
+        await apiClient
+          .get(`video/detail/${kind}/${id}/extras`)
+          .json<{ trailer?: Trailer | null }>()
+      ).trailer ?? null,
+    staleTime: 30 * MINUTE,
+    retry: false,
+  });
+
+export const videoPrefsQuery = () =>
+  queryOptions({
+    queryKey: ['player', 'video-prefs'],
+    queryFn: () => apiClient.get('video/prefs').json<{ billboard_autoplay?: boolean }>(),
+    staleTime: 30 * MINUTE,
+    retry: false,
+  });

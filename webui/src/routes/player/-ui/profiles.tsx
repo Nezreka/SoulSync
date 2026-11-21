@@ -16,6 +16,7 @@ import type { PlayerProfile } from '../-player.types';
 import { profilesQuery, selectProfile } from '../-player.api';
 import { ExitIcon, LockIcon } from './icons';
 import s from './player.module.css';
+import { inPlayer, useTrailersSetting } from './trailer';
 
 /** the manager's "always open as me on this device" choice */
 const OPEN_AS_KEY = 'ss_open_as_profile';
@@ -248,6 +249,7 @@ export function WhoGate({
 /** the header chip: who you are, and the switch */
 export function ProfileChip({ currentId }: { currentId: number | null }) {
   const { data: profiles = [] } = useQuery(profilesQuery());
+  const [trailers, setTrailers] = useTrailersSetting();
   const [open, setOpen] = useState(false);
   const [switching, setSwitching] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -303,14 +305,31 @@ export function ProfileChip({ currentId }: { currentId: number | null }) {
               <div className={s.menuSep} />
             </>
           ) : null}
+          <button
+            type="button"
+            role="menuitemcheckbox"
+            aria-checked={trailers}
+            className={s.menuItem}
+            onClick={() => setTrailers(!trailers)}
+            data-nav
+          >
+            Background trailers: {trailers ? 'on' : 'off'}
+          </button>
+          <div className={s.menuSep} />
           <a role="menuitem" className={s.menuItem} href={appURL('/')} data-nav>
             <ExitIcon /> Back to SoulSync
           </a>
         </div>
       ) : null}
-      {switching ? (
-        <WhoGate profiles={profiles} currentId={currentId} onDone={() => setSwitching(false)} />
-      ) : null}
+      {switching
+        ? inPlayer(
+            <WhoGate
+              profiles={profiles}
+              currentId={currentId}
+              onDone={() => setSwitching(false)}
+            />,
+          )
+        : null}
     </div>
   );
 }

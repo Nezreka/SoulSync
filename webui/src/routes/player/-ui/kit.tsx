@@ -287,7 +287,10 @@ export function Hero({
   badges,
   overview,
   actions,
+  trailer,
 }: {
+  /** a background trailer layer (trailer.tsx), between the backdrop and its scrim */
+  trailer?: ReactNode;
   backdrop?: string | null;
   poster?: string | null;
   posterShape?: 'poster' | 'square';
@@ -303,8 +306,9 @@ export function Hero({
   const [logoOk, setLogoOk] = useState(true);
   return (
     <header className={s.hero}>
-      <div className={s.heroBackdrop} aria-hidden="true">
+      <div className={s.heroBackdrop}>
         {backdrop ? <Art src={backdrop} alt="" className={undefined} eager /> : null}
+        {trailer}
       </div>
       <div className={s.heroBody}>
         {poster !== undefined ? (

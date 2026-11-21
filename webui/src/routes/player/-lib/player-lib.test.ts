@@ -505,3 +505,33 @@ describe('preview placement and languages', () => {
     expect(plainText('<p>a</p><p>b</p>')).toBe('a\n\nb');
   });
 });
+
+describe('trailers', () => {
+  it('follows this device, else the video side, and less motion means off', async () => {
+    const { trailersOn } = await import('../-ui/trailer');
+    expect(trailersOn('on', false, true)).toBe(true);
+    expect(trailersOn('off', true, false)).toBe(false);
+    expect(trailersOn(null, false, false)).toBe(false);
+    expect(trailersOn(null, undefined, false)).toBe(true);
+    expect(trailersOn(null, true, true)).toBe(false);
+  });
+
+  it('embeds muted and chromeless in the background, full with sound on demand', async () => {
+    const { embedUrl } = await import('../-ui/trailer');
+    const bg = new URL(embedUrl('abc', true));
+    expect(bg.pathname).toBe('/embed/abc');
+    expect(bg.searchParams.get('mute')).toBe('1');
+    expect(bg.searchParams.get('controls')).toBe('0');
+    const full = new URL(embedUrl('abc', false));
+    expect(full.searchParams.get('mute')).toBeNull();
+    expect(full.searchParams.get('autoplay')).toBe('1');
+  });
+
+  it('reads youtube player states from either message shape', async () => {
+    const { playerState } = await import('../-ui/trailer');
+    expect(playerState('{"event":"onStateChange","info":1}')).toBe(1);
+    expect(playerState('{"event":"infoDelivery","info":{"playerState":0}}')).toBe(0);
+    expect(playerState('not json')).toBeNull();
+    expect(playerState({ event: 'x' })).toBeNull();
+  });
+});

@@ -32,6 +32,7 @@ import {
 } from '../-ui/kit';
 import { NotFound, NotPartOfProfile } from '../-ui/not-part';
 import { useSections } from '../-ui/sections';
+import { BackgroundTrailer, TrailerButton } from '../-ui/trailer';
 import { Facts, Ratings } from '../-ui/video-facts';
 import { CastRow, VersionPicker } from '../-ui/video-parts';
 
@@ -195,6 +196,7 @@ function ShowPage() {
         backdrop={show.has_backdrop !== false ? backdropUrl('show', id) : null}
         poster={show.has_poster !== false ? posterUrl('show', id, 500) : null}
         title={show.title}
+        trailer={<BackgroundTrailer kind="show" id={id} />}
         logo={show.logo ? proxiedImage(show.logo) : null}
         meta={
           <>
@@ -229,6 +231,7 @@ function ShowPage() {
                   : 'Play'
               }
             />
+            <TrailerButton kind="show" id={id} />
             {next?.title ? <span className={s.notYet}>Up next: {next.title}</span> : null}
           </>
         }

@@ -1106,6 +1106,99 @@
   position: absolute;
   inset: 0;
   z-index: 0;
+  container-type: size;
+}
+
+/* the muted background trailer: covers the backdrop like the image does,
+   crops youtube's chrome off the edges, fades in only once it plays */
+.heroTrailer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.9s ease;
+}
+
+.heroTrailer[data-playing='true'] {
+  opacity: 1;
+}
+
+.heroTrailer iframe {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: max(100cqw, 177.78cqh);
+  height: max(56.25cqw, 100cqh);
+  border: 0;
+  transform: translate(-50%, -50%) scale(1.18);
+}
+
+.trailerControls {
+  position: absolute;
+  right: var(--pl-gutter);
+  bottom: calc(var(--u) * 2.5);
+  z-index: 2;
+  display: flex;
+  gap: calc(var(--u) * 0.5);
+}
+
+.trailerBtn {
+  height: calc(var(--u) * 2.2);
+  padding: 0 calc(var(--u) * 0.9);
+  border: 1px solid var(--white-a25);
+  border-radius: var(--radius-pill);
+  background: var(--black-a45);
+  color: var(--pl-text);
+  font: inherit;
+  font-size: calc(var(--u) * 0.8);
+  font-weight: 600;
+  cursor: pointer;
+  backdrop-filter: blur(calc(var(--u) * 0.5));
+}
+
+.trailerBtn:hover {
+  background: var(--black-a65);
+}
+
+.trailerModal {
+  position: fixed;
+  inset: 0;
+  z-index: 9;
+  display: grid;
+  place-items: center;
+  padding: var(--pl-gutter);
+  background: var(--black-a90);
+  animation: pageIn var(--dur-moderate) var(--pl-ease);
+}
+
+.trailerBox {
+  position: relative;
+  width: min(100%, calc((100vh - var(--u) * 10) * 16 / 9));
+  aspect-ratio: 16 / 9;
+}
+
+.trailerBox iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: var(--radius-lg);
+  background: var(--pl-bg);
+}
+
+.trailerClose {
+  position: absolute;
+  top: calc(var(--u) * -3);
+  right: 0;
+  height: calc(var(--u) * 2.3);
+  padding: 0 calc(var(--u) * 1);
+  border: none;
+  border-radius: var(--radius-pill);
+  background: var(--white-a12);
+  color: var(--pl-text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
 }
 
 .heroBackdrop img {
