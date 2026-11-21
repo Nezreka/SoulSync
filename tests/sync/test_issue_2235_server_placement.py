@@ -335,3 +335,140 @@ def test_the_status_file_keeps_the_count():
         src = f.read()
     keys_at = src.index("for key in ('matched_tracks', 'total_tracks'")
     assert "'unplaced_tracks'" in src[keys_at:keys_at + 300]
+
+
+# --- a library row the server has no id for (#2235 follow-up) ----------------
+#
+# with a server asked for, a lib2 row the server hasn't mapped came back with
+# its catalogue row id as if it were the server's (_rows_to_tracks:
+# ``id=public_id or row['id']``). the sync sent it, jellyfin dropped it, plex
+# would fetchItem an unrelated item. it is in the library, not on the server.
+
+from tests.sync.test_issue_1715_album_fallback_artist_gate import _make_db  # noqa: E402
+from tests.sync.test_issue_1721_stale_sync_match_cache import (  # noqa: E402
+    _db_only_match, _media_match)
+
+
+def _eva_db(tmp_path, server_id):
+    return _make_db(
+        tmp_path,
+        artists=[('a-lola', 'La Vaca Lola', 'navidrome')],
+        albums=[('al-lola', 'a-lola', 'Canciones de la Granja', 'navidrome')],
+        tracks=[(server_id, 'al-lola', 'a-lola', 'La Vaca Lola', None, 'navidrome')],
+    )
+
+
+def _lola():
+    from core.spotify_client import Track as SpotifyTrack
+    return SpotifyTrack(id='sp-lola', name='La Vaca Lola', artists=['La Vaca Lola'],
+                        album='Canciones de la Granja', duration_ms=0, popularity=0)
+
+
+def test_the_library_says_when_the_id_is_not_the_servers(tmp_path):
+    db = _eva_db(tmp_path, None)
+    track, _ = db.check_track_exists('La Vaca Lola', 'La Vaca Lola', confidence_threshold=0.7,
+                                     server_source='navidrome')
+    assert track is not None
+    assert track.server_id_known is False  # its id is the catalogue row's
+    mapped = _eva_db(tmp_path / "m", 'nd-77')
+    track, _ = mapped.check_track_exists('La Vaca Lola', 'La Vaca Lola', confidence_threshold=0.7,
+                                         server_source='navidrome')
+    assert track.server_id_known is True and str(track.id) == 'nd-77'
+    # without a server asked for, nothing changes
+    track, _ = db.check_track_exists('La Vaca Lola', 'La Vaca Lola', confidence_threshold=0.7)
+    assert track.server_id_known is None
+
+
+@pytest.mark.parametrize('match', [_media_match, _db_only_match], ids=['media', 'db-only'])
+def test_an_unmapped_track_sends_no_id_and_caches_nothing(tmp_path, match):
+    (tmp_path / "x").mkdir()
+    db = _eva_db(tmp_path / "x", None)
+    found, conf = match(db, _lola())
+    assert found is not None and conf >= 0.7
+    assert found.ratingKey is None and found.id is None
+    assert found.title == 'La Vaca Lola'
+    assert db.read_sync_match_cache('sp-lola', 'navidrome') is None
+
+
+@pytest.mark.parametrize('match', [_media_match, _db_only_match], ids=['media', 'db-only'])
+def test_a_mapped_track_still_syncs(tmp_path, match):
+    (tmp_path / "x").mkdir()
+    db = _eva_db(tmp_path / "x", 'nd-77')
+    found, _ = match(db, _lola())
+    assert str(found.ratingKey) == 'nd-77'
+
+
+def test_an_unmapped_match_is_reported_and_never_sent():
+    from services.sync_service import NotOnServerTrack
+    a = _lib(_guid(1), "Pollito Pio")
+    ghost = NotOnServerTrack(SimpleNamespace(title="La Vaca Lola", artist_name="La Vaca Lola"))
+    service, client = _service([(a, 1.0), (ghost, 1.0)], [a.ratingKey])
+    playlist = SimpleNamespace(id="pl", name="Eva", tracks=[_src("1", "Pollito Pio"),
+                                                            _src("2", "La Vaca Lola")])
+
+    result = asyncio.run(service.sync_playlist(playlist))
+
+    (_name, pushed), = [c.args for c in client.update_playlist.call_args_list]
+    assert [t.ratingKey for t in pushed] == [a.ratingKey]
+    by_id = {d["source_track_id"]: d for d in result.match_details}
+    assert by_id["2"]["status"] == "found"
+    assert by_id["2"]["server_placement"] == NOT_ON_SERVER
+    assert result.unplaced_tracks == 1 and result.synced_tracks == 1
+
+
+def test_only_unmapped_matches_keep_the_server_playlist():
+    # nothing the server can take: the playlist is left alone, not emptied,
+    # and the sync isn't a failed write
+    from services.sync_service import NotOnServerTrack
+    ghost = NotOnServerTrack(SimpleNamespace(title="La Vaca Lola"))
+    service, client = _service([(ghost, 1.0)], ["other"])
+    playlist = SimpleNamespace(id="pl", name="Eva", tracks=[_src("1", "La Vaca Lola")])
+
+    result = asyncio.run(service.sync_playlist(playlist))
+
+    client.update_playlist.assert_not_called()
+    assert result.errors == []
+    assert result.unplaced_tracks == 1
+    assert result.match_details[0]["server_placement"] == NOT_ON_SERVER
+
+
+def test_the_server_playlist_editor_refuses_a_library_row_id(tmp_path, monkeypatch):
+    import web_server
+    db = _eva_db(tmp_path, None)  # a library row jellyfin has no id for
+    with db._get_connection() as conn:
+        row_id = conn.execute("SELECT id FROM lib2_tracks").fetchone()[0]
+    monkeypatch.setattr(web_server, "get_database", lambda: db)
+    with web_server.app.test_request_context():
+        refused = web_server._not_on_server_refusal("navidrome", row_id)
+        assert refused is not None and refused[1] == 400
+        assert "not on Navidrome yet" in refused[0].get_json()["error"]
+        # an id soulsync has never seen, a non-numeric id, soulsync itself: as before
+        assert web_server._not_on_server_refusal("navidrome", 999999) is None
+        assert web_server._not_on_server_refusal("navidrome", "abc") is None
+        assert web_server._not_on_server_refusal("soulsync", row_id) is None
+
+
+def test_the_editor_lets_a_mapped_row_through(tmp_path, monkeypatch):
+    import web_server
+    db = _eva_db(tmp_path, '4242')  # the server's own id is numeric too
+    monkeypatch.setattr(web_server, "get_database", lambda: db)
+    with web_server.app.test_request_context():
+        assert web_server._not_on_server_refusal("navidrome", "4242") is None
+
+
+def test_a_failed_read_does_not_refuse(monkeypatch):
+    import web_server
+    db = MagicMock()
+    db.get_track_by_server_id.side_effect = RuntimeError("db gone")
+    monkeypatch.setattr(web_server, "get_database", lambda: db)
+    with web_server.app.test_request_context():
+        assert web_server._not_on_server_refusal("jellyfin", 18) is None
+
+
+def test_add_and_replace_both_ask_before_writing():
+    with open("web_server.py", encoding="utf-8") as f:
+        src = f.read()
+    for route in ("def server_playlist_replace_track(", "def server_playlist_add_track("):
+        start = src.index(route)
+        body = src[start:src.index("\n@app.route", start)]
+        assert "_not_on_server_refusal(active_server" in body, route

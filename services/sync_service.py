@@ -112,6 +112,20 @@ def _fold_matches_by_rating_key(matched: list) -> tuple:
     return kept, folds
 
 
+class NotOnServerTrack:
+    """a match the library has and the media server doesn't know yet (#2235).
+
+    no ratingKey, so nothing is sent for it: the dedupe skips it and the
+    readback reports it not_on_server. the title is kept for the review."""
+
+    def __init__(self, db_track):
+        self.ratingKey = None
+        self.id = None
+        self.title = getattr(db_track, 'title', '') or ''
+        self.artist = getattr(db_track, 'artist_name', '') or ''
+        self.album = getattr(db_track, 'album_title', '') or ''
+
+
 def _source_label(spotify_track) -> str:
     artists = getattr(spotify_track, 'artists', None) or []
     artist = _artist_name(artists[0]) if artists else ''
@@ -871,10 +885,11 @@ class PlaylistSyncService:
                         getattr(lib, 'title', ''), getattr(lib, 'artist', '') or '',
                         _source_label(keeper.spotify_track), dropped.confidence,
                     )
-                if len(plex_tracks) < len(valid_tracks):
+                _keyed = [t for t in valid_tracks if getattr(t, 'ratingKey', None) is not None]
+                if len(plex_tracks) < len(_keyed):
                     logger.info(
-                        f"Deduplicated {len(valid_tracks) - len(plex_tracks)} duplicate ratingKeys "
-                        f"({len(valid_tracks)} → {len(plex_tracks)} tracks)"
+                        f"Deduplicated {len(_keyed) - len(plex_tracks)} duplicate ratingKeys "
+                        f"({len(_keyed)} → {len(plex_tracks)} tracks)"
                     )
 
                 # Server IDs the playlist write's guard dropped as no
@@ -885,7 +900,10 @@ class PlaylistSyncService:
                 if not media_client:
                     logger.error("No active media client available for playlist sync")
                     sync_success = False
-                elif not matched_tracks and media_client.is_connected():
+                elif not plex_tracks and media_client.is_connected():
+                    # nothing the server can take: no match at all, or only
+                    # matches the server has no id for yet (#2235). either
+                    # way an existing playlist must not be emptied
                     # #1543: a zero-match scan must not wipe an EXISTING
                     # server playlist — but a brand-new mirror has no server
                     # playlist yet, and the first pipeline run should leave
@@ -1095,11 +1113,13 @@ class PlaylistSyncService:
                 # answer, the playlist is the server's, and jellyfin answers
                 # 204 to an add it quietly drops. a mirror read 167 in library
                 # against a 149-track jellyfin playlist and nothing said why.
-                if sync_success and media_client is not None and matched_tracks:
+                # a match the server has no id for is known not to be on it
+                # even when the write failed, so that part always runs
+                if media_client is not None and matched_tracks:
                     unplaced_results, placement_known, synced_tracks = await self._read_back_placement(
                         media_client, server_type, playlist.name,
                         _navidrome_id_kw.get('playlist_id'),
-                        matched_tracks, synced_tracks)
+                        matched_tracks, synced_tracks, read_server=sync_success)
                 # Not in library (for wishlist), not "total minus playlist size".
                 failed_tracks = unmatched_count
 
@@ -1234,7 +1254,8 @@ class PlaylistSyncService:
                 self._cancelled = False
     
     async def _read_back_placement(self, media_client, server_type, playlist_name,
-                                   playlist_id, matched_tracks, synced_tracks):
+                                   playlist_id, matched_tracks, synced_tracks, *,
+                                   read_server: bool = True):
         """read the server playlist back after a write and say which matched
         tracks it doesn't hold (#2235).
 
@@ -1249,7 +1270,7 @@ class PlaylistSyncService:
         no_id = {id(r) for r in matched_tracks
                  if r.plex_track is not None
                  and not norm_id(getattr(r.plex_track, 'ratingKey', None))}
-        reader = getattr(media_client, 'read_playlist_track_ids', None)
+        reader = getattr(media_client, 'read_playlist_track_ids', None) if read_server else None
         server_ids = None
         if callable(reader):
             try:
@@ -1273,6 +1294,8 @@ class PlaylistSyncService:
                 and norm_id(getattr(r.plex_track, 'ratingKey', None)) in missing)
         if server_ids is not None:
             synced_tracks = len(sent) - len(missing)
+        elif not read_server:
+            pass  # the write failed: synced stays what the caller said (0)
         else:
             synced_tracks = max(0, min(synced_tracks, len(sent)))
         if unplaced:
@@ -1790,6 +1813,22 @@ class PlaylistSyncService:
 
                     if db_track and confidence >= 0.7:
                         logger.debug(f"Database match found for '{original_title}' by '{artist_name}': '{db_track.title}' with confidence {confidence:.2f}")
+
+                        # #2235: a library row the server has no id for yet
+                        # comes back with its catalogue id. sending that to
+                        # the server is what dropped tracks without a word,
+                        # and caching it pinned the bogus id for every sync
+                        from core.sync.server_placement import server_item_id
+                        if server_item_id(db_track) is None:
+                            if server_type == "plex":
+                                # plex can still be asked live, by name
+                                rescued = rescue_stale_plex_track(media_client, db_track, artist_name)
+                                if rescued is not None:
+                                    return rescued, confidence
+                            logger.info(
+                                f"'{db_track.title}' is in the library but {server_type} has no id "
+                                f"for it yet (not scanned there); it can't go on the playlist")
+                            return NotOnServerTrack(db_track), confidence
 
                         # Save to sync match cache for next time
                         if spotify_id:

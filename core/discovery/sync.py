@@ -383,6 +383,14 @@ async def _database_only_find_track(spotify_track, candidate_pool=None):
 
             if db_track and confidence >= 0.80:
                 logger.info(f"Database match: '{db_track.title}' (confidence: {confidence:.2f})")
+                # #2235: no server id yet means nothing to send and nothing
+                # to cache; the sync reports it as not on the server
+                from core.sync.server_placement import server_item_id
+                if server_item_id(db_track) is None:
+                    from services.sync_service import NotOnServerTrack
+                    logger.info(f"'{db_track.title}' is in the library but {active_server} "
+                                f"has no id for it yet; it can't go on the playlist")
+                    return NotOnServerTrack(db_track), confidence
                 if spotify_id:
                     try:
                         from core.matching_engine import MusicMatchingEngine

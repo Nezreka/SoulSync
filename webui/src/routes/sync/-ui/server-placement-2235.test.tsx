@@ -138,3 +138,38 @@ describe('the detail modal', () => {
     expect(screen.queryByRole('button', { name: 'Sync again' })).toBeNull();
   });
 });
+
+describe('Find & Add', () => {
+  it('shows a track the server has no id for, but it cannot be picked', async () => {
+    const { ServerSearchOverlay } = await import('./server-search-overlay');
+    const { waitFor } = await import('@testing-library/react');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        json: async () => ({
+          success: true,
+          tracks: [
+            { id: 'jf-1', title: 'Pollito Pio', on_server: true },
+            { id: 18, title: 'La Vaca Lola', on_server: false },
+          ],
+        }),
+      })),
+    );
+    const onSelect = vi.fn(async () => true);
+    render(
+      <ServerSearchOverlay
+        track={{ source_track: { name: 'La Vaca Lola', artist: 'La Vaca Lola' } } as never}
+        mode="add"
+        onClose={vi.fn()}
+        onSelect={onSelect}
+      />,
+    );
+    const off = await waitFor(() => screen.getByRole('button', { name: 'Not on server yet' }));
+    expect((off as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(off.closest('.server-search-result') as HTMLElement);
+    expect(onSelect).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Select' }));
+    expect(onSelect).toHaveBeenCalledWith('jf-1', expect.any(Function));
+    vi.unstubAllGlobals();
+  });
+});

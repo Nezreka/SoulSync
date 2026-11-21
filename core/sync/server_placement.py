@@ -47,6 +47,20 @@ def missing_from_server(sent_ids: Iterable, server_ids: Optional[Iterable]) -> O
     return {norm_id(s) for s in sent_ids if norm_id(s) and norm_id(s) not in held}
 
 
+def server_item_id(db_track):
+    """the id a playlist write may send for a matched library track, or None.
+
+    with a server asked for, a library row the server has no id for comes
+    back carrying its catalogue row id instead (database _rows_to_tracks,
+    ``server_id_known`` False). that id means nothing to the server: jellyfin
+    drops it without a word, plex resolves it to an unrelated item. such a
+    track is in the library, not on the server yet (#2235)."""
+    if db_track is None or getattr(db_track, "server_id_known", None) is False:
+        return None
+    value = getattr(db_track, "id", None)
+    return value if norm_id(value) else None
+
+
 def placement_of(extra) -> Optional[str]:
     """the placement a sync stamped on a mirrored track's extra_data, or None
     when no sync has said (never synced, or the server couldn't be read)"""
@@ -64,4 +78,5 @@ __all__ = [
     "missing_from_server",
     "norm_id",
     "placement_of",
+    "server_item_id",
 ]
