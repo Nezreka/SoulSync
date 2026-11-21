@@ -134,27 +134,32 @@ def recent_episodes(conn, limit: int = RECENT_EPISODES) -> List[Dict[str, Any]]:
 
 
 def downloaded_youtube(conn, limit: int = YOUTUBE_MAX) -> List[Dict[str, Any]]:
-    """youtube videos with a file on disk, newest download first."""
-    rows = conn.execute("""
-        SELECT v.id, v.youtube_id, v.title, v.duration_seconds, v.published_at, v.thumbnail_url,
-               c.youtube_id AS channel_youtube_id, c.title AS channel_title,
-               f.runtime_seconds, f.added_at
-        FROM media_files f
-        JOIN channel_videos v ON v.id = f.video_id
-        LEFT JOIN channels c ON c.id = v.channel_id
-        WHERE f.video_id IS NOT NULL
-        ORDER BY f.added_at DESC
-        LIMIT ?
-    """, (int(limit),)).fetchall()
-    out, seen = [], set()
-    for r in rows:
-        if r[0] in seen:
-            continue
-        seen.add(r[0])
-        out.append({"id": r[0], "youtube_id": r[1], "title": r[2],
-                    "duration_seconds": r[8] or r[3], "published_at": r[4],
-                    "thumbnail_url": r[5], "channel_id": r[6], "channel_title": r[7],
-                    "added_at": r[9]})
+    """youtube videos on disk (the download ledger), newest download first,
+    with the duration and channel the follow cache knows."""
+    from core.player import youtube
+
+    ledger = list(youtube.downloaded_ids(conn).items())[:int(limit)]
+    if not ledger:
+        return []
+    ids = [vid for vid, _ in ledger]
+    found: Dict[str, Any] = {}
+    for start in range(0, len(ids), 500):
+        chunk = ids[start:start + 500]
+        for r in conn.execute(
+                "SELECT youtube_id, duration, thumbnail_url FROM youtube_channel_videos "
+                "WHERE youtube_id IN (%s)" % ",".join("?" for _ in chunk), chunk):
+            found[r[0]] = (r[1], r[2])
+    titles = {r[0]: r[1] for r in conn.execute("SELECT channel_id, title FROM youtube_channel_meta")}
+    out = []
+    for vid, entry in ledger:
+        duration, thumb = found.get(vid, (None, None))
+        out.append({"id": vid, "youtube_id": vid, "title": entry.get("title") or "",
+                    "duration_seconds": youtube.parse_duration(duration),
+                    "published_at": entry.get("published_at"),
+                    "thumbnail_url": youtube.thumbnail(vid, thumb or entry.get("poster_url")),
+                    "channel_id": entry.get("channel_id"),
+                    "channel_title": titles.get(entry.get("channel_id") or ""),
+                    "added_at": entry.get("completed_at")})
     return out
 
 

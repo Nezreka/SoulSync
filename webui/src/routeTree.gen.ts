@@ -52,6 +52,7 @@ import { Route as PlayerPodcastsIndexRouteImport } from './routes/player/podcast
 import { Route as PlayerMusicIndexRouteImport } from './routes/player/music/index'
 import { Route as PlayerMoviesIndexRouteImport } from './routes/player/movies/index'
 import { Route as PlayerAudiobooksIndexRouteImport } from './routes/player/audiobooks/index'
+import { Route as PlayerYoutubeChannelIdRouteImport } from './routes/player/youtube/$channelId'
 import { Route as PlayerTvShowIdRouteImport } from './routes/player/tv/$showId'
 import { Route as PlayerPodcastsPodcastIdRouteImport } from './routes/player/podcasts/$podcastId'
 import { Route as PlayerMoviesMovieIdRouteImport } from './routes/player/movies/$movieId'
@@ -278,6 +279,11 @@ const PlayerAudiobooksIndexRoute = PlayerAudiobooksIndexRouteImport.update({
   path: '/audiobooks/',
   getParentRoute: () => PlayerRouteRoute,
 } as any)
+const PlayerYoutubeChannelIdRoute = PlayerYoutubeChannelIdRouteImport.update({
+  id: '/youtube/$channelId',
+  path: '/youtube/$channelId',
+  getParentRoute: () => PlayerRouteRoute,
+} as any)
 const PlayerTvShowIdRoute = PlayerTvShowIdRouteImport.update({
   id: '/tv/$showId',
   path: '/tv/$showId',
@@ -376,6 +382,7 @@ export interface FileRoutesByFullPath {
   '/player/movies/$movieId': typeof PlayerMoviesMovieIdRoute
   '/player/podcasts/$podcastId': typeof PlayerPodcastsPodcastIdRoute
   '/player/tv/$showId': typeof PlayerTvShowIdRoute
+  '/player/youtube/$channelId': typeof PlayerYoutubeChannelIdRoute
   '/player/audiobooks/': typeof PlayerAudiobooksIndexRoute
   '/player/movies/': typeof PlayerMoviesIndexRoute
   '/player/music/': typeof PlayerMusicIndexRoute
@@ -427,6 +434,7 @@ export interface FileRoutesByTo {
   '/player/movies/$movieId': typeof PlayerMoviesMovieIdRoute
   '/player/podcasts/$podcastId': typeof PlayerPodcastsPodcastIdRoute
   '/player/tv/$showId': typeof PlayerTvShowIdRoute
+  '/player/youtube/$channelId': typeof PlayerYoutubeChannelIdRoute
   '/player/audiobooks': typeof PlayerAudiobooksIndexRoute
   '/player/movies': typeof PlayerMoviesIndexRoute
   '/player/music': typeof PlayerMusicIndexRoute
@@ -483,6 +491,7 @@ export interface FileRoutesById {
   '/player/movies/$movieId': typeof PlayerMoviesMovieIdRoute
   '/player/podcasts/$podcastId': typeof PlayerPodcastsPodcastIdRoute
   '/player/tv/$showId': typeof PlayerTvShowIdRoute
+  '/player/youtube/$channelId': typeof PlayerYoutubeChannelIdRoute
   '/player/audiobooks/': typeof PlayerAudiobooksIndexRoute
   '/player/movies/': typeof PlayerMoviesIndexRoute
   '/player/music/': typeof PlayerMusicIndexRoute
@@ -540,6 +549,7 @@ export interface FileRouteTypes {
     | '/player/movies/$movieId'
     | '/player/podcasts/$podcastId'
     | '/player/tv/$showId'
+    | '/player/youtube/$channelId'
     | '/player/audiobooks/'
     | '/player/movies/'
     | '/player/music/'
@@ -591,6 +601,7 @@ export interface FileRouteTypes {
     | '/player/movies/$movieId'
     | '/player/podcasts/$podcastId'
     | '/player/tv/$showId'
+    | '/player/youtube/$channelId'
     | '/player/audiobooks'
     | '/player/movies'
     | '/player/music'
@@ -646,6 +657,7 @@ export interface FileRouteTypes {
     | '/player/movies/$movieId'
     | '/player/podcasts/$podcastId'
     | '/player/tv/$showId'
+    | '/player/youtube/$channelId'
     | '/player/audiobooks/'
     | '/player/movies/'
     | '/player/music/'
@@ -988,6 +1000,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PlayerAudiobooksIndexRouteImport
       parentRoute: typeof PlayerRouteRoute
     }
+    '/player/youtube/$channelId': {
+      id: '/player/youtube/$channelId'
+      path: '/youtube/$channelId'
+      fullPath: '/player/youtube/$channelId'
+      preLoaderRoute: typeof PlayerYoutubeChannelIdRouteImport
+      parentRoute: typeof PlayerRouteRoute
+    }
     '/player/tv/$showId': {
       id: '/player/tv/$showId'
       path: '/tv/$showId'
@@ -1110,6 +1129,7 @@ interface PlayerRouteRouteChildren {
   PlayerMoviesMovieIdRoute: typeof PlayerMoviesMovieIdRoute
   PlayerPodcastsPodcastIdRoute: typeof PlayerPodcastsPodcastIdRoute
   PlayerTvShowIdRoute: typeof PlayerTvShowIdRoute
+  PlayerYoutubeChannelIdRoute: typeof PlayerYoutubeChannelIdRoute
   PlayerAudiobooksIndexRoute: typeof PlayerAudiobooksIndexRoute
   PlayerMoviesIndexRoute: typeof PlayerMoviesIndexRoute
   PlayerMusicIndexRoute: typeof PlayerMusicIndexRoute
@@ -1127,6 +1147,7 @@ const PlayerRouteRouteChildren: PlayerRouteRouteChildren = {
   PlayerMoviesMovieIdRoute: PlayerMoviesMovieIdRoute,
   PlayerPodcastsPodcastIdRoute: PlayerPodcastsPodcastIdRoute,
   PlayerTvShowIdRoute: PlayerTvShowIdRoute,
+  PlayerYoutubeChannelIdRoute: PlayerYoutubeChannelIdRoute,
   PlayerAudiobooksIndexRoute: PlayerAudiobooksIndexRoute,
   PlayerMoviesIndexRoute: PlayerMoviesIndexRoute,
   PlayerMusicIndexRoute: PlayerMusicIndexRoute,

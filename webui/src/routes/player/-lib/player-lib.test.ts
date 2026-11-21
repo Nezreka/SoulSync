@@ -413,6 +413,7 @@ describe('video labels and sorting', () => {
     expect(resolutionLabel('1080p')).toBe('1080p');
     expect(resolutionLabel('2160p')).toBe('4K');
     expect(resolutionLabel(null)).toBe('');
+    expect(resolutionLabel('sd')).toBe('SD');
   });
 
   it('sorts titles like a shelf, ignoring a leading the', () => {
@@ -423,5 +424,84 @@ describe('video labels and sorting', () => {
       added_at: null,
     }));
     expect(sortTitles(items, 'title').map((x) => x.title)).toEqual(['Alpha', 'a Beta', 'The Zoo']);
+  });
+});
+
+describe('round two helpers', () => {
+  it('counts and durations read like youtube', async () => {
+    const { compactCount, clockDuration, ago } = await import('./format');
+    expect(compactCount(527_000_000)).toBe('527M');
+    expect(compactCount(1_250_000)).toBe('1.3M');
+    expect(compactCount(34_000)).toBe('34K');
+    expect(compactCount(950)).toBe('950');
+    expect(compactCount(null)).toBe('');
+    expect(clockDuration(1928)).toBe('32:08');
+    expect(clockDuration(3723)).toBe('1:02:03');
+    const now = new Date('2026-11-20T12:00:00Z').getTime();
+    expect(ago('2026-11-20T08:00:00Z', now)).toBe('today');
+    expect(ago('2026-11-17T12:00:00Z', now)).toBe('3 days ago');
+    expect(ago('2024-11-01T12:00:00Z', now)).toBe('2 years ago');
+  });
+
+  it('more like this ranks shared genres, then rating, never itself', async () => {
+    const { moreLikeThis } = await import('./rails');
+    const items = [
+      { id: 1, genres: ['Drama', 'Crime'], rating: 9 },
+      { id: 2, genres: ['Drama', 'Crime'], rating: 6 },
+      { id: 3, genres: ['Drama'], rating: 9.5 },
+      { id: 4, genres: ['Comedy'], rating: 10 },
+    ];
+    expect(moreLikeThis(items, { id: 1, genres: ['drama', 'crime'] }).map((x) => x.id)).toEqual([
+      2, 3,
+    ]);
+    expect(moreLikeThis(items, { id: 9, genres: [] })).toEqual([]);
+  });
+
+  it('a youtube card says whether it is on disk', async () => {
+    const { ytVideoCard } = await import('./rails');
+    const card = ytVideoCard({
+      id: 'abc',
+      title: 'T',
+      channel_id: 'UC1',
+      channel_title: 'Chan',
+      thumbnail: 'https://i.ytimg.com/vi/abc/mqdefault.jpg',
+      duration_seconds: 600,
+      published_at: null,
+      views: 2_000_000,
+      downloaded: false,
+    });
+    expect(card.flag).toEqual({ label: 'Embed' });
+    expect(card.badge).toBe('10:00');
+    expect(card.subtitle).toBe('Chan · 2M views');
+    expect(card.href).toBe('/player/youtube/UC1');
+  });
+});
+
+describe('preview placement and languages', () => {
+  it('keeps the preview on screen and wider than the card', async () => {
+    const { placePanel } = await import('../-ui/preview');
+    const view = { width: 1000, height: 800 };
+    const mid = placePanel({ left: 400, top: 300, width: 150, height: 225 }, view, 300);
+    expect(mid.width).toBe(300);
+    expect(mid.left).toBe(400 + 75 - 150);
+    const edge = placePanel({ left: 950, top: 300, width: 150, height: 225 }, view, 300);
+    expect(edge.left + edge.width).toBeLessThanOrEqual(988);
+    const left = placePanel({ left: 0, top: 0, width: 150, height: 225 }, view, 300);
+    expect(left.left).toBe(12);
+    expect(left.top).toBe(12);
+  });
+
+  it('names languages from codes in any shape', async () => {
+    const { languageList } = await import('../-ui/video-facts');
+    expect(languageList('en,ja')).toBe('English, Japanese');
+    expect(languageList('["eng","spa","eng"]')).toBe('English, Spanish');
+    expect(languageList(['xx'])).toBe('XX');
+    expect(languageList(null)).toBe('');
+  });
+
+  it('plain text survives a bio that is not a string', async () => {
+    const { plainText } = await import('./format');
+    expect(plainText({ bio: 'x' })).toBe('');
+    expect(plainText('<p>a</p><p>b</p>')).toBe('a\n\nb');
   });
 });

@@ -67,7 +67,8 @@ export interface CatalogRecentEpisode {
 }
 
 export interface CatalogYoutube {
-  id: number;
+  /** the youtube video id */
+  id: string;
   youtube_id: string;
   title: string;
   duration_seconds: number | null;
@@ -139,8 +140,14 @@ export interface LibArtistDetail {
   image_url: string | null;
   remote_image_url?: string | null;
   summary?: string | null;
-  about?: string | null;
+  /** the resolved bio and tags with their sources (core/library2/artist_about) */
+  about?: { bio?: string | null; bio_source?: string | null; tags?: string[] } | null;
+  style?: string | null;
+  mood?: string | null;
+  label?: string | null;
   genres?: string[];
+  album_count?: number;
+  single_count?: number;
   albums?: LibRelease[];
   eps?: LibRelease[];
   singles?: LibRelease[];
@@ -210,6 +217,12 @@ export interface VideoDetailBase {
   tagline?: string | null;
   content_rating?: string | null;
   rating?: number | null;
+  imdb_rating?: number | null;
+  rt_rating?: number | null;
+  metacritic?: number | null;
+  trakt_rating?: number | null;
+  awards?: string | null;
+  status?: string | null;
   genres?: string[];
   runtime_minutes?: number | null;
   logo?: string | null;
@@ -218,10 +231,18 @@ export interface VideoDetailBase {
   cast?: CastMember[];
   crew?: { name: string; job: string }[];
   studio?: string | null;
+  subtitle_langs?: string[] | string | null;
+  watched?: boolean | null;
+  play_count?: number | null;
+  imdb_id?: string | null;
+  /** a scene during or after the credits */
+  mediastinger?: string | boolean | null;
 }
 
 export interface MovieDetail extends VideoDetailBase {
   kind: 'movie';
+  release_date?: string | null;
+  digital_release_date?: string | null;
 }
 
 export interface DetailEpisode {
@@ -233,6 +254,10 @@ export interface DetailEpisode {
   runtime_minutes?: number | null;
   has_still?: boolean;
   owned?: boolean;
+  rating?: number | null;
+  watched?: boolean | null;
+  resolution?: string | null;
+  versions?: number | null;
 }
 
 export interface DetailSeason {
@@ -250,6 +275,19 @@ export interface ShowDetail extends VideoDetailBase {
   network?: string | null;
   seasons?: DetailSeason[];
   season_count?: number;
+  first_air_date?: string | null;
+  last_air_date?: string | null;
+  episode_total?: number | null;
+  episode_owned?: number | null;
+  watched_episodes?: number | null;
+  next_up?: {
+    season_number: number;
+    episode_number: number;
+    title?: string | null;
+    resume?: boolean;
+    view_offset_ms?: number | null;
+    runtime_minutes?: number | null;
+  } | null;
 }
 
 export type PlayVerdict = 'yes' | 'maybe' | 'no';
@@ -262,6 +300,8 @@ export interface VideoFile {
   video_codec?: string | null;
   audio_codec?: string | null;
   audio_channels?: number | null;
+  audio_languages?: string | null;
+  subtitle_languages?: string | null;
   dynamic_range?: string | null;
   atmos?: boolean | number | null;
   size_bytes?: number | null;
@@ -355,4 +395,33 @@ export interface PlayerProfile {
   has_pin?: boolean;
   has_password?: boolean;
   disabled?: boolean;
+}
+
+// ── youtube ────────────────────────────────────────────────────────────
+
+export interface YtChannel {
+  id: string;
+  title: string;
+  handle?: string | null;
+  avatar?: string | null;
+  banner?: string | null;
+  subscribers?: number | null;
+  followed: boolean;
+  video_count?: number;
+  downloaded_count: number;
+  latest_at?: string | null;
+  description?: string | null;
+}
+
+export interface YtVideo {
+  id: string;
+  title: string;
+  channel_id: string | null;
+  channel_title: string | null;
+  thumbnail: string;
+  duration_seconds: number | null;
+  published_at: string | null;
+  views: number | null;
+  downloaded: boolean;
+  downloaded_at?: string | null;
 }

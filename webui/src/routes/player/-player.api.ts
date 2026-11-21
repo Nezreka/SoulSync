@@ -21,6 +21,8 @@ import type {
   ShowDetail,
   ShowLibraryPayload,
   VideoCatalog,
+  YtChannel,
+  YtVideo,
 } from './-player.types';
 
 import { decodeCatalog, type CatalogWire } from './-lib/catalog';
@@ -363,3 +365,32 @@ export async function selectProfile(
   if (res.status === 429) return { ok: false, error: 'Too many tries. Wait a moment.' };
   return { ok: false, error: body.error || 'Could not switch profile' };
 }
+
+// ── youtube ────────────────────────────────────────────────────────────
+
+export const youtubeHomeQuery = () =>
+  queryOptions({
+    queryKey: ['player', 'youtube'],
+    queryFn: async () => {
+      const body = await apiClient
+        .get('player/youtube')
+        .json<{ channels?: YtChannel[]; latest?: YtVideo[]; downloads?: YtVideo[] }>();
+      return {
+        channels: body.channels ?? [],
+        latest: body.latest ?? [],
+        downloads: body.downloads ?? [],
+      };
+    },
+    staleTime: 2 * MINUTE,
+  });
+
+export const youtubeChannelQuery = (channelId: string) =>
+  queryOptions({
+    queryKey: ['player', 'youtube', 'channel', channelId],
+    queryFn: () =>
+      readJson<{ channel: YtChannel; videos: YtVideo[] }>(
+        apiClient.get(`player/youtube/channel/${encodeURIComponent(channelId)}`),
+      ),
+    staleTime: 2 * MINUTE,
+    retry: false,
+  });

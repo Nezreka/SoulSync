@@ -41,13 +41,17 @@ function ArtistPage() {
   const eps = ownedReleases(a.eps);
   const singles = ownedReleases(a.singles);
   const appears = ownedReleases(a.appears_on);
-  const about = plainText(a.about || a.summary);
+  const about = plainText(a.about?.bio) || plainText(a.summary);
   const image = a.image_url ?? a.remote_image_url;
+  // no photo of the artist: their newest cover sets the scene instead
+  const scene =
+    image ??
+    [...albums, ...eps, ...singles].map((r) => r.image_url ?? r.remote_image_url).find(Boolean);
 
   return (
     <>
       <Hero
-        backdrop={image}
+        backdrop={scene}
         poster={image}
         posterShape="square"
         posterRound

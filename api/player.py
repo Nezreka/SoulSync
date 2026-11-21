@@ -225,3 +225,60 @@ def video_catalog():
     except Exception:  # noqa: BLE001
         logger.exception("player video catalog failed")
         return jsonify({"success": False, "error": "Could not read the video library"}), 500
+
+
+def _youtube_gate():
+    """the video side's own rule for youtube: any video access at all."""
+    from api.video import access
+    if not access.any_side():
+        return jsonify({"success": False, "error": "Video isn't part of your profile"}), 403
+    return None
+
+
+@bp.route("/api/player/youtube", methods=["GET"])
+@requires_any("movies.access", "tv.access")
+def youtube_home():
+    """followed channels, newest uploads from them, newest downloads. read only:
+    nothing here calls youtube."""
+    from core.player import youtube
+    refused = _youtube_gate()
+    if refused:
+        return refused
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    try:
+        conn = get_video_db()._get_connection()
+        try:
+            return jsonify({"success": True, **youtube.home(conn, pid)})
+        finally:
+            conn.close()
+    except Exception:  # noqa: BLE001
+        logger.exception("player youtube home failed")
+        return jsonify({"success": False, "error": "Could not read YouTube"}), 500
+
+
+@bp.route("/api/player/youtube/channel/<channel_id>", methods=["GET"])
+@requires_any("movies.access", "tv.access")
+def youtube_channel(channel_id):
+    from core.player import youtube
+    refused = _youtube_gate()
+    if refused:
+        return refused
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    if not channel_id or len(channel_id) > 64:
+        return _bad("unknown channel")
+    try:
+        conn = get_video_db()._get_connection()
+        try:
+            data = youtube.channel(conn, channel_id, pid)
+        finally:
+            conn.close()
+    except Exception:  # noqa: BLE001
+        logger.exception("player youtube channel failed")
+        return jsonify({"success": False, "error": "Could not read this channel"}), 500
+    if data is None:
+        return jsonify({"success": False, "error": "Channel not found"}), 404
+    return jsonify({"success": True, **data})

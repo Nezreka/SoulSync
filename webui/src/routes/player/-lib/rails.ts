@@ -8,12 +8,21 @@ import { appURL } from '@/platform/url-base';
 import type {
   CatalogMovie,
   CatalogRecentEpisode,
+  CatalogShow,
   CatalogYoutube,
   LibAlbum,
   OwnedBook,
   PodcastEpisode,
   ProgressRow,
+  YtChannel,
+  YtVideo,
 } from '../-player.types';
+
+import {
+  ago as agoShort,
+  clockDuration as clockDurationShort,
+  compactCount as compactCountShort,
+} from './format';
 
 export interface RailCard {
   key: string;
@@ -26,6 +35,12 @@ export interface RailCard {
   progress?: number;
   /** the progress row this card came from, for remove / mark finished */
   source?: { itemType: string; itemId: string };
+  /** a small label over the artwork's corner: a duration, an episode count */
+  badge?: string;
+  /** a status mark over the artwork's other corner */
+  flag?: { label: string; tone?: 'yes' | 'maybe' | 'no' };
+  /** the title this card previews on hover or focus */
+  preview?: { kind: 'movie' | 'show'; id: number };
 }
 
 /** item types and the shape their artwork is */
@@ -110,14 +125,60 @@ export const proxiedImage = (url: string | null | undefined) =>
 export function recentMovieCards(movies: readonly CatalogMovie[], limit = 20): RailCard[] {
   return newestFirst(movies, (m) => m.added_at)
     .slice(0, limit)
-    .map((m) => ({
-      key: `movie:${m.id}`,
-      title: m.title,
-      subtitle: m.year ? String(m.year) : undefined,
-      art: m.has_poster ? posterUrl('movie', m.id) : null,
-      href: `/player/movies/${m.id}`,
-      shape: 'poster' as const,
-    }));
+    .map(movieCard);
+}
+
+export function movieCard(m: CatalogMovie): RailCard {
+  return {
+    key: `movie:${m.id}`,
+    title: m.title,
+    subtitle: [m.year, m.runtime_seconds ? runtimeShort(m.runtime_seconds) : '']
+      .filter(Boolean)
+      .join(' · '),
+    art: m.has_poster ? posterUrl('movie', m.id) : null,
+    href: `/player/movies/${m.id}`,
+    shape: 'poster',
+    badge: m.rating ? `★ ${m.rating.toFixed(1)}` : undefined,
+    preview: { kind: 'movie', id: m.id },
+  };
+}
+
+export function showCard(x: CatalogShow): RailCard {
+  return {
+    key: `show:${x.id}`,
+    title: x.title,
+    subtitle: [x.year, x.network].filter(Boolean).join(' · '),
+    art: x.has_poster ? posterUrl('show', x.id) : null,
+    href: `/player/tv/${x.id}`,
+    shape: 'poster',
+    badge: `${x.episode_count} ep`,
+    preview: { kind: 'show', id: x.id },
+  };
+}
+
+function runtimeShort(seconds: number): string {
+  const m = Math.round(seconds / 60);
+  return m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`;
+}
+
+/**
+ * "more like this": titles sharing the most genres with this one, the better
+ * rated first. real library data, nothing recommended from outside it.
+ */
+export function moreLikeThis<T extends { id: number; genres: string[]; rating: number | null }>(
+  items: readonly T[],
+  self: { id: number; genres: string[] },
+  limit = 20,
+): T[] {
+  const mine = new Set(self.genres.map((g) => g.toLowerCase()));
+  if (!mine.size) return [];
+  return items
+    .filter((x) => x.id !== self.id)
+    .map((x) => ({ x, shared: x.genres.filter((g) => mine.has(g.toLowerCase())).length }))
+    .filter((e) => e.shared > 0)
+    .sort((a, b) => b.shared - a.shared || (b.x.rating ?? 0) - (a.x.rating ?? 0))
+    .slice(0, limit)
+    .map((e) => e.x);
 }
 
 export function recentEpisodeCards(
@@ -151,8 +212,9 @@ export function recentYoutubeCards(videos: readonly CatalogYoutube[], limit = 20
     title: v.title,
     subtitle: v.channel_title ?? undefined,
     art: proxiedImage(v.thumbnail_url),
-    href: '/player/youtube',
+    href: v.channel_id ? `/player/youtube/${encodeURIComponent(v.channel_id)}` : '/player/youtube',
     shape: 'wide' as const,
+    badge: v.duration_seconds ? clockDurationShort(v.duration_seconds) : undefined,
   }));
 }
 
@@ -180,4 +242,39 @@ export function recentBookCards(books: readonly OwnedBook[], limit = 20): RailCa
 /** an episode's id in the progress store: its guid, else its audio url */
 export function episodeKey(episode: PodcastEpisode): string {
   return (episode.guid || episode.enclosure_url || episode.title).slice(0, 200);
+}
+
+/** a youtube video card: thumbnail, duration on the corner, on disk or embed */
+export function ytVideoCard(v: YtVideo, showChannel = true): RailCard {
+  const bits = [
+    showChannel ? v.channel_title : '',
+    v.views ? `${compactCountShort(v.views)} views` : '',
+    agoShort(v.published_at),
+  ].filter(Boolean);
+  return {
+    key: `yt:${v.id}`,
+    title: v.title,
+    subtitle: bits.join(' · '),
+    art: proxiedImage(v.thumbnail),
+    href: v.channel_id ? `/player/youtube/${encodeURIComponent(v.channel_id)}` : undefined,
+    shape: 'wide',
+    badge: v.duration_seconds ? clockDurationShort(v.duration_seconds) : undefined,
+    flag: v.downloaded ? { label: 'Downloaded', tone: 'yes' } : { label: 'Embed' },
+  };
+}
+
+export function ytChannelCard(c: YtChannel): RailCard {
+  return {
+    key: `ytc:${c.id}`,
+    title: c.title,
+    subtitle: [
+      c.subscribers ? `${compactCountShort(c.subscribers)} subscribers` : '',
+      c.downloaded_count ? `${c.downloaded_count} downloaded` : '',
+    ]
+      .filter(Boolean)
+      .join(' · '),
+    art: proxiedImage(c.avatar),
+    href: `/player/youtube/${encodeURIComponent(c.id)}`,
+    shape: 'square',
+  };
 }

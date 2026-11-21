@@ -6,9 +6,10 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { Link, Outlet, useRouterState } from '@tanstack/react-router';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 
+import { CardSizeSlider, useCardSize, type CardSizeRange } from '@/components/card-size';
 import { appURL } from '@/platform/url-base';
 
 import { profilesQuery } from '../-player.api';
@@ -20,14 +21,14 @@ import { Search } from './search';
 import { NAV, useSections } from './sections';
 import { focusFirstIn, useSpatialNav } from './use-spatial-nav';
 
+const CARD_SCALE_RANGE: CardSizeRange = { min: 64, max: 160, base: 100 };
+
 function Sidebar() {
   const sections = useSections();
   return (
     <nav className={s.side} aria-label="Player">
       <div className={s.brand}>
-        <span className={s.brandMark} aria-hidden="true">
-          ▶
-        </span>
+        <img className={s.brandLogo} src={appURL('/static/trans2.png')} alt="" />
         SoulSync
       </div>
       {NAV.filter((entry) => entry.visible(sections)).map((entry) => (
@@ -103,6 +104,9 @@ export function PlayerShell({ profileId }: { profileId: number | null }) {
   const [gate, setGate] = useState<boolean | null>(null);
 
   useSpatialNav(rootRef);
+  // one card size for the whole player on this device, as a percent
+  const [cardSize, setCardSize] = useCardSize('ss-player-card-scale', CARD_SCALE_RANGE);
+  const cardScale = (cardSize ?? CARD_SCALE_RANGE.base) / 100;
 
   // decided once per entry, when the profile list is in
   useEffect(() => {
@@ -136,12 +140,27 @@ export function PlayerShell({ profileId }: { profileId: number | null }) {
   // straight under <body>: the manager's react host sits in a stacking
   // context of its own, which would hold the player under the manager chrome
   return createPortal(
-    <div className={s.app} ref={rootRef}>
+    <div
+      className={s.app}
+      ref={rootRef}
+      data-player-root
+      style={{ '--pl-card-scale': cardScale } as CSSProperties}
+    >
       <Sidebar />
       <main className={s.main} ref={mainRef}>
         <div className={s.header}>
           <Search />
-          <ProfileChip currentId={profileId} />
+          <div className={s.headerEnd}>
+            <span className={s.sizeControl}>
+              <CardSizeSlider
+                label="Card size"
+                size={cardSize}
+                range={CARD_SCALE_RANGE}
+                onChange={setCardSize}
+              />
+            </span>
+            <ProfileChip currentId={profileId} />
+          </div>
         </div>
         <div className={s.page} data-page key={pathname}>
           <Outlet />

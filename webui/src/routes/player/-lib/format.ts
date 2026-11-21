@@ -41,8 +41,8 @@ export function shortDate(value: string | null | undefined): string {
 }
 
 /** text with html tags removed, for podcast and book descriptions */
-export function plainText(html: string | null | undefined): string {
-  if (!html) return '';
+export function plainText(html: unknown): string {
+  if (typeof html !== 'string' || !html) return '';
   return html
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<\/p>/gi, '\n\n')
@@ -55,4 +55,44 @@ export function plainText(html: string | null | undefined): string {
     .replace(/&gt;/g, '>')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
+}
+
+/** 1.2M, 34K, 950: view and subscriber counts the way youtube writes them */
+export function compactCount(n: number | null | undefined): string {
+  if (n === null || n === undefined || !Number.isFinite(n) || n < 0) return '';
+  if (n >= 1e9) return `${trim(n / 1e9)}B`;
+  if (n >= 1e6) return `${trim(n / 1e6)}M`;
+  if (n >= 1e3) return `${trim(n / 1e3)}K`;
+  return String(Math.round(n));
+}
+
+function trim(x: number): string {
+  return x >= 100 ? String(Math.round(x)) : x.toFixed(1).replace(/\.0$/, '');
+}
+
+/** "today", "3 days ago", "2 months ago", "4 years ago" */
+export function ago(value: string | null | undefined, now = Date.now()): string {
+  if (!value) return '';
+  const t = new Date(value).getTime();
+  if (Number.isNaN(t)) return '';
+  const days = Math.floor((now - t) / 86_400_000);
+  if (days <= 0) return 'today';
+  if (days === 1) return 'yesterday';
+  if (days < 7) return `${days} days ago`;
+  if (days < 30) return `${Math.floor(days / 7)} week${days < 14 ? '' : 's'} ago`;
+  if (days < 365) return `${Math.floor(days / 30)} month${days < 60 ? '' : 's'} ago`;
+  const years = Math.floor(days / 365);
+  return `${years} year${years === 1 ? '' : 's'} ago`;
+}
+
+/** a youtube-style duration on a thumbnail: 3:25, 1:02:03 */
+export function clockDuration(seconds: number | null | undefined): string {
+  if (!seconds || !Number.isFinite(seconds) || seconds <= 0) return '';
+  const total = Math.round(seconds);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  return h
+    ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+    : `${m}:${String(s).padStart(2, '0')}`;
 }

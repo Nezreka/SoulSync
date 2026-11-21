@@ -76,7 +76,9 @@ export function youtubeItem(video: CatalogYoutube): GuideItem {
     title: video.title,
     subtitle: video.channel_title ?? undefined,
     seconds: video.duration_seconds ?? 0,
-    href: '/player/youtube',
+    href: video.channel_id
+      ? `/player/youtube/${encodeURIComponent(video.channel_id)}`
+      : '/player/youtube',
   };
 }
 

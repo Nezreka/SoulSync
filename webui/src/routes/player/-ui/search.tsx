@@ -129,7 +129,9 @@ export function Search() {
             title: v.title,
             sub: v.channel_title ?? 'YouTube',
             art: proxiedImage(v.thumbnail_url),
-            href: '/player/youtube',
+            href: v.channel_id
+              ? `/player/youtube/${encodeURIComponent(v.channel_id)}`
+              : '/player/youtube',
           })),
       );
     }

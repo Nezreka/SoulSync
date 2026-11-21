@@ -5,12 +5,34 @@ import { useMemo, useState } from 'react';
 import type { DetailEpisode, VideoFile } from '../-player.types';
 
 import { remaining, runtime, shortDate } from '../-lib/format';
-import { backdropUrl, fraction, posterUrl, proxiedImage } from '../-lib/rails';
-import { rankVersions } from '../-lib/video';
-import { progressLookupQuery, showDetailQuery, showFilesQuery } from '../-player.api';
-import { Art, Badge, Hero, PlayButton, Tabs, VerdictBadge, styles as s } from '../-ui/kit';
+import {
+  backdropUrl,
+  fraction,
+  moreLikeThis,
+  posterUrl,
+  proxiedImage,
+  showCard,
+} from '../-lib/rails';
+import { rankVersions, resolutionLabel } from '../-lib/video';
+import {
+  progressLookupQuery,
+  showDetailQuery,
+  showFilesQuery,
+  videoCatalogQuery,
+} from '../-player.api';
+import {
+  Art,
+  Badge,
+  CardRail,
+  Hero,
+  PlayButton,
+  Tabs,
+  VerdictBadge,
+  styles as s,
+} from '../-ui/kit';
 import { NotFound, NotPartOfProfile } from '../-ui/not-part';
 import { useSections } from '../-ui/sections';
+import { Facts, Ratings } from '../-ui/video-facts';
 import { CastRow, VersionPicker } from '../-ui/video-parts';
 
 export const Route = createFileRoute('/player/tv/$showId')({
@@ -72,7 +94,12 @@ function EpisodeRow({
             {episode.episode_number}. {episode.title || `Episode ${episode.episode_number}`}
           </span>
           <span className={s.rowSub}>
-            {[shortDate(episode.air_date), runtime(seconds), owned ? '' : 'not in your library']
+            {[
+              shortDate(episode.air_date),
+              runtime(seconds),
+              episode.rating ? `★ ${episode.rating.toFixed(1)}` : '',
+              owned ? '' : 'not in your library',
+            ]
               .filter(Boolean)
               .join(' · ')}
             {position !== undefined && done !== undefined && done < 1
@@ -82,6 +109,8 @@ function EpisodeRow({
           {episode.overview ? <span className={s.rowText}>{episode.overview}</span> : null}
         </div>
         <div className={s.rowEnd}>
+          {episode.watched ? <Badge tone="yes">Watched</Badge> : null}
+          {best?.resolution ? <Badge>{resolutionLabel(best.resolution)}</Badge> : null}
           {files.length > 1 ? <Badge>{files.length} versions</Badge> : null}
           {best?.playable ? (
             <VerdictBadge verdict={best.playable.verdict} reasons={best.playable.reasons} />
@@ -89,7 +118,7 @@ function EpisodeRow({
         </div>
       </div>
       {open ? (
-        <div style={{ padding: '0 0.75rem 1rem' }}>
+        <div className={s.rowMore}>
           <VersionPicker files={files} />
         </div>
       ) : null}
@@ -104,6 +133,7 @@ function ShowPage() {
   const navigate = useNavigate({ from: '/player/tv/$showId' });
   const ok = sections.tv && Number.isFinite(id);
   const detail = useQuery({ ...showDetailQuery(id), enabled: ok, retry: false });
+  const catalog = useQuery({ ...videoCatalogQuery(), enabled: ok });
 
   const seasons = useMemo(
     () =>
@@ -146,6 +176,19 @@ function ShowPage() {
   const show = detail.data;
   if (!show || detail.isError) return <NotFound what="Show" />;
 
+  const firstYear = show.first_air_date?.slice(0, 4) ?? (show.year ? String(show.year) : '');
+  const lastYear = show.last_air_date?.slice(0, 4) ?? '';
+  const ended = (show.status ?? '').toLowerCase() === 'ended';
+  const years =
+    firstYear && ended && lastYear && lastYear !== firstYear
+      ? `${firstYear}–${lastYear}`
+      : firstYear;
+  const next = show.next_up;
+  const creators = show.crew?.filter((c) => c.job === 'Creator').map((c) => c.name);
+  const similar = moreLikeThis(catalog.data?.shows ?? [], { id, genres: show.genres ?? [] }).map(
+    showCard,
+  );
+
   return (
     <>
       <Hero
@@ -155,7 +198,7 @@ function ShowPage() {
         logo={show.logo ? proxiedImage(show.logo) : null}
         meta={
           <>
-            {show.year ? <span>{show.year}</span> : null}
+            {years ? <span>{years}</span> : null}
             {show.network ? <span>{show.network}</span> : null}
             {seasons.length ? (
               <span>
@@ -168,14 +211,47 @@ function ShowPage() {
           </>
         }
         badges={
-          <div className={s.badges}>
-            {show.content_rating ? <Badge>{show.content_rating}</Badge> : null}
-            {show.rating ? <Badge>★ {show.rating.toFixed(1)}</Badge> : null}
-          </div>
+          <>
+            <div className={s.badges}>
+              {show.content_rating ? <Badge>{show.content_rating}</Badge> : null}
+              {show.status ? <Badge>{ended ? 'Ended' : 'Still airing'}</Badge> : null}
+            </div>
+            <Ratings d={show} />
+          </>
         }
         overview={show.overview}
-        actions={<PlayButton label="Play next episode" />}
+        actions={
+          <>
+            <PlayButton
+              label={
+                next
+                  ? `${next.resume ? 'Resume' : 'Play'} S${next.season_number} E${next.episode_number}`
+                  : 'Play'
+              }
+            />
+            {next?.title ? <span className={s.notYet}>Up next: {next.title}</span> : null}
+          </>
+        }
       />
+
+      <div className={s.rail}>
+        <Facts
+          rows={[
+            ['Created by', creators?.length ? creators.join(', ') : null],
+            ['Network', show.network],
+            [
+              'Episodes',
+              show.episode_total
+                ? `${show.episode_owned ?? 0} of ${show.episode_total} in your library`
+                : null,
+            ],
+            ['Watched', show.watched_episodes ? `${show.watched_episodes} episodes` : null],
+            ['First aired', shortDate(show.first_air_date)],
+            ['Last aired', ended ? shortDate(show.last_air_date) : null],
+            ['Awards', show.awards],
+          ]}
+        />
+      </div>
 
       {seasons.length > 1 ? (
         <div className={s.rail}>
@@ -216,6 +292,7 @@ function ShowPage() {
       </div>
 
       <CastRow cast={show.cast} />
+      <CardRail title="More like this" cards={similar} />
     </>
   );
 }

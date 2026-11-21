@@ -64,7 +64,10 @@ export function resolutionLabel(value: string | null | undefined): string {
   if (!value) return '';
   const n = Number.parseInt(value, 10);
   if (n >= 2000) return '4K';
-  return /^\d+$/.test(value.trim()) ? `${value.trim()}p` : value;
+  const text = value.trim();
+  if (/^\d+$/.test(text)) return `${text}p`;
+  // 'sd', 'hd', 'uhd' read as labels
+  return /^[a-z]{2,3}$/i.test(text) ? text.toUpperCase() : text;
 }
 
 /** "4K · HDR10 · HEVC" and "TrueHD Atmos 7.1" lines for a version */

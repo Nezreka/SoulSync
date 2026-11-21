@@ -4,8 +4,7 @@ import { useMemo } from 'react';
 
 import type { RailCard } from '../-lib/rails';
 
-import { plural } from '../-lib/format';
-import { posterUrl, recentEpisodeCards } from '../-lib/rails';
+import { recentEpisodeCards, showCard } from '../-lib/rails';
 import { genresOf, sortTitles, validateBrowseSearch } from '../-lib/video';
 import { videoCatalogQuery } from '../-player.api';
 import { CardGrid, CardRail, Empty, PageTitle, styles as s } from '../-ui/kit';
@@ -28,14 +27,7 @@ function TvBrowse() {
 
   const cards: RailCard[] = useMemo(
     () =>
-      sortTitles(genre ? shows.filter((x) => x.genres.includes(genre)) : shows, sort).map((x) => ({
-        key: `s${x.id}`,
-        title: x.title,
-        subtitle: plural(x.episode_count, 'episode'),
-        art: x.has_poster ? posterUrl('show', x.id) : null,
-        href: `/player/tv/${x.id}`,
-        shape: 'poster',
-      })),
+      sortTitles(genre ? shows.filter((x) => x.genres.includes(genre)) : shows, sort).map(showCard),
     [shows, genre, sort],
   );
 

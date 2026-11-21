@@ -12,6 +12,7 @@ import type { PlayVerdict } from '../-player.types';
 
 import { MoreIcon, PlayIcon } from './icons';
 import s from './player.module.css';
+import { usePreview } from './preview';
 
 // ── links ──────────────────────────────────────────────────────────────
 
@@ -93,10 +94,18 @@ export function Card({
     return () => document.removeEventListener('mousedown', close);
   }, [menuOpen]);
 
+  const { handlers, panel } = usePreview(card.preview, card.title, card.href);
+
   const body = (
     <>
       <div className={s.art}>
         <Art src={card.art} alt={card.title} />
+        {card.flag ? (
+          <span className={s.cardFlag} data-tone={card.flag.tone}>
+            {card.flag.label}
+          </span>
+        ) : null}
+        {card.badge ? <span className={s.cardBadge}>{card.badge}</span> : null}
         {card.progress !== undefined ? (
           <div
             className={s.progress}
@@ -127,14 +136,15 @@ export function Card({
       ref={menuRef}
     >
       {card.href ? (
-        <PlayerLink href={card.href} className={s.card} data-nav>
+        <PlayerLink href={card.href} className={s.card} data-nav {...handlers}>
           {body}
         </PlayerLink>
       ) : (
-        <div className={s.card} tabIndex={0} data-nav>
+        <div className={s.card} tabIndex={0} data-nav {...handlers}>
           {body}
         </div>
       )}
+      {panel}
       {actions?.length ? (
         <>
           <button

@@ -4,7 +4,7 @@ import { useMemo } from 'react';
 
 import type { RailCard } from '../-lib/rails';
 
-import { posterUrl } from '../-lib/rails';
+import { movieCard } from '../-lib/rails';
 import { genresOf, sortTitles, validateBrowseSearch } from '../-lib/video';
 import { videoCatalogQuery } from '../-player.api';
 import { CardGrid, Empty, PageTitle, styles as s } from '../-ui/kit';
@@ -28,14 +28,7 @@ function MoviesBrowse() {
   const cards: RailCard[] = useMemo(
     () =>
       sortTitles(genre ? movies.filter((m) => m.genres.includes(genre)) : movies, sort).map(
-        (m) => ({
-          key: `m${m.id}`,
-          title: m.title,
-          subtitle: m.year ? String(m.year) : undefined,
-          art: m.has_poster ? posterUrl('movie', m.id) : null,
-          href: `/player/movies/${m.id}`,
-          shape: 'poster',
-        }),
+        movieCard,
       ),
     [movies, genre, sort],
   );

@@ -242,8 +242,14 @@ def test_every_player_route_declares_its_access():
 
     app = Flask(__name__)
     app.register_blueprint(player_api.create_blueprint())
-    rules = [r for r in app.url_map.iter_rules() if r.rule.startswith("/api/player/")
-             and "catalog" not in r.rule]
-    assert len(rules) == 6
-    for rule in rules:
+    rules = [r for r in app.url_map.iter_rules() if r.rule.startswith("/api/player/")]
+    own = [r for r in rules if "/progress" in r.rule or r.rule.endswith("/continue")]
+    library = [r for r in rules if r not in own]
+    assert len(own) == 6 and len(library) == 3
+    # your own rows: self only
+    for rule in own:
         assert declared_access(app.view_functions[rule.endpoint]) == ("self", None), rule.rule
+    # library reads ride the video side's own access rows
+    for rule in library:
+        assert declared_access(app.view_functions[rule.endpoint]) == (
+            "perm_any", ("movies.access", "tv.access")), rule.rule

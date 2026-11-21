@@ -10,7 +10,7 @@ import {
   backdropUrl,
   continueRails,
   newestFirst,
-  posterUrl,
+  movieCard,
   recentAlbumCards,
   recentBookCards,
   recentEpisodeCards,
@@ -196,14 +196,7 @@ function PlayerHome() {
             .filter((m) => (m.rating ?? 0) > 0)
             .sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0))
             .slice(0, 20)
-            .map((m) => ({
-              key: `top:${m.id}`,
-              title: m.title,
-              subtitle: m.year ? String(m.year) : undefined,
-              art: m.has_poster ? posterUrl('movie', m.id) : null,
-              href: `/player/movies/${m.id}`,
-              shape: 'poster' as const,
-            }))}
+            .map((m) => ({ ...movieCard(m), key: `top:${m.id}` }))}
         />
       ) : null}
 

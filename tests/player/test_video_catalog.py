@@ -21,6 +21,13 @@ def conn(tmp_path):
     c = sqlite3.connect(str(tmp_path / "video.db"))
     c.row_factory = sqlite3.Row
     c.executescript(SCHEMA.read_text(encoding="utf-8"))
+    # the columns later versions add on top of the base schema
+    from database.video_database import _COLUMN_MIGRATIONS
+    for table, column, decl in _COLUMN_MIGRATIONS:
+        try:
+            c.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+        except sqlite3.OperationalError:
+            pass
     c.executescript("""
         INSERT INTO genres (id, name) VALUES (1, 'Comedy'), (2, 'Drama');
         INSERT INTO movies (id, title, year, runtime_minutes, content_rating, has_file, added_at)
@@ -41,10 +48,23 @@ def conn(tmp_path):
                    (1100, 11, 110, 1, 1, 'Nope', 30, 0);
         INSERT INTO media_files (episode_id, relative_path, runtime_seconds, added_at)
             VALUES (1000, 'e1.mkv', 3300, '2026-03-01'), (1001, 'e2.mkv', NULL, '2026-03-05');
-        INSERT INTO channels (id, youtube_id, title) VALUES (5, 'UC1', 'Chan');
-        INSERT INTO channel_videos (id, channel_id, youtube_id, title, duration_seconds, has_file)
-            VALUES (50, 5, 'vid1', 'On disk', 600, 1), (51, 5, 'vid2', 'Not on disk', 300, 0);
-        INSERT INTO media_files (video_id, relative_path, added_at) VALUES (50, 'v.mp4', '2026-04-01');
+        INSERT INTO youtube_channel_meta (channel_id, title, avatar_url, subscriber_count)
+            VALUES ('UC1', 'Chan', 'https://yt3.googleusercontent.com/a', 1000),
+                   ('UC2', 'Other', NULL, NULL);
+        INSERT INTO youtube_channel_videos (channel_id, youtube_id, title, thumbnail_url, duration, view_count)
+            VALUES ('UC1', 'vid1', 'On disk', NULL, '10:00', 50),
+                   ('UC1', 'vid2', 'Embed only', 'https://i.ytimg.com/vi/vid2/hq.jpg', '1:02:03', 7),
+                   ('UC2', 'vid3', 'Not followed', NULL, '5:00', 1);
+        INSERT INTO youtube_video_dates (youtube_id, published_at)
+            VALUES ('vid1', '2026-04-01'), ('vid2', '2026-05-01'), ('vid3', '2026-06-01');
+        INSERT INTO video_download_history (kind, title, source, media_id, outcome, channel_id,
+                                            published_at, completed_at, pruned_at)
+            VALUES ('youtube', 'On disk', 'youtube', 'vid1', 'completed', 'UC1', '2026-04-01', '2026-04-02', NULL),
+                   ('youtube', 'Pruned', 'youtube', 'vidX', 'completed', 'UC1', '2026-01-01', '2026-01-02', '2026-03-01'),
+                   ('youtube', 'Failed', 'youtube', 'vidY', 'failed', 'UC1', '2026-01-01', '2026-01-02', NULL);
+        INSERT INTO video_watchlist (kind, tmdb_id, title, source, source_id, state, profile_id)
+            VALUES ('channel', 1, 'Chan', 'youtube', 'UC1', 'follow', 1),
+                   ('channel', 2, 'Other', 'youtube', 'UC2', 'follow', 2);
     """)
     yield c
     c.close()
@@ -87,9 +107,11 @@ def test_recent_episodes_newest_first(conn):
 
 def test_downloaded_youtube_only(conn):
     vids = catalog.downloaded_youtube(conn)
+    # pruned and failed downloads aren't on disk
     assert [v["youtube_id"] for v in vids] == ["vid1"]
     assert vids[0]["duration_seconds"] == 600
     assert vids[0]["channel_title"] == "Chan"
+    assert vids[0]["thumbnail_url"] == "https://i.ytimg.com/vi/vid1/mqdefault.jpg"
 
 
 def _raw(conn):
@@ -121,3 +143,38 @@ def test_rating_index_matches_the_field_order():
     from api.player import RATING
     assert catalog.MOVIE_FIELDS[RATING] == "content_rating"
     assert catalog.SHOW_FIELDS[RATING] == "content_rating"
+
+
+# ── youtube ──────────────────────────────────────────────────────────────
+
+from core.player import youtube  # noqa: E402
+
+
+def test_youtube_home_is_per_profile_follows_plus_downloads(conn):
+    home = youtube.home(conn, 1)
+    assert [c["id"] for c in home["channels"]] == ["UC1"]
+    chan = home["channels"][0]
+    assert chan["followed"] is True and chan["downloaded_count"] == 1 and chan["video_count"] == 2
+    # newest upload first, from followed channels only
+    assert [v["id"] for v in home["latest"]] == ["vid2", "vid1"]
+    assert [v["downloaded"] for v in home["latest"]] == [False, True]
+    assert home["latest"][0]["duration_seconds"] == 3723
+    assert [v["id"] for v in home["downloads"]] == ["vid1"]
+
+    other = youtube.home(conn, 2)
+    # profile 2 follows UC2, and sees UC1 only because it has downloads on disk
+    assert {c["id"]: c["followed"] for c in other["channels"]} == {"UC2": True, "UC1": False}
+    assert [v["id"] for v in other["latest"]] == ["vid3"]
+
+
+def test_youtube_channel_lists_its_videos_with_downloaded_flags(conn):
+    data = youtube.channel(conn, "UC1", 1)
+    assert data["channel"]["title"] == "Chan" and data["channel"]["downloaded_count"] == 1
+    assert [(v["id"], v["downloaded"]) for v in data["videos"]] == [("vid2", False), ("vid1", True)]
+    assert youtube.channel(conn, "UCnope", 1) is None
+
+
+@pytest.mark.parametrize("text,seconds", [("32:08", 1928), ("1:02:03", 3723), ("45", 45),
+                                          (None, None), ("live", None), ("", None), (90, 90)])
+def test_parse_duration(text, seconds):
+    assert youtube.parse_duration(text) == seconds
