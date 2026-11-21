@@ -84,6 +84,28 @@ def track_status(track: Dict[str, Any], wishlisted: Set[str]) -> str:
     return UNCHECKED
 
 
+def server_placement(track: Dict[str, Any], status: str) -> Any:
+    """for a track in the library: is it on the server playlist, and if not,
+    why (core/sync/server_placement, #2235). None when no sync has read the
+    playlist back, or the track isn't in the library (nothing to place)."""
+    if status != IN_LIBRARY:
+        return None
+    from core.sync.server_placement import placement_of
+    return placement_of(parse_extra(track.get("extra_data")))
+
+
+def placement_counts(placements: Iterable[Any]) -> Dict[str, int]:
+    """how many in-library tracks the server playlist holds, and how many it
+    doesn't and why. "in library" and "on the playlist" are two answers and a
+    mirror showed only the first (#2235)."""
+    from core.sync.server_placement import PLACEMENTS
+    counts = {p: 0 for p in PLACEMENTS}
+    for p in placements:
+        if p in counts:
+            counts[p] += 1
+    return counts
+
+
 def status_counts(statuses: Iterable[str]) -> Dict[str, int]:
     counts = {s: 0 for s in STATUSES}
     for s in statuses:
@@ -101,6 +123,8 @@ __all__ = [
     "WISHLISTED",
     "needs_match",
     "parse_extra",
+    "placement_counts",
+    "server_placement",
     "status_counts",
     "track_status",
     "wishlist_ids",

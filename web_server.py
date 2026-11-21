@@ -18538,6 +18538,41 @@ def _jellyfin_recreated_playlist_id(playlist_name):
         return None
 
 
+def _not_on_server_refusal(active_server, track_id):
+    """a refusal when ``track_id`` is a library row's own id for a track the
+    active server has no id for yet, else None.
+
+    library search hands back the catalogue row id for a track the server
+    hasn't scanned yet. sent to the server, jellyfin dropped it without a
+    word and plex resolved it to an unrelated item (#2235). only that shape
+    is refused: an id the server knows, or one soulsync has never seen, goes
+    through as before. a read that fails says nothing, so it doesn't refuse."""
+    if not active_server or active_server == 'soulsync' or not str(track_id).isdigit():
+        return None
+    try:
+        database = get_database()
+        if database.get_track_by_server_id(str(track_id), active_server) is not None:
+            return None  # the server's own id for a library track
+        conn = database._get_connection()
+        try:
+            is_row = conn.execute("SELECT 1 FROM lib2_tracks WHERE id = ?",
+                                  (int(track_id),)).fetchone() is not None
+        finally:
+            conn.close()
+        if not is_row or database.server_track_id(int(track_id), active_server):
+            return None
+    except Exception as e:  # noqa: BLE001 - no answer is not a refusal
+        logger.debug(f"server track check for {track_id} failed: {e}")
+        return None
+    label = {'plex': 'Plex', 'jellyfin': 'Jellyfin', 'emby': 'Emby',
+             'navidrome': 'Navidrome'}.get(str(active_server).lower(), 'your server')
+    return jsonify({
+        "success": False,
+        "error": f"That track is in your library but not on {label} yet. "
+                 f"Scan the library on {label}, then in SoulSync, and try again.",
+    }), 400
+
+
 @app.route('/api/server/playlist/<playlist_id>/replace-track', methods=['POST'])
 @requires("music.playlist_sync")
 def server_playlist_replace_track(playlist_id):
@@ -18560,6 +18595,9 @@ def server_playlist_replace_track(playlist_id):
             active_server, playlist_id, playlist_name)
         if _sp_refusal is not None:
             return _sp_refusal
+        _unknown = _not_on_server_refusal(active_server, new_track_id)
+        if _unknown is not None:
+            return _unknown
 
         # Persist the correction, exactly as Find & Add does. This endpoint
         # used to edit the server playlist and store NOTHING, so a fixed bad
@@ -18803,6 +18841,10 @@ def server_playlist_add_track(playlist_id):
                     "error": f"Track is not on the active {active_server} server"
                 }), 400
             track_id = str(server_id)
+        else:
+            _unknown = _not_on_server_refusal(active_server, track_id)
+            if _unknown is not None:
+                return _unknown
         # #1289 item 7 + item 6: the frontend sends playlist_id=0 and a name.
         # If this name matches a mirrored playlist with a stored server link,
         # follow the stored server ID (survives server-side renames) instead
@@ -19230,6 +19272,9 @@ def library_search_tracks():
                 'bitrate': getattr(t, 'bitrate', 0),
                 'duration': getattr(t, 'duration', 0),
                 'server_source': getattr(t, 'server_source', ''),
+                # False: the server has no id for it yet, so ``id`` is the
+                # catalogue row's and can't go on a server playlist (#2235)
+                'on_server': getattr(t, 'server_id_known', None) is not False,
             })
 
         return jsonify({"success": True, "tracks": tracks})
@@ -20084,7 +20129,8 @@ def _update_and_save_sync_status(playlist_id, playlist_name, playlist_owner, sna
         # authoritative profile change must re-run the sync even when the track
         # list is byte-identical (P1-03).
         for key in ('matched_tracks', 'total_tracks', 'discovered_tracks', 'tracks_hash',
-                    'mirror_tracks_hash', 'quality_profile_id', 'sync_mode'):
+                    'mirror_tracks_hash', 'quality_profile_id', 'sync_mode',
+                    'unplaced_tracks'):
             if key in kwargs:
                 status[key] = kwargs[key]
         sync_statuses[playlist_id] = status

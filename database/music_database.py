@@ -494,6 +494,12 @@ class DatabaseTrack:
     bitrate: Optional[int] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    # asked for a media server's ids (server_source given): True when ``id``
+    # is that server's id for the track, False when the server has no id for
+    # it yet and ``id`` fell back to the catalogue row id. a playlist write
+    # must never send that one: jellyfin drops it without a word and a plex
+    # fetchItem resolves it to an unrelated item (#2235). None = not asked
+    server_id_known: Optional[bool] = None
 
 @dataclass
 class DatabaseTrackWithMetadata:
@@ -13292,6 +13298,7 @@ class MusicDatabase:
                                         else None),
                 updated_at=_as_datetime(row['updated_at'] if 'updated_at' in row_keys
                                         else None),
+                server_id_known=bool(public_id) if server_source else None,
             )
             # Add artist and album info for compatibility with Plex responses
             track.artist_name = row['artist_name']

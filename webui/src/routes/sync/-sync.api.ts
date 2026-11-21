@@ -11,7 +11,7 @@
 import type { ExportJob, ExportMode, ExportStartResponse } from './-sync.export';
 import type { SyncHistoryEntry, SyncHistoryResyncTrack } from './-sync.history';
 import type { MirrorPayload } from './-sync.import';
-import type { MirroredPlaylistRow, MirroredTrackStatus } from './-sync.mirrored';
+import type { MirroredPlaylistRow, MirroredTrackStatus, ServerPlacement } from './-sync.mirrored';
 import type { MirroredPipelineState } from './-sync.pipeline';
 import type { SourceVerticalConfig } from './-sync.sources';
 import type { SourceSkipped } from './-sync.state';
@@ -543,9 +543,15 @@ export interface MirroredPlaylistDetail {
     /** when it joined the playlist; null for rows from before that was kept */
     added_at?: string | null;
     status?: MirroredTrackStatus;
+    server_placement?: ServerPlacement | null;
+    server_placement_with?: string;
   }[];
   /** how many tracks sit in each status (#1721) */
   status_counts?: Partial<Record<MirroredTrackStatus, number>>;
+  /** in-library tracks on the server playlist, and the ones that aren't (#2235) */
+  placement_counts?: Partial<Record<ServerPlacement, number>>;
+  /** the active media server, for "not on the Jellyfin playlist" */
+  server_type?: string | null;
   /** tracks the detail's library check should look at: unchecked, plus its
       own misses old enough to ask again (#1910) */
   library_check_due?: number;

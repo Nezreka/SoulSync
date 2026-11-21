@@ -27,6 +27,8 @@ import {
   mirroredHeroArt,
   mirroredRowDuration,
   mirroredTotalRuntime,
+  placementChip,
+  placementSegments,
   timeAgo,
   trackStatusChip,
   trackStatusSegments,
@@ -273,14 +275,18 @@ function TrackRow({
   track,
   edit,
   onPlay,
+  serverType,
 }: {
   track: MirroredTrack;
   edit?: EditProps;
   /** play the playlist from this song on; the number turns into it on hover */
   onPlay?: () => void;
+  /** the active media server, for "Not on Jellyfin yet" (#2235) */
+  serverType?: string | null;
 }) {
   const cls = `mm-row${edit?.dragging ? ' mm-row--dragging' : ''}${edit?.over ? ' mm-row--over' : ''}`;
   const chip = trackStatusChip(track.status);
+  const placed = placementChip(track, serverType);
   return (
     <div
       className={cls}
@@ -357,6 +363,11 @@ function TrackRow({
           {chip ? (
             <span className="mm-row-st" data-st={track.status} title={chip}>
               {chip}
+            </span>
+          ) : null}
+          {placed ? (
+            <span className="mm-row-st" data-st={track.server_placement} title={placed.title}>
+              {placed.label}
             </span>
           ) : null}
         </span>
@@ -467,7 +478,10 @@ export function MirroredDetailModal({
     }
   };
   // click a part of the status line to see just those tracks
-  const [statusFilter, setStatusFilter] = useState<MirroredTrackStatus | null>(null);
+  // or to the in-library tracks the server playlist doesn't hold (#2235)
+  const [statusFilter, setStatusFilter] = useState<
+    MirroredTrackStatus | 'not_on_server' | 'duplicate' | null
+  >(null);
   // tracks nothing has checked against the library yet get checked now, so
   // the line says what's owned instead of "not checked yet" (#1910)
   const checkingLibrary = useLibraryCheck(
@@ -478,8 +492,13 @@ export function MirroredDetailModal({
   const segments = trackStatusSegments(data.status_counts).map((seg) =>
     seg.status === 'unchecked' && checkingLibrary ? { ...seg, label: 'being checked…' } : seg,
   );
+  const placements = placementSegments(data.placement_counts, data.server_type);
   const shownTracks = sortTracks(tracks, sort).filter(
-    (t) => !statusFilter || t.status === statusFilter,
+    (t) =>
+      !statusFilter ||
+      (statusFilter === 'not_on_server' || statusFilter === 'duplicate'
+        ? t.status === 'in_library' && t.server_placement === statusFilter
+        : t.status === statusFilter),
   );
   // dragging only means something in the playlist's own order, all of it
   const editable = own && Boolean(onRemoveTrack && onReorder);
@@ -887,6 +906,40 @@ export function MirroredDetailModal({
                   ) : null}
                 </div>
               ) : null}
+              {placements.length > 0 ? (
+                <div
+                  className="mm-status"
+                  role="group"
+                  aria-label="Tracks in your library that are not on the server playlist"
+                >
+                  {placements.map((seg) => (
+                    <button
+                      key={seg.placement}
+                      type="button"
+                      className={`mm-status-seg${statusFilter === seg.placement ? ' mm-status-seg--on' : ''}`}
+                      data-st={seg.placement}
+                      aria-pressed={statusFilter === seg.placement}
+                      title={seg.title}
+                      onClick={() =>
+                        setStatusFilter((cur) => (cur === seg.placement ? null : seg.placement))
+                      }
+                    >
+                      <span className="mm-status-dot" aria-hidden="true" />
+                      <b>{seg.count}</b> {seg.label}
+                    </button>
+                  ))}
+                  {placements.some((seg) => seg.placement === 'not_on_server') ? (
+                    <button
+                      type="button"
+                      className="mm-status-fix"
+                      title="Sync again after a library scan, to put them on the playlist"
+                      onClick={onRunPipeline}
+                    >
+                      Sync again
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
               {/* play is the one big thing; the rest sit beside it, quiet */}
               <div className="mm-play-row">
                 <button
@@ -1166,6 +1219,7 @@ export function MirroredDetailModal({
               <TrackRow
                 key={`${track.position ?? index}-${track.track_name ?? ''}`}
                 track={track}
+                serverType={data.server_type}
                 onPlay={() => void runPlay('play', index)}
                 edit={
                   editable

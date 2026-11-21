@@ -156,7 +156,7 @@ def _fast_path_run(db, pk, last_status, config=None, global_mode="reconcile"):
     from core.automation.handlers.sync_playlist import auto_sync_playlist
 
     h = hashlib.md5("sp1".encode()).hexdigest()
-    status = {"tracks_hash": h, "mirror_tracks_hash": h, "matched_tracks": 1,
+    status = {"tracks_hash": h, "mirror_tracks_hash": h, "matched_tracks": 1, "unplaced_tracks": 0,
               "quality_profile_id": db.get_mirrored_playlist(pk).get("quality_profile_id"),
               **last_status}
     deps = MagicMock()
