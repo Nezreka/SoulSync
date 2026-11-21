@@ -112,6 +112,55 @@
     "key_rejected": false,
     "message": ""
   },
+  "/api/library/coverage": {
+    "docker": true,
+    "folders": [
+      {
+        "examples": [],
+        "found_by": "suffix",
+        "library": "Music",
+        "library_folder": "/app/Transfer",
+        "library_parts": [],
+        "local_folder": "/app/Transfer",
+        "reachable_tracks": 600,
+        "readable": 40,
+        "readable_pct": 100,
+        "reasons": { "ok": 40 },
+        "sampled": 40,
+        "server_folder": "/data/music",
+        "status": "covered",
+        "tracks": 600
+      },
+      {
+        "examples": [],
+        "found_by": "same",
+        "library": "Music",
+        "library_folder": null,
+        "library_parts": [],
+        "local_folder": "/archive",
+        "reachable_tracks": 0,
+        "readable": 0,
+        "readable_pct": 0,
+        "reasons": { "not_library": 40 },
+        "sampled": 40,
+        "server_folder": "/data/archive",
+        "status": "not_library",
+        "tracks": 600
+      }
+    ],
+    "folders_from": "server",
+    "outside_folders": 0,
+    "reachable_pct": 50,
+    "reachable_tracks": 600,
+    "relative_paths": false,
+    "server": "plex",
+    "success": true,
+    "total_tracks": 1200
+  },
+  "/api/library/path-mappings": {
+    "mappings": [],
+    "success": true
+  },
   "/api/logs/tail": {
     "lines": [
       "2026-11-15 10:00:00 - soulsync.app - INFO - sample line 0",

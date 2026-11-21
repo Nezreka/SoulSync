@@ -36,6 +36,7 @@ describe('the tabs', () => {
     // System's pills (settings-bic phase 6); Server Activity kept its own
     expect(resolveTab('server-activity')).toEqual({ tab: 'advanced', view: 'activity' });
     expect(resolveTab('security')).toEqual({ tab: 'advanced', view: 'security' });
+    expect(resolveTab('library-folders')).toEqual({ tab: 'library', view: 'folders' });
     expect(resolveTab('system', 'maintenance')).toEqual({ tab: 'advanced', view: 'maintenance' });
     // an old address's view=system is the first pill
     expect(resolveTab('system', 'system')).toEqual({ tab: 'advanced', view: 'general' });
@@ -147,6 +148,10 @@ describe('moving', () => {
     // an old key that names a pill goes to that pill
     nav.go('sources');
     expect(nav.get().view).toBe('sources');
+    // the Help coverage fix lands on Folders from another Library pill
+    nav.go('library', 'naming');
+    nav.go('library-folders');
+    expect(nav.get()).toMatchObject({ tab: 'library', view: 'folders' });
   });
   it('the address changing is heard as the address, so it is not written back', () => {
     const heard = vi.fn();

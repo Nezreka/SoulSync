@@ -150,6 +150,7 @@ def configure(*, config_manager_=None, get_database_=None,
         providers["download_probe"] = _download_probe(download_orchestrator_getter)
         providers["download_sources"] = _download_sources(download_orchestrator_getter)
         providers["download_failures"] = _download_failures(download_orchestrator_getter)
+    providers["library_coverage"] = _library_coverage
     help_health.configure(**providers)
     if version:
         help_bundle.configure(version=lambda: version)
@@ -160,6 +161,22 @@ def configure(*, config_manager_=None, get_database_=None,
 
 
 # ---------------------------------------------------------------- helpers
+# a coverage check older than this is run again when Help asks
+_COVERAGE_MAX_AGE = 6 * 3600
+
+
+def _library_coverage():
+    """the last library coverage check, or a new one when it's stale"""
+    import time as _time
+
+    from core.library import coverage
+    last = coverage.last_result()
+    if last and _time.time() - int(last.get("checked_at") or 0) < _COVERAGE_MAX_AGE:
+        return last
+    from api.library_coverage import run_now
+    return run_now()
+
+
 def _app_file() -> Path:
     return Path(_state["log_path"]) if _state.get("log_path") else help_logs.app_log_file()
 

@@ -12798,6 +12798,27 @@
       "sides": ["music", "video"],
       "scenario": "music"
     },
+    "#library-coverage \"Add as a library folder\"": {
+      "label": "Add as a library folder",
+      "anchor": "library-coverage",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#library-coverage \"SoulSync sees it somewhere else\"": {
+      "label": "SoulSync sees it somewhere else",
+      "anchor": "library-coverage",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#library-coverage \"Check again\"": {
+      "label": "Check again",
+      "anchor": "library-coverage",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
     "#sample-paths-list \"Remove ./samples\"": {
       "label": "Remove ./samples",
       "anchor": "sample-paths-list",

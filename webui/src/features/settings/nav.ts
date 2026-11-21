@@ -182,6 +182,9 @@ const ALIASES: Record<string, { tab: TabKey; view?: string }> = {
   system: { tab: 'advanced', view: 'general' },
   // a health fix that names the place it means (core/help/health.py)
   security: { tab: 'advanced', view: 'security' },
+  // the library coverage fix (core/help/health.py): the Folders pill even
+  // when Library is already open on another one
+  'library-folders': { tab: 'library', view: 'folders' },
 };
 
 /** a tab key from anywhere (a button, an old caller, the address) as a place */

@@ -24841,6 +24841,13 @@ _cfg_mcp(get_database=get_database, config_manager=config_manager,
          version=SOULSYNC_VERSION.split('+')[0])
 app.register_blueprint(_bp_mcp())
 
+# library coverage: how much of the media server's music SoulSync can read,
+# and the folder overrides the path resolver asks first
+from api.library_coverage import configure as _cfg_cov, create_blueprint as _bp_cov
+_cfg_cov(get_database=get_database, config_manager=config_manager,
+         media_server_engine_getter=lambda: media_server_engine)
+app.register_blueprint(_bp_cov())
+
 # help sheet: health, report a problem, the log files (api/help.py)
 from api.help import configure as _cfg_help, create_blueprint as _bp_help
 _cfg_help(config_manager_=config_manager, get_database_=get_database,

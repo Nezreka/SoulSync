@@ -198,6 +198,19 @@ After the music library folder moves, these point the library's file records at 
 - `GET /api/library/file-locations/status`: `{status, action, checked, total, result, preview, error, runs}`. `runs` lists recent runs, manual and from library scans, with `id`, `kind`, `status`, `repointed` and `groups`.
 - `POST /api/library/file-locations/runs/<id>/undo`: put a run's records back. A record changed since is left as it is. `POST /api/library/file-locations/stop` stops the running job.
 
+### Library coverage and folder overrides (web UI routes, admins only)
+
+How much of the media server's music SoulSync can read directly, folder by folder. Each folder is sampled (up to 40 real files, opened and size-checked), never scanned whole.
+
+- `GET /api/library/coverage`: the last check, or a new one when there is none. `?refresh=1` always runs a new one. `{server, folders_from: "server"|"inferred", relative_paths, total_tracks, outside_folders, reachable_tracks, reachable_pct, docker, folders}`. Each folder: `{library, server_folder, tracks, local_folder, found_by: "override"|"same"|"learned"|"suffix"|null, status: "covered"|"partly_covered"|"not_library"|"not_mounted", library_folder, library_parts, volume_example (Docker, not mounted), sampled, readable, readable_pct, reasons: {reason: count}, examples: [{server_path, local_path, reason, why}], reachable_tracks}`. Reasons: `ok`, `not_mounted`, `missing`, `permission`, `size`, `unreadable`, `not_a_file`, `not_library`. Navidrome doesn't say which folders it uses, so its folders are worked out from its track paths (`folders_from: "inferred"`); `relative_paths: true` means Report Real Path is off.
+- `POST /api/library/coverage/folder` `{server_folder, local_folder?, library?}`: one folder, checked now. With `local_folder` it is checked as if SoulSync saw it there; nothing is saved.
+- `POST /api/library/coverage/check-path` `{path}`: `{exists, is_dir, readable, entries, sample, library_folder}` for a typed folder.
+- `GET /api/library/path-mappings` `?media_type=music|video`: folder overrides, `[{id, media_type, server_kind, server_prefix, local_prefix, enabled, verified_at, verify}]`.
+- `POST /api/library/path-mappings` `{server_prefix, local_prefix, media_type?: "music", server_kind?: "", this_server?: bool}` adds one (the same server folder saves over itself); `PUT /api/library/path-mappings/<id>` changes one; `DELETE` removes it. `this_server: true` limits it to the active media server.
+- `POST /api/library/path-mappings/<id>/verify`: samples the files under it and stores `verify` and `verified_at`.
+
+An override renames a folder: "the server's `/data/music` is `/music` here". It never gives SoulSync access to a drive. Every server path SoulSync turns into its own asks the overrides first (the longest matching server folder wins, Windows paths compare without case), then the mounts it learned itself, then the trailing-folder match against its library folders. An override whose folder is missing is skipped, so it never hides a file.
+
 ---
 
 ## MCP for AI clients

@@ -31,6 +31,7 @@ import {
   useLoads,
   useSettings,
 } from './library-card';
+import { ServerFoldersSection } from './library-coverage';
 import { text } from './source-panels';
 
 export { isDocker };
@@ -396,6 +397,29 @@ export function MusicFolders({ store }: { store: SettingsStore }) {
           container read-write, then add the <em>container-side</em> path here (like{' '}
           <code>/music2</code>).
         </p>
+      </Card>
+
+      {/* every music folder the media server has, and whether SoulSync scans
+          it (library-coverage.tsx). "Add as a library folder" adds a row to
+          the list above */}
+      <SectionLabel
+        title="Your media server's folders"
+        hint="Which of them SoulSync can read, and what the rest need."
+      />
+      <Card>
+        <div className={s.cardPad}>
+          <ServerFoldersSection
+            bare
+            onAddLibraryFolder={(path) => {
+              const rows = music.map((r) => r.trim()).filter(Boolean);
+              if (rows.includes(path)) return;
+              const next = [...rows, path];
+              setMusic(next);
+              saveList('music_paths', next);
+              refreshChecks('music');
+            }}
+          />
+        </div>
       </Card>
 
       <SectionLabel

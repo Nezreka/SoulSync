@@ -292,6 +292,7 @@ A personal front page shaped by your library, your listening and your watchlist.
 - **Fix a wrong match** by pasting the artist's link or ID from Spotify, Apple Music, Deezer, Discogs, Tidal, Qobuz and more. The watchlist follows the fix.
 - **Artist pages**: full discography with ownership, and live records, compilations, soundtracks, remixes and spoken word in sections of their own. Live completion bars for albums / EPs / singles, a bio, tags and listener numbers (Last.fm first; without a working key, TheAudioDB or Wikipedia, MusicBrainz, ListenBrainz and Deezer fill in and say so), top tracks, a flame on each album's most played tracks (Last.fm), similar artists, a **music video player**, and **concerts** (Ticketmaster dates and Setlist.fm setlists you can play from your own library).
 - **Gap-fill** pulls in releases your other metadata sources know about.
+- **Your media server's folders** (Settings → Library → Folders → Music): every folder Plex, Jellyfin or Navidrome keeps music in, whether SoulSync scans it, and how much of it SoulSync can read directly (a sample of real files from each folder). A folder SoulSync sees but doesn't scan adds as a library folder in one click; one it can't see says why, with the compose volume line in Docker. Names don't have to match: SoulSync finds `/data/music` as its own `/music` on its own, and a folder override covers the rare setup it can't work out. Help warns when SoulSync can read less than half of the server's music.
 - **Label pages**: a label's full catalog with owned / missing filters. Follow a label for new releases or its whole backlog.
 
 <details>
@@ -872,6 +873,8 @@ Settings save as you change them. If you'd rather press save yourself, turn off 
 | Podcasts / audiobooks | `/app/podcasts`, `/app/audiobooks` | Optional |
 | Video | `/media/movies`, `/media/tv`, `/media/youtube` | Optional, for the video side |
 | Video extras | `/media/anime`, `/media/movies-4k`, `/media/tv-4k` | Optional: the anime and 4K libraries, commented out in the compose file |
+
+If your media server keeps music on more drives than SoulSync's library folder, mount those into SoulSync too and add them as library folders. **Settings → Library → Folders → Music → Your media server's folders** lists every folder the server uses and which ones SoulSync can't read yet.
 
 **Environment variables**
 
