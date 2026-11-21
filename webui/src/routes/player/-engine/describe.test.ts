@@ -41,6 +41,23 @@ group('what loading says', () => {
     expect(resume).toEqual({ title: 'Picking up at 42:10', detail: 'From Jellyfin' });
   });
 
+  it('says what the converter does and on what', () => {
+    const t = at({
+      phase: 'opening',
+      source: { via: 'disk', tookMs: 1 },
+      transcode: {
+        video: 'h264',
+        audio: 'aac',
+        reasons: ['HEVC video to H.264', 'AC3 audio to AAC'],
+        encoder: 'NVIDIA GPU',
+      },
+    } as Partial<PlayerState>);
+    expect(describe(t, 0)).toEqual({
+      title: 'Starting the converter',
+      detail: 'HEVC video to H.264, AC3 audio to AAC, on your NVIDIA GPU',
+    });
+  });
+
   it('seeking and buffering', () => {
     expect(describe(at({ phase: 'seeking', position: 3723 }), 0)?.title).toBe('Jumping to 1:02:03');
     const buffering = at({

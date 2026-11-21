@@ -56,6 +56,9 @@ class Source:
     parts: List[Dict[str, Any]] = field(default_factory=list)
     chapters: List[Dict[str, Any]] = field(default_factory=list)
     extra: Dict[str, Any] = field(default_factory=dict)
+    # facts the server uses (a video's codecs, for the transcoder) and a
+    # client never sees
+    private: Dict[str, Any] = field(default_factory=dict)
 
     def public(self) -> Dict[str, Any]:
         """what a client may see: how to play it, never where the file is"""

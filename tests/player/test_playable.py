@@ -178,6 +178,10 @@ def client(monkeypatch, tmp_path):
         return sources[item_id]
 
     monkeypatch.setattr(P, "resolve", fake)
+    # the transcoder's ffmpeg and encoder pinned: this machine's own don't count
+    from core.player import transcode as T
+    monkeypatch.setattr(T, "ffmpeg_path", lambda: "ffmpeg")
+    monkeypatch.setattr(T, "encoder", lambda ff: ("libx264", "CPU", [], ""))
     app = Flask(__name__)
     app.register_blueprint(S.create_blueprint())
     return app.test_client()
@@ -191,6 +195,8 @@ def test_playable_says_how_and_never_where(client):
                     "url": "/api/player/stream/track/file", "via": "disk"}
     relayed = client.get("/api/player/playable/movie/relay?part=11").get_json()
     assert relayed["url"] == "/api/player/stream/movie/relay?part=11"
+    # codecs unknown ('maybe'): it plays as it is, the converted stream kept as the fallback
+    assert relayed.get("fallback_url", "").startswith("/api/player/transcode/movie/relay")
     assert relayed["via"] == "media server"
     assert "secret" not in json.dumps(relayed)
     refused = client.get("/api/player/playable/track/nope")

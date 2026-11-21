@@ -31,8 +31,28 @@ export interface Verdict {
 }
 
 /** what the server says about how to play an item (GET /api/player/playable/...) */
+/** what the server converts for this browser (core/player/transcode.py) */
+export interface TranscodeInfo {
+  video: 'copy' | 'h264';
+  audio: 'copy' | 'aac';
+  reasons: string[];
+  quality?: string;
+  tonemap?: boolean;
+  /** the encoder doing the video ('NVIDIA GPU', 'CPU'); null when the video is copied */
+  encoder?: string | null;
+}
+
+export type Quality = 'original' | '1080p' | '720p' | '480p';
+export const QUALITIES: Quality[] = ['original', '1080p', '720p', '480p'];
+
 export interface Playable {
   url: string;
+  /** set when the url is the converted stream: it starts at ?t= and can't seek by range */
+  transcode?: TranscodeInfo | null;
+  /** a 'maybe' file: the converted stream to switch to if the browser can't play it */
+  fallback_url?: string;
+  /** why a file that needs converting can't be (no ffmpeg) */
+  transcode_unavailable?: string;
   /** where the bytes come from: 'disk', or the media server ('plex', 'jellyfin', 'navidrome') */
   via?: string;
   /** how long the server took to find the file (a sleeping drive shows here) */
@@ -52,8 +72,13 @@ export interface SavedPosition {
 
 export interface EngineDeps {
   createMedia: (kind: MediaKind) => HTMLMediaElement;
-  playable: (item: PlayItem) => Promise<Playable>;
+  playable: (item: PlayItem, quality: Quality) => Promise<Playable>;
   progress: (item: PlayItem) => Promise<SavedPosition | null>;
+  /**
+   * where a converted stream with copied video really starts if asked for
+   * ``t`` (a keyframe), and the ``t`` to request so it lands there
+   */
+  transcodeStart: (url: string, t: number) => Promise<{ start: number; seek: number }>;
   save: (item: PlayItem, position: number, duration: number | null, finished: boolean) => void;
   store: { get: (key: string) => string | null; set: (key: string, value: string) => void };
   now: () => number;
@@ -89,6 +114,10 @@ export interface PlayerState {
   phaseSince: number;
   /** where this item's bytes come from, once the server has said */
   source: SourceInfo | null;
+  /** what's converted, while the server is converting it */
+  transcode: TranscodeInfo | null;
+  /** the picked video quality (original: as it is, converted only if it must be) */
+  quality: Quality;
 }
 
 export type Phase = 'locating' | 'opening' | 'resuming' | 'seeking' | 'buffering' | null;
@@ -123,6 +152,8 @@ export class PlayerEngine {
   private saveTimer: unknown = null;
   private lastSaved = -1;
   private pendingSeek: number | null = null;
+  /** a converted stream starts where it was asked to: its own 0 is this far in */
+  private streamOffset = 0;
 
   constructor(private readonly deps: EngineDeps) {
     this.state = {
@@ -145,6 +176,10 @@ export class PlayerEngine {
       phase: null,
       phaseSince: 0,
       source: null,
+      transcode: null,
+      quality: (QUALITIES as string[]).includes(deps.store.get('quality') ?? '')
+        ? (deps.store.get('quality') as Quality)
+        : 'original',
     };
     this.bindMediaSession();
   }
@@ -268,7 +303,12 @@ export class PlayerEngine {
     if (!el || !this.state.item) return;
     const target = Math.max(0, Math.min(to, this.state.duration || to));
     const { index, offset } = locate(this.state.parts, target);
-    if (this.state.parts.length > 1 && index !== this.partIndex) {
+    if (this.playable?.transcode) {
+      // a converted stream seeks inside what's arrived; past it, a new one starts there
+      const inside = target >= this.streamOffset && target <= this.state.buffered;
+      if (inside) el.currentTime = target - this.streamOffset;
+      else void this.loadPart(0, target, !el.paused);
+    } else if (this.state.parts.length > 1 && index !== this.partIndex) {
       void this.loadPart(index, offset, !el.paused);
     } else {
       el.currentTime = offset;
@@ -314,6 +354,15 @@ export class PlayerEngine {
     this.set({ rate: r });
   }
 
+  /** the video quality: kept on this device, applied now at the same spot */
+  setQuality(quality: Quality) {
+    if (quality === this.state.quality) return;
+    this.deps.store.set('quality', quality);
+    this.set({ quality });
+    if (this.state.kind === 'video' && this.state.item)
+      void this.load({ startAt: this.state.position, live: this.state.live });
+  }
+
   /** stop after ``minutes``, or at the end of this item (null: off) */
   setSleep(minutes: number | 'end' | null) {
     this.set({
@@ -355,6 +404,7 @@ export class PlayerEngine {
       phase: null,
       phaseSince: 0,
       source: null,
+      transcode: null,
     });
   }
 
@@ -400,6 +450,7 @@ export class PlayerEngine {
       verdict: null,
       live: !!options.live,
       source: null,
+      transcode: null,
       rate: this.isLongForm(item) ? this.rateFor(item.type) : 1,
     });
     this.setPhase('locating');
@@ -407,7 +458,7 @@ export class PlayerEngine {
     let saved: SavedPosition | null = null;
     try {
       [playable, saved] = await Promise.all([
-        this.deps.playable(item),
+        this.deps.playable(item, this.state.quality),
         options.startAt !== undefined || options.live || !this.isLongForm(item)
           ? Promise.resolve(null)
           : this.deps.progress(item).catch(() => null),
@@ -427,15 +478,15 @@ export class PlayerEngine {
       return;
     }
     if (token !== this.loadToken) return;
-    if (playable.verdict?.verdict === 'no') {
-      // honest: this file can't play in a browser as it is. the transcoder
-      // will change that; until then, say so instead of a silent picture
+    if (playable.verdict?.verdict === 'no' && !playable.transcode) {
+      // can't play as it is, and the server can't convert it: say so, never a silent picture
       this.set({
         status: 'error',
         phase: null,
         verdict: playable.verdict,
         error:
-          "This file's format can't play in a browser yet. Pick another version, or it plays once the transcoder lands.",
+          playable.transcode_unavailable ??
+          "This file's format can't play in a browser. Pick another version.",
       });
       return;
     }
@@ -454,6 +505,7 @@ export class PlayerEngine {
       duration,
       position: start,
       source: { via: playable.via ?? 'disk', tookMs: playable.took_ms ?? null },
+      transcode: playable.transcode ?? null,
     });
     this.setPhase(start > 0 ? 'resuming' : 'opening');
     const at = locate(parts, start);
@@ -469,14 +521,33 @@ export class PlayerEngine {
     const el = this.element(this.state.kind);
     this.partIndex = index;
     const multi = (playable.parts?.length ?? 0) > 1;
-    const src = multi ? withPart(playable.url, index) : playable.url;
     el.volume = this.state.volume;
     el.muted = this.state.muted;
-    if (el.getAttribute('src') !== src) {
-      el.src = src;
-      this.pendingSeek = offset > 0 ? offset : null;
+    if (playable.transcode) {
+      // the converted stream is made from ``offset`` on: its 0 is that far in.
+      // copied video can only start at a keyframe: ask where, start exactly there
+      let start = offset;
+      let seek = offset;
+      if (offset > 0 && playable.transcode.video === 'copy') {
+        try {
+          ({ start, seek } = await this.deps.transcodeStart(playable.url, offset));
+        } catch {
+          /* unanswered: start where asked; the clock may be off by a keyframe */
+        }
+        if (token !== this.loadToken) return;
+      }
+      this.streamOffset = start;
+      this.pendingSeek = null;
+      el.src = withParam(playable.url, 't', seek > 0 ? seek.toFixed(2) : null);
     } else {
-      el.currentTime = offset;
+      this.streamOffset = 0;
+      const src = multi ? withPart(playable.url, index) : playable.url;
+      if (el.getAttribute('src') !== src) {
+        el.src = src;
+        this.pendingSeek = offset > 0 ? offset : null;
+      } else {
+        el.currentTime = offset;
+      }
     }
     el.playbackRate = this.state.rate;
     if (!autoplay) return;
@@ -503,7 +574,8 @@ export class PlayerEngine {
     });
     el.addEventListener('timeupdate', () => {
       if (!mine()) return;
-      const position = bookTime(this.state.parts, this.partIndex, el.currentTime);
+      const position =
+        this.streamOffset + bookTime(this.state.parts, this.partIndex, el.currentTime);
       this.set({ position });
       this.checkSleep();
       this.updatePositionState();
@@ -511,11 +583,9 @@ export class PlayerEngine {
     el.addEventListener('progress', () => {
       if (!mine() || !el.buffered.length) return;
       this.set({
-        buffered: bookTime(
-          this.state.parts,
-          this.partIndex,
-          el.buffered.end(el.buffered.length - 1),
-        ),
+        buffered:
+          this.streamOffset +
+          bookTime(this.state.parts, this.partIndex, el.buffered.end(el.buffered.length - 1)),
       });
     });
     el.addEventListener('playing', () => {
@@ -547,6 +617,24 @@ export class PlayerEngine {
     el.addEventListener('ended', () => mine() && this.onEnded());
     el.addEventListener('error', () => {
       if (!mine() || !this.state.item) return;
+      // a 'maybe' file this browser couldn't play after all: the converted stream, same spot
+      const p = this.playable;
+      if (p?.fallback_url && !p.transcode) {
+        this.playable = {
+          ...p,
+          url: p.fallback_url,
+          fallback_url: undefined,
+          transcode: {
+            video: 'h264',
+            audio: 'aac',
+            reasons: ["this browser couldn't play it as it is"],
+          },
+        };
+        this.set({ transcode: this.playable.transcode ?? null });
+        this.setPhase('opening');
+        void this.loadPart(0, this.state.position, true);
+        return;
+      }
       this.set({
         status: 'error',
         error: "This couldn't be played. The file may be gone or unreadable.",
@@ -655,6 +743,11 @@ export class PlayerEngine {
       /* a stale duration: the next update fixes it */
     }
   }
+}
+
+function withParam(url: string, key: string, value: string | null) {
+  const u = url.replace(new RegExp(`([?&])${key}=[^&]*`), '').replace(/[?&]$/, '');
+  return value === null ? u : `${u}${u.includes('?') ? '&' : '?'}${key}=${value}`;
 }
 
 function withPart(url: string, index: number) {

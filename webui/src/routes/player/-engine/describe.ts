@@ -35,6 +35,14 @@ export function viaName(via: string | undefined | null): string {
   return SERVER_NAMES[via.toLowerCase()] ?? via;
 }
 
+/** "AC3 audio to AAC, on your NVIDIA GPU" */
+export function converting(state: PlayerState): string | undefined {
+  const t = state.transcode;
+  if (!t) return undefined;
+  const what = t.reasons.length ? t.reasons.join(', ') : 'Converting for this browser';
+  return t.encoder && t.encoder !== 'CPU' ? `${what}, on your ${t.encoder}` : what;
+}
+
 function woke(state: PlayerState): string | undefined {
   const took = state.source?.tookMs;
   if (!took || took < ASLEEP_MS) return undefined;
@@ -54,6 +62,7 @@ export function describe(state: PlayerState, now: number): Description | null {
             detail: `${Math.round(elapsed / 1000)}s. The drive it's on may be waking up. That can take half a minute.`,
           };
     case 'opening':
+      if (state.transcode) return { title: 'Starting the converter', detail: converting(state) };
       return {
         title: fromServer ? `Connecting to ${viaName(via)}` : 'Opening the file',
         detail: woke(state),
@@ -61,9 +70,15 @@ export function describe(state: PlayerState, now: number): Description | null {
     case 'resuming':
       return {
         title: `Picking up at ${clock(state.position)}`,
-        detail: woke(state) ?? (fromServer ? `From ${viaName(via)}` : undefined),
+        detail:
+          converting(state) ?? woke(state) ?? (fromServer ? `From ${viaName(via)}` : undefined),
       };
     case 'seeking':
+      if (state.transcode)
+        return {
+          title: `Jumping to ${clock(state.position)}`,
+          detail: 'The converter starts again from there',
+        };
       return { title: `Jumping to ${clock(state.position)}` };
     case 'buffering': {
       const ahead = Math.max(0, state.buffered - state.position);

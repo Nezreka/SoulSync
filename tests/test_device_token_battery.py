@@ -32,6 +32,8 @@ OPTED_IN = {
     # tracks through these, as its profile
     "player_stream.playable": A.PLAYBACK,
     "player_stream.stream": A.PLAYBACK,
+    "player_stream.transcode": A.PLAYBACK,
+    "player_stream.transcode_start": A.PLAYBACK,
 }
 
 IGNORED = {"HEAD", "OPTIONS"}

@@ -127,3 +127,13 @@ export const SpeedIcon = () => (
     <path d="m12 12 4-3" />
   </Icon>
 );
+
+export const QualityIcon = () => (
+  <Icon>
+    <rect x="3" y="5" width="18" height="14" rx="2" />
+    <path
+      d="M7.5 9.5v5M7.5 12h3M10.5 9.5v5M14 9.5h2a2 2 0 0 1 2 2v1a2 2 0 0 1-2 2h-2z"
+      strokeWidth={1.5}
+    />
+  </Icon>
+);

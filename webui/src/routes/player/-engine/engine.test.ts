@@ -16,7 +16,7 @@ class FakeMedia {
   muted = false;
   playbackRate = 1;
   preload = '';
-  buffered = { length: 0, end: () => 0 };
+  buffered: { length: number; end: (i: number) => number } = { length: 0, end: () => 0 };
   private handlers: Record<string, (() => void)[]> = {};
   constructor(public kind: MediaKind) {}
   set src(v: string) {
@@ -70,6 +70,8 @@ function setup(opts: { playable?: (item: PlayItem) => Playable; saved?: SavedPos
     playable: async (item) =>
       opts.playable?.(item) ?? { url: `/s/${item.type}/${item.id}`, duration: 100 },
     progress: async () => opts.saved ?? null,
+    // copied video starts at the keyframe before: here, the whole second below
+    transcodeStart: async (_url, t) => ({ start: Math.floor(t), seek: Math.floor(t) + 0.3 }),
     save: (item, position, _d, finished) => saves.push({ id: item.id, position, finished }),
     store: { get: (k) => store.get(k) ?? null, set: (k, v) => void store.set(k, v) },
     now: () => now,
@@ -164,6 +166,7 @@ describe('player engine', () => {
     const s = t.engine.getState();
     expect(s.status).toBe('error');
     expect(s.error).toMatch(/can't play in a browser/);
+    expect(s.error).not.toMatch(/transcoder lands/);
     expect(t.media.video?.src ?? '').toBe('');
   });
 
@@ -241,7 +244,7 @@ describe('player engine', () => {
     const slow = new Promise<Playable>((r) => (release = r));
     const deps = (t.engine as unknown as { deps: EngineDeps }).deps;
     const fast = deps.playable;
-    deps.playable = (item) => (item.id === 'slow' ? slow : fast(item));
+    deps.playable = (item, q) => (item.id === 'slow' ? slow : fast(item, q));
     t.engine.playItems([movie('slow')]);
     t.engine.playItems([movie('fast')]);
     await t.flush();
@@ -284,5 +287,94 @@ describe('what loading is doing', () => {
     expect(s.status).toBe('error');
     expect(s.phase).toBeNull();
     expect(s.error).toMatch(/didn't answer in time/);
+  });
+});
+
+describe('converted video', () => {
+  const converted = {
+    url: '/t/movie/1?q=original&part=7',
+    duration: 6000,
+    verdict: { verdict: 'no' as const },
+    transcode: { video: 'copy' as const, audio: 'aac' as const, reasons: ['AC3 audio to AAC'] },
+  };
+
+  it('starts the converted stream where it resumes, and keeps the clock right', async () => {
+    const t = setup({ saved: { position: 1200, finished: false }, playable: () => converted });
+    t.engine.playItems([movie('1')]);
+    await t.flush();
+    const el = t.media.video!;
+    expect(el.src).toBe('/t/movie/1?q=original&part=7&t=1200.30');
+    el.tick(5);
+    expect(t.engine.getState().position).toBe(1205);
+    expect(t.engine.getState().transcode?.reasons).toEqual(['AC3 audio to AAC']);
+  });
+
+  it('seeks inside what has arrived, and restarts the stream past it', async () => {
+    const t = setup({ playable: () => converted });
+    t.engine.playItems([movie('1')]);
+    await t.flush();
+    const el = t.media.video!;
+    el.buffered = { length: 1, end: () => 120 };
+    el.emit('progress');
+    t.engine.seek(60);
+    expect(el.src).toBe('/t/movie/1?q=original&part=7');
+    expect(el.currentTime).toBe(60);
+    t.engine.seek(3000.6);
+    await t.flush();
+    // the stream starts at the keyframe (3000) and the clock knows it
+    expect(el.src).toBe('/t/movie/1?q=original&part=7&t=3000.30');
+    el.tick(1);
+    expect(t.engine.getState().position).toBe(3001);
+  });
+
+  it('a maybe file the browser cannot play switches to the converted stream at the same spot', async () => {
+    const t = setup({
+      playable: () => ({
+        url: '/s/movie/1',
+        duration: 6000,
+        fallback_url: '/t/movie/1?q=original',
+      }),
+    });
+    t.engine.playItems([movie('1')]);
+    await t.flush();
+    const el = t.media.video!;
+    el.tick(300);
+    el.emit('error');
+    await t.flush();
+    // the fallback converts both streams: frame exact, no keyframe to find
+    expect(el.src).toBe('/t/movie/1?q=original&t=300.00');
+    expect(t.engine.getState().status).not.toBe('error');
+    expect(t.engine.getState().transcode?.reasons[0]).toMatch(/couldn't play it as it is/);
+  });
+
+  it('a file that needs converting but cannot be says why', async () => {
+    const t = setup({
+      playable: () => ({
+        url: '/s',
+        verdict: { verdict: 'no' },
+        transcode_unavailable: "SoulSync can't find ffmpeg",
+      }),
+    });
+    t.engine.playItems([movie('1')]);
+    await t.flush();
+    expect(t.engine.getState().error).toBe("SoulSync can't find ffmpeg");
+  });
+
+  it('a quality change reloads at the same spot and is remembered', async () => {
+    const asked: string[] = [];
+    const t = setup({ playable: () => converted });
+    const deps = (t.engine as unknown as { deps: EngineDeps }).deps;
+    deps.playable = async (item, q) => {
+      asked.push(q);
+      return { ...converted, url: `/t/movie/${item.id}?q=${q}` };
+    };
+    t.engine.playItems([movie('1')]);
+    await t.flush();
+    t.media.video!.tick(100);
+    t.engine.setQuality('720p');
+    await t.flush();
+    expect(asked).toEqual(['original', '720p']);
+    expect(t.media.video!.src).toBe('/t/movie/1?q=720p&t=100.30');
+    expect(t.store.get('quality')).toBe('720p');
   });
 });

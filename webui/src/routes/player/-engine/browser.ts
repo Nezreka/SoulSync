@@ -8,7 +8,7 @@
 import { apiClient } from '@/app/api-client';
 import { appURL } from '@/platform/url-base';
 
-import type { EngineDeps, Playable, SavedPosition } from './engine';
+import type { EngineDeps, Playable, Quality, SavedPosition } from './engine';
 import type { MediaKind, PlayItem } from './types';
 
 import { progressPayload } from '../-lib/progress';
@@ -25,7 +25,7 @@ function createMedia(kind: MediaKind): HTMLMediaElement {
   return el;
 }
 
-async function playable(item: PlayItem): Promise<Playable> {
+async function playable(item: PlayItem, quality: Quality): Promise<Playable> {
   if (item.type === 'podcast_episode') {
     if (!item.url) throw new Error('This episode has no audio address.');
     // podcast audio lives on the feed's host: the podcast side's checked proxy fetches it
@@ -35,7 +35,10 @@ async function playable(item: PlayItem): Promise<Playable> {
     };
   }
   const res = await apiClient.get(`player/playable/${item.type}/${encodeURIComponent(item.id)}`, {
-    searchParams: item.part ? { part: item.part } : {},
+    searchParams: {
+      ...(item.part ? { part: item.part } : {}),
+      ...(quality !== 'original' ? { q: quality } : {}),
+    },
     throwHttpErrors: false,
     // finding the file can mean a sleeping drive spinning up (half a minute is normal)
     timeout: PLAYABLE_TIMEOUT_MS,
@@ -47,7 +50,11 @@ async function playable(item: PlayItem): Promise<Playable> {
   if (!res.ok || !body.success || !body.url) {
     throw new Error(body.message || "This can't be played right now.");
   }
-  return { ...body, url: appURL(body.url) } as Playable;
+  return {
+    ...body,
+    url: appURL(body.url),
+    fallback_url: body.fallback_url ? appURL(body.fallback_url) : undefined,
+  } as Playable;
 }
 
 async function progress(item: PlayItem): Promise<SavedPosition | null> {
@@ -56,6 +63,16 @@ async function progress(item: PlayItem): Promise<SavedPosition | null> {
     .json<{ progress?: { position_seconds: number; finished: boolean } | null }>();
   const row = body.progress;
   return row ? { position: row.position_seconds, finished: row.finished } : null;
+}
+
+/** where a converted stream (copied video) really starts if asked for ``t`` */
+async function transcodeStart(url: string, t: number): Promise<{ start: number; seek: number }> {
+  const [path, query] = url.split('?');
+  const res = await fetch(`${path}/start?${query ? `${query}&` : ''}t=${t}`, {
+    credentials: 'same-origin',
+  });
+  const body = (await res.json()) as { start?: number; seek?: number };
+  return { start: body.start ?? t, seek: body.seek ?? t };
 }
 
 /** fire and forget, and still sent when the page is closing (keepalive) */
@@ -112,6 +129,7 @@ export function browserDeps(): EngineDeps {
     createMedia,
     playable,
     progress,
+    transcodeStart,
     save,
     store,
     now: () => Date.now(),

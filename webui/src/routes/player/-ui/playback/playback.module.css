@@ -906,3 +906,15 @@ a.nowTitle:hover {
   color: var(--pl-text-2);
   font-size: calc(var(--u) * 0.9);
 }
+
+/* the video is being converted: says so quietly, what and how on hover */
+.convertBadge {
+  flex: none;
+  padding: calc(var(--u) * 0.2) calc(var(--u) * 0.6);
+  border: 1px solid var(--white-a25);
+  border-radius: var(--radius-pill);
+  color: var(--pl-text-2);
+  font-size: calc(var(--u) * 0.75);
+  font-weight: 600;
+  cursor: help;
+}

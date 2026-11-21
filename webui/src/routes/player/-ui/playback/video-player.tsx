@@ -14,11 +14,12 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { PlayerState } from '../../-engine/engine';
 
+import { converting } from '../../-engine/describe';
 import { current, nextIndex } from '../../-engine/queue';
 import { clock } from '../../-engine/timeline';
 import { NextIcon, PauseIcon, PlayIcon } from '../icons';
 import { inPlayer } from '../trailer';
-import { SleepMenu, SpeedMenu, VolumeControl } from './controls';
+import { QualityMenu, SleepMenu, SpeedMenu, VolumeControl } from './controls';
 import {
   BackSecondsIcon,
   CloseIcon,
@@ -196,6 +197,14 @@ function FullPlayer({ state, onLeave }: { state: PlayerState; onLeave: () => voi
           <span className={s.fullTitle}>{item.title}</span>
           {item.subtitle ? <span className={s.fullSub}>{item.subtitle}</span> : null}
         </div>
+        {state.transcode ? (
+          <span className={s.convertBadge} title={converting(state)}>
+            Converted
+            {state.transcode.quality && state.transcode.quality !== 'original'
+              ? ` · ${state.transcode.quality}`
+              : ''}
+          </span>
+        ) : null}
         <button
           type="button"
           className={s.ctl}
@@ -265,6 +274,7 @@ function FullPlayer({ state, onLeave }: { state: PlayerState; onLeave: () => voi
                 <NextIcon />
               </button>
             ) : null}
+            <QualityMenu quality={state.quality} />
             <SpeedMenu rate={state.rate} />
             <SleepMenu state={state} />
             {canPip ? (

@@ -29,8 +29,8 @@ def _title(conn, kind: str, item_id: int) -> Optional[Dict[str, Any]]:
 
 def _file(conn, kind: str, item_id: int, part: Any) -> Optional[Dict[str, Any]]:
     column = "movie_id" if kind == "movie" else "episode_id"
-    sql = (f"SELECT id, relative_path, size_bytes, video_codec, audio_codec, runtime_seconds "  # noqa: S608
-           f"FROM media_files WHERE {column} = ?")
+    sql = (f"SELECT id, relative_path, size_bytes, video_codec, audio_codec, runtime_seconds, "  # noqa: S608
+           f"resolution, dynamic_range FROM media_files WHERE {column} = ?")
     args: list = [item_id]
     if part not in (None, ""):
         try:
@@ -42,7 +42,16 @@ def _file(conn, kind: str, item_id: int, part: Any) -> Optional[Dict[str, Any]]:
     if not r:
         return None
     return {"id": r[0], "path": r[1], "size": r[2], "video_codec": r[3], "audio_codec": r[4],
-            "runtime": r[5]}
+            "runtime": r[5], "height": _height(r[6]), "dynamic_range": r[7]}
+
+
+def _height(resolution) -> int | None:
+    """'1080p' -> 1080, '4k' / '2160p' -> 2160"""
+    text = str(resolution or "").lower().strip()
+    if text in ("4k", "uhd"):
+        return 2160
+    digits = text.rstrip("pi")
+    return int(digits) if digits.isdigit() else None
 
 
 def locate(kind: str, item_id: str, part: Any = None) -> Source:
@@ -72,10 +81,13 @@ def locate(kind: str, item_id: str, part: Any = None) -> Source:
 
     verdict = direct_play_verdict(f["path"], f["video_codec"], f["audio_codec"])
     extra = {"file_id": f["id"]}
+    private = {"video_codec": f["video_codec"], "audio_codec": f["audio_codec"],
+               "height": f["height"], "dynamic_range": f["dynamic_range"]}
     duration = float(f["runtime"]) if f["runtime"] else None
     local = resolve_video_file_path(f["path"], video_base_dirs(db), size_bytes=f["size"])
     if local:
-        return Source("file", mime_for(local), path=local, duration=duration, verdict=verdict, extra=extra)
+        return Source("file", mime_for(local), path=local, duration=duration, verdict=verdict,
+                      extra=extra, private=private)
 
     from core.video.media_stream import server_stream_target
     target = server_stream_target(
@@ -84,6 +96,6 @@ def locate(kind: str, item_id: str, part: Any = None) -> Source:
     if target and target.get("url"):
         extra["via"] = target.get("server")
         return Source("relay", mime_for(f["path"]), url=target["url"], duration=duration,
-                      verdict=verdict, extra=extra)
+                      verdict=verdict, extra=extra, private=private)
     why = (target or {}).get("error") or "your media server had no file for it"
     raise Refused(404, "no_file", f"SoulSync can't reach the file, and {why}.")

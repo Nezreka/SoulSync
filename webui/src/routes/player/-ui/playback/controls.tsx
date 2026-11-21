@@ -3,10 +3,10 @@
  * button behaves the same everywhere: speed, sleep timer, chapters, volume.
  */
 
-import type { PlayerState } from '../../-engine/engine';
+import type { PlayerState, Quality } from '../../-engine/engine';
 
 import { chapterAt, clock } from '../../-engine/timeline';
-import { ChaptersIcon, SleepIcon, SpeedIcon, VolumeIcon } from './icons';
+import { ChaptersIcon, QualityIcon, SleepIcon, SpeedIcon, VolumeIcon } from './icons';
 import { PopMenu } from './menu';
 import s from './playback.module.css';
 import { getEngine } from './use-player';
@@ -111,5 +111,30 @@ export function VolumeControl({ volume, muted }: { volume: number; muted: boolea
         style={{ '--fill': `${(muted ? 0 : volume) * 100}%` } as React.CSSProperties}
       />
     </div>
+  );
+}
+
+const QUALITY_LABELS: Record<Quality, { label: string; hint: string }> = {
+  original: { label: 'Original', hint: 'as it is, converted only if it must be' },
+  '1080p': { label: '1080p', hint: 'up to 8 Mbps' },
+  '720p': { label: '720p', hint: 'up to 4 Mbps' },
+  '480p': { label: '480p', hint: 'for slow connections' },
+};
+
+export function QualityMenu({ quality }: { quality: Quality }) {
+  return (
+    <PopMenu
+      label="Quality"
+      title="Quality"
+      icon={<QualityIcon />}
+      badge={quality !== 'original' ? quality : undefined}
+      options={(Object.keys(QUALITY_LABELS) as Quality[]).map((q) => ({
+        key: q,
+        label: QUALITY_LABELS[q].label,
+        hint: QUALITY_LABELS[q].hint,
+        selected: q === quality,
+        onSelect: () => getEngine().setQuality(q),
+      }))}
+    />
   );
 }
