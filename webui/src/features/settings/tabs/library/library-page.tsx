@@ -1,8 +1,8 @@
 /**
  * The Library tab (settings-bic DESIGN.md 3.1, 3.3, mockup 03): Folders,
  * Naming, Tags and artwork, Import and files, and Subtitles (the video side's
- * own), one pill each. Each pill reads itself back in a hero sentence and has
- * a Music / Audiobooks / Podcasts / Video switch (only the kinds it has
+ * own), one pill each. Each pill says what it is for, for the kind it shows
+ * (about.ts), and has a Music / Audiobooks / Podcasts / Video switch (only the kinds it has
  * settings for), opening on the side the page is on. The switch is in the
  * address (`kind`), one per pill.
  *
@@ -18,92 +18,63 @@ import type { SettingsTabProps } from '../../host';
 import type { SettingsStore } from '../../settings-store';
 
 import { nav, useNav } from '../../nav';
-import { KindBar, KindSay, Segmented } from '../../ui';
+import { Hero, KindBar, KindSay, Segmented } from '../../ui';
 import s from '../../ui/settings.module.css';
+import { aboutOf } from '../about';
 import { ViewPanel } from '../downloads/downloads-page';
 import {
   AudiobookFolders,
-  AudiobookFoldersHero,
   AudiobookImport,
-  AudiobookImportHero,
   AudiobookNaming,
-  AudiobookNamingHero,
   AudiobookTags,
-  AudiobookTagsHero,
 } from '../library-audiobooks';
 import { type Media, MEDIA_LABEL } from '../library-card';
-import {
-  MusicFolders,
-  MusicFoldersHero,
-  PodcastFolders,
-  PodcastFoldersHero,
-} from '../library-folders';
-import {
-  MusicNaming,
-  MusicNamingHero,
-  PodcastImport,
-  PodcastImportHero,
-  PodcastNaming,
-  PodcastNamingHero,
-} from '../library-organization';
-import { MusicImport, MusicImportHero, MusicTags, MusicTagsHero } from '../library-processing';
-import { VideoFolders, VideoFoldersHero } from '../library-video-folders';
-import {
-  SubtitlesHero,
-  VideoImport,
-  VideoImportHero,
-  VideoNaming,
-  VideoNamingHero,
-  VideoSubtitles,
-  VideoTags,
-  VideoTagsHero,
-} from '../library-video-organization';
+import { MusicFolders, PodcastFolders } from '../library-folders';
+import { MusicNaming, PodcastImport, PodcastNaming } from '../library-organization';
+import { MusicImport, MusicTags } from '../library-processing';
+import { VideoFolders } from '../library-video-folders';
+import { VideoImport, VideoNaming, VideoSubtitles, VideoTags } from '../library-video-organization';
 
 const TAB = 'library';
 
 type Part = ComponentType<{ store: SettingsStore }>;
 
-/** what each pill shows for each kind: its hero and its cards */
-const PAGES: Record<string, Partial<Record<Media, { hero: Part; body: Part; say: string }>>> = {
+/** what each pill shows for each kind: its cards and how they save */
+const PAGES: Record<string, Partial<Record<Media, { body: Part; say: string }>>> = {
   folders: {
     music: {
-      hero: MusicFoldersHero,
       body: MusicFolders,
       say: 'Saves as you type. Each folder is checked as you go.',
     },
     audiobooks: {
-      hero: AudiobookFoldersHero,
       body: AudiobookFolders,
       say: 'Saves as you type.',
     },
-    podcasts: { hero: PodcastFoldersHero, body: PodcastFolders, say: 'Saves as you type.' },
+    podcasts: { body: PodcastFolders, say: 'Saves as you type.' },
     video: {
-      hero: () => <VideoFoldersHero />,
       body: VideoFoldersBody,
       say: 'A folder saves when you leave it. More libraries save with their own Save.',
     },
   },
   naming: {
-    music: { hero: MusicNamingHero, body: MusicNaming, say: 'Saves with the page.' },
-    audiobooks: { hero: AudiobookNamingHero, body: AudiobookNaming, say: 'Saves with the page.' },
-    podcasts: { hero: PodcastNamingHero, body: PodcastNaming, say: 'Saves with the page.' },
+    music: { body: MusicNaming, say: 'Saves with the page.' },
+    audiobooks: { body: AudiobookNaming, say: 'Saves with the page.' },
+    podcasts: { body: PodcastNaming, say: 'Saves with the page.' },
     video: {
-      hero: () => <VideoNamingHero />,
       body: () => <VideoNaming />,
       say: 'A template saves when you leave it; a pick saves at once.',
     },
   },
   tags: {
-    music: { hero: MusicTagsHero, body: MusicTags, say: 'Saves with the page.' },
-    audiobooks: { hero: AudiobookTagsHero, body: AudiobookTags, say: 'Saves with the page.' },
-    video: { hero: () => <VideoTagsHero />, body: () => <VideoTags />, say: 'Saves at once.' },
+    music: { body: MusicTags, say: 'Saves with the page.' },
+    audiobooks: { body: AudiobookTags, say: 'Saves with the page.' },
+    video: { body: () => <VideoTags />, say: 'Saves at once.' },
   },
   import: {
-    music: { hero: MusicImportHero, body: MusicImport, say: 'Saves with the page.' },
-    audiobooks: { hero: AudiobookImportHero, body: AudiobookImport, say: 'Saves with the page.' },
-    podcasts: { hero: PodcastImportHero, body: PodcastImport, say: 'Saves with the page.' },
+    music: { body: MusicImport, say: 'Saves with the page.' },
+    audiobooks: { body: AudiobookImport, say: 'Saves with the page.' },
+    podcasts: { body: PodcastImport, say: 'Saves with the page.' },
     video: {
-      hero: () => <VideoImportHero />,
       body: () => <VideoImport />,
       say: 'A switch saves at once; a field when you leave it.',
     },
@@ -152,10 +123,9 @@ function KindPage({
   const pages = PAGES[view];
   const kinds = Object.keys(pages) as Media[];
   const kind = kindFor(view, here ? asked : null, side);
-  const Hero = pages[kind]!.hero;
   return (
     <>
-      <Hero store={store} />
+      <Hero>{aboutOf(TAB, view, kind)}</Hero>
       <KindBar>
         <Segmented
           id={`stg-library-${view}-kind`}
@@ -214,7 +184,6 @@ export function LibraryPage({ store }: SettingsTabProps) {
         </ViewPanel>
       ))}
       <ViewPanel tab={TAB} view="subtitles" open={view === 'subtitles'}>
-        <SubtitlesHero />
         <div className={s.cards}>
           <VideoSubtitles />
         </div>

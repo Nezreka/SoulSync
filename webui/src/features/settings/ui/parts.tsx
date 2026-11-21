@@ -144,35 +144,16 @@ export function Pills({
   );
 }
 
-// ── hero ──
+// ── what a pill is for ──
 
-export interface HeroStat {
-  value: ReactNode;
-  label: string;
-}
-
-/** the tab's settings read back as one sentence, and up to three figures */
-export function Hero({ children, stats }: { children: ReactNode; stats?: HeroStat[] }) {
+/** one short line under the pills: what this page is for. What needs a
+ *  look is said on its own row or card, not here */
+export function Hero({ children }: { children: ReactNode }) {
   return (
-    <div className={s.hero}>
-      <p className={s.heroLine}>{children}</p>
-      {stats?.length ? (
-        <div className={s.stats}>
-          {stats.map((stat) => (
-            <div className={s.stat} key={stat.label}>
-              <b className={s.statValue}>{stat.value}</b>
-              <span className={s.statLabel}>{stat.label}</span>
-            </div>
-          ))}
-        </div>
-      ) : null}
-    </div>
+    <p className={s.hero} data-about="">
+      {children}
+    </p>
   );
-}
-
-/** the words of a hero sentence that need a look */
-export function HeroWarn({ children }: { children: ReactNode }) {
-  return <span className={s.heroWarn}>{children}</span>;
 }
 
 // ── section label, card ──
@@ -254,6 +235,8 @@ export interface RowProps {
   wide?: boolean;
   /** what is wrong with it; the row is marked */
   error?: ReactNode;
+  /** something about it that needs a look, said in amber under the help */
+  warn?: ReactNode;
   /** changed and not saved yet */
   changed?: boolean;
   /** saved just now through its own endpoint */
@@ -276,6 +259,7 @@ export function Row({
   field,
   wide,
   error,
+  warn,
   changed,
   saved,
   id,
@@ -337,6 +321,7 @@ export function Row({
               {rest}
             </div>
           ) : null}
+          {warn ? <div className={s.rowWarnText}>{warn}</div> : null}
           {error ? (
             <div className={s.rowErrorText} role="alert">
               {error}

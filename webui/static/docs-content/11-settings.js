@@ -123,7 +123,7 @@ These live on other tabs, not Downloads:
 - **Lossy copy** — on the **Quality** tab ("Create lossy copy of downloaded FLAC files"): optionally keep a lossy copy of each downloaded FLAC alongside the original
 - **YouTube cookies** — on **Downloads › Sources**, in the YouTube sheet ("Browser cookies" / "Paste cookies.txt"): authenticate with a browser profile or a \`cookies.txt\` file when YouTube rate-limits anonymous downloads
 
-![Downloads, Sources: the music order read back in a sentence, Soulseek tried first, then YouTube, then Qobuz](settings-downloads.jpg)
+![Downloads, Sources: the music order as a list, Soulseek tried first, then YouTube, then Qobuz, each row saying its place](settings-downloads.jpg)
 `
         },
         {
@@ -232,7 +232,7 @@ On **Library › Folders**. Your **Music library folder** is already covered —
             title: 'Database Maintenance',
             lede: 'Backups, vacuuming, and cache management to keep SoulSync healthy.',
             body: `
-![System, Maintenance: the database read back in a sentence, its size, free space, write-ahead log, Tidy up and Show biggest tables](settings-maintenance.jpg)
+![System, Maintenance: the database's size, free space, write-ahead log, Tidy up and Show biggest tables](settings-maintenance.jpg)
 
 ## Backups
 

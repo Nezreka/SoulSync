@@ -114,10 +114,8 @@ async function shown() {
 }
 
 describe('the pages', () => {
-  it('before the video settings page is shown: waiting, every control there, no colon', () => {
+  it('before the video settings page is shown: every control there, no colon', () => {
     const { container } = render(<VideoQualitySections />);
-    expect(container.textContent).toContain('Loading the video quality profiles.');
-    expect(container.textContent).toContain('Loading the YouTube profile.');
     for (const id of [
       'vq-profile-select',
       'vq-profile-name',
@@ -145,25 +143,6 @@ describe('the pages', () => {
     for (const l of container.querySelectorAll('label'))
       expect(l.textContent, l.textContent ?? '').not.toMatch(/:\s*$/);
     expect(container.textContent).not.toMatch(/—/);
-  });
-
-  it('reads the profile and the YouTube profile back in words', async () => {
-    render(<VideoQualitySections />);
-    await shown();
-    const heroes = [
-      ...document.querySelectorAll('[data-video-quality] p, [data-youtube-quality] p'),
-    ];
-    expect(heroes[0].textContent).toBe(
-      'Default takes BluRay · 1080p, then WEB-DL · 1080p. It stops upgrading at 1080p.',
-    );
-    await waitFor(() =>
-      expect(document.querySelector('[data-youtube-quality] p')!.textContent).toBe(
-        'Followed channels download up to 1440p, as MKV, preferring VP9.',
-      ),
-    );
-    expect(document.querySelector('[data-video-quality]')!.textContent).toContain(
-      '2 of 3Qualities on',
-    );
   });
 });
 

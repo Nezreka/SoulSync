@@ -34,7 +34,6 @@ import {
 import s from '../ui/settings.module.css';
 import {
   FolderRows,
-  LibHero,
   LibPath,
   checkAttrs,
   int,
@@ -46,13 +45,6 @@ import {
   useSettings,
 } from './library-card';
 import { useTemplateField } from './library-organization';
-import {
-  audiobookFoldersSentence,
-  audiobookImportSentence,
-  audiobookNamingSentence,
-  audiobookTagsSentence,
-} from './library/words';
-import { templatesOf } from './organization';
 import { text } from './source-panels';
 
 type Section = Record<string, unknown>;
@@ -227,28 +219,6 @@ function RoutesList({ store }: { store: SettingsStore }) {
   );
 }
 
-export function AudiobookFoldersHero({ store }: { store: SettingsStore }) {
-  const settings = useSettings(store);
-  const loads = useLoads(store);
-  const routes = useRoutes();
-  const extra = ((settings.library?.audiobooks_additional_paths as unknown[] | undefined) || [])
-    .map((p) => text(p).trim())
-    .filter(Boolean).length;
-  return (
-    <LibHero
-      parts={
-        loads
-          ? audiobookFoldersSentence({
-              path: audiobooksPath(settings),
-              extra,
-              routed: Array.isArray(routes) ? routes.length : null,
-            })
-          : [{ text: 'Loading your folders.' }]
-      }
-    />
-  );
-}
-
 export function AudiobookFolders({ store }: { store: SettingsStore }) {
   const settings = useSettings(store);
   const loads = useLoads(store);
@@ -329,22 +299,6 @@ export function AudiobookFolders({ store }: { store: SettingsStore }) {
   );
 }
 
-// ── Naming > Audiobooks ──
-
-export function AudiobookNamingHero({ store }: { store: SettingsStore }) {
-  const settings = useSettings(store);
-  const loads = useLoads(store);
-  return (
-    <LibHero
-      parts={
-        loads
-          ? audiobookNamingSentence(templatesOf(settings).audiobook_path)
-          : [{ text: 'Loading your naming templates.' }]
-      }
-    />
-  );
-}
-
 export function AudiobookNaming({ store }: { store: SettingsStore }) {
   const field = useTemplateField(store, 'audiobook_path');
   return (
@@ -384,24 +338,6 @@ function useAudiobookImport(store: SettingsStore) {
     (typeof ab.completeness_tolerance === 'number' ? ab.completeness_tolerance : 0.92) * 100,
   );
   return { ab, percent };
-}
-
-export function AudiobookImportHero({ store }: { store: SettingsStore }) {
-  const loads = useLoads(store);
-  const { ab, percent } = useAudiobookImport(store);
-  return (
-    <LibHero
-      parts={
-        loads
-          ? audiobookImportSentence({
-              percent,
-              days: int(text(ab.staging_days ?? 7), 7),
-              merge: ab.merge_m4b === true,
-            })
-          : [{ text: 'Loading.' }]
-      }
-    />
-  );
 }
 
 export function AudiobookImport({ store }: { store: SettingsStore }) {
@@ -546,28 +482,6 @@ export function AudiobookImport({ store }: { store: SettingsStore }) {
         </Row>
       </Card>
     </>
-  );
-}
-
-// ── Tags and artwork > Audiobooks ──
-
-export function AudiobookTagsHero({ store }: { store: SettingsStore }) {
-  const settings = useSettings(store);
-  const loads = useLoads(store);
-  const ab = (settings.audiobooks || {}) as Section;
-  return (
-    <LibHero
-      parts={
-        loads
-          ? audiobookTagsSentence({
-              tags: on(ab.embed_metadata),
-              embed: on(ab.embed_artwork),
-              cover: on(ab.save_artwork),
-              sidecars: on(ab.write_nfo),
-            })
-          : [{ text: 'Loading.' }]
-      }
-    />
   );
 }
 

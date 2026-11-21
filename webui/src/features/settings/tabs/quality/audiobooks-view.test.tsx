@@ -45,12 +45,9 @@ function saved(): SettingsPayload {
 }
 
 describe('Quality > Audiobooks', () => {
-  it('reads back, with every field at its default, named without a colon', () => {
+  it('every field at its default, named without a colon', () => {
     act(() => store.hydrate({ audiobooks: {} }));
     const { container } = render(<AudiobookQualityView store={store} />);
-    expect(container.querySelector('p')!.textContent).toBe(
-      'Audiobooks prefer M4B, and every format is allowed.',
-    );
     expect(input('audiobook-format-first').value).toBe('m4b');
     expect(
       [...document.querySelectorAll<HTMLInputElement>('#audiobook-allowed-formats input')].every(
@@ -72,7 +69,7 @@ describe('Quality > Audiobooks', () => {
         audiobooks: { quality: { format_order: ['m4b', 'mp3'], min_bitrate_kbps: 32 } },
       }),
     );
-    const { container } = render(<AudiobookQualityView store={store} />);
+    render(<AudiobookQualityView store={store} />);
     fireEvent.change(input('audiobook-format-first'), { target: { value: 'mp3' } });
     fireEvent.click(format('flac'));
     fireEvent.click(format('ogg'));
@@ -91,9 +88,6 @@ describe('Quality > Audiobooks', () => {
     });
     // the rest of the quality dict is the server's still
     expect(store.getState().settings.audiobooks?.quality).toMatchObject({ min_bitrate_kbps: 32 });
-    expect(container.querySelector('p')!.textContent).toContain(
-      'only M4B, M4A, MP3, OPUS are allowed',
-    );
   });
 
   it('every format switched off stays off on screen, and saves as all allowed', async () => {

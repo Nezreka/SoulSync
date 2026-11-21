@@ -13,7 +13,6 @@ import { folderChecks } from './library-card';
 import {
   M3uExportOptions,
   MusicFolders,
-  MusicFoldersHero,
   PodcastFolders,
   isDocker,
   pathsSummary,
@@ -50,7 +49,6 @@ afterEach(async () => {
 const card = () =>
   render(
     <div>
-      <MusicFoldersHero store={store} />
       <MusicFolders store={store} />
       <PodcastFolders store={store} />
       <M3uExportOptions store={store} />
@@ -94,10 +92,6 @@ describe('the card', () => {
     expect([guide('docker'), guide('native')]).toEqual([true, false]);
     expect(line()!.getAttribute('data-tone')).toBe('warn');
     expect(line()!.textContent).toContain('Still the install folder default');
-    // and the hero says it too
-    expect(document.body.textContent).toContain(
-      'Your music library is still the install folder default.',
-    );
     act(() =>
       store.hydrate({ _environment: { docker: true }, soulseek: { transfer_path: './Transfer' } }),
     );
@@ -105,7 +99,7 @@ describe('the card', () => {
     expect(line()).toBeNull();
   });
 
-  it("the folder check's answer is drawn under its field, and the hero counts it", () => {
+  it("the folder check's answer is drawn under its field", () => {
     act(() => store.hydrate({ soulseek: { download_path: '/dl' } }));
     card();
     const dl = input('download-path');

@@ -45,15 +45,8 @@ import {
 } from '../ui';
 import s from '../ui/settings.module.css';
 import { ExperimentalCard } from './connections-metadata';
-import { LibHero } from './library-card';
 import { text } from './source-panels';
-import {
-  apiSentence,
-  developerSentence,
-  generalSentence,
-  LOG_LEVEL_WORDS,
-  maintenanceSentence,
-} from './system/words';
+import { LOG_LEVEL_WORDS } from './system/words';
 
 type Section_ = Record<string, unknown>;
 
@@ -152,14 +145,6 @@ export function GeneralView({
   const words = LOG_LEVEL_WORDS[log.level];
   return (
     <>
-      <LibHero
-        parts={generalSentence({ autosave, workers, level: log.level, path: log.path })}
-        stats={[
-          { value: autosave ? 'On' : 'Off', label: 'Autosave' },
-          { value: workers, label: 'Workers' },
-          { value: words?.label ?? log.level, label: 'Log level' },
-        ]}
-      />
       <div className={s.cards}>
         <Card title="Saving">
           <Row
@@ -493,9 +478,6 @@ export function ApiView({ store }: { store: SettingsStore }) {
   const enabled = (section: string) => (loads ? (settings[section] || {}).enabled === true : false);
   // an install from before #2166 has no key and keeps today's fallback profile
   const refuseUnknown = Boolean(loads) && (settings['seerr_compat'] || {}).refuse_unknown === true;
-  const list = Array.isArray(api.keys) ? api.keys : null;
-  const admins = list ? list.filter((k) => k.scope !== 'read').length : 0;
-  const answers = ['mcp', 'lidarr_compat', 'seerr_compat'].filter(enabled).length;
   const toggle = (section: string) => ({
     checked: enabled(section),
     onChange: (event: { target: { checked: boolean } }) =>
@@ -504,20 +486,6 @@ export function ApiView({ store }: { store: SettingsStore }) {
 
   return (
     <>
-      <LibHero
-        parts={apiSentence({
-          keys: api.keys === null ? null : (list?.length ?? 0),
-          admin: admins,
-          mcp: enabled('mcp'),
-          lidarr: enabled('lidarr_compat'),
-          seerr: enabled('seerr_compat'),
-        })}
-        stats={[
-          { value: list ? list.length : '…', label: list?.length === 1 ? 'Key' : 'Keys' },
-          { value: admins, label: 'Admin' },
-          { value: answers, label: answers === 1 ? 'API it answers as' : 'APIs it answers as' },
-        ]}
-      />
       <div className={s.cards}>
         <ApiKeysCards api={api} />
 
@@ -1186,25 +1154,8 @@ export function MaintenanceView({
 }) {
   const db = useDbInfo(shown, opened);
   const cache = useCache(shown, opened);
-  const info = db.info;
-  const status = cache.cache;
-  const free = info && (info.free_pages || 0) > 0 ? (info.free_size_display ?? null) : null;
   return (
     <>
-      <LibHero
-        parts={maintenanceSentence({
-          size: info?.total_size_display ?? null,
-          reclaim: free,
-          room: info?.vacuum_has_room !== false,
-          cacheImages: status ? status.entries || 0 : null,
-          cacheSize: status ? cacheBytes(status.bytes) : null,
-        })}
-        stats={[
-          { value: info?.total_size_display ?? '…', label: 'Database' },
-          { value: !info ? '…' : (free ?? 'None'), label: 'Free inside it' },
-          { value: status ? cacheBytes(status.bytes) : '…', label: 'Artwork cache' },
-        ]}
-      />
       <div className={s.cards}>
         <DatabaseCard db={db} />
         <ArtworkCacheCard store={store} cache={cache} />
@@ -1356,35 +1307,10 @@ function PreviewToolsCard() {
   );
 }
 
-export function DeveloperView({
-  store,
-  side,
-}: {
-  store: SettingsStore;
-  side: 'music' | 'video';
-}): ReactNode {
-  const settings = useSettings(store);
-  const loads = useLoads(store);
+export function DeveloperView({ store }: { store: SettingsStore }): ReactNode {
   const active = useDevMode();
-  const exp = (loads ? settings.experimental || {} : {}) as Section_;
-  const experiments =
-    side === 'music'
-      ? [
-          { name: 'JioSaavn', on: exp.jiosaavn_enabled === true },
-          { name: 'Bandcamp', on: exp.bandcamp_enabled === true },
-        ]
-      : [];
   return (
     <>
-      <LibHero
-        parts={developerSentence({ devMode: active, experiments })}
-        stats={[
-          { value: active ? 'On' : 'Off', label: 'Developer mode' },
-          ...(experiments.length
-            ? [{ value: experiments.filter((e) => e.on).length, label: 'Experiments on' }]
-            : []),
-        ]}
-      />
       <div className={s.cards}>
         <DevModeCard active={active} />
         <PreviewToolsCard />

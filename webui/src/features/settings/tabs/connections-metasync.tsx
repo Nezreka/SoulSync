@@ -15,11 +15,9 @@
 import { Fragment, type ReactNode, useEffect, useRef, useState } from 'react';
 
 import type { SettingsTabProps } from '../host';
-import type { HeroPart } from './downloads/words';
 
 import { Btn, Card, DangerRow, FieldNote, More, Note, Row, StatusWords, TextField } from '../ui';
 import s from '../ui/settings.module.css';
-import { LibHero } from './library-card';
 import { text } from './source-panels';
 
 type Shell = Window & {
@@ -127,86 +125,6 @@ function statusLines(s: Answer, nodeUrl: string): ReactNode[] {
   return lines;
 }
 
-// ── the hero ──
-
-/** what the hero reads: the settings answer and the status answer */
-export interface MetaSyncFacts {
-  /** null until the settings answered */
-  linked: boolean | null;
-  version?: string;
-  /** MetaSync can read this SoulSync */
-  reading?: boolean;
-  pools: Pool[];
-  dryRun?: boolean;
-}
-
-const say = (t: string): HeroPart => ({ text: t });
-const named = (t: string): HeroPart => ({ text: t, kind: 'name' });
-const warn = (t: string): HeroPart => ({ text: t, kind: 'warn' });
-
-/** MetaSync read back in one sentence. Pure */
-export function metasyncSentence(f: MetaSyncFacts): HeroPart[] {
-  if (f.linked === null) return [say('Loading MetaSync.')];
-  if (!f.linked)
-    return [
-      say(
-        'SoulSync is not connected to MetaSync. Connect pairs the two programs on this machine; joining a pool is a second step, and nothing is shared until you take it.',
-      ),
-    ];
-  const parts: HeroPart[] = [
-    say('SoulSync is connected to '),
-    named(`MetaSync${f.version ? ` ${f.version}` : ''}`),
-  ];
-  if (f.reading === false) parts.push(say(', which '), warn('cannot read this SoulSync yet'));
-  if (!f.pools.length) {
-    parts.push(say('. It has not joined a pool, so nothing is shared.'));
-    return parts;
-  }
-  parts.push(say('. It is in '));
-  f.pools.forEach((p, i) => {
-    if (i) parts.push(say(i === f.pools.length - 1 ? ' and ' : ', '));
-    parts.push(named(p.name || p.id || 'a pool'));
-  });
-  const stuck = f.pools.filter(
-    (p) =>
-      p.binding_status && p.binding_status !== 'bound' && p.binding_status !== 'not_applicable',
-  );
-  if (stuck.length)
-    parts.push(
-      say(', '),
-      warn(
-        stuck.length === 1
-          ? `${stuck[0].name || 'one pool'}: ${(BINDING_TEXT[stuck[0].binding_status || ''] || 'not bound').toLowerCase()}`
-          : `${stuck.length} pools are not bound yet`,
-      ),
-    );
-  if (f.dryRun === true) parts.push(say('. Dry run is on, so nothing is sent yet.'));
-  else if (f.dryRun === false) parts.push(say('. It sends one anonymous report a week.'));
-  else parts.push(say('.'));
-  return parts;
-}
-
-function MetaSyncHero({ facts }: { facts: MetaSyncFacts }) {
-  return (
-    <LibHero
-      parts={metasyncSentence(facts)}
-      stats={
-        facts.linked === null
-          ? undefined
-          : [
-              { value: facts.linked ? 'Connected' : 'Not connected', label: 'MetaSync' },
-              { value: facts.pools.length, label: facts.pools.length === 1 ? 'Pool' : 'Pools' },
-              {
-                value:
-                  facts.dryRun === true ? 'Dry run' : facts.dryRun === false ? 'Sending' : 'None',
-                label: 'Reports',
-              },
-            ]
-      }
-    />
-  );
-}
-
 /** _msAutoDetectTried: one auto-detect a page load, not one a Settings visit
  *  (the page unmounts when it is left; SETTINGS_PORT.md step V4c) */
 export const detectTried = { done: false };
@@ -222,7 +140,6 @@ export function MetaSyncSection({ opened }: Pick<SettingsTabProps, 'opened'>) {
   const [status, setStatus] = useState('Loading...');
   const [statusTone, setStatusTone] = useState<'idle' | 'ok' | 'warn'>('idle');
   const [detail, setDetail] = useState<ReactNode[]>([]);
-  const [facts, setFacts] = useState<MetaSyncFacts>({ linked: null, pools: [] });
   const nodeField = useRef<HTMLInputElement>(null);
   const poolField = useRef<HTMLInputElement>(null);
   // what the status line reads for the Open MetaSync link: the field as it is
@@ -261,13 +178,6 @@ export function MetaSyncSection({ opened }: Pick<SettingsTabProps, 'opened'>) {
       );
       setStatusTone(s.soulsync_connected ? 'ok' : 'warn');
       setDetail(statusLines(s, nodeNow.current.trim()));
-      setFacts((f) => ({
-        ...f,
-        version: text(s.version) || undefined,
-        reading: !!s.soulsync_connected,
-        pools: (Array.isArray(s.pools) ? s.pools : []) as Pool[],
-        dryRun: typeof s.dry_run === 'boolean' ? s.dry_run : undefined,
-      }));
     } catch {
       setStatus('MetaSync status unavailable');
       setStatusTone('warn');
@@ -295,7 +205,6 @@ export function MetaSyncSection({ opened }: Pick<SettingsTabProps, 'opened'>) {
           ? `Connected${data.node_fingerprint ? `, MetaSync ID ${text(data.node_fingerprint)}` : ''}`
           : 'Not connected',
       );
-      setFacts((f) => ({ ...f, linked: !!data.local_key_set }));
       await refreshStatus();
       // auto-detect once a page load, only while there is nothing to lose
       if (!detectTried.done && !data.local_key_set && !nodeNow.current.trim()) {
@@ -431,7 +340,6 @@ export function MetaSyncSection({ opened }: Pick<SettingsTabProps, 'opened'>) {
 
   return (
     <div data-metasync="">
-      <MetaSyncHero facts={facts} />
       <div className={s.cards}>
         <div className={s.stack}>
           <Note info>

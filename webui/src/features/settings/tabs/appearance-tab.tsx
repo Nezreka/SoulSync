@@ -18,6 +18,7 @@ import { useFeaturesLocked } from '@/platform/features';
 
 import type { SettingsTabProps } from '../host';
 import type { SettingsStore } from '../settings-store';
+import type { WeatherLine } from './appearance/words';
 
 import { useNav } from '../nav';
 import { Btn, Card, FieldLine, Row, Say, Select, Switch, Tag, TextField } from '../ui';
@@ -29,15 +30,8 @@ import {
   resolveAppearance,
   savedEffectValue,
 } from './appearance';
-import {
-  appearanceSentence,
-  EFFECTS_WORDS,
-  effectsLevel,
-  type WeatherLine,
-} from './appearance/words';
 import { useChanged, useValues } from './downloads/behaviour-view';
 import { ViewPanel } from './downloads/downloads-page';
-import { LibHero } from './library-card';
 import { VideoPagesCard } from './library-video-prefs';
 
 const TAB = 'appearance';
@@ -577,45 +571,6 @@ function FeaturesCard() {
   );
 }
 
-function AppearanceHero({ store, weather }: { store: SettingsStore; weather: WeatherLine | null }) {
-  const { state } = useValues(store);
-  const values = resolveAppearance(state.settings);
-  const flags = effectFlags();
-  const level = effectsLevel(flags);
-  const preset = ACCENT_PRESETS.find((o) => o.value === values.preset && o.value !== 'custom');
-  const visualizer = VISUALIZERS.find((o) => o.value === values.visualizer);
-  const swatch = useRef<HTMLSpanElement>(null);
-  // applyAccentColor paints the swatch by id, and ran before this mounted
-  useEffect(() => {
-    if (swatch.current) swatch.current.style.background = values.accent;
-  }, [values.accent]);
-  return (
-    <LibHero
-      parts={appearanceSentence({
-        accent: preset?.label ?? null,
-        visualizer:
-          visualizer?.value === 'none' ? 'none' : (visualizer?.label ?? 'Bars').toLowerCase(),
-        effects: level,
-        particles: flags.particles,
-        weather,
-      })}
-      stats={[
-        {
-          value: (
-            <span className={s.accentStat}>
-              <span className={s.swatchDot} id="accent-preview-swatch" ref={swatch} />
-              {preset?.label ?? 'Custom'}
-            </span>
-          ),
-          label: 'Accent',
-        },
-        { value: visualizer?.label ?? 'Bars', label: 'Visualizer' },
-        { value: EFFECTS_WORDS[level], label: 'Effects' },
-      ]}
-    />
-  );
-}
-
 export function AppearancePage({ store, opened }: SettingsTabProps) {
   const state = useNav();
   const here = state.tab === TAB;
@@ -628,7 +583,6 @@ export function AppearancePage({ store, opened }: SettingsTabProps) {
   return (
     <div data-stg-new={TAB} hidden={!here}>
       <ViewPanel tab={TAB} view="all" open={here}>
-        <AppearanceHero store={store} weather={weather.line} />
         <div className={s.cards}>
           {featuresLocked ? null : <FeaturesCard />}
           <LookCard store={store} />

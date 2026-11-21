@@ -12,7 +12,6 @@ import {
   Chips,
   DangerRow,
   Hero,
-  HeroWarn,
   ListEditor,
   Mark,
   More,
@@ -85,16 +84,11 @@ describe('Pills', () => {
 });
 
 describe('Hero, SectionLabel, Card, Note', () => {
-  it('reads the sentence and its figures', () => {
-    render(
-      <Hero stats={[{ value: 3, label: 'In use' }]}>
-        Music tries <em>Soulseek</em> first. <HeroWarn>Qobuz isn't set up yet</HeroWarn>
-      </Hero>,
-    );
-    expect(screen.getByText(/Music tries/).textContent).toBe(
-      "Music tries Soulseek first. Qobuz isn't set up yet",
-    );
-    expect(screen.getByText('In use').previousSibling?.textContent).toBe('3');
+  it('says what the page is for, in one line', () => {
+    render(<Hero>Where downloads come from, and in what order.</Hero>);
+    const line = screen.getByText('Where downloads come from, and in what order.');
+    expect(line.tagName).toBe('P');
+    expect(line.hasAttribute('data-about')).toBe(true);
   });
   it('labels a section, with its hint and action', () => {
     render(

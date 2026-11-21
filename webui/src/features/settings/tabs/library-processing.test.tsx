@@ -1,7 +1,7 @@
 /**
  * Library > Tags and artwork, Music, and Import and files, Music
  * (settings-bic phase 4): the album-art sources on the order list, a
- * service's tags as chips under its row, the counts in words, the hero, and
+ * service's tags as chips under its row, the counts in words, and
  * every saved key (a source's tags are saved one dotted key at a time, beside
  * the credentials Connections saves).
  */
@@ -12,9 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createSettingsStore, type SettingsPayload, type SettingsStore } from '../settings-store';
 import {
   MusicImport,
-  MusicImportHero,
   MusicTags,
-  MusicTagsHero,
   artList,
   fillEmptyTags,
   postProcessingSummary,
@@ -49,9 +47,7 @@ afterEach(async () => {
 const cards = () =>
   render(
     <div>
-      <MusicTagsHero store={store} />
       <MusicTags store={store} />
-      <MusicImportHero store={store} />
       <MusicImport store={store} />
     </div>,
   );
@@ -104,11 +100,6 @@ describe('Tags and artwork, and Import', () => {
     expect(box('metadata_enhancement.tags.genre_merge').checked).toBe(false);
     expect(input('mb-use-original-date-for-date').checked).toBe(true);
     expect(input('beatport-search-all').checked).toBe(true);
-    // the hero: who writes IDs, and the services counted
-    expect(document.body.textContent).toContain(
-      'Downloads are tagged with IDs from iTunes, MusicBrainz',
-    );
-    expect(document.body.textContent).not.toContain('IDs from Spotify');
   });
 
   it("a service's tags open under its row; its switch does not open them", () => {
@@ -125,13 +116,15 @@ describe('Tags and artwork, and Import', () => {
     expect(toggle.getAttribute('aria-expanded')).toBe('true');
   });
 
-  it('switching post-processing off hides its options', () => {
+  it('switching post-processing off hides its options, and its row says so in amber', () => {
     act(() => store.hydrate({}));
     cards();
+    const row = () => input('metadata-enabled').closest('[data-row]')!;
+    expect(row().textContent).not.toContain('Post-processing is off');
     fireEvent.click(input('metadata-enabled'));
     expect(document.getElementById('post-processing-options')!.hidden).toBe(true);
-    expect(document.body.textContent).toContain(
-      'Post-processing is off, so downloads are kept as they arrive',
+    expect(row().textContent).toContain(
+      'Post-processing is off: downloads get no tags, artwork or lyrics.',
     );
   });
 
@@ -208,16 +201,12 @@ describe('Tags and artwork, and Import', () => {
     );
   });
 
-  it('the import settings save their keys; the hero reads them', async () => {
+  it('the import settings save their keys', async () => {
     act(() => store.hydrate({ import: { default_search_source: 'deezer' } }));
     cards();
-    expect(document.body.textContent).toContain('The Import page searches Deezer.');
-    expect(document.body.textContent).toContain('Your music library folder is permanent');
     fireEvent.change(input('import-default-search-source'), { target: { value: '' } });
     fireEvent.click(input('import-folder-artist-override'));
     fireEvent.click(input('import-transfer-permanent'));
-    expect(document.body.textContent).toContain('The Import page searches any source.');
-    expect(document.body.textContent).toContain('is a drop area');
     await waitFor(() => expect(store.hasPending()).toBe(false));
     expect(saved().import).toEqual({
       default_search_source: '',

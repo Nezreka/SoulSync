@@ -21,7 +21,6 @@ import type { SettingsTabProps } from '../host';
 import {
   Btn,
   Card,
-  Hero,
   Icon,
   More,
   Note,
@@ -65,7 +64,6 @@ import {
   withTargets,
 } from './quality';
 import { QualityPage } from './quality/quality-page';
-import { musicSentence } from './quality/words';
 
 const toast = (message: string, type: string) => window.showToast?.(message, type);
 
@@ -751,19 +749,6 @@ export function MusicQualityTab({ store }: SettingsTabProps) {
 
   return (
     <div data-music-quality="">
-      <Hero
-        stats={
-          rowsLoaded
-            ? [
-                { value: rows.length, label: rows.length === 1 ? 'Profile' : 'Profiles' },
-                { value: targets.length, label: targets.length === 1 ? 'Target' : 'Targets' },
-              ]
-            : undefined
-        }
-      >
-        {ready ? musicSentence(profileName, ladder) : 'Loading the quality profile.'}
-      </Hero>
-
       <SectionLabel
         title="Quality profiles"
         hint="Click one to edit it. Editing never makes it the active one."

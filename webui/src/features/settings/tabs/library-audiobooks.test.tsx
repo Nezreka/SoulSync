@@ -12,7 +12,6 @@ import { createSettingsStore, type SettingsPayload, type SettingsStore } from '.
 import {
   AudiobookDownloadOptions,
   AudiobookFolders,
-  AudiobookFoldersHero,
   AudiobookImport,
   AudiobookNaming,
   AudiobookTags,
@@ -75,7 +74,6 @@ const folders = () => {
   resetRoutes();
   return render(
     <div>
-      <AudiobookFoldersHero store={store} />
       <AudiobookFolders store={store} />
     </div>,
   );
@@ -159,10 +157,6 @@ describe('Folders > Audiobooks', () => {
     act(() => store.hydrate({}));
     await waitFor(() =>
       expect(document.querySelector('[data-route-row="bluey"]')!.textContent).toContain('Bluey'),
-    );
-    // the hero counts them
-    expect(document.body.textContent).toContain(
-      'Downloads by 1 spoken-word artist are filed with the books.',
     );
     fireEvent.click(document.querySelector('[data-action="move"]')!);
     await waitFor(() =>

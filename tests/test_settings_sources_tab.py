@@ -598,11 +598,14 @@ def test_a_failed_settings_load_does_not_summarise_an_empty_form(js):
     good = fn.split("} catch (error) {", 1)[0]
     assert good.index("throw new Error(") < good.index("SoulSyncSettings?.hydrate(settings)")
     assert "hydrate" not in fn.split("} catch (error) {")[-1][:400]
-    # a hero reads the settings back only after a load (Library, settings-bic
-    # phase 4): before it, it says it is loading
+    # a pill's line says what it is for, not what the settings are, so a blank
+    # form has nothing to misread there; a warning on a row waits for a load
+    # (the install folder default on Library > Folders)
+    about = _read("webui/src/features/settings/tabs/about.ts")
+    # plain words, read from nothing
+    assert "import " not in about
     folders = _read("webui/src/features/settings/tabs/library-folders.tsx")
-    assert "loads\n          ? musicFoldersSentence(" in folders
-    assert "[{ text: 'Loading your folders.' }]" in folders
+    assert "const installDefault = loads && !docker && defaultOut;" in folders
 
 
 def test_the_two_sides_name_their_sections_the_same_way():

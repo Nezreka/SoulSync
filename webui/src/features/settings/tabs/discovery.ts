@@ -1,6 +1,6 @@
 /**
  * What the Discovery tab shows, worked out the way settings.js did it
- * (SETTINGS_PORT.md, step 4). The hero sentences are discovery/words.ts.
+ * (SETTINGS_PORT.md, step 4).
  */
 
 import type { SettingsPayload } from '../settings-store';

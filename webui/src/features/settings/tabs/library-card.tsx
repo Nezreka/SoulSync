@@ -1,12 +1,11 @@
 /**
  * What the Library tab's pages share (settings-bic phase 4): the kinds of
- * media, the folder field every path uses, the folder checks the hero counts,
+ * media, the folder field every path uses, the folder checks,
  * and the small helpers the old cards had (the Docker check, a draft that a
  * fresh load resets).
  */
 
 import {
-  type ReactNode,
   type RefObject,
   useEffect,
   useLayoutEffect,
@@ -16,9 +15,8 @@ import {
 } from 'react';
 
 import type { SettingsStore } from '../settings-store';
-import type { HeroPart } from './library/words';
 
-import { Btn, type FolderCheck, Hero, HeroWarn, PathField, Tag } from '../ui';
+import { Btn, type FolderCheck, PathField, Tag } from '../ui';
 import s from '../ui/settings.module.css';
 import { useDraft } from './parts';
 import { text } from './source-panels';
@@ -321,30 +319,5 @@ export function FolderRows({
         </Btn>
       </div>
     </div>
-  );
-}
-
-/** a hero sentence: names stand out, what needs a look is amber */
-export function LibHero({
-  parts,
-  stats,
-}: {
-  parts: HeroPart[];
-  stats?: Array<{ value: ReactNode; label: string }>;
-}) {
-  return (
-    <Hero stats={stats}>
-      {parts.map((part, index) =>
-        part.kind === 'name' ? (
-          // eslint-disable-next-line react/no-array-index-key
-          <em key={index}>{part.text}</em>
-        ) : part.kind === 'warn' ? (
-          // eslint-disable-next-line react/no-array-index-key
-          <HeroWarn key={index}>{part.text}</HeroWarn>
-        ) : (
-          part.text
-        ),
-      )}
-    </Hero>
   );
 }

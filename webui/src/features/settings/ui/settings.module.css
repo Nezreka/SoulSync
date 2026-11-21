@@ -410,62 +410,14 @@
   }
 }
 
-/* ── hero ── */
+/* ── what a pill is for: one quiet line under the pills ── */
 
 .hero {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 24px;
-  align-items: center;
-  margin-top: 22px;
-  padding: 22px 26px;
-  border: 1px solid var(--white-a06);
-  border-radius: var(--radius-sheet);
-  background:
-    radial-gradient(120% 160% at 0% 0%, rgba(var(--accent-rgb), 0.1), transparent 55%),
-    var(--white-a03);
-}
-
-.heroLine {
   max-width: 760px;
-  margin: 0;
-  color: var(--white-a80);
-  font-size: 19px;
-  font-weight: 500;
-  line-height: 1.45;
-}
-
-.heroLine em {
-  color: var(--text-bright);
-  font-style: normal;
-  font-weight: 600;
-}
-
-.heroWarn {
-  color: var(--warning);
-  font-weight: 600;
-}
-
-.stats {
-  display: flex;
-  gap: 28px;
-}
-
-.stat {
-  text-align: right;
-}
-
-.statValue {
-  display: block;
-  font-size: 20px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-
-.statLabel {
-  color: var(--white-a50);
-  font-size: 12px;
-  white-space: nowrap;
+  margin: 18px 0 0;
+  color: var(--white-a60);
+  font-size: 14.5px;
+  line-height: 1.5;
 }
 
 /* ── buttons ── */
@@ -604,7 +556,8 @@
 .card + .card,
 .card + .stack,
 .stack + .card,
-.stack + .stack {
+.stack + .stack,
+.note + .card {
   margin-top: 12px;
 }
 
@@ -759,6 +712,14 @@
 .rowErrorText {
   margin-top: 4px;
   color: var(--danger-light);
+  font-size: 12.5px;
+}
+
+/* something about the row that needs a look (a folder not set, a switch
+   that leaves things out) */
+.rowWarnText {
+  margin-top: 4px;
+  color: var(--warning);
   font-size: 12.5px;
 }
 
@@ -2183,13 +2144,6 @@ button.chip:hover:not(:disabled) {
   box-shadow: inset 0 0 0 1px var(--white-a20);
 }
 
-/* the hero's accent figure: the colour in use and its name */
-.accentStat {
-  display: inline-flex;
-  gap: 8px;
-  align-items: center;
-}
-
 /* the custom accent colour: the browser's own picker, as a swatch */
 .colorPick {
   width: 52px;
@@ -2813,22 +2767,8 @@ button.chip:hover:not(:disabled) {
   }
 
   .hero {
-    grid-template-columns: 1fr;
-    gap: 14px;
-    margin-top: 16px;
-    padding: 18px;
-  }
-
-  .heroLine {
-    font-size: 16.5px;
-  }
-
-  .stats {
-    gap: 22px;
-  }
-
-  .stat {
-    text-align: left;
+    margin-top: 14px;
+    font-size: 14px;
   }
 
   .btn {

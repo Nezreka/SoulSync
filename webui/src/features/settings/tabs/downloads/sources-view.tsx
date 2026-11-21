@@ -17,8 +17,6 @@ import type { SettingsStore } from '../../settings-store';
 import {
   Btn,
   Card,
-  Hero,
-  HeroWarn,
   KindBar,
   KindSay,
   Mark,
@@ -52,8 +50,7 @@ import {
   KIND_WORD,
   changeText,
   dropText,
-  heroSentence,
-  heroText,
+  orderText,
   lookOf,
   roleText,
   statusOf,
@@ -405,7 +402,6 @@ export function SourcesView({
     };
   });
 
-  const connected = order.filter((id) => ['ok', 'warn'].includes(state.status[id] || '')).length;
   const word = KIND_WORD[kind];
   const savedUrl = settings.prowlarr?.url;
   const prowlarrUrl = typeof savedUrl === 'string' ? savedUrl.trim() : '';
@@ -413,26 +409,6 @@ export function SourcesView({
 
   return (
     <>
-      <Hero
-        stats={[
-          { value: order.length, label: 'In use' },
-          { value: connected, label: 'Connected' },
-          { value: unused.length, label: 'Not used' },
-        ]}
-      >
-        {heroSentence(kind, order, unready).map((part, index) =>
-          part.kind === 'name' ? (
-            // eslint-disable-next-line react/no-array-index-key
-            <em key={index}>{part.text}</em>
-          ) : part.kind === 'warn' ? (
-            // eslint-disable-next-line react/no-array-index-key
-            <HeroWarn key={index}>{part.text}</HeroWarn>
-          ) : (
-            part.text
-          ),
-        )}
-      </Hero>
-
       <div id="download-chain-widget" data-kind={kind}>
         <KindBar>
           <Segmented
@@ -462,7 +438,7 @@ export function SourcesView({
             items={items}
             role={(id, index, live) => roleText(kind, id, index, live, unready)}
             dropText={(id, index) => dropText(kind, id, index)}
-            afterText={(live) => heroText(kind, live)}
+            afterText={(live) => orderText(kind, live)}
             onChange={change}
             pool={pool}
             poolHead={

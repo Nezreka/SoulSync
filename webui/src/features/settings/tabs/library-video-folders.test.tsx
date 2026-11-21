@@ -10,7 +10,6 @@ import { act, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
-  VideoFoldersHero,
   VideoFoldersPanel,
   composeLines,
   drivePrefix,
@@ -89,13 +88,7 @@ function typeAndLeave(input: HTMLInputElement, value: string) {
   fireEvent.input(input, { target: { value } });
   input.dispatchEvent(new Event('change', { bubbles: true }));
 }
-const panel = () =>
-  render(
-    <>
-      <VideoFoldersHero />
-      <VideoFoldersPanel hidden={false} docker={null} />
-    </>,
-  );
+const panel = () => render(<VideoFoldersPanel hidden={false} docker={null} />);
 async function shown() {
   act(() => {
     document.dispatchEvent(new CustomEvent('soulsync:library-settings-shown'));
@@ -304,14 +297,15 @@ describe('the folders', () => {
     expect(pre.textContent).not.toContain('tv-4k');
   });
 
-  it('the hero says where downloads land and where each kind goes', async () => {
+  it('a library folder left empty says so on its own row, once the settings loaded', async () => {
+    answers['GET /api/video/downloads/config'] = { ...CONFIG, tv_path: '' };
     panel();
-    expect(document.body.textContent).toContain('Loading the video folders.');
+    const row = (id: string) => el(id).closest('[data-row]')!.textContent;
+    // not while loading: nothing is known yet
+    expect(row('video-tv-path')).not.toContain('No TV folder is set yet.');
     await shown();
-    expect(document.body.textContent).toContain(
-      'Downloads land in /downloads. Movies go to /movies and TV shows to /tv.',
-    );
-    expect(document.body.textContent).toContain('3 of 3');
+    expect(row('video-tv-path')).toContain('No TV folder is set yet.');
+    expect(row('video-movies-path')).not.toContain('No movies folder is set yet.');
   });
 
   it('the video minimum free disk space sits beside the download folder', () => {

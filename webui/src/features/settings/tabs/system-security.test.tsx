@@ -1,6 +1,6 @@
 /**
  * System > Security (settings-bic phase 6, on the parts): the cards and the
- * hero, the PIN, password and recovery flows against their endpoints, the
+ * open-door note, the PIN, password and recovery flows against their endpoints, the
  * locks that keep anyone from shutting themselves out, the OIDC block, and
  * every security.* key it saves.
  */
@@ -114,11 +114,11 @@ describe('the cards', () => {
     expect(shell.refreshOidcOnlySettingsStatus).toHaveBeenCalledOnce();
   });
 
-  it('the hero says who can get in', async () => {
-    const { container } = section();
+  it('with no PIN and no sign-in, the page says anyone can get in, above the locks', async () => {
+    section();
     await loaded({ security: {} });
     await waitFor(() =>
-      expect(container.textContent).toContain(
+      expect(document.getElementById('security-open-note')!.textContent).toContain(
         'Anyone who can reach SoulSync can use it: there is no PIN and no sign-in.',
       ),
     );

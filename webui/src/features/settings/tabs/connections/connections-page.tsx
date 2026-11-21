@@ -17,7 +17,7 @@ import { useEffect, useState, useSyncExternalStore } from 'react';
 import type { SettingsTabProps } from '../../host';
 
 import { useNav } from '../../nav';
-import { Btn, Hero, SectionLabel, Sheet, SheetFootSay, StatusWords } from '../../ui';
+import { Btn, SectionLabel, Sheet, SheetFootSay, StatusWords } from '../../ui';
 import s from '../../ui/settings.module.css';
 import { statusFrames } from '../connections';
 import { MetadataSourceGroup } from '../connections-metadata';
@@ -38,10 +38,8 @@ import {
   useVideoServerState,
   videoServerName,
 } from '../connections-video-server';
-import { notificationsSentence } from '../discovery/words';
 import { ViewPanel } from '../downloads/downloads-page';
-import { LibHero } from '../library-card';
-import { NotificationsCard, useNotifyLines } from '../video-row-lists';
+import { NotificationsCard } from '../video-row-lists';
 import { useVideoServer, videoServer } from '../video-server';
 import { markVideoShown, useVideoShown } from '../video-shown';
 
@@ -59,85 +57,6 @@ function useSide(): 'music' | 'video' {
   );
 }
 
-/** the metadata source in words, as the picker names it */
-const SOURCE_NAMES: Record<string, string> = {
-  spotify: 'Spotify',
-  spotify_free: 'Spotify (no auth)',
-  itunes: 'iTunes',
-  deezer: 'Deezer',
-  discogs: 'Discogs',
-  musicbrainz: 'MusicBrainz',
-  jiosaavn: 'JioSaavn',
-  hydrabase: 'Hydrabase',
-};
-
-const NUMBERS = [
-  'No',
-  'One',
-  'Two',
-  'Three',
-  'Four',
-  'Five',
-  'Six',
-  'Seven',
-  'Eight',
-  'Nine',
-  'Ten',
-  'Eleven',
-  'Twelve',
-  'Thirteen',
-  'Fourteen',
-  'Fifteen',
-];
-const say = (n: number) => NUMBERS[n] ?? String(n);
-const lower = (n: number) => (n < NUMBERS.length ? NUMBERS[n].toLowerCase() : String(n));
-
-export interface Counts {
-  set: number;
-  keyless: number;
-  unset: number;
-  total: number;
-}
-
-/** the tab read back: the server, the metadata source, how many services */
-export function connectionsSentence(
-  side: 'music' | 'video',
-  server: string,
-  source: string,
-  counts: Counts | null,
-): string {
-  const services = counts
-    ? ` ${say(counts.set)} of ${lower(counts.total)} services ${counts.set === 1 ? 'is' : 'are'} set up.`
-    : '';
-  if (side === 'video')
-    return server
-      ? `${serverName(server)} is the video side's server.${services}`
-      : `The video side has no server picked yet.${services}`;
-  const host =
-    server === 'soulsync'
-      ? 'SoulSync runs standalone, with no media server'
-      : `${serverName(server)} is your media server`;
-  return `${host} and metadata comes from ${SOURCE_NAMES[source] || source}.${services}`;
-}
-
-function NotificationsHero() {
-  const lines = useNotifyLines();
-  const on = lines ? lines.filter((l) => l.enabled).length : 0;
-  return (
-    <LibHero
-      parts={notificationsSentence(lines)}
-      stats={
-        lines
-          ? [
-              { value: lines.length, label: lines.length === 1 ? 'Connection' : 'Connections' },
-              { value: on, label: 'Switched on' },
-            ]
-          : undefined
-      }
-    />
-  );
-}
-
 export function ConnectionsPage(props: SettingsTabProps) {
   const { store, opened } = props;
   const state = useNav();
@@ -147,7 +66,6 @@ export function ConnectionsPage(props: SettingsTabProps) {
   const settings = useSyncExternalStore(store.subscribe, () => store.getState().settings);
   const frame = useSyncExternalStore(statusFrames.subscribe, statusFrames.get);
   const tests = useTestResults();
-  const [counts, setCounts] = useState<Counts | null>(null);
   const [viewing, setViewing] = useState<Server | null>(null);
   const [videoSheet, setVideoSheet] = useState(false);
   const [host, setHost] = useState<HTMLElement | null>(null);
@@ -166,15 +84,7 @@ export function ConnectionsPage(props: SettingsTabProps) {
   const saved = (settings as Record<string, unknown>).active_media_server;
   const server = typeof saved === 'string' && saved ? saved : 'plex';
   const video = useVideoServer();
-  const videoServerNow = video.active;
   const videoState = useVideoServerState();
-  const meta = (settings.metadata || {}) as Record<string, unknown>;
-  const source =
-    meta.spotify_free === true && meta.fallback_source === 'spotify'
-      ? 'spotify_free'
-      : typeof meta.fallback_source === 'string' && meta.fallback_source
-        ? meta.fallback_source
-        : 'deezer';
   // the sheet's answer: its own Test, else Test server's while it is the active one
   const viewingNow = viewing
     ? serverState(
@@ -196,25 +106,6 @@ export function ConnectionsPage(props: SettingsTabProps) {
   return (
     <div data-stg-new={TAB} hidden={!here}>
       <ViewPanel tab={TAB} view="services" open={view === 'services'}>
-        <Hero
-          stats={
-            counts
-              ? [
-                  { value: counts.set, label: 'Set up' },
-                  { value: counts.keyless, label: 'No key needed' },
-                  { value: counts.unset, label: 'Not set up' },
-                ]
-              : undefined
-          }
-        >
-          {connectionsSentence(
-            side,
-            side === 'video' ? videoServerNow || '' : server,
-            source,
-            counts,
-          )}
-        </Hero>
-
         <div hidden={side === 'video'} data-media-server="music">
           <SectionLabel title="Media server" hint="Where your library is played from" />
           <ServerConnections store={store} host={host} onView={(s) => setViewing(s)} />
@@ -268,7 +159,7 @@ export function ConnectionsPage(props: SettingsTabProps) {
           <MetadataSourceGroup store={store} />
         </div>
 
-        <ServicesPart model={servicesModel} opened={opened} onCounts={setCounts} />
+        <ServicesPart model={servicesModel} opened={opened} />
 
         <Sheet
           open={viewing !== null}
@@ -314,7 +205,6 @@ export function ConnectionsPage(props: SettingsTabProps) {
       </ViewPanel>
 
       <ViewPanel tab={TAB} view="notifications" open={view === 'notifications'}>
-        <NotificationsHero />
         <div className={s.cards}>
           <NotificationsCard />
         </div>

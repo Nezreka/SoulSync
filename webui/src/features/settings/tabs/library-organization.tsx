@@ -36,8 +36,7 @@ import {
   TemplateField,
 } from '../ui';
 import s from '../ui/settings.module.css';
-import { LibHero, shell, useLoadedDraft, useLoads, useSettings } from './library-card';
-import { musicNamingSentence, podcastImportSentence, podcastNamingSentence } from './library/words';
+import { shell, useLoadedDraft, useLoads, useSettings } from './library-card';
 import {
   PREVIEW_SCENARIOS,
   RESET_TEMPLATES,
@@ -216,62 +215,6 @@ function usePathPreview(
   return { scenario, pick, preview, refresh };
 }
 
-/** the album template's last answer, for the hero (one page, one preview) */
-let albumPreview: string | null = null;
-const albumListeners = new Set<() => void>();
-function setAlbumPreview(path: string | null) {
-  if (path === albumPreview) return;
-  albumPreview = path;
-  for (const listener of albumListeners) listener();
-}
-function useAlbumPreview() {
-  return useSyncExternalStore(
-    (listener) => {
-      albumListeners.add(listener);
-      return () => {
-        albumListeners.delete(listener);
-      };
-    },
-    () => albumPreview,
-  );
-}
-
-export function MusicNamingHero({ store }: { store: SettingsStore }) {
-  const settings = useSettings(store);
-  const loads = useLoads(store);
-  const album = useAlbumPreview();
-  const org = (settings.file_organization || {}) as Section;
-  const on = org.enabled !== false;
-  const templates = templatesOf(settings);
-  const errors = templateFieldErrors(settings);
-  const count = Object.keys(errors).length;
-  return (
-    <LibHero
-      stats={
-        loads
-          ? [
-              { value: 6, label: 'Templates' },
-              count
-                ? { value: count, label: 'To fix' }
-                : { value: on ? 'On' : 'Off', label: 'Organizing' },
-            ]
-          : undefined
-      }
-      parts={
-        !loads
-          ? [{ text: 'Loading your naming templates.' }]
-          : errors.album_path
-            ? [
-                { text: 'The album path template ' },
-                { text: 'would not work', kind: 'warn' },
-                { text: ', so it is not saved until it is fixed below.' },
-              ]
-            : musicNamingSentence({ on, album, template: templates.album_path })
-      }
-    />
-  );
-}
-
 /** the variables each template can use, in one place */
 function Variables() {
   const group = (title: string, vars: readonly string[], extra?: string) => (
@@ -354,9 +297,6 @@ export function MusicNaming({ store }: { store: SettingsStore }) {
     playlist_item: useTemplateError(store, 'playlist_item'),
     sample_path: useTemplateError(store, 'sample_path'),
   };
-
-  const album = previewOf(preview, 'album_path');
-  useEffect(() => setAlbumPreview(on ? (album.path ?? null) : null), [album.path, on]);
 
   const setOrg = (key: string, value: unknown) => {
     store.set('file_organization', key, value);
@@ -904,22 +844,6 @@ export function RedownloadDeleted({ store }: { store: SettingsStore }) {
   );
 }
 
-// ── Podcasts: the template, and what file is kept ──
-
-export function PodcastNamingHero({ store }: { store: SettingsStore }) {
-  const settings = useSettings(store);
-  const loads = useLoads(store);
-  return (
-    <LibHero
-      parts={
-        loads
-          ? podcastNamingSentence(templatesOf(settings).podcast_path)
-          : [{ text: 'Loading your naming templates.' }]
-      }
-    />
-  );
-}
-
 export function PodcastNaming({ store }: { store: SettingsStore }) {
   const field = useTemplateField(store, 'podcast_path');
   const error = useTemplateError(store, 'podcast_path');
@@ -950,20 +874,6 @@ export function PodcastNaming({ store }: { store: SettingsStore }) {
         />
       </Row>
     </Card>
-  );
-}
-
-export function PodcastImportHero({ store }: { store: SettingsStore }) {
-  const settings = useSettings(store);
-  const loads = useLoads(store);
-  return (
-    <LibHero
-      parts={
-        loads
-          ? podcastImportSentence(text((settings.podcasts as Section | undefined)?.media_format))
-          : [{ text: 'Loading.' }]
-      }
-    />
   );
 }
 

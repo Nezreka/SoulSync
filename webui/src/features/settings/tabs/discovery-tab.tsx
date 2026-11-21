@@ -19,9 +19,7 @@ import type { SettingsStore } from '../settings-store';
 import { Card, NumberField, Row, Segmented, Select, Switch, TextField } from '../ui';
 import s from '../ui/settings.module.css';
 import { HEMISPHERES, LOOKBACK_PERIODS, SYNC_MODES, resolveDiscovery } from './discovery';
-import { playlistsSentence, recommendationsSentence, SYNC_MODE_NAMES } from './discovery/words';
 import { useChanged } from './downloads/behaviour-view';
-import { LibHero } from './library-card';
 import { M3uExportOptions } from './library-folders';
 import { useDraft } from './parts';
 
@@ -125,45 +123,6 @@ export function usePool(store: SettingsStore) {
 }
 
 export type Pool = ReturnType<typeof usePool>;
-
-// ── Recommendations ──
-
-export function RecommendationsHero({
-  store,
-  pool,
-  side,
-}: {
-  store: SettingsStore;
-  pool: Pool;
-  side: 'music' | 'video';
-}) {
-  const { values } = useDiscovery(store);
-  const music = side === 'music';
-  const stats = [
-    { value: values.adventurousness.toFixed(2), label: 'Adventurousness' },
-    {
-      value: values.statsEnabled ? `${values.statsInterval} min` : 'Off',
-      label: 'Play history',
-    },
-  ];
-  if (music && pool.lookback)
-    stats.push({
-      value: pool.lookback === 'all' ? 'All' : `${pool.lookback} days`,
-      label: 'Lookback',
-    });
-  return (
-    <LibHero
-      parts={recommendationsSentence({
-        adventurousness: values.adventurousness,
-        statsEnabled: values.statsEnabled,
-        statsInterval: values.statsInterval,
-        lookback: music ? pool.lookback : null,
-        hemisphere: music ? pool.hemisphere : null,
-      })}
-      stats={stats}
-    />
-  );
-}
 
 export function Recommendations({ store, pool }: { store: SettingsStore; pool: Pool }) {
   const { state, values } = useDiscovery(store);
@@ -285,23 +244,6 @@ export function Recommendations({ store, pool }: { store: SettingsStore; pool: P
         </Card>
       </div>
     </>
-  );
-}
-
-// ── Playlists ──
-
-export function PlaylistsHero({ store }: { store: SettingsStore }) {
-  const { values } = useDiscovery(store);
-  const m3u = [values.m3uExport, values.libraryM3u].filter(Boolean).length;
-  return (
-    <LibHero
-      parts={playlistsSentence(values)}
-      stats={[
-        { value: SYNC_MODE_NAMES[values.syncMode] ?? values.syncMode, label: 'Sync mode' },
-        { value: values.wishlistMissing ? 'On' : 'Off', label: 'Missing to wishlist' },
-        { value: `${m3u} of 2`, label: 'M3U files' },
-      ]}
-    />
   );
 }
 

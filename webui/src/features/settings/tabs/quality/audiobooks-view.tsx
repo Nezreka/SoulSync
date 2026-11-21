@@ -9,10 +9,9 @@ import { useEffect, useState, useSyncExternalStore } from 'react';
 
 import type { SettingsStore } from '../../settings-store';
 
-import { Card, CheckChips, Hero, NumberField, Row, SectionLabel, Select, Switch } from '../../ui';
+import { Card, CheckChips, NumberField, Row, SectionLabel, Select, Switch } from '../../ui';
 import { int, useLoadedDraft } from '../library-card';
 import { text } from '../source-panels';
-import { audiobookSentence } from './words';
 
 type Section = Record<string, unknown>;
 
@@ -84,16 +83,6 @@ export function AudiobookQualityView({ store }: { store: SettingsStore }) {
 
   return (
     <div data-audiobook-quality="">
-      <Hero>
-        {audiobookSentence({
-          first: order[0] || 'm4b',
-          allowed: loads ? switches.formats : [],
-          of: AB_FORMATS.length,
-          minKbps: int(minRate.value, 0),
-          maxKbps: int(maxRate.value, 0),
-        })}
-      </Hero>
-
       <SectionLabel
         title="Formats"
         hint="One profile for every audiobook. The per-author card on Library holds what differs by author."

@@ -90,7 +90,6 @@ const pool = () =>
   [...widget().querySelectorAll<HTMLElement>('[data-pool] > li[data-id]')].map((r) => r.dataset.id);
 const poolRow = (id: string) =>
   widget().querySelector<HTMLElement>(`[data-pool] > li[data-id="${id}"]`)!;
-const hero = () => document.querySelector('p')!.textContent;
 /** pick an entry of a row's ⋯ menu */
 function menu(name: string, entry: RegExp) {
   fireEvent.click(screen.getByRole('button', { name: `More for ${name}` }));
@@ -111,11 +110,10 @@ function music() {
 }
 
 describe('the order, read back', () => {
-  it('says the music order in a sentence, with its figures, and lists it', async () => {
+  it('lists the music order, each row saying its place', async () => {
     music();
     view();
     await act(() => model.loadChain());
-    expect(hero()).toBe('Music tries Soulseek first, then YouTube, then Tidal.');
     expect(rows()).toEqual(['soulseek', 'youtube', 'tidal']);
     expect(row('soulseek').textContent).toContain('Tried first');
     expect(row('youtube').textContent).toContain('Tried when Soulseek finds nothing');
@@ -129,8 +127,6 @@ describe('the order, read back', () => {
       'usenet',
       'lidarr',
     ]);
-    const stats = [...document.querySelectorAll('b')].map((b) => b.textContent);
-    expect(stats.slice(0, 3)).toEqual(['3', '0', '7']);
     // no on/off switch per source: a source is on by being in the order
     expect(widget().querySelector('input[type="checkbox"]')).toBeNull();
   });
@@ -142,9 +138,7 @@ describe('the order, read back', () => {
     });
     view();
     await act(() => model.loadChain());
-    expect(hero()).toBe(
-      "Music tries Soulseek first, then Qobuz. Qobuz isn't set up yet, so it is skipped for now.",
-    );
+    // the warning sits on the row it is about
     expect(row('qobuz').textContent).toContain('Skipped until it is set up');
     expect(row('qobuz').textContent).toContain('Needs setup');
     fireEvent.click(screen.getByRole('button', { name: 'Set up Qobuz' }));
@@ -179,14 +173,12 @@ describe('the order, read back', () => {
     view();
     act(() => model.switchChain('video'));
     await waitFor(() => expect(rows()).toEqual(['usenet']));
-    expect(hero()).toBe('Movies and TV download from Usenet only.');
     expect(row('usenet').textContent).toContain('The only source for video');
     expect(pool()).toEqual(['soulseek', 'torrent', 'extto']);
     // External has no settings and no test here, as before
     expect(within(poolRow('extto')).queryByRole('button', { name: /settings/i })).toBeNull();
     act(() => model.switchChain('audiobooks'));
     await waitFor(() => expect(rows()).toEqual(['usenet', 'torrent']));
-    expect(hero()).toBe('Books ask Usenet first, then Torrent.');
     expect(row('torrent').textContent).toContain('Asked after Usenet');
     // the kind switch is a tablist over the order
     const tabs = within(document.getElementById('dlchain-tabs')!).getAllByRole('tab');
@@ -384,7 +376,6 @@ describe('changing the order', () => {
     await act(() => model.loadChain());
     menu('Tidal', /Stop using for music/);
     expect(rows()).toEqual(['soulseek']);
-    expect(hero()).toBe('Music downloads from Soulseek only.');
     fireEvent.click(screen.getByRole('button', { name: 'More for Soulseek' }));
     const last = screen.getByRole('menuitem', { name: /Stop using for music/ });
     expect(last).toHaveProperty('disabled', true);

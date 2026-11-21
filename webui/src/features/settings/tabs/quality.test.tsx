@@ -186,16 +186,6 @@ async function loaded(settings: SettingsPayload = {}) {
 }
 
 describe('the page', () => {
-  it('reads the profile on screen back in one sentence, with its numbers', async () => {
-    await loaded();
-    const hero = document.querySelector('[data-music-quality] p')!;
-    expect(hero.textContent).toBe(
-      'Balanced takes FLAC 24-bit, then FLAC, then MP3 at 320 or better. When none of them turns up it takes what there is. It keeps upgrading until it has FLAC.',
-    );
-    expect(document.querySelector('[data-music-quality]')!.textContent).toContain('2Profiles');
-    expect(document.querySelector('[data-music-quality]')!.textContent).toContain('3Targets');
-  });
-
   it('every control it had is there once, named without a colon, no emoji; the Manage modal went', async () => {
     const { container } = await loaded();
     for (const id of [

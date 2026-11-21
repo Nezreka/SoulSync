@@ -10,8 +10,9 @@ import { type ReactNode, useEffect, useRef, useSyncExternalStore } from 'react';
 import type { SettingsTabProps } from '../../host';
 
 import { nav, useNav } from '../../nav';
-import { KindBar, KindSay, Segmented } from '../../ui';
+import { Hero, KindBar, KindSay, Segmented } from '../../ui';
 import s from '../../ui/settings.module.css';
+import { aboutOf } from '../about';
 import { CHAIN_KINDS, type SourcesModel, sourcesModel } from '../sources-model';
 import { MusicBehaviour, VideoBehaviour } from './behaviour-view';
 import { FilteringView } from './filtering-view';
@@ -19,7 +20,9 @@ import { SourcePanelsHome, SourceSheet, SourcesView } from './sources-view';
 
 const TAB = 'downloads';
 
-/** one pill's page: in the document always, on screen when it is the open one */
+/** one pill's page: in the document always, on screen when it is the open
+ *  one. It opens with what the pill is for (about.ts); a pill whose kinds
+ *  differ (Library) says its own under the kind it shows */
 export function ViewPanel({
   tab,
   view,
@@ -31,6 +34,7 @@ export function ViewPanel({
   open: boolean;
   children: ReactNode;
 }) {
+  const about = aboutOf(tab, view);
   return (
     <div
       className={s.view}
@@ -42,6 +46,7 @@ export function ViewPanel({
       data-ui=""
       hidden={!open}
     >
+      {about ? <Hero>{about}</Hero> : null}
       {children}
     </div>
   );

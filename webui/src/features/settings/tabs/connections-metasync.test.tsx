@@ -7,7 +7,7 @@
 import { act, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { detectTried, MetaSyncSection, metasyncSentence } from './connections-metasync';
+import { detectTried, MetaSyncSection } from './connections-metasync';
 
 type Shell = Window & Record<string, unknown>;
 const shell = window as unknown as Shell;
@@ -45,10 +45,9 @@ const sent = (method: string, url: string) =>
   calls.filter((c) => c.method === method && c.url === url);
 
 describe('MetaSync', () => {
-  it('asks nothing before it opens, and reads back loading', () => {
+  it('asks nothing before it opens', () => {
     render(<MetaSyncSection opened={0} />);
     expect(calls).toEqual([]);
-    expect(document.body.textContent).toContain('Loading MetaSync.');
     // the steps are cards, Disconnect is in a danger zone
     for (const title of [
       'Step 1: connect SoulSync and MetaSync',
@@ -195,55 +194,23 @@ describe('MetaSync', () => {
     await act(() => Promise.resolve());
   });
 
-  it('the hero reads the connection, the pools and the reports back', async () => {
+  it('the status card says what needs a look: MetaSync not reading, a pool not bound', async () => {
     answers['GET /api/metasync'] = { success: true, local_key_set: true };
     answers['GET /api/metasync/status'] = {
       success: true,
       status: {
         version: '1.2',
-        soulsync_connected: true,
+        soulsync_connected: false,
         pools: [{ name: 'SIN', binding_status: 'pending_approval' }],
         dry_run: false,
       },
     };
     render(<MetaSyncSection opened={1} />);
-    await waitFor(() => expect(document.body.textContent).toContain('It is in SIN'));
-    expect(document.body.textContent).toContain('SIN: waiting for approval in the portal');
-    expect(document.body.textContent).toContain('It sends one anonymous report a week.');
-  });
-});
-
-describe('metasyncSentence', () => {
-  const words = (f: Parameters<typeof metasyncSentence>[0]) =>
-    metasyncSentence(f)
-      .map((p) => p.text)
-      .join('');
-  it('says loading, then not connected, then what it is in', () => {
-    expect(words({ linked: null, pools: [] })).toBe('Loading MetaSync.');
-    expect(words({ linked: false, pools: [] })).toMatch(/^SoulSync is not connected to MetaSync\./);
-    expect(words({ linked: true, version: '2', pools: [] })).toBe(
-      'SoulSync is connected to MetaSync 2. It has not joined a pool, so nothing is shared.',
+    await waitFor(() =>
+      expect(document.body.textContent).toContain(
+        'connected to MetaSync 1.2, which is not reading this SoulSync yet',
+      ),
     );
-    expect(
-      words({
-        linked: true,
-        reading: false,
-        pools: [{ name: 'SIN', binding_status: 'bound' }],
-        dryRun: true,
-      }),
-    ).toBe(
-      'SoulSync is connected to MetaSync, which cannot read this SoulSync yet. It is in SIN. Dry run is on, so nothing is sent yet.',
-    );
-  });
-  it('marks what needs a look', () => {
-    const parts = metasyncSentence({
-      linked: true,
-      reading: false,
-      pools: [{ name: 'SIN', binding_status: 'auth_failed' }],
-    });
-    expect(parts.filter((p) => p.kind === 'warn').map((p) => p.text)).toEqual([
-      'cannot read this SoulSync yet',
-      'SIN: pool authentication failed',
-    ]);
+    expect(document.body.textContent).toMatch(/Pool SIN \([^)]*\): Waiting for approval/i);
   });
 });

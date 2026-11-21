@@ -3,7 +3,7 @@
  * card drawn elsewhere now (tag options, wishlist rules, re-download, podcast
  * format) (settings-bic phase 4): the template rules, each saved key, the
  * "Saves as" preview under each field, a bad template marked on its own field
- * and named in the save status, Reset (asking first), and the hero.
+ * and named in the save status, and Reset (asking first).
  */
 
 import { act, fireEvent, render, waitFor } from '@testing-library/react';
@@ -15,7 +15,6 @@ import { Card } from '../ui';
 import { AudiobookNaming } from './library-audiobooks';
 import {
   MusicNaming,
-  MusicNamingHero,
   MusicTagOptions,
   PodcastImport,
   PodcastNaming,
@@ -87,7 +86,6 @@ afterEach(async () => {
 const card = () =>
   render(
     <div>
-      <MusicNamingHero store={store} />
       <MusicNaming store={store} />
       <Card>
         <MusicTagOptions store={store} />
@@ -326,20 +324,6 @@ describe('the page', () => {
     act(() => store.hydrate({ file_organization: { templates: { playlist_path: '$playlist' } } }));
     expect(row().hidden).toBe(false);
     expect(row().textContent).toContain('no longer used');
-  });
-
-  it('the hero reads the album template back; templates off says so', async () => {
-    act(() => store.hydrate({ file_organization: {} }));
-    card();
-    await waitFor(() =>
-      expect(document.body.textContent).toContain(
-        'An album track is saved as Daft Punk / Daft Punk - Discovery / 01 - One More Time.flac',
-      ),
-    );
-    fireEvent.click(input('file-organization-enabled'));
-    expect(document.body.textContent).toContain(
-      "Custom templates are off, so files keep SoulSync's built-in layout.",
-    );
   });
 
   it('Reset asks first, then writes every default, the audiobook template included', async () => {

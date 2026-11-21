@@ -20,7 +20,6 @@ import {
   Card,
   Chips,
   FieldLine,
-  Hero,
   NumberField,
   OrderList,
   Row,
@@ -32,7 +31,6 @@ import {
 } from '../ui';
 import s from '../ui/settings.module.css';
 import { useCommit } from './commit';
-import { videoSentence, youtubeSentence } from './quality/words';
 import { onVideoSave, useVideoShown } from './video-shown';
 
 const QUALITY_URL = '/api/video/downloads/quality';
@@ -478,33 +476,9 @@ export function VideoQualitySections() {
   const langs = p?.audio_languages || [];
   const profileOptions = profiles.length ? profiles : [{ id: 0, name: 'Default', profile: {} }];
   const tierName = (key: string) => TIER_LABEL[key] || key;
-  const on = tiers.filter((t) => t.enabled);
 
   return (
     <div data-video-quality="">
-      <Hero
-        stats={
-          p
-            ? [
-                {
-                  value: profileOptions.length,
-                  label: profileOptions.length === 1 ? 'Profile' : 'Profiles',
-                },
-                { value: `${on.length} of ${tiers.length}`, label: 'Qualities on' },
-                { value: formats.length, label: formats.length === 1 ? 'Format' : 'Formats' },
-              ]
-            : undefined
-        }
-      >
-        {p
-          ? videoSentence({
-              name: selected?.name || 'Default',
-              tiers: on.map((t) => tierName(t.key)),
-              cutoff: p.cutoff_resolution,
-            })
-          : 'Loading the video quality profiles.'}
-      </Hero>
-
       <SectionLabel
         title="Profiles"
         hint="A title uses the profile picked for it, else its kind's default below."
@@ -1280,7 +1254,6 @@ export function YoutubeQuality({ shown }: { shown: number }) {
 
   return (
     <div data-youtube-quality="">
-      <Hero>{p ? youtubeSentence(p) : 'Loading the YouTube profile.'}</Hero>
       <SectionLabel
         title="Followed channels"
         hint="YouTube is grabbed with yt-dlp, so this is a ceiling, a codec and a container"

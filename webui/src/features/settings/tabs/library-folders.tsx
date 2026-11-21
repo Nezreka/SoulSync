@@ -22,19 +22,15 @@ import s from '../ui/settings.module.css';
 import { audiobooksPath } from './library-audiobooks';
 import {
   FolderRows,
-  LibHero,
   LibPath,
   checkAttrs,
-  freeOf,
   isDocker,
   refreshChecks,
   shell,
-  useFolderChecks,
   useLoadedDraft,
   useLoads,
   useSettings,
 } from './library-card';
-import { musicFoldersSentence, podcastFoldersSentence } from './library/words';
 import { text } from './source-panels';
 
 export { isDocker };
@@ -68,65 +64,12 @@ export function isInstallDefault(transfer: string) {
   return out === '' || out === '.' || out.startsWith('./') || out.startsWith('.\\');
 }
 
-const MUSIC_IDS = [
-  'download-path',
-  'transfer-path',
-  'staging-path',
-  'music-videos-path',
-  'playlists-materialize-path',
-];
-
 function musicValues(settings: Record<string, Record<string, unknown> | undefined>) {
   const soulseek = settings.soulseek || {};
   return {
     download: text(soulseek.download_path) || './downloads',
     transfer: text(soulseek.transfer_path) || './Transfer',
   };
-}
-
-/** the Folders > Music hero: where downloads land and where music goes */
-export function MusicFoldersHero({ store }: { store: SettingsStore }) {
-  const settings = useSettings(store);
-  const loads = useLoads(store);
-  const { download, transfer } = musicValues(settings);
-  const docker = !!settings._environment?.docker;
-  const checks = useFolderChecks(MUSIC_IDS);
-  const ready = checks.filter((c) => c?.tone === 'ok').length;
-  const free = freeOf(checks[0]);
-  const extra = ((settings.library?.music_paths as string[] | undefined) || []).filter((p) =>
-    String(p).trim(),
-  ).length;
-  const stats: Array<{ value: string | number; label: string }> = [
-    { value: MUSIC_IDS.length + extra, label: 'Folders' },
-  ];
-  if (checks.some(Boolean)) stats.push({ value: ready, label: 'Ready' });
-  if (free) stats.push({ value: free, label: 'Free' });
-  return (
-    <LibHero
-      stats={loads ? stats : undefined}
-      parts={
-        loads
-          ? musicFoldersSentence({
-              download,
-              transfer,
-              installDefault: !docker && isInstallDefault(transfer),
-            })
-          : [{ text: 'Loading your folders.' }]
-      }
-    />
-  );
-}
-
-export function PodcastFoldersHero({ store }: { store: SettingsStore }) {
-  const settings = useSettings(store);
-  const loads = useLoads(store);
-  return (
-    <LibHero
-      parts={
-        loads ? podcastFoldersSentence(podcastsPath(settings)) : [{ text: 'Loading your folders.' }]
-      }
-    />
-  );
 }
 
 /** Rebuild playlist folders now, and what it said */

@@ -1,24 +1,32 @@
-/** the download order in words: the hero sentence, a row's role, its status, the toast */
+/** the download order in words: the order read aloud, a row's role, its status, the toast */
 
 import { describe, expect, it } from 'vitest';
 
-import { changeText, dropText, heroSentence, heroText, roleText, statusOf, usedIn } from './words';
+import {
+  changeText,
+  dropText,
+  orderSentence,
+  orderText,
+  roleText,
+  statusOf,
+  usedIn,
+} from './words';
 
-describe('the hero sentence', () => {
+describe('the order read aloud', () => {
   it('reads the music order aloud', () => {
-    expect(heroText('music', ['soulseek', 'youtube', 'qobuz'])).toBe(
+    expect(orderText('music', ['soulseek', 'youtube', 'qobuz'])).toBe(
       'Music tries Soulseek first, then YouTube, then Qobuz.',
     );
-    expect(heroText('music', ['soulseek'])).toBe('Music downloads from Soulseek only.');
+    expect(orderText('music', ['soulseek'])).toBe('Music downloads from Soulseek only.');
   });
   it('says which sources are skipped until they are set up', () => {
-    expect(heroText('music', ['soulseek', 'youtube', 'qobuz'], { qobuz: true })).toBe(
+    expect(orderText('music', ['soulseek', 'youtube', 'qobuz'], { qobuz: true })).toBe(
       "Music tries Soulseek first, then YouTube, then Qobuz. Qobuz isn't set up yet, so it is skipped for now.",
     );
-    expect(heroText('music', ['tidal', 'qobuz', 'soulseek'], { qobuz: true, tidal: true })).toBe(
+    expect(orderText('music', ['tidal', 'qobuz', 'soulseek'], { qobuz: true, tidal: true })).toBe(
       "Music tries Tidal first, then Qobuz, then Soulseek. Tidal and Qobuz aren't set up yet, so they are skipped for now.",
     );
-    const parts = heroSentence('music', ['soulseek', 'qobuz'], { qobuz: true });
+    const parts = orderSentence('music', ['soulseek', 'qobuz'], { qobuz: true });
     expect(parts.filter((p) => p.kind === 'name').map((p) => p.text)).toEqual([
       'Soulseek',
       'Qobuz',
@@ -26,14 +34,14 @@ describe('the hero sentence', () => {
     expect(parts.find((p) => p.kind === 'warn')?.text).toBe("Qobuz isn't set up yet");
   });
   it('has its own words for video and for audiobooks', () => {
-    expect(heroText('video', ['torrent', 'usenet'])).toBe(
+    expect(orderText('video', ['torrent', 'usenet'])).toBe(
       'Movies and TV try Torrent first, then Usenet.',
     );
-    expect(heroText('video', ['extto'])).toBe('Movies and TV download from External only.');
-    expect(heroText('audiobooks', ['usenet', 'torrent'])).toBe(
+    expect(orderText('video', ['extto'])).toBe('Movies and TV download from External only.');
+    expect(orderText('audiobooks', ['usenet', 'torrent'])).toBe(
       'Books ask Usenet first, then Torrent.',
     );
-    expect(heroText('music', [])).toBe('No source is picked yet. Add one below.');
+    expect(orderText('music', [])).toBe('No source is picked yet. Add one below.');
   });
 });
 

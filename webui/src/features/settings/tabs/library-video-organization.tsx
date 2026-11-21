@@ -36,13 +36,7 @@ import {
   TextField,
 } from '../ui';
 import s from '../ui/settings.module.css';
-import { LibHero, shell, useBusyGate } from './library-card';
-import {
-  subtitlesSentence,
-  videoImportSentence,
-  videoNamingSentence,
-  videoTagsSentence,
-} from './library/words';
+import { shell, useBusyGate } from './library-card';
 import {
   EPISODE_EG,
   MISSING_SUBS_JOB,
@@ -213,11 +207,6 @@ function useExamples() {
   };
 }
 
-export function VideoNamingHero() {
-  const eg = useExamples();
-  return <LibHero parts={videoNamingSentence(eg.movie, eg.episode)} />;
-}
-
 /** "a/b/c.mkv" as the template field's folders and file */
 const crumbs = (path: string | null) => {
   if (!path) return null;
@@ -353,27 +342,6 @@ export function VideoNaming() {
   );
 }
 
-// ── Import and files > Video ──
-
-export function VideoImportHero() {
-  const { form, loads } = useVideoOrganization();
-  return (
-    <LibHero
-      parts={videoImportSentence(
-        loads
-          ? {
-              move: form.transfer_mode === 'move',
-              verify: !!form.verify_with_ffprobe,
-              replace: !!form.replace_existing,
-              recycle: !!form.recycle_deletes,
-              days: parseInt(String(form.recycle_keep_days), 10) || 7,
-            }
-          : null,
-      )}
-    />
-  );
-}
-
 export function VideoImport() {
   const { form } = useVideoOrganization();
   const recyclePath = useField('recycle_path');
@@ -462,25 +430,6 @@ export function VideoImport() {
         </Row>
       </Card>
     </VoBlock>
-  );
-}
-
-// ── Tags and artwork > Video ──
-
-export function VideoTagsHero() {
-  const { form, loads } = useVideoOrganization();
-  return (
-    <LibHero
-      parts={
-        loads
-          ? videoTagsSentence({
-              subs: !!form.carry_subtitles,
-              artwork: !!form.save_artwork,
-              nfo: !!form.write_nfo,
-            })
-          : [{ text: 'Loading the video settings.' }]
-      }
-    />
   );
 }
 
@@ -751,24 +700,6 @@ function Whisper() {
         />
       </Row>
     </>
-  );
-}
-
-export function SubtitlesHero() {
-  const { form, order, whisper, loads } = useVideoOrganization();
-  return (
-    <LibHero
-      parts={subtitlesSentence(
-        loads
-          ? {
-              on: !!form.download_subtitles,
-              langs: String(form.subtitle_langs || ''),
-              providers: order.map((id) => subchainMeta(id).name),
-              whisper: !!(whisper && whisper.enabled && whisper.downloaded && whisper.engine),
-            }
-          : null,
-      )}
-    />
   );
 }
 

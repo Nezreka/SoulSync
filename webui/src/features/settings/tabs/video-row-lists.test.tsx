@@ -115,6 +115,19 @@ function leave(el: HTMLElement) {
 }
 
 describe('Import Lists', () => {
+  it('says so when every list is switched off, and not while one is on', async () => {
+    render(<ImportListsCard />);
+    shown();
+    await waitFor(() => expect(document.querySelectorAll('[data-vq-implist]')).toHaveLength(2));
+    expect(document.body.textContent).not.toContain('Every list is switched off');
+    fireEvent.click(q('[data-vq-implist="1"] [data-vq-il-f="enabled"]'));
+    await waitFor(() =>
+      expect(document.body.textContent).toContain(
+        'Every list is switched off, so nothing is added from them.',
+      ),
+    );
+  });
+
   it('loads each time the video settings page is shown', async () => {
     render(<ImportListsCard />);
     expect(q('#vq-implist-rows').children).toHaveLength(0);
@@ -244,6 +257,27 @@ describe('Import Lists', () => {
 });
 
 describe('Notifications', () => {
+  it('a connection that hears no events says so on its block; all switched off says so too', async () => {
+    render(<NotificationsCard />);
+    shown();
+    await waitFor(() => expect(document.querySelectorAll('[data-vq-notify]')).toHaveLength(2));
+    const deaf = (id: number) => q(`[data-vq-notify="${id}"]`).querySelector('[data-vq-nt-deaf]');
+    // Telegram hears nothing but is off: nothing to say yet
+    expect(deaf(5)).toBeNull();
+    expect(deaf(4)).toBeNull();
+    fireEvent.click(q('[data-vq-notify="5"] [data-vq-nt-f="enabled"]'));
+    await waitFor(() => expect(deaf(5)).not.toBeNull());
+    expect(deaf(5)!.textContent).toContain('Hears no events yet');
+    expect(document.body.textContent).not.toContain('Every connection is switched off');
+    fireEvent.click(q('[data-vq-notify="5"] [data-vq-nt-f="enabled"]'));
+    fireEvent.click(q('[data-vq-notify="4"] [data-vq-nt-f="enabled"]'));
+    await waitFor(() =>
+      expect(document.body.textContent).toContain(
+        'Every connection is switched off, so nothing is sent.',
+      ),
+    );
+  });
+
   it('loads the connections and their events; a non-admin sees none', async () => {
     render(<NotificationsCard />);
     shown();

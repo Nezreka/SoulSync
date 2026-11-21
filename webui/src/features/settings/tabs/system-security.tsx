@@ -40,10 +40,9 @@ import {
   Value,
 } from '../ui';
 import s from '../ui/settings.module.css';
-import { LibHero, useLoadedDraft } from './library-card';
+import { useLoadedDraft } from './library-card';
 import { openPeopleSettings } from './people/people-tab';
 import { text } from './source-panels';
-import { securitySentence } from './system/words';
 
 type Section_ = Record<string, unknown>;
 
@@ -337,30 +336,20 @@ export function SecurityView({ store }: { store: SettingsStore }) {
   const oidcOnly = on('oidc_only');
   const proxy = on('trust_reverse_proxy');
   const corsBad = loads ? badOrigins(cors.value.trim()) : [];
-  const ways = [loginOn && 'Password', loginOn && plex && 'Plex', loginOn && oidc && 'OIDC'].filter(
-    Boolean,
-  ).length;
+  // no PIN and no sign-in: said on the page, where the locks are
+  const open = !!loads && admin !== null && !pinOn && !loginOn;
 
   return (
     <>
-      <LibHero
-        parts={securitySentence({
-          hasPin: admin ? hasPin : null,
-          hasPassword: admin ? hasPassword : null,
-          requirePin: pinOn,
-          requireLogin: loginOn,
-          plex,
-          oidc,
-          oidcOnly,
-          proxy,
-        })}
-        stats={[
-          { value: pinOn ? 'On' : hasPin ? 'Set, off' : 'Not set', label: 'PIN lock' },
-          { value: loginOn ? 'On' : 'Off', label: 'Sign-in' },
-          { value: loginOn ? (oidcOnly && oidc ? 1 : ways) : 0, label: 'Ways to sign in' },
-        ]}
-      />
       <div className={s.cards}>
+        {open ? (
+          <Note>
+            <span id="security-open-note">
+              Anyone who can reach SoulSync can use it: there is no PIN and no sign-in. Turn on one
+              of them below.
+            </span>
+          </Note>
+        ) : null}
         <Card
           title="Lock with a PIN"
           hint="One shared PIN for the whole app. Simple, and fine on a home network."

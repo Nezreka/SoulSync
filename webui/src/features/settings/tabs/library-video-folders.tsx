@@ -34,7 +34,6 @@ import s from '../ui/settings.module.css';
 import { useCommit } from './commit';
 import {
   FolderRows,
-  LibHero,
   checkAttrs,
   folderChecks,
   refreshChecks,
@@ -42,7 +41,6 @@ import {
   toast,
   useBusyGate,
 } from './library-card';
-import { videoFoldersSentence } from './library/words';
 import { videoDownloads, useVideoDownloads, type DownloadsConfig } from './video-downloads';
 import { useVideoOrganization, videoOrganization } from './video-organization';
 
@@ -58,19 +56,6 @@ export function videoFoldersSummary(c: DownloadsConfig | null): string {
   ].filter((p) => String(p).trim()).length;
   const primary = set ? `${set} of 3 libraries set` : 'no primary libraries set';
   return extra ? `${primary} · ${extra} additional` : set ? primary : 'no libraries set yet';
-}
-
-export function VideoFoldersHero() {
-  const { config, status } = useVideoDownloads();
-  const set = config
-    ? ['movies_path', 'tv_path', 'youtube_path'].filter((k) => str(config[k]).trim()).length
-    : 0;
-  return (
-    <LibHero
-      stats={config ? [{ value: `${set} of 3`, label: 'Libraries set' }] : undefined}
-      parts={videoFoldersSentence(config, status === 'loaded' ? 'ready' : status)}
-    />
-  );
 }
 
 /** a folder behind its lock, typed into the config and saved when left */
@@ -1203,6 +1188,8 @@ export function VideoFolders({ docker }: { docker: boolean | null }) {
     if (on && !str(config?.[`${kind}_4k_path`]).trim()) open4k[kind].current?.();
   }
 
+  // a library folder left empty once the settings loaded: said on its row
+  const unset = (field: string) => status === 'loaded' && !str(config?.[field]).trim();
   const lib = (id: string, field: string, placeholder: string, label: string) => (
     <VideoPath id={id} field={field} placeholder={placeholder} label={label} />
   );
@@ -1254,10 +1241,20 @@ export function VideoFolders({ docker }: { docker: boolean | null }) {
         hint="Where finished downloads are filed. Point Plex, Jellyfin or Emby at the same folders"
       />
       <Card>
-        <Row wide label="Movies" htmlFor="video-movies-path">
+        <Row
+          wide
+          label="Movies"
+          htmlFor="video-movies-path"
+          warn={unset('movies_path') ? 'No movies folder is set yet.' : undefined}
+        >
           {lib('video-movies-path', 'movies_path', '/media/movies', 'Movies library')}
         </Row>
-        <Row wide label="TV shows" htmlFor="video-tv-path">
+        <Row
+          wide
+          label="TV shows"
+          htmlFor="video-tv-path"
+          warn={unset('tv_path') ? 'No TV folder is set yet.' : undefined}
+        >
           {lib('video-tv-path', 'tv_path', '/media/tv', 'TV library')}
         </Row>
         <Row

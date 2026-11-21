@@ -1,8 +1,8 @@
 /**
  * The Discovery tab on the parts (settings-bic phase 5): Recommendations,
  * Playlists and Import Lists, one pill each. Every control on its pill with
- * its key, the dependent rows dimmed with their parent, the heroes read the
- * settings back, and the same saves as the page it replaced.
+ * its key, the dependent rows dimmed with their parent, a line per pill
+ * saying what it is for, and the same saves as the page it replaced.
  */
 
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
@@ -75,7 +75,6 @@ const rowOf = (id: string) => document.getElementById(id)!.closest<HTMLElement>(
 const picked = (id: string) => document.getElementById(id)!.getAttribute('data-value');
 const pick = (id: string, value: string) =>
   fireEvent.click(document.querySelector(`#${id} [data-value="${value}"]`)!);
-const hero = (view: string) => panel(view).querySelector('p')!.textContent;
 const dimmed = (id: string) => /rowOff/.test(rowOf(id).className);
 
 describe('the Discovery page', () => {
@@ -123,33 +122,14 @@ describe('the Discovery page', () => {
     expect(videoShown.get()).toBe(before + 1);
   });
 
-  it('the heroes read each pill back', async () => {
-    store.hydrate({
-      discover: { adventurousness: 0.8 },
-      listening_stats: { enabled: true, poll_interval: 15 },
-      playlist_sync: { mode: 'replace', create_backup: true, wishlist_missing_tracks: false },
-      m3u_export: { enabled: true },
-    });
+  it('each pill opens with what it is for, in one line', () => {
     page();
-    await waitFor(() => expect(hero('recommendations')).toContain('southern hemisphere'));
-    expect(hero('recommendations')).toBe(
-      'Recommendations are adventurous, with more obscure picks. Play history is read from your media server every 15 minutes. New artists are scanned back over the last 90 days, and seasonal playlists follow the southern hemisphere.',
+    const about = (view: string) => panel(view).querySelector('[data-about]')!.textContent;
+    expect(about('recommendations')).toBe(
+      'How new music is picked for you, and what it learns from.',
     );
-    expect(panel('recommendations').textContent).toContain('90 days');
-    expect(hero('playlists')).toBe(
-      'A playlist sync replaces the playlist on your server and leaves missing tracks off the wishlist. A backup copy is kept on the server first. An M3U file is saved with each playlist download.',
-    );
-  });
-
-  it('the video side reads no lookback or hemisphere back', async () => {
-    document.body.setAttribute('data-side', 'video');
-    store.hydrate({});
-    page();
-    await waitFor(() => expect(calls.length).toBeGreaterThan(1));
-    await act(async () => {});
-    expect(hero('recommendations')).toBe(
-      'Recommendations are balanced between what you know and new finds. Play history is not collected.',
-    );
+    expect(about('playlists')).toBe('How playlists sync to your server, and the M3U files.');
+    expect(about('import-lists')).toBe('Lists SoulSync watches for new movies and shows to add.');
   });
 });
 

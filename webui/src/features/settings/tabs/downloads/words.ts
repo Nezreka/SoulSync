@@ -1,6 +1,6 @@
 /**
- * The download order, in words (settings-bic DESIGN.md 5.2, 5.3): the hero
- * sentence, what a row's place means, its status, and what a change did.
+ * The download order, in words (settings-bic DESIGN.md 5.2, 5.3): the order
+ * read aloud, what a row's place means, its status, and what a change did.
  * Pure functions over the sources model's state, so the copy is tested.
  */
 
@@ -108,14 +108,16 @@ function list(names: string[]): string {
   return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
 }
 
-/** a piece of the hero sentence: plain, a source's name, or the warning */
+/** a piece of the order sentence: plain, a source's name, or the warning */
 export type HeroPart = { text: string; kind?: 'name' | 'warn' };
 
 /**
- * The order read aloud. Music and video are tried in turn; audiobooks are
- * fetched as a whole folder, so their order is who is asked first.
+ * The order read aloud, for the order list's live region after a change (the
+ * page itself says what the pill is for, about.ts). Music and video are tried
+ * in turn; audiobooks are fetched as a whole folder, so their order is who is
+ * asked first.
  */
-export function heroSentence(
+export function orderSentence(
   kind: ChainKind,
   order: string[],
   unready: Record<string, boolean> = {},
@@ -151,8 +153,12 @@ export function heroSentence(
 }
 
 /** the same sentence as plain text (the live region, the tests) */
-export const heroText = (kind: ChainKind, order: string[], unready: Record<string, boolean> = {}) =>
-  heroSentence(kind, order, unready)
+export const orderText = (
+  kind: ChainKind,
+  order: string[],
+  unready: Record<string, boolean> = {},
+) =>
+  orderSentence(kind, order, unready)
     .map((part) => part.text)
     .join('');
 

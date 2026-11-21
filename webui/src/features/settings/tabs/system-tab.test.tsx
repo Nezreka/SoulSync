@@ -181,21 +181,17 @@ describe('the page', () => {
     ).not.toBeNull();
   });
 
-  it('a pill shows only its own panel, and each reads itself back', async () => {
+  it('a pill shows only its own panel, and each opens with what it is for', () => {
     act(() => store.hydrate({ ui_appearance: {}, database: { max_workers: 7 } }));
     page('general');
     expect(panel('general').hidden).toBe(false);
     expect(panel('security').hidden).toBe(true);
-    await waitFor(() =>
-      expect(panel('general').textContent).toContain(
-        'Settings save as you change them. Database updates run on 7 workers, and the server logs at debug level to logs/app.log.',
-      ),
-    );
+    const about = (view: string) => panel(view).querySelector('[data-about]')!.textContent;
+    expect(about('general')).toBe('How settings save, database workers and the server log level.');
     act(() => nav.view('api'));
     expect(panel('api').hidden).toBe(false);
-    await waitFor(() =>
-      expect(panel('api').textContent).toContain('2 API keys, 1 with admin rights.'),
-    );
+    expect(about('api')).toBe('Keys that let other apps talk to SoulSync.');
+    expect(about('logs')).toBe('What the server writes to its log, and the live viewer.');
   });
 });
 
@@ -256,8 +252,8 @@ describe('General', () => {
     expect(calls.find((c) => c.method === 'POST')?.body).toEqual({ level: 'ERROR' });
     // not a settings key: nothing goes through the page save
     expect(store.hasPending()).toBe(false);
-    // the Logs pill reads the same level back
-    expect(panel('logs').textContent).toContain('The server writes errors only to /var/log/s.log.');
+    // the row says what the level writes
+    expect(panel('general').textContent).toContain('Writes errors only.');
   });
 });
 
@@ -273,9 +269,7 @@ describe('Maintenance', () => {
     );
     expect(input('db-wal-display').textContent).toBe('12 MB');
     expect(calls.filter((c) => c.url === '/api/image-cache/status')).toHaveLength(1);
-    expect(panel('maintenance').textContent).toContain(
-      'The database is 11.2 GB, with 48 MB a compact would free.',
-    );
+    expect(panel('maintenance').textContent).toContain('48 MB (12,345 pages)');
     act(() => nav.view('api'));
     act(() => nav.view('maintenance'));
     await waitFor(() =>
@@ -545,7 +539,7 @@ describe('Developer', () => {
     expect(calls.find((c) => c.url === '/api/dev-mode')?.body).toEqual({ password: 'pw' });
     expect(hydra.style.display).toBe('');
     expect(input('dev-mode-password').value).toBe('');
-    expect(panel('developer').textContent).toContain('Developer mode is on.');
+    expect(input('dev-mode-status').textContent).toBe('Active');
     // Hydrabase's disconnect turns it off by the same event
     act(() => {
       window.dispatchEvent(new CustomEvent('ss:dev-mode', { detail: { enabled: false } }));

@@ -1,6 +1,6 @@
 /**
- * The Appearance tab on the parts (settings-bic phase 5): one page, its hero
- * reading the look back, every control in its card. The behaviour tests
+ * The Appearance tab on the parts (settings-bic phase 5): one page, a line
+ * saying what it is for, every control in its card. The behaviour tests
  * follow what settings.js and init.js did.
  */
 
@@ -11,7 +11,6 @@ import { nav } from '../nav';
 import { createSettingsStore, type SettingsPayload, type SettingsStore } from '../settings-store';
 import { applyAppearanceOnLoad, effectFlags, resolveAppearance } from './appearance';
 import { AppearanceTab, weatherStatus } from './appearance-tab';
-import { appearanceSentence } from './appearance/words';
 
 type Shell = Window & Record<string, unknown>;
 const shell = window as unknown as Shell;
@@ -114,60 +113,11 @@ describe('the Appearance page', () => {
       );
   });
 
-  it('the hero reads the look back, the accent swatch beside its name', async () => {
-    shell._reduceEffectsActive = true;
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(() =>
-        Promise.resolve({
-          ok: true,
-          json: () =>
-            Promise.resolve({
-              success: true,
-              enabled: true,
-              location: { name: 'Medford, Oregon', query: '97501' },
-            }),
-        }),
-      ),
-    );
-    store.hydrate({ ui_appearance: { accent_preset: '#8b5cf6', sidebar_visualizer: 'wave' } });
+  it('opens with what the page is for, in one line', () => {
+    store.hydrate({ ui_appearance: { accent_preset: '#8b5cf6' } });
     page();
-    const hero = () => document.querySelector('[data-stg-view="all"] p')!.textContent;
-    await waitFor(() => expect(hero()).toContain('Medford'));
-    expect(hero()).toBe(
-      'SoulSync is in Boulder Purple, with the wave visualizer on the sidebar while music plays. This device runs with reduced effects. The sidebar shows the weather for Medford, Oregon.',
-    );
-    const swatch = document.getElementById('accent-preview-swatch')!;
-    expect(swatch.style.background).not.toBe('');
-    expect(swatch.parentElement!.textContent).toBe('Boulder Purple');
-  });
-
-  it('the hero, from sample settings', () => {
-    const read = (o: Parameters<typeof appearanceSentence>[0]) =>
-      appearanceSentence(o)
-        .map((p) => p.text)
-        .join('');
-    const base = {
-      accent: 'Teal',
-      visualizer: 'bars',
-      effects: 'full' as const,
-      particles: false,
-      weather: null,
-    };
-    expect(read(base)).toBe(
-      'SoulSync is in Teal, with the bars visualizer on the sidebar while music plays.',
-    );
-    expect(read({ ...base, accent: null, visualizer: 'none', particles: true })).toBe(
-      'SoulSync is in your own color, with no visualizer on the sidebar. Background particles are on.',
-    );
-    expect(read({ ...base, effects: 'max', particles: true })).toContain(
-      'This device runs in max performance: no effects and no animation.',
-    );
-    expect(read({ ...base, weather: { place: '', enabled: true } })).toContain(
-      'Sidebar weather is off until you set a location.',
-    );
-    expect(read({ ...base, weather: { place: 'Medford', enabled: false } })).toContain(
-      'Sidebar weather is switched off.',
+    expect(document.querySelector('[data-stg-view="all"] [data-about]')!.textContent).toBe(
+      'How SoulSync looks, on every device and on this one.',
     );
   });
 });

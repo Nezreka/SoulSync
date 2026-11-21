@@ -17,7 +17,7 @@
 
 import { useEffect, useRef, useSyncExternalStore } from 'react';
 
-import { Btn, Card, CheckChips, Row as SettingRow, Select, Switch, TextField } from '../ui';
+import { Btn, Card, CheckChips, Note, Row as SettingRow, Select, Switch, TextField } from '../ui';
 import s from '../ui/settings.module.css';
 import { videoShown } from './video-shown';
 
@@ -345,6 +345,8 @@ async function addImportList() {
 /** Discovery > Import Lists (video side): the lists, a row each, with
  *  column headers; a delete asks first */
 export function ImportListsCard() {
+  const lines = useImportListLines();
+  const allOff = !!lines?.length && lines.every((l) => !l.enabled);
   return (
     <div id="video-import-lists">
       <Card
@@ -356,6 +358,11 @@ export function ImportListsCard() {
           </Btn>
         }
       >
+        {allOff ? (
+          <div className={s.cardPad}>
+            <Note>Every list is switched off, so nothing is added from them.</Note>
+          </div>
+        ) : null}
         <ImportListRows />
         <SettingRow
           label="How a list adds things"
@@ -550,6 +557,11 @@ function NotifyBlocks() {
                   />
                 </span>
               </div>
+              {fields[c.id]?.enabled && !ticked.length ? (
+                <p className={s.rowWarnText} data-vq-nt-deaf="">
+                  Hears no events yet, so nothing is sent here. Pick at least one below.
+                </p>
+              ) : null}
               <CheckChips
                 label={`What ${name} hears`}
                 options={events.map((ev) => ({ value: ev, label: NOTIFY_EVENT_LABEL[ev] || ev }))}
@@ -610,6 +622,8 @@ async function addNotification() {
  *  name, where it sends, a switch, Test and a delete that asks first, then
  *  its target and the events it hears as chips */
 export function NotificationsCard() {
+  const lines = useNotifyLines();
+  const allOff = !!lines?.length && lines.every((l) => !l.enabled);
   return (
     <div id="video-notifications" data-video-only="">
       <Card
@@ -621,6 +635,11 @@ export function NotificationsCard() {
           </Btn>
         }
       >
+        {allOff ? (
+          <div className={s.cardPad}>
+            <Note>Every connection is switched off, so nothing is sent.</Note>
+          </div>
+        ) : null}
         <NotifyBlocks />
       </Card>
     </div>

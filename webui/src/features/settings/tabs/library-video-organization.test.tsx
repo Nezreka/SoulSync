@@ -12,14 +12,10 @@ import { act, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
-  SubtitlesHero,
   VideoImport,
-  VideoImportHero,
   VideoNaming,
-  VideoNamingHero,
   VideoSubtitles,
   VideoTags,
-  VideoTagsHero,
   YoutubeFileOptions,
   YoutubeFollowCount,
 } from './library-video-organization';
@@ -107,13 +103,9 @@ function typeAndLeave(input: HTMLInputElement, value: string) {
 const panel = () =>
   render(
     <div>
-      <VideoNamingHero />
       <VideoNaming />
-      <VideoImportHero />
       <VideoImport />
-      <VideoTagsHero />
       <VideoTags />
-      <SubtitlesHero />
       <VideoSubtitles />
     </div>,
   );
@@ -311,15 +303,6 @@ describe('the fields', () => {
     expect(shell.showToast).toHaveBeenCalledWith('Reset to the standard layout', 'success');
   });
 
-  it('the heroes read the naming, the import and the sidecars back', async () => {
-    panel();
-    await shown();
-    const text = document.body.textContent!;
-    expect(text).toContain('A movie is saved as The Matrix (1999) / The Matrix.mkv');
-    expect(text).toContain('A finished file is moved in and checked with ffprobe.');
-    expect(text).toContain('Finished files are filed alone');
-  });
-
   it('the YouTube follow count, drawn on Downloads > Behaviour, saves when it is left', async () => {
     render(<YoutubeFollowCount />);
     act(() => {
@@ -360,10 +343,6 @@ describe('the subtitle chain', () => {
         (t) => t.dataset.id,
       ),
     ).toEqual(['subsource', 'embedded']);
-    // and the hero reads it back
-    expect(document.body.textContent).toContain(
-      'Subtitles in en, es come from SubDL, then OpenSubtitles. When none has them, Whisper transcribes the audio.',
-    );
   });
 
   it('add, move and remove save at once; the last one stays', async () => {

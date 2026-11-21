@@ -15,18 +15,10 @@ import type { SettingsTabProps } from '../../host';
 
 import { useNav } from '../../nav';
 import s from '../../ui/settings.module.css';
-import {
-  Playlists,
-  PlaylistsHero,
-  Recommendations,
-  RecommendationsHero,
-  usePool,
-} from '../discovery-tab';
+import { Playlists, Recommendations, usePool } from '../discovery-tab';
 import { ViewPanel } from '../downloads/downloads-page';
-import { LibHero } from '../library-card';
-import { ImportListsCard, useImportListLines } from '../video-row-lists';
+import { ImportListsCard } from '../video-row-lists';
 import { markVideoShown, useVideoShown } from '../video-shown';
-import { importListsSentence } from './words';
 
 const TAB = 'discovery';
 
@@ -39,24 +31,6 @@ function useSide(): 'music' | 'video' {
     },
     () => (document.body.getAttribute('data-side') === 'video' ? 'video' : 'music'),
     () => 'music',
-  );
-}
-
-function ImportListsHero() {
-  const lines = useImportListLines();
-  const on = lines ? lines.filter((l) => l.enabled).length : 0;
-  return (
-    <LibHero
-      parts={importListsSentence(lines)}
-      stats={
-        lines
-          ? [
-              { value: lines.length, label: lines.length === 1 ? 'List' : 'Lists' },
-              { value: on, label: 'Switched on' },
-            ]
-          : undefined
-      }
-    />
   );
 }
 
@@ -78,19 +52,16 @@ export function DiscoveryPage({ store }: SettingsTabProps) {
   return (
     <div data-stg-new={TAB} hidden={!here}>
       <ViewPanel tab={TAB} view="recommendations" open={view === 'recommendations'}>
-        <RecommendationsHero store={store} pool={pool} side={side} />
         <div className={s.cards}>
           <Recommendations store={store} pool={pool} />
         </div>
       </ViewPanel>
       <ViewPanel tab={TAB} view="playlists" open={view === 'playlists'}>
-        <PlaylistsHero store={store} />
         <div className={s.cards}>
           <Playlists store={store} />
         </div>
       </ViewPanel>
       <ViewPanel tab={TAB} view="import-lists" open={view === 'import-lists'}>
-        <ImportListsHero />
         <div className={s.cards}>
           <ImportListsCard />
         </div>

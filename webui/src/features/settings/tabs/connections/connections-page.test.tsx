@@ -140,7 +140,7 @@ describe('the video server', () => {
 });
 
 describe('Notifications', () => {
-  it('its pill reads the connections back; opening it on the music side loads them', () => {
+  it('its pill says what it is for; opening it on the music side loads them', () => {
     page();
     act(() => nav.go('connections', 'notifications'));
     const panel = document.getElementById('stg-view-connections-notifications')!;
@@ -148,7 +148,9 @@ describe('Notifications', () => {
     // loaded at least once (the music side never shows the video settings page)
     expect(videoShown.get()).toBeGreaterThan(0);
     expect(panel.querySelector('[data-card="Notifications"]')).not.toBeNull();
-    expect(panel.textContent).toContain('Loading your notification connections.');
+    expect(panel.querySelector('[data-about]')!.textContent).toBe(
+      'Where SoulSync sends a message when something happens.',
+    );
     // no folded section left on the pill
     expect(panel.querySelector('.settings-section-header, .form-group')).toBeNull();
   });

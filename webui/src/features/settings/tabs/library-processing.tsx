@@ -31,9 +31,8 @@ import {
 } from '../ui';
 import s from '../ui/settings.module.css';
 import { GenresCard } from './downloads/filtering-view';
-import { LibHero, useLoadedDraft, useLoads, useSettings } from './library-card';
+import { useLoadedDraft, useLoads, useSettings } from './library-card';
 import { MusicTagOptions, RedownloadDeleted } from './library-organization';
-import { musicImportSentence, musicTagsSentence } from './library/words';
 import { text } from './source-panels';
 
 type Section_ = Record<string, unknown>;
@@ -433,50 +432,6 @@ function ServiceTags({
   );
 }
 
-function musicTagsValues(settings: Record<string, Record<string, unknown> | undefined>) {
-  const meta = (settings.metadata_enhancement || {}) as Section_;
-  const services = TAG_GROUPS.filter(
-    (g) => ((settings[g.service] || {}) as Section_).embed_tags !== false,
-  ).map((g) => g.name);
-  const art = (Array.isArray(meta.album_art_order) ? (meta.album_art_order as string[]) : []).map(
-    artName,
-  );
-  return {
-    meta,
-    enabled: meta.enabled !== false,
-    services,
-    art: art.length ? art : meta.prefer_caa_art === true ? ['Cover Art Archive'] : [],
-    artwork: meta.embed_album_art !== false || meta.cover_art_download !== false,
-  };
-}
-
-export function MusicTagsHero({ store }: { store: SettingsStore }) {
-  const settings = useSettings(store);
-  const loads = useLoads(store);
-  const v = musicTagsValues(settings);
-  const tagsOn = TAG_GROUPS.reduce(
-    (n, g) =>
-      n +
-      (v.services.includes(g.name)
-        ? g.tags.filter(([key]) => tagOn(settings, `${g.service}.tags.${key}`)).length
-        : 0),
-    0,
-  );
-  return (
-    <LibHero
-      stats={
-        loads && v.enabled
-          ? [
-              { value: v.services.length, label: 'Services' },
-              { value: tagsOn, label: 'Tags written' },
-            ]
-          : undefined
-      }
-      parts={loads ? musicTagsSentence(v) : [{ text: 'Loading your tag settings.' }]}
-    />
-  );
-}
-
 /** "Fill empty tags automatically" (core/library2/tag_fill.py). unset is
  *  Fill empty tags only: the import already fills blanks the same way */
 export const FILL_EMPTY_TAGS_OPTIONS = [
@@ -512,6 +467,11 @@ export function MusicTags({ store }: { store: SettingsStore }) {
           label="Enable post-processing on downloaded files"
           htmlFor="metadata-enabled"
           help="Off skips all metadata, artwork and lyrics processing: files are kept as they arrive."
+          warn={
+            loads && !enabled
+              ? 'Post-processing is off: downloads get no tags, artwork or lyrics.'
+              : undefined
+          }
         >
           <Switch
             id="metadata-enabled"
@@ -695,27 +655,6 @@ export const IMPORT_SEARCH_SOURCE_OPTIONS = [
   { value: 'jiosaavn', label: 'JioSaavn' },
   { value: 'bandcamp', label: 'Bandcamp' },
 ] as const;
-
-export function MusicImportHero({ store }: { store: SettingsStore }) {
-  const settings = useSettings(store);
-  const loads = useLoads(store);
-  const imp = (settings.import || {}) as Section_;
-  const source =
-    IMPORT_SEARCH_SOURCE_OPTIONS.find((o) => o.value === text(imp.default_search_source))?.label ??
-    'Any source';
-  return (
-    <LibHero
-      parts={
-        loads
-          ? musicImportSentence({
-              source: source === 'Any source' ? 'any source' : source,
-              permanent: imp.transfer_is_permanent !== false,
-            })
-          : [{ text: 'Loading.' }]
-      }
-    />
-  );
-}
 
 export function MusicImport({ store }: { store: SettingsStore }) {
   const settings = useSettings(store);
