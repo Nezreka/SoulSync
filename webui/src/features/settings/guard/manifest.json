@@ -3174,6 +3174,80 @@
       "asked": "5.5",
       "shows": ["soulseek.min_free_disk_gb"]
     },
+    "#watch-folders": {
+      "sel": "#watch-folders",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": true,
+      "to": false,
+      "saves": {
+        "settings": {
+          "library": {
+            "watch_folders": false
+          }
+        },
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/library/folder-watch/refresh",
+            "body": "{}"
+          }
+        ]
+      },
+      "asked": false,
+      "shows": ["library.watch_folders"]
+    },
+    "#watch-poll-minutes": {
+      "sel": "#watch-poll-minutes",
+      "kind": "number",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "15",
+      "to": "16",
+      "saves": {
+        "settings": {
+          "library": {
+            "watch_poll_minutes": 16
+          }
+        },
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/library/folder-watch/refresh",
+            "body": "{}"
+          }
+        ]
+      },
+      "asked": "16",
+      "shows": ["library.watch_poll_minutes"]
+    },
+    "#watch-mode-0": {
+      "sel": "#watch-mode-0",
+      "kind": "select",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "auto",
+      "to": "live",
+      "saves": {
+        "settings": {
+          "library": {
+            "watch_root_modes": {
+              "/app/Transfer": "live"
+            }
+          }
+        },
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/library/folder-watch/refresh",
+            "body": "{}"
+          }
+        ]
+      },
+      "asked": "live",
+      "shows": ["library.watch_root_modes./app/Transfer"]
+    },
     "#staging-path": {
       "sel": "#staging-path",
       "kind": "text",
@@ -12862,7 +12936,7 @@
     "#stg-library-folders-music \"More about this setting\"": {
       "label": "More about this setting",
       "anchor": "stg-library-folders-music",
-      "count": 5,
+      "count": 7,
       "sides": ["music", "video"],
       "scenario": "music"
     },

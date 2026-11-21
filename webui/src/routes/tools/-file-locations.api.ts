@@ -39,7 +39,7 @@ export interface FileLocationWalk {
 
 export interface FileLocationRun {
   id: number;
-  kind: 'manual' | 'scan';
+  kind: 'manual' | 'scan' | 'watch';
   status: 'running' | 'done' | 'stopped' | 'undone';
   repointed: number;
   groups: FileLocationGroup[];
