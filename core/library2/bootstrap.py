@@ -973,6 +973,13 @@ def run_deferred_backfills(database: Any, *,
             except sqlite3.Error as exc:
                 logger.warning("merged album credits not restored yet: %s", exc)
             conn.commit()
+            # wishlist albums matched by title alone go back in the musicbrainz
+            # worker's queue once (#2225); here, not on boot, which runs no
+            # match-status update (test_a_boot_runs_no_match_status_backfill)
+            recheck = getattr(database, "_recheck_wishlist_release_groups", None)
+            if recheck is not None:
+                recheck(conn.cursor())
+                conn.commit()
             # 3.6.1 logged a scan import on every refresh; once, in batches
             from core.maintenance.library_history_dedupe import dedupe_scan_import_history
             stats["history_repeats_removed"] = dedupe_scan_import_history(

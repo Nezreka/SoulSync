@@ -2314,7 +2314,8 @@ class MusicDatabase:
             self._wishlist_lib2_album_dates(cursor)
             self._purge_beatport_positional_matches(cursor)
             self._purge_fake_provider_ids(cursor)
-            self._recheck_wishlist_release_groups(cursor)
+            # _recheck_wishlist_release_groups runs from the deferred passes
+            # (core/library2/bootstrap.py): a boot runs no match-status update
             # Unify scattered migration state into the ledger + stamp the schema
             # version. Additive backstop — runs last, gates nothing.
             self._sync_migration_ledger(cursor)
