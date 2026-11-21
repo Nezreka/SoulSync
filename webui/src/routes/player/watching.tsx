@@ -16,6 +16,7 @@ import { clock } from './-engine/timeline';
 import { MEDIA_KIND, type ItemType } from './-engine/types';
 import { remoteImage } from './-lib/images';
 import { playerSettingsQuery, togetherQuery, watchingNowQuery } from './-player.api';
+import { Avatar } from './-ui/channel-viewers';
 import { PlayIcon } from './-ui/icons';
 import { Empty, PageTitle, PlayerLink, styles as k } from './-ui/kit';
 import { channelByIdTune } from './-ui/playback/tuner';
@@ -41,22 +42,6 @@ function itemOf(type: string, id: string, meta: ProgressMeta): PlayItem | null {
     parentId: meta.parent_id,
     parentTitle: meta.parent_title,
   };
-}
-
-function Avatar({ profile }: { profile: WatchingSession['profile'] }) {
-  return (
-    <span
-      className={s.avatar}
-      style={profile.avatar_color ? { background: profile.avatar_color } : undefined}
-      aria-hidden="true"
-    >
-      {profile.avatar_url ? (
-        <img src={remoteImage(profile.avatar_url) ?? undefined} alt="" />
-      ) : (
-        profile.name.charAt(0).toUpperCase()
-      )}
-    </span>
-  );
 }
 
 function verb(type: string) {

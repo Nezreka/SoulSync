@@ -28,6 +28,32 @@ export interface GuideProgram extends GuideItem {
   /** epoch ms */
   start: number;
   end: number;
+  /** a new episode or film airing in its premiere slot */
+  premiere?: boolean;
+}
+
+/** something new, set to air at a fixed time (its premiere) */
+export interface Premiere {
+  item: GuideItem;
+  /** epoch ms */
+  at: number;
+}
+
+/** an episode premieres at 8pm, a film at 9pm */
+const PREMIERE_HOUR = { episode: 20, movie: 21 } as const;
+
+/**
+ * when something new premieres: the evening of the day it arrived (or the
+ * next one, if it came after its hour). worked out from when it was added,
+ * so every screen puts it in the same slot.
+ */
+export function premiereAt(addedMs: number, kind: 'episode' | 'movie'): number {
+  const hour = PREMIERE_HOUR[kind];
+  const d = new Date(addedMs);
+  const slot = new Date(d.getFullYear(), d.getMonth(), d.getDate(), hour, 0, 0, 0).getTime();
+  return addedMs < slot
+    ? slot
+    : new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1, hour).getTime();
 }
 
 /** keeps a program long enough to see, and drops broken runtimes */
@@ -135,6 +161,15 @@ export interface ScheduleOptions {
   daypart?: boolean;
   /** today's local midnight: where an in-order channel's "next unseen" starts from */
   today?: number;
+  /**
+   * episodes of a show air in blocks this long, in order (2: two back to
+   * back), the way a channel runs a show, instead of one episode of
+   * something, then one of something else
+   */
+  blocks?: number;
+  /** what's new on this channel and when it airs; premiereKey names them */
+  premieres?: readonly Premiere[];
+  premiereKey?: string;
 }
 
 /** evening, film time: 6pm to 2am */
@@ -159,7 +194,7 @@ export function scheduleDay(
 ): GuideProgram[] {
   const key = `${channelId}|${startOfLocalDay(day.getTime())}|${options.ordered ? 1 : 0}|${
     options.daypart ? 1 : 0
-  }|${options.seenKey ?? ''}|${options.today ?? ''}`;
+  }|${options.seenKey ?? ''}|${options.today ?? ''}|${options.blocks ?? 1}|${options.premiereKey ?? ''}`;
   let days = dayCache.get(pool);
   if (!days) {
     days = new Map();
@@ -187,10 +222,74 @@ function scheduleDayUncached(
 
   const out: GuideProgram[] = [];
   let cursor = dayStart;
+  // premieres hold their slot: what's on before one is cut at it, and two
+  // at the same time air back to back
+  const premieres = (options.premieres ?? [])
+    .filter((p) => p.at >= dayStart && p.at < dayEnd && p.item.seconds >= MIN_SECONDS)
+    .sort((a, b) => a.at - b.at);
+  let nextPremiere = 0;
+  const premiereNow = () => {
+    while (nextPremiere < premieres.length && premieres[nextPremiere].at <= cursor) {
+      const p = premieres[nextPremiere++];
+      const seconds = Math.min(p.item.seconds, MAX_SECONDS);
+      out.push({ ...p.item, seconds, start: cursor, end: cursor + seconds * 1000, premiere: true });
+      cursor += seconds * 1000;
+    }
+  };
+  const place = (item: GuideItem) => {
+    premiereNow();
+    if (cursor >= dayEnd) return;
+    let end = cursor + item.seconds * 1000;
+    const due = premieres[nextPremiere];
+    if (due && due.at < end) end = due.at; // cut at the premiere
+    if (end - cursor >= MIN_SECONDS * 1000) out.push({ ...item, start: cursor, end });
+    cursor = Math.max(cursor, end);
+    premiereNow();
+  };
+  // episodes run in blocks of this many, in order (the pool keeps each show's sample in airing order)
+  const block = Math.max(1, Math.floor(options.blocks ?? 1));
+  // blocks: a drawn episode stands for its show; the show's next episodes
+  // not yet aired this time round go on, in order (the unseen first), so a
+  // show runs in proper back to back blocks. nothing airs twice in a round.
+  const aired = new Set<string>();
+  const distinct = new Set(items.map((x) => x.key)).size;
+  const episodesOf = new Map<string, GuideItem[]>();
+  if (block > 1 && !options.ordered)
+    for (const item of items)
+      if (item.kind === 'episode' && item.href) {
+        const list = episodesOf.get(item.href);
+        if (list) list.push(item);
+        else episodesOf.set(item.href, [item]);
+      }
+  const nextOf = (href: string): GuideItem | null => {
+    const list = episodesOf.get(href) ?? [];
+    const open = list.filter((x) => !aired.has(x.key));
+    return open.find((x) => !options.seen?.has(x.key)) ?? open[0] ?? null;
+  };
   const push = (item: GuideItem) => {
-    const end = cursor + item.seconds * 1000;
-    out.push({ ...item, start: cursor, end });
-    cursor = end;
+    if (block <= 1) {
+      place(item);
+      return;
+    }
+    // every push airs something: the caller loops until the day is full, so
+    // a push that placed nothing would spin forever (it froze the tab)
+    if (aired.size >= distinct) aired.clear();
+    const show = item.kind === 'episode' && item.href ? item.href : null;
+    let first: GuideItem =
+      (show ? nextOf(show) : aired.has(item.key) ? null : item) ??
+      // that show has had its turn this round: whatever hasn't, so nothing repeats early
+      items.find((x) => !aired.has(x.key)) ??
+      item;
+    place(first);
+    aired.add(first.key);
+    for (let i = 1; i < block && show && cursor < dayEnd; i++) {
+      const list = episodesOf.get(show)!;
+      const after = list[list.indexOf(first) + 1];
+      if (!after || aired.has(after.key)) break;
+      place(after);
+      aired.add(after.key);
+      first = after;
+    }
   };
 
   const seen = options.seen;

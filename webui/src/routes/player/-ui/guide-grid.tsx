@@ -17,6 +17,7 @@ import { channelArt } from '../-lib/channels';
 import { clock, runtime } from '../-lib/format';
 import { channelQueue } from '../-lib/play-items';
 import { blockArtists, mergeIntoBlocks } from '../-lib/schedule';
+import { useChannelViewers, ViewerFaces, ViewerPins, ViewersHere } from './channel-viewers';
 import { PlayIcon } from './icons';
 import { Art, PlayButton, PlayerLink, styles as s, useProgressive } from './kit';
 import { useReminder } from './playback/reminders';
@@ -83,10 +84,12 @@ function ChannelCell({
   channel,
   favorite,
   onFavorite,
+  viewers,
 }: {
   channel: Channel;
   favorite: boolean;
   onFavorite: (channel: Channel) => void;
+  viewers?: Parameters<typeof ViewerFaces>[0]['sessions'];
 }) {
   return (
     <div className={s.guideChannel} role="rowheader">
@@ -114,6 +117,7 @@ function ChannelCell({
           </span>
         </span>
       </button>
+      <ViewerFaces sessions={viewers} />
       <StarButton channel={channel} on={favorite} onToggle={onFavorite} />
     </div>
   );
@@ -163,6 +167,7 @@ export function GuideGrid({
     ro.observe(el);
     return () => ro.disconnect();
   }, [pxPerMinute, minutes]);
+  const viewers = useChannelViewers();
   const ppm = fit;
   const width = minutes * ppm;
   const x = (ms: number) => ((ms - from) / 60000) * ppm;
@@ -211,6 +216,7 @@ export function GuideGrid({
                 picked: Picked;
                 title: string;
                 sub: string;
+                premiere?: boolean;
               }[] = channel.music
                 ? mergeIntoBlocks(programs).map((block) => ({
                     key: `${block.start}`,
@@ -228,6 +234,7 @@ export function GuideGrid({
                     picked: { channel, program: p },
                     title: p.title,
                     sub: p.subtitle ?? '',
+                    premiere: p.premiere,
                   }));
               return (
                 <div key={channel.id} className={s.guideRow} role="row">
@@ -235,8 +242,17 @@ export function GuideGrid({
                     channel={channel}
                     favorite={favorites.has(channel.id)}
                     onFavorite={onFavorite}
+                    viewers={viewers.get(channel.id)}
                   />
                   <div className={s.guideLane} style={{ width }}>
+                    {channel.music ? null : (
+                      <ViewerPins
+                        sessions={viewers.get(channel.id)}
+                        programs={programs}
+                        x={x}
+                        width={width}
+                      />
+                    )}
                     {cells.map((cell) => {
                       const left = Math.max(0, x(cell.start));
                       const right = Math.min(width, x(cell.end));
@@ -251,14 +267,18 @@ export function GuideGrid({
                           className={s.guideProgram}
                           data-now={live ? 'true' : undefined}
                           data-past={cell.end <= now ? 'true' : undefined}
+                          data-premiere={cell.premiere ? 'true' : undefined}
                           style={{ left: left + 2, width: Math.max(8, right - left - 4) }}
-                          title={`${cell.title}${cell.sub ? ` · ${cell.sub}` : ''}\n${clock(cell.start)} – ${clock(cell.end)}`}
+                          title={`${cell.premiere ? 'New: ' : ''}${cell.title}${cell.sub ? ` · ${cell.sub}` : ''}\n${clock(cell.start)} – ${clock(cell.end)}`}
                           onClick={() => onPick(cell.picked)}
                           onMouseEnter={() => onPreview?.(cell.picked)}
                           onFocus={() => onPreview?.(cell.picked)}
                           data-nav
                         >
-                          <span className={s.guideProgramTitle}>{cell.title}</span>
+                          <span className={s.guideProgramTitle}>
+                            {cell.premiere ? <span className={s.guideNew}>New</span> : null}
+                            {cell.title}
+                          </span>
                           {right - left > 110 ? (
                             <span className={s.guideProgramSub}>
                               {cell.sub ? `${cell.sub} · ` : ''}
@@ -430,6 +450,7 @@ export function GuideDetail({
   // live: what's airing and the channel after it; from the start: this program (or set) and on
   const liveQueue = channelQueue(channelPrograms, airing);
   const startQueue = channelQueue(channelPrograms, block ? block.items[0] : program);
+  const viewers = useChannelViewers().get(channel.id);
 
   return (
     <section
@@ -450,7 +471,13 @@ export function GuideDetail({
         <span className={s.rowSub}>
           {block
             ? `${block.items.length} songs · ${blockArtists(block, 4)}`
-            : [program.subtitle, runtime(program.seconds)].filter(Boolean).join(' · ')}
+            : [
+                program.premiere ? 'New, premiering' : '',
+                program.subtitle,
+                runtime(program.seconds),
+              ]
+                .filter(Boolean)
+                .join(' · ')}
         </span>
         {live ? (
           <span className={s.onNowBar}>
@@ -526,6 +553,12 @@ export function GuideDetail({
             </button>
           ) : null}
         </div>
+        <ViewersHere
+          channel={channel}
+          sessions={viewers}
+          programs={channelPrograms}
+          onDone={onClose}
+        />
       </div>
       <div className={s.guideDetailSide}>
         {block ? (

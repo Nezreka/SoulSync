@@ -22,6 +22,9 @@ export type ChannelKind =
   | 'network'
   | 'decade'
   | 'kids'
+  | 'pick'
+  | 'collection'
+  | 'studio'
   | 'playlist'
   | 'rule'
   | 'server'
@@ -270,16 +273,124 @@ export function autoChannels(
     });
   }
 
+  // ── picks: what a channel programmer would put on ──
+  const scored = (x: { rating: number | null }) => (x.rating ?? 0) >= 8;
+  add(out, {
+    id: 'pick-top',
+    name: 'Top rated',
+    kind: 'pick',
+    blurb: 'films and shows scored 8 or better',
+    pool: [...movies.filter(scored).map(movieItem), ...shows.filter(scored).flatMap(episodeItems)],
+  });
+  const monthAgo = Date.now() - 30 * 86_400_000;
+  const fresh = (x: { added_at: string | null }) => {
+    const t = x.added_at
+      ? Date.parse(x.added_at.includes('T') ? x.added_at : `${x.added_at.replace(' ', 'T')}Z`)
+      : NaN;
+    return Number.isFinite(t) && t >= monthAgo;
+  };
+  add(out, {
+    id: 'pick-new',
+    name: 'New arrivals',
+    kind: 'pick',
+    blurb: 'added in the last month',
+    pool: [...movies.filter(fresh).map(movieItem), ...shows.filter(fresh).flatMap(episodeItems)],
+  });
+  add(out, {
+    id: 'pick-classics',
+    name: 'Classics',
+    kind: 'pick',
+    blurb: 'films before 1980, scored 7 or better',
+    pool: movies.filter((m) => (m.year ?? 9999) < 1980 && (m.rating ?? 0) >= 7).map(movieItem),
+  });
+  const genre = (x: { genres: string[] }, g: string) => x.genres.some((y) => y.toLowerCase() === g);
+  add(out, {
+    id: 'pick-comfort',
+    name: 'Comfort TV',
+    kind: 'pick',
+    blurb: 'sitcoms, back to back',
+    pool: shows.filter((x) => genre(x, 'comedy')).flatMap(episodeItems),
+  });
+  add(out, {
+    id: 'pick-late',
+    name: 'Late night',
+    kind: 'pick',
+    blurb: 'horror and thrillers',
+    pool: movies.filter((m) => genre(m, 'horror') || genre(m, 'thriller')).map(movieItem),
+  });
+
+  // ── kids: a section of their own ──
+  const kidSafe = <T extends { content_rating: string | null }>(xs: readonly T[]) =>
+    xs.filter((x) => isKidSafe(x.content_rating));
+  const little = (x: { content_rating: string | null }) =>
+    ['TV-Y', 'TV-Y7', 'TV-Y7-FV', 'G'].includes((x.content_rating ?? '').trim().toUpperCase());
   add(out, {
     id: 'kids',
     name: 'Kids',
     kind: 'kids',
     blurb: 'rated G, PG, TV-Y to TV-PG',
+    pool: [...kidSafe(movies).map(movieItem), ...kidSafe(shows).flatMap(episodeItems)],
+  });
+  add(out, {
+    id: 'kids-little',
+    name: 'Little ones',
+    kind: 'kids',
+    blurb: 'rated TV-Y, TV-Y7 and G',
+    pool: [...movies.filter(little).map(movieItem), ...shows.filter(little).flatMap(episodeItems)],
+  });
+  add(out, {
+    id: 'kids-cartoons',
+    name: 'Cartoons',
+    kind: 'kids',
+    blurb: 'animation for kids',
     pool: [
-      ...movies.filter((m) => isKidSafe(m.content_rating)).map(movieItem),
-      ...shows.filter((s) => isKidSafe(s.content_rating)).flatMap(episodeItems),
+      ...kidSafe(movies)
+        .filter((m) => genre(m, 'animation'))
+        .map(movieItem),
+      ...kidSafe(shows)
+        .filter((x) => genre(x, 'animation'))
+        .flatMap(episodeItems),
     ],
   });
+  add(out, {
+    id: 'kids-tv',
+    name: 'Kids TV',
+    kind: 'kids',
+    blurb: 'shows for kids, back to back',
+    pool: kidSafe(shows).flatMap(episodeItems),
+  });
+  add(out, {
+    id: 'kids-family',
+    name: 'Family movies',
+    kind: 'kids',
+    blurb: 'G and PG films for everyone',
+    pool: kidSafe(movies).map(movieItem),
+  });
+
+  // ── studios and film series ──
+  for (const [name, list] of bySize(groupBy(movies, (m) => (m.studio ? [m.studio] : [])))) {
+    if (list.length < 6) continue;
+    add(out, {
+      id: `studio-${slug(name)}`,
+      name,
+      kind: 'studio',
+      blurb: `${list.length} films`,
+      pool: list.map(movieItem),
+    });
+  }
+  for (const [name, list] of bySize(groupBy(movies, (m) => (m.collection ? [m.collection] : [])))) {
+    if (list.length < 3) continue;
+    // a series airs in order, oldest first, like a marathon
+    const inOrder = [...list].sort((a, b) => (a.year ?? 0) - (b.year ?? 0));
+    add(out, {
+      id: `collection-${slug(name)}`,
+      name: name.replace(/\s+collection$/i, ''),
+      kind: 'collection',
+      blurb: `${list.length} films, in order`,
+      pool: inOrder.map(movieItem),
+      ordered: true,
+    });
+  }
 
   return out;
 }
@@ -400,9 +511,12 @@ export const CHANNEL_GROUPS: { kind: ChannelKind; label: string }[] = [
   { kind: 'playlist', label: 'Your playlists' },
   { kind: 'vibe', label: 'Vibes' },
   { kind: 'music', label: 'Music genres' },
+  { kind: 'pick', label: 'Picks' },
   { kind: 'kids', label: 'Kids' },
   { kind: 'genre', label: 'Movie and TV genres' },
   { kind: 'network', label: 'Networks' },
+  { kind: 'studio', label: 'Studios' },
+  { kind: 'collection', label: 'Film series' },
   { kind: 'decade', label: 'Decades' },
 ];
 

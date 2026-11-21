@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { GuideItem } from './schedule';
 
-import { filmHour, programsInWindow, scheduleDay, startOfLocalDay } from './schedule';
+import { filmHour, premiereAt, programsInWindow, scheduleDay, startOfLocalDay } from './schedule';
 
 const ep = (n: number): GuideItem => ({
   key: `episode:${n}`,
@@ -56,5 +56,82 @@ describe('smarter scheduling', () => {
       today,
     })[0];
     expect(tomorrow.key).toBe(`episode:${(12 + 48) % 30}`);
+  });
+});
+
+describe('shows in blocks', () => {
+  it("an episode is followed by the show's next one", () => {
+    const show = (h: string, n: number): GuideItem => ({
+      key: `episode:${h}${n}`,
+      title: h,
+      seconds: 1800,
+      kind: 'episode',
+      href: `/player/tv/${h}`,
+    });
+    const pool = [
+      ...[1, 2, 3, 4].map((n) => show('a', n)),
+      ...[1, 2, 3, 4].map((n) => show('b', n)),
+    ];
+    const programs = scheduleDay('blk', pool, new Date(2026, 10, 21, 12), { blocks: 2 });
+    const firstLap = programs.slice(0, 8).map((p) => p.key);
+    // a lap airs each episode once
+    expect(new Set(firstLap).size).toBe(firstLap.length);
+    // and every episode with a next one has it straight after, unless it was itself a second
+    const pairs = firstLap.filter((k, i) => {
+      const n = firstLap[i + 1];
+      return (
+        n && n.slice(0, -1) === k.slice(0, -1) && Number(n.slice(-1)) === Number(k.slice(-1)) + 1
+      );
+    });
+    expect(pairs.length).toBeGreaterThanOrEqual(3);
+  });
+});
+
+describe('premieres', () => {
+  it('a new episode airs at 8pm the evening it came, a film at 9', () => {
+    const at = (h: number, d = 21) => new Date(2026, 10, d, h).getTime();
+    expect(premiereAt(at(9), 'episode')).toBe(at(20));
+    expect(premiereAt(at(21), 'episode')).toBe(at(20, 22));
+    expect(premiereAt(at(9), 'movie')).toBe(at(21));
+  });
+
+  it('holds its slot on the channel, back to back with another, marked', () => {
+    const pool = Array.from({ length: 10 }, (_, i) => ep(i));
+    const day = new Date(2026, 10, 21, 12);
+    const eight = new Date(2026, 10, 21, 20).getTime();
+    const premieres = [
+      { item: ep(100), at: eight },
+      { item: ep(101), at: eight },
+      { item: film(7), at: new Date(2026, 10, 21, 21).getTime() },
+    ];
+    const programs = scheduleDay('pre', pool, day, { premieres, premiereKey: 'p' });
+    const first = programs.findIndex((p) => p.premiere);
+    expect(programs[first].start).toBe(eight);
+    expect(programs[first].key).toBe('episode:100');
+    expect(programs[first + 1]).toMatchObject({ key: 'episode:101', premiere: true });
+    expect(programs.filter((p) => p.premiere).map((p) => p.key)).toEqual([
+      'episode:100',
+      'episode:101',
+      'movie:7',
+    ]);
+    // nothing runs over a premiere
+    expect(programs[first - 1].end).toBeLessThanOrEqual(eight);
+  });
+});
+
+describe('blocks never stall', () => {
+  it('fills the day with repeated keys and a show that has run out', () => {
+    const e = (h: string, n: number): GuideItem => ({
+      key: `episode:${h}${n}`,
+      title: h,
+      seconds: 1800,
+      kind: 'episode',
+      href: `/player/tv/${h}`,
+    });
+    // the same episode twice in the pool, and one film
+    const pool = [e('a', 1), e('a', 1), e('a', 2), film(1)];
+    const programs = scheduleDay('stall', pool, new Date(2026, 10, 21, 12), { blocks: 2 });
+    const last = programs[programs.length - 1];
+    expect(last.end).toBeGreaterThanOrEqual(new Date(2026, 10, 22, 0).getTime());
   });
 });

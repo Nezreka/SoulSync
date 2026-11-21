@@ -70,6 +70,8 @@ export interface CatalogRecentEpisode {
   title: string | null;
   has_still: boolean;
   added_at: string | null;
+  /** its length, for the guide's premiere slot */
+  runtime_seconds?: number | null;
 }
 
 export interface CatalogYoutube {

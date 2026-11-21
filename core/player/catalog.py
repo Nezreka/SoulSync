@@ -123,7 +123,7 @@ def recent_episodes(conn, limit: int = RECENT_EPISODES) -> List[Dict[str, Any]]:
     ids = list(seen)
     rows = {r[0]: r for r in conn.execute(
         """SELECT e.id, e.show_id, s.title, s.content_rating, e.season_number, e.episode_number,
-                  e.title, e.still_url IS NOT NULL
+                  e.title, e.still_url IS NOT NULL, e.runtime_minutes
            FROM episodes e JOIN shows s ON s.id = e.show_id
            WHERE e.id IN (%s)""" % ",".join("?" for _ in ids), ids)}
     out = []
@@ -133,7 +133,9 @@ def recent_episodes(conn, limit: int = RECENT_EPISODES) -> List[Dict[str, Any]]:
             continue
         out.append({"id": r[0], "show_id": r[1], "show_title": r[2], "content_rating": r[3],
                     "season_number": r[4], "episode_number": r[5], "title": r[6],
-                    "has_still": bool(r[7]), "added_at": seen[episode_id]})
+                    "has_still": bool(r[7]), "added_at": seen[episode_id],
+                    # the guide airs a new episode as a premiere: it needs its length
+                    "runtime_seconds": (r[8] * 60) if r[8] else None})
     return out
 
 

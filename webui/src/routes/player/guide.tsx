@@ -32,6 +32,7 @@ import {
   saveRules,
 } from './-lib/guide';
 import { albumArtwork } from './-lib/images';
+import { premieresFor } from './-lib/premieres';
 import {
   hashSeed,
   mergeIntoBlocks,
@@ -324,15 +325,28 @@ function GuidePage() {
     return out;
   }, [watched.data]);
   const seenKey = String(watched.dataUpdatedAt);
-  const channels = useMemo(
-    () =>
-      numberChannels(lined.filter((c) => !c.hidden)).map((c) =>
-        c.music
-          ? c
-          : { ...c, schedule: { seen, seenKey, daypart: true, today: startOfLocalDay(today) } },
-      ),
-    [lined, seen, seenKey, today],
-  );
+  const channels = useMemo(() => {
+    const visible = lined.filter((c) => !c.hidden);
+    // new episodes and films premiere on their home channel, in the evening
+    const premieres = premieresFor(cat, visible, today);
+    return numberChannels(visible).map((c) => {
+      if (c.music) return c;
+      const mine = premieres.get(c.id);
+      return {
+        ...c,
+        // shows in blocks of two, films in the evening, the unseen first
+        schedule: {
+          seen,
+          seenKey,
+          daypart: true,
+          blocks: 2,
+          today: startOfLocalDay(today),
+          premieres: mine,
+          premiereKey: mine?.map((p) => `${p.item.key}@${p.at}`).join(','),
+        },
+      };
+    });
+  }, [lined, seen, seenKey, today, cat]);
   const numbers = useMemo(() => new Map(channels.map((c) => [c.id, c.number])), [channels]);
 
   // channel up / down follow the guide's numbers, from anywhere in the player
@@ -402,8 +416,22 @@ function GuidePage() {
     const ro = new ResizeObserver(measure);
     ro.observe(document.body);
     window.addEventListener('resize', measure);
+    // the playing bar comes and goes without the page changing size: closing
+    // it left its height empty under the guide. look again when it does
+    let frame = 0;
+    const soon = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(measure);
+    };
+    const root = document.querySelector('[data-player-root]') ?? document.body;
+    const mo = new MutationObserver((changes) => {
+      if (changes.some((c) => c.addedNodes.length || c.removedNodes.length)) soon();
+    });
+    mo.observe(root, { childList: true, subtree: true });
     return () => {
       ro.disconnect();
+      mo.disconnect();
+      cancelAnimationFrame(frame);
       window.removeEventListener('resize', measure);
     };
   }, [view, making]);

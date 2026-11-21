@@ -2447,6 +2447,33 @@
   color: var(--pl-text-3);
 }
 
+/* a premiere: something new, in its slot. warm, so it reads from across the room */
+.guideProgram[data-premiere='true'] {
+  background: linear-gradient(
+    100deg,
+    rgba(var(--warning-rgb), 0.26),
+    rgba(var(--warning-rgb), 0.08) 70%
+  );
+  box-shadow: inset 0 0 0 1px rgba(var(--warning-rgb), 0.45);
+}
+
+.guideProgram[data-premiere='true']:hover {
+  background: rgba(var(--warning-rgb), 0.3);
+}
+
+.guideNew {
+  margin-right: calc(var(--u) * 0.4);
+  padding: calc(var(--u) * 0.05) calc(var(--u) * 0.35);
+  border-radius: var(--radius-sm);
+  background: var(--warning);
+  color: var(--pl-bg);
+  font-size: calc(var(--u) * 0.6);
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  vertical-align: 0.1em;
+}
+
 /* how far into the live program: a quiet fill under its text */
 .guideLive {
   position: absolute;
