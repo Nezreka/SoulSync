@@ -96,3 +96,8 @@ simple-websocket==1.1.0
 # it's missing or fails, so this is never a hard runtime requirement.
 spotipyFree>=1.1.2,<2
 websockets>=12  # required by SpotipyFree/spotapi, not pulled in automatically
+
+# Live folder watching: inotify / ReadDirectoryChangesW / FSEvents. Optional at
+# RUNTIME -- core/library/folder_watch.py checks every folder on a timer
+# without it. ~80 KB, no dependencies.
+watchdog==6.0.0

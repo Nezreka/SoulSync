@@ -988,6 +988,17 @@ class ConfigManager:
             },
             "library": {
                 "music_paths": [],
+                # live folder watching (core/library/folder_watch.py): a change
+                # in a music library folder rescans that album folder. local
+                # disks are watched live, network shares checked every
+                # watch_poll_minutes. watch_root_modes holds a per-folder
+                # choice ({folder: "auto"|"live"|"polling"|"off"}).
+                # watch_max_live_folders caps the folders watched live before
+                # a library is checked on a timer instead (Linux inotify).
+                "watch_folders": True,
+                "watch_poll_minutes": 15,
+                "watch_root_modes": {},
+                "watch_max_live_folders": 100000,
                 "music_videos_path": "",
                 "podcasts_path": default_podcast_path,
                 "audiobooks_path": default_audiobook_path,

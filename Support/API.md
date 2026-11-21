@@ -195,8 +195,15 @@ After the music library folder moves, these point the library's file records at 
 
 - `POST /api/library/file-locations/preview`: check every record, write nothing. The finished result (on `/status` as `preview`) has `counts` per outcome (`repoint`, `present`, `not_found`, `ambiguous`, `different_file`, `unverified`, `outside_library`, `partial_match`, `claimed`, `old_root_live`) and `groups`: `[{old_root, new_root, count, examples}]`.
 - `POST /api/library/file-locations/apply` `{groups?: [{old_root, new_root}]}`: move the records, every one checked again; `groups` limits it to those folder pairs. An interrupted apply continues in the same run.
-- `GET /api/library/file-locations/status`: `{status, action, checked, total, result, preview, error, runs}`. `runs` lists recent runs, manual and from library scans, with `id`, `kind`, `status`, `repointed` and `groups`.
+- `GET /api/library/file-locations/status`: `{status, action, checked, total, result, preview, error, runs}`. `runs` lists recent runs, manual, from library scans and from folder watching (`kind`: `manual`, `scan`, `watch`), with `id`, `kind`, `status`, `repointed` and `groups`.
 - `POST /api/library/file-locations/runs/<id>/undo`: put a run's records back. A record changed since is left as it is. `POST /api/library/file-locations/stop` stops the running job.
+
+### Live folder watching (web UI routes, admins only)
+
+- `GET /api/library/folder-watch`: `{enabled, running, live_available, watching, last_change, last_change_folder, pending, poll_minutes, roots}`. Each root: `{path, kind: "library"|"import", setting: "auto"|"live"|"polling"|"off", mode: "live"|"polling"|"off", reason, note, reachable, poll_minutes, last_change, last_check, changes, pending}`. Times are Unix seconds. `live_available` is false when the `watchdog` package is missing (every folder is then polled).
+- `POST /api/library/folder-watch/refresh`: read the settings again now (after a save), then the same answer.
+
+Settings: `library.watch_folders` (default true), `library.watch_poll_minutes` (15), `library.watch_root_modes` (`{folder: mode}`), `library.watch_max_live_folders` (100000). A change reaches open pages as the `library:changed` socket event.
 
 ### Library coverage and folder overrides (web UI routes, admins only)
 

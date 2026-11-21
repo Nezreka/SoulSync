@@ -7811,6 +7811,8 @@ class RepairWorker:
 
         try:
             os.makedirs(os.path.dirname(dst), exist_ok=True)
+            from core.library import own_writes
+            own_writes.note(src, dst)
 
             # Case rename on case-insensitive FS
             if sys.platform in ('win32', 'darwin') and os.path.exists(dst):

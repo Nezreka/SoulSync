@@ -872,6 +872,10 @@ def _rename_track_in_place(
     takes its own back out.
     """
     made: List[str] = []
+    # a reorganize records its own moves: the folder watcher leaves them alone
+    from core.library import own_writes
+    own_writes.note(current_abs, new_abs, os.path.dirname(current_abs), os.path.dirname(new_abs),
+                    *sibling_paths)
     try:
         if current_abs and not os.path.exists(current_abs):
             return False, 'source file no longer on disk'
@@ -1258,6 +1262,8 @@ def _is_junk(name: str) -> bool:
 
 
 def _move_entry(src: str, dst: str) -> None:
+    from core.library import own_writes
+    own_writes.note(src, dst)
     try:
         os.rename(src, dst)
     except OSError as e:
@@ -1513,6 +1519,8 @@ def _move_sibling_to_destination(sibling_src: str, canonical_dst: str) -> Option
         return None
     try:
         os.makedirs(dst_dir, exist_ok=True)
+        from core.library import own_writes
+        own_writes.note(sibling_src, sibling_dst)
         shutil.move(sibling_src, sibling_dst)
         return sibling_dst
     except OSError as e:

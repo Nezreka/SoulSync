@@ -287,6 +287,7 @@ def rescan_files(
     on_presence_change: Optional[Callable[[List[int]], None]] = None,
     confirmed_gone: bool = False,
     outage_guard: bool = True,
+    confirm_missing: bool = True,
 ) -> Dict[str, int]:
     """Probe the files in scope and persist their measured audio properties.
 
@@ -325,6 +326,11 @@ def rescan_files(
     (``missing_path_root_is_healthy``), so an unmounted drive still advances
     nothing.
 
+    ``confirm_missing=False`` caps a miss at ``missing_suspected``: the folder
+    watcher reads a folder every time it changes, and two of its passes a
+    minute apart are not the two scans the confirmation waits for. The next
+    library scan confirms.
+
     Returns a stats dict: ``scanned``/``updated`` for files that were there,
     ``missing`` for paths that did not resolve, ``path_drift``/``path_repointed``
     for renames spotted and repaired, ``missing_suspected``/``missing_confirmed``
@@ -360,7 +366,7 @@ def rescan_files(
     _rescan_loop(database, rows, total, progress=progress, stats=stats,
                  manual=manual or confirmed_gone, presence=presence, source=source,
                  confirmed=confirmed, confirmed_gone=confirmed_gone,
-                 outage_guard=outage_guard)
+                 outage_guard=outage_guard, confirm_missing=confirm_missing)
     if confirmed and not _redownload_externally_deleted():
         # Before the presence consumer: it mirrors the wanted projection, so
         # it has to see the track already released.
@@ -442,7 +448,8 @@ def _flush_observations(database, pending, stats, presence=None,
 
 def _rescan_loop(database, rows, total, *, progress, stats, manual: bool = False,
                  presence=None, source='scan', confirmed=None,
-                 confirmed_gone: bool = False, outage_guard: bool = True) -> None:
+                 confirmed_gone: bool = False, outage_guard: bool = True,
+                 confirm_missing: bool = True) -> None:
     """The per-file body of :func:`rescan_files`, in three ordered phases.
 
     The order is the behaviour, not an implementation detail:
@@ -483,7 +490,8 @@ def _rescan_loop(database, rows, total, *, progress, stats, manual: bool = False
                     presence=presence, source=source)
     _observe_missing(database, still_missing, stats=stats, manual=manual,
                      ambiguous=ambiguous, presence=presence, confirmed=confirmed,
-                     confirmed_gone=confirmed_gone, outage_guard=outage_guard)
+                     confirmed_gone=confirmed_gone, outage_guard=outage_guard,
+                     confirm_missing=confirm_missing)
 
 
 def _probe_rows(database, rows, total, *, progress, stats,
@@ -609,7 +617,7 @@ def _reconcile_drifted_paths(database, rows, *, stats, repair: bool):
 
 def _observe_missing(database, rows, *, stats, manual: bool, ambiguous,
                      presence=None, confirmed=None, confirmed_gone: bool = False,
-                     outage_guard: bool = True) -> None:
+                     outage_guard: bool = True, confirm_missing: bool = True) -> None:
     """Phase 3: what survived the drift check is genuinely absent."""
     from core.library2.paths import missing_path_root_is_healthy
 
@@ -649,7 +657,8 @@ def _observe_missing(database, rows, *, stats, manual: bool, ambiguous,
             "file_id": row["id"],
             "root_healthy": confirmed_gone or (
                 not mass and missing_path_root_is_healthy(row["path"])),
-            "allow_confirm": int(row["id"]) not in ambiguous,
+            "allow_confirm": (confirm_missing or confirmed_gone)
+                             and int(row["id"]) not in ambiguous,
             "force_confirm": bool(manual),
         }))
         if len(pending) >= _OBSERVATION_FLUSH_BATCH:

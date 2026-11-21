@@ -32,6 +32,7 @@ import {
   useSettings,
 } from './library-card';
 import { ServerFoldersSection } from './library-coverage';
+import { FolderWatchSection } from './library-folder-watch';
 import { text } from './source-panels';
 
 export { isDocker };
@@ -260,6 +261,8 @@ export function MusicFolders({ store }: { store: SettingsStore }) {
           />
         </Row>
       </Card>
+
+      <FolderWatchSection store={store} />
 
       <SectionLabel title="Other folders" />
       <Card>

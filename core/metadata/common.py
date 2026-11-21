@@ -324,6 +324,10 @@ def save_audio_file(audio_file: Any, symbols: Any) -> bool:
         path = None
     if path and _locked_against_tag_writes(path):
         return False
+    if path:
+        # the folder watcher leaves a file SoulSync is retagging alone
+        from core.library import own_writes
+        own_writes.note(path)
     if not path or not os.path.isfile(path):
         _raw_audio_save(audio_file, symbols)
         return True
