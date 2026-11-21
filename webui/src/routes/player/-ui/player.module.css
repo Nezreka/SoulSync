@@ -980,6 +980,45 @@
   text-align: center;
 }
 
+/* the menu's quick switch: the profile it's going to, while the page comes back */
+.gateSwitching {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: calc(var(--u) * 1.1);
+  color: var(--pl-text-2);
+  font-size: calc(var(--u) * 1.1);
+  font-weight: 600;
+  animation: pageIn var(--dur-moderate) var(--pl-ease);
+}
+
+.gateSwitching .gateAvatar {
+  animation: switchPulse 1.4s ease-in-out infinite;
+}
+
+@keyframes switchPulse {
+  50% {
+    opacity: 0.6;
+    transform: scale(0.97);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gateSwitching .gateAvatar {
+    animation: none;
+  }
+}
+
+.gateBack {
+  padding: calc(var(--u) * 0.5) calc(var(--u) * 1.2);
+  border: none;
+  border-radius: var(--radius-pill);
+  background: var(--white-a10);
+  color: var(--pl-text);
+  font: inherit;
+  cursor: pointer;
+}
+
 .gateTitle {
   margin: 0;
   font-size: calc(var(--u) * 2.6);

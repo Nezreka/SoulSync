@@ -227,6 +227,17 @@ export function WhoGate({
               setError('');
             }}
           />
+        ) : initial ? (
+          // the menu's quick switch: no picker, just where it's going
+          <div className={s.gateSwitching} role="status">
+            <Avatar profile={initial} className={s.gateAvatar} />
+            <span>{error || `Switching to ${initial.name}…`}</span>
+            {error ? (
+              <button type="button" className={s.gateBack} onClick={onDone} data-nav>
+                Back
+              </button>
+            ) : null}
+          </div>
         ) : (
           <>
             <h1 className={s.gateTitle}>Who's watching?</h1>

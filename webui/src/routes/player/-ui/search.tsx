@@ -19,7 +19,10 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react';
 
 import { appURL } from '@/platform/url-base';
 
+import type { PlayItem } from '../-engine/types';
+
 import { albumArtwork, libraryThumb, remoteImage, youtubeThumb } from '../-lib/images';
+import { youtubeItems } from '../-lib/play-items';
 import { bookCover, posterUrl } from '../-lib/rails';
 import { parseQuery, rank, scoreHit, type Query } from '../-lib/search';
 import { genresOf } from '../-lib/video';
@@ -35,6 +38,7 @@ import {
 } from '../-player.api';
 import { SearchIcon } from './icons';
 import { PlayerLink } from './kit';
+import { playItems } from './playback/use-player';
 import s from './player.module.css';
 import { useSections } from './sections';
 
@@ -48,6 +52,8 @@ interface Hit {
   score: number;
   /** what it is, for the top result ("Movie", "Artist") */
   type: string;
+  /** a song or a video: picking it plays it, instead of opening its page */
+  playNow?: PlayItem;
 }
 
 interface Group {
@@ -269,6 +275,17 @@ export function Search() {
             art: albumArtwork(x.album_id),
             href: `/player/music/album/${x.album_id}`,
             type: 'Song',
+            playNow: {
+              type: 'track',
+              id: String(x.id),
+              title: x.title,
+              subtitle: x.artist_name ?? undefined,
+              artwork: albumArtwork(x.album_id),
+              href: `/player/music/album/${x.album_id}`,
+              duration: x.duration ? x.duration / 1000 : null,
+              parentId: String(x.album_id),
+              parentTitle: x.album_title ?? undefined,
+            },
           }),
         ),
       );
@@ -312,6 +329,8 @@ export function Search() {
               ? `/player/youtube/${encodeURIComponent(v.channel_id)}`
               : '/player/youtube',
             type: 'Video',
+            // a downloaded video plays here; the rest open their channel
+            playNow: youtubeItems([v])[0],
           }),
         ),
       );
@@ -607,7 +626,8 @@ export function Search() {
     remember(raw);
     setOpen(false);
     input.current?.blur();
-    void navigate({ to: hit.href as '/player' });
+    if (hit.playNow) playItems([hit.playNow]);
+    else void navigate({ to: hit.href as '/player' });
   };
 
   const hitRow = (hit: Hit, index: number, big = false) => (
@@ -620,9 +640,14 @@ export function Search() {
       role="option"
       aria-selected={index === active}
       onMouseEnter={() => setActive(index)}
-      onClick={() => {
+      onClick={(e) => {
         remember(raw);
         setOpen(false);
+        if (hit.playNow) {
+          // songs and videos play; albums, shows and the rest open
+          e.preventDefault();
+          playItems([hit.playNow]);
+        }
       }}
       data-nav
     >
