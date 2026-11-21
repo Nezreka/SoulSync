@@ -41,6 +41,7 @@ import {
 import { ChannelForm } from './-ui/guide-form';
 import { GuideDetail, GuideGrid, OnNow, type Picked } from './-ui/guide-grid';
 import { Empty, PageTitle, Tabs, styles as s } from './-ui/kit';
+import { setLineup } from './-ui/playback/tuner';
 import { useSections } from './-ui/sections';
 
 type GuideView = 'grid' | 'now';
@@ -197,6 +198,12 @@ function GuidePage() {
     }
     return numberChannels(out);
   }, [videoChannels, musicChannel, serverMusic, playlistKey, rules, firstPlaylists, cat]);
+
+  // channel up / down follow the guide's numbers, from anywhere in the player
+  useEffect(
+    () => setLineup([...channels].sort((a, b) => (a.number ?? 0) - (b.number ?? 0))),
+    [channels],
+  );
 
   const { from, to } = guideWindow(now, offset);
   // a schedule only changes when the window or the half hour does

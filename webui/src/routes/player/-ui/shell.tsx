@@ -16,7 +16,9 @@ import { profilesQuery } from '../-player.api';
 import { BackIcon, ChevronIcon, ExitIcon } from './icons';
 import { AddToPlaylistHost } from './music/add-to-playlist';
 import { useNowPlaying } from './now-playing';
+import { MusicView } from './playback/music-view';
 import { TransportBar } from './playback/transport-bar';
+import { ChannelBanner } from './playback/tuner';
 import { VideoPlayer } from './playback/video-player';
 import s from './player.module.css';
 import { gateNeeded, ProfileChip, WhoGate } from './profiles';
@@ -223,6 +225,8 @@ export function PlayerShell({ profileId }: { profileId: number | null }) {
       </main>
       {nowPlaying ? <TransportBar /> : null}
       <VideoPlayer />
+      <MusicView />
+      <ChannelBanner />
       <AddToPlaylistHost />
       {gate && profiles ? (
         <WhoGate profiles={profiles} currentId={profileId} onDone={() => setGate(false)} />

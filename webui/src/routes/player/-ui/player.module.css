@@ -4221,3 +4221,85 @@ a.crewRow:hover {
     transform: none;
   }
 }
+
+/* ── the guide: a channel's name tunes it in ─────────────────────────── */
+
+.guideTune {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: calc(var(--u) * 0.7);
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-md);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.guideTunePlay {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: calc(var(--u) * 1.9);
+  height: calc(var(--u) * 1.9);
+  border-radius: var(--radius-circle);
+  background: var(--accent);
+  color: var(--pl-bg);
+  opacity: 0;
+  transform: scale(0.85);
+  transition:
+    opacity var(--dur-fast) ease,
+    transform var(--dur-fast) var(--pl-ease);
+}
+
+.guideTunePlay svg {
+  width: calc(var(--u) * 0.85);
+  height: calc(var(--u) * 0.85);
+  margin-left: calc(var(--u) * 0.08);
+}
+
+.guideTune:hover .guideTunePlay,
+.guideTune:focus-visible .guideTunePlay {
+  opacity: 1;
+  transform: none;
+}
+
+.guideTune:hover .guideChannelName,
+.guideTune:focus-visible .guideChannelName {
+  color: var(--accent-light);
+}
+
+.guideTune:focus-visible {
+  outline: 2px solid var(--pl-ring);
+  outline-offset: -2px;
+}
+
+.onNowTune {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: calc(var(--u) * 2.6);
+  height: calc(var(--u) * 2.6);
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-circle);
+  background: var(--accent);
+  color: var(--pl-bg);
+  cursor: pointer;
+  transition: transform var(--dur-fast) ease;
+}
+
+.onNowTune:hover {
+  transform: scale(1.06);
+}
+
+.onNowTune svg {
+  width: calc(var(--u) * 1.1);
+  height: calc(var(--u) * 1.1);
+  margin-left: calc(var(--u) * 0.1);
+}

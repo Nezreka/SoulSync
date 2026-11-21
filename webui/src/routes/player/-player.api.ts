@@ -307,6 +307,33 @@ export const playlistEdits = {
     apiClient.post('user-playlists/liked/remove', { json: { tracks: songBody(songs) } }).json(),
 };
 
+// ── lyrics ─────────────────────────────────────────────────────────────
+
+export interface Lyrics {
+  success: boolean;
+  synced: string | null;
+  plain: string | null;
+  /** sidecar: a .lrc beside the file; embedded: the file's tags; lrclib: lrclib.net */
+  source: 'sidecar' | 'embedded' | 'lrclib' | null;
+  error?: string;
+  retryable?: boolean;
+}
+
+export const lyricsQuery = (trackId: string) =>
+  queryOptions({
+    queryKey: ['player', 'lyrics', trackId],
+    queryFn: async (): Promise<Lyrics> => {
+      const res = await apiClient.get(`player/lyrics/track/${trackId}`, {
+        throwHttpErrors: false,
+        timeout: 45_000,
+      });
+      return (await res.json()) as Lyrics;
+    },
+    staleTime: Number.POSITIVE_INFINITY,
+    // a busy lrclib says so: try again later, not on every render
+    retry: (n, e) => n < 1 && !!e,
+  });
+
 // ── video ──────────────────────────────────────────────────────────────
 
 export const movieDetailQuery = (id: number) =>

@@ -28,6 +28,7 @@ export function PopMenu({
   badge,
   options,
   title,
+  below,
 }: {
   label: string;
   icon: ReactNode;
@@ -35,6 +36,8 @@ export function PopMenu({
   badge?: string;
   options: MenuOption[];
   title?: string;
+  /** opens downward (a button at the top of the screen) */
+  below?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -75,7 +78,12 @@ export function PopMenu({
         {badge ? <span className={s.ctlBadge}>{badge}</span> : null}
       </button>
       {open ? (
-        <div className={s.menu} role="menu" aria-label={label}>
+        <div
+          className={s.menu}
+          data-below={below ? 'true' : undefined}
+          role="menu"
+          aria-label={label}
+        >
           {title ? <div className={s.menuTitle}>{title}</div> : null}
           {options.map((o, i) => [
             o.group && o.group !== options[i - 1]?.group ? (

@@ -164,24 +164,56 @@ const store = {
  * first time it's needed (a person turning it up, so the audio context may
  * start) and kept, since an element can be wired to only one.
  */
-const gains = new WeakMap<HTMLMediaElement, { ctx: AudioContext; gain: GainNode }>();
+interface Graph {
+  ctx: AudioContext;
+  gain: GainNode;
+  analyser: AnalyserNode;
+}
+const graphs = new WeakMap<HTMLMediaElement, Graph>();
+
+/**
+ * an element's web audio: source, gain (volume past full), and an analyser
+ * on the side (what the music visuals read). made once per element, the
+ * first time something needs it: an element can be wired to only one.
+ * made from a click (turning it up, opening the music view), so the audio
+ * context is allowed to start.
+ */
+function graph(el: HTMLMediaElement): Graph | null {
+  const have = graphs.get(el);
+  if (have) {
+    if (have.ctx.state === 'suspended') void have.ctx.resume();
+    return have;
+  }
+  if (typeof AudioContext === 'undefined') return null;
+  try {
+    const ctx = new AudioContext();
+    const gain = ctx.createGain();
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 2048;
+    analyser.smoothingTimeConstant = 0.6;
+    ctx.createMediaElementSource(el).connect(gain).connect(ctx.destination);
+    gain.connect(analyser);
+    const made = { ctx, gain, analyser };
+    graphs.set(el, made);
+    if (ctx.state === 'suspended') void ctx.resume();
+    // a context the browser held back plays nothing: start it on the next play
+    el.addEventListener('play', () => {
+      if (ctx.state === 'suspended') void ctx.resume();
+    });
+    return made;
+  } catch {
+    return null; // no web audio: no boost, no visuals that follow the music
+  }
+}
 
 function boost(el: HTMLMediaElement, gain: number) {
-  let node = gains.get(el);
-  if (!node) {
-    if (gain <= 1 || typeof AudioContext === 'undefined') return;
-    try {
-      const ctx = new AudioContext();
-      const g = ctx.createGain();
-      ctx.createMediaElementSource(el).connect(g).connect(ctx.destination);
-      node = { ctx, gain: g };
-      gains.set(el, node);
-    } catch {
-      return; // no web audio: it stops at full volume
-    }
-  }
-  if (node.ctx.state === 'suspended') void node.ctx.resume();
-  node.gain.gain.value = gain;
+  if (gain <= 1 && !graphs.has(el)) return;
+  const g = graph(el);
+  if (g) g.gain.gain.value = gain;
+}
+
+function analyser(el: HTMLMediaElement): AnalyserNode | null {
+  return graph(el)?.analyser ?? null;
 }
 
 export function browserDeps(): EngineDeps {
@@ -191,6 +223,7 @@ export function browserDeps(): EngineDeps {
     progress,
     transcodeStart,
     boost,
+    analyser,
     tracks,
     subtitle,
     save,

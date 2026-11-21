@@ -37,7 +37,7 @@ import {
   BackSecondsIcon,
   EpisodesIcon,
   CloseIcon,
-  CollapseIcon,
+  ChevronDownBigIcon,
   ForwardSecondsIcon,
   FullscreenIcon,
   PipIcon,
@@ -47,6 +47,7 @@ import s from './playback.module.css';
 import { SeekBar } from './seek-bar';
 import { StatsOverlay } from './stats';
 import { SubtitleOverlay } from './subtitles';
+import { ChannelButtons } from './tuner';
 import { useLoading } from './use-loading';
 import { dimOpacity, OBJECT_FIT, useBrightness, useFit } from './use-picture';
 import { getEngine, usePlayer, useVideoOpen } from './use-player';
@@ -218,13 +219,14 @@ function FullPlayer({ state, onLeave }: { state: PlayerState; onLeave: () => voi
       <div className={s.fullTop}>
         <button
           type="button"
-          className={s.ctl}
-          aria-label="Keep watching in a small window"
-          title="Small window (esc)"
+          className={s.minimize}
+          aria-label="Minimize: keep watching in a small window while you browse"
+          title="Minimize (esc)"
           onClick={onLeave}
           data-nav
         >
-          <CollapseIcon />
+          <ChevronDownBigIcon />
+          <span>Minimize</span>
         </button>
         <div className={s.fullTitles}>
           <span className={s.fullTitle}>{item.title}</span>
@@ -298,6 +300,7 @@ function FullPlayer({ state, onLeave }: { state: PlayerState; onLeave: () => voi
             >
               <ForwardSecondsIcon n={10} />
             </button>
+            <ChannelButtons state={state} />
             <VolumeControl volume={state.volume} muted={state.muted} />
             <span className={s.fullClock}>
               {clock(state.position)} / {clock(state.duration)}

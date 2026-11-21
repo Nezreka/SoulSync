@@ -110,3 +110,35 @@ def test_track_routes(client):
     assert client.get("/api/player/subtitle/movie/1?sub=s1").get_json()["error"] == "image"
     assert client.get("/api/player/subtitle/movie/1?sub=s9").status_code == 404
     assert client.get("/api/player/tracks/track/1").status_code == 400
+
+
+def test_lyrics_by_track_id_finds_the_file_itself(client, monkeypatch, tmp_path):
+    """the player asks by track id; the server reads the song's facts and
+    hands the lyrics lookup the file on this machine (never a client path)"""
+    import api.stats as stats
+    from database.music_database import MusicDatabase
+    db = MusicDatabase(str(tmp_path / "lib.db"))
+    with db._get_connection() as conn:
+        ar = conn.execute("INSERT INTO lib2_artists (name) VALUES ('Mitski')").lastrowid
+        al = conn.execute("INSERT INTO lib2_albums (primary_artist_id, title) VALUES (?, 'Be the Cowboy')",
+                          (ar,)).lastrowid
+        tid = conn.execute("INSERT INTO lib2_tracks (album_id, title, duration) VALUES (?, 'Geyser', 143000)",
+                           (al,)).lastrowid
+        conn.commit()
+    monkeypatch.setattr("database.music_database.get_database", lambda *a, **k: db)
+    asked = []
+    monkeypatch.setattr(stats, "lyrics_answer", lambda *a: asked.append(a) or (
+        {"success": True, "synced": "[00:01.00] hi", "plain": "hi", "source": "sidecar"}, 200))
+    body = client.get(f"/api/player/lyrics/track/{tid}").get_json()
+    assert body["synced"] == "[00:01.00] hi"
+    assert asked == [("Geyser", "Mitski", "Be the Cowboy", 143, str(tmp_path / "a.mkv"))]
+
+
+def test_lyrics_for_a_track_this_profile_cant_play(client, monkeypatch):
+    import core.player.playable as P
+
+    def refuse(*a, **k):
+        raise P.Refused(404, "not_found", "That track isn't in your library.")
+    monkeypatch.setattr(P, "resolve", refuse)
+    res = client.get("/api/player/lyrics/track/5")
+    assert res.status_code == 404 and res.get_json()["error"] == "not_found"

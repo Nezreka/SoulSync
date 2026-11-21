@@ -91,12 +91,6 @@ export const ExpandIcon = () => (
   </Icon>
 );
 
-export const CollapseIcon = () => (
-  <Icon>
-    <path d="M4 14h6v6M20 10h-6V4M10 14l-7 7M14 10l7-7" />
-  </Icon>
-);
-
 export const FullscreenIcon = ({ on }: { on: boolean }) =>
   on ? (
     <Icon>
@@ -169,5 +163,37 @@ export const EpisodesIcon = () => (
   <Icon>
     <rect x="3" y="5" width="13" height="10" rx="1.5" />
     <path d="M19 8v9a2 2 0 0 1-2 2H7" />
+  </Icon>
+);
+
+export const LyricsIcon = () => (
+  <Icon>
+    <path d="M4 6h10M4 10h14M4 14h8" />
+    <path d="M17 13v5.5a1.5 1.5 0 1 1-1.5-1.5H17" />
+  </Icon>
+);
+
+export const VisualsIcon = () => (
+  <Icon>
+    <path d="M3 17c2.5-6 5-9 7-9s3 4 5 4 3.5-3 6-5" />
+    <path d="M3 21h18" />
+  </Icon>
+);
+
+export const ChevronDownBigIcon = () => (
+  <Icon>
+    <path d="m6 9 6 6 6-6" />
+  </Icon>
+);
+
+export const ChannelUpIcon = () => (
+  <Icon>
+    <path d="m7 14 5-5 5 5" />
+  </Icon>
+);
+
+export const ChannelDownIcon = () => (
+  <Icon>
+    <path d="m7 10 5 5 5-5" />
   </Icon>
 );

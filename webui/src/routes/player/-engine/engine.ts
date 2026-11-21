@@ -100,6 +100,8 @@ export interface EngineDeps {
   now: () => number;
   /** amplify an element past full volume (a web audio gain); absent: no boost */
   boost?: (el: HTMLMediaElement, gain: number) => void;
+  /** what's playing as sound, for visuals that follow it; absent or null: none */
+  analyser?: (el: HTMLMediaElement) => AnalyserNode | null;
   /** the lock screen / media keys (navigator.mediaSession), when there is one */
   mediaSession?: MediaSession | null;
   setInterval: (fn: () => void, ms: number) => unknown;
@@ -418,6 +420,12 @@ export class PlayerEngine {
     this.set({ volume: v });
     // turning it up is turning it on
     if (v > 0 && this.state.muted) this.setMuted(false);
+  }
+
+  /** the playing element's analyser (made on first ask, from a click), or null */
+  analyser(): AnalyserNode | null {
+    const el = this.active();
+    return el && this.deps.analyser ? this.deps.analyser(el) : null;
   }
 
   /** an element at ``v``: up to full on the element, past it through the boost */

@@ -447,6 +447,10 @@ A video a browser can't play as it is (an MKV, HEVC, AC3 or DTS sound) is conver
 - `GET /api/player/playlists/<id>`: one of them with `songs`, each `{position, title, artist, album, album_id, artist_id, duration_ms, image_url, added_at, track_id}`. `track_id` is the library track it plays (the match identify stamped, else the library's own match by name, the same one Subsonic apps get), or null when this profile can't play it (not in its library, or explicit on a profile that hides it). Also `duration_ms` and `playable_count`.
 - Changing your playlists uses the playlist routes the music side already has (`/api/user-playlists`, `/api/mirrored-playlists/<id>/custom-name`, `DELETE /api/mirrored-playlists/<id>`).
 
+#### Lyrics
+
+- `GET /api/player/lyrics/track/<track_id>`: a library track's lyrics, `{success, synced, plain, source}`, the same answer as `POST /api/lyrics/fetch` (the `.lrc` beside the file and the file's own tags first, then LRCLib). Asked by track id: the server finds the file itself, so a client never sends a path. A track this profile can't play is refused the same way playback refuses it.
+
 #### Watched
 
 - `POST /api/player/watched` with `{item_type, item_id}`: a movie or episode is into its credits (92% of the way): it counts as watched, in SoulSync's video library and on the media server account, for the profile whose watch state it is (the same rules as the detail page's watched toggle). Returns `{watched}`: false for anything else, or a profile that keeps no watch state of its own. `POST /api/player/progress/finish` does the same for a movie or episode played to the end.

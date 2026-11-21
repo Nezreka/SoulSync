@@ -101,3 +101,37 @@ def subtitle(item_type, item_id):
         logger.exception("subtitle %s of %s %s failed", want, item_type, item_id)
         return jsonify({"success": False, "error": "failed", "message": "Couldn't read that subtitle."}), 500
     return Response(text, mimetype="text/vtt", headers={"Cache-Control": "private, max-age=3600"})
+
+
+@bp.route("/api/player/lyrics/track/<int:track_id>", methods=["GET"])
+@requires_any("music.access")
+@device_playback
+def lyrics(track_id):
+    """a library track's lyrics: synced (LRC) and plain, the same answer as
+    the music side's lyrics route (its local sidecar and tags first, then
+    LRCLib). asked by track id: the server finds the file itself, so a
+    client never sends a path. a track this profile can't play has none."""
+    from api.stats import lyrics_answer
+    from core.player.playable import Refused, resolve
+    try:
+        source = resolve("track", str(track_id))
+    except Refused as e:
+        return jsonify({"success": False, "error": e.code, "message": e.message}), e.status
+    from database.music_database import get_database
+    with get_database()._get_connection() as conn:
+        row = conn.execute(
+            "SELECT t.title, COALESCE(NULLIF(t.track_artist, ''), ar.name), al.title, t.duration "
+            "FROM lib2_tracks t JOIN lib2_albums al ON al.id = t.album_id "
+            "LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id WHERE t.id = ?",
+            (int(track_id),)).fetchone()
+    if not row:
+        return jsonify({"success": False, "error": "not_found", "message": "No such track."}), 404
+    title, artist, album, duration_ms = row
+    local = source.path if source.mode == "file" else None
+    try:
+        out, status = lyrics_answer(title or "", artist or "", album or None,
+                                    int((duration_ms or 0) / 1000) or None, local)
+    except Exception:  # noqa: BLE001
+        logger.exception("player lyrics failed for track %s", track_id)
+        return jsonify({"success": False, "error": "failed", "message": "Couldn't get the lyrics."}), 500
+    return jsonify(out), status

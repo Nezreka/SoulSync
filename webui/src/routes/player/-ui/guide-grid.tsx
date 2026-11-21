@@ -14,7 +14,9 @@ import type { GuideBlock, GuideProgram } from '../-lib/schedule';
 import { clock, runtime } from '../-lib/format';
 import { channelQueue } from '../-lib/play-items';
 import { blockArtists, mergeIntoBlocks } from '../-lib/schedule';
+import { PlayIcon } from './icons';
 import { Art, PlayButton, PlayerLink, styles as s, useProgressive } from './kit';
+import { tuneIn } from './playback/tuner';
 import { playItems } from './playback/use-player';
 
 export interface Picked {
@@ -61,11 +63,23 @@ function ChannelCell({
 }) {
   return (
     <div className={s.guideChannel} role="rowheader">
-      <span className={s.guideNum}>{channel.number}</span>
-      <span className={s.guideChannelText}>
-        <span className={s.guideChannelName}>{channel.name}</span>
-        <span className={s.guideChannelBlurb}>{channel.blurb}</span>
-      </span>
+      <button
+        type="button"
+        className={s.guideTune}
+        title={`Watch ${channel.name} now`}
+        aria-label={`Tune in to ${channel.number ?? ''} ${channel.name}`}
+        onClick={() => void tuneIn(channel)}
+        data-nav
+      >
+        <span className={s.guideNum}>{channel.number}</span>
+        <span className={s.guideChannelText}>
+          <span className={s.guideChannelName}>{channel.name}</span>
+          <span className={s.guideChannelBlurb}>{channel.blurb}</span>
+        </span>
+        <span className={s.guideTunePlay} aria-hidden="true">
+          <PlayIcon />
+        </span>
+      </button>
       <StarButton channel={channel} on={favorite} onToggle={onFavorite} />
     </div>
   );
@@ -278,6 +292,16 @@ export function OnNow({
                 </span>
               ) : null}
             </button>
+            <button
+              type="button"
+              className={s.onNowTune}
+              aria-label={`Watch ${channel.name} now`}
+              title="Watch now"
+              onClick={() => void tuneIn(channel)}
+              data-nav
+            >
+              <PlayIcon />
+            </button>
             <StarButton channel={channel} on={favorites.has(channel.id)} onToggle={onFavorite} />
           </div>
         );
@@ -344,11 +368,8 @@ export function GuideDetail({
             <PlayButton
               label="Join live"
               onPlay={() => {
-                // in at the minute it's on; a live join saves nothing as the item's own progress
-                playItems(liveQueue, 0, {
-                  startAt: Math.max(0, (now - airing.start) / 1000),
-                  live: true,
-                });
+                // in at the minute it's on, through the tuner: channel up and down work from here
+                tuneIn(channel);
                 onClose();
               }}
             />

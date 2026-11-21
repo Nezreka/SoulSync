@@ -27,6 +27,7 @@ import {
 import s from './playback.module.css';
 import { QueuePanel } from './queue-panel';
 import { SeekBar } from './seek-bar';
+import { ChannelButtons } from './tuner';
 import { useLoading } from './use-loading';
 import { getEngine, usePlayer, useVideoOpen } from './use-player';
 
@@ -56,18 +57,19 @@ export function TransportBar() {
         <button
           type="button"
           className={s.nowArt}
-          onClick={() => (state.kind === 'video' ? setVideoOpen(true) : undefined)}
-          aria-label={state.kind === 'video' ? 'Back to the video' : item.title}
-          tabIndex={state.kind === 'video' ? 0 : -1}
+          onClick={() => setVideoOpen(true)}
+          aria-label={state.kind === 'video' ? 'Back to the video' : 'Open now playing'}
+          title={
+            state.kind === 'video' ? 'Back to the video' : 'Now playing: lyrics, up next, visuals'
+          }
+          data-nav
         >
           {item.artwork || item.backdrop ? (
             <img src={(item.artwork ?? item.backdrop)!} alt="" />
           ) : null}
-          {state.kind === 'video' ? (
-            <span className={s.nowArtExpand} aria-hidden="true">
-              <ExpandIcon />
-            </span>
-          ) : null}
+          <span className={s.nowArtExpand} aria-hidden="true">
+            <ExpandIcon />
+          </span>
         </button>
         <div className={s.nowText}>
           {item.href ? (
@@ -175,6 +177,7 @@ export function TransportBar() {
       <div className={s.end}>
         {long ? <ChapterMenu state={state} /> : null}
         {long ? <SpeedMenu rate={state.rate} /> : null}
+        <ChannelButtons state={state} />
         <SleepMenu state={state} />
         <button
           type="button"

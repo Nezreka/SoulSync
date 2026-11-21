@@ -302,6 +302,11 @@
   box-shadow: 0 calc(var(--u) * 0.8) calc(var(--u) * 2.4) var(--black-a60);
 }
 
+.menu[data-below='true'] {
+  top: calc(100% + var(--u) * 0.6);
+  bottom: auto;
+}
+
 .menuTitle {
   padding: calc(var(--u) * 0.4) calc(var(--u) * 0.6);
   color: var(--pl-text-3);
@@ -1501,4 +1506,119 @@ a.nowTitle:hover {
 
 .songActions button:disabled {
   opacity: 0.5;
+}
+
+/* ── channels: up, down, and the banner ─────────────────────────────── */
+
+.channelBtns {
+  display: inline-flex;
+  align-items: center;
+}
+
+.channelNum {
+  min-width: calc(var(--u) * 1.6);
+  color: var(--pl-text-2);
+  font-size: calc(var(--u) * 0.8);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.banner {
+  position: fixed;
+  top: calc(var(--u) * 1.5);
+  left: 50%;
+  z-index: 9;
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 1);
+  min-width: min(90vw, calc(var(--u) * 22));
+  max-width: 90vw;
+  padding: calc(var(--u) * 0.8) calc(var(--u) * 1.3) calc(var(--u) * 0.8) calc(var(--u) * 0.9);
+  border: 1px solid var(--white-a15);
+  border-radius: var(--radius-lg);
+  background: var(--black-a80);
+  backdrop-filter: blur(14px);
+  color: var(--pl-text);
+  pointer-events: none;
+  transform: translateX(-50%);
+  animation: bannerIn var(--dur-moderate) var(--pl-ease) both;
+}
+
+@keyframes bannerIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, calc(var(--u) * -1));
+  }
+}
+
+.bannerNum {
+  display: grid;
+  flex: none;
+  place-items: center;
+  min-width: calc(var(--u) * 3);
+  height: calc(var(--u) * 3);
+  padding: 0 calc(var(--u) * 0.5);
+  border-radius: var(--radius-md);
+  background: var(--accent);
+  color: var(--pl-bg);
+  font-size: calc(var(--u) * 1.3);
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+}
+
+.bannerText {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.bannerChannel {
+  color: var(--pl-text-2);
+  font-size: calc(var(--u) * 0.72);
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.bannerTitle {
+  overflow: hidden;
+  font-size: calc(var(--u) * 1.1);
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bannerSub {
+  color: var(--pl-text-3);
+  font-size: calc(var(--u) * 0.8);
+}
+
+/* minimize, plex style: a chevron that says what it does */
+.minimize {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: calc(var(--u) * 0.35);
+  height: calc(var(--u) * 2.4);
+  padding: 0 calc(var(--u) * 0.9) 0 calc(var(--u) * 0.6);
+  border: none;
+  border-radius: var(--radius-pill);
+  background: var(--white-a10);
+  color: var(--pl-text);
+  font: inherit;
+  font-size: calc(var(--u) * 0.85);
+  font-weight: 700;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  transition: background var(--dur-fast) ease;
+}
+
+.minimize:hover {
+  background: var(--white-a20);
+}
+
+.minimize svg {
+  width: calc(var(--u) * 1.2);
+  height: calc(var(--u) * 1.2);
 }
