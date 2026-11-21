@@ -47,11 +47,14 @@ class _Ancestors(HTMLParser):
 
 def _slot_ancestors():
     p = _Ancestors(
-        lambda a: a.get("data-stg-react") == "connections" and a.get("data-stg-part") == "metadata"
+        # settings-bic: the Connections page is one slot, and draws the group
+        lambda a: a.get("data-stg-react") == "connections" and a.get("data-stg-part") == "page"
     )
     # the Settings page is React (SETTINGS_PORT.md step V4c): read in its place
     p.feed(index_with_settings_page())
-    assert p.found, "the metadata source slot is gone from index.html"
+    assert p.found, "the Connections page slot is gone from index.html"
+    page = (_TSX.parent / "connections" / "connections-page.tsx").read_text(encoding="utf-8")
+    assert "<MetadataSourceGroup store={store} />" in page
     return p.found
 
 
@@ -71,7 +74,8 @@ def test_metadata_source_is_not_inside_the_hidden_legacy_group():
 
 def test_metadata_source_still_lives_on_the_connections_tab_music_side():
     group = _group()
-    assert '<div className="settings-group" data-stg="connections" data-music-only="">' in group
+    # music only, as it was (the page shows it on the music side)
+    assert '<div data-ui="" data-music-only="">' in group
     assert "<MetadataPicker" in group
     # the library discography source sits with it
     assert "<DiscographyPicker" in group

@@ -88,6 +88,16 @@ describe('keys on the Settings page', () => {
     expect(event.defaultPrevented).toBe(false);
   });
 
+  it('/ still works with the closed sheets in the page (hidden, aria-modal)', () => {
+    const input = settingsPage();
+    document.body.insertAdjacentHTML(
+      'beforeend',
+      '<aside role="dialog" aria-modal="true" hidden></aside><div style="pointer-events: none"><div role="dialog" aria-modal="true"></div></div>',
+    );
+    press('/');
+    expect(document.activeElement).toBe(input);
+  });
+
   it('/ leaves a window on top alone', () => {
     const input = settingsPage();
     document.body.insertAdjacentHTML('beforeend', '<div role="dialog" aria-modal="true"></div>');

@@ -4,10 +4,11 @@
  * card (Spotify, iTunes, Deezer, Discogs, Tidal, Qobuz, MusicBrainz,
  * Hydrabase) and System's Experimental switches, which the picker reads.
  *
- * The service cards keep their markup: they sit in the hidden API
- * Configuration group, and the Services tiles (still settings.js) lift one
- * into their modal by moving the node. data-react-panel tells settings.js's
- * page-wide autosave and secret wiring a card is React's wherever it sits.
+ * The service cards are built on the settings parts (settings-bic phase 3):
+ * connection fields first, a callback address as a quiet line to copy, sign-in
+ * as the sheet's main action, rare things behind More. They sit in the hidden
+ * API Configuration group until a tile opens one in the service sheet
+ * (connections-services.tsx ServiceFrame).
  */
 
 import {
@@ -27,6 +28,26 @@ import {
   normalizeLibraryDiscographySource,
 } from '../library-discography-source';
 import {
+  ActionRow,
+  Btn,
+  Card,
+  CopyButton,
+  FieldNote,
+  More,
+  Note,
+  NumberField,
+  Row,
+  SecretField,
+  SectionLabel,
+  Select,
+  SheetField,
+  SheetGroup,
+  StatusWords,
+  Switch,
+  TextField,
+  type Tone,
+} from '../ui';
+import {
   checkQobuzAuthStatus,
   hydrabaseLink,
   onQobuzAuth,
@@ -43,16 +64,9 @@ import {
   type StatusFrame,
   statusFrames,
 } from './connections';
-import { useServicePlace } from './connections-services';
-import {
-  helpBits,
-  REDACTED_SECRET_SENTINEL,
-  SecretInput,
-  Section,
-  useDraft,
-  useHelp,
-} from './parts';
-import { text, useSettings } from './source-panels';
+import { type CardActions, ServiceFrame } from './connections-services';
+import { REDACTED_SECRET_SENTINEL, useDraft } from './parts';
+import { secretNote, text, useSettings } from './source-panels';
 
 type Section_ = Record<string, unknown>;
 
@@ -112,8 +126,6 @@ function MetadataPicker({ store }: { store: SettingsStore }) {
   const shown = savedSource(settings);
   const lastValid = useRef(shown);
   const select = useRef<HTMLSelectElement>(null);
-  const help = useHelp();
-  const bits = helpBits(HELP_BODY, help);
 
   /** settings.js sanitizeMetadataSourceSelection: a source that cannot be
    *  picked goes back to the last one that could, else Deezer */
@@ -155,9 +167,14 @@ function MetadataPicker({ store }: { store: SettingsStore }) {
   }
 
   return (
-    <div className="form-group">
-      <label>Primary metadata source:</label>
-      <select
+    <Row
+      field
+      label="Primary metadata source"
+      htmlFor="metadata-fallback-source"
+      help="Spotify and Discogs need their account connected below before they can be picked."
+      more={HELP_BODY}
+    >
+      <Select
         id="metadata-fallback-source"
         ref={select}
         value={shown}
@@ -168,35 +185,42 @@ function MetadataPicker({ store }: { store: SettingsStore }) {
             {o.label}
           </option>
         ))}
-      </select>
-      {bits.icon}
-      <div className="setting-help-text setting-help-body" hidden={!help.open}>
-        {HELP_BODY}
-      </div>
-      {bits.line}
-    </div>
+      </Select>
+    </Row>
   );
 }
 
 const HELP_BODY = (
   <>
-    Where artist, album, and track metadata comes from:
-    <br />• <strong>Spotify</strong> — official Spotify; connect your account with the Spotify tile
-    under Services.
-    <br />• <strong>Spotify (no auth)</strong> — the same Spotify catalog with no account needed.
-    It's unofficial and best-effort (may break if Spotify changes its site) and can't read your
-    personal library or playlists.
-    <br />• <strong>Deezer</strong> / <strong>iTunes</strong> — free, no account.
-    <br />• <strong>MusicBrainz</strong> — free; the public server is limited to 1 request/sec.
-    Configure a self-hosted server in the MusicBrainz tile under Services.
-    <br />• <strong>Discogs</strong> — needs a personal access token.
-    <br />• <strong>JioSaavn</strong> — opt in under Advanced → Experimental. Strong for Indian and
-    Bollywood catalogs.
-    <br />
-    <br />
-    Tip: if you pick <strong>Spotify (no auth)</strong> and later connect a real Spotify account, it
-    uses the official account normally and only falls back to no-auth while Spotify is rate-limited
-    — then switches back automatically.
+    Where artist, album and track metadata comes from:
+    <ul>
+      <li>
+        <strong>Spotify</strong>: official Spotify; connect your account with the Spotify tile under
+        Services.
+      </li>
+      <li>
+        <strong>Spotify (no auth)</strong>: the same Spotify catalog with no account needed. It is
+        unofficial and best-effort (it may break if Spotify changes its site) and cannot read your
+        own library or playlists.
+      </li>
+      <li>
+        <strong>Deezer</strong> and <strong>iTunes</strong>: free, no account.
+      </li>
+      <li>
+        <strong>MusicBrainz</strong>: free; the public server allows 1 request a second. Set up a
+        self-hosted server in the MusicBrainz tile under Services.
+      </li>
+      <li>
+        <strong>Discogs</strong>: needs a personal access token.
+      </li>
+      <li>
+        <strong>JioSaavn</strong>: opt in under System, Experimental. Strong for Indian and
+        Bollywood catalogs.
+      </li>
+    </ul>
+    Tip: pick <strong>Spotify (no auth)</strong> and connect a real Spotify account later, and the
+    official account is used normally; no-auth is only used while Spotify is rate-limited, then it
+    switches back by itself.
   </>
 );
 
@@ -235,88 +259,79 @@ function DiscographyPicker({ store }: { store: SettingsStore }) {
   }
 
   return (
-    <div id="library-discography-source-group" className="form-group">
-      <label htmlFor="library-discography-source">Library discography source:</label>
-      <select
+    <Row
+      field
+      id="library-discography-source-group"
+      label="Library discography source"
+      htmlFor="library-discography-source"
+      help="Controls album, EP and single catalogues shown in Library artist views. Automatic tries iTunes, then Deezer."
+    >
+      <Select
         id="library-discography-source"
-        className="form-select"
         value={value}
         disabled={busy}
         onChange={(event) => void change(event.target.value)}
-      >
-        {LIBRARY_DISCOGRAPHY_SOURCE_OPTIONS.map((o) => (
-          <option key={o.value} value={o.value}>
-            {o.label}
-          </option>
-        ))}
-      </select>
-      <small className="settings-hint">
-        Controls album, EP and single catalogues shown in Library artist views. Automatic tries
-        iTunes, then Deezer.
-      </small>
-    </div>
+        options={LIBRARY_DISCOGRAPHY_SOURCE_OPTIONS.map((o) => ({
+          value: o.value,
+          label: o.label,
+        }))}
+      />
+    </Row>
   );
 }
 
 export function MetadataSourceGroup({ store }: { store: SettingsStore }) {
   return (
-    <div className="settings-group" data-stg="connections" data-music-only="">
-      <div className="api-service-frame">
-        <h4 className="service-title" style={{ color: '#e8e8e8' }}>
-          Metadata Source
-        </h4>
+    <div data-ui="" data-music-only="">
+      <SectionLabel
+        title="Metadata source"
+        hint="Where artist, album and track details come from"
+      />
+      <Card id="stg-metadata-source">
         <MetadataPicker store={store} />
         <DiscographyPicker store={store} />
-      </div>
+      </Card>
     </div>
   );
 }
 
 // ── the service cards ──
 
-/** one service's card as the API Configuration group had it. the header
- *  is hidden wherever the card shows (the group is hidden, the tile modal
- *  hides headers); the tiles read its dot's colour */
+/** a music service's card (connections-services.tsx ServiceFrame) */
 export function ServiceCard({
   service,
   colour,
   title,
-  titleClass,
   id,
   extra,
+  test,
+  primary,
   children,
 }: {
   service: string;
   colour: string;
   title: string;
-  titleClass?: string;
   id?: string;
   extra?: Record<string, string>;
+  /** the sheet's Test: the same request the card's own button sent */
+  test?: () => unknown;
+  /** the sheet's main action, in place of Done (Authenticate) */
+  primary?: CardActions['primary'];
   children: ReactNode;
 }) {
-  const { wrap, open } = useServicePlace(service, CARD_ORDER.indexOf(service));
-  return createPortal(
-    <div
-      className="api-service-frame stg-service"
+  return (
+    <ServiceFrame
+      service={service}
+      order={CARD_ORDER.indexOf(service)}
+      colour={colour}
+      title={title}
       id={id}
-      data-service={service}
-      data-react-panel=""
-      {...extra}
+      extra={extra}
+      test={test}
+      primary={primary}
     >
-      <div
-        className="stg-service-header"
-        onClick={(event) => event.currentTarget.parentElement?.classList.toggle('expanded')}
-      >
-        <span className="stg-service-dot" style={{ color: colour }}></span>
-        <h4 className={titleClass ? `service-title ${titleClass}` : 'service-title'}>{title}</h4>
-        <span className="stg-service-chevron">›</span>
-      </div>
-      {/* collapsed by default as an accordion; in the modal it is the content */}
-      <div className="stg-service-body" style={open ? { display: 'block' } : undefined}>
-        {children}
-      </div>
-    </div>,
-    wrap,
+      {children}
+    </ServiceFrame>
   );
 }
 
@@ -339,23 +354,6 @@ const CARD_ORDER = [
   'hydrabase',
 ];
 
-export function Field({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="form-group">
-      <label>{label}</label>
-      {children}
-    </div>
-  );
-}
-
-export function TestButton({ onClick }: { onClick: () => void }) {
-  return (
-    <button className="test-button" type="button" onClick={onClick}>
-      Test Connection
-    </button>
-  );
-}
-
 /** a text field for one key, as settings.js loaded it (`|| ''`) */
 export function useText(store: SettingsStore, section: string, key: string) {
   const settings = useSettings(store);
@@ -365,8 +363,8 @@ export function useText(store: SettingsStore, section: string, key: string) {
   };
 }
 
-/** a redirect uri: the saved one, else the default, once loaded; the
- *  Current Redirect URI line under it follows what is typed */
+/** a redirect uri: the saved one, else the default, once loaded; its copy
+ *  button copies what is typed (or the default when it is emptied) */
 function useRedirect({
   store,
   section,
@@ -386,15 +384,16 @@ function useRedirect({
   useEffect(() => draft.reset(), [loads]); // eslint-disable-line react-hooks/exhaustive-deps
   return {
     input: (
-      <input
-        type="text"
+      <TextField
+        full
+        mono
         id={`${id}-redirect-uri`}
         placeholder={fallback}
         value={draft.value}
         onChange={(event) => draft.onChange(event.target.value)}
+        trailing={<CopyButton value={draft.value || fallback} />}
       />
     ),
-    shown: draft.value || fallback,
   };
 }
 
@@ -417,24 +416,25 @@ async function authenticate(name: string, path: string, errorContext?: string) {
   }
 }
 
+/** a link out, in the help line */
+function Out({ href, children }: { href: string; children: ReactNode }) {
+  return (
+    <a href={href} target="_blank" rel="noreferrer">
+      {children}
+    </a>
+  );
+}
+
 function SpotifyCard({ store }: { store: SettingsStore }) {
   const settings = useSettings(store);
   const loads = useLoads(store);
   const status = useStatus();
-  const help = useHelp();
   const id = useText(store, 'spotify', 'client_id');
   const secret = useText(store, 'spotify', 'client_secret');
   const redirect = useRedirect({ store, section: 'spotify', id: 'spotify' });
   const meta = sec(settings, 'metadata');
   const enrich = loads ? meta.spotify_free_enrichment !== false : false;
-
-  // settings.js syncSpotifySettingsAuthState, once /status has spoken
-  const spotify = status?.spotify;
-  const attention = spotify
-    ? spotify.authenticated !== true ||
-      !!(spotify.rate_limited && spotify.rate_limit) ||
-      (spotify.post_ban_cooldown ?? 0) > 0
-    : null;
+  const signedIn = status?.spotify?.authenticated === true;
 
   async function disconnect() {
     const w = shell();
@@ -469,114 +469,88 @@ function SpotifyCard({ store }: { store: SettingsStore }) {
     }
   }
 
-  const bits = helpBits(ENRICH_HELP, help);
   return (
     <ServiceCard
       service="spotify"
-      colour={attention ? '#f1c40f' : '#1DB954'}
-      title="Spotify"
-      titleClass="spotify-title"
+      colour="#1DB954"
+      title="Spotify (Metadata, playlists and your followed artists)"
+      test={() => testService(store, 'spotify')}
+      primary={{
+        label: signedIn ? 'Sign in again' : 'Authenticate',
+        id: 'spotify-auth-btn',
+        onClick: () => authenticate('Spotify', '/auth/spotify', 'gs-connecting'),
+      }}
     >
-      <Field label="Client ID:">
-        <input
-          type="text"
+      <SheetGroup title="Your Spotify app" />
+      <SheetField label="Client ID" htmlFor="spotify-client-id">
+        <TextField
+          full
           id="spotify-client-id"
           placeholder="Spotify Client ID"
           value={id.value}
           onChange={(event) => id.onChange(event.target.value)}
         />
-      </Field>
-      <Field label="Client Secret:">
-        <SecretInput
+      </SheetField>
+      <SheetField
+        label="Client secret"
+        htmlFor="spotify-client-secret"
+        help={secretNote(secret.value)}
+      >
+        <SecretField
           id="spotify-client-secret"
           placeholder="Spotify Client Secret"
           value={secret.value}
           onChange={secret.onChange}
         />
-      </Field>
-      <Field label="Redirect URI:">{redirect.input}</Field>
-      <div className="callback-info">
-        <div className="callback-label">Current Redirect URI:</div>
-        <div className="callback-url" id="spotify-callback-display">
-          {redirect.shown}
-        </div>
-        <div className="callback-help">
-          Add this URL to your Spotify app's 'Redirect URIs' in the Spotify Developer Dashboard.
-          Spotify requires HTTPS for any URI that isn't loopback — on a NAS or remote server, enter
-          an HTTPS proxy URL in the Redirect URI field above instead (see Help &amp; Docs → Getting
-          Started).
-        </div>
-      </div>
-      <div className="form-actions">
-        <button
-          className="auth-button"
-          onClick={() => void authenticate('Spotify', '/auth/spotify', 'gs-connecting')}
-        >
-          🔐 Authenticate
-        </button>{' '}
-        <button
-          className="auth-button disconnect-button"
-          id="spotify-disconnect-btn"
-          style={{ display: 'none' }}
-          onClick={() => void disconnect()}
-        >
-          🔌 Disconnect
-        </button>{' '}
-        <button
-          className="test-button"
-          type="button"
-          onClick={() => void testService(store, 'spotify')}
-        >
-          Test Connection
-        </button>
-      </div>
-      <div
-        className="form-group"
-        style={{
-          marginTop: '14px',
-          borderTop: '1px solid rgba(255,255,255,0.08)',
-          paddingTop: '14px',
-        }}
+      </SheetField>
+      <SheetField
+        label="Redirect URI"
+        htmlFor="spotify-redirect-uri"
+        help="Add this address to your Spotify app's Redirect URIs in the Spotify Developer Dashboard. Leave it as it is unless SoulSync runs on another machine."
       >
-        <div className="setting-row" style={{ flex: 1, minWidth: 0 }}>
-          <label
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              cursor: 'pointer',
-              fontWeight: 'normal',
-              margin: 0,
-            }}
-          >
-            <input
-              type="checkbox"
-              id="metadata-spotify-free-enrichment"
-              checked={enrich}
-              onChange={(event) =>
-                store.set('metadata', 'spotify_free_enrichment', event.target.checked)
-              }
-            />{' '}
-            <span>Use Spotify (no auth) for background enrichment</span>
-          </label>
-          {bits.icon}
-        </div>
-        <div className="setting-help-text setting-help-body" hidden={!help.open}>
-          {ENRICH_HELP}
-        </div>
-        {bits.line}
-      </div>
+        {redirect.input}
+      </SheetField>
+      <More label="On a NAS or remote server?" names="Spotify needs HTTPS there">
+        <FieldNote>
+          Spotify needs HTTPS for any address that is not this machine. On a NAS or remote server,
+          put an HTTPS proxy address in Redirect URI above instead (Help and Docs, Getting started).
+        </FieldNote>
+      </More>
+      <ActionRow
+        label="Signed in"
+        help="Disconnecting stops Spotify-specific actions until you sign in again."
+        hidden={!signedIn}
+      >
+        <Btn small id="spotify-disconnect-btn" hidden={!signedIn} onClick={() => void disconnect()}>
+          Disconnect
+        </Btn>
+      </ActionRow>
+      <SheetGroup title="Options" />
+      <Row
+        label="Use Spotify (no auth) for background enrichment"
+        htmlFor="metadata-spotify-free-enrichment"
+        help="Keeps bulk enrichment off your connected account."
+        more={ENRICH_HELP}
+      >
+        <Switch
+          id="metadata-spotify-free-enrichment"
+          checked={enrich}
+          onChange={(event) =>
+            store.set('metadata', 'spotify_free_enrichment', event.target.checked)
+          }
+        />
+      </Row>
     </ServiceCard>
   );
 }
 
 const ENRICH_HELP = (
   <>
-    Runs the background metadata enrichment worker on the no-auth Spotify source instead of this
-    connected account — keeping bulk enrichment off your official API quota (and dodging rate-limit
-    bans), so your account is reserved for interactive search and playlist sync.{' '}
-    <strong>On by default.</strong> Turn off to enrich through your connected account instead. Works
-    even with no account connected. Note: the no-auth source can't supply artist genres.
+    Runs the background metadata enrichment on the no-auth Spotify source instead of this connected
+    account. That keeps bulk enrichment off your official API quota (and away from rate-limit bans),
+    so your account is kept for searches and playlist sync. <strong>On by default.</strong> Turn it
+    off to enrich through your connected account instead. Works with no account connected too. The
+    no-auth source cannot supply artist genres.
   </>
 );
 
@@ -607,30 +581,22 @@ function ItunesCard({ store }: { store: SettingsStore }) {
       service="itunes"
       colour="#fc3c44"
       title="iTunes / Apple Music"
-      titleClass="itunes-title"
+      test={() => testService(store, 'itunes')}
     >
-      <Field label="Storefront Country:">
-        <select
+      <Note info>No key needed. iTunes answers searches as it is.</Note>
+      <Row
+        label="Storefront country"
+        htmlFor="itunes-country"
+        field
+        help="The Apple Music storefront searched first. Albums only sold in another region are looked for in the other storefronts too."
+      >
+        <Select
           id="itunes-country"
           value={country}
           onChange={(event) => store.set('itunes', 'country', event.target.value || 'US')}
-        >
-          {ITUNES_COUNTRIES.map(([value, label]) => (
-            <option key={value} value={value}>
-              {label}
-            </option>
-          ))}
-        </select>
-      </Field>
-      <div className="callback-info">
-        <div className="callback-help">
-          Sets the primary Apple Music storefront. Region-specific albums are auto-searched across
-          other storefronts as fallback.
-        </div>
-      </div>
-      <div className="form-actions">
-        <TestButton onClick={() => void testService(store, 'itunes')} />
-      </div>
+          options={ITUNES_COUNTRIES.map(([value, label]) => ({ value, label }))}
+        />
+      </Row>
     </ServiceCard>
   );
 }
@@ -688,74 +654,62 @@ function DeezerCard({ store }: { store: SettingsStore }) {
       service="deezer"
       colour="#A238FF"
       title="Deezer (Favorites & Playlists)"
-      titleClass="deezer-title"
+      test={test}
+      primary={{
+        label: 'Authenticate',
+        id: 'deezer-auth-btn',
+        onClick: () => authenticate('Deezer', '/auth/deezer'),
+      }}
     >
-      <Field label="App ID:">
-        <input
-          type="text"
+      <Note info>
+        Searches work with no key. Sign in with your own Deezer app for favorites and playlists, or
+        use an ARL token below for playlists and downloads.
+      </Note>
+      <SheetGroup title="Your Deezer app" />
+      <SheetField label="App ID" htmlFor="deezer-app-id">
+        <TextField
+          full
           id="deezer-app-id"
           placeholder="Deezer App ID"
           value={appId.value}
           onChange={(event) => appId.onChange(event.target.value)}
         />
-      </Field>
-      <Field label="App Secret:">
-        <SecretInput
+      </SheetField>
+      <SheetField label="App secret" htmlFor="deezer-app-secret" help={secretNote(appSecret.value)}>
+        <SecretField
           id="deezer-app-secret"
           placeholder="Deezer App Secret"
           value={appSecret.value}
           onChange={appSecret.onChange}
         />
-      </Field>
-      <Field label="Redirect URI:">{redirect.input}</Field>
-      <div className="callback-info">
-        <div className="callback-label">Current Redirect URI:</div>
-        <div className="callback-url" id="deezer-callback-display">
-          {redirect.shown}
-        </div>
-        <div className="callback-help">
-          Add this URL to your Deezer app at developers.deezer.com
-        </div>
-      </div>
-      <div className="form-actions">
-        <button className="auth-button" onClick={() => void authenticate('Deezer', '/auth/deezer')}>
-          🔐 Authenticate
-        </button>
-      </div>
-      <div
-        className="callback-info"
-        style={{
-          marginTop: '10px',
-          borderTop: '1px solid rgba(255,255,255,0.05)',
-          paddingTop: '10px',
-        }}
+      </SheetField>
+      <SheetField
+        label="Redirect URI"
+        htmlFor="deezer-redirect-uri"
+        help="Add this address to your Deezer app at developers.deezer.com."
       >
-        <div className="callback-help" style={{ marginBottom: '8px' }}>
-          Or use an <strong>ARL token</strong> for playlist access and downloads (no OAuth app
-          needed):
-        </div>
-      </div>
-      <Field label="ARL Token:">
-        <SecretInput
+        {redirect.input}
+      </SheetField>
+      <SheetGroup title="Or an ARL token" />
+      <SheetField
+        label="ARL token"
+        htmlFor="deezer-connection-arl"
+        help={secretNote(arl, 'Playlist access and downloads, with no Deezer app needed.')}
+        more={
+          <>
+            Sign in at <Out href="https://www.deezer.com">deezer.com</Out>, open DevTools (F12),
+            then Application, Cookies, and copy the <code>arl</code> value. It is the same token as
+            the Deezer download source.
+          </>
+        }
+      >
+        <SecretField
           id="deezer-connection-arl"
           placeholder="Paste your ARL cookie token here"
           value={arl}
           onChange={(value) => store.set('deezer_download', 'arl', value)}
         />
-      </Field>
-      <div className="callback-info">
-        <div className="callback-help">
-          Log into{' '}
-          <a href="https://www.deezer.com" target="_blank" style={{ color: '#A238FF' }}>
-            deezer.com
-          </a>{' '}
-          → DevTools (F12) → Application → Cookies → copy the <code>arl</code> value. Provides
-          playlist access + downloads.
-        </div>
-      </div>
-      <div className="form-actions">
-        <TestButton onClick={() => void test()} />
-      </div>
+      </SheetField>
     </ServiceCard>
   );
 }
@@ -763,34 +717,35 @@ function DeezerCard({ store }: { store: SettingsStore }) {
 function DiscogsCard({ store }: { store: SettingsStore }) {
   const token = useText(store, 'discogs', 'token');
   return (
-    <ServiceCard service="discogs" colour="#e0d4b8" title="Discogs">
-      <Field label="Personal Access Token:">
-        <SecretInput
+    <ServiceCard
+      service="discogs"
+      colour="#e0d4b8"
+      title="Discogs"
+      test={() => testService(store, 'discogs')}
+    >
+      <SheetField
+        label="Personal access token"
+        htmlFor="discogs-token"
+        help={secretNote(
+          token.value,
+          'Free, no app needed: Generate new token in Discogs Developer Settings.',
+        )}
+        more={
+          <>
+            Get it from{' '}
+            <Out href="https://www.discogs.com/settings/developers">Discogs Developer Settings</Out>{' '}
+            with Generate new token. No app registration needed. It gives 60 requests a minute and
+            cover art in search results.
+          </>
+        }
+      >
+        <SecretField
           id="discogs-token"
           placeholder="Discogs Personal Access Token"
           value={token.value}
           onChange={token.onChange}
         />
-      </Field>
-      <div className="callback-info">
-        <div className="callback-help">
-          Get your free token from{' '}
-          <a
-            href="https://www.discogs.com/settings/developers"
-            target="_blank"
-            style={{ color: '#ffff64' }}
-          >
-            Discogs Developer Settings
-          </a>
-        </div>
-        <div className="callback-help">
-          Click "Generate new token" — no app registration needed. Provides 60 req/min and cover art
-          in search results.
-        </div>
-      </div>
-      <div className="form-actions">
-        <TestButton onClick={() => void testService(store, 'discogs')} />
-      </div>
+      </SheetField>
     </ServiceCard>
   );
 }
@@ -803,13 +758,15 @@ function TidalCard({ store }: { store: SettingsStore }) {
   // clears the saved token: for when re-authenticating does not pick up
   // newly added scopes. Authenticate again afterwards for a clean grant
   async function disconnect() {
+    const w = shell();
     if (
-      !window.confirm(
-        "Disconnect Tidal? Saved token will be cleared and you'll need to re-authenticate.",
-      )
+      !(await w.showConfirmDialog?.({
+        title: 'Disconnect Tidal',
+        message:
+          "Disconnect Tidal? The saved token is cleared and you'll need to authenticate again.",
+      }))
     )
       return;
-    const w = shell();
     try {
       w.showLoadingOverlay?.('Disconnecting Tidal...');
       const resp = await fetch('/api/tidal/disconnect', { method: 'POST' });
@@ -835,46 +792,50 @@ function TidalCard({ store }: { store: SettingsStore }) {
       service="tidal"
       colour="#ff6600"
       title="Tidal (Playlists & Metadata)"
-      titleClass="tidal-title"
+      test={() => testService(store, 'tidal')}
+      primary={{
+        label: 'Authenticate',
+        id: 'tidal-auth-btn',
+        onClick: () => authenticate('Tidal', '/auth/tidal'),
+      }}
     >
-      <Field label="Client ID:">
-        <input
-          type="text"
+      <SheetGroup title="Your Tidal app" />
+      <SheetField label="Client ID" htmlFor="tidal-client-id">
+        <TextField
+          full
           id="tidal-client-id"
           placeholder="Tidal Client ID"
           value={id.value}
           onChange={(event) => id.onChange(event.target.value)}
         />
-      </Field>
-      <Field label="Client Secret:">
-        <SecretInput
+      </SheetField>
+      <SheetField
+        label="Client secret"
+        htmlFor="tidal-client-secret"
+        help={secretNote(secret.value)}
+      >
+        <SecretField
           id="tidal-client-secret"
           placeholder="Tidal Client Secret"
           value={secret.value}
           onChange={secret.onChange}
         />
-      </Field>
-      <Field label="Redirect URI:">{redirect.input}</Field>
-      <div className="callback-info">
-        <div className="callback-label">Current Redirect URI:</div>
-        <div className="callback-url" id="tidal-callback-display">
-          {redirect.shown}
-        </div>
-        <div className="callback-help">Add this URL to your Tidal app configuration</div>
-      </div>
-      <div className="form-actions">
-        <button className="auth-button" onClick={() => void authenticate('Tidal', '/auth/tidal')}>
-          🔐 Authenticate
-        </button>{' '}
-        <button
-          className="auth-button"
-          style={{ marginLeft: '8px' }}
-          onClick={() => void disconnect()}
-        >
+      </SheetField>
+      <SheetField
+        label="Redirect URI"
+        htmlFor="tidal-redirect-uri"
+        help="Add this address to your Tidal app's configuration."
+      >
+        {redirect.input}
+      </SheetField>
+      <ActionRow
+        label="Start over"
+        help="Clears the saved token, for when signing in again does not pick up new permissions. Authenticate afterwards."
+      >
+        <Btn small id="tidal-disconnect-btn" onClick={() => void disconnect()}>
           Disconnect
-        </button>{' '}
-        <TestButton onClick={() => void testService(store, 'tidal')} />
-      </div>
+        </Btn>
+      </ActionRow>
     </ServiceCard>
   );
 }
@@ -883,8 +844,7 @@ function TidalCard({ store }: { store: SettingsStore }) {
 
 type QobuzAuth = QobuzAuthState;
 
-type Said = { text: string; color?: string };
-const QOBUZ_ERR = '#ff5555';
+type Said = { text: string; tone?: Tone };
 
 function QobuzCard({ store }: { store: SettingsStore }) {
   const [auth, setAuth] = useState<QobuzAuth | null>(null);
@@ -922,12 +882,12 @@ function QobuzCard({ store }: { store: SettingsStore }) {
         setPassword('');
         void checkQobuzAuthStatus();
       } else {
-        said = { text: data.error || 'Login failed', color: QOBUZ_ERR };
+        said = { text: data.error || 'Login failed', tone: 'bad' };
         toast(data.error || 'Qobuz login failed', 'error');
       }
     } catch (error) {
       console.error('Qobuz login error:', error);
-      said = { text: 'Connection error', color: QOBUZ_ERR };
+      said = { text: 'Connection error', tone: 'bad' };
       toast('Failed to connect to Qobuz', 'error');
     } finally {
       setLogin({ busy: false, said });
@@ -954,12 +914,12 @@ function QobuzCard({ store }: { store: SettingsStore }) {
         setToken('');
         void checkQobuzAuthStatus();
       } else {
-        said = { text: data.error || 'Token login failed', color: QOBUZ_ERR };
+        said = { text: data.error || 'Token login failed', tone: 'bad' };
         toast(data.error || 'Qobuz token login failed', 'error');
       }
     } catch (error) {
       console.error('Qobuz token login error:', error);
-      said = { text: 'Connection error', color: QOBUZ_ERR };
+      said = { text: 'Connection error', tone: 'bad' };
       toast('Failed to connect to Qobuz', 'error');
     } finally {
       setByToken({ busy: false, said });
@@ -983,126 +943,103 @@ function QobuzCard({ store }: { store: SettingsStore }) {
       service="qobuz"
       colour="#4285f4"
       title="Qobuz (Metadata & Enrichment)"
-      titleClass="qobuz-title"
+      test={() => testService(store, 'qobuz')}
     >
-      <div
+      <Note info>
+        Metadata enrichment (ISRC, labels, copyright). Also used for downloads when Qobuz is one of
+        your download sources.
+      </Note>
+      <ActionRow
         id="qobuz-connection-logged-in"
-        style={{ display: loggedIn ? 'flex' : 'none', marginBottom: '8px' }}
+        label="Signed in"
+        help={
+          <span id="qobuz-connection-user-info">
+            {loggedIn
+              ? `Connected: ${user.display_name || 'Qobuz User'} (${user.subscription || 'Active'})`
+              : ''}
+          </span>
+        }
+        hidden={!loggedIn}
       >
-        <span
-          id="qobuz-connection-user-info"
-          className="setting-help-text"
-          style={{ color: '#4caf50' }}
-        >
-          {loggedIn
-            ? `Connected: ${user.display_name || 'Qobuz User'} (${user.subscription || 'Active'})`
-            : ''}
-        </span>{' '}
-        <button className="auth-button" style={{ marginLeft: '8px' }} onClick={() => void logout()}>
+        <Btn small onClick={() => void logout()}>
           Disconnect
-        </button>
-      </div>
-      <div
-        id="qobuz-connection-form"
-        style={auth ? { display: loggedIn ? 'none' : 'block' } : undefined}
-      >
-        <Field label="Email:">
-          <input
+        </Btn>
+      </ActionRow>
+      <div id="qobuz-connection-form" hidden={!!auth && loggedIn}>
+        <SheetGroup title="Sign in" />
+        <SheetField label="Email" htmlFor="qobuz-connection-email">
+          <TextField
+            full
             type="email"
             id="qobuz-connection-email"
-            className="form-input"
             placeholder="Qobuz email"
             autoComplete="email"
             value={email}
             onChange={(event) => setEmail(event.target.value)}
           />
-        </Field>
-        <Field label="Password:">
-          <input
+        </SheetField>
+        <SheetField label="Password" htmlFor="qobuz-connection-password">
+          <TextField
+            full
             type="password"
             id="qobuz-connection-password"
-            className="form-input"
             placeholder="Qobuz password"
             autoComplete="current-password"
             value={password}
             onChange={(event) => setPassword(event.target.value)}
           />
-        </Field>
-        <div className="form-actions">
-          <button
-            className="auth-button"
+        </SheetField>
+        <ActionRow label="Sign in with these" help="Your password is sent to Qobuz once, not kept.">
+          <StatusWords id="qobuz-connection-status" tone={login.said.tone} live>
+            {login.said.text}
+          </StatusWords>
+          <Btn
+            small
+            kind="primary"
             id="qobuz-connection-login-btn"
-            disabled={login.busy}
+            busy={login.busy}
             onClick={() => void connect()}
           >
             {login.busy ? 'Connecting...' : 'Connect Qobuz'}
-          </button>{' '}
-          <span
-            id="qobuz-connection-status"
-            className="setting-help-text"
-            style={{ marginLeft: '8px', color: login.said.color }}
+          </Btn>
+        </ActionRow>
+      </div>
+      <More label="Sign in with a token instead" names="when the email sign-in asks for a CAPTCHA">
+        <SheetField
+          label="Auth token"
+          htmlFor="qobuz-connection-token"
+          help="If the email sign-in fails on a CAPTCHA, paste your token here."
+          more={
+            <>
+              Sign in at <Out href="https://play.qobuz.com">play.qobuz.com</Out>, open DevTools
+              (F12), the Network tab, find a request to <code>www.qobuz.com/api.json</code>, and
+              copy the <code>X-User-Auth-Token</code> request header.
+            </>
+          }
+        >
+          <TextField
+            full
+            type="password"
+            id="qobuz-connection-token"
+            placeholder="Paste your Qobuz auth token here"
+            value={token}
+            onChange={(event) => setToken(event.target.value)}
+          />
+        </SheetField>
+        <ActionRow label="Sign in with the token">
+          <StatusWords id="qobuz-token-status" tone={byToken.said.tone} live>
+            {byToken.said.text}
+          </StatusWords>
+          <Btn
+            small
+            id="qobuz-token-login-btn"
+            busy={byToken.busy}
+            onClick={() => void connectToken()}
           >
-            {login.said.text}
-          </span>
-        </div>
-      </div>
-      <div className="setting-help-text" style={{ marginTop: '6px' }}>
-        Connects Qobuz for metadata enrichment (ISRC, labels, copyright). Also used for downloads if
-        Qobuz is your download source.
-      </div>
-      <div
-        className="callback-info"
-        style={{
-          marginTop: '10px',
-          borderTop: '1px solid rgba(255,255,255,0.05)',
-          paddingTop: '10px',
-        }}
-      >
-        <div className="callback-help" style={{ marginBottom: '8px' }}>
-          <strong>Alternative: Auth Token</strong> — If email/password login fails (CAPTCHA), paste
-          your token directly:
-        </div>
-      </div>
-      <Field label="Auth Token:">
-        <input
-          type="password"
-          id="qobuz-connection-token"
-          className="form-input"
-          placeholder="Paste your Qobuz auth token here"
-          value={token}
-          onChange={(event) => setToken(event.target.value)}
-        />
-      </Field>
-      <div className="form-actions">
-        <button
-          className="auth-button"
-          id="qobuz-token-login-btn"
-          disabled={byToken.busy}
-          onClick={() => void connectToken()}
-        >
-          {byToken.busy ? 'Connecting...' : 'Connect with Token'}
-        </button>{' '}
-        <span
-          id="qobuz-token-status"
-          className="setting-help-text"
-          style={{ marginLeft: '8px', color: byToken.said.color }}
-        >
-          {byToken.said.text}
-        </span>
-      </div>
-      <div className="callback-info">
-        <div className="callback-help">
-          To get your token: log into{' '}
-          <a href="https://play.qobuz.com" target="_blank" style={{ color: '#4285f4' }}>
-            play.qobuz.com
-          </a>{' '}
-          → DevTools (F12) → Network tab → find any request to <code>www.qobuz.com/api.json</code> →
-          look in the request headers for <code>X-User-Auth-Token</code> → copy that value.
-        </div>
-      </div>
-      <div className="form-actions">
-        <TestButton onClick={() => void testService(store, 'qobuz')} />
-      </div>
+            {byToken.busy ? 'Connecting...' : 'Connect with Token'}
+          </Btn>
+        </ActionRow>
+      </More>
     </ServiceCard>
   );
 }
@@ -1132,10 +1069,12 @@ export function MusicbrainzCard({ store }: { store: SettingsStore }) {
   const loads = useLoads(store);
   const saved = sec(settings, 'musicbrainz');
   const [draft, setDraft] = useState<{ url: string; mode: string; rate: string } | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   // each load shows what is saved (settings.js loadMusicBrainzServerSettings)
   useEffect(() => {
     setDraft(null);
+    setError(null);
     mbError = null;
   }, [loads]);
 
@@ -1149,9 +1088,11 @@ export function MusicbrainzCard({ store }: { store: SettingsStore }) {
     const keys = musicbrainzKeys(next.url, next.mode, next.rate);
     if ('error' in keys) {
       mbError = keys.error;
+      setError(keys.error);
       return;
     }
     mbError = null;
+    setError(null);
     store.patch('musicbrainz', keys);
   }
 
@@ -1161,64 +1102,83 @@ export function MusicbrainzCard({ store }: { store: SettingsStore }) {
       colour="#ba478f"
       title="MusicBrainz"
       id="musicbrainz-server-settings"
+      test={() => testService(store, 'musicbrainz')}
     >
-      <div className="form-group">
-        <label htmlFor="musicbrainz-base-url">MusicBrainz server URL</label>
-        <input
+      <Note info>No key needed. Public MusicBrainz works as it is.</Note>
+      <SheetField
+        label="MusicBrainz server URL"
+        htmlFor="musicbrainz-base-url"
+        help="Only for your own MusicBrainz server. Leave it empty for public MusicBrainz."
+        more={
+          <span id="musicbrainz-server-help">
+            Optional: your self-hosted server's address. Leave it empty to use public MusicBrainz.
+            It applies to search, matching and enrichment as soon as settings are saved. Your server
+            needs its search indexes; use its final URL.
+          </span>
+        }
+      >
+        <TextField
+          full
+          mono
           type="url"
           id="musicbrainz-base-url"
           placeholder="https://musicbrainz.org"
           aria-describedby="musicbrainz-server-help"
+          invalid={!!error && /URL/.test(error)}
           value={shown.url}
           onChange={(event) => change({ ...shown, url: event.target.value })}
         />
-        <small className="settings-hint" id="musicbrainz-server-help">
-          Optional: enter your self-hosted server address. Leave blank to use public MusicBrainz.
-          Applies to search, matching and enrichment as soon as settings are saved.
-        </small>
-      </div>
-      <div className="form-group">
-        <label htmlFor="musicbrainz-rate-mode">MusicBrainz request rate</label>
-        <select
+      </SheetField>
+      <Row
+        label="Request rate"
+        htmlFor="musicbrainz-rate-mode"
+        field
+        error={error}
+        help="How fast SoulSync may ask. Public MusicBrainz always keeps its limit."
+        more={
+          <span id="musicbrainz-rate-help">
+            For a fixed limit, enter requests a second (for example, 10). With No limit (adaptive),
+            SoulSync finds the most requests a second your server can take. Only use it when you
+            host the MusicBrainz server yourself and nothing else uses it. Public MusicBrainz always
+            keeps its rate limit. Environment overrides take precedence over these fields.
+          </span>
+        }
+      >
+        <Select
           id="musicbrainz-rate-mode"
           aria-describedby="musicbrainz-rate-help"
           value={shown.mode}
           onChange={(event) => change({ ...shown, mode: event.target.value })}
-        >
-          <option value="fixed">Fixed limit</option>
-          <option value="adaptive">No limit (adaptive)</option>
-        </select>
-        <label htmlFor="musicbrainz-request-rate">Maximum requests/second</label>
-        <input
-          type="number"
+          options={[
+            { value: 'fixed', label: 'Fixed limit' },
+            { value: 'adaptive', label: 'No limit (adaptive)' },
+          ]}
+        />
+      </Row>
+      <Row
+        label="Maximum requests"
+        htmlFor="musicbrainz-request-rate"
+        sub
+        field
+        off={shown.mode === 'adaptive'}
+        help={shown.mode === 'adaptive' ? 'Not used with No limit.' : undefined}
+      >
+        <NumberField
           id="musicbrainz-request-rate"
           min="0.001"
           step="any"
+          unit="a second"
           aria-describedby="musicbrainz-rate-help"
           disabled={shown.mode === 'adaptive'}
           value={shown.rate}
           onChange={(event) => change({ ...shown, rate: event.target.value })}
         />
-        <small className="settings-hint" id="musicbrainz-rate-help">
-          For a fixed limit, enter requests/second (for example, 10). With No limit (adaptive),
-          SoulSync will try to find the maximum number of requests/second your server can handle.
-          Only use this when you host the MusicBrainz server yourself and it has no other traffic.
-          Public MusicBrainz always keeps its rate limit. Environment overrides take precedence over
-          these fields. Your server needs search indexes; use its final URL.
-        </small>
-      </div>
-
-      <div className="form-actions">
-        <TestButton onClick={() => void testService(store, 'musicbrainz')} />
-      </div>
+      </Row>
     </ServiceCard>
   );
 }
 
 // ── Hydrabase ──
-
-type Said_ = { text: string; color?: string };
-const HB_IDLE = 'rgba(255,255,255,0.4)';
 
 export function HydrabaseCard({ store }: { store: SettingsStore }) {
   const settings = useSettings(store);
@@ -1227,7 +1187,7 @@ export function HydrabaseCard({ store }: { store: SettingsStore }) {
   const url = text(hb.url || '');
   const apiKey = text(hb.api_key || '');
   const connected = useHydrabase();
-  const [said, setSaid] = useState<Said_>({ text: '' });
+  const [said, setSaid] = useState<Said>({ text: '' });
 
   // each load asks whether it is connected, and only ever says so
   useEffect(() => {
@@ -1237,7 +1197,7 @@ export function HydrabaseCard({ store }: { store: SettingsStore }) {
       .then((s) => {
         if (!s.connected) return;
         hydrabaseLink.set(true);
-        setSaid({ text: 'Connected', color: '#4caf50' });
+        setSaid({ text: 'Connected', tone: 'ok' });
       })
       .catch(() => {});
   }, [loads]);
@@ -1257,7 +1217,7 @@ export function HydrabaseCard({ store }: { store: SettingsStore }) {
       if (statusData.connected) {
         await fetch('/api/hydrabase/disconnect', { method: 'POST' });
         hydrabaseLink.set(false);
-        setSaid({ text: 'Disconnected', color: HB_IDLE });
+        setSaid({ text: 'Disconnected', tone: 'idle' });
         // the picker leaves it for iTunes if it was on it
         if (savedSource(store.getState().settings) === 'hydrabase')
           store.patch('metadata', sourceKeys('itunes'));
@@ -1271,7 +1231,7 @@ export function HydrabaseCard({ store }: { store: SettingsStore }) {
         const data = (await res.json()) as { success?: boolean; error?: string };
         if (data.success) {
           hydrabaseLink.set(true);
-          setSaid({ text: 'Connected', color: '#4caf50' });
+          setSaid({ text: 'Connected', tone: 'ok' });
           toast('Hydrabase connected', 'success');
         } else {
           setSaid((s) => ({ ...s, text: data.error || 'Connection failed' }));
@@ -1292,60 +1252,45 @@ export function HydrabaseCard({ store }: { store: SettingsStore }) {
       extra={{ 'data-stg': 'connections' }}
     >
       <input type="hidden" id="hydrabase-enabled" value="false" />
-      <Field label="WebSocket URL:">
-        <input
-          type="text"
+      <Note info>
+        A peer-to-peer metadata network. Connected, it takes over from Spotify and iTunes as the
+        primary source for searches.
+      </Note>
+      <SheetGroup title="Connection" />
+      <SheetField label="WebSocket URL" htmlFor="hydrabase-url">
+        <TextField
+          full
+          mono
           id="hydrabase-url"
           placeholder="ws://localhost:4545"
           value={url}
           onChange={(event) => store.set('hydrabase', 'url', event.target.value)}
         />
-      </Field>
-      <Field label="API Key:">
-        <SecretInput
+      </SheetField>
+      <SheetField label="API key" htmlFor="hydrabase-api-key" help={secretNote(apiKey)}>
+        <SecretField
           id="hydrabase-api-key"
           placeholder="Hydrabase API Key"
           value={apiKey}
           onChange={(value) => store.set('hydrabase', 'api_key', value)}
         />
-      </Field>
-      <div className="form-group" style={{ marginBottom: '8px' }}>
-        <label
-          className="checkbox-label"
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            cursor: 'pointer',
-            padding: 0,
-          }}
-        >
-          <input
-            type="checkbox"
-            id="hydrabase-auto-connect"
-            checked={!!hb.auto_connect}
-            onChange={(event) => store.set('hydrabase', 'auto_connect', event.target.checked)}
-          />{' '}
-          <span>Auto-connect on startup</span>
-        </label>
-      </div>
-      <div className="callback-info">
-        <div className="callback-help">
-          P2P metadata network. When enabled and connected, replaces Spotify/iTunes as the primary
-          metadata source for searches.
-        </div>
-      </div>
-      <div className="form-actions">
-        <button className="test-button" id="hydrabase-connect-btn" onClick={() => void toggle()}>
-          {connected ? 'Disconnect' : 'Connect'}
-        </button>{' '}
-        <span
-          id="hydrabase-settings-status"
-          style={{ fontSize: '0.82em', color: said.color ?? HB_IDLE, marginLeft: '8px' }}
-        >
+      </SheetField>
+      <ActionRow label="Link" help="Saves first, then opens or closes the link.">
+        <StatusWords id="hydrabase-settings-status" tone={said.tone} live>
           {said.text}
-        </span>
-      </div>
+        </StatusWords>
+        <Btn small id="hydrabase-connect-btn" onClick={() => void toggle()}>
+          {connected ? 'Disconnect' : 'Connect'}
+        </Btn>
+      </ActionRow>
+      <SheetGroup title="Options" />
+      <Row label="Connect when SoulSync starts" htmlFor="hydrabase-auto-connect">
+        <Switch
+          id="hydrabase-auto-connect"
+          checked={!!hb.auto_connect}
+          onChange={(event) => store.set('hydrabase', 'auto_connect', event.target.checked)}
+        />
+      </Row>
     </ServiceCard>
   );
 }
@@ -1426,53 +1371,7 @@ const BANDCAMP_ASK = {
     "Bandcamp has no official public search/metadata API — this uses Bandcamp's own public search and release-page endpoints. Coverage and availability may change without notice. Once enabled, Bandcamp will appear as a search source in Discover and as a metadata enrichment source for downloaded tracks.",
 };
 
-function ExperimentalRow({
-  id,
-  label,
-  checked,
-  onChange,
-  help,
-}: {
-  id: string;
-  label: ReactNode;
-  checked: boolean;
-  onChange: (checked: boolean) => void;
-  help: string;
-}) {
-  const state = useHelp();
-  const bits = helpBits(help, state);
-  return (
-    <div className="form-group">
-      <div className="setting-row" style={{ flex: 1, minWidth: 0 }}>
-        <label
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            cursor: 'pointer',
-            fontWeight: 'normal',
-            margin: 0,
-          }}
-        >
-          <input
-            type="checkbox"
-            id={id}
-            checked={checked}
-            onChange={(event) => onChange(event.target.checked)}
-          />{' '}
-          <span>{label}</span>
-        </label>
-        {bits.icon}
-      </div>
-      <div className="setting-help-text setting-help-body" hidden={!state.open}>
-        {help}
-      </div>
-      {bits.line}
-    </div>
-  );
-}
-
-export function ExperimentalSection({ store }: { store: SettingsStore }) {
+export function ExperimentalCard({ store }: { store: SettingsStore }) {
   const settings = useSettings(store);
   const loads = useLoads(store);
   const exp = sec(settings, 'experimental');
@@ -1519,28 +1418,37 @@ export function ExperimentalSection({ store }: { store: SettingsStore }) {
 
   return (
     <>
-      <Section tab="advanced" title="Experimental" hint="Opt-in preview features" side="music">
-        <div className="settings-group" data-stg="advanced" data-music-only="">
-          <p className="settings-experimental-intro">
-            Features in this section are optional, may change without notice, and are not held to
-            the same support standard as core metadata sources.
-          </p>
-          <ExperimentalRow
+      <Card
+        title="Experimental"
+        hint="Optional preview features. They may change without notice and are not held to the same support standard as the core metadata sources."
+        data-music-only=""
+        id="stg-experimental"
+      >
+        <Row
+          label="JioSaavn metadata source"
+          htmlFor="experimental-jiosaavn-enabled"
+          help="Offers JioSaavn as a primary metadata source on Connections and in search. Strong for Indian and Bollywood catalogs."
+          more="Free, no account. It goes through a public proxy API, limited to one request a second. Off by default. Turning it off moves the metadata source back to Deezer if JioSaavn was picked."
+        >
+          <Switch
             id="experimental-jiosaavn-enabled"
-            label="Enable JioSaavn metadata source"
             checked={jiosaavn}
-            onChange={(on) => void toggleJiosaavn(on)}
-            help="Exposes JioSaavn as a primary metadata source on the Connections tab and in search. Free, no account — strong for Indian and Bollywood catalogs; limited to 1 request/sec via the public proxy API. Off by default."
+            onChange={(event) => void toggleJiosaavn(event.target.checked)}
           />
-          <ExperimentalRow
+        </Row>
+        <Row
+          label="Bandcamp search and enrichment"
+          htmlFor="experimental-bandcamp-enabled"
+          help="Adds Bandcamp as a search source in Discover and fills in tags, label and credits for downloaded tracks."
+          more="Free, no account. It uses Bandcamp's own public search and release pages, which are unofficial: no promised uptime or rate limits. Off by default."
+        >
+          <Switch
             id="experimental-bandcamp-enabled"
-            label="Enable Bandcamp search & enrichment"
             checked={exp.bandcamp_enabled === true}
-            onChange={(on) => void toggleBandcamp(on)}
-            help="Adds Bandcamp as a Discover search source and a track/album metadata enrichment source (tags, label, credits). Free, no account — uses Bandcamp's own public search and release-page endpoints (unofficial, no guaranteed uptime or rate limits). Off by default."
+            onChange={(event) => void toggleBandcamp(event.target.checked)}
           />
-        </div>
-      </Section>
+        </Row>
+      </Card>
       <EnableDialog asking={asking} close={close} />
     </>
   );

@@ -24,21 +24,23 @@ describe('ServerFingerprint', () => {
       fingerprint: 'ae0396a668c3',
       lookup_id: 'ae0396a668c3' + 'f'.repeat(52),
     });
-    const { container } = render(<ServerFingerprint />);
+    const { container } = render(<ServerFingerprint load />);
     await waitFor(() =>
-      expect(container.querySelector('code')?.textContent).toBe('ae03 96a6 68c3'),
+      expect(container.querySelector('#security-server-fingerprint code')?.textContent).toBe(
+        'ae03 96a6 68c3',
+      ),
     );
   });
 
   it('says why when the server cannot read it', async () => {
     stub({ success: false, error: 'The server identity could not be read.' }, 500);
-    const { getByText } = render(<ServerFingerprint />);
+    const { getByText } = render(<ServerFingerprint load />);
     await waitFor(() => getByText('The server identity could not be read.'));
   });
 
-  it('asks nothing until its tab has been opened', () => {
+  it('asks nothing until System › Security is open', () => {
     const fn = stub({ success: true });
-    render(<ServerFingerprint load={false} />);
+    render(<ServerFingerprint />);
     expect(fn).not.toHaveBeenCalled();
   });
 });

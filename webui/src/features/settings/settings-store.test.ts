@@ -206,7 +206,8 @@ describe('the settings store', () => {
     expect(posted).toEqual([]);
     expect(await store.flush()).toBe(false);
     expect(store.hasPending()).toBe(true);
-    expect(states).toEqual(['pending']);
+    // held, and said so each time: the save status names what holds it
+    expect(states).toEqual(['pending', 'blocked', 'blocked']);
     bad = false;
     expect(await store.flush()).toBe(true);
     expect(posted).toEqual([{ ui_appearance: { sidebar_visualizer: 'wave' } }]);
@@ -215,6 +216,37 @@ describe('the settings store', () => {
     store.set('ui_appearance', 'sidebar_visualizer', 'bars');
     expect(await store.flush()).toBe(true);
     expect(posted).toHaveLength(2);
+  });
+
+  it('a held key waits unsaved while everything else saves, and saves once it is let go', async () => {
+    const store = make();
+    let bad = true;
+    store.hold(() => (bad ? [{ section: 'file_organization', key: 'templates.album_path' }] : []));
+    store.set('file_organization', 'templates.album_path', '$album');
+    store.set('ui_appearance', 'sidebar_visualizer', 'wave');
+    // the count is what a save would send
+    expect(store.pendingCount()).toBe(1);
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS);
+    // the other setting saved; the held key did not go out
+    expect(posted).toEqual([{ ui_appearance: { sidebar_visualizer: 'wave' } }]);
+    expect(store.getState().pending).toEqual({
+      file_organization: { 'templates.album_path': '$album' },
+    });
+    // said, not hidden behind "saved"
+    expect(states.at(-1)).toBe('blocked');
+    // only the held key waiting: nothing is sent, nothing failed
+    expect(await store.flush()).toBe(true);
+    expect(posted).toHaveLength(1);
+    expect(states.at(-1)).toBe('blocked');
+    // fixed: it saves
+    bad = false;
+    store.set('file_organization', 'templates.album_path', '$albumartist/$album');
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS);
+    expect(posted[1]).toEqual({
+      file_organization: { 'templates.album_path': '$albumartist/$album' },
+    });
+    expect(store.hasPending()).toBe(false);
+    expect(states.at(-1)).toBe('saved');
   });
 
   it('a saved setting refreshes the status dots at once, an autosave too', async () => {

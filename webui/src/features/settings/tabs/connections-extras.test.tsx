@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createSettingsStore, type SettingsPayload, type SettingsStore } from '../settings-store';
 import { SCROBBLER_PRESETS, scrobblerPresetUrl } from './connections-extras';
+import { serviceActions } from './connections-services';
 import { ConnectionsTab } from './connections-tab';
 
 type Shell = Window & Record<string, unknown>;
@@ -167,19 +168,11 @@ describe('the Scrobbling and Extras cards', () => {
     opened.mockRestore();
   });
 
-  it('Clear Quarantine asks, then clears', async () => {
+  it('Clear quarantine is not in the AcoustID sheet any more: it moved to System > Maintenance', () => {
     group();
-    const button = [...document.querySelectorAll('[data-service="acoustid"] button')].find(
-      (b) => b.textContent === 'Clear Quarantine',
-    )!;
-    fireEvent.click(button);
-    await waitFor(() =>
-      expect(calls).toContainEqual({ url: '/api/quarantine/clear', method: 'POST' }),
-    );
-    expect(shell.showConfirmDialog).toHaveBeenCalledWith(
-      expect.objectContaining({ title: 'Clear Quarantine', destructive: true }),
-    );
-    expect(shell.showToast).toHaveBeenCalledWith('Quarantine cleared', 'success');
+    const card = document.querySelector('[data-service="acoustid"]')!;
+    expect(card.textContent).not.toContain('Clear quarantine');
+    expect(card.textContent).not.toContain('Clear Quarantine');
   });
 
   it('Last.fm says plainly when the key was refused (Pro only from 1 December 2026)', async () => {
@@ -200,50 +193,23 @@ describe('the Scrobbling and Extras cards', () => {
       expect(calls.filter((c) => c.url === '/api/lastfm/configured')).toHaveLength(1),
     );
     expect(document.getElementById('lastfm-key-rejected')).toBeNull();
-    const buttons = document.querySelectorAll<HTMLButtonElement>(
-      '[data-service="lastfm"] .form-actions:last-child .test-button',
-    );
-    fireEvent.click(buttons[buttons.length - 1]);
+    // the sheet's Test calls the card's own, which asks again afterwards
+    await act(async () => {
+      await serviceActions.get('music:lastfm')!.test!();
+    });
     await waitFor(() =>
       expect(calls.filter((c) => c.url === '/api/lastfm/configured')).toHaveLength(2),
     );
   });
 
-  it('the test row and each card test the service', async () => {
+  it('each card tests its service; the hidden row of six Test buttons and Expand All went', async () => {
     group();
-    const row = [...document.querySelectorAll<HTMLButtonElement>('.api-test-buttons button')];
-    expect(row.map((b) => b.textContent)).toEqual([
-      'Test Spotify',
-      'Test Tidal',
-      'Test ListenBrainz',
-      'Test AcoustID',
-      'Test Last.fm',
-      'Test Genius',
-    ]);
-    fireEvent.click(row[2]);
-    fireEvent.click(
-      document.querySelector<HTMLButtonElement>('[data-service="concerts"] .test-button')!,
-    );
-    await waitFor(() => expect(shell.testConnection).toHaveBeenCalledTimes(2));
+    expect(document.querySelector('.api-test-buttons, .stg-accordion-toggle')).toBeNull();
+    await act(async () => {
+      await serviceActions.get('music:listenbrainz')!.test!();
+      await serviceActions.get('music:concerts')!.test!();
+    });
     expect(shell.testConnection).toHaveBeenNthCalledWith(1, 'listenbrainz');
     expect(shell.testConnection).toHaveBeenNthCalledWith(2, 'concerts');
-  });
-
-  it('Expand All opens every card, then shuts them', () => {
-    const page = document.createElement('div');
-    page.id = 'settings-page';
-    document.body.append(page);
-    render(<ConnectionsTab store={store} part="api-music" opened={0} active={false} />, {
-      container: page,
-    });
-    const toggle = document.querySelector<HTMLButtonElement>('.stg-accordion-toggle')!;
-    fireEvent.click(toggle);
-    const cards = [...page.querySelectorAll('.stg-service')];
-    expect(cards).toHaveLength(15);
-    expect(cards.every((c) => c.classList.contains('expanded'))).toBe(true);
-    expect(toggle.textContent).toBe('Collapse All');
-    fireEvent.click(toggle);
-    expect(cards.some((c) => c.classList.contains('expanded'))).toBe(false);
-    expect(toggle.textContent).toBe('Expand All');
   });
 });

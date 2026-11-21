@@ -11,7 +11,7 @@ import { act, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createSettingsStore } from '@/features/settings/settings-store';
-import { SecuritySection } from '@/features/settings/tabs/system-security';
+import { SecurityView } from '@/features/settings/tabs/system-security';
 
 const opened: string[] = [];
 vi.mock('@/features/settings/tabs/people/people-tab', () => ({
@@ -44,7 +44,7 @@ function page(security: Record<string, unknown> | null, templates: unknown = nul
     },
     delay: 0,
   });
-  render(<SecuritySection store={store} part="security" opened={0} active={false} />);
+  render(<SecurityView store={store} />);
   if (security) act(() => store.hydrate({ security }));
   return { store, posted };
 }
@@ -63,10 +63,9 @@ describe('new people start as', () => {
       },
     );
     await waitFor(() =>
-      expect(el('security-signup-template-open').textContent).toBe(
-        'New sign-ups: change in People',
-      ),
+      expect(el('security-signup-template').textContent).toContain('New sign-ups'),
     );
+    expect(el('security-signup-template-open').textContent).toBe('Change in People');
   });
 
   it('opens People > Templates', () => {

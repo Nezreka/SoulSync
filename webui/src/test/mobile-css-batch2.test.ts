@@ -61,14 +61,6 @@ describe('RC2 — tab rails that #1661 could not reach', () => {
     expect(WATCHLIST_TSX).toContain('role="tablist"');
     expect(WATCHLIST_TSX).toContain('aria-selected={search.tab ===');
   });
-
-  it('the folders media switcher scrolls instead of squeezing its labels', () => {
-    const at = STYLE.indexOf('#settings-page .stg-media-switcher button { flex: 1; min-width: 0');
-    expect(at, 'the old flex:1 squeeze rule is still in style.css').toBe(-1);
-    const block = blockAfter(STYLE, '#settings-page .stg-media-switcher {');
-    expect(block).toContain('overflow-x: auto');
-    expect(block).toContain('flex-wrap: nowrap');
-  });
 });
 
 describe('RC3 — min-width floors collapse at phone widths', () => {
@@ -81,21 +73,8 @@ describe('RC3 — min-width floors collapse at phone widths', () => {
     expect(blockAfter(STYLE, '#tools-page .tools-section-head {')).toContain('flex-wrap: wrap');
   });
 
-  it('the logs toolbar wraps so the Auto-scroll toggle stays on screen', () => {
-    expect(blockAfter(STYLE, '.log-viewer-actions {')).toContain('flex-wrap: wrap');
-  });
-
   it('quality presets wrap instead of cutting the third preset', () => {
     expect(blockAfter(STYLE, '.preset-buttons {')).toContain('flex-wrap: wrap');
-  });
-
-  it('the downloads chain columns may shrink below their desktop min-content', () => {
-    expect(STYLE).toContain('.dlchain-columns > * { min-width: 0; }');
-  });
-
-  it('chain step rows shed their decorative chrome on phones so the name fits', () => {
-    const at = STYLE.indexOf('.dlchain-step-art, .dlchain-grip { display: none; }');
-    expect(at).toBeGreaterThan(-1);
   });
 
   it('video issues stats get a phone layout', () => {
@@ -117,10 +96,6 @@ describe('RC3 — min-width floors collapse at phone widths', () => {
     const block = blockAfter(AUDIOBOOKS_CSS.slice(at), '.searchModes {');
     expect(block).toContain('overflow-x: auto');
     expect(block).toContain('min-width: 0');
-  });
-
-  it('below 360px chain steps drop the rank numeral so the source name fits', () => {
-    expect(STYLE).toContain('.dlchain-step-rank { display: none; }');
   });
 });
 
@@ -150,12 +125,6 @@ describe('RC4 — hamburger coverage matches the classes the app actually sets',
     // unmount removes it, so no body class can leak.
     expect(MOBILE).toContain('body:has([data-audiobook-overlay]) .hamburger-btn');
     expect(AUDIOBOOK_OVERLAY_TSX).toContain('data-audiobook-overlay');
-  });
-
-  it('settings sub-page titles clear the hamburger', () => {
-    expect(blockAfter(MOBILE, '#settings-page .stg-active-section-title {')).toContain(
-      'padding-left: 56px',
-    );
   });
 
   it('the Auto-Sync header wraps so the summary cannot crush the title', () => {

@@ -1,0 +1,233 @@
+/**
+ * The side sheet: one thing's settings beside the page that opened it, the
+ * whole screen on a phone. Head (mark, name, where it is used, status, close),
+ * a body that scrolls, and a foot that stays put (a Test with its answer on
+ * the left, the main action on the right).
+ *
+ * It stays mounted while closed, so what was typed in it is still there when
+ * it opens again. Escape and the scrim close it; Tab stays inside while it is
+ * open, and focus goes back to what opened it.
+ */
+
+import { type ReactNode, useEffect, useId, useRef, useState } from 'react';
+
+import { helpFirstLine } from '../tabs/parts';
+import { Btn, FieldNote } from './parts';
+import s from './settings.module.css';
+
+const FOCUSABLE = [
+  'a[href]',
+  'button:not([disabled])',
+  'input:not([disabled]):not([type="hidden"])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])',
+].join(',');
+
+function focusable(root: HTMLElement): HTMLElement[] {
+  return Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
+    (el) => !el.closest('[hidden]') && el.getAttribute('aria-hidden') !== 'true',
+  );
+}
+
+export function Sheet({
+  open,
+  onClose,
+  id,
+  title,
+  titleId,
+  sub,
+  mark,
+  status,
+  foot,
+  bodyId,
+  bodyClass,
+  // not a saved secret: focusing one empties it for a new one (SecretField)
+  focusFirst = 'input:not([type=hidden]):not([type=password]), select, textarea',
+  children,
+}: {
+  open: boolean;
+  onClose: () => void;
+  id?: string;
+  title: ReactNode;
+  titleId: string;
+  /** where it is used, under the name */
+  sub?: ReactNode;
+  mark?: ReactNode;
+  status?: ReactNode;
+  foot?: ReactNode;
+  bodyId?: string;
+  /** on <body> while open (the page's own scroll lock) */
+  bodyClass?: string;
+  /** what takes focus on open, inside the body; the sheet itself otherwise */
+  focusFirst?: string;
+  children?: ReactNode;
+}) {
+  const sheet = useRef<HTMLElement>(null);
+  const body = useRef<HTMLDivElement>(null);
+  const close = useRef(onClose);
+  close.current = onClose;
+
+  useEffect(() => {
+    const node = sheet.current;
+    if (!open || !node) return;
+    const previous = document.activeElement as HTMLElement | null;
+    if (bodyClass) document.body.classList.add(bodyClass);
+    // after the open thing's content is in the body
+    const focus = setTimeout(() => {
+      (body.current?.querySelector<HTMLElement>(focusFirst) ?? node).focus({ preventScroll: true });
+    }, 40);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        // a menu or picker inside that takes Escape stops it getting here
+        event.stopPropagation();
+        close.current();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const items = focusable(node);
+      if (!items.length) {
+        event.preventDefault();
+        node.focus({ preventScroll: true });
+        return;
+      }
+      const edge = event.shiftKey ? items[0] : items[items.length - 1];
+      if (document.activeElement === edge || !node.contains(document.activeElement)) {
+        event.preventDefault();
+        (event.shiftKey ? items[items.length - 1] : items[0]).focus({ preventScroll: true });
+      }
+    };
+    node.addEventListener('keydown', onKeyDown);
+    // Escape with focus outside the sheet (the page behind it) closes it too
+    const onDocKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !node.contains(event.target as Node)) close.current();
+    };
+    document.addEventListener('keydown', onDocKey);
+    return () => {
+      clearTimeout(focus);
+      node.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener('keydown', onDocKey);
+      if (bodyClass) document.body.classList.remove(bodyClass);
+      const active = document.activeElement;
+      if (previous?.isConnected && (!active || active === document.body || node.contains(active)))
+        previous.focus({ preventScroll: true });
+    };
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <>
+      <div className={s.scrim} hidden={!open} onClick={() => onClose()} data-sheet-scrim="" />
+      <aside
+        ref={sheet}
+        id={id}
+        className={s.sheet}
+        hidden={!open}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+      >
+        <div className={s.sheetHead} data-ui="">
+          {mark}
+          <div className={s.sheetTitles}>
+            <h3 className={s.sheetTitle} id={titleId}>
+              {title}
+            </h3>
+            {sub ? <p className={s.sheetSub}>{sub}</p> : null}
+          </div>
+          {status}
+          <Btn kind="ghost" iconOnly icon="x" aria-label="Close" onClick={() => onClose()} />
+        </div>
+        <div className={s.sheetBody} id={bodyId} ref={body}>
+          {children}
+        </div>
+        {foot ? (
+          <div className={s.sheetFoot} data-ui="">
+            {foot}
+          </div>
+        ) : null}
+      </aside>
+    </>
+  );
+}
+
+/** the left of a sheet's foot: the answer takes the room, the main action sits right */
+export function SheetFootSay({ children }: { children: ReactNode }) {
+  return <div className={s.sheetFootSay}>{children}</div>;
+}
+
+/** a labelled group of fields in a sheet; `children` sit beside the title (a badge) */
+export function SheetGroup({ title, children }: { title: string; children?: ReactNode }) {
+  return (
+    <h4 className={s.grp}>
+      {children ? (
+        <span className={s.grpLine}>
+          {title}
+          {children}
+        </span>
+      ) : (
+        title
+      )}
+    </h4>
+  );
+}
+
+/**
+ * A field in a sheet: its label over it and the field the full width, the way
+ * a URL or a key reads best. One line of help under it; a long string keeps
+ * the rest behind the "i", as a row does.
+ */
+export function SheetField({
+  label,
+  htmlFor,
+  help,
+  more,
+  id,
+  hidden,
+  children,
+}: {
+  label: ReactNode;
+  htmlFor?: string;
+  help?: ReactNode;
+  /** more to read, behind the "i" (when `help` is not a long string) */
+  more?: ReactNode;
+  id?: string;
+  hidden?: boolean;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const moreId = useId();
+  let line: ReactNode = help;
+  let rest: ReactNode = more;
+  if (typeof help === 'string' && !more) {
+    const split = helpFirstLine(help);
+    line = split.line;
+    rest = split.rest ? help : null;
+  }
+  return (
+    <div className={s.sfield} id={id} hidden={hidden} data-field="">
+      <div className={s.sfieldLabel}>
+        {htmlFor ? <label htmlFor={htmlFor}>{label}</label> : <span>{label}</span>}
+        {rest ? (
+          <button
+            type="button"
+            className={s.helpBtn}
+            aria-expanded={open}
+            aria-controls={moreId}
+            aria-label="More about this setting"
+            onClick={() => setOpen((o) => !o)}
+          >
+            i
+          </button>
+        ) : null}
+      </div>
+      {children}
+      {line ? <FieldNote>{line}</FieldNote> : null}
+      {rest ? (
+        <div className={s.rowMore} id={moreId} hidden={!open}>
+          {rest}
+        </div>
+      ) : null}
+    </div>
+  );
+}

@@ -41,14 +41,10 @@ describe('per-indexer seed rules', () => {
   it('says when Prowlarr is not set up', async () => {
     answers['GET /api/prowlarr/indexers'] = { success: false };
     render(<VideoSeedingGoals />);
-    expect(rows().textContent).toBe(
-      'Click Load indexers to list the torrent indexers from Prowlarr.',
-    );
+    expect(rows().textContent).toBe('Load indexers to list the torrent indexers from Prowlarr.');
     fireEvent.click(document.getElementById('video-seed-idx-refresh')!);
     await waitFor(() =>
-      expect(rows().textContent).toBe(
-        "Prowlarr isn't configured yet (Settings → Indexers & Downloaders).",
-      ),
+      expect(rows().textContent).toBe("Prowlarr isn't set up yet (Downloads, Sources, Indexers)."),
     );
   });
 
@@ -63,8 +59,12 @@ describe('per-indexer seed rules', () => {
     render(<VideoSeedingGoals />);
     await act(() => videoDownloads.load());
     fireEvent.click(document.getElementById('video-seed-idx-refresh')!);
-    await waitFor(() => expect(rows().querySelectorAll('.ind-indexer-card')).toHaveLength(1));
-    expect(rows().querySelector('.ind-indexer-card-name')!.textContent).toBe('TorrentLeech');
+    await waitFor(() => expect(rows().querySelectorAll('[data-indexer]')).toHaveLength(1));
+    expect(rows().querySelector('[data-indexer]')!.textContent).toContain('TorrentLeech');
+    // each box is named for a reader: what it is, and for which tracker
+    expect(rows().querySelector('[data-vseed-field="hours"]')!.getAttribute('aria-label')).toBe(
+      'Hours for TorrentLeech',
+    );
     const field = (f: string) =>
       rows().querySelector<HTMLInputElement>(`[data-vseed-field="${f}"]`)!;
     expect(field('ratio').value).toBe('2');

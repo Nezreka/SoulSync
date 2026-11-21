@@ -1,8 +1,11 @@
 /**
  * The video side's two row editors (SETTINGS_PORT.md, video pass V3c):
  * Notifications on the Connections tab (a Discord / webhook / Telegram
- * connection per row, the events it hears, Test) and Import Lists on the
- * Discovery tab (a TMDB / IMDb / Plex list per row). Were video-settings.js.
+ * connection per block, the events it hears as chips, Test, a delete that
+ * asks first; on the parts since settings-bic phase 6) and Import Lists on the
+ * Discovery tab (a TMDB / IMDb / Plex list per row, on the parts since
+ * settings-bic phase 5: column headers, a delete that asks first). Were
+ * video-settings.js.
  * Each loads each time the video settings page is shown; a row saves alone
  * when one of its fields changes (a text field when it is left), as before.
  *
@@ -12,9 +15,10 @@
  * which is drawn again so its URL or token fields swap.
  */
 
-import { type ReactNode, useEffect, useRef, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useSyncExternalStore } from 'react';
 
-import { Section } from './parts';
+import { Btn, Card, CheckChips, Note, Row as SettingRow, Select, Switch, TextField } from '../ui';
+import s from '../ui/settings.module.css';
 import { videoShown } from './video-shown';
 
 type Row = Record<string, unknown> & { id: number };
@@ -130,18 +134,6 @@ function useRowChange(onChange: (row: HTMLElement, field: string | null) => void
   return host;
 }
 
-function Options({ options }: { options: Array<[string, string]> }) {
-  return (
-    <>
-      {options.map(([v, label]) => (
-        <option key={v} value={v}>
-          {label}
-        </option>
-      ))}
-    </>
-  );
-}
-
 // ── import lists ──
 
 /** a field of a row, off the page */
@@ -164,6 +156,47 @@ function listBody(row: HTMLElement) {
   };
 }
 
+export const IMPORT_SOURCES: Array<[string, string]> = [
+  ['tmdb_list', 'TMDB list'],
+  ['tmdb_chart', 'TMDB chart'],
+  ['imdb_list', 'IMDb list'],
+  ['plex_watchlist', 'Plex Watchlist'],
+];
+
+/** what goes in the List field, by where the list comes from */
+export const IMPORT_REF_HINT: Record<string, string> = {
+  tmdb_list: 'TMDB list id',
+  tmdb_chart: 'chart, like trending_movies',
+  imdb_list: 'IMDb ls id or link',
+  plex_watchlist: 'not needed',
+};
+
+const IMPORT_MEDIA: Array<[string, string]> = [
+  ['both', 'Both'],
+  ['movie', 'Movies'],
+  ['show', 'Shows'],
+];
+
+const IMPORT_MONITOR: Array<[string, string]> = [
+  ['future', 'Future episodes'],
+  ['all', 'All aired'],
+  ['latest_season', 'Latest season'],
+  ['first_season', 'First season'],
+  ['pilot', 'Pilot'],
+];
+
+const opts = (list: Array<[string, string]>) => list.map(([value, label]) => ({ value, label }));
+
+/** the lists as the hero reads them: null until they loaded */
+export function useImportListLines() {
+  const { rows, drawn, fields } = useRows(importLists);
+  if (rows === null) return null;
+  return drawn.map((l) => ({
+    name: str(fields[l.id]?.name),
+    enabled: !!fields[l.id]?.enabled,
+  }));
+}
+
 function ImportListRows() {
   const { rows, drawn, fields } = useRows(importLists);
   const host = useRowChange((row) => {
@@ -172,7 +205,7 @@ function ImportListRows() {
         const r = await post(importLists.url, listBody(row));
         const res = r.ok ? ((await r.json()) as (Row & { success?: boolean }) | null) : null;
         if (!res || !res.success) {
-          toast('A list needs a valid source + ref', 'error');
+          toast('A list needs a valid source and list', 'error');
           return;
         }
         importLists.saved(res);
@@ -183,6 +216,18 @@ function ImportListRows() {
   });
 
   async function remove(id: number) {
+    const name = str(fields[id]?.name).trim() || 'this list';
+    const confirm = window.showConfirmDialog;
+    if (confirm) {
+      const ok = await confirm({
+        title: `Delete ${name}?`,
+        message: 'SoulSync stops watching it. What it already added stays where it is.',
+        confirmText: 'Delete',
+        cancelText: 'Keep it',
+        destructive: true,
+      });
+      if (!ok) return;
+    }
     try {
       const r = await fetch(`${importLists.url}/${id}`, { method: 'DELETE' });
       const res = r.ok ? ((await r.json()) as { success?: boolean } | null) : null;
@@ -198,93 +243,85 @@ function ImportListRows() {
     importLists.edit(id, k, event.target.value);
 
   return (
-    <div id="vq-implist-rows" ref={host}>
+    <div id="vq-implist-rows" className={s.cardPad} ref={host}>
       {rows === null ? null : drawn.length ? (
-        drawn.map((l) => (
-          <div className="vq-fmt-row vq-implist-row" key={l.id} data-vq-implist={l.id}>
-            <input
-              className="vq-fmt-in"
-              data-vq-il-f="name"
-              placeholder="Name"
-              value={field(l.id, 'name')}
-              onChange={edit(l.id, 'name')}
-            />
-            <select
-              className="vq-fmt-in"
-              data-vq-il-f="source"
-              value={field(l.id, 'source')}
-              onChange={edit(l.id, 'source')}
-            >
-              <Options
-                options={[
-                  ['tmdb_list', 'TMDB list'],
-                  ['tmdb_chart', 'TMDB chart'],
-                  ['imdb_list', 'IMDb list'],
-                  ['plex_watchlist', 'Plex Watchlist'],
-                ]}
-              />
-            </select>
-            <input
-              className="vq-fmt-in"
-              data-vq-il-f="ref"
-              placeholder="list id / chart / ls…"
-              value={field(l.id, 'ref')}
-              onChange={edit(l.id, 'ref')}
-            />
-            <select
-              className="vq-fmt-in"
-              data-vq-il-f="media"
-              value={field(l.id, 'media')}
-              onChange={edit(l.id, 'media')}
-            >
-              <Options
-                options={[
-                  ['both', 'Both'],
-                  ['movie', 'Movies'],
-                  ['show', 'Shows'],
-                ]}
-              />
-            </select>
-            <select
-              className="vq-fmt-in"
-              data-vq-il-f="monitor"
-              title="Shows: what to wish when followed"
-              value={field(l.id, 'monitor')}
-              onChange={edit(l.id, 'monitor')}
-            >
-              <Options
-                options={[
-                  ['future', 'Future eps'],
-                  ['all', 'All aired'],
-                  ['latest_season', 'Latest season'],
-                  ['first_season', 'First season'],
-                  ['pilot', 'Pilot'],
-                ]}
-              />
-            </select>
-            <label className="vq-il-on" title="Enabled">
-              <input
-                type="checkbox"
-                data-vq-il-f="enabled"
-                checked={!!fields[l.id]?.enabled}
-                onChange={(event) => importLists.edit(l.id, 'enabled', event.target.checked)}
-              />
-            </label>
-            <button
-              className="vq-fmt-del"
-              type="button"
-              data-vq-implist-del={l.id}
-              title="Delete list"
-              onClick={() => void remove(l.id)}
-            >
-              ✕
-            </button>
+        <>
+          <div className={s.ilHead} aria-hidden="true">
+            <span>Name</span>
+            <span>From</span>
+            <span>List</span>
+            <span>Adds</span>
+            <span>A followed show gets</span>
+            <span>On</span>
+            <span />
           </div>
-        ))
+          {drawn.map((l) => {
+            const name = field(l.id, 'name').trim() || 'this list';
+            const source = field(l.id, 'source');
+            const movies = field(l.id, 'media') === 'movie';
+            return (
+              <div className={s.ilRow} key={l.id} data-vq-implist={l.id}>
+                <TextField
+                  full
+                  data-vq-il-f="name"
+                  aria-label="List name"
+                  placeholder="Name"
+                  value={field(l.id, 'name')}
+                  onChange={edit(l.id, 'name')}
+                />
+                <Select
+                  data-vq-il-f="source"
+                  aria-label="From"
+                  value={source}
+                  options={opts(IMPORT_SOURCES)}
+                  onChange={edit(l.id, 'source')}
+                />
+                <TextField
+                  full
+                  mono
+                  data-vq-il-f="ref"
+                  aria-label="List"
+                  placeholder={IMPORT_REF_HINT[source] ?? 'list id, chart or ls id'}
+                  value={field(l.id, 'ref')}
+                  onChange={edit(l.id, 'ref')}
+                />
+                <Select
+                  data-vq-il-f="media"
+                  aria-label="Adds"
+                  value={field(l.id, 'media')}
+                  options={opts(IMPORT_MEDIA)}
+                  onChange={edit(l.id, 'media')}
+                />
+                <Select
+                  data-vq-il-f="monitor"
+                  aria-label="What a followed show gets"
+                  title={movies ? 'Only used for shows' : undefined}
+                  className={movies ? s.ilDim : undefined}
+                  value={field(l.id, 'monitor')}
+                  options={opts(IMPORT_MONITOR)}
+                  onChange={edit(l.id, 'monitor')}
+                />
+                <Switch
+                  data-vq-il-f="enabled"
+                  aria-label="Use this list"
+                  checked={!!fields[l.id]?.enabled}
+                  onChange={(event) => importLists.edit(l.id, 'enabled', event.target.checked)}
+                />
+                <Btn
+                  kind="ghost"
+                  small
+                  iconOnly
+                  icon="x"
+                  data-vq-implist-del={l.id}
+                  aria-label={`Delete ${name}`}
+                  onClick={() => void remove(l.id)}
+                />
+              </div>
+            );
+          })}
+        </>
       ) : (
-        <div className="settings-hint" style={{ padding: '6px 0' }}>
-          No import lists yet.
-        </div>
+        <p className={s.listEmpty}>No import lists yet.</p>
       )}
     </div>
   );
@@ -305,36 +342,41 @@ async function addImportList() {
   }
 }
 
-export function ImportListsSection() {
+/** Discovery > Import Lists (video side): the lists, a row each, with
+ *  column headers; a delete asks first */
+export function ImportListsCard() {
+  const lines = useImportListLines();
+  const allOff = !!lines?.length && lines.every((l) => !l.enabled);
   return (
-    <Section
-      tab="discovery"
-      side="video"
-      title="Import Lists"
-      hint="Auto-add movies & shows from a list"
-    >
-      <div className="settings-group" data-stg="discovery" data-video-only="">
-        <div className="form-group" id="video-import-lists">
-          <label>Import lists:</label>
-          <small className="settings-hint" style={{ display: 'block', marginBottom: '8px' }}>
-            Everything on a list enters acquisition automatically (movies → wishlist, shows → follow
-            with the chosen monitor policy). Only NEW list members are added, so removing something
-            never boomerangs back. Synced by the &quot;Sync Import Lists&quot; automation. Ref: a
-            TMDB list id, a chart key (trending_movies, top_shows, …), an IMDb ls-id/URL — Plex
-            Watchlist needs no ref.
-          </small>
-          <ImportListRows />
-          <button
-            className="test-button"
-            type="button"
-            data-vq-implist-add=""
-            onClick={() => void addImportList()}
-          >
-            + Add list
-          </button>
-        </div>
-      </div>
-    </Section>
+    <div id="video-import-lists">
+      <Card
+        title="Import lists"
+        hint="Anything new on a list is added on its own. Each row saves when you change it."
+        actions={
+          <Btn small icon="plus" data-vq-implist-add="" onClick={() => void addImportList()}>
+            Add list
+          </Btn>
+        }
+      >
+        {allOff ? (
+          <div className={s.cardPad}>
+            <Note>Every list is switched off, so nothing is added from them.</Note>
+          </div>
+        ) : null}
+        <ImportListRows />
+        <SettingRow
+          label="How a list adds things"
+          help="Movies go to the wishlist and shows are followed, with what a followed show gets. Only new members of a list are added, so removing something never brings it back."
+          more={
+            <>
+              The <strong>Sync Import Lists</strong> automation checks them. List takes a TMDB list
+              id, a TMDB chart (trending_movies, top_shows and so on) or an IMDb ls id or link. Plex
+              Watchlist needs none.
+            </>
+          }
+        />
+      </Card>
+    </div>
   );
 }
 
@@ -375,7 +417,7 @@ function NotifyBlocks() {
         const r = await post(notifications.url, notifyBody(block));
         const res = r.ok ? ((await r.json()) as (Row & { success?: boolean }) | null) : null;
         if (!res || !res.success) {
-          toast('Connection needs a valid target (URL or token + chat id)', 'error');
+          toast('A connection needs a valid target: a URL, or a bot token and chat id', 'error');
           return;
         }
         notifications.saved(res);
@@ -388,6 +430,18 @@ function NotifyBlocks() {
   });
 
   async function remove(id: number) {
+    const name = str(fields[id]?.name).trim() || 'this connection';
+    const confirm = window.showConfirmDialog;
+    if (confirm) {
+      const ok = await confirm({
+        title: `Delete ${name}?`,
+        message: 'SoulSync stops sending to it. Nothing already sent is touched.',
+        confirmText: 'Delete',
+        cancelText: 'Keep it',
+        destructive: true,
+      });
+      if (!ok) return;
+    }
     try {
       const r = await fetch(`${notifications.url}/${id}`, { method: 'DELETE' });
       const res = r.ok ? ((await r.json()) as { success?: boolean } | null) : null;
@@ -406,7 +460,7 @@ function NotifyBlocks() {
       const r = await post(`${notifications.url}/test`, notifyBody(block));
       const j = (await r.json().catch(() => null)) as { success?: boolean; error?: string } | null;
       button.disabled = false;
-      if (r.ok && j && j.success) toast('Test sent — check the channel', 'success');
+      if (r.ok && j && j.success) toast('Test sent. Check the channel.', 'success');
       else toast((j && j.error) || 'Test failed', 'error');
     } catch {
       button.disabled = false;
@@ -417,121 +471,136 @@ function NotifyBlocks() {
   const field = (id: number, k: string) => str(fields[id]?.[k]);
   const edit = (id: number, k: string) => (event: { target: { value: string } }) =>
     notifications.edit(id, k, event.target.value);
-  const hide = (on: boolean) => (on ? undefined : { display: 'none' });
 
   return (
-    <div id="vq-notify-rows" ref={host}>
+    <div id="vq-notify-rows" className={s.cardPad} ref={host}>
       {rows === null ? null : drawn.length ? (
         drawn.map((c) => {
           // the target fields follow the type the row was drawn with
           const tg = c.type === 'telegram';
+          const name = field(c.id, 'name').trim() || 'this connection';
           const ticked = (fields[c.id]?.events as string[] | undefined) || [];
           return (
-            <div className="vq-nt-block" key={c.id} data-vq-notify={c.id}>
-              <div className="vq-fmt-row vq-nt-row">
-                <input
-                  className="vq-fmt-in"
+            <div className={s.ntBlock} key={c.id} data-vq-notify={c.id}>
+              <div className={s.ntHead}>
+                <TextField
+                  full
                   data-vq-nt-f="name"
+                  aria-label="Connection name"
                   placeholder="Name"
                   value={field(c.id, 'name')}
                   onChange={edit(c.id, 'name')}
                 />
-                <select
-                  className="vq-fmt-in"
+                <Select
                   data-vq-nt-f="type"
+                  aria-label="Sends to"
                   value={field(c.id, 'type')}
+                  options={NOTIFY_TYPES}
                   onChange={edit(c.id, 'type')}
-                >
-                  <Options
-                    options={[
-                      ['discord', 'Discord'],
-                      ['webhook', 'Webhook'],
-                      ['telegram', 'Telegram'],
-                    ]}
-                  />
-                </select>
-                <input
-                  className="vq-fmt-in"
-                  data-vq-nt-f="url"
-                  placeholder="Webhook URL"
-                  style={hide(!tg)}
-                  value={field(c.id, 'url')}
-                  onChange={edit(c.id, 'url')}
                 />
-                <input
-                  className="vq-fmt-in"
-                  data-vq-nt-f="token"
-                  placeholder="Bot token"
-                  style={hide(tg)}
-                  value={field(c.id, 'token')}
-                  onChange={edit(c.id, 'token')}
+                <Switch
+                  data-vq-nt-f="enabled"
+                  aria-label={`Use ${name}`}
+                  checked={!!fields[c.id]?.enabled}
+                  onChange={(event) => notifications.edit(c.id, 'enabled', event.target.checked)}
                 />
-                <input
-                  className="vq-fmt-in"
-                  data-vq-nt-f="chat_id"
-                  placeholder="Chat id"
-                  style={hide(tg)}
-                  value={field(c.id, 'chat_id')}
-                  onChange={edit(c.id, 'chat_id')}
-                />
-                <button
-                  className="test-button vq-nt-test"
-                  type="button"
+                <Btn
+                  small
                   data-vq-notify-test={c.id}
+                  aria-label={`Test ${name}`}
                   onClick={(event) => void test(event.currentTarget)}
                 >
                   Test
-                </button>
-                <label className="vq-il-on" title="Enabled">
-                  <input
-                    type="checkbox"
-                    data-vq-nt-f="enabled"
-                    checked={!!fields[c.id]?.enabled}
-                    onChange={(event) => notifications.edit(c.id, 'enabled', event.target.checked)}
-                  />
-                </label>
-                <button
-                  className="vq-fmt-del"
-                  type="button"
+                </Btn>
+                <Btn
+                  kind="ghost"
+                  small
+                  iconOnly
+                  icon="x"
                   data-vq-notify-del={c.id}
-                  title="Delete"
+                  aria-label={`Delete ${name}`}
                   onClick={() => void remove(c.id)}
-                >
-                  ✕
-                </button>
+                />
               </div>
-              <div className="vq-nt-events">
-                {events.map((ev) => (
-                  <label className="vq-nt-ev" key={ev}>
-                    <input
-                      type="checkbox"
-                      data-vq-nt-ev={ev}
-                      checked={ticked.includes(ev)}
-                      onChange={(event) =>
-                        notifications.edit(
-                          c.id,
-                          'events',
-                          // in the page's order, as the boxes were read
-                          events.filter((e) =>
-                            e === ev ? event.target.checked : ticked.includes(e),
-                          ),
-                        )
-                      }
-                    />
-                    {NOTIFY_EVENT_LABEL[ev] || ev}
-                  </label>
-                ))}
+              <div className={s.ntTarget}>
+                <span className={s.grow} hidden={tg}>
+                  <TextField
+                    full
+                    mono
+                    data-vq-nt-f="url"
+                    aria-label="Webhook URL"
+                    placeholder="Webhook URL"
+                    value={field(c.id, 'url')}
+                    onChange={edit(c.id, 'url')}
+                  />
+                </span>
+                <span className={s.grow} hidden={!tg}>
+                  <TextField
+                    full
+                    mono
+                    data-vq-nt-f="token"
+                    aria-label="Bot token"
+                    placeholder="Bot token"
+                    value={field(c.id, 'token')}
+                    onChange={edit(c.id, 'token')}
+                  />
+                </span>
+                <span className={s.grow} hidden={!tg}>
+                  <TextField
+                    full
+                    mono
+                    data-vq-nt-f="chat_id"
+                    aria-label="Chat id"
+                    placeholder="Chat id"
+                    value={field(c.id, 'chat_id')}
+                    onChange={edit(c.id, 'chat_id')}
+                  />
+                </span>
               </div>
+              {fields[c.id]?.enabled && !ticked.length ? (
+                <p className={s.rowWarnText} data-vq-nt-deaf="">
+                  Hears no events yet, so nothing is sent here. Pick at least one below.
+                </p>
+              ) : null}
+              <CheckChips
+                label={`What ${name} hears`}
+                options={events.map((ev) => ({ value: ev, label: NOTIFY_EVENT_LABEL[ev] || ev }))}
+                value={ticked}
+                inputAttrs={(ev) => ({ 'data-vq-nt-ev': ev })}
+                onToggle={(ev, on) =>
+                  notifications.edit(
+                    c.id,
+                    'events',
+                    // in the page's order, as the boxes were read
+                    events.filter((e) => (e === ev ? on : ticked.includes(e))),
+                  )
+                }
+              />
             </div>
           );
         })
       ) : (
-        <div className="settings-hint" style={{ padding: '6px 0' }}>
-          No connections yet.
-        </div>
+        <p className={s.listEmpty}>No connections yet.</p>
       )}
     </div>
   );
+}
+
+const NOTIFY_TYPES = [
+  { value: 'discord', label: 'Discord' },
+  { value: 'webhook', label: 'Webhook' },
+  { value: 'telegram', label: 'Telegram' },
+];
+
+/** the connections as the hero reads them: null until they loaded */
+export function useNotifyLines() {
+  const { rows, drawn, fields } = useRows(notifications);
+  if (rows === null) return null;
+  return drawn.map((c) => ({
+    name: str(fields[c.id]?.name),
+    enabled: !!fields[c.id]?.enabled,
+    events: ((fields[c.id]?.events as string[] | undefined) || []).length,
+  }));
 }
 
 async function addNotification() {
@@ -549,34 +618,30 @@ async function addNotification() {
   }
 }
 
-export function NotificationsSection(): ReactNode {
+/** Connections > Notifications (video side): each connection a block with its
+ *  name, where it sends, a switch, Test and a delete that asks first, then
+ *  its target and the events it hears as chips */
+export function NotificationsCard() {
+  const lines = useNotifyLines();
+  const allOff = !!lines?.length && lines.every((l) => !l.enabled);
   return (
-    <Section
-      tab="connections"
-      side="video"
-      title="Notifications"
-      hint="Discord, webhooks & Telegram"
-    >
-      <div className="settings-group" data-stg="connections" data-video-only="">
-        {/* the retired video source picker that rode along in here went in
-            SETTINGS_PORT.md video pass V3c: nothing read it */}
-        <div className="form-group" id="video-notifications">
-          <label>Notifications:</label>
-          <small className="settings-hint" style={{ display: 'block', marginBottom: '8px' }}>
-            Get told when things happen — a Discord webhook, any generic webhook (raw JSON), or a
-            Telegram bot. Each connection picks which events it cares about.
-          </small>
-          <NotifyBlocks />
-          <button
-            className="test-button"
-            type="button"
-            data-vq-notify-add=""
-            onClick={() => void addNotification()}
-          >
-            + Add connection
-          </button>
-        </div>
-      </div>
-    </Section>
+    <div id="video-notifications" data-video-only="">
+      <Card
+        title="Notifications"
+        hint="Get told when things happen: a Discord webhook, any webhook (raw JSON) or a Telegram bot. Each connection saves when you change it."
+        actions={
+          <Btn small icon="plus" data-vq-notify-add="" onClick={() => void addNotification()}>
+            Add connection
+          </Btn>
+        }
+      >
+        {allOff ? (
+          <div className={s.cardPad}>
+            <Note>Every connection is switched off, so nothing is sent.</Note>
+          </div>
+        ) : null}
+        <NotifyBlocks />
+      </Card>
+    </div>
   );
 }

@@ -1,6 +1,7 @@
 /**
- * The video side's Server Connection (SETTINGS_PORT.md, video pass V3b): the
- * markup it replaced, the load each time the video settings page is shown,
+ * The video side's media server (SETTINGS_PORT.md, video pass V3b; on the
+ * settings parts in settings-bic phase 3): the card and the sheet's fields,
+ * the load each time the video settings page is shown,
  * the toggle, the credentials and their notes, Test, the Jellyfin user, and
  * the library picks (the other TV libraries' Scan and Anime ticks).
  */
@@ -8,8 +9,11 @@
 import { act, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { shape, vanilla } from './__fixtures__/shape';
-import { VideoServerConnection } from './connections-video-server';
+import {
+  VideoServerConnection as Card,
+  VideoServerFields,
+  useVideoServerState,
+} from './connections-video-server';
 import { connNote, videoServer } from './video-server';
 
 type Shell = Window & Record<string, unknown>;
@@ -77,27 +81,60 @@ async function shown() {
   await waitFor(() => expect(q('[data-video-conn="plex-url"]').value).toBe('http://plex:32400'));
 }
 
-describe('the video Server Connection', () => {
-  it('is the markup it replaced', () => {
+/** the card on the page and the fields its sheet holds */
+function VideoServerConnection() {
+  return (
+    <>
+      <Card onView={onView} />
+      <VideoServerFields />
+      <State />
+    </>
+  );
+}
+const onView = vi.fn();
+function State() {
+  const state = useVideoServerState();
+  return <output data-testid="state">{`${state.tone}: ${state.text}`}</output>;
+}
+
+describe('the video media server', () => {
+  it('one card on the parts: a pick-one row, Test and View configuration in its head, no colons', async () => {
     const { container } = render(<VideoServerConnection />);
-    expect(shape(container)).toEqual(shape(vanilla('video-server.vanilla.html')));
+    await shown();
+    const cards = container.querySelectorAll('[data-card]');
+    expect(cards).toHaveLength(1);
+    expect(cards[0].getAttribute('data-card')).toBe('Server connections');
+    // one heading: the old group's own "Server Connection" heading went
+    expect(container.querySelectorAll('h3')).toHaveLength(0);
+    const radios = [...container.querySelectorAll('[role="radio"]')];
+    expect(radios.map((r) => r.textContent)).toEqual(['Plex', 'Jellyfin']);
+    expect(q('[data-video-server-toggle="jellyfin"]').getAttribute('aria-checked')).toBe('true');
+    fireEvent.click(
+      [...container.querySelectorAll('button')].find(
+        (b) => b.textContent === 'View configuration',
+      )!,
+    );
+    expect(onView).toHaveBeenCalled();
+    for (const l of container.querySelectorAll('label')) expect(l.textContent).not.toMatch(/:\s*$/);
+    // its state in words: the key is missing
+    expect(document.querySelector('[data-testid="state"]')!.textContent).toBe('warn: Not set up');
   });
 
   it('loads the server, its fields, the user and the libraries', async () => {
     render(<VideoServerConnection />);
     await shown();
-    expect(q('[data-video-server-toggle="jellyfin"]').className).toBe('server-toggle-btn active');
-    expect(q('[data-video-server-config="plex"]').classList.contains('hidden')).toBe(true);
-    expect(q('[data-video-server-config="jellyfin"]').classList.contains('hidden')).toBe(false);
+    expect(q('[data-video-server-toggle="jellyfin"]').getAttribute('aria-checked')).toBe('true');
+    expect(q<HTMLElement>('[data-video-server-config="plex"]').hidden).toBe(true);
+    expect(q<HTMLElement>('[data-video-server-config="jellyfin"]').hidden).toBe(false);
     expect(q('[data-video-conn="plex-token"]').value).toBe('tok');
     expect(q('[data-video-conn-note="plex"]').textContent).toBe(
-      'Inherited from your Music Plex connection — edit to use a different server for video.',
+      'Inherited from your music Plex connection. Change it to use a different server for video.',
     );
     expect(q('[data-video-conn-note="jellyfin"]').textContent).toBe(
       'Add the API key to finish this connection.',
     );
     await waitFor(() =>
-      expect(q<HTMLElement>('[data-video-jellyfin-user-wrap]').style.display).toBe('block'),
+      expect(q<HTMLElement>('[data-video-jellyfin-user-wrap]').hidden).toBe(false),
     );
     expect(q<HTMLSelectElement>('[data-video-jellyfin-user]').value).toBe('u2');
     expect(
@@ -106,7 +143,9 @@ describe('the video Server Connection', () => {
     expect(q<HTMLSelectElement>('[data-video-lib-select="movies"]').value).toBe('Movies');
     // the other TV libraries, without the main one
     expect(
-      [...document.querySelectorAll('.video-library-tv-more-item span')].map((s) => s.textContent),
+      [...document.querySelectorAll('[data-video-lib-tv-scan]')].map((l) =>
+        l.getAttribute('data-video-lib-tv-scan'),
+      ),
     ).toEqual(['Anime', 'Kids TV']);
     expect(q('[data-video-lib-tv-scan="Kids TV"]').checked).toBe(true);
     expect(q<HTMLElement>('[data-video-lib-tv-more-row]').hidden).toBe(false);
@@ -133,7 +172,7 @@ describe('the video Server Connection', () => {
     render(<VideoServerConnection />);
     await shown();
     fireEvent.click(q('[data-video-server-toggle="plex"]'));
-    expect(q('[data-video-server-config="plex"]').classList.contains('hidden')).toBe(false);
+    expect(q<HTMLElement>('[data-video-server-config="plex"]').hidden).toBe(false);
     await waitFor(() => expect(posts('/api/video/server')).toEqual([{ server: 'plex' }]));
     await waitFor(() =>
       expect(shell.showToast).toHaveBeenCalledWith('Video server set to Plex', 'success'),
@@ -150,6 +189,10 @@ describe('the video Server Connection', () => {
     );
     expect(posts('/api/video/server-config/test')).toEqual([{ server: 'jellyfin' }]);
     expect(shell.showToast).not.toHaveBeenCalledWith('Connection saved', 'success');
+    // and says it in words where the server is
+    await waitFor(() =>
+      expect(document.querySelector('[data-testid="state"]')!.textContent).toBe('bad: refused'),
+    );
   });
 
   it('a user picked saves and reads its libraries', async () => {
@@ -192,7 +235,9 @@ describe('the video Server Connection', () => {
       anime: ['TV', 'Anime'],
     });
     expect(
-      [...document.querySelectorAll('.video-library-tv-more-item span')].map((s) => s.textContent),
+      [...document.querySelectorAll('[data-video-lib-tv-scan]')].map((l) =>
+        l.getAttribute('data-video-lib-tv-scan'),
+      ),
     ).toEqual(['TV', 'Anime']);
   });
 
@@ -222,7 +267,7 @@ describe('the video Server Connection', () => {
 
   it('the notes', () => {
     expect(connNote('plex', false, false, false)).toBe(
-      'Not connected — add a server URL and token.',
+      'Not connected: add a server URL and token.',
     );
     expect(connNote('jellyfin', false, true, false)).toBe(
       'Add the server URL to finish this connection.',

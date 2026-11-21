@@ -616,7 +616,7 @@ Soulseek rooms and private messages through slskd, in a Discord-style layout.
 | **Lidarr compatible API** | `/lidarr`, so request apps that only speak Lidarr (Singarr, MusicSeerr 1.x) can send their album requests to SoulSync instead. |
 | **Seerr compatible API** | `/seerr`, so apps built for Seerr (Jellyseerr, Overseerr), like Litefin's Jellyfin plugin, can browse and request movies and shows through SoulSync's video side. |
 
-The MCP server and the Lidarr and Seerr compatible APIs are off until you turn them on in **Settings → System → SoulSync API**. Full reference: [Support/API.md](Support/API.md), including [MCP for AI clients](Support/API.md#mcp-for-ai-clients).
+The MCP server and the Lidarr and Seerr compatible APIs are off until you turn them on in **Settings → System → API**. Full reference: [Support/API.md](Support/API.md), including [MCP for AI clients](Support/API.md#mcp-for-ai-clients).
 
 ## Help
 
@@ -628,7 +628,7 @@ The MCP server and the Lidarr and Seerr compatible APIs are off until you turn t
 ## Mobile, PWA & theming
 
 - Fully responsive, and installable as a **PWA** (cover art cached for speed, never stale pages).
-- Accent colours (presets or any custom colour), a sidebar visualizer, background particles, worker orbs, and **Reduce Visual Effects** / **Max Performance** switches for low-power devices.
+- Accent colours (presets or any custom colour), a sidebar visualizer, background particles, worker orbs, and **Reduce visual effects** / **Max performance** switches for low-power devices (kept per device).
 
 ## Companion browser extension
 
@@ -830,7 +830,7 @@ cd webui && npm ci && npm run dev
 ### 1. Connect slskd (optional)
 
 1. Add an API key in slskd's `settings.yml` under `web > authentication > api_keys`, then restart slskd.
-2. In SoulSync: **Settings → Connections → Soulseek**, paste the URL and key (or use **Auto-detect**).
+2. In SoulSync: **Settings → Downloads → Sources → Soulseek**, paste the URL and key (or use **Auto-detect**).
 3. **Share some files in slskd.** Leechers get banned by the network.
 
 ### 2. Connect Spotify (optional)
@@ -854,11 +854,11 @@ Everything else lives in **Settings**:
 | Tab | What to set |
 |---|---|
 | **Connections** | Your media server. Use your machine's real IP, not `localhost` (inside Docker that means the container itself). |
-| **Sources / Downloads** | Pick a source or build your hybrid chain. |
+| **Downloads** | Your sources and their order (one source, or a hybrid chain), and how downloads behave. |
 | **Quality** | Pick a preset or build a quality profile. |
 | **Library** | Your folders and file-naming templates. |
 
-Settings save as you change them. If you'd rather press save yourself, turn off **Save settings as I change them** under **System → Saving**.
+Settings save as you change them. If you'd rather press save yourself, turn off **Save settings as I change them** under **System → General**.
 
 ### 4. Docker paths
 
@@ -868,7 +868,7 @@ Settings save as you change them. If you'd rather press save yourself, turn off 
 | Logs | `/app/logs` | |
 | Databases | `/app/data` | Use a **named volume** (`soulsync_database:/app/data`). Bind-mounting a host path here can hide files the app needs. |
 | Downloads | `/app/downloads` | The same folder slskd and your clients download to |
-| Music library folder | `/app/Transfer` | Where organized music is filed. Set Settings → Library → Folders → Music Library Folder to this path |
+| Music library folder | `/app/Transfer` | Where organized music is filed. Set Settings → Library → Folders → Music library folder to this path |
 | Import | `/app/Staging` | Optional, for importing music you already have |
 | Music videos | `/app/MusicVideos` | Optional |
 | Podcasts / audiobooks | `/app/podcasts`, `/app/audiobooks` | Optional |

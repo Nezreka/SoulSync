@@ -8,6 +8,7 @@
 import { act, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { nav } from '../../nav';
 import { createSettingsStore } from '../../settings-store';
 import { clock, deviceLine, DevicesTab } from './devices-tab';
 
@@ -121,12 +122,17 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  nav.reset();
   vi.unstubAllGlobals();
   for (const k of ['getCurrentProfileContext', 'showToast', 'showConfirmDialog']) delete shell[k];
 });
 
-const tab = (opened = 1) =>
-  render(<DevicesTab store={createSettingsStore()} opened={opened} active={true} />);
+const tab = (opened = 1) => {
+  nav.go('devices');
+  return render(
+    <DevicesTab store={createSettingsStore()} part="page" opened={opened} active={true} />,
+  );
+};
 
 describe('Settings > Devices', () => {
   it('draws nothing for a member', () => {
@@ -152,7 +158,7 @@ describe('Settings > Devices', () => {
   it('shows the server, its addresses and the plain http warning', async () => {
     const { findByText, getAllByRole } = tab();
     await findByText('http://192.168.1.5:8008');
-    expect(getAllByRole('alert').some((a) => /plain http/.test(a.textContent || ''))).toBe(true);
+    expect(getAllByRole('note').some((a) => /plain http/.test(a.textContent || ''))).toBe(true);
     expect(document.body.textContent).toContain('ae03 96a6 68c3');
   });
 
@@ -177,6 +183,25 @@ describe('Settings > Devices', () => {
     await waitFor(() =>
       expect(calls.some((c) => c.url === '/api/devices/1' && c.method === 'DELETE')).toBe(true),
     );
+  });
+
+  it('renames a device from its row', async () => {
+    const { findByText, getAllByText, getByLabelText, getByText } = tab();
+    await findByText('Car');
+    fireEvent.click(getAllByText('Rename')[0]);
+    fireEvent.change(getByLabelText('New name for Car'), { target: { value: 'Car stereo' } });
+    await act(async () => {
+      fireEvent.click(getByText('Save'));
+    });
+    const patch = calls.find((c) => c.url === '/api/devices/1' && c.method === 'PATCH');
+    expect(patch?.body).toEqual({ name: 'Car stereo' });
+  });
+
+  it('is hidden while another tab is open', async () => {
+    const { container, findByText } = tab();
+    await findByText('Car');
+    act(() => nav.go('people'));
+    expect((container.querySelector('[data-stg-new="devices"]') as HTMLElement).hidden).toBe(true);
   });
 
   it('saves the remote address and says what the reachability check found', async () => {

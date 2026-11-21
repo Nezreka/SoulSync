@@ -20,18 +20,6 @@ const HTML = renderToStaticMarkup(<SettingsPage tabs={{}} />);
 const set = setSettingsSaveState as (state: string) => void;
 const btn = () => document.getElementById('save-settings')!;
 
-/** the brace-matched body of the first `@media (max-width: <px>px)` */
-function media(css: string, px: number): string {
-  const at = css.indexOf(`@media (max-width: ${px}px)`);
-  const open = css.indexOf('{', at);
-  let depth = 0;
-  for (let i = open; i < css.length; i++) {
-    if (css[i] === '{') depth++;
-    if (css[i] === '}' && --depth === 0) return css.slice(open + 1, i);
-  }
-  return '';
-}
-
 afterEach(() => {
   vi.useRealTimers();
   document.body.innerHTML = '';
@@ -64,14 +52,5 @@ describe('#2187: no saved status without a save', () => {
     vi.advanceTimersByTime(2000);
     expect(btn().dataset.state).toBe('idle');
     expect(btn().textContent).toBe('All changes saved');
-  });
-
-  it('on a phone the status wraps under the title instead of squeezing it', () => {
-    const phone = media(PREMIER, 560);
-    expect(phone).toMatch(/#settings-page \.settings-nav-row \{[^}]*flex-wrap: wrap;/);
-    expect(phone).toMatch(/#settings-page \.stg-active-section-title \{ flex: 1 1 100%; \}/);
-    // the base row's nowrap must not be !important, or the phone wrap loses
-    const base = PREMIER.slice(PREMIER.indexOf('#settings-page .settings-nav-row {'));
-    expect(base.slice(0, base.indexOf('}'))).not.toMatch(/flex-wrap:\s*nowrap\s*!important/);
   });
 });
