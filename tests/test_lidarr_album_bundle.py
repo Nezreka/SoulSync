@@ -205,11 +205,81 @@ def test_lookup_retries_a_failed_metadata_search(client):
         assert client._lookup('PISS you made me / skin on linen') == [PISS]
 
 
-def test_release_year_of_requires_agreement():
+def test_bundle_release_year_of_requires_agreement():
+    from core.downloads.master import bundle_release_year_of
+    assert bundle_release_year_of([{'album': {'release_date': '2026-05-01'}}, {'album': {}}]) == '2026'
+    assert bundle_release_year_of([{'album': {'release_date': '2026-05-01'}},
+                                   {'album': {'release_date': '2019-03-22'}}]) is None
+
+
+def test_the_album_context_year_is_still_read():
+    # the bundle helper first shipped as a second release_year_of, which
+    # replaced this one for every caller: the re-release gate read no year
     from core.downloads.master import release_year_of
-    assert release_year_of([{'album': {'release_date': '2026-05-01'}}, {'album': {}}]) == '2026'
-    assert release_year_of([{'album': {'release_date': '2026-05-01'}},
-                            {'album': {'release_date': '2019-03-22'}}]) is None
+    assert release_year_of({'name': 'Chaosphere', 'release_date': '2023-11-10'}) == '2023'
+    assert release_year_of({'year': 1998}) == '1998'
+
+
+def test_bundle_release_type_of_requires_agreement():
+    from core.downloads.master import bundle_release_type_of
+    assert bundle_release_type_of([{'album': {'album_type': 'Album'}}, {'album': {}}]) == 'album'
+    assert bundle_release_type_of([{'album': {'album_type': 'album'}},
+                                   {'album': {'album_type': 'single'}}]) is None
+
+
+def _bib(rg, kind):
+    return {'foreignAlbumId': rg, 'title': 'Back in Black', 'albumType': kind,
+            'releaseDate': '1980-07-25T00:00:00Z',
+            'artist': {'foreignArtistId': 'ar-acdc', 'artistName': 'AC/DC'}}
+
+
+def test_a_reissue_year_still_finds_the_album_over_its_title_single(client):
+    # spotify dates the remaster 2003; musicbrainz knows the 1980 album and
+    # the 1980 single. no year fits, so the album type picks the album.
+    fake = FakeLidarr({'AC/DC Back in Black': [_bib('rg-single', 'Single'), _bib('rg-album', 'Album')]})
+    with patch.object(client, '_api_get', side_effect=fake.get):
+        found = client._find_album('Back in Black', 'AC/DC', '', '2003', release_type='album')
+        assert found['foreignAlbumId'] == 'rg-album'
+        assert client._find_album('Back in Black', 'AC/DC', '', '1980', release_type='single'
+                                  )['foreignAlbumId'] == 'rg-single'
+        # with no type to go by, two records and no year is still a refusal
+        assert client._find_album('Back in Black', 'AC/DC', '', '2003') is None
+
+
+def test_the_type_does_not_overrule_the_year(client):
+    # three self-titled albums: the type fits all of them, the year decides
+    records = [dict(_af(y, rg), albumType='Album') for y, rg in ((1999, 'lp1'), (2016, 'lp2'), (2019, 'lp3'))]
+    fake = FakeLidarr({'American Football American Football': records})
+    with patch.object(client, '_api_get', side_effect=fake.get):
+        assert client._find_album('American Football', 'American Football', '', '2026',
+                                  release_type='album') is None
+        assert client._find_album('American Football', 'American Football', '', '2016',
+                                  release_type='album')['foreignAlbumId'] == 'lp2'
+
+
+def test_the_hinted_album_type_reaches_the_lookup(client):
+    fake = FakeLidarr({'AC/DC Back in Black': [_bib('rg-single', 'Single'), _bib('rg-album', 'Album')]})
+    hint = {'title': 'Hells Bells', 'artist': 'AC/DC', 'album': 'Back in Black',
+            'catalogue_context': {'track_info': {'album': {'release_date': '2003-01-01', 'album_type': 'album'}}}}
+    with patch.object(client, '_api_get', side_effect=fake.get), track_hint_context(hint):
+        assert [a['foreignAlbumId'] for a in client._hinted_album_lookup()] == ['rg-album']
+
+
+def test_lidarrs_artist_list_is_read_once_a_minute(client):
+    fake = FakeLidarr({'PISS you made me / skin on linen': [PISS]})
+    calls = []
+
+    def get(endpoint, params=None):
+        calls.append(endpoint)
+        return fake.get(endpoint, params)
+    with patch.object(client, '_api_get', side_effect=get):
+        client._find_album('you made me / skin on linen', 'PISS')
+        client._find_album('you made me / skin on linen', 'PISS')
+    assert calls.count('artist') == 1
+    client.reload_settings()
+    with patch.object(client, '_api_get', side_effect=get):
+        client._find_album('you made me / skin on linen', 'PISS')
+    assert calls.count('artist') == 2
 
 
 def test_wishlist_tracks_carry_the_release_group_id():

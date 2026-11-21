@@ -441,11 +441,13 @@ def release_group_id_of(tracks_json) -> Optional[str]:
     return groups.pop() if len(groups) == 1 else None
 
 
-def release_year_of(tracks_json) -> Optional[str]:
+def bundle_release_year_of(tracks_json) -> Optional[str]:
     """The release year every requested track's album gives, or None.
 
     Tells a band's same-titled albums apart in Lidarr. Tracks without a date
-    are ignored; tracks that disagree make the answer None.
+    are ignored; tracks that disagree make the answer None. (not
+    release_year_of above: that one reads one album context, and a second
+    def under its name replaced it for every caller.)
     """
     years = set()
     for entry in tracks_json or []:
@@ -455,6 +457,20 @@ def release_year_of(tracks_json) -> Optional[str]:
             if value.isdigit():
                 years.add(value)
     return years.pop() if len(years) == 1 else None
+
+
+def bundle_release_type_of(tracks_json) -> Optional[str]:
+    """The album type every requested track's album gives ('album',
+    'single', 'compilation', 'ep'), or None. Tells an album from its
+    same-titled single in Lidarr."""
+    types = set()
+    for entry in tracks_json or []:
+        if isinstance(entry, dict):
+            album = entry.get('album') if isinstance(entry.get('album'), dict) else {}
+            value = str(album.get('album_type') or '').strip().lower()
+            if value:
+                types.add(value)
+    return types.pop() if len(types) == 1 else None
 
 
 def expected_release_duration_seconds(tracks_json) -> Optional[int]:
@@ -1292,9 +1308,12 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
                 _group = release_group_id_of(tracks_json)
                 if _group:
                     kwargs['release_group_id'] = _group
-                _year = release_year_of(tracks_json)
+                _year = bundle_release_year_of(tracks_json)
                 if _year:
                     kwargs['release_year'] = _year
+                _type = bundle_release_type_of(tracks_json)
+                if _type:
+                    kwargs['release_type'] = _type
             return kwargs or None
 
         def _stamp_terminal_bundle_failure():

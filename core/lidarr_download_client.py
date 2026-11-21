@@ -67,6 +67,8 @@ class LidarrDownloadClient(DownloadSourcePlugin):
         # not in active_downloads, and the cleanup must not delete an album
         # another run is still waiting on
         self._bundle_waits: Dict[str, int] = {}
+        # (monotonic time, Lidarr's artist list): see _library_artists
+        self._artist_list_cache = None
         self.shutdown_check = None
         self._load_config()
 
@@ -92,6 +94,7 @@ class LidarrDownloadClient(DownloadSourcePlugin):
 
     def reload_settings(self):
         self._load_config()
+        self._artist_list_cache = None
         logger.info("Lidarr settings reloaded")
 
     # ==================== Interface Methods ====================
@@ -464,6 +467,7 @@ class LidarrDownloadClient(DownloadSourcePlugin):
         progress_callback=None,
         release_group_id: str = '',
         release_year: str = '',
+        release_type: str = '',
         **_kwargs,
     ) -> Dict[str, Any]:
         """Album-bundle flow: have Lidarr fetch the whole album, then copy its
@@ -497,7 +501,8 @@ class LidarrDownloadClient(DownloadSourcePlugin):
             return _fail('Lidarr is not configured', True)
 
         _emit('searching', query=f"{artist_name} {album_name}".strip())
-        album = self._find_album(album_name, artist_name, release_group_id, release_year)
+        album = self._find_album(album_name, artist_name, release_group_id, release_year,
+                                 release_type=release_type)
         if not album:
             return _fail(f"Lidarr has no album '{album_name}' by '{artist_name}'")
 
@@ -560,7 +565,8 @@ class LidarrDownloadClient(DownloadSourcePlugin):
         return any(str(s).lower() != 'lidarr' for s in order)
 
     def _find_album(self, album_name: str, artist_name: str,
-                    release_group_id: str = '', release_year: str = '') -> Optional[Dict[str, Any]]:
+                    release_group_id: str = '', release_year: str = '',
+                    release_type: str = '') -> Optional[Dict[str, Any]]:
         """The Lidarr record for this album, or None.
 
         By MusicBrainz release-group id when known. Otherwise by artist and
@@ -569,7 +575,8 @@ class LidarrDownloadClient(DownloadSourcePlugin):
         from Lidarr's metadata proxy). A candidate must match both artist and
         title, since a near miss would grab someone else's album, and
         ``release_year`` tells same-titled albums apart (a band's self-titled
-        records). None sends the batch to the next source.
+        records), ``release_type`` an album from its same-titled single. None
+        sends the batch to the next source.
         """
         if release_group_id:
             found = self._lookup(f'lidarr:{release_group_id}')
@@ -579,11 +586,13 @@ class LidarrDownloadClient(DownloadSourcePlugin):
         if not album_name or not artist_name:
             return None
         library = self._pick_album(self._library_albums(artist_name), album_name, artist_name,
-                                   release_year, trust_lone_candidate=False)
+                                   release_year, trust_lone_candidate=False,
+                                   release_type=release_type)
         if library:
             return library
         for term in (f"{artist_name} {album_name}", album_name):
-            best = self._pick_album(self._lookup(term)[:20], album_name, artist_name, release_year)
+            best = self._pick_album(self._lookup(term)[:20], album_name, artist_name, release_year,
+                                    release_type=release_type)
             if best:
                 return best
         return None
@@ -625,12 +634,33 @@ class LidarrDownloadClient(DownloadSourcePlugin):
         Lidarr's own library has no such noise.
         """
         albums = []
-        for artist in self._api_get('artist') or []:
+        for artist in self._library_artists():
             if self._name_score(artist_name, artist.get('artistName', '')) >= 0.8:
                 for album in self._api_get('album', params={'artistId': artist.get('id')}) or []:
                     album.setdefault('artist', artist)
                     albums.append(album)
         return albums
+
+    _ARTIST_LIST_TTL = 60
+
+    def _library_artists(self) -> List[Dict[str, Any]]:
+        """Every artist in Lidarr, kept for a minute: the per-track flow asks
+        once per track, and a big library answers in megabytes."""
+        cached = self._artist_list_cache
+        if cached and time.monotonic() - cached[0] < self._ARTIST_LIST_TTL:
+            return cached[1]
+        artists = self._api_get('artist')
+        if not isinstance(artists, list):
+            return []
+        self._artist_list_cache = (time.monotonic(), artists)
+        return artists
+
+    # spotify/deezer album types and the lidarr (musicbrainz) types they cover.
+    # spotify calls an ep a single, so those two go together.
+    _TYPE_FITS = {
+        'album': {'album'}, 'compilation': {'album'},
+        'single': {'single', 'ep'}, 'ep': {'ep', 'single'},
+    }
 
     @staticmethod
     def _year_of(record: Dict[str, Any]) -> Optional[int]:
@@ -640,15 +670,17 @@ class LidarrDownloadClient(DownloadSourcePlugin):
             return None
 
     def _pick_album(self, candidates, album_name: str, artist_name: str,
-                    release_year: str = '', trust_lone_candidate: bool = True
-                    ) -> Optional[Dict[str, Any]]:
+                    release_year: str = '', trust_lone_candidate: bool = True,
+                    release_type: str = '') -> Optional[Dict[str, Any]]:
         """The best candidate matching artist and title.
 
-        With a requested year, a candidate released within a year of it wins.
-        When none is, a lone match is still taken (a reissue keeps its title
-        but not its date), unless ``trust_lone_candidate`` is off: the library
-        holds only the albums someone added, so its lone match may be another
-        record with the same title.
+        With a requested type, candidates of that type win when there are
+        any (an album over its same-titled single). With a requested year, a
+        candidate released within a year of it wins. When none is, a lone
+        match is still taken (a reissue keeps its title but not its date),
+        unless ``trust_lone_candidate`` is off: the library holds only the
+        albums someone added, so its lone match may be another record with
+        the same title.
         """
         matches = []
         for candidate in candidates or []:
@@ -659,6 +691,11 @@ class LidarrDownloadClient(DownloadSourcePlugin):
                 matches.append((title_score + artist_score, candidate))
         if not matches:
             return None
+        fits = self._TYPE_FITS.get(str(release_type or '').strip().lower())
+        if fits:
+            typed = [m for m in matches if str(m[1].get('albumType') or '').lower() in fits]
+            if typed:
+                matches = typed
         try:
             year = int(str(release_year or '')[:4])
         except ValueError:
@@ -698,6 +735,7 @@ class LidarrDownloadClient(DownloadSourcePlugin):
                 str(hint.get('artist') or '').strip(),
                 self._hint_release_group_id(hint),
                 self._hint_release_year(hint),
+                release_type=self._hint_release_type(hint),
             )
             hint['_lidarr_album'] = album
         return [hint['_lidarr_album']] if hint.get('_lidarr_album') else []
@@ -718,6 +756,12 @@ class LidarrDownloadClient(DownloadSourcePlugin):
         info = ((hint.get('catalogue_context') or {}).get('track_info')) or {}
         album = info.get('album') if isinstance(info.get('album'), dict) else {}
         return str(album.get('release_date') or info.get('release_date') or '')[:4]
+
+    @staticmethod
+    def _hint_release_type(hint: Dict[str, Any]) -> str:
+        info = ((hint.get('catalogue_context') or {}).get('track_info')) or {}
+        album = info.get('album') if isinstance(info.get('album'), dict) else {}
+        return str(album.get('album_type') or '').strip().lower()
 
     def _album_lock(self, foreign_album_id: str) -> threading.Lock:
         with self._album_locks_guard:
