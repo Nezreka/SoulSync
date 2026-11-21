@@ -225,6 +225,14 @@ def test_one_word_translation_is_guarded_by_year(engine):
     assert not _ok("Oben.Ohne.2009.GERMAN.1080p.BluRay.x264-GRP", want, 2009)[0]
 
 
+def test_a_one_word_title_takes_no_extra_words_even_with_the_year():
+    # 'Up Something 2009' is another film, whatever its year
+    assert not _ok("Up.Something.2009.1080p.BluRay.x264-GRP", ["Up"], 2009)[0]
+    # an edition or language word is still the film
+    assert _ok("Up.Extended.2009.1080p.BluRay.x264-GRP", ["Up"], 2009)[0]
+    assert _ok("Up.French.2009.1080p.BluRay.x264-GRP", ["Up"], 2009)[0]
+
+
 def test_show_releases_in_a_translated_name(engine):
     want = engine.alt_titles_for("show", 70523)
     from core.video.quality_eval import _scope_ok
