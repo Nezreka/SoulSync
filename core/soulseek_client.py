@@ -600,7 +600,8 @@ class SoulseekClient(DownloadSourcePlugin):
                 year=year,
                 free_upload_slots=first_track.free_upload_slots,
                 upload_speed=first_track.upload_speed,
-                queue_length=first_track.queue_length
+                queue_length=first_track.queue_length,
+                grouped_hits=True,
             )
             
             album_results.append(album)

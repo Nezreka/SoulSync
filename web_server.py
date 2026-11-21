@@ -8144,6 +8144,7 @@ def start_download():
 
 
 
+from core.download_plugins.types import track_candidates
 from core.downloads.streaming_pickup import PickupMisses, check_streaming_pickup
 
 # finished streaming downloads whose file hasn't turned up yet (#2231)
@@ -9282,7 +9283,8 @@ def manual_search_for_task(task_id):
                 with candidate_binding(_search_profile):
                     result = run_async(client.search(query))
                 if isinstance(result, tuple):
-                    tracks = result[0] if result else []
+                    # files inside soulseek folder groups are candidates too (#2228)
+                    tracks = track_candidates(result[0], result[1] if len(result) > 1 else None) if result else []
                 else:
                     tracks = result or []
                 return src_name, tracks, None
@@ -11815,7 +11817,9 @@ def _inspect_sources_stream(track_obj, quality_profile_id, *, log_tag='Inspector
                 # the tier the APP default wants.
                 with quality_profile_context(quality_profile_id), \
                         (candidate_binding(_bind_to) if _bind_to is not None else nullcontext()):
-                    tracks_result, _ = run_async(client.search(q, timeout=20))
+                    tracks_result, _albums_result = run_async(client.search(q, timeout=20))
+                    # files inside soulseek folder groups are candidates too (#2228)
+                    tracks_result = track_candidates(tracks_result, _albums_result)
                 if not tracks_result:
                     continue
                 pairs = evaluate_candidates(tracks_result, track_obj, q, quality_profile_id)
