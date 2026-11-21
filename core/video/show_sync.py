@@ -23,6 +23,11 @@ from utils.logging_config import get_logger
 logger = get_logger("video.show_sync")
 
 
+# what a retired row knew that the new one may not: the ids, the year, and
+# anime/standard when set by hand
+_CARRY_OVER = ("tmdb_id", "tvdb_id", "imdb_id", "year", "series_type")
+
+
 class _Skip(Exception):
     """the caller refreshes the schedule itself"""
 
@@ -123,7 +128,19 @@ def sync_show(db, show_id: int, *, remove_when_gone: bool = True,
                 (row["server_source"], str(tree.get("server_id")))).fetchone()
             if new_row and int(new_row["id"]) != int(show_id):
                 target_id = int(new_row["id"])
+                old = conn.execute("SELECT " + ", ".join(_CARRY_OVER) + " FROM shows WHERE id=?",
+                                   (int(show_id),)).fetchone()
                 conn.execute("DELETE FROM shows WHERE id=?", (int(show_id),))
+                # the new row is the server's one-show read, which can come
+                # back without ids or a year the old row had (a re-keyed show
+                # lost its imdb id and year this way): what it lacks comes over
+                # from the row it replaces, after the delete so a legacy unique
+                # id index can't collide
+                fill = [(c, old[c]) for c in _CARRY_OVER if old[c] not in (None, "")]
+                if fill:
+                    conn.execute(
+                        "UPDATE shows SET " + ", ".join("%s=COALESCE(NULLIF(%s, ''), ?)" % (c, c) for c, _ in fill)
+                        + " WHERE id=?", [v for _, v in fill] + [target_id])
                 conn.commit()
                 logger.info("show sync: '%s' re-keyed on %s (%s → %s) — row healed",
                             row["title"], row["server_source"],

@@ -166,6 +166,30 @@ def test_plex_rekey_heals_the_row_instead_of_deleting(seeded, monkeypatch, _quie
         conn.close()
 
 
+def test_rekey_keeps_the_ids_and_year_the_new_read_lacks(seeded, monkeypatch, _quiet_scanner):
+    # plex's one-show read can come back without the imdb id or year the old
+    # row had: the healed row keeps them (and an anime choice made by hand)
+    db, show_id = seeded
+    conn = db._get_connection()
+    conn.execute("UPDATE shows SET imdb_id='tt0105559', tvdb_id=80009, year=1992, "
+                 "series_type='anime' WHERE id=?", (show_id,))
+    conn.commit()
+    conn.close()
+    new_tree = dict(_tree(server_id="sh1-NEW"), tmdb_id=43004, tvdb_id=99999)
+    _use_source(monkeypatch, _Source(tree=new_tree))
+    res = sync_show(db, show_id)
+    assert res["rekeyed"] is True
+    conn = db._get_connection()
+    try:
+        row = dict(conn.execute("SELECT tmdb_id, tvdb_id, imdb_id, year, series_type FROM shows "
+                                "WHERE id=?", (res["show_id"],)).fetchone())
+    finally:
+        conn.close()
+    # what the server sent wins; what it left out comes from the old row
+    assert row == {"tmdb_id": 43004, "tvdb_id": 99999, "imdb_id": "tt0105559",
+                   "year": 1992, "series_type": "anime"}
+
+
 def test_sync_triggers_a_scoped_episode_list_refresh(seeded, monkeypatch, _quiet_scanner):
     # the server only knows about FILES; the aired-episode schedule comes from
     # enrichment — sync asks TMDB for the recent seasons so schedule holes
