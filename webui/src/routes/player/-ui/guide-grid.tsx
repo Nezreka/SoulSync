@@ -8,6 +8,8 @@
  * music block's track list.
  */
 
+import { useEffect, useRef, useState } from 'react';
+
 import type { Channel } from '../-lib/channels';
 import type { GuideBlock, GuideProgram } from '../-lib/schedule';
 
@@ -117,8 +119,27 @@ export function GuideGrid({
   onPreview?: (picked: Picked) => void;
   label: string;
 }) {
-  const width = ((to - from) / 60000) * pxPerMinute;
-  const x = (ms: number) => ((ms - from) / 60000) * pxPerMinute;
+  // the hours shown fill the box: on a wide screen each minute gets wider
+  // instead of the grid stopping short (never narrower than pxPerMinute)
+  const box = useRef<HTMLDivElement>(null);
+  const [fit, setFit] = useState(pxPerMinute);
+  const minutes = (to - from) / 60000;
+  useEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const measure = () => {
+      const corner = el.querySelector<HTMLElement>('[data-guide-corner]');
+      const lane = el.clientWidth - (corner?.offsetWidth ?? 0) - 2;
+      setFit(Math.max(pxPerMinute, lane / minutes));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [pxPerMinute, minutes]);
+  const ppm = fit;
+  const width = minutes * ppm;
+  const x = (ms: number) => ((ms - from) / 60000) * ppm;
   const marks: number[] = [];
   for (let t = Math.ceil(from / 1_800_000) * 1_800_000; t < to; t += 1_800_000) marks.push(t);
   const nowVisible = now >= from && now < to;
@@ -140,10 +161,10 @@ export function GuideGrid({
   }
 
   return (
-    <div className={s.guide} role="grid" aria-label={label}>
+    <div ref={box} className={s.guide} role="grid" aria-label={label}>
       <div className={s.guideCanvas} style={{ width: `calc(var(--g-chan) + ${width}px)` }}>
         <div className={s.guideTimes} role="row">
-          <div className={s.guideCorner} />
+          <div className={s.guideCorner} data-guide-corner />
           <div className={s.guideLane} style={{ width }}>
             {marks.map((t) => (
               <div key={t} className={s.guideTime} style={{ left: x(t) }} role="columnheader">

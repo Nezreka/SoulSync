@@ -6,6 +6,7 @@
 import type { PlayerState } from '../../-engine/engine';
 
 import { current, upcoming } from '../../-engine/queue';
+import { RetryImg } from '../retry-img';
 import { CloseIcon } from './icons';
 import s from './playback.module.css';
 import { getEngine } from './use-player';
@@ -32,7 +33,11 @@ export function QueuePanel({ state, onClose }: { state: PlayerState; onClose: ()
         <>
           <div className={s.queueLabel}>Now playing</div>
           <div className={s.queueRow} data-now="true">
-            {now.artwork ? <img src={now.artwork} alt="" /> : <span className={s.queueThumb} />}
+            {now.artwork ? (
+              <RetryImg src={now.artwork} alt="" />
+            ) : (
+              <span className={s.queueThumb} />
+            )}
             <span className={s.queueText}>
               <span className={s.queueName}>{now.title}</span>
               {now.subtitle ? <span className={s.queueSub}>{now.subtitle}</span> : null}
@@ -52,7 +57,11 @@ export function QueuePanel({ state, onClose }: { state: PlayerState; onClose: ()
               onClick={() => engine.jump(index)}
               data-nav
             >
-              {item.artwork ? <img src={item.artwork} alt="" /> : <span className={s.queueThumb} />}
+              {item.artwork ? (
+                <RetryImg src={item.artwork} alt="" />
+              ) : (
+                <span className={s.queueThumb} />
+              )}
               <span className={s.queueText}>
                 <span className={s.queueName}>{item.title}</span>
                 {item.subtitle ? <span className={s.queueSub}>{item.subtitle}</span> : null}

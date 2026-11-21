@@ -20,9 +20,11 @@ import type { PlayerState } from '../../-engine/engine';
 import { upcoming } from '../../-engine/queue';
 import { chapterAt, clock } from '../../-engine/timeline';
 import { LONG_FORM } from '../../-engine/types';
+import { fullArt } from '../../-lib/images';
 import { NextIcon, PauseIcon, PlayIcon, PrevIcon, ShuffleIcon } from '../icons';
 import { PlayerLink } from '../kit';
 import { SongActions } from '../music/song-actions';
+import { RetryImg } from '../retry-img';
 import { inPlayer } from '../trailer';
 import { SleepMenu, SpeedMenu, VolumeControl } from './controls';
 import {
@@ -57,7 +59,7 @@ function UpNextList({ state }: { state: PlayerState }) {
         return (
           <li key={`${item.type}:${item.id}:${index}`}>
             <button type="button" className={s.upNextRow} onClick={() => engine.jump(index)}>
-              {item.artwork ? <img src={item.artwork} alt="" loading="lazy" /> : <span />}
+              {item.artwork ? <RetryImg src={item.artwork} alt="" loading="lazy" /> : <span />}
               <span className={s.upNextText}>
                 <span className={s.upNextTitle}>{item.title}</span>
                 {item.subtitle ? <span className={s.upNextSub}>{item.subtitle}</span> : null}
@@ -154,7 +156,8 @@ function View({ state, onClose }: { state: PlayerState; onClose: () => void }) {
     { id: 'queue', label: 'Up next', icon: <QueueIcon /> },
   ];
 
-  const art = item.artwork ?? item.backdrop ?? null;
+  // the big cover and the background want the full picture, not a card's thumb
+  const art = fullArt(item.artwork ?? item.backdrop ?? null);
   return inPlayer(
     <div className={s.view} role="dialog" aria-label={`Now playing ${item.title}`}>
       <Visuals art={art} music={music} />
@@ -199,7 +202,7 @@ function View({ state, onClose }: { state: PlayerState; onClose: () => void }) {
       <main className={s.stage}>
         <section className={s.now}>
           <div className={s.art} data-playing={playing ? 'true' : undefined}>
-            {art ? <img src={art} alt="" /> : <span className={s.artBlank} />}
+            {art ? <RetryImg src={art} alt="" /> : <span className={s.artBlank} />}
           </div>
           <div className={s.meta}>
             <div className={s.titles}>

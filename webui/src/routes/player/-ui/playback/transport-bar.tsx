@@ -14,6 +14,7 @@ import { LONG_FORM } from '../../-engine/types';
 import { NextIcon, PauseIcon, PlayIcon, PrevIcon, ShuffleIcon } from '../icons';
 import { PlayerLink } from '../kit';
 import { SongActions } from '../music/song-actions';
+import { RetryImg } from '../retry-img';
 import { ChapterMenu, SleepMenu, SpeedMenu, VolumeControl } from './controls';
 import {
   BackSecondsIcon,
@@ -67,7 +68,7 @@ export function TransportBar() {
           data-nav
         >
           {item.artwork || item.backdrop ? (
-            <img src={(item.artwork ?? item.backdrop)!} alt="" />
+            <RetryImg src={(item.artwork ?? item.backdrop)!} alt="" />
           ) : null}
           <span className={s.nowArtExpand} aria-hidden="true">
             <ExpandIcon />

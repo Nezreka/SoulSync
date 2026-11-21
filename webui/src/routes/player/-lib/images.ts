@@ -134,3 +134,24 @@ export function remoteImage(url: string | null | undefined, size: ImgSize = 'car
   }
   return card ? appURL(`/api/image-proxy?url=${encodeURIComponent(url)}&v=rail`) : url;
 }
+
+const LIBRARY_ART = '/api/library/v2/artwork/';
+
+/** a library artwork link may answer "not yet" and be there a moment later */
+export function canRetryArt(url: string | null | undefined): boolean {
+  return !!url && url.includes(LIBRARY_ART);
+}
+
+/** the same picture asked for again (past the browser's memory of the miss) */
+export function retryArt(url: string, attempt: number): string {
+  return `${url}${url.includes('?') ? '&' : '?'}try=${attempt}`;
+}
+
+/** a library cover at full size, for a big view (the thumb is for a card) */
+export function fullArt(url: string | null | undefined): string | null {
+  if (!url) return null;
+  if (!url.includes(LIBRARY_ART)) return url;
+  return url
+    .replace(/([?&])size=thumb(&|$)/, (_m, pre: string, post: string) => (post ? pre : ''))
+    .replace(/[?&]$/, '');
+}

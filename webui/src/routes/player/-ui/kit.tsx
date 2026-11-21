@@ -10,6 +10,7 @@ import { useEffect, useRef, useState, type ComponentProps, type ReactNode } from
 import type { RailCard } from '../-lib/rails';
 import type { PlayVerdict } from '../-player.types';
 
+import { canRetryArt, retryArt } from '../-lib/images';
 import { BackIcon, CheckIcon, ChevronIcon, GridIcon, ListIcon, MoreIcon, PlayIcon } from './icons';
 import { usePlayCard } from './playback/play-card';
 import s from './player.module.css';
@@ -56,13 +57,18 @@ export function Art({
   eager?: boolean;
 }) {
   const [state, setState] = useState<'loading' | 'ok' | 'failed'>(src ? 'loading' : 'failed');
-  useEffect(() => setState(src ? 'loading' : 'failed'), [src]);
+  // library art may answer "not yet" while it's fetched: ask again a couple of times
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    setState(src ? 'loading' : 'failed');
+    setAttempt(0);
+  }, [src]);
   return (
     <>
       {src && state !== 'failed' ? (
         <img
           className={className ?? s.artImg}
-          src={src}
+          src={attempt ? retryArt(src, attempt) : src}
           srcSet={srcSet}
           sizes={srcSet ? (sizes ?? 'auto, 220px') : undefined}
           alt=""
@@ -71,7 +77,12 @@ export function Art({
           decoding="async"
           data-loaded={state === 'ok'}
           onLoad={() => setState('ok')}
-          onError={() => setState('failed')}
+          onError={() => {
+            if (canRetryArt(src) && attempt < 2) {
+              const next = attempt + 1;
+              window.setTimeout(() => setAttempt(next), 2000 * next);
+            } else setState('failed');
+          }}
         />
       ) : null}
       {state === 'failed' ? (

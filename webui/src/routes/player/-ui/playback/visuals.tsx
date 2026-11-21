@@ -17,6 +17,8 @@ import {
   type ThemeId,
 } from '@/lib/visualizer';
 
+import { canRetryArt, retryArt } from '../../-lib/images';
+import { RetryImg } from '../retry-img';
 import { VisualsIcon } from './icons';
 import { PopMenu } from './menu';
 import s from './music-view.module.css';
@@ -124,6 +126,15 @@ export function Visuals({ art, music }: { art: string | null; music: boolean }) 
     img.crossOrigin = 'anonymous';
     img.decoding = 'async';
     let gone = false;
+    let tries = 0;
+    img.onerror = () => {
+      // the library's art may be fetched on first ask: try again a moment later
+      if (gone || !canRetryArt(art) || tries >= 3) return;
+      tries += 1;
+      window.setTimeout(() => {
+        if (!gone) img.src = retryArt(art, tries);
+      }, 1500 * tries);
+    };
     img.onload = () => {
       if (gone) return;
       const colors = ambientColorsFromImage(img);
@@ -146,7 +157,7 @@ export function Visuals({ art, music }: { art: string | null; music: boolean }) 
   return (
     <div ref={root} className={s.bg} aria-hidden="true">
       <div className={s.bgTint} />
-      {art ? <img className={s.bgArt} src={art} alt="" /> : null}
+      {art ? <RetryImg className={s.bgArt} src={art} alt="" /> : null}
       {on ? <canvas ref={canvas} className={s.bgCanvas} /> : null}
     </div>
   );

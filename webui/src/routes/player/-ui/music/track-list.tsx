@@ -14,6 +14,7 @@ import { clock } from '../../-engine/timeline';
 import { GripIcon, PlayIcon, PlusIcon, XIcon } from '../icons';
 import { PlayerLink } from '../kit';
 import { usePlayer } from '../playback/use-player';
+import { RetryImg } from '../retry-img';
 import { openAddToPlaylist } from './add-to-playlist';
 import s from './music.module.css';
 
@@ -164,13 +165,7 @@ export function TrackList({
               {showArt ? (
                 <span className={s.trackArt}>
                   {row.art ? (
-                    <img
-                      src={row.art}
-                      alt=""
-                      loading="lazy"
-                      decoding="async"
-                      onError={(e) => (e.currentTarget.style.visibility = 'hidden')}
-                    />
+                    <RetryImg src={row.art} alt="" loading="lazy" decoding="async" />
                   ) : null}
                 </span>
               ) : null}
