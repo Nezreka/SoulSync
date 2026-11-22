@@ -256,10 +256,11 @@ def create_code():
         return jsonify({"success": False, "error": f"{C.MAX_LIVE} codes are already waiting. "
                         "Cancel one or let it run out."}), 409
     C.sweep(db)
-    try:  # tell the rendezvous, when it is running, so the code is live there too
+    try:  # tell the rendezvous: it registers the code when running, and
+        # bootstraps the certificate + presence when it is not
         from core.connect import rendezvous
 
-        rendezvous.register_created(row["code_hash"], int(row["seconds_left"]))
+        rendezvous.register_created(row["code_hash"], int(row["seconds_left"]), get_database, config_manager)
     except Exception:  # noqa: BLE001
         logger.debug("connect rendezvous register failed", exc_info=True)
     _audit("device_code_created", detail=note.strip()[:80] or None)

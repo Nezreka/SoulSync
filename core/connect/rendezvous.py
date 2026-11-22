@@ -8,16 +8,18 @@ port and LAN addresses from here, and the certificate store in the
 connect state dir.
 
 Presence starts only once the server has a certificate: a sealed
-answer the app cannot pin is worse than no answer, so until
-:func:`ensure_certificate` has run successfully, start() is a no-op
-that logs why. Starting is idempotent — the devices blueprint's
-configure() calls it and later calls return the running client.
+answer the app cannot pin is worse than no answer. When there is no
+certificate yet, start() kicks a background bootstrap that obtains
+one (see :func:`_kick_bootstrap`) and starts presence as soon as it
+lands. Starting is idempotent — the devices blueprint's configure()
+calls it and later calls return the running client.
 """
 from __future__ import annotations
 
 import ipaddress
 import logging
 import socket
+import threading
 import time
 
 from . import dns_labels
@@ -34,6 +36,12 @@ ZONE = "connect.ssync.net"
 _LIVE_SQL = "used_at IS NULL AND cancelled_at IS NULL AND locked_at IS NULL AND expires_at > ?"
 
 _client: PresenceClient | None = None
+_start_lock = threading.Lock()
+_bootstrap_lock = threading.Lock()
+_bootstrap_running = False
+_last_bootstrap_failed_at = 0.0
+_BOOTSTRAP_RETRY_DELAY_SECONDS = 45
+_BOOTSTRAP_COOLDOWN_SECONDS = 300
 
 
 def dns_id(identity: ServerIdentity) -> str:
@@ -148,13 +156,22 @@ def _identity_and_store(get_database, config_manager):
 
 
 def start(get_database, config_manager) -> PresenceClient | None:
-    """Start presence if the server has a certificate. Idempotent."""
+    """Start presence if the server has a certificate. Idempotent.
+
+    With no certificate yet, kicks the background bootstrap that
+    obtains one and returns None; presence starts when it lands."""
+    with _start_lock:
+        return _start_locked(get_database, config_manager)
+
+
+def _start_locked(get_database, config_manager) -> PresenceClient | None:
     global _client
     if _client is not None:
         return _client
     identity, store = _identity_and_store(get_database, config_manager)
     if not store.fingerprint():
         log.info("connect rendezvous: no TLS certificate yet; presence not started")
+        _kick_bootstrap(get_database, config_manager)
         return None
     from .addresses import web_port
 
@@ -179,9 +196,75 @@ def start(get_database, config_manager) -> PresenceClient | None:
     return _client
 
 
-def register_created(code_hash_hex: str, ttl_seconds: int) -> None:
+def register_created(code_hash_hex: str, ttl_seconds: int, get_database=None, config_manager=None) -> None:
     if _client is not None:
         _client.register_code(code_hash_hex, ttl_seconds)
+    elif get_database is not None and config_manager is not None:
+        # No presence yet (almost always: no certificate). A code the
+        # rendezvous never hears of can never be found, so use the
+        # pairing attempt itself as the bootstrap trigger.
+        _kick_bootstrap(get_database, config_manager)
+
+
+def _kick_bootstrap(get_database, config_manager) -> None:
+    """Obtain the certificate in the background, then start presence.
+
+    Nothing else in the app ever asked for the first certificate, so
+    a fresh server could hand out pairing codes the rendezvous had
+    never heard of and every lookup came back empty. The bootstrap
+    runs on a daemon thread (an ACME round trip takes a while), at
+    most one at a time, and is kicked from start() and from
+    register_created(), so startup and every new code retry it until
+    the certificate lands. Once presence connects it re-registers
+    every live code from the database, so a code created just before
+    the certificate arrived still becomes findable.
+
+    A failed cycle imposes a cooldown before the next kick starts
+    another: each cycle can burn Let's Encrypt failed-validation
+    attempts (5 per account per hostname per hour), so an admin
+    re-creating codes against a down service must not be able to
+    spend them all and delay recovery.
+    """
+    global _bootstrap_running
+    with _bootstrap_lock:
+        if _client is not None or _bootstrap_running:
+            return
+        if _last_bootstrap_failed_at and (
+            time.monotonic() - _last_bootstrap_failed_at < _BOOTSTRAP_COOLDOWN_SECONDS
+        ):
+            return
+        _bootstrap_running = True
+    try:
+        threading.Thread(
+            target=_bootstrap,
+            args=(get_database, config_manager),
+            name="connect-cert-bootstrap",
+            daemon=True,
+        ).start()
+    except Exception:  # noqa: BLE001 - never wedge the flag on a spawn failure
+        log.warning("connect rendezvous: could not start the certificate bootstrap", exc_info=True)
+        with _bootstrap_lock:
+            _bootstrap_running = False
+
+
+def _bootstrap(get_database, config_manager) -> None:
+    global _bootstrap_running, _last_bootstrap_failed_at
+    try:
+        for attempt in range(2):
+            try:
+                ensure_certificate(get_database, config_manager)
+            except Exception:  # noqa: BLE001 - logged and retried, never raised
+                log.warning("connect rendezvous: certificate attempt failed", exc_info=True)
+            if start(get_database, config_manager) is not None:
+                return
+            if attempt == 0:
+                time.sleep(_BOOTSTRAP_RETRY_DELAY_SECONDS)
+        log.warning("connect rendezvous: certificate bootstrap gave up for now")
+    finally:
+        with _bootstrap_lock:
+            _bootstrap_running = False
+            if _client is None:
+                _last_bootstrap_failed_at = time.monotonic()
 
 
 def report_redeemed(code_hash_hex: str) -> None:
@@ -216,5 +299,8 @@ def check_ct(get_database, config_manager) -> list[dict]:
 
 
 def _reset_for_tests() -> None:
-    global _client
+    global _client, _bootstrap_running, _last_bootstrap_failed_at
     _client = None
+    with _bootstrap_lock:
+        _bootstrap_running = False
+        _last_bootstrap_failed_at = 0.0
