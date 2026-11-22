@@ -16184,6 +16184,10 @@ def _tracks_with_mirrored_quality_profile(
 
 
 def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, serialize=False):
+    # a waiting wishlist batch keeps its tracks packed (#2242); the quality
+    # stamp below only reads a real list
+    from core.downloads.queued_tracks import unpack_tracks
+    tracks_json = unpack_tracks(tracks_json)
     batch = download_batches.get(batch_id, {})
     tracks_json, quality_profile_id = _tracks_with_mirrored_quality_profile(
         batch.get('playlist_id') or playlist_id,

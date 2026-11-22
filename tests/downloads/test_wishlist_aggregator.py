@@ -210,3 +210,12 @@ def test_rows_keep_the_index_the_modal_drew_them_at():
     assert [t['track_index'] for t in out['tasks']] == [0, 1, 2]
     assert [r['track_index'] for r in out['analysis_results']] == [0, 1, 2]
 
+
+
+def test_a_run_says_how_many_batches_wait_and_how_many_run():
+    """#2242: a big run's albums wait for the album pool's few workers"""
+    primary = {'phase': 'downloading', 'tasks': []}
+    siblings = ([{'phase': 'queued'}] * 75 + [{'phase': 'analysis'}, {'phase': 'downloading'}]
+                + [{'phase': 'complete'}, {'phase': 'cancelled'}])
+    merged = merge_wishlist_run_status(primary, siblings)
+    assert merged['run_batches'] == {'total': 80, 'waiting': 75, 'running': 3}

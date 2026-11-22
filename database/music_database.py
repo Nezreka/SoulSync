@@ -147,6 +147,29 @@ def _library_sort_key_sql(column: str) -> str:
     return f"{_library_stripped_sql(column)} COLLATE NOCASE"
 
 
+def _wishlist_duplicate_key(spotify_data, allow_duplicates: bool):
+    """(name, artist[, album]) a wishlist row is a duplicate by, lowercased;
+    None when its json can't be read. remove_wishlist_duplicates' key"""
+    try:
+        track_data = json.loads(spotify_data)
+        track_name = track_data.get('name', '').lower()
+        artists = track_data.get('artists', [])
+        if artists and isinstance(artists[0], dict):
+            artist_name = artists[0].get('name', '').lower()
+        elif artists:
+            artist_name = str(artists[0]).lower()
+        else:
+            artist_name = 'unknown'
+        if not allow_duplicates:
+            return (track_name, artist_name)
+        # the album is in the key so the same song from two albums survives
+        album = track_data.get('album', {})
+        album_name = (album.get('name', '') if isinstance(album, dict) else str(album)).lower()
+        return (track_name, artist_name, album_name)
+    except Exception:  # noqa: BLE001 - an unreadable row is skipped, as before
+        return None
+
+
 def _row_value(row, column: str, default=None):
     """Read a column off a sqlite3.Row that may not have it.
 
@@ -18705,68 +18728,51 @@ class MusicDatabase:
         (same name + artist + album). When False, removes any track with the
         same name + artist regardless of album.
         Keeps the oldest entry (by date_added) for each duplicate set.
-        Returns the number of duplicates removed."""
+        Returns the number of duplicates removed.
+
+        #2242: one pass over the cursor, a row at a time. it used to
+        fetchall() every row's full json first (13.6k payloads in memory at
+        once on a big wishlist) and log every duplicate on its own line."""
         try:
             from core.settings import config_manager
             allow_duplicates = config_manager.get('wishlist.allow_duplicate_tracks', True)
+            started = time.monotonic()
 
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-
-                # Get all wishlist tracks for this profile
                 cursor.execute("""
-                    SELECT id, spotify_track_id, spotify_data, date_added
+                    SELECT id, spotify_data
                     FROM wishlist_tracks
                     WHERE profile_id = ?
                     ORDER BY date_added ASC
                 """, (profile_id,))
-                all_tracks = cursor.fetchall()
 
-                # Track seen tracks and duplicates to remove
-                seen_tracks = {}  # Value: track row id to keep
+                seen_tracks = {}  # key -> row id kept
                 duplicates_to_remove = []
-
-                for track in all_tracks:
-                    try:
-                        track_data = json.loads(track['spotify_data'])
-                        track_name = track_data.get('name', '').lower()
-                        artists = track_data.get('artists', [])
-                        if artists and isinstance(artists[0], dict):
-                            artist_name = artists[0].get('name', '').lower()
-                        elif artists:
-                            artist_name = str(artists[0]).lower()
-                        else:
-                            artist_name = 'unknown'
-
-                        if allow_duplicates:
-                            # Include album in the key so same song from different albums survives
-                            album = track_data.get('album', {})
-                            album_name = (album.get('name', '') if isinstance(album, dict) else str(album)).lower()
-                            key = (track_name, artist_name, album_name)
-                        else:
-                            key = (track_name, artist_name)
-
-                        if key in seen_tracks:
-                            # Duplicate found - mark for removal
-                            duplicates_to_remove.append(track['id'])
-                            logger.info(f"Found duplicate: '{track_name}' by {artist_name} (ID: {track['id']}, keeping ID: {seen_tracks[key]})")
-                        else:
-                            # First occurrence - keep this one
-                            seen_tracks[key] = track['id']
-
-                    except Exception as parse_error:
-                        logger.warning(f"Error parsing wishlist track {track['id']}: {parse_error}")
+                scanned = 0
+                for row_id, spotify_data in cursor:
+                    scanned += 1
+                    key = _wishlist_duplicate_key(spotify_data, allow_duplicates)
+                    if key is None:
+                        logger.warning(f"Error parsing wishlist track {row_id}")
                         continue
+                    kept = seen_tracks.setdefault(key, row_id)
+                    if kept != row_id:
+                        duplicates_to_remove.append(row_id)
+                        logger.debug(f"Found duplicate: '{key[0]}' by {key[1]} "
+                                     f"(ID: {row_id}, keeping ID: {kept})")
 
-                # Remove all duplicates
-                removed_count = 0
-                for duplicate_id in duplicates_to_remove:
-                    cursor.execute("DELETE FROM wishlist_tracks WHERE id = ?", (duplicate_id,))
-                    removed_count += 1
+                for start in range(0, len(duplicates_to_remove), 500):
+                    cursor.executemany("DELETE FROM wishlist_tracks WHERE id = ?",
+                                       [(i,) for i in duplicates_to_remove[start:start + 500]])
+                removed_count = len(duplicates_to_remove)
 
                 conn.commit()
                 if removed_count > 0:
-                    logger.info(f"Removed {removed_count} duplicate tracks from wishlist (allow_duplicates={allow_duplicates})")
+                    logger.info(f"Removed {removed_count} duplicate tracks from wishlist "
+                                f"(allow_duplicates={allow_duplicates})")
+                logger.info(f"Wishlist duplicate check: {scanned} row(s) in "
+                            f"{time.monotonic() - started:.1f}s, {removed_count} removed")
                 return removed_count
 
         except Exception as e:
