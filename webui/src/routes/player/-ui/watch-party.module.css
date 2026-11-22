@@ -1,0 +1,606 @@
+/* Best-in-class Watching Now & Watch Parties (Theater Waiting Room) */
+
+.pageHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--u) * 1);
+  margin-bottom: calc(var(--u) * 1.4);
+}
+
+.headActions {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 0.6);
+}
+
+.startPartyBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--u) * 0.45);
+  height: calc(var(--u) * 2.6);
+  padding: 0 calc(var(--u) * 1.15);
+  border: 1px solid rgba(var(--accent-rgb), 0.55);
+  border-radius: var(--radius-pill);
+  background: linear-gradient(135deg, var(--accent), var(--accent-light));
+  color: var(--pl-bg);
+  font-size: calc(var(--u) * 0.88);
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 6px 22px rgba(var(--accent-rgb), 0.28);
+  transition:
+    transform var(--dur-fast) ease,
+    box-shadow var(--dur-fast) ease;
+}
+
+.startPartyBtn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 28px rgba(var(--accent-rgb), 0.38);
+}
+
+/* ── Cinema Live Screen Cards (Watching Now) ── */
+
+.cinemaGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, calc(var(--u) * 24)), 1fr));
+  gap: calc(var(--u) * 1.25);
+}
+
+.cinemaCard {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  min-height: calc(var(--u) * 15.5);
+  overflow: hidden;
+  border: 1px solid var(--white-a12);
+  border-radius: calc(var(--radius-lg) + 4px);
+  background: #0d121d;
+  transition:
+    transform var(--dur-moderate) var(--pl-ease),
+    border-color var(--dur-fast) ease,
+    box-shadow var(--dur-moderate) var(--pl-ease);
+}
+
+.cinemaCard:hover {
+  border-color: rgba(var(--accent-rgb), 0.48);
+  transform: translateY(-3px);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.48);
+}
+
+.cinemaBg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.58;
+  transition: transform 0.6s var(--pl-ease);
+}
+
+.cinemaCard:hover .cinemaBg {
+  transform: scale(1.03);
+}
+
+.cinemaScrim {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to top,
+    rgba(7, 10, 16, 0.96) 0%,
+    rgba(7, 10, 16, 0.72) 48%,
+    rgba(7, 10, 16, 0.25) 100%
+  );
+}
+
+.cinemaTop {
+  position: absolute;
+  top: calc(var(--u) * 0.85);
+  right: calc(var(--u) * 0.85);
+  left: calc(var(--u) * 0.85);
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--u) * 0.5);
+}
+
+.livePill {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--u) * 0.4);
+  padding: calc(var(--u) * 0.28) calc(var(--u) * 0.7);
+  border: 1px solid var(--white-a14);
+  border-radius: var(--radius-pill);
+  background: rgba(7, 10, 16, 0.72);
+  color: var(--pl-text);
+  font-size: calc(var(--u) * 0.72);
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  backdrop-filter: blur(12px);
+}
+
+.liveDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--pl-text-3);
+}
+
+.liveDotActive {
+  background: #34d399;
+  box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.28);
+  animation: pulseGlow 1.8s ease-in-out infinite;
+}
+
+.liveDotLobby {
+  background: var(--accent-light);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.32);
+  animation: pulseGlow 1.8s ease-in-out infinite;
+}
+
+@keyframes pulseGlow {
+  50% {
+    opacity: 0.65;
+    transform: scale(0.9);
+  }
+}
+
+.whoChip {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--u) * 0.4);
+  padding: calc(var(--u) * 0.18) calc(var(--u) * 0.65) calc(var(--u) * 0.18) calc(var(--u) * 0.22);
+  border: 1px solid var(--white-a12);
+  border-radius: var(--radius-pill);
+  background: rgba(7, 10, 16, 0.68);
+  color: var(--pl-text);
+  font-size: calc(var(--u) * 0.76);
+  font-weight: 700;
+  backdrop-filter: blur(12px);
+}
+
+.cinemaBody {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 0.35);
+  padding: calc(var(--u) * 1.15);
+}
+
+.cinemaTitle {
+  margin: 0;
+  color: #fff;
+  font-size: calc(var(--u) * 1.25);
+  font-weight: 850;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cinemaSub {
+  margin: 0;
+  color: var(--pl-text-2);
+  font-size: calc(var(--u) * 0.84);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.musicTicker {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--u) * 0.35);
+  margin-top: calc(var(--u) * 0.15);
+  color: var(--accent-light);
+  font-size: calc(var(--u) * 0.78);
+  font-weight: 650;
+}
+
+.progressWrap {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 0.6);
+  margin-top: calc(var(--u) * 0.35);
+}
+
+.progressTrack {
+  flex: 1;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--white-a16);
+}
+
+.progressFill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-light));
+}
+
+.progressTime {
+  color: var(--pl-text-3);
+  font-size: calc(var(--u) * 0.72);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.cardActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: calc(var(--u) * 0.5);
+  margin-top: calc(var(--u) * 0.55);
+}
+
+.glassBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--u) * 0.35);
+  height: calc(var(--u) * 2.2);
+  padding: 0 calc(var(--u) * 0.85);
+  border: 1px solid var(--white-a16);
+  border-radius: var(--radius-pill);
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  font-size: calc(var(--u) * 0.8);
+  font-weight: 700;
+  text-decoration: none;
+  cursor: pointer;
+  backdrop-filter: blur(10px);
+  transition: background var(--dur-fast) ease;
+}
+
+.glassBtn:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.glassBtnPrimary {
+  border-color: transparent;
+  background: #fff;
+  color: #070a10;
+}
+
+.glassBtnPrimary:hover {
+  background: #e9eef8;
+}
+
+/* ── Shared Titles Grid ("Watching the Same Thing") ── */
+
+.sharedGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, calc(var(--u) * 21)), 1fr));
+  gap: calc(var(--u) * 1);
+}
+
+.sharedCard {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 0.9);
+  padding: calc(var(--u) * 0.75);
+  border: 1px solid var(--white-a08);
+  border-radius: calc(var(--radius-lg) + 2px);
+  background: var(--white-a04);
+  transition:
+    border-color var(--dur-fast) ease,
+    background var(--dur-fast) ease;
+}
+
+.sharedCard:hover {
+  border-color: var(--white-a18);
+  background: var(--white-a06);
+}
+
+.sharedPoster {
+  flex: none;
+  width: calc(var(--u) * 4.2);
+  aspect-ratio: 2 / 3;
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  background: var(--white-a08);
+}
+
+.sharedPoster img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.sharedInfo {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: calc(var(--u) * 0.35);
+  min-width: 0;
+}
+
+.sharedTitle {
+  color: #fff;
+  font-size: calc(var(--u) * 0.96);
+  font-weight: 800;
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sharedTitle:hover {
+  text-decoration: underline;
+}
+
+.sharedMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: calc(var(--u) * 0.35) calc(var(--u) * 0.7);
+  color: var(--pl-text-3);
+  font-size: calc(var(--u) * 0.76);
+}
+
+/* ── Theater Waiting Room & Create Party Modal ── */
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  place-items: center;
+  padding: calc(var(--u) * 1.2);
+  background: rgba(5, 8, 14, 0.82);
+  backdrop-filter: blur(16px);
+}
+
+.modal {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(100%, 880px);
+  max-height: min(90vh, 780px);
+  overflow: hidden;
+  border: 1px solid var(--white-a14);
+  border-radius: calc(var(--radius-lg) + 6px);
+  background: #0b0f19;
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.72);
+}
+
+.modalHero {
+  position: relative;
+  padding: calc(var(--u) * 1.4) calc(var(--u) * 1.5);
+  border-bottom: 1px solid var(--white-a10);
+  background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.18), rgba(11, 15, 25, 0.95));
+}
+
+.modalHeroBg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.24;
+  pointer-events: none;
+}
+
+.modalHeroInner {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: calc(var(--u) * 1);
+}
+
+.modalTitle {
+  margin: 0;
+  color: #fff;
+  font-size: calc(var(--u) * 1.35);
+  font-weight: 850;
+}
+
+.modalSub {
+  margin: calc(var(--u) * 0.25) 0 0;
+  color: var(--pl-text-2);
+  font-size: calc(var(--u) * 0.85);
+}
+
+.roomGrid {
+  display: grid;
+  grid-template-columns: 1.15fr 0.85fr;
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+}
+
+@media (max-width: 760px) {
+  .roomGrid {
+    grid-template-columns: 1fr;
+    overflow-y: auto;
+  }
+}
+
+.roomMain {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 1);
+  padding: calc(var(--u) * 1.3);
+  overflow-y: auto;
+  border-right: 1px solid var(--white-a08);
+}
+
+.lobbyMusicBox {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 0.8);
+  padding: calc(var(--u) * 0.75) calc(var(--u) * 0.9);
+  border: 1px solid rgba(var(--accent-rgb), 0.3);
+  border-radius: var(--radius-lg);
+  background: rgba(var(--accent-rgb), 0.08);
+}
+
+.lobbyMusicArt {
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: var(--white-a10);
+}
+
+.memberList {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 0.45);
+}
+
+.memberRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: calc(var(--u) * 0.45) calc(var(--u) * 0.65);
+  border-radius: var(--radius-md);
+  background: var(--white-a04);
+}
+
+.readyBadge {
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: rgba(52, 211, 153, 0.16);
+  color: #34d399;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.waitingBadge {
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--white-a08);
+  color: var(--pl-text-3);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.chatPane {
+  display: flex;
+  flex-direction: column;
+  min-height: 280px;
+  overflow: hidden;
+  padding: calc(var(--u) * 1);
+  gap: calc(var(--u) * 0.65);
+}
+
+.chatLog {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 0.45);
+}
+
+.chatMsg {
+  font-size: calc(var(--u) * 0.82);
+  line-height: 1.35;
+  color: var(--pl-text-2);
+}
+
+.chatMsg strong {
+  color: #fff;
+  margin-right: 6px;
+}
+
+.chatSys {
+  font-size: calc(var(--u) * 0.74);
+  color: var(--pl-text-3);
+  font-style: italic;
+}
+
+.emojiRow {
+  display: flex;
+  gap: 6px;
+}
+
+.emojiBtn {
+  flex: 1;
+  height: 32px;
+  border: 1px solid var(--white-a10);
+  border-radius: 8px;
+  background: var(--white-a04);
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.emojiBtn:hover {
+  background: var(--white-a12);
+}
+
+.chatForm {
+  display: flex;
+  gap: 6px;
+}
+
+.input {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--white-a14);
+  border-radius: 10px;
+  background: var(--white-a06);
+  color: #fff;
+  font-size: 13px;
+}
+
+.pickerList {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 8px;
+  max-height: 230px;
+  overflow-y: auto;
+}
+
+.pickerItem {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px;
+  border: 1px solid var(--white-a10);
+  border-radius: 10px;
+  background: var(--white-a04);
+  color: #fff;
+  text-align: left;
+  cursor: pointer;
+}
+
+.pickerItemActive {
+  border-color: var(--accent-light);
+  background: rgba(var(--accent-rgb), 0.16);
+}
+
+.pickerThumb {
+  width: 36px;
+  height: 50px;
+  border-radius: 6px;
+  object-fit: cover;
+  background: var(--white-a08);
+  flex: none;
+}
+
+.pillToggleRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.pillToggle {
+  padding: 6px 12px;
+  border: 1px solid var(--white-a12);
+  border-radius: 999px;
+  background: var(--white-a04);
+  color: var(--pl-text-2);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.pillToggleOn {
+  border-color: var(--accent-light);
+  background: rgba(var(--accent-rgb), 0.2);
+  color: #fff;
+}

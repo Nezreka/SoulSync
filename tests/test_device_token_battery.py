@@ -114,6 +114,14 @@ OPTED_IN = {
     "devices.device_switch_profiles": A.PLAYBACK,
     "devices.device_switch_profile": A.PLAYBACK,
     "player_stream.create_cast_token": A.PLAYBACK,
+    "player.list_watch_parties": A.PLAYBACK,
+    "player.create_watch_party": A.PLAYBACK,
+    "player.get_watch_party": A.PLAYBACK,
+    "player.join_watch_party": A.PLAYBACK,
+    "player.leave_watch_party": A.PLAYBACK,
+    "player.update_watch_party_state": A.PLAYBACK,
+    "player.post_watch_party_chat": A.PLAYBACK,
+    "player.delete_watch_party": A.PLAYBACK,
 }
 
 IGNORED = {"HEAD", "OPTIONS"}

@@ -1330,3 +1330,187 @@ def remove_guide_reminder():
         return _bad("starts_at must be a number")
     guide_data.remove_reminder(player_db(), pid, request.args.get("channel_id", ""), starts)
     return jsonify({"success": True})
+
+
+# ── watch parties (watch together + theater waiting rooms) ──────────────
+
+def _hydrate_party_profiles(party: dict, who: dict) -> dict:
+    party["host_profile"] = who.get(party["host_profile_id"], {"name": "Host"})
+    for m in party.get("members", []):
+        m["profile"] = who.get(m["profile_id"], {"name": "Someone"})
+    for msg in party.get("messages", []):
+        msg["profile"] = who.get(msg["profile_id"], {"name": "Someone"})
+    return party
+
+
+def _pick_default_lobby_track() -> dict | None:
+    """Pick a random owned track from the music library for the theater waiting room."""
+    try:
+        from database.music_database import get_database
+        db = get_database()
+        with db._get_connection() as conn:
+            row = conn.execute(
+                "SELECT t.id, t.title, COALESCE(a.name, '') AS artist, t.album_id, t.duration "
+                "FROM tracks t "
+                "LEFT JOIN artists a ON a.id = t.artist_id "
+                "WHERE t.file_path IS NOT NULL AND t.file_path != '' "
+                "ORDER BY RANDOM() LIMIT 1"
+            ).fetchone()
+            if not row:
+                return None
+            tid, title, artist, album_id, duration = row
+            dur_ms = int(duration) if duration and duration > 10000 else (int(duration * 1000) if duration else 210000)
+            return {
+                "track_id": str(tid),
+                "title": title or "Lobby Music",
+                "artist": artist or "",
+                "album_id": int(album_id) if album_id is not None else None,
+                "artwork": f"/api/library/v2/artwork/album/{album_id}?size=thumb" if album_id is not None else None,
+                "duration_ms": dur_ms,
+            }
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _party_may_see(item_type: str, item_id: str) -> bool:
+    from types import SimpleNamespace
+    return _viewer_may_see(SimpleNamespace(item_type=item_type, item_id=item_id))
+
+
+@bp.route("/api/player/parties", methods=["GET"])
+@device_playback
+@self_only
+def list_watch_parties():
+    """Active and scheduled watch parties visible to this profile."""
+    from core.player import parties
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    try:
+        rows = parties.list_parties(player_db(), pid, may_see=_party_may_see)
+    except Exception:  # noqa: BLE001
+        return _failed("parties list", "Couldn't load watch parties.")
+    who = _profiles_by_id()
+    return jsonify({"success": True, "parties": [_hydrate_party_profiles(r, who) for r in rows]})
+
+
+@bp.route("/api/player/parties", methods=["POST"])
+@device_playback
+@self_only
+def create_watch_party():
+    """Create a watch party (instant theater lobby or scheduled premiere)."""
+    from core.player import parties
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    body = request.get_json(silent=True) or {}
+    default_lobby = None if body.get("lobby_music") is False else _pick_default_lobby_track()
+    try:
+        party = parties.create_party(player_db(), pid, body, default_lobby_track=default_lobby)
+    except parties.PartyError as e:
+        return _bad(e)
+    except Exception:  # noqa: BLE001
+        return _failed("party create", "Couldn't create watch party.")
+    who = _profiles_by_id()
+    return jsonify({"success": True, "party": _hydrate_party_profiles(party, who)}), 201
+
+
+@bp.route("/api/player/parties/<party_id>", methods=["GET"])
+@device_playback
+@self_only
+def get_watch_party(party_id):
+    """Live room state: members, ready flags, synced position, lobby music, chat."""
+    from core.player import parties
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    party = parties.get_party(player_db(), party_id, pid)
+    if not party:
+        return jsonify({"success": False, "error": "not_found", "message": "Watch party not found."}), 404
+    who = _profiles_by_id()
+    return jsonify({"success": True, "party": _hydrate_party_profiles(party, who)})
+
+
+@bp.route("/api/player/parties/<party_id>/join", methods=["POST"])
+@device_playback
+@self_only
+def join_watch_party(party_id):
+    """Join a watch party, RSVP to a scheduled one, or toggle Ready."""
+    from core.player import parties
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    body = request.get_json(silent=True) or {}
+    ready = body.get("ready") if isinstance(body.get("ready"), bool) else None
+    rsvp = bool(body.get("rsvp", False))
+    try:
+        party = parties.join_party(player_db(), party_id, pid, ready=ready, rsvp=rsvp)
+    except parties.PartyError as e:
+        return _bad(e)
+    who = _profiles_by_id()
+    return jsonify({"success": True, "party": _hydrate_party_profiles(party, who)})
+
+
+@bp.route("/api/player/parties/<party_id>/leave", methods=["POST"])
+@device_playback
+@self_only
+def leave_watch_party(party_id):
+    from core.player import parties
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    parties.leave_party(player_db(), party_id, pid)
+    return jsonify({"success": True})
+
+
+@bp.route("/api/player/parties/<party_id>/state", methods=["POST"])
+@device_playback
+@self_only
+def update_watch_party_state(party_id):
+    """Start movie from lobby, play/pause/seek, change lobby track, or switch title."""
+    from core.player import parties
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    body = request.get_json(silent=True) or {}
+    if body.get("shuffle_lobby_music"):
+        body = {**body, "lobby_track": _pick_default_lobby_track()}
+    try:
+        party = parties.update_state(player_db(), party_id, pid, body, is_admin=_is_admin())
+    except parties.PartyError as e:
+        return _bad(e)
+    who = _profiles_by_id()
+    return jsonify({"success": True, "party": _hydrate_party_profiles(party, who)})
+
+
+@bp.route("/api/player/parties/<party_id>/chat", methods=["POST"])
+@device_playback
+@self_only
+def post_watch_party_chat(party_id):
+    """Send a chat message or quick emoji reaction in a watch party."""
+    from core.player import parties
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    try:
+        msg = parties.post_message(player_db(), party_id, pid, request.get_json(silent=True))
+    except parties.PartyError as e:
+        return _bad(e)
+    who = _profiles_by_id()
+    msg["profile"] = who.get(pid, {"name": "You"})
+    return jsonify({"success": True, "message": msg})
+
+
+@bp.route("/api/player/parties/<party_id>", methods=["DELETE"])
+@device_playback
+@self_only
+def delete_watch_party(party_id):
+    from core.player import parties
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    try:
+        deleted = parties.delete_party(player_db(), party_id, pid, is_admin=_is_admin())
+    except parties.PartyError as e:
+        return _bad(e)
+    return jsonify({"success": True, "deleted": deleted})

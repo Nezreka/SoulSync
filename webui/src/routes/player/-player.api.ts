@@ -451,6 +451,132 @@ export const togetherQuery = () =>
     staleTime: MINUTE,
   });
 
+// ── watch parties (watch together + theater waiting rooms) ────────────
+
+export interface WatchPartyLobbyTrack {
+  track_id: string;
+  title: string;
+  artist: string;
+  album_id: number | null;
+  artwork: string | null;
+  duration_ms: number | null;
+  started_at: number;
+  live_position?: number;
+}
+
+export interface WatchPartyMember {
+  profile_id: number;
+  profile: WatchingSession['profile'];
+  status: 'rsvp' | 'joined';
+  ready: boolean;
+  joined_at: number;
+  seen_at: number;
+  is_host: boolean;
+  you: boolean;
+}
+
+export interface WatchPartyMessage {
+  id: number;
+  profile_id: number;
+  profile: WatchingSession['profile'];
+  kind: 'chat' | 'reaction' | 'system';
+  body: string;
+  created_at: number;
+  you: boolean;
+}
+
+export interface WatchParty {
+  id: string;
+  host_profile_id: number;
+  host_profile: WatchingSession['profile'];
+  is_host: boolean;
+  is_member: boolean;
+  can_control: boolean;
+  title: string;
+  item_type: 'movie' | 'episode' | 'youtube';
+  item_id: string;
+  meta: ProgressMeta;
+  show_id: number | null;
+  status: 'scheduled' | 'lobby' | 'playing' | 'paused' | 'ended';
+  scheduled_for: number | null;
+  control_mode: 'host' | 'everyone';
+  position: number;
+  position_at: number;
+  live_position: number;
+  server_now: number;
+  lobby_track: WatchPartyLobbyTrack | null;
+  members: WatchPartyMember[];
+  member_count: number;
+  ready_count: number;
+  messages: WatchPartyMessage[];
+  created_at: number;
+  updated_at: number;
+}
+
+export const watchPartiesQuery = () =>
+  queryOptions({
+    queryKey: ['player', 'parties'],
+    queryFn: async () =>
+      (await apiClient.get('player/parties').json<{ parties: WatchParty[] }>()).parties,
+    staleTime: 4_000,
+    refetchInterval: 6_000,
+  });
+
+export const watchPartyQuery = (partyId: string) =>
+  queryOptions({
+    queryKey: ['player', 'party', partyId],
+    queryFn: async () =>
+      (await apiClient.get(`player/parties/${encodeURIComponent(partyId)}`).json<{ party: WatchParty }>()).party,
+    staleTime: 1_500,
+    refetchInterval: 2_500,
+  });
+
+export const watchPartyApi = {
+  create: async (payload: {
+    title?: string;
+    item_type: 'movie' | 'episode' | 'youtube';
+    item_id: string;
+    meta?: ProgressMeta;
+    show_id?: number | null;
+    scheduled_for?: number | null;
+    control_mode?: 'host' | 'everyone';
+    lobby_music?: boolean;
+  }): Promise<WatchParty> =>
+    (await apiClient.post('player/parties', { json: payload }).json<{ party: WatchParty }>()).party,
+  join: async (partyId: string, opts?: { ready?: boolean; rsvp?: boolean }): Promise<WatchParty> =>
+    (
+      await apiClient
+        .post(`player/parties/${encodeURIComponent(partyId)}/join`, { json: opts ?? {} })
+        .json<{ party: WatchParty }>()
+    ).party,
+  leave: async (partyId: string): Promise<void> => {
+    await apiClient.post(`player/parties/${encodeURIComponent(partyId)}/leave`).json();
+  },
+  state: async (
+    partyId: string,
+    payload: {
+      action?: 'start' | 'play' | 'pause' | 'seek' | 'lobby' | 'end';
+      position?: number;
+      shuffle_lobby_music?: boolean;
+      control_mode?: 'host' | 'everyone';
+    },
+  ): Promise<WatchParty> =>
+    (
+      await apiClient
+        .post(`player/parties/${encodeURIComponent(partyId)}/state`, { json: payload })
+        .json<{ party: WatchParty }>()
+    ).party,
+  chat: async (partyId: string, kind: 'chat' | 'reaction', body: string): Promise<WatchPartyMessage> =>
+    (
+      await apiClient
+        .post(`player/parties/${encodeURIComponent(partyId)}/chat`, { json: { kind, body } })
+        .json<{ message: WatchPartyMessage }>()
+    ).message,
+  remove: async (partyId: string): Promise<void> => {
+    await apiClient.delete(`player/parties/${encodeURIComponent(partyId)}`).json();
+  },
+};
+
 // ── notes: comments on a title, marks on a moment ─────────────────────
 
 export interface Note {
