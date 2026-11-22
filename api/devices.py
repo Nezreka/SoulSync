@@ -32,6 +32,12 @@ def configure(*, get_database, config_manager, require_login_enabled=None):
     globals()["config_manager"] = config_manager
     if require_login_enabled is not None:
         globals()["_require_login_enabled"] = require_login_enabled
+    try:  # the rendezvous is best-effort: it self-gates on having a certificate
+        from core.connect import rendezvous
+
+        rendezvous.start(get_database, config_manager)
+    except Exception:  # noqa: BLE001 - pairing must never break app setup
+        logger.debug("connect rendezvous start failed", exc_info=True)
 
 
 def create_blueprint():
@@ -250,6 +256,12 @@ def create_code():
         return jsonify({"success": False, "error": f"{C.MAX_LIVE} codes are already waiting. "
                         "Cancel one or let it run out."}), 409
     C.sweep(db)
+    try:  # tell the rendezvous, when it is running, so the code is live there too
+        from core.connect import rendezvous
+
+        rendezvous.register_created(row["code_hash"], int(row["seconds_left"]))
+    except Exception:  # noqa: BLE001
+        logger.debug("connect rendezvous register failed", exc_info=True)
     _audit("device_code_created", detail=note.strip()[:80] or None)
     out = {"success": True, "code": C.display(code), **row}
     out.update(_pairing(C.display(code)))
@@ -306,6 +318,14 @@ def redeem_code():
     token, device_id = T.create(db, name=str(body.get("name") or ""), platform=str(body.get("platform") or ""),
                                 app=str(body.get("app") or ""), ip=ip, invite_code_id=code_id, now=now)
     C.mark_device(db, code_id, device_id)
+    try:  # the service drops the registration the moment a code is redeemed
+        from core.connect import rendezvous
+
+        normalized = C.normalize(body.get("code"))
+        if normalized:
+            rendezvous.report_redeemed(C.code_hash(normalized))
+    except Exception:  # noqa: BLE001
+        logger.debug("connect rendezvous redeemed report failed", exc_info=True)
     T.sweep_expired(db, now=now)
     _audit("device_code_used", detail=str(body.get("name") or "")[:80] or None,
            actor=(None, "a device", False))
