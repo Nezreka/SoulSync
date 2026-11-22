@@ -40,6 +40,7 @@ _LIVE_SQL = "used_at IS NULL AND cancelled_at IS NULL AND locked_at IS NULL AND 
 
 _client: PresenceClient | None = None
 _https_server = None
+_upnp_mapper = None
 _runtime_thread: threading.Thread | None = None
 _runtime_lock = threading.Lock()
 
@@ -74,19 +75,22 @@ def build_address_list(
     observed_public_ip: str | None,
     lan_ips: list[str],
     port: int,
+    external_port: int | None = None,
 ) -> list[str]:
     """Ordered candidate URLs for one sealed answer: every candidate
     an HTTPS URL under the server's own certificate name
     (``<ip-label>.<dns_id>.connect.ssync.net``) so the app can pin the
     certificate fingerprint whichever one it reaches. LAN IPv4 first,
-    then the observed public IPv4, then IPv6 forms. No raw-IP or
+    then the observed public IPv4 (using ``external_port`` if UPnP/NAT-PMP
+    mapped a different WAN port), then IPv6 forms. No raw-IP or
     plain-HTTP candidates: an address the app cannot verify against
     the pinned fingerprint has no place in the list."""
     server_dns_id = dns_id(identity)
     urls: list[str] = []
     seen: set[str] = set()
+    wan_port = external_port if external_port else port
 
-    def add(ip_text: str) -> None:
+    def add(ip_text: str, use_port: int) -> None:
         try:
             addr = ipaddress.ip_address(ip_text)
         except ValueError:
@@ -96,7 +100,7 @@ def build_address_list(
         else:
             label = dns_labels.encode_ipv6_label(str(addr))
         host = f"{label}.{server_dns_id}.{ZONE}"
-        url = f"https://{host}:{port}" if port != 443 else f"https://{host}"
+        url = f"https://{host}:{use_port}" if use_port != 443 else f"https://{host}"
         if url not in seen:
             seen.add(url)
             urls.append(url)
@@ -108,11 +112,11 @@ def build_address_list(
             return True  # unparseable entries sort as v4; add() drops them anyway
 
     for ip in [i for i in lan_ips if is_v4(i)]:
-        add(ip)
+        add(ip, port)
     if observed_public_ip:
-        add(observed_public_ip)
+        add(observed_public_ip, wan_port)
     for ip in [i for i in lan_ips if not is_v4(i)]:
-        add(ip)
+        add(ip, port)
     return urls
 
 
@@ -196,7 +200,11 @@ def start(get_database, config_manager, *, port: int | None = None) -> PresenceC
         registrations_provider=lambda: _registrations(db),
         is_live=lambda code_hash: _is_live(db, code_hash),
         address_provider=lambda observed: build_address_list(
-            identity, observed_public_ip=observed, lan_ips=_local_lan_ips(), port=tls_port
+            identity,
+            observed_public_ip=observed or (_upnp_mapper.mapping.external_ip if _upnp_mapper and _upnp_mapper.mapping else None),
+            lan_ips=_local_lan_ips(),
+            port=tls_port,
+            external_port=_upnp_mapper.external_port if _upnp_mapper else None,
         ),
         cert_fingerprint_provider=store.fingerprint,
     )
@@ -240,6 +248,7 @@ def start_runtime(app, get_database, config_manager) -> None:
             return
 
         def _worker() -> None:
+            global _upnp_mapper
             host = os.environ.get("SOULSYNC_WEB_BIND_HOST", "0.0.0.0")
             tls_port = connect_tls_port(config_manager)
             backoff = 15
@@ -250,6 +259,14 @@ def start_runtime(app, get_database, config_manager) -> None:
                     if store.fingerprint():
                         if _https_server is None or renewed:
                             _start_https_listener(app, store, host, tls_port)
+                        if _upnp_mapper is None:
+                            from .upnp import UpnpPortMapper
+
+                            _upnp_mapper = UpnpPortMapper(
+                                tls_port,
+                                cert_fingerprint_provider=store.fingerprint,
+                            )
+                            _upnp_mapper.start()
                         start(get_database, config_manager, port=tls_port)
                         backoff = 15
                         time.sleep(_RENEW_INTERVAL_SECONDS)
@@ -261,6 +278,30 @@ def start_runtime(app, get_database, config_manager) -> None:
 
         _runtime_thread = threading.Thread(target=_worker, daemon=True, name="ConnectRuntime")
         _runtime_thread.start()
+
+
+def current_addresses(get_database, config_manager) -> list[str]:
+    """Return the server's live LAN + WAN Connect candidate URLs (for /api/devices/me)."""
+    try:
+        identity, store = _identity_and_store(get_database, config_manager)
+        if not store.fingerprint():
+            return []
+        tls_port = connect_tls_port(config_manager)
+        observed = None
+        if _client is not None and _client.observed_public_ip:
+            observed = _client.observed_public_ip
+        elif _upnp_mapper is not None and _upnp_mapper.mapping and _upnp_mapper.mapping.external_ip:
+            observed = _upnp_mapper.mapping.external_ip
+        ext_port = _upnp_mapper.external_port if _upnp_mapper else None
+        return build_address_list(
+            identity,
+            observed_public_ip=observed,
+            lan_ips=_local_lan_ips(),
+            port=tls_port,
+            external_port=ext_port,
+        )
+    except Exception:  # noqa: BLE001
+        return []
 
 
 def register_created(code_hash_hex: str, ttl_seconds: int) -> None:

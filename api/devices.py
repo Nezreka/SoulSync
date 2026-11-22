@@ -161,12 +161,18 @@ def device_me():
     if dev is None:
         return _no_device()
     from core.connect import device_tokens as T
+    from core.connect import rendezvous as R
     from core.connect.server_key import public_view
     db = get_database()
     row = T.get(db, dev["id"]) or {}
     out = T.public_row(row)
     out.pop("last_ip", None)
-    return jsonify({"success": True, "device": out, "server": public_view(_identity())})
+    return jsonify({
+        "success": True,
+        "device": out,
+        "server": public_view(_identity()),
+        "addresses": R.current_addresses(get_database, config_manager),
+    })
 
 
 @bp.route("/api/devices/me/profiles", methods=["GET"])
