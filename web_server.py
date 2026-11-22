@@ -3784,27 +3784,30 @@ def spa_catch_all(page):
 
 def _get_windowed_calls(key, current_total):
     """Record current cumulative total and return (calls_1h, calls_24h).
-    Deque stores (timestamp, cumulative_total) in chronological order.
-    To get calls in a window: current_total minus the oldest total within that window."""
+    Deque stores (timestamp, cumulative_total) in chronological order, one entry
+    per change of the total: the status poll runs every ~5 s and an idle
+    service's total does not move, and appending every poll kept up to 17,300
+    identical entries per service. Calls in a window: current_total minus the
+    total in force when the window opened (the last entry at or before its start;
+    the first entry when the history begins inside the window)."""
     now = time.time()
     cutoff_1h = now - 3600
     cutoff_24h = now - 86400
 
     with _enrichment_activity_lock:
         history = _enrichment_activity_log.setdefault(key, collections.deque(maxlen=17300))
-        history.append((now, current_total))
+        if not history or history[-1][1] != current_total:
+            history.append((now, current_total))
 
-        # Forward scan: first entry with ts >= cutoff is the oldest in that window
-        oldest_1h_total = current_total
-        oldest_24h_total = current_total
-        found_24h = False
+        oldest_1h_total = oldest_24h_total = history[0][1]
         for ts, total in history:
-            if not found_24h and ts >= cutoff_24h:
-                oldest_24h_total = total
-                found_24h = True
-            if ts >= cutoff_1h:
-                oldest_1h_total = total
+            if ts > cutoff_24h:
                 break
+            oldest_24h_total = total
+        for ts, total in history:
+            if ts > cutoff_1h:
+                break
+            oldest_1h_total = total
 
     return max(0, current_total - oldest_1h_total), max(0, current_total - oldest_24h_total)
 
