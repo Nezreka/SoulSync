@@ -481,11 +481,13 @@ def try_staging_match(task_id, batch_id, track, deps: StagingDeps):
         except Exception as _root_err:  # noqa: BLE001
             logger.debug(f"[Staging] per-profile root lookup failed: {_root_err}")
         # a Lidarr album bundle's files are imported into Lidarr's own folder
-        # (lidarr_download.transfer_path), so stage them there too
+        # (lidarr_download.transfer_path), so stage them there too; with
+        # import_through_lidarr every source's files wait there for Lidarr
         if batch_id and deps.get_batch_field is not None:
             try:
-                if deps.get_batch_field(batch_id, 'album_bundle_source') == 'lidarr':
-                    from core.imports.paths import lidarr_transfer_root
+                from core.imports.paths import imports_through_lidarr, lidarr_transfer_root
+                if (imports_through_lidarr()
+                        or deps.get_batch_field(batch_id, 'album_bundle_source') == 'lidarr'):
                     transfer_dir = lidarr_transfer_root() or transfer_dir
             except Exception as _exc:  # noqa: BLE001
                 logger.debug("lidarr staging root lookup failed: %s", _exc)

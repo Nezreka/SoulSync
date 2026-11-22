@@ -49,6 +49,12 @@ class FakeLidarr:
         self.deleted = []
         self.lock = threading.Lock()
         self.library = []               # albums already in Lidarr, with artist ids
+        self.queue = []                 # queue records
+        self.manual = []                # what Manual Import lists for a folder
+        self.manual_folders = []
+        self.landed = []                # track files Manual Import created
+        self.track_files = {}           # track id -> track file id
+        self.turned_down = set()        # paths Lidarr rejects while importing
 
     def get(self, endpoint, params=None):
         params = params or {}
@@ -73,9 +79,16 @@ class FakeLidarr:
                     return rec
             return None
         if endpoint == 'queue':
-            return {'records': []}
+            return {'records': list(self.queue)}
+        if endpoint == 'manualimport':
+            self.manual_folders.append(params['folder'])
+            return [m for m in self.manual if m['path'].startswith(params['folder'] + '/')]
         if endpoint == 'trackfile':
-            return [{'path': p} for p in self.files]
+            return [{'path': p} for p in self.files] + list(self.landed)
+        if endpoint == 'track':
+            return [{'id': t, 'trackFileId': f} for t, f in self.track_files.items()]
+        if endpoint == 'command/77':
+            return {'id': 77, 'status': 'completed', 'started': '2026-11-22T00:22:52.400Z'}
         if endpoint in ('qualityprofile', 'metadataprofile'):
             return [{'id': 1, 'name': 'Any'}]
         if endpoint == 'rootfolder':
@@ -94,9 +107,21 @@ class FakeLidarr:
                 if data['foreignAlbumId'] in self.albums:
                     return None  # duplicate album
                 rec = {'id': len(self.albums) + 100, 'foreignAlbumId': data['foreignAlbumId'],
-                       'monitored': True, 'statistics': {'trackFileCount': 0, 'trackCount': 2}}
+                       'artistId': data['artistId'], 'monitored': data['monitored'],
+                       'statistics': {'trackFileCount': 0, 'trackCount': 2}}
                 self.albums[data['foreignAlbumId']] = rec
                 return rec
+            if endpoint == 'command' and data.get('name') == 'ManualImport':
+                self.commands.append(data)
+                for f in data['files']:
+                    if f['path'] in self.turned_down:
+                        continue
+                    file_id = 500 + len(self.landed)
+                    self.landed.append({'id': file_id, 'dateAdded': '2026-11-22T00:22:52Z',
+                                        'path': '/music/PISS/album/' + f['path'].rsplit('/', 1)[1]})
+                    for track_id in f['trackIds']:
+                        self.track_files[track_id] = file_id
+                return {'id': 77, 'status': 'queued', 'queued': '2026-11-22T00:22:52.100Z'}
             if endpoint == 'command':
                 self.commands.append(data)
                 # the search "finds" the album: Lidarr imports the files
@@ -108,6 +133,9 @@ class FakeLidarr:
 
     def delete(self, endpoint, params=None):
         self.deleted.append(endpoint)
+        if endpoint.startswith('queue/'):
+            self.queue = [r for r in self.queue if f"queue/{r['id']}" != endpoint]
+            assert params == {'removeFromClient': 'true', 'blocklist': 'true'}
         return True
 
 
@@ -624,3 +652,210 @@ def test_per_track_skips_lidarr_only_after_its_whole_album_turn():
     # lidarr-only mode never skips lidarr
     assert per_track_exclusions(album, _cfg({'download_source.mode': 'lidarr'}),
                                 hybrid=False, bundle_sources=['lidarr']) is None
+
+
+# ── a grab that never moves, and handing the album on ─────────────────────────
+
+def _queued(record_id, left, size=100, album='rg'):
+    return {'id': record_id, 'album': {'foreignAlbumId': album}, 'status': 'queued',
+            'size': size, 'sizeleft': left}
+
+
+def test_wait_gives_up_on_a_grab_that_never_moves(client):
+    """a torrent with no seeders sat in Lidarr's queue for the whole 6 h
+    deadline, and only then did the batch move on to the next source."""
+    client._stall_timeout = 1800
+
+    def get(endpoint, params=None):
+        if endpoint == 'queue':
+            return {'records': [_queued(7, 100)]}
+        return {'id': 100, 'statistics': {'trackFileCount': 0}}
+
+    with patch.object(client, '_api_get', side_effect=get), \
+            patch('core.lidarr_download_client.time.sleep'), \
+            patch('core.lidarr_download_client.time.monotonic', side_effect=_clock(100)):
+        assert client._wait_for_album(100, 'rg') == 'stalled'
+
+
+def test_a_magnet_that_never_got_metadata_is_stalled(client):
+    """what really sat in the queue on 2026-11-21: status queued, size 0 and
+    0 bytes left, because qBittorrent never found a peer for the metadata."""
+    client._stall_timeout = 1800
+
+    def get(endpoint, params=None):
+        if endpoint == 'queue':
+            return {'records': [_queued(7, 0, size=0)]}
+        return {'id': 100, 'statistics': {'trackFileCount': 0}}
+
+    with patch.object(client, '_api_get', side_effect=get), \
+            patch('core.lidarr_download_client.time.sleep'), \
+            patch('core.lidarr_download_client.time.monotonic', side_effect=_clock(100)):
+        assert client._wait_for_album(100, 'rg') == 'stalled'
+
+
+def test_a_release_held_by_a_delay_profile_is_not_stalled(client):
+    client._stall_timeout = 1800
+    polls = {'n': 0}
+
+    def get(endpoint, params=None):
+        if endpoint == 'queue':
+            polls['n'] += 1
+            held = dict(_queued(7, 100), status='delay')
+            return {'records': [] if polls['n'] > 30 else [held]}
+        return {'id': 100, 'statistics': {'trackFileCount': 12 if polls['n'] > 30 else 0}}
+
+    with patch.object(client, '_api_get', side_effect=get), \
+            patch('core.lidarr_download_client.time.sleep'), \
+            patch('core.lidarr_download_client.time.monotonic', side_effect=_clock(600)):
+        assert client._wait_for_album(100, 'rg') == 'complete'
+
+
+def test_a_slow_download_is_not_stalled(client):
+    client._stall_timeout = 1800
+    polls = {'n': 0}
+
+    def get(endpoint, params=None):
+        if endpoint == 'queue':
+            polls['n'] += 1
+            if polls['n'] > 60:
+                return {'records': []}
+            return {'records': [_queued(7, 100 - polls['n'], size=100)]}
+        return {'id': 100, 'statistics': {'trackFileCount': 12 if polls['n'] > 60 else 0}}
+
+    # 5 hours, 5 minutes a poll: far past the stall timeout, never stalled
+    with patch.object(client, '_api_get', side_effect=get), \
+            patch('core.lidarr_download_client.time.sleep'), \
+            patch('core.lidarr_download_client.time.monotonic', side_effect=_clock(300)):
+        assert client._wait_for_album(100, 'rg') == 'complete'
+
+
+def test_a_finished_download_waiting_on_its_import_is_not_stalled(client):
+    client._stall_timeout = 1800
+    polls = {'n': 0}
+
+    def get(endpoint, params=None):
+        if endpoint == 'queue':
+            polls['n'] += 1
+            done = dict(_queued(7, 0), status='completed', trackedDownloadState='importPending')
+            return {'records': [] if polls['n'] > 30 else [done]}
+        return {'id': 100, 'statistics': {'trackFileCount': 12 if polls['n'] > 30 else 0}}
+
+    with patch.object(client, '_api_get', side_effect=get), \
+            patch('core.lidarr_download_client.time.sleep'), \
+            patch('core.lidarr_download_client.time.monotonic', side_effect=_clock(600)):
+        assert client._wait_for_album(100, 'rg') == 'complete'
+
+
+def _hybrid(extra=None):
+    cfg = {'download_source.mode': 'hybrid', 'download_source.hybrid_order': ['lidarr', 'soulseek']}
+    cfg.update(extra or {})
+    return patch('core.lidarr_download_client.config_manager.get',
+                 side_effect=lambda k, d=None: cfg.get(k, d))
+
+
+@pytest.mark.parametrize('owns_library', [False, True])
+def test_a_stalled_album_is_handed_to_the_next_source(client, tmp_path, owns_library):
+    """the stalled torrent stayed in Lidarr after the fallback, and the album
+    stayed monitored: Lidarr delivered it as well, next to the fallback's copy."""
+    client._stall_timeout = 1800
+    client._owns_library = owns_library
+    fake = FakeLidarr({'PISS you made me / skin on linen': [PISS]})
+    fake.queue = [_queued(7, 100, album='rg-piss')]
+    with _wired(client, fake), _hybrid(), \
+            patch('core.lidarr_download_client.time.monotonic', side_effect=_clock(100)), \
+            patch('core.lidarr_download_client.http_requests.put') as put:
+        out = client.download_album_to_staging('you made me / skin on linen', 'PISS',
+                                               str(tmp_path / 's'))
+    assert not out['success'] and out['fallback'] is True
+    assert out['error'] == "Lidarr's download made no progress"
+    assert fake.deleted == ['queue/7']
+    unmonitored = [c for c in put.call_args_list if c.kwargs['json'] == {'albumIds': [100], 'monitored': False}]
+    assert bool(unmonitored) is not owns_library
+
+
+def test_a_miss_in_lidarr_only_mode_keeps_the_album(client, tmp_path):
+    """nothing else will fetch it: Lidarr keeps the album and its grab."""
+    client._stall_timeout = 1800
+    fake = FakeLidarr({'PISS you made me / skin on linen': [PISS]})
+    fake.queue = [_queued(7, 100, album='rg-piss')]
+    with _wired(client, fake), _hybrid({'download_source.mode': 'lidarr'}), \
+            patch('core.lidarr_download_client.time.monotonic', side_effect=_clock(100)), \
+            patch('core.lidarr_download_client.http_requests.put') as put:
+        out = client.download_album_to_staging('you made me / skin on linen', 'PISS',
+                                               str(tmp_path / 's'))
+    assert not out['success'] and out['fallback'] is False
+    assert fake.deleted == []
+    assert not [c for c in put.call_args_list if c.kwargs['json'].get('monitored') is False]
+
+
+# ── Lidarr imports what other sources downloaded ──────────────────────────────
+
+def _listed(path, rejections=(), track=900):
+    return {'path': path, 'artist': {'id': 1}, 'album': {'id': 100}, 'albumReleaseId': 5,
+            'tracks': [{'id': track}], 'quality': {'quality': {'name': 'FLAC'}},
+            'indexerFlags': 0, 'rejections': [{'reason': r, 'type': 'permanent'} for r in rejections]}
+
+
+def test_lidarr_imports_the_files_it_matches(client, tmp_path):
+    files = _audio(tmp_path, 'PISS/album/01.flac', 'PISS/album/02.flac', 'PISS/album/03.flac')
+    fake = FakeLidarr({'PISS you made me / skin on linen': [PISS]})
+    fake.manual = [_listed(files[0]),
+                   _listed(files[1], ['Not an upgrade for existing track file(s)']),
+                   _listed(str(tmp_path / 'music/PISS/album/cover.flac'))]  # not ours
+    with _wired(client, fake), patch('core.lidarr_download_client.http_requests.put'):
+        out = client.import_into_library(files, 'you made me / skin on linen', 'PISS', monitored=True)
+    assert out['imported'] == 1 and out['error'] is None
+    assert out['paths'] == {files[0]: '/music/PISS/album/01.flac'}
+    assert set(out['rejected']) == {files[1], files[2]}
+    assert 'Not an upgrade' in out['rejected'][files[1]]
+    assert out['rejected'][files[2]] == 'Lidarr did not list the file'
+    command = fake.commands[-1]
+    assert command['name'] == 'ManualImport' and command['importMode'] == 'copy'
+    assert command['replaceExistingFiles'] is False
+    assert [f['path'] for f in command['files']] == [files[0]]
+    assert command['files'][0]['trackIds'] == [900] and command['files'][0]['albumReleaseId'] == 5
+    assert fake.manual_folders == [str(tmp_path / 'music/PISS/album')]
+
+
+def test_a_playlist_track_does_not_make_lidarr_fetch_its_album(client, tmp_path):
+    files = _audio(tmp_path, 'PISS/album/01.flac')
+    fake = FakeLidarr({'PISS you made me / skin on linen': [PISS]})
+    fake.manual = [_listed(files[0])]
+    with _wired(client, fake), patch('core.lidarr_download_client.http_requests.put') as put:
+        out = client.import_into_library(files, 'you made me / skin on linen', 'PISS', monitored=False)
+    assert out['imported'] == 1
+    added = [d for e, d in fake.posts if e == 'album']
+    assert added and added[0]['monitored'] is False
+    assert not [c for c in fake.commands if c['name'] == 'AlbumSearch']
+    assert not put.called
+
+
+def test_an_album_lidarr_does_not_know_is_left_alone(client, tmp_path):
+    files = _audio(tmp_path, 'X/album/01.flac')
+    fake = FakeLidarr({})
+    with _wired(client, fake):
+        out = client.import_into_library(files, 'Nope', 'Nobody')
+    assert out['imported'] == 0 and "Lidarr has no album" in out['error']
+    assert not fake.commands and not fake.posts
+
+
+def test_imports_never_lose_the_cleanup_that_would_forget_them(tmp_path):
+    cfg = {'lidarr_download.import_through_lidarr': True, 'lidarr_download.cleanup_after_import': True}
+    with patch('core.lidarr_download_client.config_manager.get',
+               side_effect=lambda k, d=None: cfg.get(k, d)):
+        c = LidarrDownloadClient(download_path=str(tmp_path / 'downloads'))
+    assert c._owns_library is True and c._cleanup is False
+
+
+def test_a_file_lidarr_turns_down_while_importing_is_not_reported_imported(client, tmp_path):
+    """the command says completed either way: only the track files tell."""
+    files = _audio(tmp_path, 'PISS/album/01.flac', 'PISS/album/02.flac')
+    fake = FakeLidarr({'PISS you made me / skin on linen': [PISS]})
+    fake.manual = [_listed(files[0], track=901), _listed(files[1], track=902)]
+    fake.turned_down = {files[1]}
+    fake.landed = [{'id': 1, 'dateAdded': '2026-11-01T10:00:00Z', 'path': '/music/PISS/album/old-02.flac'}]
+    fake.track_files[902] = 1   # the track already had an older file
+    with _wired(client, fake), patch('core.lidarr_download_client.http_requests.put'):
+        out = client.import_files(files)
+    assert out['paths'] == {files[0]: '/music/PISS/album/01.flac'}
+    assert out['rejected'] == {files[1]: 'Lidarr did not import it (see History in Lidarr)'}

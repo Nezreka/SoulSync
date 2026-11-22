@@ -1074,6 +1074,15 @@ def _run_batch_completion_side_effects(batch_id: str, batch: dict, deps: Lifecyc
         # already in its folder, or navidrome shows two albums
         _adopt_loose_tracks(_cons_files, cons_tag, batch.get('album_context'))
 
+    # LIDARR HANDOFF (lidarr_download.import_through_lidarr): Lidarr imports
+    # the batch into the library. Last, because it identifies each file by the
+    # album tags the consistency pass above has just made agree.
+    try:
+        from core.downloads.lidarr_handoff import hand_batch_to_lidarr
+        hand_batch_to_lidarr(batch_id, batch, tasks_snapshot)
+    except Exception as _handoff_err:  # noqa: BLE001 — the batch is already complete
+        logger.warning(f"{tag} Lidarr handoff failed (files stay in the Lidarr imports folder): {_handoff_err}")
+
 
 def on_download_completed(batch_id: str, task_id: str, success: bool, deps: LifecycleDeps) -> None:
     """Handle a finished task, then offer the freed slot to whoever is waiting.

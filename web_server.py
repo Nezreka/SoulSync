@@ -26550,6 +26550,15 @@ def start_runtime_services():
             # Recovery must not crash startup — the files are still on disk.
             logger.warning("[Startup] Atomic staging reconciliation failed: %s", _recover_err)
 
+        # lidarr_download.import_through_lidarr: hand Lidarr the downloads a
+        # previous session left waiting for it (a batch that never finished).
+        # In the background: it waits on Lidarr's imports.
+        try:
+            from core.downloads.lidarr_handoff import start_startup_sweep
+            start_startup_sweep()
+        except Exception as _lidarr_sweep_err:
+            logger.warning("[Startup] Lidarr imports sweep failed to start: %s", _lidarr_sweep_err)
+
         # Establish the barrier before any runtime service that can mutate the
         # music catalogue. It treats an unclaimed-but-required upgrade as
         # active too, closing the old startup race before try_claim().

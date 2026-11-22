@@ -345,6 +345,20 @@ export function LidarrPanel({ store }: { store: SettingsStore }) {
           onChange={(event) => store.set('lidarr_download', 'transfer_path', event.target.value)}
         />
       </SheetField>
+      <Row
+        label="Lidarr imports every download"
+        htmlFor="lidarr-import-through-lidarr"
+        help="Downloads from every source wait in the Lidarr imports folder, and Lidarr imports them into its root folder when the batch is done."
+        more="For a library that Lidarr keeps: Lidarr names the files and keeps one copy of each track, so an album SoulSync got from Soulseek and Lidarr got later is never there twice. Lidarr has to read the Lidarr imports folder at the same path, and it needs that folder set."
+      >
+        <Switch
+          id="lidarr-import-through-lidarr"
+          checked={settings.lidarr_download?.import_through_lidarr === true}
+          onChange={(event) =>
+            store.set('lidarr_download', 'import_through_lidarr', event.target.checked)
+          }
+        />
+      </Row>
       <SheetField
         label="Lidarr download folder"
         htmlFor="lidarr-download-path"
