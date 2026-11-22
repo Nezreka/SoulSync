@@ -1795,7 +1795,7 @@ class JellyfinVideoSource:
         def total(view, itype):
             resp = self._req(f"/Users/{self.uid}/Items", {
                 "ParentId": view["Id"], "IncludeItemTypes": itype,
-                "Recursive": "true", "Limit": "0"}) or {}
+                "Recursive": "true", "CollapseBoxSetItems": "false", "Limit": "0"}) or {}
             return int(resp.get("TotalRecordCount", 0) or 0)
         m = sum(total(v, "Movie") for v in self._scan_views("movies", self._movies_lib))
         sh = sum(total(v, "Series") for v in self._scan_views("tvshows", self._tv_lib))
@@ -1877,8 +1877,11 @@ class JellyfinVideoSource:
     def iter_movies(self, incremental=False, since=None):
         path = f"/Users/{self.uid}/Items"
         for view in self._scan_views("movies", self._movies_lib):
+            # with "group movies into collections" on, jellyfin answers a query
+            # that doesn't say otherwise with one BoxSet in place of the films in it
             params = {"ParentId": view["Id"], "IncludeItemTypes": "Movie",
-                      "Recursive": "true", "Fields": _JF_MOVIE_FIELDS}
+                      "Recursive": "true", "CollapseBoxSetItems": "false",
+                      "Fields": _JF_MOVIE_FIELDS}
             if incremental and since is not None:
                 # Delta: DateLastSaved bumps when metadata is (re-)saved — a re-match or
                 # edit on an EXISTING movie — so MinDateLastSaved catches changes, not
@@ -1978,8 +1981,10 @@ class JellyfinVideoSource:
     def iter_shows(self, incremental=False, since=None):
         path = f"/Users/{self.uid}/Items"
         for view in self._scan_views("tvshows", self._tv_lib):
+            # same for "group shows into collections" (see iter_movies)
             params = {"ParentId": view["Id"], "IncludeItemTypes": "Series",
-                      "Recursive": "true", "Fields": _JF_SHOW_FIELDS}
+                      "Recursive": "true", "CollapseBoxSetItems": "false",
+                      "Fields": _JF_SHOW_FIELDS}
             if incremental and since is not None:
                 # Delta: metadata (re-)saved since the last scan — catches re-matches + edits.
                 params.update({"MinDateLastSaved": since.isoformat()})
