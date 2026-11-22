@@ -14,6 +14,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from core.downloads.history import ALBUM_PREFIXES
 from core.downloads.origin import HAND_PICKED_ID_PREFIXES
+from core.downloads.queued_tracks import pack_tracks
 from core.wishlist.payloads import build_failed_track_wishlist_context
 from core.wishlist.selection import filter_wishlist_tracks_by_category, sanitize_and_dedupe_wishlist_tracks
 from core.wishlist.service import get_wishlist_service, wishlist_rows_for_sweep as _rows_for_sweep
@@ -127,6 +128,22 @@ def _tag_wishlist_owner(tracks, profile_id) -> None:
             # what upstream's per-owner steps read (H10 batching, the S13
             # backoff clear)
             track['profile_id'] = profile_id
+
+
+# stamped on every batch of a whole-wishlist run, automatic or "Download now"
+# (#2242): while one of them is live another whole run would queue every album
+# a second time. a scoped run (picked tracks, one playlist) never carries it
+FULL_RUN_KEY = 'wishlist_full_run'
+_TERMINAL_BATCH_PHASES = frozenset({'complete', 'error', 'cancelled', 'failed'})
+
+
+def live_full_wishlist_batches(download_batches) -> list:
+    """ids of the live batches of a whole-wishlist run. caller holds tasks_lock"""
+    return [
+        bid for bid, row in download_batches.items()
+        if isinstance(row, dict) and row.get(FULL_RUN_KEY)
+        and row.get('phase') not in _TERMINAL_BATCH_PHASES
+    ]
 
 
 def make_wishlist_batch_row(
@@ -311,9 +328,11 @@ def _run_wishlist_cycle(
             # makes the worker actually HOLD its pool slot until the album drains, so
             # only a few albums are in flight at once instead of every album flooding
             # the shared download pool with 'searching' tracks (#740 / Sokhi).
+            # it waits for one of the album pool's workers, maybe for hours:
+            # its tracks wait packed, not as dicts (#2242)
             album_executor.submit(
                 runtime.run_full_missing_tracks_process,
-                album_batch_id, playlist_id, group.tracks, True,
+                album_batch_id, playlist_id, pack_tracks(group.tracks), True,
             )
 
         residual_tracks = grouping.residual_tracks if grouping is not None else owner_tracks
@@ -403,7 +422,7 @@ def _run_wishlist_cycle(
                 residual_total += batch_count
                 runtime.missing_download_executor.submit(
                     runtime.run_full_missing_tracks_process,
-                    batch_id, playlist_id, batch_tracks,
+                    batch_id, playlist_id, pack_tracks(batch_tracks),
                 )
                 # #1548: playlist-named batches get their own log; the generic
                 # residual keeps the old message so existing tests pass.
@@ -1469,8 +1488,20 @@ def start_manual_wishlist_download_batch(
         batch_id = str(uuid.uuid4())
         playlist_id = "wishlist"
         playlist_name = "Wishlist"
+        # no track ids: the whole wishlist (or one category of it)
+        full_run = not track_ids
 
         with runtime.tasks_lock:
+            # #2242: a second whole-wishlist run on top of one still going
+            # queued every album again (218 batches, the same tracks twice)
+            if full_run:
+                live = live_full_wishlist_batches(runtime.download_batches)
+                if live:
+                    logger.info("[Manual-Wishlist] A wishlist run is still going "
+                                f"({len(live)} batch(es) left); not starting another")
+                    return {"success": False, "already_running": True,
+                            "error": "The wishlist is already downloading.",
+                            "retry_after": 30}, 409
             # analysis_total starts at 0; the bg job updates it after cleanup
             # finishes and the real track count is known.
             runtime.download_batches[batch_id] = make_wishlist_batch_row(
@@ -1480,6 +1511,7 @@ def start_manual_wishlist_download_batch(
                 max_concurrent=runtime.get_batch_max_concurrent(),
                 profile_id=runtime.profile_id,
                 phase='analysis',
+                extra_fields={FULL_RUN_KEY: True} if full_run else None,
             )
 
         runtime.missing_download_executor.submit(
@@ -1639,8 +1671,11 @@ def _prepare_and_run_manual_wishlist_batch(
             auto_initiated=False,
             first_batch_id=batch_id,
             # "Whole album via Lidarr" from the dialog; None = the default
-            batch_extra_fields=({'lidarr_whole_album': bool(lidarr_whole_album)}
-                                if lidarr_whole_album is not None else None),
+            batch_extra_fields={
+                **({'lidarr_whole_album': bool(lidarr_whole_album)}
+                   if lidarr_whole_album is not None else {}),
+                **({FULL_RUN_KEY: True} if not track_ids else {}),
+            } or None,
         )
         logger.info(
             f"[Manual-Wishlist] Dispatched {result['album_batches']} album batch(es) + "
@@ -2096,7 +2131,7 @@ def process_wishlist_automatically(
                 _cycle_extra = {
                     'wishlist_scope': 'playlist',
                     'toggle_wishlist_cycle': False,
-                } if scoped else None
+                } if scoped else {FULL_RUN_KEY: True}
                 _runtime_profile = runtime.profile_id
                 if len(_track_profiles) == 1:
                     # one profile's tracks: dispatched under THAT profile, which

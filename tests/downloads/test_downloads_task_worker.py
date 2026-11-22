@@ -1227,3 +1227,27 @@ def test_skipped_rows_that_never_reach_used_sources_do_not_loop():
     tw.download_track_worker('t1', 'b1', deps)
     assert download_tasks['t1']['status'] == 'not_found'
     assert calls[:2] == [['bl'], ['f1']]
+
+
+def test_a_task_keeps_only_the_best_candidates_for_its_retry():
+    """#2242: a popular track passes hundreds of peers' copies. the download
+    walk gets every one; the task keeps the best fifty for a retry, not all of
+    them for as long as its batch lives"""
+    _seed_task()
+    walked = []
+
+    def attempt(task_id, candidates, *a, **kw):
+        walked.append(len(candidates))
+        return True
+
+    deps, _ = _build_deps(
+        soulseek=_FakeClient(results=[f'hit{i}' for i in range(300)]),
+        matching=_FakeMatchEngine(queries=['q1']),
+        get_valid_candidates=lambda r, t, q, p=None: list(r),
+        attempt_download_with_candidates=attempt,
+    )
+    tw.download_track_worker('t1', 'b1', deps)
+    assert walked and walked[0] == 300
+    cached = download_tasks['t1']['cached_candidates']
+    assert len(cached) == tw.CACHED_CANDIDATES_KEPT == 50
+    assert cached == [f'hit{i}' for i in range(50)]

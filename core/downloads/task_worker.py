@@ -153,6 +153,13 @@ def _candidate_ordering(track_info: Optional[dict] = None):
     return False, None
 
 
+# a task keeps the candidates it found for a retry until its whole batch is
+# cleaned up. a popular track can pass hundreds of peers' copies, and a long
+# residual batch kept every one for every finished task (#2242). a retry walks
+# a handful at most; the best fifty are plenty
+CACHED_CANDIDATES_KEPT = 50
+
+
 def _seed_from_preflight_pool(task_id, batch_id, track):
     """A quarantine retry with nothing cached of its own takes its candidates
     from what the batch's album search already found: the other files in the
@@ -187,7 +194,7 @@ def _seed_from_preflight_pool(task_id, batch_id, track):
     with tasks_lock:
         task = download_tasks.get(task_id)
         if task is not None and not task.get('cached_candidates'):
-            task['cached_candidates'] = fits[:50]
+            task['cached_candidates'] = fits[:CACHED_CANDIDATES_KEPT]
     logger.info("[Modal Worker] Retry: %d candidate(s) from the album search for task %s",
                 min(len(fits), 50), task_id)
 
@@ -366,7 +373,7 @@ def _attempt_with_tier_fallthrough(deps, task_id, batch_id, track, results, cand
                     f"trying {len(candidates)} candidate(s) from the next tier (task {task_id})")
         with tasks_lock:
             if task_id in download_tasks:
-                download_tasks[task_id]['cached_candidates'] = candidates
+                download_tasks[task_id]['cached_candidates'] = candidates[:CACHED_CANDIDATES_KEPT]
 
 
 def _record_decision(deps, task_id, pool, outcome, track, profile_id, merge=False,
@@ -1052,7 +1059,7 @@ def _download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWork
                             # Store candidates for retry fallback (like GUI). A
                             # later quarantine retry walks these via cached-first
                             # and skips re-searching this query (searched_queries).
-                            download_tasks[task_id]['cached_candidates'] = candidates
+                            download_tasks[task_id]['cached_candidates'] = candidates[:CACHED_CANDIDATES_KEPT]
 
                         # Try to download with these candidates
                         success = _attempt_with_tier_fallthrough(
@@ -1168,7 +1175,7 @@ def _download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWork
                                 with tasks_lock:
                                     if task_id not in download_tasks or download_tasks[task_id]['status'] == 'cancelled':
                                         return
-                                    download_tasks[task_id]['cached_candidates'] = fb_candidates
+                                    download_tasks[task_id]['cached_candidates'] = fb_candidates[:CACHED_CANDIDATES_KEPT]
                                 success = _attempt_with_tier_fallthrough(
                                     deps, task_id, batch_id, track, fb_results, fb_candidates,
                                     fb_query, _profile_id, decision_pool,

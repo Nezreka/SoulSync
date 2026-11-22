@@ -739,15 +739,32 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
     # batch fills (#1199) -- the one decided when it was created, which for an
     # admin is the library they had selected, not their own. this runs on a
     # pool thread with no request context.
+    from core.downloads.queued_tracks import unpack_tracks
     from core.library_scope import batch_scope, library_scope
     with tasks_lock:
-        _batch = dict(download_batches.get(batch_id) or {})
+        _row = download_batches.get(batch_id)
+        _batch = dict(_row or {})
+    # a batch waits in its pool until a worker is free (#2242). stopped or
+    # cleared while it waited, it must not start: the analysis used to set the
+    # phase back to 'analysis' and run the whole album anyway
+    if _row is None or _batch.get('phase') == 'cancelled':
+        logger.info("Batch %s was %s before it started; not running it", batch_id,
+                    'cleared' if _row is None else 'stopped')
+        return None
+    tracks_json = unpack_tracks(tracks_json)
     with library_scope(batch_scope(_batch)):
-        return _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps, serialize)
+        _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps)
+    # serialize=True (the album pool): hold this pool slot until the album
+    # finishes so only a few albums are ever in flight at once (#740 / Sokhi).
+    # waited out here, not inside the worker, so the album's search results,
+    # candidate folders and analysis die with the worker's frame instead of
+    # living for the whole download (#2242)
+    if serialize:
+        _wait_for_batch_drain(batch_id)
+    return None
 
 
-def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: MasterDeps,
-                                     serialize: bool = False):
+def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: MasterDeps):
     try:
         # PHASE 1: ANALYSIS
         with tasks_lock:
@@ -2022,14 +2039,11 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
         deps.start_next_batch_of_downloads(batch_id)
 
         # Album-bundle batches run on the dedicated album pool and pass
-        # serialize=True: hold this pool slot until the album finishes so only a
-        # few albums are ever in flight at once, instead of every album batch
-        # immediately starting and flooding the shared download pool with
-        # 'searching' tracks (#740 / Sokhi). The residual + playlist + manual
-        # paths run on the shared download pool and DON'T serialize (blocking
-        # there would steal an actual download worker).
-        if serialize:
-            _wait_for_batch_drain(batch_id)
+        # serialize=True; run_full_missing_tracks_process holds the pool slot
+        # until the album drains, once this frame and its search results are
+        # gone (#2242). The residual + playlist + manual paths run on the
+        # shared download pool and DON'T serialize (blocking there would steal
+        # an actual download worker).
 
     except Exception as e:
         logger.error(f"Master worker for batch {batch_id} failed: {e}")

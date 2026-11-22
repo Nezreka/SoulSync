@@ -54,4 +54,21 @@ describe('summarizeRun', () => {
       label: 'Stopped',
     });
   });
+
+  it('says how many albums of a big run are still waiting their turn (#2242)', () => {
+    const status = {
+      phase: 'downloading',
+      tasks: [{ status: 'downloading' }],
+      run_batches: { total: 78, waiting: 75, running: 3 },
+    };
+    expect(summarizeRun(status)?.label).toBe('Downloading 1 track · 0 done · 75 albums waiting');
+    expect(
+      summarizeRun({ phase: 'queued', run_batches: { total: 2, waiting: 1, running: 1 } })?.label,
+    ).toBe('Getting ready · 1 album waiting');
+    // nothing waiting, or the run is over: no note
+    expect(summarizeRun({ ...status, run_batches: { waiting: 0 } })?.label).toBe(
+      'Downloading 1 track · 0 done',
+    );
+    expect(summarizeRun({ ...status, phase: 'cancelled' })?.label).not.toContain('waiting');
+  });
 });
