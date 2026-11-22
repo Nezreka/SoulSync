@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from flask import g, jsonify, request
 
+from core.connect.device_access import device_playback
 from utils.logging_config import get_logger
 
 logger = get_logger("video_api.requests")
@@ -679,6 +680,7 @@ def awaiting_queue(db) -> list:
 
 def register_routes(bp):
     @bp.route("/requests", methods=["POST"])
+    @device_playback
     def video_request_create():
         """File a request. Bodies per kind:
         - movie/show: {kind, tmdb_id, title, year?, poster_url?, note?, monitor?}
@@ -689,6 +691,7 @@ def register_routes(bp):
         return file_request(request.get_json(silent=True) or {})
 
     @bp.route("/requests/options", methods=["GET"])
+    @device_playback
     def video_request_options():
         """What the request dialog may offer this profile (#2168), from the
         same rules the server holds every path to. Without ?kind: the mode

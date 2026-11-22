@@ -16,6 +16,7 @@ from datetime import datetime, timedelta, timezone
 
 from flask import Blueprint, jsonify, request, send_file, session
 
+from core.connect.device_access import device_playback
 from core.permissions import may_manage_profile
 from core.profile_context import admin_only, admin_or_api_key, get_current_profile_id
 from core.security.rate_limit import TargetedLimiter
@@ -500,6 +501,7 @@ def upload_avatar(profile_id):
 
 
 @bp.route("/api/profiles/<int:profile_id>/avatar", methods=["GET"])
+@device_playback
 @signed_in
 def get_avatar(profile_id):
     path = _avatar_path(profile_id)

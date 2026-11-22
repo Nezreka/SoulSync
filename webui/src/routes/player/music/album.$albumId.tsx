@@ -1,14 +1,15 @@
 import { useQuery } from '@tanstack/react-query';
 import { createFileRoute } from '@tanstack/react-router';
+import { useState } from 'react';
 
 import type { LibTrack } from '../-player.types';
 
 import { runtime } from '../-lib/format';
 import { fileQuality } from '../-lib/music';
 import { albumItems } from '../-lib/play-items';
-import { albumQuery } from '../-player.api';
+import { albumQuery, requestMusicTrack } from '../-player.api';
 import { Comments } from '../-ui/comments';
-import { PlusIcon } from '../-ui/icons';
+import { DownloadIcon, PlusIcon } from '../-ui/icons';
 import { Badge, Hero, PlayButton, PlayerLink, styles as s } from '../-ui/kit';
 import { LabelLink, MusicGenreLinks } from '../-ui/links';
 import { openAddToPlaylist } from '../-ui/music/add-to-playlist';
@@ -32,6 +33,10 @@ function AlbumPage() {
   const sections = useSections();
   const id = Number(Route.useParams().albumId);
   const album = useQuery({ ...albumQuery(id), enabled: sections.music && Number.isFinite(id) });
+  const [reqState, setReqState] = useState<
+    Record<string, 'sending' | 'wishlist' | 'requested' | 'owned' | 'error'>
+  >({});
+  const [requestingAll, setRequestingAll] = useState(false);
 
   if (!sections.music) return <NotPartOfProfile what="Music" single />;
   if (album.isLoading)
@@ -40,6 +45,9 @@ function AlbumPage() {
   if (!a) return <NotFound what="Album" />;
 
   const owned = a.tracks.filter((t) => !t.is_missing && t.id);
+  const missing = a.tracks
+    .map((track, index) => ({ track, index, key: String(track.id ?? `missing-${index}`) }))
+    .filter(({ track }) => track.is_missing || !track.id);
   const totalMs = owned.reduce((sum, t) => sum + (t.duration ?? 0), 0);
   const discs = new Set(a.tracks.map((t) => t.disc_number ?? 1)).size;
   const qualities = [...new Set(owned.map((t) => fileQuality(t.file)).filter(Boolean))];
@@ -50,6 +58,43 @@ function AlbumPage() {
     const at = queue.findIndex((x) => x.id === String(trackId));
     if (at >= 0) playItems(queue, at);
   };
+
+  const requestOne = async (rowKey: string, track: LibTrack, index: number) => {
+    const cur = reqState[rowKey];
+    if (cur === 'sending' || cur === 'wishlist' || cur === 'requested' || cur === 'owned') return;
+    setReqState((prev) => ({ ...prev, [rowKey]: 'sending' }));
+    const res = await requestMusicTrack({
+      title: track.title,
+      artist: trackArtists(track) || albumArtist || 'Unknown Artist',
+      album: a.title,
+      album_id: a.id,
+      artist_id: a.primary_artist?.id ?? null,
+      track_id: track.id ?? null,
+      track_number: track.track_number ?? index + 1,
+      disc_number: track.disc_number ?? 1,
+      duration_ms: track.duration ?? null,
+      year: a.year ?? null,
+      image_url: a.image_url ?? null,
+    });
+    setReqState((prev) => ({ ...prev, [rowKey]: res.state }));
+  };
+
+  const requestAllMissing = async () => {
+    if (requestingAll || !missing.length) return;
+    setRequestingAll(true);
+    try {
+      for (const item of missing) {
+        await requestOne(item.key, item.track, item.index);
+      }
+    } finally {
+      setRequestingAll(false);
+    }
+  };
+
+  const unrequestedMissing = missing.filter(({ key }) => {
+    const st = reqState[key];
+    return !st || st === 'error';
+  });
 
   return (
     <>
@@ -130,6 +175,19 @@ function AlbumPage() {
                 Add to playlist
               </button>
             ) : null}
+            {unrequestedMissing.length ? (
+              <button
+                type="button"
+                className={s.btn}
+                disabled={requestingAll}
+                onClick={() => void requestAllMissing()}
+                title="Request missing tracks so SoulSync can grab them for your library"
+                data-nav
+              >
+                <DownloadIcon />
+                {requestingAll ? 'Requesting…' : `Request ${unrequestedMissing.length} missing`}
+              </button>
+            ) : null}
           </>
         }
       />
@@ -139,8 +197,22 @@ function AlbumPage() {
         rows={a.tracks.map((track, index) => {
           const artists = trackArtists(track);
           const playable = !track.is_missing && !!track.id;
+          const rowKey = String(track.id ?? `missing-${index}`);
+          const st = reqState[rowKey];
+          const missingLabel =
+            st === 'sending'
+              ? 'Requesting…'
+              : st === 'wishlist'
+                ? 'On wishlist'
+                : st === 'requested'
+                  ? 'Requested'
+                  : st === 'owned'
+                    ? 'In library'
+                    : st === 'error'
+                      ? 'Try again'
+                      : 'Request';
           return {
-            key: String(track.id ?? `missing-${index}`),
+            key: rowKey,
             title: track.title,
             trackId: playable ? Number(track.id) : null,
             number:
@@ -150,8 +222,14 @@ function AlbumPage() {
             artist: artists && artists !== albumArtist ? artists : undefined,
             duration: track.duration ? track.duration / 1000 : null,
             explicit: !!track.explicit,
-            end: playable ? fileQuality(track.file) : null,
-            why: 'Not in your library',
+            end: playable ? fileQuality(track.file) : <Badge>{missingLabel}</Badge>,
+            why:
+              st === 'wishlist'
+                ? 'Added to wishlist'
+                : st === 'requested'
+                  ? 'Request submitted'
+                  : 'Not in your library — click to request',
+            onRequest: !playable ? () => void requestOne(rowKey, track, index) : undefined,
             song: playable
               ? {
                   title: track.title,

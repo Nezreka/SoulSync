@@ -1018,6 +1018,47 @@ export async function requestTitle(body: {
   return { state: 'error', message: data.message || data.error || 'Could not ask for it' };
 }
 
+export type MusicTrackRequestResult =
+  | { state: 'wishlist' }
+  | { state: 'requested' }
+  | { state: 'owned' }
+  | { state: 'error'; message: string };
+
+/** Put a missing album track onto this profile's wishlist (or pending music request queue). */
+export async function requestMusicTrack(body: {
+  title: string;
+  artist: string;
+  album?: string | null;
+  album_id?: number | null;
+  artist_id?: number | null;
+  track_id?: number | string | null;
+  track_number?: number | null;
+  disc_number?: number | null;
+  duration_ms?: number | null;
+  year?: number | null;
+  image_url?: string | null;
+}): Promise<MusicTrackRequestResult> {
+  const res = await apiClient.post('player/music/request-track', {
+    json: body,
+    throwHttpErrors: false,
+  });
+  let data: {
+    success?: boolean;
+    skipped?: boolean;
+    mode?: 'download' | 'ask';
+    error?: string;
+    message?: string;
+  } = {};
+  try {
+    data = await res.json();
+  } catch {
+    data = {};
+  }
+  if (data.success && data.skipped) return { state: 'owned' };
+  if (data.success) return { state: data.mode === 'ask' ? 'requested' : 'wishlist' };
+  return { state: 'error', message: data.message || data.error || 'Could not request track' };
+}
+
 /** the media server's own resume list, as the video side's dashboard shows it */
 export const serverResumeQuery = () =>
   queryOptions({

@@ -791,6 +791,76 @@ def artist_top_tracks(artist_id):
     return jsonify({"success": True, "tracks": rows})
 
 
+@bp.route("/api/player/music/request-track", methods=["POST"])
+@device_playback
+@requires("music.access")
+def request_music_track():
+    """Put a missing album track onto this profile's wishlist (or pending music
+    request queue when music.get == 'ask'). Uses the manager's own wishlist add."""
+    from core.permissions import can, enforcing, map_refuses, refusal
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    if map_refuses("music.get", "ask"):
+        return refusal("music.get")
+    body = request.get_json(silent=True) or {}
+    title = str(body.get("title") or "").strip()
+    artist_name = str(body.get("artist") or "").strip()
+    album_name = str(body.get("album") or "").strip()
+    if not title or not artist_name:
+        return _bad("title and artist are required")
+    album_id = body.get("album_id")
+    artist_id = body.get("artist_id")
+    track_number = body.get("track_number")
+    disc_number = body.get("disc_number")
+    duration_ms = body.get("duration_ms")
+    year = body.get("year")
+    image_url = body.get("image_url")
+    raw_tid = body.get("track_id")
+    # Stable synthetic ID when a missing album track has no external provider ID yet
+    if raw_tid is not None and str(raw_tid).strip():
+        track_key = str(raw_tid).strip()
+    else:
+        import hashlib
+        slug = f"{artist_name.lower()}|{album_name.lower()}|{disc_number or 1}|{track_number or 0}|{title.lower()}"
+        track_key = f"player:{hashlib.sha1(slug.encode('utf-8')).hexdigest()[:16]}"
+
+    artist_obj = {"id": str(artist_id) if artist_id is not None else artist_name, "name": artist_name}
+    album_obj = {
+        "id": str(album_id) if album_id is not None else album_name,
+        "name": album_name or title,
+        "artists": [artist_obj],
+        "release_date": str(year) if year else "",
+        "images": [{"url": image_url}] if image_url else [],
+    }
+    track_obj = {
+        "id": track_key,
+        "name": title,
+        "artists": [artist_obj],
+        "track_number": track_number if isinstance(track_number, int) else None,
+        "disc_number": disc_number if isinstance(disc_number, int) else None,
+        "duration_ms": duration_ms if isinstance(duration_ms, int) else None,
+    }
+    from api.wishlist_routes import _build_wishlist_route_runtime
+    from core.wishlist import routes as wishlist_routes
+    try:
+        payload, status = wishlist_routes.add_album_track_to_wishlist(
+            _build_wishlist_route_runtime(),
+            track=track_obj,
+            artist=artist_obj,
+            album=album_obj,
+            source_type="album",
+            source_context={"source_page": "player"},
+        )
+    except Exception:  # noqa: BLE001
+        return _failed("request track", "Couldn't request that track right now.")
+    can_download = (not enforcing()) or can(None, "music.get", "download")
+    mode = "download" if can_download else "ask"
+    if isinstance(payload, dict):
+        payload = {**payload, "mode": mode}
+    return jsonify(payload), status
+
+
 # ── player settings (per profile) ────────────────────────────────────────
 
 @bp.route("/api/player/settings", methods=["GET"])

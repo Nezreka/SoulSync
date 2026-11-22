@@ -107,6 +107,10 @@ OPTED_IN = {
     "audiobooks_api.library_cover": A.PLAYBACK,
     "video_api.subtitles_search": A.PLAYBACK,
     "video_api.subtitles_manual_download": A.PLAYBACK,
+    "profile_admin.get_avatar": A.PLAYBACK,
+    "video_api.video_request_create": A.PLAYBACK,
+    "video_api.video_request_options": A.PLAYBACK,
+    "player.request_music_track": A.PLAYBACK,
 }
 
 IGNORED = {"HEAD", "OPTIONS"}

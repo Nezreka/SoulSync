@@ -11,7 +11,7 @@ import { useState, type ReactNode } from 'react';
 import type { SongRef } from '../../-player.api';
 
 import { clock } from '../../-engine/timeline';
-import { GripIcon, PlayIcon, PlusIcon, XIcon } from '../icons';
+import { DownloadIcon, GripIcon, PlayIcon, PlusIcon, XIcon } from '../icons';
 import { PlayerLink } from '../kit';
 import { usePlayer } from '../playback/use-player';
 import { RetryImg } from '../retry-img';
@@ -37,6 +37,8 @@ export interface TrackRow {
   end?: ReactNode;
   /** why it can't play */
   why?: string;
+  /** when not in the library, clicking the row requests it */
+  onRequest?: () => void;
   /** the song as playlists take it; null: can't be added */
   song: SongRef | null;
 }
@@ -87,8 +89,13 @@ export function TrackList({
     >
       {rows.map((row, index) => {
         const playable = row.trackId !== null;
+        const requestable = !playable && !!row.onRequest;
+        const interactive = playable || requestable;
         const playing = playable && row.trackId === playingId;
-        const play = () => playable && onPlay(index);
+        const activate = () => {
+          if (playable) onPlay(index);
+          else if (row.onRequest) row.onRequest();
+        };
         return (
           <div
             key={row.key}
@@ -104,7 +111,13 @@ export function TrackList({
                   : 'before'
                 : undefined
             }
-            title={playable ? undefined : (row.why ?? 'Not in your library')}
+            title={
+              playable
+                ? undefined
+                : requestable
+                  ? `Click to request "${row.title}"`
+                  : (row.why ?? 'Not in your library')
+            }
             draggable={!!onMove}
             onDragStart={(e) => {
               setDrag(index);
@@ -129,16 +142,20 @@ export function TrackList({
             <div
               className={s.trackHit}
               role="button"
-              tabIndex={playable ? 0 : -1}
+              tabIndex={interactive ? 0 : -1}
               aria-label={
-                playable ? `Play ${row.title}` : `${row.title}, ${row.why ?? 'not in your library'}`
+                playable
+                  ? `Play ${row.title}`
+                  : requestable
+                    ? `Request ${row.title}`
+                    : `${row.title}, ${row.why ?? 'not in your library'}`
               }
-              aria-disabled={!playable}
-              onClick={play}
+              aria-disabled={!interactive}
+              onClick={activate}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' || e.key === ' ') {
                   e.preventDefault();
-                  play();
+                  activate();
                 } else if (onMove && e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
                   e.preventDefault();
                   e.stopPropagation();
@@ -146,7 +163,7 @@ export function TrackList({
                   if (to >= 0 && to < rows.length) onMove(index, to);
                 }
               }}
-              data-nav={playable ? true : undefined}
+              data-nav={interactive ? true : undefined}
             >
               <span className={s.trackNum}>
                 {playing ? (
@@ -157,6 +174,10 @@ export function TrackList({
                     {playable ? (
                       <span className={s.trackNumPlay}>
                         <PlayIcon />
+                      </span>
+                    ) : requestable ? (
+                      <span className={s.trackNumPlay}>
+                        <DownloadIcon />
                       </span>
                     ) : null}
                   </>
