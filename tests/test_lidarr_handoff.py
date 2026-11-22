@@ -180,3 +180,50 @@ def test_the_setting_needs_a_folder_lidarr_can_read():
     with _settings({'lidarr_download.import_through_lidarr': True}):
         assert paths.imports_through_lidarr() is False
         assert paths.lidarr_root_for_context({'search_result': {'username': 'peer'}}) is None
+
+
+def _tags(by_name):
+    def read(path):
+        return {'available': True, 'tags': {'musicbrainz_releasegroupid': by_name[os.path.basename(path)]}}
+    return patch('core.library.file_tags.read_embedded_tags', side_effect=read)
+
+
+def test_the_files_tags_name_the_album_when_the_tracks_do_not(tmp_path):
+    """a Deezer album carries no MusicBrainz id, and Lidarr's text search did
+    not find 'XXXXX' by Arca: the files Lidarr was offered stayed out of the
+    library. The consistency pass had tagged them with the release group."""
+    root = tmp_path / 'imports'
+    a = _file(root, 'Arca/XXXXX/01.flac')
+    b = _file(root, 'Arca/XXXXX/02.flac')
+    batch = {'is_album_download': True, 'album_context': {'name': 'XXXXX'},
+             'artist_context': {'name': 'Arca'}}
+    client = FakeClient()
+    with _tags({'01.flac': 'rg-xxxxx', '02.flac': 'rg-xxxxx'}):
+        hand_batch_to_lidarr('b', batch, {1: _task(a), 2: _task(b)}, client=client,
+                             enabled=lambda: True, transfer_root=str(root), repoint=lambda o, n: 1)
+    assert client.calls[0][3]['release_group_id'] == 'rg-xxxxx'
+
+
+def test_files_that_disagree_name_no_album(tmp_path):
+    from core.downloads.lidarr_handoff import tagged_release_group
+    root = tmp_path / 'imports'
+    files = [_file(root, 'A/X/01.flac'), _file(root, 'A/X/02.flac')]
+    with _tags({'01.flac': 'rg-1', '02.flac': 'rg-2'}):
+        assert tagged_release_group(files) is None
+
+
+def test_the_sweep_names_the_album_from_the_tags_and_never_monitors_it(tmp_path):
+    root = tmp_path / 'imports'
+    a = _file(root, 'Arca/XXXXX/01.flac', age=7 * 3600)
+
+    def read(path):
+        return {'available': True, 'tags': {'album': 'XXXXX', 'albumartist': 'Arca',
+                                            'musicbrainz_releasegroupid': 'rg-xxxxx'}}
+
+    client = FakeClient()
+    with patch('core.library.file_tags.read_embedded_tags', side_effect=read):
+        taken = sweep_lidarr_imports(client=client, enabled=lambda: True,
+                                     transfer_root=str(root), repoint=lambda o, n: 1)
+    assert taken == 1 and client.swept == []
+    assert client.calls == [([a], 'XXXXX', 'Arca',
+                             {'release_group_id': 'rg-xxxxx', 'monitored': False})]

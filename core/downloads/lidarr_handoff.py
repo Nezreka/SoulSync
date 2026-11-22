@@ -164,6 +164,30 @@ def _prune_empty(folder: str, transfer_root: str) -> None:
         current = os.path.dirname(current)
 
 
+def _tagged(paths: List[str], key: str) -> Optional[str]:
+    """The value of tag ``key`` the files agree on, or None."""
+    from core.library.file_tags import read_embedded_tags
+    values = set()
+    for path in paths:
+        read = read_embedded_tags(path)
+        value = str(((read.get('tags') or {}) if read.get('available') else {})
+                    .get(key) or '').strip()
+        if value:
+            values.add(value)
+    return values.pop() if len(values) == 1 else None
+
+
+def tagged_release_group(paths: List[str]) -> Optional[str]:
+    """The MusicBrainz release group the files' tags agree on, or None.
+
+    A track picked from Deezer, iTunes or Spotify carries no MusicBrainz id,
+    and Lidarr's text search can miss an album its MusicBrainz id finds at
+    once (a new release, a common title). The album consistency pass has just
+    tagged every file with the release it settled on, so the tags name it.
+    """
+    return _tagged(paths, 'musicbrainz_releasegroupid')
+
+
 def _log_outcome(label: str, outcome: dict, total: int) -> None:
     logger.info("[Lidarr Handoff] %s: Lidarr imported %d of %d file(s)%s", label,
                 outcome.get('imported', 0), total,
@@ -207,9 +231,10 @@ def hand_batch_to_lidarr(batch_id: str, batch: dict, tasks_snapshot: dict, *,
     taken = 0
     for (album, artist), entries in groups.items():
         infos = [info for _path, info in entries]
+        files = [path for path, _info in entries]
         outcome = client.import_into_library(
-            [path for path, _info in entries], album, artist,
-            release_group_id=release_group_id_of(infos) or '',
+            files, album, artist,
+            release_group_id=release_group_id_of(infos) or tagged_release_group(files) or '',
             release_year=bundle_release_year_of(infos) or '',
             release_type=bundle_release_type_of(infos) or '',
             monitored=is_album,
@@ -256,9 +281,25 @@ def sweep_lidarr_imports(*, client: Any = None,
         client = _lidarr_client(client) if files else None
         if client is None:
             return 0
-        outcome = client.import_files(files)
-        _log_outcome(f"Sweep of {root}", outcome, len(files))
-        return finish_imported(outcome.get('paths') or {}, root, repoint=repoint)
+        by_folder: Dict[str, List[str]] = {}
+        for path in files:
+            by_folder.setdefault(os.path.dirname(path), []).append(path)
+        taken = 0
+        for folder, folder_files in sorted(by_folder.items()):
+            # the batch that knew the album is gone: the tags name it, and
+            # Lidarr needs the album (and its artist) before it can take the
+            # files. Added unmonitored: a recovery must not start a download.
+            album = _tagged(folder_files, 'album')
+            artist = _tagged(folder_files, 'albumartist') or _tagged(folder_files, 'artist')
+            if album and artist:
+                outcome = client.import_into_library(
+                    folder_files, album, artist,
+                    release_group_id=tagged_release_group(folder_files) or '', monitored=False)
+            else:
+                outcome = client.import_files(folder_files)
+            _log_outcome(f"Sweep of {folder}", outcome, len(folder_files))
+            taken += finish_imported(outcome.get('paths') or {}, root, repoint=repoint)
+        return taken
     finally:
         _sweep_lock.release()
 
