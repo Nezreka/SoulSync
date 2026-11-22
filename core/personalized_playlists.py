@@ -339,13 +339,19 @@ class PersonalizedPlaylistsService:
         try:
             with self.database._get_connection() as conn:
                 _ensure_owned_ids(conn)
-                ids = conn.execute(
-                    f"""SELECT id, {near_sql} FROM discovery_pool
+                # one row, not one per pool entry: sqlite3 takes the GIL back
+                # for every row it hands to Python, and next to busy threads
+                # each take waits for the switch interval. 15.5k (id, near)
+                # rows took 185-370 s live, the same pairs as one JSON array
+                # 25 ms. same pairs, same order (rng.sample depends on it)
+                packed = conn.execute(
+                    f"""SELECT json_group_array(json_array(id, {near_sql})) FROM discovery_pool
                         {self._POOL_WHERE}
                           {self._OWNED_CLAUSE}
                           {extra_where}""",
                     tuple(near_names) + (source, profile, profile) + tuple(extra_params),
-                ).fetchall()
+                ).fetchone()
+                ids = json.loads(packed[0]) if packed and packed[0] else []
         except Exception as e:
             logger.error(f"Error drawing pool candidates (source={source}): {e}")
             return []
