@@ -59,7 +59,6 @@ function EpisodeRow({
   position,
   duration,
   onPlay,
-  onOpen,
   filesKnown = true,
 }: {
   showId: number;
@@ -69,12 +68,11 @@ function EpisodeRow({
   duration?: number | null;
   /** play this episode (and the rest of the show after it), in this version */
   onPlay?: (fileId?: number) => void;
-  /** open this episode's dedicated detail page */
-  onOpen?: () => void;
   /** the show's file list has arrived (until then, ownership is the show's word) */
   filesKnown?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   // the show says what you own; the file list (versions, quality) only adds
   // detail. an episode is never greyed out just because that list is late
   const owned =
@@ -91,18 +89,27 @@ function EpisodeRow({
         data-missing={owned ? undefined : 'true'}
         role="button"
         tabIndex={0}
-        aria-label={`Open episode ${episode.episode_number}: ${episode.title || `Episode ${episode.episode_number}`}`}
-        onClick={() => onOpen?.()}
+        aria-expanded={expanded}
+        aria-label={`Episode ${episode.episode_number}: ${episode.title || `Episode ${episode.episode_number}`}`}
+        onClick={() => setExpanded((v) => !v)}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault();
-            onOpen?.();
+            setExpanded((v) => !v);
           }
         }}
         data-show-id={showId}
         data-nav
       >
-        <div className={s.rowArt}>
+        <div
+          className={s.rowArt}
+          onClick={(e) => {
+            if (owned) {
+              e.stopPropagation();
+              onPlay?.();
+            }
+          }}
+        >
           <Art
             src={episode.has_still ? stillSet(episode.id).src : null}
             srcSet={episode.has_still ? stillSet(episode.id).srcSet : undefined}
@@ -132,7 +139,7 @@ function EpisodeRow({
               ? ` · ${remaining(position, duration ?? seconds)}`
               : ''}
           </span>
-          {episode.overview ? <span className={s.rowText}>{episode.overview}</span> : null}
+          {!expanded && episode.overview ? <span className={s.rowText}>{episode.overview}</span> : null}
         </div>
         <div className={s.rowEnd}>
           {episode.watched ? <Badge tone="yes">Watched</Badge> : null}
@@ -156,7 +163,27 @@ function EpisodeRow({
           ) : null}
         </div>
       </div>
-      {open ? (
+      {expanded ? (
+        <div className={s.rowMore} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {episode.overview ? (
+            <p style={{ margin: 0, color: 'var(--pl-text-2)', fontSize: '0.92rem', lineHeight: 1.55 }}>
+              {episode.overview}
+            </p>
+          ) : null}
+          {owned ? (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              <PlayButton
+                label={position && done !== undefined && done < 1 ? 'Resume episode' : 'Play episode'}
+                onPlay={() => onPlay?.()}
+              />
+            </div>
+          ) : null}
+          {files.length > 1 ? (
+            <VersionPicker files={files} onChange={(fileId) => onPlay?.(fileId)} />
+          ) : null}
+        </div>
+      ) : null}
+      {open && !expanded ? (
         <div className={s.rowMore}>
           <VersionPicker files={files} onChange={(fileId) => onPlay?.(fileId)} />
         </div>
@@ -383,12 +410,6 @@ function ShowPage() {
                         }
                         duration={row?.duration_seconds}
                         onPlay={(fileId) => playFrom(episode.id, fileId)}
-                        onOpen={() =>
-                          void navigate({
-                            to: '/player/tv/$showId/episode/$episodeId',
-                            params: { showId: String(id), episodeId: String(episode.id) },
-                          })
-                        }
                         filesKnown={!!files.data}
                       />
                     );

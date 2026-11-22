@@ -49,6 +49,12 @@ SETTINGS: Dict[str, Tuple[Any, Callable[[Any], Any], str]] = {
     "autoplay_next": (True, _bool, "the next episode plays on its own"),
     "still_watching_after": (3, _int(0, 20),
                              "episodes in a row nobody touched before asking (0: never ask)"),
+    "show_movie_ratings": (False, _bool,
+                           "show the star rating badge in the corner of movie poster cards"),
+    "show_tv_episode_count": (True, _bool,
+                              "show the episode count badge on TV show poster cards"),
+    "show_year_on_cards": (True, _bool,
+                           "show the release year beneath movie and TV poster cards"),
 }
 
 

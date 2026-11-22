@@ -258,6 +258,49 @@ function SettingsPage() {
               })}
             </div>
           </Row>
+        </Group>
+
+        <Group
+          icon={<MovieIcon />}
+          title="Poster cards"
+          badge="All screens"
+          note="Choose what badges and metadata appear on movie and TV cards across every device."
+        >
+          <Row
+            label="Show movie ratings"
+            help="Display the star rating pill in the bottom-right corner of movie posters."
+          >
+            <Switch
+              label="Show movie ratings"
+              on={mine?.show_movie_ratings ?? false}
+              busy={!mine || busy}
+              onChange={(v) => save.mutate({ show_movie_ratings: v })}
+            />
+          </Row>
+
+          <Row
+            label="Show episode count on TV shows"
+            help="Display the episode count pill in the corner of TV show posters."
+          >
+            <Switch
+              label="Show episode count on TV shows"
+              on={mine?.show_tv_episode_count ?? true}
+              busy={!mine || busy}
+              onChange={(v) => save.mutate({ show_tv_episode_count: v })}
+            />
+          </Row>
+
+          <Row
+            label="Show release year on cards"
+            help="Display the release year beneath movie and TV show posters."
+          >
+            <Switch
+              label="Show release year on cards"
+              on={mine?.show_year_on_cards ?? true}
+              busy={!mine || busy}
+              onChange={(v) => save.mutate({ show_year_on_cards: v })}
+            />
+          </Row>
 
           {save.isError ? (
             <div className={s.saveError} role="alert">

@@ -40,7 +40,14 @@ export const Route = createFileRoute('/player/watching')({
   component: WatchingPage,
 });
 
-const PLAYABLE = new Set<ItemType>(['track', 'movie', 'episode', 'youtube', 'audiobook']);
+const PLAYABLE = new Set<ItemType>([
+  'track',
+  'movie',
+  'episode',
+  'youtube',
+  'audiobook',
+  'podcast_episode',
+]);
 const QUICK_EMOJIS = ['🍿', '🔥', '😂', '😮', '👏', '❤️'];
 
 function itemOf(type: string, id: string, meta: ProgressMeta): PlayItem | null {

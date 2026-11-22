@@ -4,6 +4,7 @@
  * what the phone and tv apps copy.
  */
 
+import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { useEffect, useRef, useState, type ComponentProps, type ReactNode } from 'react';
 
@@ -11,6 +12,7 @@ import type { RailCard } from '../-lib/rails';
 import type { PlayVerdict } from '../-player.types';
 
 import { canRetryArt, retryArt } from '../-lib/images';
+import { playerSettingsQuery } from '../-player.api';
 import { BackIcon, CheckIcon, ChevronIcon, GridIcon, ListIcon, MoreIcon, PlayIcon } from './icons';
 import { usePlayCard } from './playback/play-card';
 import s from './player.module.css';
@@ -176,6 +178,31 @@ export function Card({
   }, [menuOpen]);
 
   const { handlers, panel } = usePreview(card.preview, card.title, card.href);
+  const settingsQ = useQuery({ ...playerSettingsQuery(), enabled: !!card.preview });
+  const prefs = settingsQ.data?.settings;
+  const showMovieRatings = prefs?.show_movie_ratings ?? false;
+  const showTvEpisodeCount = prefs?.show_tv_episode_count ?? true;
+  const showYearOnCards = prefs?.show_year_on_cards ?? true;
+
+  const visibleBadge = (() => {
+    if (!card.badge) return undefined;
+    if (card.preview?.kind === 'movie' && card.badge.startsWith('★') && !showMovieRatings) {
+      return undefined;
+    }
+    if (card.preview?.kind === 'show' && /\bep\b/i.test(card.badge) && !showTvEpisodeCount) {
+      return undefined;
+    }
+    return card.badge;
+  })();
+
+  const visibleSubtitle = (() => {
+    if (!card.subtitle) return undefined;
+    if (!showYearOnCards && card.preview) {
+      const cleaned = card.subtitle.replace(/^\d{4}(\s*·\s*)?/, '').trim();
+      return cleaned || undefined;
+    }
+    return card.subtitle;
+  })();
 
   const body = (
     <>
@@ -186,7 +213,7 @@ export function Card({
             <CheckIcon />
           </span>
         ) : null}
-        {card.badge ? <span className={s.cardBadge}>{card.badge}</span> : null}
+        {visibleBadge ? <span className={s.cardBadge}>{visibleBadge}</span> : null}
         {card.progress !== undefined ? (
           <div
             className={s.progress}
@@ -204,7 +231,7 @@ export function Card({
         <div className={s.cardTitle} title={card.title}>
           {card.title}
         </div>
-        {card.subtitle ? <div className={s.cardSub}>{card.subtitle}</div> : null}
+        {visibleSubtitle ? <div className={s.cardSub}>{visibleSubtitle}</div> : null}
       </div>
     </>
   );

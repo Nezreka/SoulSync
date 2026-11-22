@@ -383,6 +383,9 @@ export interface PlayerSettings {
   share_activity: boolean;
   autoplay_next: boolean;
   still_watching_after: number;
+  show_movie_ratings: boolean;
+  show_tv_episode_count: boolean;
+  show_year_on_cards: boolean;
 }
 
 export const playerSettingsQuery = () =>
