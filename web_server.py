@@ -23946,20 +23946,42 @@ def _chat_auto_prove_loop():
         except Exception:
             logger.debug("chat auto-prove loop error", exc_info=True)
 
+def _watched_batch_rooms():
+    """The ``batch:<id>`` rooms with at least one client in them, or None when
+    the socket server's rooms cannot be read (the caller then builds every
+    batch, as before). python-socketio drops a room when its last member
+    leaves or disconnects."""
+    try:
+        rooms = socketio.server.manager.rooms.get('/', {})
+        return {room for room, members in list(rooms.items())
+                if isinstance(room, str) and room.startswith('batch:') and members}
+    except Exception:  # noqa: BLE001 - unknown manager: keep the old behaviour
+        return None
+
+
 def _emit_download_status_loop():
     """Background thread that pushes download batch status every 2 seconds to subscribed rooms.
     Skipped entirely while no client is connected — the transfer fetch below is a real
     slskd API call (TTL-cached), so at idle this loop polled slskd every ~2s for nobody.
     Download progression doesn't depend on it (the workers poll transfers themselves);
-    this cache is populated on demand by its other callers."""
+    this cache is populated on demand by its other callers.
+
+    Only batches someone has joined the room of are built: the status of every
+    batch in memory was built (under tasks_lock) every 2 s and sent to rooms
+    nobody was in; this loop was measured at 29% of a core on a live install."""
     while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(2)
         if not _has_connected_clients():
+            continue
+        watched = _watched_batch_rooms()
+        if watched is not None and not watched:
             continue
         try:
             live_transfers_lookup = get_cached_transfer_data()
             with tasks_lock:
                 for batch_id, batch in download_batches.items():
+                    if watched is not None and f'batch:{batch_id}' not in watched:
+                        continue
                     try:
                         status_data = _build_batch_status_data(
                             batch_id, batch, live_transfers_lookup
