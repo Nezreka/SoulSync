@@ -163,7 +163,7 @@ export function musicTypeChannel(tracks: readonly MusicTrackLike[]): Channel | n
   add(out, {
     id: 'type-music',
     name: 'Music',
-    kind: 'type',
+    kind: 'music',
     blurb: 'songs from your library',
     pool: tracks.map(trackItem),
     music: true,
@@ -505,19 +505,19 @@ export function matchesFilter(
 }
 
 export const CHANNEL_GROUPS: { kind: ChannelKind; label: string }[] = [
-  { kind: 'type', label: 'Everything' },
+  { kind: 'network', label: 'Networks' },
+  { kind: 'pick', label: 'Picks' },
   { kind: 'server', label: 'Channels for everyone' },
   { kind: 'rule', label: 'Your channels' },
-  { kind: 'playlist', label: 'Your playlists' },
-  { kind: 'vibe', label: 'Vibes' },
-  { kind: 'music', label: 'Music genres' },
-  { kind: 'pick', label: 'Picks' },
-  { kind: 'kids', label: 'Kids' },
+  { kind: 'type', label: 'Everything' },
   { kind: 'genre', label: 'Movie and TV genres' },
-  { kind: 'network', label: 'Networks' },
   { kind: 'studio', label: 'Studios' },
   { kind: 'collection', label: 'Film series' },
   { kind: 'decade', label: 'Decades' },
+  { kind: 'kids', label: 'Kids' },
+  { kind: 'playlist', label: 'Your playlists' },
+  { kind: 'vibe', label: 'Vibes' },
+  { kind: 'music', label: 'Music' },
 ];
 
 /** channel numbers in guide order, from 101: stable while the library is */

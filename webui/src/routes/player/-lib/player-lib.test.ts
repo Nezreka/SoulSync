@@ -591,8 +591,8 @@ describe('the guide, round two', () => {
     ]);
     expect(numbered.map((c) => [c.id, c.number])).toEqual([
       ['type-movies', 101],
-      ['music-vibe-chill', 102],
-      ['genre-drama', 103],
+      ['genre-drama', 102],
+      ['music-vibe-chill', 103],
     ]);
     const favs = new Set(['genre-drama']);
     expect(numbered.filter((c) => matchesFilter(c, 'music', favs)).map((c) => c.id)).toEqual([
