@@ -30,6 +30,8 @@ import logging
 from difflib import SequenceMatcher
 from typing import Any, Optional
 
+from core.spotapi_hashes import install as install_spotapi_hashes
+
 logger = logging.getLogger(__name__)
 
 
@@ -181,12 +183,14 @@ class SpotifyFreeMetadataClient:
     def _sf_client(self):
         if self._sf is None:
             from SpotipyFree import Spotify  # optional, user-installed
+            install_spotapi_hashes()  # SpotipyFree builds a spotapi object per call
             self._sf = Spotify()
         return self._sf
 
     def _public_client(self):
         if self._public is None:
             import spotapi
+            install_spotapi_hashes()
             self._public = spotapi.Public()
         return self._public
 
@@ -297,6 +301,7 @@ class SpotifyFreeMetadataClient:
     def _fetch_discography_sections(self, artist_id: str) -> dict:
         """The raw artist discography from ONE upstream call (spotapi)."""
         import spotapi
+        install_spotapi_hashes()
         artist = spotapi.Artist().get_artist(artist_id)
         return ((artist or {}).get('data') or {}).get('artistUnion', {}).get('discography') or {}
 
