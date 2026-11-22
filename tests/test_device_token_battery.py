@@ -105,6 +105,8 @@ OPTED_IN = {
     "podcasts_api.podcasts_watchlist_list": A.PLAYBACK,
     "audiobooks_api.library": A.PLAYBACK,
     "audiobooks_api.library_cover": A.PLAYBACK,
+    "video_api.subtitles_search": A.PLAYBACK,
+    "video_api.subtitles_manual_download": A.PLAYBACK,
 }
 
 IGNORED = {"HEAD", "OPTIONS"}

@@ -33,6 +33,7 @@ import threading
 import time
 import uuid
 
+from core.connect.device_access import device_playback
 from flask import jsonify, request
 
 from utils.logging_config import get_logger
@@ -261,6 +262,7 @@ def register_routes(bp):
         return jsonify({"ok": True})
 
     @bp.route("/subtitles/search/<kind>/<int:item_id>", methods=["GET"])
+    @device_playback
     def subtitles_search(kind, item_id):
         from . import get_video_db
         from core.video.subtitles import providers as providers_pkg
@@ -343,6 +345,7 @@ def register_routes(bp):
                         "in_file": tracks_in_file(file_path, lang, forced, get_setting)})
 
     @bp.route("/subtitles/manual-download", methods=["POST"])
+    @device_playback
     def subtitles_manual_download():
         from . import get_video_db
         from core.video.subtitles import providers as providers_pkg
