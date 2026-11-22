@@ -111,6 +111,9 @@ OPTED_IN = {
     "video_api.video_request_create": A.PLAYBACK,
     "video_api.video_request_options": A.PLAYBACK,
     "player.request_music_track": A.PLAYBACK,
+    "devices.device_switch_profiles": A.PLAYBACK,
+    "devices.device_switch_profile": A.PLAYBACK,
+    "player_stream.create_cast_token": A.PLAYBACK,
 }
 
 IGNORED = {"HEAD", "OPTIONS"}

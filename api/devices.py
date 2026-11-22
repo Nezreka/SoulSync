@@ -12,7 +12,7 @@ import time
 
 from flask import Blueprint, g, jsonify, request
 
-from core.connect.device_access import device_pick
+from core.connect.device_access import device_pick, device_playback
 from core.permissions import device_only, public
 from core.security.rate_limit import AttemptLimiter
 from core.profile_context import admin_only
@@ -243,6 +243,63 @@ def device_pick_profile():
                         "message": "No profile was picked in time. Pair this device again."}), 409
     _audit("device_paired", detail=dev.get("name"), target_id=profile_id, target_name=profile.get("name"))
     return jsonify({"success": True, "profile": {"id": profile_id, "name": profile.get("name")}})
+
+
+@bp.route("/api/devices/me/switch-profiles", methods=["GET"])
+@device_only
+@device_playback
+def device_switch_profiles():
+    """List household profiles a live paired device may switch to (with PIN/password requirements)."""
+    dev = _device()
+    if dev is None:
+        return _no_device()
+    from core.connect.pick import pick_list
+    db = get_database()
+    current_pid = dev.get("profile_id")
+    profiles = pick_list(db, dev.get("kind") or "", login_mode=bool(_require_login_enabled()))
+    for p in profiles:
+        p["active"] = (p.get("id") == current_pid)
+    return jsonify({"success": True, "profiles": profiles})
+
+
+@bp.route("/api/devices/me/switch-profile", methods=["POST"])
+@device_only
+@device_playback
+def device_switch_profile():
+    """Switch a live paired device to another household profile (enforces PIN/password via check_profile_pick)."""
+    dev = _device()
+    if dev is None:
+        return _no_device()
+    body = request.get_json(silent=True) or {}
+    try:
+        profile_id = int(body.get("profile_id") or 0)
+    except (TypeError, ValueError):
+        profile_id = 0
+    db = get_database()
+    profile = db.get_profile(profile_id) if profile_id else None
+    from core.connect.pick import may_use
+    if not profile or not may_use(db, profile, dev.get("kind") or ""):
+        return jsonify({"success": False, "error": "Profile not found"}), 404
+    from api.user_profiles import check_profile_pick
+    refused, _pin_checked = check_profile_pick(
+        db, profile, pin=str(body.get("pin") or ""), password=str(body.get("password") or ""),
+        ip=request.remote_addr or "unknown", now=time.time(),
+        is_new_sign_in=True, always_ask_pin=True)
+    if refused is not None:
+        return refused
+    from core.connect import device_tokens as T
+    if not T.switch_profile(db, dev["id"], profile_id):
+        return jsonify({"success": False, "error": "switch_failed",
+                        "message": "Could not switch profile on this device."}), 409
+    return jsonify({
+        "success": True,
+        "profile": {
+            "id": profile_id,
+            "name": profile.get("name"),
+            "avatar_color": profile.get("avatar_color"),
+            "avatar_url": profile.get("avatar_url"),
+        },
+    })
 
 
 # ── invite codes (admin) ─────────────────────────────────────────────────

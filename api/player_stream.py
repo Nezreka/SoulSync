@@ -22,10 +22,10 @@ from __future__ import annotations
 
 from urllib.parse import quote
 
-from flask import Blueprint, jsonify, request, send_file
+from flask import Blueprint, g, jsonify, make_response, request, send_file
 
 from core.connect.device_access import device_playback
-from core.permissions import requires_any
+from core.permissions import public, requires_any
 from utils.logging_config import get_logger
 
 logger = get_logger("player.stream")
@@ -172,6 +172,137 @@ def stream(item_type, item_id):
     if source.mode == "relay":
         return relay(source.url, request.headers.get("Range"), source.mime)
     return jsonify({"success": False, "error": "external", "message": "That plays from its own address."}), 400
+
+
+_CAST_TOKEN_TTL = 6 * 3600  # 6 hours, scoped to one (profile_id, item_type, item_id)
+
+
+def _cast_secret() -> bytes:
+    import hashlib
+    from flask import current_app
+    key = current_app.secret_key or "soulsync-cast-fallback"
+    if isinstance(key, str):
+        key = key.encode("utf-8")
+    return hashlib.sha256(b"soulsync:cast-token:v1:" + key).digest()
+
+
+def _sign_cast_token(profile_id: int, item_type: str, item_id: str, part: str | None) -> str:
+    import base64
+    import hashlib
+    import hmac
+    import json
+    import time
+    payload = json.dumps(
+        {
+            "p": int(profile_id),
+            "t": item_type,
+            "i": str(item_id),
+            "r": part or "",
+            "e": int(time.time()) + _CAST_TOKEN_TTL,
+        },
+        separators=(",", ":"),
+    ).encode("utf-8")
+    b64 = base64.urlsafe_b64encode(payload).rstrip(b"=").decode("ascii")
+    sig = hmac.new(_cast_secret(), b64.encode("ascii"), hashlib.sha256).hexdigest()[:32]
+    return f"{b64}.{sig}"
+
+
+def _verify_cast_token(token: str, item_type: str, item_id: str) -> tuple[int, str | None] | None:
+    import base64
+    import hashlib
+    import hmac
+    import json
+    import time
+    if not token or "." not in token:
+        return None
+    b64, sig = token.rsplit(".", 1)
+    expected = hmac.new(_cast_secret(), b64.encode("ascii"), hashlib.sha256).hexdigest()[:32]
+    if not hmac.compare_digest(sig, expected):
+        return None
+    try:
+        pad = "=" * (-len(b64) % 4)
+        data = json.loads(base64.urlsafe_b64decode(b64 + pad).decode("utf-8"))
+        if int(data.get("e", 0)) < int(time.time()):
+            return None
+        if data.get("t") != item_type or str(data.get("i")) != str(item_id):
+            return None
+        pid = int(data["p"])
+        part = data.get("r") or None
+        return pid, part
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _add_cast_cors(resp):
+    resp.headers["Access-Control-Allow-Origin"] = "*"
+    resp.headers["Access-Control-Allow-Methods"] = "GET, HEAD, OPTIONS"
+    resp.headers["Access-Control-Allow-Headers"] = "Range, Content-Type"
+    resp.headers["Access-Control-Expose-Headers"] = "Content-Range, Content-Length, Accept-Ranges"
+    return resp
+
+
+@bp.route("/api/player/cast-token", methods=["POST"])
+@requires_any(*SECTIONS)
+@device_playback
+def create_cast_token():
+    """Mint a short-lived, item-scoped signed stream URL for Chromecast Default Media Receiver."""
+    from core.player.playable import Refused, resolve
+    body = request.get_json(silent=True) or {}
+    item_type = str(body.get("item_type") or "").strip()
+    item_id = str(body.get("item_id") or "").strip()
+    part = body.get("part")
+    part_str = str(part) if part not in (None, "") else None
+    if not item_type or not item_id:
+        return jsonify({"success": False, "error": "item_type and item_id required"}), 400
+    try:
+        source = resolve(item_type, item_id, part_str)
+    except Refused as e:
+        return _refused(e)
+    except Exception:  # noqa: BLE001
+        logger.exception("cast-token resolve failed for %s %s", item_type, item_id)
+        return jsonify({"success": False, "error": "failed"}), 500
+    pid = int(getattr(g, "profile_id", 1) or 1)
+    ct = _sign_cast_token(pid, item_type, item_id, part_str)
+    stream_path = f"/api/player/cast-stream/{item_type}/{quote(item_id, safe='')}?ct={quote(ct, safe='')}"
+    return jsonify({
+        "success": True,
+        "token": ct,
+        "stream_path": stream_path,
+        "content_type": source.mime or "application/octet-stream",
+        "expires_in": _CAST_TOKEN_TTL,
+    })
+
+
+@bp.route("/api/player/cast-stream/<item_type>/<path:item_id>", methods=["GET", "OPTIONS"])
+@public
+def cast_stream(item_type, item_id):
+    """Stream one media item to a Chromecast receiver using a short-lived signed cast token."""
+    if request.method == "OPTIONS":
+        return _add_cast_cors(make_response("", 204))
+    verified = _verify_cast_token(request.args.get("ct", ""), item_type, item_id)
+    if verified is None:
+        return _add_cast_cors(jsonify({"success": False, "error": "invalid_cast_token"})), 401
+    pid, part = verified
+    g.profile_id = pid
+    from core.player.playable import Refused, resolve
+    from core.player.relay import relay
+    try:
+        source = resolve(item_type, item_id, part)
+    except Refused as e:
+        return _add_cast_cors(_refused(e)[0]), e.status
+    except Exception:  # noqa: BLE001
+        logger.exception("cast-stream failed for %s %s", item_type, item_id)
+        return _add_cast_cors(jsonify({"success": False, "error": "failed"})), 500
+    if source.mode == "file":
+        try:
+            resp = send_file(source.path, mimetype=source.mime, conditional=True, as_attachment=False)
+            return _add_cast_cors(resp)
+        except OSError:
+            return _add_cast_cors(jsonify({"success": False, "error": "no_file"})), 404
+    if source.mode == "relay":
+        resp = relay(source.url, request.headers.get("Range"), source.mime)
+        return _add_cast_cors(resp)
+    return _add_cast_cors(jsonify({"success": False, "error": "external"})), 400
 
 
 @bp.route("/api/player/transcode/<item_type>/<path:item_id>", methods=["GET"])

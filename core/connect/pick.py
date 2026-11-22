@@ -30,6 +30,9 @@ KIND_ITEM_TYPES = {
 }
 
 
+_PLAYER_SECTIONS = ("movies.access", "tv.access", "music.access", "podcasts.access", "audiobooks.access")
+
+
 def may_use(db, profile: Optional[Mapping[str, Any]], kind: str) -> bool:
     """may a device of this kind act as this profile? fails closed."""
     if not profile:
@@ -46,6 +49,8 @@ def may_use(db, profile: Optional[Mapping[str, Any]], kind: str) -> bool:
     except Exception:  # noqa: BLE001
         logger.warning("device pick: no permissions for profile %s", profile.get("id"), exc_info=True)
         return False
+    if kind == T.KIND_PLAYER:
+        return can(ctx, perm) or any(can(ctx, sec) for sec in _PLAYER_SECTIONS)
     return can(ctx, perm)
 
 

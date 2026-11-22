@@ -151,6 +151,17 @@ def pick_profile(db, device_id: int, profile_id: int, *, now: Optional[float] = 
         return cur.rowcount > 0
 
 
+def switch_profile(db, device_id: int, profile_id: int) -> bool:
+    """Switch a live (already-paired, non-revoked) device to another household profile."""
+    with _conn(db) as conn:
+        cur = conn.execute(
+            "UPDATE device_tokens SET profile_id = ?, pick_deadline = NULL "
+            "WHERE id = ? AND profile_id IS NOT NULL AND revoked_at IS NULL",
+            (int(profile_id), int(device_id)))
+        conn.commit()
+        return cur.rowcount > 0
+
+
 def revoke(db, device_id: int) -> bool:
     with _conn(db) as conn:
         cur = conn.execute("UPDATE device_tokens SET revoked_at = CURRENT_TIMESTAMP "
