@@ -228,7 +228,6 @@ function FullPlayer({ state, onLeave }: { state: PlayerState; onLeave: () => voi
           data-nav
         >
           <ChevronDownBigIcon />
-          <span>Minimize</span>
         </button>
         <div className={s.fullTitles}>
           <span className={s.fullTitle}>{item.title}</span>
