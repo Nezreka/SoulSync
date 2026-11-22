@@ -121,18 +121,52 @@ def build_address_list(
     return urls
 
 
+def _is_public_ip(ip_text: str | None) -> bool:
+    """True only for globally routable public IPs (rejects RFC1918/Docker proxy IPs like 172.16.x.x)."""
+    if not ip_text:
+        return False
+    try:
+        return ipaddress.ip_address(ip_text.strip()).is_global
+    except ValueError:
+        return False
+
+
+def _best_public_ip(observed: str | None = None) -> str | None:
+    """Pick the real globally routable WAN IP (UPnP IGD external IP or broker observed_ip)."""
+    upnp_ip = (
+        _upnp_mapper.mapping.external_ip
+        if (_upnp_mapper is not None and _upnp_mapper.mapping is not None)
+        else None
+    )
+    if _is_public_ip(upnp_ip):
+        return upnp_ip
+    if _is_public_ip(observed):
+        return observed
+    if _client is not None and _is_public_ip(_client.observed_public_ip):
+        return _client.observed_public_ip
+    return None
+
+
 def _local_lan_ips() -> list[str]:
     ips: set[str] = set()
-    try:
-        hostname = socket.gethostname()
-        for info in socket.getaddrinfo(hostname, None):
-            ips.add(info[4][0])
-    except OSError:
-        pass
     try:  # the primary outbound address, the LAN IP other devices use
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
             sock.connect(("192.0.2.1", 80))  # TEST-NET-1: no traffic is sent (UDP)
             ips.add(sock.getsockname()[0])
+    except OSError:
+        pass
+    try:
+        hostname = socket.gethostname()
+        for info in socket.getaddrinfo(hostname, None):
+            ip = info[4][0].split("%", 1)[0]
+            try:
+                addr = ipaddress.ip_address(ip)
+            except ValueError:
+                continue
+            # Skip loopback and IPv6 link-local (fe80::) which aren't usable cross-host
+            if addr.is_loopback or addr.is_link_local:
+                continue
+            ips.add(str(addr))
     except OSError:
         pass
     return sorted(ips)
@@ -202,7 +236,7 @@ def start(get_database, config_manager, *, port: int | None = None) -> PresenceC
         is_live=lambda code_hash: _is_live(db, code_hash),
         address_provider=lambda observed: build_address_list(
             identity,
-            observed_public_ip=observed or (_upnp_mapper.mapping.external_ip if _upnp_mapper and _upnp_mapper.mapping else None),
+            observed_public_ip=_best_public_ip(observed),
             lan_ips=_local_lan_ips(),
             port=tls_port,
             external_port=_upnp_mapper.external_port if _upnp_mapper else None,
@@ -338,11 +372,7 @@ def current_addresses(get_database, config_manager) -> list[str]:
         if not store.fingerprint():
             return []
         tls_port = connect_tls_port(config_manager)
-        observed = None
-        if _client is not None and _client.observed_public_ip:
-            observed = _client.observed_public_ip
-        elif _upnp_mapper is not None and _upnp_mapper.mapping and _upnp_mapper.mapping.external_ip:
-            observed = _upnp_mapper.mapping.external_ip
+        observed = _best_public_ip()
         ext_port = _upnp_mapper.external_port if _upnp_mapper else None
         return build_address_list(
             identity,
