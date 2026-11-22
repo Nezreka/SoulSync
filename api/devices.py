@@ -315,8 +315,10 @@ def redeem_code():
         _redeem_limiter.record_failure(ip, now)
         return jsonify({"success": False, "error": "unknown_or_expired_code",
                         "message": "That code isn't valid. Ask for a new one."}), 404
+    app_name = str(body.get("app") or "").strip()
+    kind = T.KIND_PLAYER if app_name.lower() == T.KIND_PLAYER else T.KIND_MUSIC
     token, device_id = T.create(db, name=str(body.get("name") or ""), platform=str(body.get("platform") or ""),
-                                app=str(body.get("app") or ""), ip=ip, invite_code_id=code_id, now=now)
+                                app=app_name, kind=kind, ip=ip, invite_code_id=code_id, now=now)
     C.mark_device(db, code_id, device_id)
     try:  # the service drops the registration the moment a code is redeemed
         from core.connect import rendezvous

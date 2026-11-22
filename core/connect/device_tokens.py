@@ -28,7 +28,8 @@ SCOPE_PLAYBACK = "playback"
 # "Use music apps" permission. new kinds are added on purpose, with their
 # own permission rule (core/connect/pick.py)
 KIND_MUSIC = "music"
-KINDS = (KIND_MUSIC,)
+KIND_PLAYER = "player"
+KINDS = (KIND_MUSIC, KIND_PLAYER)
 # last_seen is written at most this often per device
 TOUCH_EVERY = 60.0
 

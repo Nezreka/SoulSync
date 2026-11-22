@@ -12,6 +12,7 @@ import time
 
 from flask import Blueprint, jsonify, request
 
+from core.connect.device_access import device_playback
 from core.permissions import requires, requires_any, self_only
 from core.player import catalog, progress, watched
 from core.profile_context import get_current_profile_id
@@ -57,6 +58,7 @@ def _failed(what, message="Something went wrong saving your place"):
 
 
 @bp.route("/api/player/progress", methods=["GET"])
+@device_playback
 @self_only
 def get_progress():
     pid = _profile()
@@ -73,6 +75,7 @@ def get_progress():
 
 
 @bp.route("/api/player/progress", methods=["PUT"])
+@device_playback
 @self_only
 def put_progress():
     pid = _profile()
@@ -94,6 +97,7 @@ def put_progress():
 
 
 @bp.route("/api/player/progress/lookup", methods=["POST"])
+@device_playback
 @self_only
 def lookup_progress():
     """many items of one type in one call: {item_type, item_ids: [...]}."""
@@ -111,6 +115,7 @@ def lookup_progress():
 
 
 @bp.route("/api/player/progress/finish", methods=["POST"])
+@device_playback
 @self_only
 def finish_progress():
     pid = _profile()
@@ -129,6 +134,7 @@ def finish_progress():
 
 
 @bp.route("/api/player/watched", methods=["POST"])
+@device_playback
 @self_only
 def mark_watched():
     """the player is into the credits of a movie or episode: it counts as
@@ -141,6 +147,7 @@ def mark_watched():
 
 
 @bp.route("/api/player/progress", methods=["DELETE"])
+@device_playback
 @self_only
 def delete_progress():
     pid = _profile()
@@ -157,6 +164,7 @@ def delete_progress():
 
 
 @bp.route("/api/player/continue", methods=["GET"])
+@device_playback
 @self_only
 def continue_rail():
     pid = _profile()
@@ -233,6 +241,7 @@ def _read_catalog(sees_movies, sees_shows, sees_youtube):
 
 
 @bp.route("/api/player/video-catalog", methods=["GET"])
+@device_playback
 @requires_any("movies.access", "tv.access")
 def video_catalog():
     """the owned movies, shows (with a sample of episodes) and youtube
@@ -251,6 +260,7 @@ _collections_cache: dict = {}
 
 
 @bp.route("/api/player/collections", methods=["GET"])
+@device_playback
 @requires_any("movies.access", "tv.access")
 def collections():
     """the collection studio's collections, each with the members this
@@ -292,6 +302,7 @@ def _youtube_gate():
 
 
 @bp.route("/api/player/youtube", methods=["GET"])
+@device_playback
 @requires_any("movies.access", "tv.access")
 def youtube_home():
     """followed channels, newest uploads from them, newest downloads. read only:
@@ -315,6 +326,7 @@ def youtube_home():
 
 
 @bp.route("/api/player/youtube/channel/<channel_id>", methods=["GET"])
+@device_playback
 @requires_any("movies.access", "tv.access")
 def youtube_channel(channel_id):
     from core.player import youtube
@@ -347,6 +359,7 @@ _MUSIC_CACHE_SECONDS = 6 * 3600
 
 
 @bp.route("/api/player/music-channels", methods=["GET"])
+@device_playback
 @requires("music.library")
 def music_channels():
     """the guide's genre and vibe channels from the caller's owned tracks.
@@ -382,6 +395,7 @@ def _session_scope():
 
 
 @bp.route("/api/player/guide/favorites", methods=["GET"])
+@device_playback
 @self_only
 def get_favorites():
     from core.player import favorites
@@ -395,6 +409,7 @@ def get_favorites():
 
 
 @bp.route("/api/player/guide/favorites", methods=["PUT"])
+@device_playback
 @self_only
 def put_favorites():
     from core.player import favorites
@@ -412,6 +427,7 @@ def put_favorites():
 
 
 @bp.route("/api/player/watchlist", methods=["GET"])
+@device_playback
 @self_only
 def get_watchlist():
     """this profile's watchlist, newest first: [{item_type, item_id, meta, added_at}]"""
@@ -426,6 +442,7 @@ def get_watchlist():
 
 
 @bp.route("/api/player/watchlist", methods=["PUT"])
+@device_playback
 @self_only
 def add_to_watchlist():
     """{item_type: movie|show|youtube, item_id, meta?}"""
@@ -444,6 +461,7 @@ def add_to_watchlist():
 
 
 @bp.route("/api/player/watchlist", methods=["DELETE"])
+@device_playback
 @self_only
 def remove_from_watchlist():
     from core.player import watchlist
@@ -460,6 +478,7 @@ def remove_from_watchlist():
 
 
 @bp.route("/api/player/home-layout", methods=["GET"])
+@device_playback
 @self_only
 def get_home_layout():
     """this screen's home rows (?device=), else the profile's shared ones,
@@ -481,6 +500,7 @@ def get_home_layout():
 
 
 @bp.route("/api/player/home-layout", methods=["PUT"])
+@device_playback
 @self_only
 def put_home_layout():
     """{layout, device}: device is this screen's id, or '*' for every
@@ -505,6 +525,7 @@ def put_home_layout():
 
 
 @bp.route("/api/player/home-layout", methods=["DELETE"])
+@device_playback
 @self_only
 def reset_home_layout():
     """?device=: this screen follows the shared layout again. no device:
@@ -526,6 +547,7 @@ KEYWORD_MAX = 80
 
 
 @bp.route("/api/player/maker", methods=["GET"])
+@device_playback
 @requires_any("movies.access", "tv.access")
 def maker_titles():
     """everything a studio (?kind=studio) or a network (?kind=network) made,
@@ -581,6 +603,7 @@ LOGO_MAX = 12
 
 
 @bp.route("/api/player/logos", methods=["GET"])
+@device_playback
 @requires_any("movies.access", "tv.access")
 def title_logos():
     """tmdb title logos (the wordmark art) for a few titles at once, for the
@@ -608,6 +631,7 @@ def title_logos():
 
 
 @bp.route("/api/player/keyword", methods=["GET"])
+@device_playback
 @requires_any("movies.access", "tv.access")
 def keyword_titles():
     """a tmdb keyword's titles ('heist', 'based on novel or book'): the
@@ -646,6 +670,7 @@ def keyword_titles():
 # ── playlists (music) ────────────────────────────────────────────────────
 
 @bp.route("/api/player/playlists", methods=["GET"])
+@device_playback
 @requires("music.access")
 def player_playlists():
     """this profile's music playlists: yours (Liked Songs first) and mirrored"""
@@ -660,6 +685,7 @@ def player_playlists():
 
 
 @bp.route("/api/player/playlists/<int:playlist_id>", methods=["GET"])
+@device_playback
 @requires("music.access")
 def player_playlist(playlist_id):
     """one of this profile's playlists with its songs, each with the library
@@ -682,6 +708,7 @@ def player_playlist(playlist_id):
 # ── discovery playlists (what discover made for this profile) ────────────
 
 @bp.route("/api/player/discover-playlists", methods=["GET"])
+@device_playback
 # the manager's own discover gate: a profile with discover off sees none
 @requires("music.discover")
 def player_discover_playlists():
@@ -697,6 +724,7 @@ def player_discover_playlists():
 
 
 @bp.route("/api/player/discover-playlists/<key>", methods=["GET"])
+@device_playback
 # the manager's own discover gate: a profile with discover off sees none
 @requires("music.discover")
 def player_discover_playlist(key):
@@ -748,6 +776,7 @@ def player_discover_playlist_get(key):
 
 
 @bp.route("/api/player/music/artist/<int:artist_id>/top", methods=["GET"])
+@device_playback
 @requires("music.access")
 def artist_top_tracks(artist_id):
     """an artist's most played songs this profile can play"""
@@ -765,6 +794,7 @@ def artist_top_tracks(artist_id):
 # ── player settings (per profile) ────────────────────────────────────────
 
 @bp.route("/api/player/settings", methods=["GET"])
+@device_playback
 @self_only
 def get_player_settings():
     """this profile's player settings, each with what it does"""
@@ -780,6 +810,7 @@ def get_player_settings():
 
 
 @bp.route("/api/player/settings", methods=["PUT"])
+@device_playback
 @self_only
 def put_player_settings():
     """{key: value, ...}: all saved or none. turning sharing off takes you
@@ -851,6 +882,7 @@ def _profiles_by_id() -> dict:
 
 
 @bp.route("/api/player/presence", methods=["POST"])
+@device_playback
 @self_only
 def presence_beat():
     """a screen plays something: {session, item_type, item_id, position,
@@ -870,6 +902,7 @@ def presence_beat():
 
 
 @bp.route("/api/player/presence", methods=["DELETE"])
+@device_playback
 @self_only
 def presence_stop():
     from core.player import presence
@@ -881,6 +914,7 @@ def presence_stop():
 
 
 @bp.route("/api/player/presence", methods=["GET"])
+@device_playback
 @self_only
 def presence_list():
     """what's playing on this server right now: this profile's own screens
@@ -897,6 +931,7 @@ def presence_list():
 
 
 @bp.route("/api/player/presence/together", methods=["GET"])
+@device_playback
 @self_only
 def presence_together():
     """titles you and others (that share) have both started lately: your
@@ -957,6 +992,7 @@ def _with_people(notes):
 
 
 @bp.route("/api/player/notes/<item_type>/<path:item_id>", methods=["GET"])
+@device_playback
 @self_only
 def list_notes(item_type, item_id):
     """a title's comments (newest first) and marks (in time order): yours,
@@ -976,6 +1012,7 @@ def list_notes(item_type, item_id):
 
 
 @bp.route("/api/player/notes/<item_type>/<path:item_id>", methods=["POST"])
+@device_playback
 @self_only
 def add_note(item_type, item_id):
     """{body} a comment; {at, body?, shared?} a mark"""
@@ -997,6 +1034,7 @@ def add_note(item_type, item_id):
 
 
 @bp.route("/api/player/note/<int:note_id>", methods=["PATCH"])
+@device_playback
 @self_only
 def edit_note(note_id):
     from core.player import notes
@@ -1014,6 +1052,7 @@ def edit_note(note_id):
 
 
 @bp.route("/api/player/note/<int:note_id>", methods=["DELETE"])
+@device_playback
 @self_only
 def delete_note(note_id):
     """your own note; an admin can take down anyone's shared one"""
@@ -1037,6 +1076,7 @@ def _is_admin() -> bool:
 
 
 @bp.route("/api/player/guide/channels", methods=["GET"])
+@device_playback
 @self_only
 def guide_channels():
     """the server's channels and this profile's own; can_edit_server: an admin"""
@@ -1052,6 +1092,7 @@ def guide_channels():
 
 
 @bp.route("/api/player/guide/channels", methods=["POST"])
+@device_playback
 @self_only
 def add_guide_channel():
     """{scope: mine|server, spec}: a server channel is an admin's to make"""
@@ -1074,6 +1115,7 @@ def add_guide_channel():
 
 
 @bp.route("/api/player/guide/channels/<channel_id>", methods=["PUT"])
+@device_playback
 @self_only
 def edit_guide_channel(channel_id):
     from core.player import lineup
@@ -1091,6 +1133,7 @@ def edit_guide_channel(channel_id):
 
 
 @bp.route("/api/player/guide/channels/<channel_id>", methods=["DELETE"])
+@device_playback
 @self_only
 def remove_guide_channel(channel_id):
     from core.player import lineup
@@ -1103,6 +1146,7 @@ def remove_guide_channel(channel_id):
 
 
 @bp.route("/api/player/guide/lineup", methods=["GET"])
+@device_playback
 @self_only
 def get_guide_lineup():
     """this profile's order, hidden channels and names"""
@@ -1114,6 +1158,7 @@ def get_guide_lineup():
 
 
 @bp.route("/api/player/guide/lineup", methods=["PUT"])
+@device_playback
 @self_only
 def put_guide_lineup():
     """{entries: [{channel_id, hidden?, name?}]} in order: the whole lineup"""
@@ -1131,6 +1176,7 @@ def put_guide_lineup():
 # ── the guide's extras: watched, people, reminders ───────────────────────
 
 @bp.route("/api/player/guide/watched", methods=["GET"])
+@device_playback
 @requires_any("movies.access", "tv.access")
 def guide_watched():
     """what this profile has seen, so channels air the unseen first"""
@@ -1148,6 +1194,7 @@ def guide_watched():
 
 
 @bp.route("/api/player/guide/people", methods=["GET"])
+@device_playback
 @requires_any("movies.access", "tv.access")
 def guide_people():
     """?q=: people in the library by name, for a channel of their work"""
@@ -1160,6 +1207,7 @@ def guide_people():
 
 
 @bp.route("/api/player/guide/people/<int:person_id>", methods=["GET"])
+@device_playback
 @requires_any("movies.access", "tv.access")
 def guide_person(person_id):
     """a person's owned films and their shows"""
@@ -1172,6 +1220,7 @@ def guide_person(person_id):
 
 
 @bp.route("/api/player/guide/reminders", methods=["GET"])
+@device_playback
 @self_only
 def guide_reminders():
     from core.player import guide_data
@@ -1182,6 +1231,7 @@ def guide_reminders():
 
 
 @bp.route("/api/player/guide/reminders", methods=["POST"])
+@device_playback
 @self_only
 def add_guide_reminder():
     """{channel_id, starts_at (seconds), program_key, title, subtitle?, channel_name?}"""
@@ -1197,6 +1247,7 @@ def add_guide_reminder():
 
 
 @bp.route("/api/player/guide/reminders", methods=["DELETE"])
+@device_playback
 @self_only
 def remove_guide_reminder():
     from core.player import guide_data
