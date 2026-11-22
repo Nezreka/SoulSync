@@ -130,44 +130,103 @@ def confirm_unreachable_gone(db, config_manager, create_finding) -> dict:
             "confirmed": confirmed}
 
 
-def _unreachable_report(context, *, missing: int, checked: int, deferred: int,
-                        before: list) -> str:
-    """Say why a run with most of the library out of reach found nothing,
-    the way 3.6.1 did: how many, one example path, and what to check. The
-    scan itself already holds off on marking any of them missing."""
-    from core.library2.paths import resolve_lib2_path
+#: the last unreachable report logged, so a library that stays the same
+#: says it once at WARNING and then quietly, not as an ERROR every run
+_LAST_REPORT: dict = {}
+
+
+def _unreachable_hint(context, paths: list) -> str:
+    """what to check, from where the unreachable paths point.
+
+    - their folders are there but the files are not: deleted or renamed
+      outside SoulSync, nothing to map
+    - they all sit under one folder that is not a library folder: the music
+      moved (an old /app/Transfer) and the records never followed
+    - otherwise the mapping / mount advice 3.6.1 gave"""
+    from core.library2.paths import resolve_lib2_ancestor
     from core.repair_worker import _path_mapping_hint
 
-    sample = None
-    for subject in before[:200]:
-        path = subject.get("path")
-        if path and not resolve_lib2_path(path, config_manager=context.config_manager):
-            sample = path
+    sample = paths[:50]
+    if sample and all(resolve_lib2_ancestor(p, context.config_manager) for p in sample):
+        return ("Their folders are there but the files are not, so they were most likely "
+                "deleted or renamed outside SoulSync. If you deleted them, answer the "
+                "finding on the Tools page to clear them.")
+    try:
+        navidrome = str(context.config_manager.get_active_media_server() or "").lower() \
+            == "navidrome"
+    except Exception:  # noqa: BLE001 - no server known: not navidrome
+        navidrome = False
+    prefix = "" if navidrome else _shared_prefix(sample)
+    if prefix and not _under_library_folder(prefix, context.config_manager):
+        return (f"They all sit under {prefix}, which is not one of your library folders. "
+                f"If your music moved, add the new folder in Settings -> Library -> Music "
+                f"Paths, then Tools -> Update File Locations points the records at it.")
+    return ("That many at once is almost always a path-mapping or mount problem, "
+            "not deleted files. " + _path_mapping_hint(context.config_manager))
+
+
+def _shared_prefix(paths: list) -> str:
+    """the folder every path starts with, two levels deep at most
+    (/app/Transfer), or '' when they don't share one"""
+    split = [[part for part in p.replace("\\", "/").split("/") if part] for p in paths if p]
+    if not split:
+        return ""
+    common = []
+    for parts in zip(*[s[:2] for s in split], strict=False):
+        if len(set(parts)) != 1:
             break
-    hint = _path_mapping_hint(context.config_manager)
-    reason = (f"{missing} of {checked} files point to paths SoulSync can't reach, which is "
-              f"almost always a path-mapping or mount problem, not deleted files. Nothing was "
-              f"marked missing. Example path: {sample or 'unknown'}. {hint}")
-    logger.error("Dead file scan: %s (%d deferred as a storage outage)", reason, deferred)
+        common.append(parts[0])
+    if not common:
+        return ""
+    lead = "/" if paths[0].replace("\\", "/").startswith("/") else ""
+    return lead + "/".join(common)
+
+
+def _under_library_folder(prefix: str, config_manager) -> bool:
+    try:
+        from core.library.path_resolver import library_base_dirs
+        bases = [os.path.abspath(b) for b in library_base_dirs(config_manager)]
+    except Exception as exc:  # noqa: BLE001 - no roots known: can't say it is outside
+        logger.debug("library folders unavailable: %s", exc)
+        return True
+    if not bases:
+        return True
+    folder = os.path.abspath(prefix)
+    return any(folder == b or folder.startswith(b.rstrip(os.sep) + os.sep)
+               or b.startswith(folder.rstrip(os.sep) + os.sep) for b in bases)
+
+
+def _unreachable_report(context, *, missing: int, checked: int, paths: list) -> str:
+    """Say why a run with most of the library out of reach found nothing,
+    the way 3.6.1 did: how many, one example path, and what to check.
+    Nothing has been written when this runs: the guard looks first."""
+    sample = paths[0] if paths else None
+    hint = _unreachable_hint(context, paths)
+    reason = (f"{missing} of {checked} files point to paths SoulSync can't reach. "
+              f"Nothing was marked missing. Example path: {sample or 'unknown'}. {hint}")
+    key = (missing, checked, sample)
+    level = logger.info if _LAST_REPORT.get("key") == key else logger.warning
+    _LAST_REPORT["key"] = key
+    level("Dead file scan: %s", reason)
     if context.report_progress:
         context.report_progress(phase="Stopped: too many unreachable paths",
-                                log_line=reason, log_type="error")
+                                log_line=reason, log_type="warning")
     _file_unreachable_finding(context, missing=missing, checked=checked, sample=sample)
     return reason
 
 
-def _count_unreachable(context: JobContext, subjects: list):
-    """how many of these files can't be reached, read only (no state is
-    written). None when the run was stopped while looking."""
+def _unreachable_paths(context: JobContext, subjects: list):
+    """the stored paths of these files that can't be reached, read only (no
+    state is written). None when the run was stopped while looking."""
     from core.library2.paths import resolve_lib2_path
-    unreachable = 0
+    unreachable = []
     for index, subject in enumerate(subjects):
         if index % 500 == 0 and (context.check_stop() or context.wait_if_paused()):
             return None
         path = subject.get("path")
         resolved = resolve_lib2_path(path, config_manager=context.config_manager) if path else None
         if not resolved or not os.path.exists(resolved):
-            unreachable += 1
+            unreachable.append(path or "")
     return unreachable
 
 
@@ -241,35 +300,30 @@ class DeadFileCleanerJob(RepairJob):
             share, minimum = self._guard_settings(context)
             live = [s for s in before
                     if (s.get("file_state") or "active") == "active"]
-            unreachable = _count_unreachable(context, live)
+            unreachable = _unreachable_paths(context, live)
             if unreachable is None:
                 return result
-            if len(live) >= minimum and live and unreachable >= len(live) * share:
+            if len(live) >= minimum and live and len(unreachable) >= len(live) * share:
                 result.stopped_early = _unreachable_report(
-                    context, missing=unreachable, checked=len(live), deferred=0, before=live)
+                    context, missing=len(unreachable), checked=len(live),
+                    paths=[p for p in unreachable if p])
                 return result
-            missing = deferred = 0
             for start in range(0, total_files, _CHUNK):
                 if context.check_stop() or context.wait_if_paused():
                     return result
-                scan = rescan_files(context.db, file_ids=file_ids[start:start + _CHUNK])
+                # the share test above was over the whole set; the scan's own
+                # test would see one chunk, where a run of deleted files next
+                # to each other (168 of 3748, all in one chunk) reads as an
+                # outage and nothing is ever marked (#2216). each miss still
+                # needs its own library folder reachable to count
+                scan = rescan_files(context.db, file_ids=file_ids[start:start + _CHUNK],
+                                    outage_guard=False)
                 result.scanned += int(scan.get("scanned") or 0)
-                missing += int(scan.get("missing") or 0)
-                deferred += int(scan.get("mass_missing_deferred") or 0)
                 done = min(start + _CHUNK, total_files)
                 if context.update_progress:
                     context.update_progress(done, total_files)
                 if context.report_progress:
                     context.report_progress(scanned=done, total=total_files)
-            checked = result.scanned + missing
-            # the scan's own storage-outage deferral (its writes held back)
-            if deferred:
-                result.stopped_early = _unreachable_report(
-                    context, missing=missing, checked=checked, deferred=deferred, before=before)
-                # 3.6.1: a run that tripped the guard files nothing. files a
-                # healthy run confirmed missing earlier wait for the next one,
-                # so a review never opens while the library is out of reach
-                return result
             after = scoped_file_subjects(context, active_file_subjects(
                 context.db, context.config_manager, include_missing=True,
             ))

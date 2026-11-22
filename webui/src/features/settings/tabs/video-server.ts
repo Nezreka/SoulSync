@@ -54,6 +54,8 @@ interface State {
   /** null until the libraries load: the pickers say Loading... */
   libs: Libraries | null;
   status: string;
+  /** what the last Test of each server said, in words */
+  said: Partial<Record<Server, { tone: 'ok' | 'bad'; text: string }>>;
 }
 
 const NAME: Record<Server, string> = { plex: 'Plex', jellyfin: 'Jellyfin' };
@@ -61,11 +63,11 @@ const NAME: Record<Server, string> = { plex: 'Plex', jellyfin: 'Jellyfin' };
 /** connNote: what is still missing, or where the connection came from */
 export function connNote(server: Server, hasUrl: boolean, hasSecret: boolean, inherited: boolean) {
   const secret = server === 'plex' ? 'token' : 'API key';
-  if (!hasUrl && !hasSecret) return `Not connected — add a server URL and ${secret}.`;
+  if (!hasUrl && !hasSecret) return `Not connected: add a server URL and ${secret}.`;
   if (!hasSecret) return `Add the ${secret} to finish this connection.`;
   if (!hasUrl) return 'Add the server URL to finish this connection.';
   if (inherited)
-    return `Inherited from your Music ${NAME[server]} connection — edit to use a different server for video.`;
+    return `Inherited from your music ${NAME[server]} connection. Change it to use a different server for video.`;
   return 'Custom video connection.';
 }
 
@@ -89,6 +91,7 @@ function createVideoServer() {
     users: null,
     libs: null,
     status: '',
+    said: {},
   };
   const listeners = new Set<() => void>();
   const set = (next: Partial<State>) => {
@@ -288,15 +291,24 @@ function createVideoServer() {
         await saveConn(true);
         const r = await fetch(`${CONN_URL}/test`, json({ server }));
         const res = (await r.json()) as { success?: boolean; message?: string; error?: string };
+        const said = (tone: 'ok' | 'bad', text: string) =>
+          set({ said: { ...state.said, [server]: { tone, text } } });
         if (res && res.success) {
+          said('ok', res.message || 'Connected');
           toast(res.message || `${name} connection successful`, 'success');
           // its user and libraries
           if (server === 'jellyfin') {
             void loadUsers();
             void loadLibs();
           }
-        } else toast(`${name} connection failed: ${(res && res.error) || 'unknown'}`, 'error');
+        } else {
+          said('bad', (res && res.error) || 'Connection failed');
+          toast(`${name} connection failed: ${(res && res.error) || 'unknown'}`, 'error');
+        }
       } catch {
+        set({
+          said: { ...state.said, [server]: { tone: 'bad', text: 'Could not reach SoulSync' } },
+        });
         toast(`Failed to test ${name} connection`, 'error');
       }
     },
@@ -326,6 +338,7 @@ function createVideoServer() {
         users: null,
         libs: null,
         status: '',
+        said: {},
       };
     },
   };

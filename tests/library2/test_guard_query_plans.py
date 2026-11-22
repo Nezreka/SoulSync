@@ -218,6 +218,9 @@ def test_lock_reads_do_not_scan_a_big_table(world, monkeypatch):
         "/api/library/v2/locks",
         "/api/library/v2/artists?review=reviewed",
         "/api/library/v2/artists?review=unreviewed",
+        # #2223: the same filter on the album list
+        "/api/library/v2/albums?review=reviewed",
+        "/api/library/v2/albums?review=unreviewed",
     ]
     found: Counter = Counter()
     try:
@@ -247,6 +250,10 @@ def test_lock_reads_do_not_scan_a_big_table(world, monkeypatch):
     finally:
         locks.reset_for_tests()
     # the plain artist list reads lib2_artists once already (BASELINE above)
-    allowed = {("/api/library/v2/artists?review", "lib2_artists"): 2}
+    allowed = {("/api/library/v2/artists?review", "lib2_artists"): 2,
+               # the plain album list's own passes (BASELINE above): the
+               # member list the first call builds, and the walk down the
+               # sort index. the lock filter itself reads the lock table's key
+               ("/api/library/v2/albums?review", "lib2_albums"): 2}
     over = {key: n for key, n in found.items() if n > allowed.get(key, 0)}
     assert not over, over

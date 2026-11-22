@@ -796,6 +796,18 @@ _VOLATILE_COLS = {
 _FRESH_SOURCES = ("server", "metadata", "ratings")
 
 
+def _ids_disagree(row, metadata: dict) -> bool:
+    """True when a provider's tmdb_id / imdb_id name a different title than
+    the ids the row already holds (either one differing is enough)."""
+    for col in ("tmdb_id", "imdb_id"):
+        have, got = row[col], metadata.get(col)
+        if have in (None, "") or got in (None, ""):
+            continue
+        if str(have).strip().lower() != str(got).strip().lower():
+            return True
+    return False
+
+
 class VideoDatabase:
     """Connection + schema manager for the isolated video library DB."""
 
@@ -1328,9 +1340,26 @@ class VideoDatabase:
             if requeued:
                 logger.info("trakt: %d title(s) queued once to count their lists", requeued)
 
+        # TVDB now reads a series' remoteIds (its IMDb and TMDB ids), but the
+        # worker only visits a matched show once. send the matched shows still
+        # missing either id back through the queue once; enrichment only fills
+        # empty columns, so nothing a show already has changes
+        if conn.execute("SELECT 1 FROM video_settings WHERE key = ?",
+                        (VideoDatabase._TVDB_REMOTE_IDS_MARKER,)).fetchone() is None:
+            requeued = conn.execute(
+                "UPDATE shows SET tvdb_match_status = NULL "
+                "WHERE tvdb_match_status = 'matched' AND tvdb_id IS NOT NULL "
+                "AND (imdb_id IS NULL OR imdb_id = '' OR tmdb_id IS NULL)").rowcount
+            conn.execute("INSERT INTO video_settings (key, value) VALUES (?, '1') "
+                         "ON CONFLICT(key) DO UPDATE SET value = '1'",
+                         (VideoDatabase._TVDB_REMOTE_IDS_MARKER,))
+            if requeued:
+                logger.info("tvdb: %d show(s) queued once to read their linked ids", requeued)
+
     _SEASON_MONITOR_MARKER = "season_monitor_backfill_done"
     _STREAMING_COUNT_MARKER = "streaming_count_backfill_done"
     _TRAKT_LISTS_MARKER = "trakt_lists_backfill_done"
+    _TVDB_REMOTE_IDS_MARKER = "tvdb_remote_ids_backfill_done"
 
     # ── enrichment plumbing (per-source match status, like music) ─────────────
     def enrichment_next(self, service: str, retry_days: int = 30, priority=None) -> dict | None:
@@ -1419,6 +1448,18 @@ class VideoDatabase:
             # User-locked fields belong to the user — enrichment never touches
             # them, not even to fill a deliberately-blanked value.
             locked = self._locked_fields_set(conn, tbl, item_id)
+            had_tmdb = None
+            if service == "tvdb" and tbl == "shows" and metadata and (
+                    metadata.get("tmdb_id") is not None or metadata.get("imdb_id")):
+                had_tmdb = conn.execute("SELECT tmdb_id, imdb_id FROM shows WHERE id=?",
+                                        (item_id,)).fetchone()
+                # the ids TVDB links the series to only fill a gap when they
+                # agree with the ids the show already has: a series that names
+                # another TMDB or IMDb id is another show (a stored tvdb id that
+                # was a title-search guess), and its other id would be wrong too
+                if had_tmdb is not None and _ids_disagree(had_tmdb, metadata):
+                    metadata = {k: v for k, v in metadata.items() if k not in ("tmdb_id", "imdb_id")}
+                    had_tmdb = None
             sql, params = build(True, locked)
             try:
                 conn.execute(sql, params)
@@ -1426,6 +1467,13 @@ class VideoDatabase:
                 conn.rollback()
                 sql, params = build(False, locked)   # keep existing id, just record status/metadata
                 conn.execute(sql, params)
+            # a TMDB id TVDB just filled in: TMDB can now enrich the show by id,
+            # so send it back through TMDB's queue rather than wait out a
+            # not_found retry
+            if had_tmdb is not None and had_tmdb["tmdb_id"] is None and metadata.get("tmdb_id") is not None:
+                conn.execute("UPDATE shows SET tmdb_match_status = NULL, tmdb_last_attempted = NULL "
+                             "WHERE id=? AND tmdb_id IS NOT NULL "
+                             "AND COALESCE(tmdb_match_status, '') != 'matched'", (item_id,))
             # Genres backfill — only when the item has none yet (enrichment fills
             # the gap the server didn't). Written to the normalised link tables.
             genres = (metadata or {}).get("genres")
@@ -5697,7 +5745,7 @@ class VideoDatabase:
         cast = [{"name": r["name"], "character": r["character"], "photo": r["photo_url"],
                  "tmdb_id": r["tmdb_id"]}
                 for r in rows if r["department"] == "cast"][:cast_limit]
-        crew = [{"name": r["name"], "job": r["job"], "tmdb_id": r["tmdb_id"]}
+        crew = [{"name": r["name"], "job": r["job"], "tmdb_id": r["tmdb_id"], "photo": r["photo_url"]}
                 for r in rows if r["department"] == "crew"]
         return {"cast": cast, "crew": crew}
 
@@ -9806,7 +9854,7 @@ class VideoDatabase:
         conn = self._get_connection()
         try:
             movies = [dict(r) for r in conn.execute(
-                "SELECT 'movie' AS scope, m.id AS item_id, f.id AS file_id, "
+                "SELECT 'movie' AS scope, m.id AS item_id, m.id AS title_id, f.id AS file_id, "
                 "m.title, m.year, m.tmdb_id, m.imdb_id, NULL AS tvdb_id, "
                 "NULL AS season, NULL AS episode, "
                 "NULL AS episode_title, NULL AS series, "
@@ -9814,7 +9862,7 @@ class VideoDatabase:
                 "FROM movies m JOIN media_files f ON f.movie_id = m.id "
                 "WHERE m.has_file = 1 AND m.hands_off = 0")]
             eps = [dict(r) for r in conn.execute(
-                "SELECT 'episode' AS scope, e.id AS item_id, f.id AS file_id, "
+                "SELECT 'episode' AS scope, e.id AS item_id, e.show_id AS title_id, f.id AS file_id, "
                 "s.title AS title, "
                 # the show's year, as mass rename reads it -- a NULL here rendered
                 # every '$series ($year)' episode path without its year
@@ -12425,6 +12473,55 @@ class VideoDatabase:
             return (int(row["pos"]), int(row["size"])) if row and row["hit"] else None
         except (sqlite3.Error, TypeError, ValueError):
             return None
+        finally:
+            conn.close()
+
+    def episode_air_date(self, show_tmdb_id, season_number, episode_number):
+        """the episode's air date (YYYY-MM-DD) from the library, or None. a
+        daily show's release is named by it, so a manual search judges by it
+        the way the wishlist does (#2233). never raises."""
+        try:
+            args = (int(show_tmdb_id), int(season_number), int(episode_number))
+        except (TypeError, ValueError):
+            return None
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT e.air_date FROM episodes e JOIN shows s ON s.id = e.show_id "
+                "WHERE s.tmdb_id = ? AND e.season_number = ? AND e.episode_number = ? "
+                "AND e.air_date IS NOT NULL AND e.air_date <> '' LIMIT 1", args).fetchone()
+            return str(row["air_date"])[:10] if row else None
+        except sqlite3.Error:
+            return None
+        finally:
+            conn.close()
+
+    def show_episode_census(self, show_id=None, tmdb_id=None) -> dict:
+        """{(season, episode): have} for every episode the library knows of a
+        show, named by its library id or its tmdb id. every library row of
+        that tmdb id counts, so an episode one server has is had. manual
+        search reads it to say what a pack covers and what you already have
+        (#2233). empty when the show isn't in the library. never raises."""
+        conn = self._get_connection()
+        try:
+            if tmdb_id in (None, "") and show_id not in (None, ""):
+                row = conn.execute("SELECT tmdb_id FROM shows WHERE id=?", (int(show_id),)).fetchone()
+                tmdb_id = row["tmdb_id"] if row else None
+            if tmdb_id not in (None, ""):
+                rows = conn.execute(
+                    "SELECT e.season_number AS s, e.episode_number AS e, MAX(e.has_file) AS have "
+                    "FROM episodes e WHERE e.show_id IN (SELECT id FROM shows WHERE tmdb_id = ?) "
+                    "GROUP BY e.season_number, e.episode_number", (int(tmdb_id),)).fetchall()
+            elif show_id not in (None, ""):
+                rows = conn.execute(
+                    "SELECT season_number AS s, episode_number AS e, has_file AS have "
+                    "FROM episodes WHERE show_id = ?", (int(show_id),)).fetchall()
+            else:
+                return {}
+            return {(int(r["s"]), int(r["e"])): bool(r["have"]) for r in rows
+                    if r["s"] is not None and r["e"] is not None}
+        except (sqlite3.Error, TypeError, ValueError):
+            return {}
         finally:
             conn.close()
 

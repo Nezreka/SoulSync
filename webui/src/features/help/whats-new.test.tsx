@@ -22,7 +22,7 @@ const PROPS: ViewProps = {
 };
 const release = RELEASES[0];
 
-function setBuild(version = '3.6.8') {
+function setBuild(version = '3.6.9') {
   useHelpStore.setState({
     update: {
       update_available: false,
@@ -69,28 +69,28 @@ describe('the header and the list', () => {
 
   it('marks the version seen, and says so the next time', () => {
     const { unmount } = render(<WhatsNewView {...PROPS} />);
-    expect(localStorage.getItem(SEEN)).toBe('3.6.8');
+    expect(localStorage.getItem(SEEN)).toBe('3.6.9');
     unmount();
     render(<WhatsNewView {...PROPS} />);
-    expect(screen.getByText(/You have seen everything in 3\.6\.8/)).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'In 3.6.8' })).toBeInTheDocument();
+    expect(screen.getByText(/You have seen everything in 3\.6\.9/)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'In 3.6.9' })).toBeInTheDocument();
     expect(document.querySelectorAll('li[data-new]')).toHaveLength(0);
   });
 
   it('reads "since you last looked" from when the app loaded, not after Home marked it', () => {
-    // the app loaded having seen 3.6.7; Home's tile then wrote 3.6.8 on the way in
-    resetSeenSnapshot('3.6.7');
-    localStorage.setItem(SEEN, '3.6.8');
+    // the app loaded having seen 3.6.8; Home's tile then wrote 3.6.9 on the way in
+    resetSeenSnapshot('3.6.8');
+    localStorage.setItem(SEEN, '3.6.9');
     render(<WhatsNewView {...PROPS} />);
     expect(screen.getByRole('heading', { name: 'New for you' })).toBeInTheDocument();
   });
 
   it('falls back to the version button when the server version isn’t in yet', () => {
     useHelpStore.setState({ update: null });
-    document.body.innerHTML = '<button class="version-button">v3.6.8</button>';
+    document.body.innerHTML = '<button class="version-button">v3.6.9</button>';
     render(<WhatsNewView {...PROPS} />);
     expect(screen.getByRole('heading', { name: release.headline })).toBeInTheDocument();
-    expect(localStorage.getItem(SEEN)).toBe('3.6.8');
+    expect(localStorage.getItem(SEEN)).toBe('3.6.9');
   });
 
   it('Full release notes closes the sheet and opens the version modal', () => {
@@ -112,12 +112,8 @@ describe('Show me', () => {
     window.navigateToPage = vi.fn() as never;
     useHelpStore.setState({ open: true });
     render(<WhatsNewView {...PROPS} />);
-    const item = screen
-      .getByRole('heading', { name: 'Titles before track numbers' })
-      .closest('li')!;
-    fireEvent.click(
-      within(item).getByRole('button', { name: 'Show me: Titles before track numbers' }),
-    );
+    const item = screen.getByRole('heading', { name: 'You and this artist' }).closest('li')!;
+    fireEvent.click(within(item).getByRole('button', { name: 'Show me: You and this artist' }));
     expect(window.navigateToPage).toHaveBeenCalledWith('library', undefined);
     expect(useHelpStore.getState().open).toBe(true);
   });
@@ -125,10 +121,10 @@ describe('Show me', () => {
   it('is not offered for a page this profile can’t open, or an item with nowhere to go', () => {
     window.SoulSyncWebShellBridge = { isPageAllowed: (id: string) => id !== 'settings' } as never;
     render(<WhatsNewView {...PROPS} />);
-    const settings = screen.getByRole('heading', { name: 'Last.fm without Pro' }).closest('li')!;
+    const settings = screen.getByRole('heading', { name: 'Settings, rebuilt' }).closest('li')!;
     expect(within(settings).queryByRole('button', { name: /Show me/ })).toBeNull();
-    const phone = screen.getByRole('heading', { name: 'A phone pass' }).closest('li')!;
-    expect(within(phone).queryByRole('button', { name: /Show me/ })).toBeNull();
+    const year = screen.getByRole('heading', { name: 'Your Year, more of it' }).closest('li')!;
+    expect(within(year).queryByRole('button', { name: /Show me/ })).toBeNull();
   });
 
   it('spotlights an anchor that is on screen (Server Activity), and not one that isn’t', () => {

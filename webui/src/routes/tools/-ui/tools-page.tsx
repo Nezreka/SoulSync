@@ -14,6 +14,7 @@ import { useLayoutEffect, useRef, useState } from 'react';
 import type { ToolsMedia } from '../-tools.media';
 
 import { setToolsMedia, ToolsMediaContext } from '../-tools.media';
+import { FileLocationsCard } from './file-locations-card';
 import {
   BlacklistCard,
   ConfigMigrationCard,
@@ -24,6 +25,7 @@ import {
 import { MaintenanceHero } from './maintenance-hero';
 import { DbUpdaterCard, DuplicateCleanerCard, ReconcileIdsCard } from './scanning-cards';
 import { BackupManagerCard, MediaScanCard, MetadataUpdaterCard } from './server-cards';
+import { TagFillsCard } from './tag-fills-card';
 import { ToolsSection } from './tool-card';
 import {
   VideoBackupsCard,
@@ -245,6 +247,7 @@ function MusicToolSections({ isAdmin }: { isAdmin: boolean }) {
         <ReconcileIdsCard />
         <DuplicateCleanerCard />
         <MediaScanCard />
+        <FileLocationsCard />
       </ToolsSection>
 
       <ToolsSection
@@ -252,6 +255,7 @@ function MusicToolSections({ isAdmin }: { isAdmin: boolean }) {
         blurb="Enriching what SoulSync knows, and fixing what it got wrong."
       >
         <MetadataUpdaterCard />
+        <TagFillsCard />
         <DiscoveryPoolCard />
         <ManualLibraryMatchCard />
       </ToolsSection>

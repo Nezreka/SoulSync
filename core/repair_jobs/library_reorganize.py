@@ -7,6 +7,7 @@ import os
 from core.repair_jobs import register_job
 from core.repair_jobs.base import (
     JobContext, JobResult, RepairJob, file_path_in_scope, get_scope_file_paths,
+    scope_findings_only,
 )
 from utils.logging_config import get_logger
 
@@ -75,7 +76,7 @@ class LibraryReorganizeJob(RepairJob):
     writes_library_files = True
 
     def _dry_run(self, context: JobContext) -> bool:
-        if not context.config_manager:
+        if not context.config_manager or scope_findings_only(context):
             return True
         nested = context.config_manager.get(
             f"repair.jobs.{self.job_id}.settings", {},

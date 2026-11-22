@@ -455,7 +455,7 @@ describe('AdlHeader', () => {
   const openMenu = (container: HTMLElement) =>
     fireEvent.click(container.querySelector('#adl-actions .dlc-more') as HTMLElement);
 
-  it('splits navigation: three view tabs, five count chips', () => {
+  it('splits navigation: three view tabs, six count chips', () => {
     const { container } = render(<AdlHeader {...props} filter="queued" />);
     const tabs = [...container.querySelectorAll('#adl-view-tabs .dlh-tab')];
     expect(tabs.map((t) => t.textContent)).toEqual(['Downloads', 'Review', 'Clients']);
@@ -466,6 +466,7 @@ describe('AdlHeader', () => {
       'queued',
       'completed',
       'failed',
+      'upgrades',
     ]);
     expect(container.querySelector('.dlh-chip-on')?.getAttribute('data-filter')).toBe('queued');
     // a status filter is still the Downloads view

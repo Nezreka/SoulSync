@@ -184,6 +184,9 @@ def safe_move_file(src, dst):
     """Atomically publish ``src`` at ``dst`` without pre-deleting ``dst``."""
     src = Path(src)
     dst = Path(dst)
+    # the folder watcher must not index a file before its own import records it
+    from core.library import own_writes
+    own_writes.note(src, dst)
 
     dst.parent.mkdir(parents=True, exist_ok=True)
 

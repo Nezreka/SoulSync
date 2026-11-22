@@ -777,6 +777,61 @@ def delete_profile(profile_id):
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
+def check_profile_pick(database, profile, *, pin, password, ip, now,
+                       is_new_sign_in: bool, always_ask_pin: bool = False):
+    """the checks a profile pick goes through, shared by the picker below and
+    a paired device picking its profile (api/devices.py), so both ask for the
+    same password or pin and count wrong tries against the same limiters.
+
+    ``is_new_sign_in``: the caller isn't already this profile (a password
+    sign-in in login mode). ``always_ask_pin``: a pinned profile needs its
+    pin even when it is the only profile (a device far away, not someone at
+    this browser). returns (error response or None, pin_checked)."""
+    profile_id = int(profile['id'])
+    if profile.get('disabled') and not profile.get('is_admin'):
+        return (jsonify({'success': False, 'error': 'This profile is turned off', 'disabled': True}), 403), False
+    if _require_login_enabled() and is_new_sign_in:
+        # switching to another profile is a password sign-in, which
+        # oidc-only closes (#1839)
+        from core.security.oidc_only import refuse_unless_open
+        closed = refuse_unless_open(config_manager)
+        if closed:
+            return closed, False
+        _locked, _retry_after = _login_limiter.is_locked(ip, profile['name'], now)
+        if _locked:
+            return (jsonify({'success': False, 'error': 'Too many attempts - please wait and try again'}),
+                    429, {'Retry-After': str(_retry_after)}), False
+        if not password:
+            return (jsonify({'success': False, 'error': 'Password required',
+                             'password_required': True}), 401), False
+        if not database.verify_profile_password(profile_id, password):
+            _login_limiter.record_failure(ip, profile['name'], now)
+            return (jsonify({'success': False, 'error': 'Invalid password'}), 401), False
+        _login_limiter.record_success(ip, profile['name'])
+        return None, False
+    # the pin guards switching, so it's only asked for when there is
+    # someone to switch between. a pin that IS sent always gets
+    # checked though: a right admin pin also opens the launch lock.
+    if always_ask_pin:
+        must_check = bool(profile['has_pin'])
+    else:
+        must_check = len(database.get_all_profiles()) > 1 and profile['has_pin']
+    if must_check and not pin:
+        return (jsonify({'success': False, 'error': 'PIN required', 'pin_required': True}), 401), False
+    if pin and profile['has_pin']:
+        _pin_key = f"pin:{profile_id}"
+        _locked, _retry_after = _launch_pin_limiter.is_locked(ip, _pin_key, now)
+        if _locked:
+            return (jsonify({'success': False, 'error': 'Too many attempts — please wait and try again'}),
+                    429, {'Retry-After': str(_retry_after)}), False
+        if not database.verify_profile_pin(profile_id, pin):
+            _launch_pin_limiter.record_failure(ip, _pin_key, now)
+            return (jsonify({'success': False, 'error': 'Invalid PIN'}), 401), False
+        _launch_pin_limiter.record_success(ip, _pin_key)
+        return None, True
+    return None, False
+
+
 @bp.route('/api/profiles/select', methods=['POST'])
 @public
 def select_profile():
@@ -797,49 +852,13 @@ def select_profile():
         profile = database.get_profile(profile_id)
         if not profile:
             return jsonify({'success': False, 'error': 'Profile not found'}), 404
-        if profile.get('disabled') and not profile.get('is_admin'):
-            return jsonify({'success': False, 'error': 'This profile is turned off', 'disabled': True}), 403
 
-        _ip = request.remote_addr or 'unknown'
-        _now = time.time()
-        pin_checked = False
-        if _require_login_enabled() and session.get('profile_id') != profile_id:
-            # switching to another profile is a password sign-in, which
-            # oidc-only closes (#1839)
-            from core.security.oidc_only import refuse_unless_open
-            closed = refuse_unless_open(config_manager)
-            if closed:
-                return closed
-            _locked, _retry_after = _login_limiter.is_locked(_ip, profile['name'], _now)
-            if _locked:
-                return (jsonify({'success': False, 'error': 'Too many attempts - please wait and try again'}),
-                        429, {'Retry-After': str(_retry_after)})
-            if not password:
-                return jsonify({'success': False, 'error': 'Password required',
-                                'password_required': True}), 401
-            if not database.verify_profile_password(profile_id, password):
-                _login_limiter.record_failure(_ip, profile['name'], _now)
-                return jsonify({'success': False, 'error': 'Invalid password'}), 401
-            _login_limiter.record_success(_ip, profile['name'])
-        else:
-            # the pin guards switching, so it's only asked for when there is
-            # someone to switch between. a pin that IS sent always gets
-            # checked though: a right admin pin also opens the launch lock.
-            all_profiles = database.get_all_profiles()
-            must_check = len(all_profiles) > 1 and profile['has_pin']
-            if must_check and not pin:
-                return jsonify({'success': False, 'error': 'PIN required', 'pin_required': True}), 401
-            if pin and profile['has_pin']:
-                _pin_key = f"pin:{profile_id}"
-                _locked, _retry_after = _launch_pin_limiter.is_locked(_ip, _pin_key, _now)
-                if _locked:
-                    return (jsonify({'success': False, 'error': 'Too many attempts — please wait and try again'}),
-                            429, {'Retry-After': str(_retry_after)})
-                if not database.verify_profile_pin(profile_id, pin):
-                    _launch_pin_limiter.record_failure(_ip, _pin_key, _now)
-                    return jsonify({'success': False, 'error': 'Invalid PIN'}), 401
-                _launch_pin_limiter.record_success(_ip, _pin_key)
-                pin_checked = True
+        refused, pin_checked = check_profile_pick(
+            database, profile, pin=pin, password=password,
+            ip=request.remote_addr or 'unknown', now=time.time(),
+            is_new_sign_in=session.get('profile_id') != profile_id)
+        if refused is not None:
+            return refused
 
         session['profile_id'] = profile_id
         # the epoch this sign-in counts under ("sign out everywhere" moves it)
@@ -1280,6 +1299,68 @@ def get_my_scrobbling():
         if not pid or pid == 1:
             return jsonify({'success': True, 'managed_in_settings': True})
         return jsonify({'success': True, **_scrobbling_payload(pid)})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+def _listening_privacy_payload(pid):
+    from core.listening_scope import listening_owners
+    from core.personalized.listening_privacy import get_privacy
+    db = get_database()
+    out = get_privacy(db, pid)
+    # asking only makes sense when there is someone to blend with
+    try:
+        conn = db._get_connection()
+        try:
+            others = conn.execute("SELECT COUNT(*) FROM profiles WHERE id != ?", (int(pid),)).fetchone()[0]
+        finally:
+            conn.close()
+    except Exception:  # noqa: BLE001 - can't tell: don't ask
+        others = 0
+    out['own_pile'] = int(pid) in listening_owners(db)
+    out['ask'] = bool(others) and not out['asked']
+    return out
+
+
+@bp.route('/api/profiles/me/listening-privacy', methods=['GET'])
+@self_only
+def get_my_listening_privacy():
+    """share listening (blends) and the private session, for the caller only"""
+    try:
+        pid = get_current_profile_id()
+        if not pid:
+            return jsonify({'success': False, 'error': 'No profile'}), 400
+        return jsonify({'success': True, **_listening_privacy_payload(pid)})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@bp.route('/api/profiles/me/listening-privacy', methods=['POST'])
+@self_only
+def set_my_listening_privacy():
+    """{share_listening: bool} / {private_session: bool} / {asked: true}.
+    only the caller's own profile: nobody, an admin included, can say yes
+    for someone else"""
+    try:
+        from core.personalized import listening_privacy as privacy
+        pid = get_current_profile_id()
+        if not pid:
+            return jsonify({'success': False, 'error': 'No profile'}), 400
+        body = request.get_json(silent=True) or {}
+        db = get_database()
+        if 'share_listening' in body:
+            privacy.set_share_listening(db, pid, bool(body['share_listening']))
+            # blends on everyone's shelf change with one person's answer
+            try:
+                from api.discover_routes import invalidate_discover_shelf_cache
+                invalidate_discover_shelf_cache('get_for_you_mixes')
+            except Exception as e:  # noqa: BLE001 - the cache runs out on its own
+                logger.debug(f"for-you cache drop failed: {e}")
+        elif body.get('asked'):
+            privacy.mark_asked(db, pid)
+        if 'private_session' in body:
+            privacy.set_private_session(db, pid, bool(body['private_session']))
+        return jsonify({'success': True, **_listening_privacy_payload(pid)})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 

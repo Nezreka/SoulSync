@@ -2,6 +2,7 @@ import { queryOptions } from '@tanstack/react-query';
 
 import { apiClient, readJson } from '@/app/api-client';
 
+import type { SoundtrackTrack } from './-year.soundtrack';
 import type { YearInListening, YearInListeningPayload } from './-year.types';
 
 import { STATS_QUERY_KEY } from './-stats.api';
@@ -60,4 +61,57 @@ export function yearInListeningQueryOptions() {
     // 30 minutes — re-fetching on every re-open would be pure waste.
     staleTime: 5 * 60 * 1000,
   });
+}
+
+/** The story's soundtrack: the year's top songs you own, in the player's
+ *  queue shape, each with where to start it. */
+export async function fetchYearSoundtrack(): Promise<SoundtrackTrack[]> {
+  const payload = await readJson<{ success: boolean; tracks?: SoundtrackTrack[] }>(
+    apiClient.get('stats/year/soundtrack'),
+  );
+  return payload.success ? (payload.tracks ?? []) : [];
+}
+
+export interface SavedYearPlaylist {
+  id: number;
+  name: string;
+  track_count: number;
+  created: boolean;
+}
+
+/** Save the year's top `size` songs into "Your <year>"; again updates it. */
+export async function saveYearPlaylist(size: 50 | 100): Promise<SavedYearPlaylist> {
+  const res = await fetch('/api/stats/year/playlist', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ size }),
+  });
+  const data = (await res.json().catch(() => null)) as
+    | (SavedYearPlaylist & { success: boolean; error?: string })
+    | null;
+  if (!res.ok || !data?.success) throw new Error(data?.error || 'Could not save the playlist');
+  return { id: data.id, name: data.name, track_count: data.track_count, created: data.created };
+}
+
+export interface YearBanner {
+  show: boolean;
+  year: number | null;
+}
+
+export async function fetchYearBanner(): Promise<YearBanner | null> {
+  try {
+    const res = await fetch('/api/stats/year/banner');
+    if (!res.ok) return null;
+    return (await res.json()) as YearBanner;
+  } catch {
+    return null;
+  }
+}
+
+export async function dismissYearBanner(): Promise<boolean> {
+  try {
+    return (await fetch('/api/stats/year/banner/dismiss', { method: 'POST' })).ok;
+  } catch {
+    return false;
+  }
 }

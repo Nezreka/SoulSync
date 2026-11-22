@@ -179,6 +179,14 @@ def _clear_tag_field(audio, field: str) -> bool:
         id3, vorbis, mp4 = _TEXT_TAGS[field]
         drop(id3, [vorbis], mp4)
         return True
+    if field == 'cover_art':
+        # only the undo of a write that ADDED a cover asks for this: the file
+        # had no picture before, so taking every picture out puts it back
+        if isinstance(audio, FLAC):
+            audio.clear_pictures()
+        else:
+            drop('APIC', ['metadata_block_picture', 'coverart'], 'covr')
+        return True
     for kind, number_key, total_key in (('track', 'track_number', 'total_tracks'), ('disc', 'disc_number', 'total_discs')):
         frame, atom = ('TRCK', 'trkn') if kind == 'track' else ('TPOS', 'disk')
         if field == number_key:
@@ -1309,12 +1317,13 @@ def _artist_name_set(value) -> set:
     """the artists a tag names, spelling aside"""
     import re as _re
     from core.library2.importer import split_artist_credits
-    from core.text.normalize import normalize_for_comparison
+    from core.text.normalize import credit_name_key
     if isinstance(value, (list, tuple)):
         value = '; '.join(str(v) for v in value if v)
     # a <Vocal: Eliana> note is a credit role, never part of a name
     text = _re.sub(r'<[^<>]*>', '', str(value or ''))
-    return {n for n in (normalize_for_comparison(p) for p in split_artist_credits(text)) if n}
+    # a leading "The" and case are spelling too (#2217)
+    return {n for n in (credit_name_key(p) for p in split_artist_credits(text)) if n}
 
 
 def _same_artist_names(file_val, db_val) -> bool:

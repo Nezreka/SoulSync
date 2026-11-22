@@ -26,7 +26,12 @@ declare global {
       message: string,
       type?: string,
       durationOrContext?: number | string | null,
-      opts?: { history?: boolean; journal?: boolean },
+      opts?: {
+        history?: boolean;
+        journal?: boolean;
+        /** a button on the toast (and on its line in the notification panel) */
+        action?: { label: string; run?: () => void; page?: string };
+      },
     ) => void;
     /** index.html: the signed-in profile the server rendered in, null when it knows none (#2156) */
     SOULSYNC_BOOT_PROFILE?: SoulSyncNavProfile | null;
@@ -717,6 +722,14 @@ declare global {
         mediaId?: number | string | null;
         mediaSource?: string | null;
         tmdbId?: number | string | null;
+        /** a show's seasons: the modal then offers whole series, a season or an episode (#2233) */
+        seasons?: Array<{
+          season: number;
+          title?: string | null;
+          total?: number;
+          have?: number;
+          episodes?: Array<{ episode: number; title?: string | null; have?: boolean }>;
+        }>;
       }) => void;
     };
     /** video-poster-modal.js: the poster manager (search, then pick art). */

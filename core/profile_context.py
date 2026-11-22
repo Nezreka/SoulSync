@@ -80,9 +80,8 @@ def get_current_profile_id() -> Optional[int]:
             req_pin = bool(config_manager.get('security.require_pin_on_launch', False)) if config_manager else False
             if req_pin and not req_login:
                 from flask import request
-                from core.security.auth_proxy import trusted_proxy_user
-                proxy_hdr = (config_manager.get('security.auth_proxy_header', '') or '') if config_manager else ''
-                proxy_authed = bool(trusted_proxy_user(request.headers.get, proxy_hdr))
+                from core.security.auth_proxy import request_proxy_user
+                proxy_authed = bool(request_proxy_user(request, config_manager.get if config_manager else None))
                 if not session.get('launch_pin_verified', False) and not proxy_authed:
                     return None
         except Exception:  # noqa: S110 — unreadable config falls through to session/background
@@ -161,9 +160,8 @@ def is_admin_request() -> bool:
             req_pin = bool(config_manager.get('security.require_pin_on_launch', False)) if config_manager else False
             if req_pin:
                 from flask import request
-                from core.security.auth_proxy import trusted_proxy_user
-                proxy_hdr = (config_manager.get('security.auth_proxy_header', '') or '') if config_manager else ''
-                proxy_authed = bool(trusted_proxy_user(request.headers.get, proxy_hdr))
+                from core.security.auth_proxy import request_proxy_user
+                proxy_authed = bool(request_proxy_user(request, config_manager.get if config_manager else None))
                 if not session.get('launch_pin_verified', False) and not proxy_authed:
                     return False
         except Exception:  # noqa: S110 — unreadable config falls through to profile inspection

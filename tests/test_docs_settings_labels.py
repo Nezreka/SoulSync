@@ -79,10 +79,10 @@ _DOCS_N = {p.name: _norm(p.read_text(encoding="utf-8")) for p in sorted(_DOCS_DI
 LABELS: list[tuple[str, str]] = [
     # Field labels
     ("Import Folder", "10-import-player.js"),
-    ("Download Folder (input)", "11-settings.js"),
-    ("Music Library Folder (output)", "11-settings.js"),
+    ("Download folder", "11-settings.js"),
+    ("Music library folder", "11-settings.js"),
     ("Plex Server URL", "11-settings.js"),
-    ("Link to Plex (OAuth)", "11-settings.js"),
+    ("Link to Plex", "11-settings.js"),
     ("Jellyfin Server URL", "11-settings.js"),
     ("Navidrome Server URL", "11-settings.js"),
     ("API Key", "11-settings.js"),
@@ -92,8 +92,7 @@ LABELS: list[tuple[str, str]] = [
     ("Auto-save M3U file when downloading playlists", "05-sync.js"),
     # Buttons
     ("Test Connection", "13-troubleshooting.js"),
-    ("Compact Database (VACUUM)", "11-settings.js"),
-    ("Enable Incremental Vacuum", "11-settings.js"),
+    ("Compact database", "11-settings.js"),
     # Processing & organization settings
     ("AcoustID verification", "11-settings.js"),
     ("Path templates", "11-settings.js"),
@@ -109,7 +108,8 @@ LABELS: list[tuple[str, str]] = [
     # Quality
     ("Accept off-list quality when nothing in the list is available", "04-search.js"),
     # Discover
-    ("Enable listening stats collection from media server", "06-discover.js"),
+    # settings-bic phase 5: Discovery > Recommendations, plain words
+    ("Collect listening stats from your media server", "06-discover.js"),
     # Service rows on the Connections tab (Service Credentials page)
     ("Spotify", "11-settings.js"),
     ("slskd", "11-settings.js"),
@@ -122,7 +122,7 @@ LABELS: list[tuple[str, str]] = [
     ("Discogs", "11-settings.js"),
     ("AcoustID", "11-settings.js"),
     ("ListenBrainz", "11-settings.js"),
-    ("YouTube Browser Cookies", "11-settings.js"),
+    ("Browser cookies", "11-settings.js"),
     ("Paste cookies.txt", "11-settings.js"),
     ("Create lossy copy of downloaded FLAC files", "11-settings.js"),
     ("Lookback Period", "11-settings.js"),
@@ -136,7 +136,6 @@ LABELS: list[tuple[str, str]] = [
 # "Settings → Library → Folders" (01-getting-started.js).
 TABS: list[tuple[str, str]] = [
     ("Connections", "connections"),
-    ("Sources", "sources"),
     ("Downloads", "downloads"),
     ("Quality", "quality"),
     ("Library", "library"),
@@ -144,7 +143,15 @@ TABS: list[tuple[str, str]] = [
     ("Appearance", "appearance"),
     # #1822: the Advanced tab is labelled System; its slug stays
     ("System", "advanced"),
-    ("Logs", "logs"),
+]
+
+# (settings-bic) ten tabs became eight: Sources is a pill of Downloads and
+# Logs a pill of System. The docs still name both, so both must still be a
+# place on the page (features/settings/nav.ts), and their old keys must
+# still open them.
+PILLS: list[tuple[str, str, str]] = [
+    ("Sources", "sources", "downloads"),
+    ("Logs", "logs", "advanced"),
 ]
 
 # Labels that exist ONLY at runtime (rendered from server data, never
@@ -162,7 +169,7 @@ ALLOWLIST: dict[str, str] = {}
 # wording — real drift candidates for a future docs copy pass, but not
 # verbatim labels, so asserting them would be flaky by construction.
 EXCLUDED: dict[str, str] = {
-    "YouTube cookies": "short prose name in docs; the exact UI labels ('YouTube Browser Cookies' / 'Paste cookies.txt') are quoted in the same sentence and asserted in LABELS",
+    "YouTube cookies": "short prose name in docs; the exact UI labels ('Browser cookies' / 'Paste cookies.txt') are quoted in the same sentence and asserted in LABELS",
     "Multi-disc labels": "docs paraphrase kept alongside the exact label; UI label is 'Multi-Disc Folder Label:' (asserted in LABELS)",
     "Auto-Backup Database": "verified real: the system automation name in core/automation_engine.py (music + video variants, every 3 days) — not a UI label, so not asserted against the corpus",
 }
@@ -208,6 +215,17 @@ def test_settings_nav_tab_present(tab_label: str, slug: str):
     assert pattern.search(_INDEX), (
         f"settings tab {tab_label!r} has no visible stg-tab-label in index.html — "
         "the docs' Settings pages describe this tab"
+    )
+
+
+@pytest.mark.parametrize("label,slug,tab", PILLS, ids=[label for label, _, _ in PILLS])
+def test_settings_pill_present(label: str, slug: str, tab: str):
+    """A tab the docs name that is now a pill: still there, under its tab, and
+    its old tab key still lands on it."""
+    nav = (_ROOT / "webui" / "src" / "features" / "settings" / "nav.ts").read_text(encoding="utf-8")
+    assert f"{{ key: '{slug}', label: '{label}' }}" in nav, f"pill {label!r} missing from nav.ts"
+    assert f"{slug}: {{ tab: '{tab}', view: '{slug}' }}," in nav, (
+        f"the old tab key {slug!r} no longer opens {label!r}"
     )
 
 

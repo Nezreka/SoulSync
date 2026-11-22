@@ -228,6 +228,7 @@ import { AlbumArtPickerModal, ArtistImagePickerModal } from './art-picker-modal'
 import { ArtistHeroVideo } from './artist-hero-video';
 import { ArtistNamingSetting } from './artist-naming-setting';
 import { ArtistPageLibraryProvider, ReleaseMonitorButton } from './artist-page-release-actions';
+import { ArtistYourPlays } from './artist-your-plays';
 import { parseArtworkTarget, watchPendingArtwork } from './artwork-pending';
 import { cardFadeIn } from './card-fade';
 import {
@@ -301,6 +302,7 @@ import {
 import styles from './library-v2-page.module.css';
 import { LineIcon } from './line-icon';
 import { WatchlistIcon, WishlistIcon } from './list-icons';
+import { MediaServerRecognitionBadges } from './media-server-badges';
 import { AlbumUpgradeButton } from './owned-album-upgrade';
 import { useArtistBack } from './owned-artist-back';
 import {
@@ -580,60 +582,6 @@ function SvgIcon({
         strokeLinejoin={!isFillIcon ? 'round' : undefined}
       />
     </svg>
-  );
-}
-
-const MEDIA_SERVER_LABELS: Record<string, string> = {
-  emby: 'Emby',
-  jellyfin: 'Jellyfin',
-  navidrome: 'Navidrome',
-  plex: 'Plex',
-};
-
-function mediaServerLabel(source: string): string {
-  const normalized = source.trim().toLowerCase();
-  return (
-    MEDIA_SERVER_LABELS[normalized] ??
-    normalized
-      .split(/[_-]+/)
-      .filter(Boolean)
-      .map((part) => `${part[0]?.toUpperCase() ?? ''}${part.slice(1)}`)
-      .join(' ')
-  );
-}
-
-function naturalList(values: string[]): string {
-  if (values.length <= 1) return values[0] ?? '';
-  if (values.length === 2) return `${values[0]} and ${values[1]}`;
-  return `${values.slice(0, -1).join(', ')}, and ${values.at(-1)}`;
-}
-
-/** A single quiet signal for one or more positive media-server mappings.
- * Provider names stay out of the layout and are available on hover and to
- * assistive technology. The count only appears when more than one server
- * independently recognised the entity. */
-function MediaServerRecognitionBadge({ sources }: { sources: string[] | undefined }) {
-  const labels = Array.from(
-    new Set((sources ?? []).map(mediaServerLabel).filter((source) => source.length > 0)),
-  );
-  if (labels.length === 0) return null;
-  const description = `Recognised by ${naturalList(labels)}`;
-  return (
-    <span
-      className={styles.mediaServerRecognitionBadge}
-      aria-label={description}
-      title={description}
-    >
-      <SvgIcon name="server" />
-      <span className={styles.mediaServerRecognitionCheck} aria-hidden="true">
-        ✓
-      </span>
-      {labels.length > 1 ? (
-        <span className={styles.mediaServerRecognitionCount} aria-hidden="true">
-          {labels.length}
-        </span>
-      ) : null}
-    </span>
   );
 }
 
@@ -5588,6 +5536,7 @@ function AlbumIndexView() {
       monitored: search.monitored,
       letter: search.letter,
       source: search.source,
+      review: search.review,
     }),
   );
   const albums = albumsQuery.data?.albums ?? [];
@@ -5596,7 +5545,8 @@ function AlbumIndexView() {
     Boolean(search.q.trim()) ||
     search.monitored !== 'all' ||
     search.letter !== 'all' ||
-    Boolean(search.source);
+    Boolean(search.source) ||
+    Boolean(search.review);
 
   return (
     <div className={styles.page}>
@@ -6465,11 +6415,8 @@ export function ArtistCard({
       <span className={`${styles.cardMonitor} ${classic.monitor}`}>
         <MonitorToggle entity="artists" id={artist.id} monitored={artist.monitored} />
       </span>
-      {artist.media_server_sources?.length ? (
-        <span className={`${styles.mediaServerBadges} ${classic.recognition}`}>
-          <MediaServerRecognitionBadge sources={artist.media_server_sources} />
-        </span>
-      ) : null}
+      {/* #2213: beside the toggle, its own logo per server */}
+      <MediaServerRecognitionBadges sources={artist.media_server_sources} variant="card" />
     </article>
   );
 }
@@ -6674,7 +6621,10 @@ function ArtistTable({
                       {artist.album_count} albums · {artist.single_count} singles
                     </span>
                   </span>
-                  <MediaServerRecognitionBadge sources={artist.media_server_sources} />
+                  <MediaServerRecognitionBadges
+                    sources={artist.media_server_sources}
+                    variant="compact"
+                  />
                 </span>
               </td>
               <td className={`${styles.colNum} ${styles.colReleaseCount}`}>{artist.album_count}</td>
@@ -9504,7 +9454,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
           {formatFileSize(artist.total_size_bytes)}
         </span>
       ) : null}
-      <MediaServerRecognitionBadge sources={artist.media_server_sources} />
+      <MediaServerRecognitionBadges sources={artist.media_server_sources} variant="header" />
       <ArtistQueueSummary tracks={queueStatusQuery.data?.tracks ?? {}} />
     </>
   ) : null;
@@ -9743,6 +9693,8 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
               </div>
             </header>
           )}
+
+          <ArtistYourPlays artistId={artistId} artistName={artist.name} />
 
           <div ref={heroSentinelRef} className={styles.heroSentinel} aria-hidden="true" />
           <div className={styles.releasesBar}>
@@ -13071,7 +13023,7 @@ function TrackRow(props: TrackRowProps) {
               ) : (
                 <span className={missing ? styles.muted : undefined}>{label}</span>
               )}
-              {track.popular ? <PopularMark /> : null}
+              {track.popular ? <PopularMark source={track.popular_source} /> : null}
               <InlineFileStatus status={track.file_status} linkedFrom={track.linked_from} />
               {(track.file_count ?? 0) > 1 ? (
                 <button
@@ -13180,7 +13132,10 @@ function TrackRow(props: TrackRowProps) {
             style={widthStyle('media_server')}
           >
             {track.media_server_sources?.length ? (
-              <MediaServerRecognitionBadge sources={track.media_server_sources} />
+              <MediaServerRecognitionBadges
+                sources={track.media_server_sources}
+                variant="compact"
+              />
             ) : (
               <span className={styles.muted}>—</span>
             )}
@@ -13848,9 +13803,12 @@ export function TrackLyricsBadge({
 
 /** Legacy parity: present/missing indicator that sits inline after the title. */
 /** #2144: plexamp's flame for an album's most played tracks (last.fm plays,
- *  ranked inside the album by the server). */
-export function PopularMark() {
-  const text = 'Popular: one of the most played tracks on this album (Last.fm)';
+ *  ranked inside the album by the server; listenbrainz listens when last.fm
+ *  knows too little). */
+export function PopularMark({ source }: { source?: 'lastfm' | 'listenbrainz' | null }) {
+  const text = `Popular: one of the most played tracks on this album (${
+    source === 'listenbrainz' ? 'ListenBrainz' : 'Last.fm'
+  })`;
   return (
     <span className={styles.popularMark} role="img" aria-label={text} title={text}>
       <LineIcon name="flame" size={13} />

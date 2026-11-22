@@ -3,6 +3,7 @@ import { HTTPError } from 'ky';
 
 import { apiClient, readJson } from '@/app/api-client';
 
+import type { SpotifyHistorySummary, SpotifyPlayRow } from './-spotify-history';
 import type {
   ListeningStatsStatus,
   LastfmListeningImportStatus,
@@ -225,6 +226,72 @@ export function listenbrainzListeningImportStatusQueryOptions() {
   return queryOptions({
     queryKey: [...STATS_QUERY_KEY, 'listenbrainz-import'],
     queryFn: fetchListenbrainzListeningImportStatus,
+  });
+}
+
+// ── Spotify streaming history (privacy export, parsed in the browser) ──────
+
+type SpotifyHistoryResponse = SpotifyHistorySummary & { success: boolean; error?: string };
+
+export type SpotifyBatchResult = {
+  success: boolean;
+  error?: string;
+  received: number;
+  kept: number;
+  added: number;
+  merged: number;
+};
+
+function checked(payload: SpotifyHistoryResponse): SpotifyHistorySummary {
+  if (!payload.success) throw new Error(payload.error || 'Spotify history request failed');
+  return payload;
+}
+
+export async function fetchSpotifyHistory(): Promise<SpotifyHistorySummary> {
+  return checked(await readJson<SpotifyHistoryResponse>(apiClient.get('listening-import/spotify')));
+}
+
+export async function sendSpotifyHistoryBatch(
+  rows: SpotifyPlayRow[],
+  includeInStats: boolean,
+): Promise<SpotifyBatchResult> {
+  const payload = await readJson<SpotifyBatchResult>(
+    apiClient.post('listening-import/spotify/batch', {
+      json: { rows, include_in_stats: includeInStats },
+    }),
+  );
+  if (!payload.success) throw new Error(payload.error || 'Could not send these plays');
+  return payload;
+}
+
+export async function finishSpotifyHistoryImport(): Promise<SpotifyHistorySummary> {
+  return checked(
+    await readJson<SpotifyHistoryResponse>(apiClient.post('listening-import/spotify/finish')),
+  );
+}
+
+export async function setSpotifyHistoryInStats(include: boolean): Promise<SpotifyHistorySummary> {
+  return checked(
+    await readJson<SpotifyHistoryResponse>(
+      apiClient.post('listening-import/spotify/settings', {
+        json: { include_in_stats: include },
+      }),
+    ),
+  );
+}
+
+export async function removeSpotifyHistory(): Promise<number> {
+  const payload = await readJson<{ success: boolean; error?: string; removed?: number }>(
+    apiClient.delete('listening-import/spotify'),
+  );
+  if (!payload.success) throw new Error(payload.error || 'Could not remove the import');
+  return payload.removed ?? 0;
+}
+
+export function spotifyHistoryQueryOptions() {
+  return queryOptions({
+    queryKey: [...STATS_QUERY_KEY, 'spotify-history'],
+    queryFn: fetchSpotifyHistory,
   });
 }
 

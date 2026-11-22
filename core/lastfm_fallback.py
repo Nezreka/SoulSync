@@ -214,8 +214,14 @@ def artist_top_tracks(artist_name: str, limit: int = 10, *, lastfm: Any = _UNSET
     if rows:
         return rows[:limit], 'lastfm'
     if 'listenbrainz' in free_sources:
-        from core import listenbrainz_public
-        mbid = listenbrainz_public.artist_mbid(name)
+        from core import listenbrainz_auth, listenbrainz_public
+        # its top recordings need a listenbrainz token: without one, skip
+        # the musicbrainz lookup too and go straight to deezer
+        mbid = None
+        if listenbrainz_auth.available():
+            mbid = listenbrainz_public.artist_mbid(name)
+        else:
+            listenbrainz_auth.note_missing()
         if mbid:
             rows = listenbrainz_public.top_recordings_for_artist(mbid, limit=limit)
             if rows:

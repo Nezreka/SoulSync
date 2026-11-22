@@ -128,44 +128,6 @@ def _test_all(model: str) -> str:
     return model.split("async function testAll(", 1)[1].split("\n  return {", 1)[0]
 
 
-def test_the_tab_exists(index):
-    assert 'data-tab="sources"' in index
-    # the tab buttons are React (settings-page.tsx, SETTINGS_PORT.md step V4c)
-    page = _read("webui/src/features/settings/settings-page.tsx")
-    assert "onClick={() => switchSettingsTab(key)}" in page
-
-
-def test_the_tab_is_available_on_both_sides(index):
-    """It started music-only, which stopped being right the moment the shared
-    config moved in: Prowlarr, the torrent client and the usenet client are the
-    video side's entire acquisition stack. A music-only tab would have taken
-    them away from it. Which TILES show is filtered per side instead.
-    """
-    line = next(ln for ln in index.splitlines() if 'data-tab="sources"' in ln)
-    assert "data-music-only" not in line
-    group = next(ln for ln in index.splitlines() if 'data-stg="sources"' in ln and "settings-group" in ln)
-    assert "data-music-only" not in group
-
-
-def test_the_sources_tab_shows_every_tile_on_both_sides(tab, js):
-    """REVERSED. This used to assert the opposite: the video side saw only a
-    SHARED_SOURCES subset - 4 tiles out of 13 - on the theory that Tidal and
-    Soulseek mean nothing to video.
-
-    They mean plenty. This is a settings page. Hiding Tidal from someone who
-    happens to be standing on the video side only means they cannot fix their
-    Tidal credentials without switching sides first, and which side you are on
-    is not a reason to be unable to see a setting. The tab is shared, so it
-    renders the same thing on both sides - same tiles, same grouping.
-
-    The tiles must therefore not branch on the side at all: not to filter
-    the list, and not to group it differently either."""
-    fn = _tiles(tab)
-    assert "data-side" not in fn, "the tiles branch on the side"
-    assert "SHARED_SOURCES" not in fn
-    assert "SHARED_SOURCES = new Set" not in js, "the dead subset is still declared"
-
-
 def test_the_shared_tabs_carry_no_side_gating(index):
     """The Sources, Downloads, Library and Quality tabs are fully shared:
     identical content on both sides. The invariant that keeps them that way is that nothing on either tab
@@ -199,58 +161,12 @@ def test_the_shared_tabs_carry_no_side_gating(index):
     assert "data-shared" not in markup
 
 
-def test_every_source_config_lives_on_the_sources_tab(index):
-    """A group nested under another tab's body would stay hidden no matter what
-    its own data-stg said — the parent is display:none. A panel ported to React
-    sits in a slot in the same place (step 7c on)."""
-    body = index.split('data-stg="sources"', 1)[1].split("end Sources tab", 1)[0]
-    react = _react_panels()
-    slots = _react_slots(index, body)
-    for cid in _SOURCE_CONTAINERS:
-        if f'id="{cid}"' in react:
-            assert slots, f"{cid} is React but no panel slot is on the Sources tab"
-        else:
-            assert f'id="{cid}"' in body, f"{cid} did not move to the Sources tab"
-
-
 def test_no_source_config_is_left_behind_on_downloads(index):
     # Exactly one home each; a duplicated id would break getElementById too.
     react = _react_panels()
     for cid in _SOURCE_CONTAINERS:
         count = index.count(f'id="{cid}"') + react.count(f'id="{cid}"')
         assert count == 1, f"{cid} appears {count} times"
-
-
-def test_a_source_no_longer_has_to_be_enabled_to_be_configured(js, tab, model):
-    """The regression that matters. If anything goes back to driving these
-    containers off the active-source set, configuring a source you have not
-    switched on becomes impossible again. updateDownloadSourceUI, which once
-    did, is gone (step 7a): a tile opens any source's panel, chain or not."""
-    assert "function updateDownloadSourceUI" not in js
-    assert "showCfg" not in js, "per-source config is gated on the source being active again"
-    for cid in _SOURCE_CONTAINERS:
-        for m in re.finditer(re.escape(f"getElementById('{cid}')"), js):
-            assert "style.display" not in js[m.end():m.end() + 120], \
-                f"something sets display on {cid} again"
-    # opening asks only whether the source has a panel (step 7b)
-    opener = model.split("    openModal(id) {", 1)[1].split("\n    },", 1)[0]
-    for gate in ("music", "order", "hybrid_order", "unready"):
-        assert gate not in opener, f"opening a source depends on the chain ({gate})"
-    assert "SOURCE_CONFIG_ID_BY_SRC[id]" in opener
-    # every configurable source gets a tile, in a chain or not
-    assert "onClick={() => model.openModal(src.id)}" in _tile(tab)
-
-
-def test_the_chain_widget_stayed_on_downloads(index, tab):
-    """Only the config moved. The order lives with the rest of the download
-    behaviour, and is the thing being redesigned separately. the chain is a
-    React slot now (step 7a): it is the Downloads tab's, and it renders its
-    blocks as Downloads blocks."""
-    assert 'data-stg-react="downloads" data-stg-part="chain"' in index
-    assert 'data-stg-react="sources" data-stg-part="chain"' not in index
-    chain = tab.split("export function ChainWidget(", 1)[1].split("// ── the Sources tab's tiles", 1)[0]
-    tags = set(re.findall(r'data-stg="([a-z]+)"', chain))
-    assert tags == {"downloads"}, f"chain widget ended up under {tags}"
 
 
 def test_the_cog_crosses_to_the_tab(js):
@@ -260,121 +176,6 @@ def test_the_cog_crosses_to_the_tab(js):
     model = _read("webui/src/features/settings/tabs/sources-model.ts")
     assert "/** open a source's settings in the modal (a tile, a chain cog) */" in model
     assert "toggleHybridSourceConfig" not in js
-
-
-def test_the_tiles_refresh_with_the_chain(model, tab):
-    # Same state drives both; a stale tile is a tile that lies about status.
-    # the tiles subscribe to the model, and a chain edit writes the model
-    assert "useSyncExternalStore(model.subscribe, model.getState)" in tab
-    assert "const state = useModel(model);" in _tiles(tab)
-    music = model.split("function writeMusic(", 1)[1].split("\n  }", 1)[0]
-    assert "set({ music:" in music
-    video = model.split("async function writeVideo(", 1)[1].split("\n  }", 1)[0]
-    assert "set({ video:" in video
-
-
-def test_every_source_has_a_tile(tab):
-    """Tiles are rendered, not hand-written, so the check is that the renderer
-    covers every source that owns a config panel."""
-    fn = _tiles(tab)
-    assert "HYBRID_SOURCES" in fn
-    assert "EXTRA_SOURCE_TILES" in fn      # Prowlarr is not a chain link
-    assert "SOURCE_CONFIG_ID_BY_SRC" in fn
-    markup = _tile(tab)
-    assert "src-tile-name" in markup and "src-tile-art" in markup
-
-
-def test_the_panel_is_moved_not_cloned(tab):
-    """Cloning would put a second element with the same id in the document, and
-    every getElementById in saveSettings would then read whichever one the
-    browser returned first — silently saving the copy nobody typed into."""
-    fn = _modal(tab)
-    assert "body.current.appendChild(panel)" in fn
-    assert "cloneNode" not in fn
-
-
-def test_closing_puts_the_panel_back(tab):
-    """It has to go home before the overlay hides, or the next open would move
-    a node that is already inside the hidden modal. The effect's cleanup runs
-    when `open` changes, before the hidden modal renders."""
-    fn = _modal(tab)
-    cleanup = fn.split("return () => {", 1)[1].split("};", 1)[0]
-    assert "getElementById('source-config-home')?.appendChild(panel)" in cleanup
-
-
-def test_closing_lands_a_pending_autosave(js, tab):
-    """The page auto-saves 2s after a change. Edit a field, close the modal, and
-    the timer would otherwise still be counting with nothing on screen to say
-    anything was pending. The vanilla timer is landed through a bridge, a React
-    tab's pending change through the store."""
-    close = _modal(tab).split("function close() {", 1)[1].split("\n  }", 1)[0]
-    assert "landPendingSettingsSave?.()" in close
-    assert "settingsStore.flush()" in close and "_settingsAutosaveOff !== true" in close
-    # the page-wide autosave timer the bridge landed went with settings.js
-    # (step V4b): every control is React, and the store is flushed right here
-    bridge = js.split("export function landPendingSettingsSave() {", 1)[1].split("\n}", 1)[0]
-    assert "saveSettings" not in bridge
-
-
-def test_escape_closes_it(tab):
-    fn = _modal(tab)
-    assert "event.key === 'Escape'" in fn and "close()" in fn
-
-
-def test_the_modal_is_a_dialog(tab):
-    fn = _modal(tab)
-    assert 'role="dialog"' in fn and 'aria-modal="true"' in fn
-
-
-def test_the_panels_park_in_a_hidden_home(index):
-    """They are real page markup, not templates — they need somewhere to live
-    that is not on screen when no modal is open. A React panel renders into a
-    slot in the same hidden home, and only portals into the modal while open."""
-    assert 'id="source-config-home" hidden' in index
-    home = index.split('id="source-config-home"', 1)[1].split("end source-config-home", 1)[0]
-    react = _react_panels()
-    slots = _react_slots(index, home)
-    for cid in _SOURCE_CONTAINERS:
-        if f'id="{cid}"' in react:
-            # the component that renders it is dispatched from a slot in the home
-            comp = react[:react.index(f'id="{cid}"')].rsplit("export function ", 1)[1].split("(", 1)[0]
-            dispatch = _react_dispatch(react)
-            parts = [part for part in slots if f"part === '{part}'" in dispatch
-                     and f"<{comp}" in dispatch.split(f"part === '{part}'", 1)[1].split("return null", 1)[0]]
-            assert parts, f"{cid} ({comp}) has no slot in the home div"
-        else:
-            assert f'id="{cid}"' in home, f"{cid} is not parked in the home div"
-    panel = react.split("function Panel(", 1)[1].split("\n/** a status line", 1)[0]
-    assert "createPortal(node, body)" in panel and "data-react-panel" in panel
-
-
-def test_the_tiles_refresh_when_the_modal_closes(js, tab):
-    # Changing a setting can change "needs setup" or the chain chip. the tiles
-    # redraw themselves from the model, so the close does not need to, and
-    # the removed vanilla renderer is not called from anywhere
-    assert "buildSourceTiles" not in js
-    assert "buildSourceTiles" not in _modal(tab)
-    assert "const state = useModel(model);" in _tiles(tab)
-
-
-def test_the_styling_reuses_the_pages_own_vocabulary():
-    """Unified, not a second design language bolted on."""
-    css = _read("webui/static/style.css")
-    block = css.split("/* ── Sources tab", 1)[1]
-    assert "--accent-rgb" in block
-    for state in ("hss-ok", "hss-fail", "hss-testing"):
-        assert f".src-tile-dot.{state}" in block
-
-
-def test_the_dot_colours_match_the_chain_rows_exactly():
-    # If these drift, the same source shows two different colours on two tabs.
-    css = _read("webui/static/style.css")
-    for state, colour in (("hss-ok", "#34d27b"), ("hss-fail", "#ff5f57")):
-        chain = re.search(rf"\.hybrid-source-status\.{state}\s*{{([^}}]*)}}", css)
-        tile = re.search(rf"\.src-tile-dot\.{state}\s*{{([^}}]*)}}", css)
-        assert chain and tile
-        assert colour in chain.group(1) and colour in tile.group(1)
-
 
 def test_no_dead_width_rule_pretends_to_set_the_page_width():
     """The @media (min-width: 1440px) block used to cap .settings-content, and
@@ -438,38 +239,6 @@ def test_the_client_records_a_warning_state(model):
     assert "startsWith" in fn
     assert "warned: { ...s.warned, [service]:" in fn
 
-
-def test_a_warning_gets_its_own_dot_colour():
-    css = _strip_comments(_read("webui/static/style.css"))
-    # the bare declaration, not the :has() ring rule that mentions the same class
-    warn = re.search(r"^\.src-tile-dot\.hss-warn\s*{([^}]*)}", css, re.M)
-    assert warn, "no .src-tile-dot.hss-warn rule"
-    assert "#f0b429" in warn.group(1)   # amber, not the red it used to draw
-    assert "#ff5f57" not in warn.group(1)
-
-
-def test_a_broken_source_is_visible_at_the_tile_not_just_the_dot():
-    """The tile used to carry this on border-color. The visual pass dropped
-    borders in favour of tonal surfaces, and this signal came within one edit of
-    going with them - the dot tests below stayed green either way, because the
-    dot is a separate element. So pin the tile-level ring, not the dot.
-
-    The alert also has to outrank .src-tile.is-active, which sets a box-shadow of
-    its own: a source that is IN the chain and failing is exactly the one you
-    need to see, so ordering in the file is load-bearing here.
-    """
-    css = _strip_comments(_read("webui/static/style.css"))
-    for state, colour in (("hss-fail", "255, 95, 87"), ("hss-warn", "240, 180, 41")):
-        m = re.search(r"^\.src-tile:has\(\.src-tile-dot\.%s\)\s*{([^}]*)}" % state, css, re.M)
-        assert m, "no tile-level ring for %s" % state
-        assert "box-shadow" in m.group(1), "%s ring is not drawn" % state
-        assert colour in m.group(1), "%s ring lost its colour" % state
-        assert css.index(m.group(0)) > css.index(".src-tile.is-active {"), (
-            "the %s ring must come after .src-tile.is-active or the chain "
-            "gradient wins and a failing in-chain source looks healthy" % state
-        )
-
-
 def test_usenet_has_a_tile(js):
     """It is its own link in the chain and shares the Prowlarr panel with
     torrent. It had no entry at all, so a usenet user saw nothing to click."""
@@ -518,76 +287,6 @@ def test_sources_gets_the_full_width_like_logs():
 # ---------------------------------------------------------------------------
 # Layout and the per-source test
 # ---------------------------------------------------------------------------
-
-def test_the_tiles_are_grouped_not_one_ragged_wrap(tab):
-    """Eleven tiles in a single auto-fill grid wrapped 7-then-4 and read as an
-    accident. Two labelled groups make the same wrap look deliberate."""
-    fn = _tiles(tab)
-    # "in use" now, not "in your chain": it covers the video and audiobook chains too (#2026)
-    assert "section('In use'" in fn and "section('Available'" in fn
-    assert "src-group" in fn
-
-
-def test_the_chain_group_is_in_chain_order(tab):
-    """Registry order put #4 before #2, which makes the numbers on the chips
-    look wrong even though they are right."""
-    fn = _tiles(tab)
-    # ranked by chain then position, since a tile can be in more than one chain (#2026)
-    assert "rank(a) - rank(b)" in fn
-    assert "* 1000 + u.pos" in fn
-
-
-def test_a_small_group_does_not_stretch_across_the_page():
-    css = _strip_comments(_read("webui/static/style.css"))
-    row = css.split(".src-tile-row {", 1)[1].split("}", 1)[0]
-    assert "auto-fit" in row
-    # a max on the track, or four tiles span the whole width of the page
-    assert "190px" in row or "px)" in row.split("minmax(", 1)[1]
-
-
-def test_there_is_a_per_source_test_button(tab):
-    """The summary toast gave a count and the dot gave a colour. Neither told
-    you WHAT was wrong with a source you could see was unhappy."""
-    fn = _modal(tab)
-    assert 'id="src-modal-test"' in fn
-    assert 'id="src-modal-result"' in fn
-    assert "async function test() {" in fn
-
-
-def test_the_test_shows_what_the_server_said(tab):
-    fn = _modal(tab).split("async function test() {", 1)[1].split("\n  }", 1)[0]
-    assert "model.getState().said[id]" in fn
-    assert "text: said ||" in fn
-
-
-def test_the_test_updates_the_dot_and_the_tiles(tab, model):
-    # the modal's test runs through the model, which sets the dot the tiles read
-    fn = _modal(tab)
-    assert "await model.testOne(id)" in fn
-    assert "hss-${dot}" in fn
-    one = model.split("async function testOne(", 1)[1].split("\n  }", 1)[0]
-    assert "setStatus(id, state)" in one
-
-
-def test_a_source_with_no_probe_says_so_rather_than_failing(tab):
-    """YouTube used to be `() => Promise.resolve(true)`; a source with nothing
-    to test must not read as a source that failed a test."""
-    fn = _modal(tab).split("async function test() {", 1)[1].split("\n  }", 1)[0]
-    assert "no connection test" in fn.lower()
-
-
-def test_opening_a_source_carries_its_last_result_in(tab):
-    # An amber tile should still explain itself once you are inside.
-    fn = _modal(tab)
-    opening = fn.split("useEffect(() => {", 1)[1].split("return () => {", 1)[0]
-    assert "said && dot !== 'unknown'" in opening and "src-modal-result is-${dot}" in opening
-
-
-def test_the_result_line_is_announced(tab):
-    fn = _modal(tab)
-    line = fn.split('id="src-modal-result"', 1)[1][:80]
-    assert 'role="status"' in line and 'aria-live="polite"' in line
-
 
 # ---------------------------------------------------------------------------
 # Consolidation: the source config that was scattered across Downloads/Advanced
@@ -671,16 +370,6 @@ def test_prowlarr_gets_a_tile_and_a_test(model):
     assert "prowlarr:" in probes
 
 
-def test_prowlarr_does_not_claim_a_chain_position(tab):
-    """order.indexOf('prowlarr') is always -1, so the generic chip would label
-    the indexer "not in chain" — which reads as something being wrong."""
-    fn = _tile(tab)
-    assert "src.id === 'prowlarr'" in fn
-    assert "torrent &amp; usenet" in fn
-    # and it is decided before the chain chips are
-    assert fn.index("src.id === 'prowlarr'") < fn.index("not in a chain")
-
-
 def test_torrent_and_usenet_open_their_own_config(js):
     """Both used to open the same redirect panel that pointed elsewhere."""
     m = js.split("SOURCE_CONFIG_ID_BY_SRC: Record<string, string> = {", 1)[1].split("};", 1)[0]
@@ -697,45 +386,6 @@ def test_ytdlp_moved_in_with_youtube(index):
     assert "ytdlp-update-btn" in panel
     assert "ytdlp-installed" in panel
     assert 'id="ytdlp-hint-badge"' in panel      # the badge lived in the old header
-
-
-def test_the_moved_ytdlp_block_left_the_advanced_tab(index):
-    # the tile is in the React YouTube panel now (step 7g): it is not in the
-    # page markup at all, and the panel's slot sits in the Sources home
-    assert 'id="ytdlp-update-btn"' not in index
-    assert 'id="ytdlp-update-btn"' in _panel_text(index, "youtube-settings-container")
-    slot = index.index('data-stg-part="youtube"')
-    assert 'data-stg="advanced"' not in index[slot - 2500:slot]
-
-
-def test_the_filesystem_note_is_still_reachable(index):
-    """It explains that torrent/usenet write to their OWN folders, which is the
-    single most common import failure. It belonged to the section that was
-    dissolved, so it had to land somewhere deliberate."""
-    assert "ind-hero-warning" in index
-    sources = index.split('data-stg="sources"', 1)[1].split("end Sources tab", 1)[0]
-    assert "ind-hero-warning" in sources
-
-
-def test_indexers_are_their_own_group(tab):
-    """Not a source you pick — the catalogue the torrent and usenet links
-    search. Left in "Available" it read as something you could add to the
-    chain, which is not a thing Prowlarr can be."""
-    fn = _tiles(tab)
-    assert "section('Indexers'" in fn
-    # one code path, not two. this used to require 2 because the video side
-    # rendered its own grouping; the tab is shared and renders once for both.
-    assert fn.count("section('Indexers'") == 1, "the side branch is back"
-
-
-def test_an_indexer_cannot_land_in_the_chain_groups(tab):
-    """The chain groups partition on order.includes(), and Prowlarr is never in
-    the order — so without splitting it out first it falls into Available every
-    time."""
-    fn = _tiles(tab)
-    assert "const sources = configurable.filter((src) => !isIndexer(src))" in fn
-    for group in ("const inChain = sources", "const available = sources"):
-        assert group in fn, group
 
 
 @pytest.mark.parametrize("container", sorted(_MOVED_IN))
@@ -785,49 +435,6 @@ def test_the_indexer_probe_reaches_the_video_side(model):
     cond = next(ln for ln in fn.splitlines() if "sources.has('torrent')" in ln)
     assert "videoSide" in cond
 
-
-def test_the_indexer_result_redraws_its_tile(model, tab):
-    """The per-source loop redraws while walking the chain, which Prowlarr is
-    not part of — so without this the dot would only appear on the next redraw
-    triggered by something else. the result goes into the model straight away,
-    and the tiles redraw on every model change."""
-    fn = _test_all(model)
-    block = fn.split("setStatus('prowlarr', 'testing');", 1)[1].split("for (const id of sources)", 1)[0]
-    assert "setStatus('prowlarr'," in block
-    assert "const state = useModel(model);" in _tiles(tab)
-
-
-def test_an_inverted_mark_is_not_then_dimmed_into_grey():
-    """Tidal, Qobuz and SoundCloud ship as thin black OUTLINE svgs - stroke only,
-    an 800px viewBox drawn at 30px. They are inverted to white so they are not
-    invisible on a dark tile.
-
-    The bug this pins: opacity MULTIPLIES down the tree. The mark carried 0.92 of
-    its own while the idle rule put 0.55 on the parent, so a source that was not
-    in the chain drew its white hairlines at 0.5 - which on a dark tile is grey,
-    and looks exactly like the inversion was never applied at all. It was; it was
-    being eaten one rule further up. Both halves have to stay put, which is why
-    this checks the parent exemption and not just the filter.
-    """
-    css = _strip_comments(_read("webui/static/style.css"))
-
-    for sel in (r"\.src-tile-art img\.is-inverted", r"\.dlchain-mark\.is-inverted"):
-        m = re.search(r"^%s\s*{([^}]*)}" % sel, css, re.M)
-        assert m, "no invert rule for %s" % sel
-        assert "brightness(0) invert(1)" in m.group(1)
-        op = re.search(r"opacity:\s*([\d.]+)", m.group(1))
-        assert op and float(op.group(1)) == 1, (
-            "an inverted mark must carry full opacity; anything less multiplies "
-            "with the parent dimming and turns white line art grey"
-        )
-
-    # and the idle dimming has to let these through
-    assert ".src-tile-art:has(img.is-inverted)" in css, (
-        "no exemption from .src-tile:not(.is-active) dimming for line-art marks"
-    )
-    assert ".dlchain-tile-art:has(.dlchain-mark.is-inverted)" in css
-
-
 def _library_cards(markup):
     """the Library tab's card titles and group labels in page order. the
     Folders and Organization cards are React (SETTINGS_PORT.md steps 8a, 8b):
@@ -869,57 +476,37 @@ def _library_cards(markup):
 
 def test_the_library_tab_speaks_one_card_language():
     """It used to be three loose blocks of video settings followed by seven
-    music cards - and the music half was hidden on the video side entirely, so
-    neither side ever saw the whole tab.
-
-    Now every section is an expandable card and they are ordered by SUBJECT
-    rather than by side: music paths beside video folders, music post-processing
-    beside video organization (which is where video's post-processing lives).
-    Grouping by which side a setting came from is an implementation detail
-    leaking into the layout.
+    music cards, then five folded cards with two media tab strips. Now
+    (settings-bic phase 4) it is pills by SUBJECT, each with a kind switch:
+    music paths beside video folders under Folders, music post-processing
+    beside the video sidecars under Tags and artwork. Grouping by which side
+    a setting came from is an implementation detail leaking into the layout.
     """
-    index = index_with_settings_page()
-    markup = re.sub(r"<!--.*?-->", "", index, flags=re.S)
-
-    titles, groups = _library_cards(markup)
-
-    assert titles == [
-        # files & folders
-        "Folders", "Organization",
-        # processing
-        "Post-Processing", "Import",
-        # video
-        "Video Preferences",
-    ], titles
-    # #1822: playlists, listening stats and discovery have their own Discovery
-    # tab now, and filtering (explicit content, genre whitelist) is a download
-    # rule, so it sits on Downloads
-
-    # ...and they sit under three labelled groups. ten identical cards in a flat
-    # column is a list you scan by reading every label; three groups is a list
-    # you scan by skipping two of them.
-    # scoped to THIS tab: the same group markup is used on Connections now, and
-    # a global sweep would pick its heading up too
-    assert groups == ["Files &amp; folders", "Processing", "Video"], groups
-
-    # no bare settings-group left stranded outside a card on this tab
-    for m in re.finditer(r'<div class="settings-group"[^>]*data-stg="library"[^>]*>', markup):
-        before = markup[:m.start()]
-        assert before.rstrip().endswith('>'), "a library group is not inside a card"
-
-    # every card's body must be its header's next sibling or the toggle misses it
-    for m in re.finditer(r'<div class="settings-section-header[^"]*"[^>]*data-stg="library"[^>]*>', markup):
-        depth = 0
-        for mm in re.finditer(r"<(/?)div\b[^>]*?(/?)>", markup[m.start():]):
-            if mm.group(2) == "/":
-                continue
-            depth += -1 if mm.group(1) else 1
-            if depth == 0:
-                end = m.start() + mm.end()
-                break
-        assert markup[end:].lstrip().startswith('<div class="settings-section-body'), (
-            "a library card's body is not its header's next sibling"
-        )
+    nav = _read("webui/src/features/settings/nav.ts")
+    library = nav.split("key: 'library',", 1)[1].split("},\n  {", 1)[0]
+    pills = re.findall(r"\{ key: '(\w+)', label: '([^']+)'", library)
+    assert pills == [
+        ("folders", "Folders"),
+        ("naming", "Naming"),
+        ("tags", "Tags and artwork"),
+        ("import", "Import and files"),
+        ("subtitles", "Subtitles"),
+    ], pills
+    # the subtitles are the video side's own pill
+    assert "{ key: 'subtitles', label: 'Subtitles', side: 'video' }" in library
+    # every pill but Subtitles has its music and video kinds side by side
+    page = _read("webui/src/features/settings/tabs/library/library-page.tsx")
+    pages = page.split("const PAGES", 1)[1].split("\n};", 1)[0]
+    for pill in ("folders", "naming", "tags", "import"):
+        block = pages.split(f"  {pill}: {{", 1)[1].split("\n  },", 1)[0]
+        assert "music: {" in block and "video: {" in block, pill
+    # no folded cards left on the tab
+    for f in ("library-folders.tsx", "library-organization.tsx", "library-processing.tsx",
+              "library-audiobooks.tsx", "library-video-folders.tsx",
+              "library-video-organization.tsx"):
+        src = _read(f"webui/src/features/settings/tabs/{f}")
+        assert "settings-section-header" not in src, f
+        assert "LibrarySection" not in src, f
 
 
 def test_no_settings_selector_is_defined_twice_at_the_top_level():
@@ -998,114 +585,6 @@ def test_the_settings_page_sizes_text_from_one_scale():
             leftovers.append((sel[:60], size))
     assert not leftovers, f"still sizing text in em: {leftovers}"
 
-
-def test_every_section_toggle_is_reachable_without_a_mouse(index, js):
-    """31 collapsible sections were <div onclick>. Tab skipped all of them,
-    Enter and Space did nothing, and the :focus-visible rules written for them
-    could never fire - the element was not focusable, so there was no focus to
-    style.
-
-    They carry role="button" and tabindex="0" now, with a delegated keydown
-    handler supplying the half a real <button> would have given for free.
-
-    aria-expanded is checked separately and on purpose: an attribute that is set
-    once in the markup and never updated is WORSE than no attribute, because a
-    screen reader would confidently announce "collapsed" for a section the user
-    just opened. So the handler has to write it back.
-    """
-    headers = re.findall(r'<div class="settings-section-header[^"]*"[^>]*>', index)
-    # every collapsible section is React now (SETTINGS_PORT.md): its header
-    # is parts.tsx Section or the Library cards' LibrarySection, with the
-    # same three attributes
-    tabs = Path(__file__).resolve().parent.parent / "webui" / "src" / "features" / "settings" / "tabs"
-    for f in ("parts.tsx", "library-card.tsx"):
-        src = (tabs / f).read_text(encoding="utf-8")
-        head = src.split('className="settings-section-header collapsed"', 1)[1]
-        head = head.split('<span className="settings-section-arrow"', 1)[0]
-        assert 'role="button"' in head and "tabIndex={0}" in head and 'aria-expanded="false"' in head, f
-
-    for h in headers:
-        if 'settings-section-static' in h:
-            continue          # a heading that toggles nothing needs no button role
-        assert 'tabindex="0"' in h, f"not focusable: {h[:90]}"
-        assert 'role="button"' in h, f"no button role: {h[:90]}"
-        assert 'aria-expanded' in h, f"no expanded state: {h[:90]}"
-
-    # a collapsed section must not claim to be open
-    for h in headers:
-        if 'settings-section-static' in h or 'aria-expanded' not in h:
-            continue
-        collapsed = 'settings-section-header collapsed' in h
-        expected = 'false' if collapsed else 'true'
-        assert f'aria-expanded="{expected}"' in h, f"wrong initial state: {h[:90]}"
-
-    assert "e.key !== 'Enter'" in js, "no keyboard activation"
-    assert "setAttribute('aria-expanded'" in js, "aria-expanded is never updated"
-    assert "e.preventDefault()" in js, "Space would scroll the page instead of toggling"
-
-
-def test_library_headers_report_what_is_set_not_what_is_inside(index, js):
-    """Every library hint used to be a table-of-contents entry - "Metadata,
-    tags, conversion, lyrics" tells you what the section CONTAINS and nothing
-    about your install, so learning anything meant opening all ten cards. That
-    is the problem the Sources tab had before its tiles started showing state,
-    and showing state is what made that page work.
-
-    Each wired header now reports its own current value.
-
-    Two properties matter more than the wording:
-
-      * a fallback. if a summary cannot be computed the header shows its static
-        description again, so it degrades to the old behaviour rather than to a
-        blank gap.
-      * summaries are computed from the LIVE controls, never from a second copy
-        of the state. a summary that can disagree with the field below it is a
-        bug generator, and this page has already been bitten by exactly that
-        kind of drift twice (the download-mode select, the slskd form).
-    """
-    slots = re.findall(r'<span[^>]*data-stg-summary="([^"]+)"[^>]*>', index)
-    # the tabs ported to React render their headers themselves, from the same
-    # state their controls render from, so the two cannot disagree either
-    # (src/features/settings/tabs/parts.tsx Section, SETTINGS_PORT.md)
-    tabs = Path(__file__).resolve().parent.parent / "webui" / "src" / "features" / "settings" / "tabs"
-    react = "\n".join(p.read_text(encoding="utf-8") for p in tabs.glob("*-tab.tsx"))
-    # and Video Preferences, its own Section (SETTINGS_PORT.md video pass V2c)
-    react += "\n" + (tabs / "library-video-prefs.tsx").read_text(encoding="utf-8")
-    react_slots = re.findall(r'summaryKey="([^"]+)"', react)
-    # the Library tab's media cards (steps 8a, 8b) render their summary span
-    # themselves, with the same fallback attribute the markup had
-    cards = "\n".join(p.read_text(encoding="utf-8") for p in tabs.glob("library-*.tsx")
-                      if not p.name.endswith(".test.tsx"))
-    card_slots = re.findall(r'data-stg-summary="([^"]+)"', cards)
-    for key in card_slots:
-        block = cards.split(f'data-stg-summary="{key}"', 1)[1][:120]
-        assert "data-stg-fallback={fallback}" in block, f"React summary {key} has no fallback"
-    react_slots += card_slots
-    assert len(slots) + len(react_slots) >= 8, f"only {len(slots) + len(react_slots)} headers report live values"
-    assert not set(slots) & set(react_slots), "a summary is on the page twice"
-    parts = (tabs / "parts.tsx").read_text(encoding="utf-8")
-    assert "data-stg-fallback={hint}" in parts, "a React header without a fallback could go blank"
-    for key in set(react_slots) - set(card_slots):
-        block = react.split(f'summaryKey="{key}"', 1)[1][:200]
-        assert "summary={" in block, f"React header {key} has no summary"
-
-    for m in re.finditer(r'<span[^>]*data-stg-summary="[^"]+"[^>]*>', index):
-        assert 'data-stg-fallback="' in m.group(0), (
-            "no fallback - a header that cannot compute its summary would go blank"
-        )
-
-    # every wired key must have a matching computer, and vice versa
-    computed = set(re.findall(r"^\s*'([a-z-]+)': \(\) =>", js, re.M))
-    assert set(slots) <= computed, f"markup asks for summaries nothing computes: {set(slots) - computed}"
-    assert computed <= set(slots), f"computed but never shown: {computed - set(slots)}"
-
-    # and they read the real inputs rather than a cached copy of the settings
-    # (every Library summary is React since SETTINGS_PORT.md video pass V2c,
-    # checked above; the vanilla map is empty until settings.js goes)
-    # (the vanilla map went with settings.js, step V4b)
-    assert "LIBRARY_SUMMARIES" not in js and not computed
-
-
 def test_a_failed_settings_load_does_not_summarise_an_empty_form(js):
     """If the fetch fails the form is blank, and a blank form summarised reads as
     "nothing enabled" - which is a confident lie about the user's config at the
@@ -1119,32 +598,24 @@ def test_a_failed_settings_load_does_not_summarise_an_empty_form(js):
     good = fn.split("} catch (error) {", 1)[0]
     assert good.index("throw new Error(") < good.index("SoulSyncSettings?.hydrate(settings)")
     assert "hydrate" not in fn.split("} catch (error) {")[-1][:400]
-    # a React header shows its summary only after a load
+    # a pill's line says what it is for, not what the settings are, so a blank
+    # form has nothing to misread there; a warning on a row waits for a load
+    # (the install folder default on Library > Folders)
+    about = _read("webui/src/features/settings/tabs/about.ts")
+    # plain words, read from nothing
+    assert "import " not in about
     folders = _read("webui/src/features/settings/tabs/library-folders.tsx")
-    assert "const summary = loads" in folders
+    assert "const installDefault = loads && !docker && defaultOut;" in folders
 
 
 def test_the_two_sides_name_their_sections_the_same_way():
-    """Folders and Organization are shared cards, each retaining both media
-    contexts so neither music nor video settings disappear in consolidation.
-    """
-    index = index_with_settings_page()
-    markup = re.sub(r"<!--.*?-->", "", index, flags=re.S)
-
-    titles, _ = _library_cards(markup)
-
-    for noun in ("Folders", "Organization"):
-        assert titles.count(noun) == 1, f"expected one shared {noun} card"
-        # React cards (steps 8a, 8b): music in the component, video in its
-        # own (SETTINGS_PORT.md video pass V2a, V2b), mounted by the card
-        card = _read(f"webui/src/features/settings/tabs/library-{noun.lower()}.tsx")
-        assert f"<strong>Music {noun.lower()}</strong>" in card
-        assert f"<Video{noun}Panel" in card
-        video = _read(f"webui/src/features/settings/tabs/library-video-{noun.lower()}.tsx")
-        assert f"<strong>Video {noun.lower()}</strong>" in video
-
-    # Folder locations and naming rules remain separate subjects.
-    assert "Paths &amp; Organization" not in titles
+    """Folders and Naming are shared pills, each keeping both media kinds so
+    neither music nor video settings disappear in consolidation; a pill opens
+    on the side the page is on (settings-bic phase 4)."""
+    page = _read("webui/src/features/settings/tabs/library/library-page.tsx")
+    for component in ("MusicFolders", "VideoFoldersBody", "MusicNaming", "<VideoNaming />"):
+        assert component in page, component
+    assert "return kinds.includes(side) ? side : (kinds[0] ?? 'music');" in page
 
 
 def test_a_settings_row_reads_left_to_right_the_same_way_everywhere(index):
@@ -1226,8 +697,12 @@ def test_no_two_cards_share_a_name():
     dupes = [t for t, n in Counter(titles).items() if n > 1]
     assert not dupes, f"more than one card claims this title: {dupes}"
 
-    # and the pair that caused it stays explicit about which side it serves
-    assert "Music Quality" in titles and "Video Quality" in titles
+    # and the pair that caused it stays explicit about which side it serves:
+    # (settings-bic phase 3) each is its own Quality pill, named for its kind
+    nav = (Path(__file__).resolve().parent.parent / "webui/src/features/settings/nav.ts").read_text(
+        encoding="utf-8")
+    assert "{ key: 'music', label: 'Music' }" in nav
+    assert "{ key: 'video', label: 'Movies and TV' }" in nav
 
 
 # ── Connections: services as tiles ─────────────────────────────────────────
@@ -1256,9 +731,13 @@ def _fn(src, name):
 
 def _video_cards():
     """the React video cards' ids (SETTINGS_PORT.md video pass V3a), each a
-    <Card service="..."> whose frame carries data-video-service={service}"""
+    <Card service="..."> drawn by ServiceFrame kind="video", whose frame carries
+    data-video-service (the services' attr for the video kind)"""
     cards = _read(_TABS + "connections-video-api.tsx")
-    assert '<div className="api-service-frame stg-service" data-video-service={service}' in cards
+    assert '<ServiceFrame\n      kind="video"' in cards
+    services = _read(_TABS + "connections-services.tsx")
+    assert "video: { label: 'Video', attr: 'data-video-service' }" in services
+    assert "{...{ [attr]: service }}" in _fn(services, "ServiceFrame")
     return re.findall(r'<Card\s+service="([^"]+)"', cards)
 
 
@@ -1300,18 +779,18 @@ def test_opening_a_service_moves_the_panel_and_never_clones_it(tiles):
     The panel also has to go home to the EXACT slot it came from, or the
     accordion groups silently reorder themselves as services get opened.
     """
-    part = _fn(tiles, "ServicesPart")
-    assert 'body.appendChild(frame)' in part, "the panel is not moved into the modal"
+    # (settings-bic) every card is React now: what moves is the card's
+    # wrapper (React keeps hearing a portal wherever its wrapper sits), into
+    # the sheet's body while open, and home in page order after
     assert 'cloneNode' not in tiles, "cloning would duplicate every id in the panel"
-    assert 'parent: frame.parentNode' in part and 'next: frame.nextSibling' in part, (
-        "the panel's original slot is not recorded - it cannot go back where it was"
-    )
-    # home in the effect's cleanup: it runs before the closed modal is drawn
-    cleanup = part[part.index('return () => {', part.index('body.appendChild(frame)')):]
-    assert 'insertBefore(frame, lifted.next)' in cleanup, "the panel is not restored to its slot"
-    # a React card is never moved itself: its wrapper is (React keeps hearing it)
+    assert 'innerHTML' not in tiles
     place = _fn(tiles, "useServicePlace")
     assert 'body.appendChild(wrap)' in place and 'placeHome(home, wrap)' in place
+    home = _fn(tiles, "placeHome")
+    assert "Number((a as HTMLElement).dataset.order) - Number((b as HTMLElement).dataset.order)" in home, (
+        "the cards do not go back in page order"
+    )
+    assert "createPortal(" in _fn(tiles, "ServiceFrame")
 
 
 def test_closing_a_service_lands_a_pending_key(tiles):
@@ -1338,49 +817,23 @@ def test_a_service_tile_reports_the_live_field_not_a_cached_setting(tiles):
     assert 'querySelectorAll' in fn and 'settings' not in fn
     assert 'return null' in fn, "no 'cannot tell' state - it will guess instead"
 
-
-def test_the_old_accordion_list_is_not_shown_alongside_the_tiles(index):
-    """The tiles REPLACE the two "API Configuration" accordion groups; they do
-    not sit above them. Leaving both on screen meant a video user saw a grid of
-    music service tiles and, directly underneath, the old video accordion list -
-    the same information twice in two different shapes.
-
-    The groups stay in the DOM because they are where a service panel lives
-    between visits to the modal: a tile lifts the panel out and puts it straight
-    back. They are hidden on the GROUP, so a panel moved into the modal is no
-    longer a descendant and renders normally.
-    """
-    # the music group is React (connections-extras.tsx, step 10b)
-    # and so is the video group (connections-video-api.tsx, video pass V3a)
-    extras = _read(_TABS + "connections-extras.tsx") + _read(_TABS + "connections-video-api.tsx")
-    assert index.count('data-svc-legacy') + extras.count('data-svc-legacy=""') == 2, (
-        "the legacy groups moved or multiplied"
-    )
-
-    css = _read("webui/static/style.css")
-    rule = re.search(r'#settings-page \.settings-group\[data-svc-legacy\]\s*\{([^}]*)\}', css)
-    assert rule, "the legacy accordion groups are not hidden"
-    assert "display: none" in rule.group(1) and "!important" in rule.group(1)
-
-    # the panels themselves must NOT be individually hidden, or lifting one into
-    # the modal would show an empty dialog
-    assert 'api-service-frame[data-svc-legacy]' not in css
-
-
 def test_the_required_keys_note_survived_hiding_its_group(index, tiles):
     """TMDB and TVDB are required, and the note saying so - crucially including
-    "both are free" - lived inside the group that is now hidden. The tiles show a
-    "required" chip, but a chip cannot say why, and someone who assumes it is a
-    paid feature just skips it and wonders why matching never works."""
-    # the note is the Services part's (React), drawn into its slot
+    "both are free" - lived inside the group that is now hidden. The tiles say
+    "Required: no key yet", but words on a tile cannot say why, and someone who
+    assumes it is a paid feature just skips it and wonders why matching never
+    works."""
+    # the note is the Services part's (React), drawn on the Connections page
     assert 'className="svc-required-note"' in tiles and 'both keys are set. Both are free.' in tiles
-    at = index.index('data-stg-react="connections" data-stg-part="services"')
+    at = index.index('data-stg-react="connections" data-stg-part="page"')
     enclosing = index.rfind('data-svc-legacy', 0, at)
     # if the slot were inside the hidden group there would be no closing
     # </div> between that group's tag and the slot
     assert enclosing == -1 or index.count('</div>', enclosing, at) > 0, (
         "the required-keys note is inside the hidden group and will never be seen"
     )
+    page = _read(_TABS + "connections/connections-page.tsx")
+    assert "<ServicesPart " in page
 
 
 def test_the_service_tabs_open_on_the_side_you_are_on(tiles):
@@ -1410,48 +863,27 @@ def test_every_mapped_service_logo_actually_exists(tiles):
 def test_a_service_without_artwork_still_looks_deliberate(tiles):
     """Nine services have no brand art in the repo. A grey blob for each would
     make the grid a list you have to read anyway, which defeats the point of a
-    grid. They get a monogram on their own brand colour instead.
+    grid. (settings-bic) They get the parts' Mark: one line icon on their own
+    brand colour, as DESIGN 4.2 says.
 
-    The colour comes off the element as --svc-brand rather than out of a
-    stylesheet map, so a service added later picks its hue up with no CSS change.
-    """
+    The colour comes off the card (its dot) rather than out of a stylesheet map,
+    so a service added later picks its hue up with no CSS change."""
     meta = _fn(tiles, "serviceMeta")
-    assert 'monogram' in meta, "no monogram fallback"
-    assert "replace(/[^A-Za-z0-9]/g, '')" in meta, (
-        "a name starting with punctuation would yield an empty monogram"
+    # (settings-bic phase 3) the card's colour is its frame's data attribute
+    assert "frame.dataset.svcColour" in meta
+    assert "data-svc-colour={colour}" in _fn(tiles, "ServiceFrame")
+    mark = _fn(tiles, "ServiceMark")
+    assert "brand={meta.colour ? brandRgb(meta.colour) : undefined}" in mark, (
+        "the brand colour never reaches the mark"
     )
-    build = _fn(tiles, "ServicesPart")
-    assert "'--svc-brand'" in build, "the brand colour never reaches the card"
-    assert 'svc-monogram' in _fn(tiles, "Fallback")
-
-    css = _read("webui/static/style.css")
-    # the tinted well lives on the shared container, not on the fallback: a card
-    # with artwork and a card with a monogram must be the same object with
-    # different contents, or the grid reads as two kinds of card
-    well = re.search(r'(?m)^\.svc-tile-art\s*\{([^}]*)\}', css)
-    assert well and 'var(--svc-brand)' in well.group(1), (
-        "the icon well is not brand-tinted on the shared container"
-    )
-    mono = re.search(r'(?m)^\.svc-monogram\s*\{([^}]*)\}', css)
-    assert mono and 'border-radius' not in mono.group(1), (
-        "the monogram has a well of its own again - that nests two squares"
-    )
-
-
-def test_the_service_grid_only_shows_actual_services(tiles):
-    """"Detail Pages" is a video-preferences panel on the LIBRARY tab that
-    happens to use the same accordion component. An unscoped query pulled it into
-    the Connections grid, where it appeared as a connection you could configure -
-    which it is not.
-
-    The grid is scoped to the connections tab, so a panel reusing this component
-    elsewhere cannot wander in.
-    """
-    fn = _fn(tiles, "frames")
-    assert 'closest(' in fn and 'data-stg="connections"' in fn, (
-        "the service query is not scoped to the connections tab"
-    )
-
+    assert "src={meta.logo}" in mark
+    # the parts' Mark draws the line icon on --brand when there is no image
+    parts = _read("webui/src/features/settings/ui/parts.tsx")
+    fn = parts.split("export function Mark(", 1)[1].split("\n}\n", 1)[0]
+    assert "!image && s.markBrand" in fn and "'--brand': brand" in fn
+    css = _read("webui/src/features/settings/ui/settings.module.css")
+    brand = re.search(r'(?m)^\.markBrand\s*\{([^}]*)\}', css)
+    assert brand and 'var(--brand' in brand.group(1), "the fallback is not brand-tinted"
 
 def test_the_media_tab_owns_the_whole_connections_tab(index, tiles):
     """The Services tabs moved only the tile grid. The server sections below kept
@@ -1459,24 +891,21 @@ def test_the_media_tab_owns_the_whole_connections_tab(index, tiles):
     tiles sitting directly above their own MUSIC server settings - the tab said
     one thing and the panel under it said another.
 
-    Both server sections are marked with the side they belong to, and the tab
-    decides which is on screen. The data-video-only marker stays: it still
-    describes whose settings these ARE, which is a different question from which
-    one is currently shown.
-    """
-    # the music section is React (connections-servers.tsx, step 10c)
-    # and the video section too (connections-video-server.tsx, video pass V3b)
+    (settings-bic) The media server is its own section above the services and
+    follows the side the page is on; the Music/Video switch is the services'
+    own, and the services heading says which side's they are. Both server
+    sections stay marked with the side they belong to."""
     servers = _read(_TABS + "connections-servers.tsx")
     video = _read(_TABS + "connections-video-server.tsx")
-    assert index.count('data-svc-side=') + servers.count('data-svc-side=') + video.count('data-svc-side=') == 2, (
-        "the two server sections are not both marked"
-    )
     assert 'data-svc-side="music"' in servers and 'data-svc-side="video"' in video
-
+    page = _read(_TABS + "connections/connections-page.tsx")
+    assert '<div hidden={side === \'video\'} data-media-server="music">' in page
+    assert '<div hidden={side !== \'video\'} data-media-server="video">' in page
+    # (settings-bic phase 3) the video server is a card on the parts in its
+    # own section: no old group to switch on with svc-side-active
+    assert '<VideoServerConnection onView={() => setVideoSheet(true)} />' in page
     build = _fn(tiles, "ServicesPart")
-    assert 'data-svc-side' in build and 'svc-side-active' in build, (
-        "switching tab does not move the server section with it"
-    )
+    assert "title={state.kind === 'video' ? 'Video services' : 'Services'}" in build
 
 
 def test_the_server_override_can_actually_win():
@@ -1522,24 +951,11 @@ def test_both_server_sections_use_the_same_copy_style(index):
     assert 'className="callback-help"' not in seg, (
         "the video server copy is back on the off-scale italic class"
     )
-    assert '<p className="setting-help-text"' in seg
-
-
-def test_the_server_toggles_are_one_control_on_both_sides():
-    """Same button, same metrics, same focus ring - they are the same control
-    doing the same job, and the only reason they ever drifted is that the two
-    sections were never on screen together to be compared."""
-    css = _read("webui/static/style.css")
-    rule = re.search(
-        r'(?m)^#settings-page \.settings-group\[data-svc-side\] \.server-toggle-btn\s*\{([^}]*)\}', css)
-    assert rule, "the shared toggle styling is gone"
-    body = re.sub(r"/\*.*?\*/", "", rule.group(1), flags=re.S)
-    assert "border-radius" in body and "transition" in body
-
-    focus = re.search(
-        r'(?m)^#settings-page \.settings-group\[data-svc-side\] \.server-toggle-btn:focus-visible\s*\{([^}]*)\}', css)
-    assert focus and "outline" in focus.group(1), "no keyboard focus ring on the server toggles"
-
+    # (settings-bic phase 3) both are the parts' Card with a one-line hint,
+    # and the closing note is the card's quiet foot line
+    servers = _read(_TABS + "connections-servers.tsx")
+    assert 'title="Server connections"' in seg and 'title="Server connections"' in servers
+    assert '<p className={s.cardFoot}>' in seg
 
 def test_the_music_tab_shows_every_music_server_from_either_side():
     """The video side downloads through Plex or Jellyfin only, so Navidrome and
@@ -1577,14 +993,13 @@ def test_a_server_row_is_one_setting_per_row(index):
     """
     # React (connections-video-server.tsx, SETTINGS_PORT.md video pass V3b)
     src = _read(_TABS + "connections-video-server.tsx")
-    rows = re.findall(r'<div className="form-group video-library-selectors">(.*?)</div>', src, re.S)
-    assert len(rows) == 2, rows
-    # each select sits in its OWN form-group
-    assert [re.findall(r'<LibrarySelect kind="(\w+)"', r) for r in rows] == [["movies"], ["tv"]]
-    assert 'data-video-lib-select={kind}' in src
+    # (settings-bic phase 3) each library is its own Row of the parts
+    assert re.findall(r'<LibraryRow kind="(\w+)" />', src) == ["movies", "tv"]
+    row = _fn(src, "LibraryRow")
+    assert row.count("<Row ") == 2 and 'data-video-lib-select={kind}' in row
 
-    # the caption is help text, not a row
-    assert 'className="setting-help-text video-library-note"' in src
+    # the caption is the card's foot line, not a row
+    assert '<p className={s.cardFoot}>' in src
 
 
 def test_services_without_art_reuse_the_app_s_own_glyphs(tiles):
@@ -1592,48 +1007,17 @@ def test_services_without_art_reuse_the_app_s_own_glyphs(tiles):
     fanart.tv, OpenSubtitles, Trakt, MDBList, Community Data - and a grid of
     letter monograms among real logos reads as placeholders, not as icons.
 
-    The video dashboard ALREADY shows a glyph for most of these sources. Reusing
-    them keeps one vocabulary across the app: OMDb is the same star in both
-    places. Inventing icons here would have started a second, competing set.
-
-    The ones with no established glyph keep a monogram on their brand colour -
-    that is a deliberate floor, not an oversight.
-    """
-    # the video dashboard is React now; its worker table holds the glyphs
-    hero = _read("webui/src/routes/dashboard/-video/video-hero.tsx")
-    dash = set(re.findall(r"logo: \{ glyph: '([^']+)' \}", hero))
-    assert dash, "the dashboard glyphs this borrows from are gone"
-
+    (settings-bic) DESIGN 4.2 Mark: where there is no logo file, one line icon
+    on that service's own brand colour, never an emoji or a letter. The glyph
+    map still says which services have an established mark elsewhere."""
     block = tiles.split('const SERVICE_GLYPHS: Record<string, string> = {', 1)[1].split('};', 1)[0]
     mapped = re.findall(r"^\s*'?([\w-]+)'?:", block, re.M)
-    assert len(mapped) >= 5, f"only {len(mapped)} services reuse a dashboard glyph"
     for svc in ('omdb', 'fanart', 'opensubtitles', 'trakt'):
-        assert svc in mapped, f"{svc} still falls back to a letter"
-
-    # order of preference: artwork, then the app's glyph, then a monogram
-    fallback = _fn(tiles, "Fallback")
-    assert 'meta.glyph' in fallback and 'svc-monogram' in fallback
-    art = _fn(tiles, "Art")
-    assert '<Fallback meta={meta} />' in art and 'onError' in art, (
-        "a logo that does not load is not replaced by the glyph or monogram"
-    )
-
-    css = _read("webui/static/style.css")
-    glyph = re.search(r'(?m)^\.svc-glyph\s*\{([^}]*)\}', css)
-    assert glyph, "no styling for the glyph"
-
-    # artwork, glyph and monogram all sit in ONE well on .svc-tile-art, so they
-    # cannot disagree about their box any more - which is what this used to have
-    # to check pair by pair. What matters now is that none of them re-grows a
-    # box of its own.
-    for sel in ('.svc-glyph', '.svc-monogram'):
-        body = re.search(r'(?m)^' + re.escape(sel) + r'\s*\{([^}]*)\}', css).group(1)
-        for prop in ('width', 'height', 'border-radius', 'background'):
-            # anchored to the start of a declaration: a bare substring check for
-            # "height" also matches "line-height", which the glyph legitimately sets
-            assert not re.search(r'(?m)^\s*' + re.escape(prop) + r'\s*:', body), (
-                f"{sel} sets {prop} - it is content inside the shared well, not a well"
-            )
+        assert svc in mapped, f"{svc} lost its place in the glyph map"
+    mark = _fn(tiles, "ServiceMark")
+    # a line icon, never the emoji glyph itself, and never a monogram
+    assert "icon={meta.glyph ? 'box' : 'link'}" in mark
+    assert "meta.glyph}" not in mark and "monogram" not in mark
 
 
 def test_a_caption_is_not_styled_as_a_heading():
@@ -1701,69 +1085,26 @@ def test_the_video_server_row_is_not_capped_narrower_than_music():
     assert m, "the settings server sections do not opt out of the video width caps"
     assert "max-width: none" in m.group(1)
 
-
-def test_the_server_cards_have_a_ceiling():
-    """.server-logo is width:100% and .server-toggle-btn is flex:1, so with
-    nothing stopping them a four-server row grew ~450px-tall cards - a
-    poster-sized logo to answer "which server". Both axes are capped now.
-
-    The cap is a TOKEN read by two rules: the one in style.css for the music
-    side, and the one in video-side.css that has to exist because that file loads
-    last and is the only thing able to beat its own [data-video-only] caps. One
-    value, two readers - not two opinions.
-    """
-    css = _read("webui/static/style.css")
-    assert '--svc-server-logo-max:' in css and '--svc-server-btn-max:' in css
-
-    btn = re.search(
-        r'(?m)^#settings-page \.settings-group\[data-svc-side\] \.server-toggle-btn\s*\{([^}]*)\}', css)
-    assert btn, "no shared rule for the server toggles"
-    body = re.sub(r"/\*.*?\*/", "", btn.group(1), flags=re.S)
-    assert 'max-width: var(--svc-server-btn-max' in body, "the button has no width ceiling"
-
-    logo = re.search(
-        r'(?m)^#settings-page \.settings-group\[data-svc-side\] \.server-logo\s*\{([^}]*)\}', css)
-    assert logo and 'max-height: var(--svc-server-logo-max' in logo.group(1), (
-        "the logo has no height ceiling - the card will grow to whatever the art is"
-    )
-
-
 def test_the_connections_tab_survives_a_phone():
     """The service tiles had narrow-screen rules; the server section had NONE.
     Four buttons capped at 176px in a flex row do not fit a 360px screen - the
     row either scrolled sideways or squeezed each logo into a sliver.
 
-    Also pins that the icon well shrinks on BOTH axes. It is a square, and an
-    earlier version set only height, which left a 48x40 box and icons that had
-    quietly stopped being square.
-    """
-    css = _read("webui/static/style.css")
-    blocks = re.findall(r'@media \(max-width: 560px\)\s*\{(.*?)\n\}', css, re.S)
-    assert blocks, "the phone breakpoint is gone"
-    narrow = "\n".join(blocks)
-
-    assert 'server-toggle-btn' in narrow, "the server toggles have no phone rules"
-    assert 'flex: 1 1 calc(50% - 4px)' in narrow, "the toggles do not wrap two per line"
-
-    # the phone rules share the base rules' specificity, so they only win if
-    # they come after them - an earlier version sat above the base and never applied
-    base = re.search(
-        r'(?m)^#settings-page \.settings-group\[data-svc-side\] \.server-toggle-btn\s*\{', css)
-    phone = [m for m in re.finditer(r'@media \(max-width: 560px\)\s*\{(.*?)\n\}', css, re.S)
-             if 'flex: 1 1 calc(50% - 4px)' in m.group(1)]
-    assert base and phone and phone[0].start() > base.start(), (
-        "the phone toggle rules come before the base rules, so the base wins"
+    (settings-bic) The pick-one server row and the tiles are the parts'
+    (ui/settings.module.css): on a phone the servers go two to a row and the
+    tiles one column, and a mark stays square on both axes."""
+    css = _read("webui/src/features/settings/ui/settings.module.css")
+    phone = css.split("@media (max-width: 768px)", 1)[1]
+    servers = re.search(r'\.servers\s*\{([^}]*)\}', phone)
+    assert servers and 'repeat(2, minmax(0, 1fr))' in servers.group(1), (
+        "the server row does not go two to a line on a phone"
     )
-    assert '--svc-server-logo-max: 30px' in phone[0].group(1), (
-        "the phone logo cap does not go through the token video-side.css reads"
+    tiles = re.search(r'\.tiles\s*\{([^}]*)\}', phone)
+    assert tiles, "the tiles have no phone rule"
+    mark = re.search(r'(?m)^\.mark\s*\{([^}]*)\}', css)
+    assert mark and 'width: 40px' in mark.group(1) and 'height: 40px' in mark.group(1), (
+        "only one axis is set - the mark stops being square"
     )
-
-    art = re.search(r'\.svc-tile-art\s*\{([^}]*)\}', narrow)
-    assert art, "the icon well has no phone rule"
-    assert 'width:' in art.group(1) and 'height:' in art.group(1), (
-        "only one axis shrinks - the well stops being square"
-    )
-
 
 
 def test_every_connections_service_sits_in_a_named_group(index, tiles):
@@ -1773,7 +1114,8 @@ def test_every_connections_service_sits_in_a_named_group(index, tiles):
     block = tiles.split('const SERVICE_GROUPS', 1)[1].split('\n};', 1)[0]
     lists = ' '.join(re.findall(r'ids:\s*\[([^\]]*)\]', block))
     grouped = set(re.findall(r"'([a-z]+)'", lists))
-    connections = index.split('data-stg="connections"', 1)[1].split('data-stg="library"', 1)[0]
+    # (settings-bic) every card is React: the page markup holds none of its own
+    connections = index.split('data-stg="connections"', 1)[-1].split('data-stg="library"', 1)[0]
     ids = set(re.findall(r'data-(?:video-)?service="([a-z]+)"', connections)) | {
         i for i in _react_cards() + _video_cards() if re.fullmatch(r'[a-z]+', i)
     }

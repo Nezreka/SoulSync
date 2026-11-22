@@ -509,6 +509,12 @@ class Track:
     # the mirrored playlist's own id when ``id`` is what discovery matched
     # instead. saved manual matches are filed under it (#1289)
     source_track_id: Optional[str] = None
+    # the mirrored playlist's own artist names when ``artists`` is what
+    # discovery matched instead: itunes can say "Δέσποινα Βανδή" where the
+    # playlist and the library say "Despina Vandi" (#2222)
+    source_artists: Optional[List[str]] = None
+    # the recording's isrc when the matched source gave one (#2222)
+    isrc: Optional[str] = None
 
     @classmethod
     def from_spotify_track(cls, track_data: Dict[str, Any]) -> 'Track':

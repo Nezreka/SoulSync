@@ -92,7 +92,7 @@ Artist descriptions, artist art, album info.
 ### 🟣 Deezer
 Deezer IDs, genres, album metadata.
 ### 🎵 JioSaavn
-Track, album, and artist metadata — strong for Indian and Bollywood catalogs (experimental, enable under Settings → Advanced).
+Track, album, and artist metadata — strong for Indian and Bollywood catalogs (experimental, enable under Settings → System → Developer).
 ### 🟢 Spotify
 Artist genres, follower counts, images, album release dates, track previews.
 ### 🌸 iTunes
@@ -240,6 +240,7 @@ The view switch offers two more ways in: **Albums** is a lens on the findings th
 
 - **Dismiss** means "don't raise this again". Every dismiss shows an **Undo** for a few seconds, and dismissed findings can be reopened from the Dismissed view.
 - **A tag finding shows both sides.** Open a Library Re-tag row and each tag is listed with the value in the file now beside the value Apply Tags would write. Nothing outside that list is touched.
+- **Blank tags fill themselves.** With **Fill empty tags automatically** on (the default while post-processing writes tags), SoulSync fills a tag finding's blanks on its own within a few minutes and closes it. What it filled is on the **Filled Tags** card, with **Undo**. Findings for files it leaves alone (hand-tagged, locked, read-only, still downloading) stay here.
 - **Fix All on tag findings only fills.** It writes the tags that are blank in a file and never replaces a tag the file already has. A finding where the file and the library disagree stays open: open it, read both values, then **Apply Tags** or **Dismiss**. If a finding had both, the blanks are filled, the rest waits, and the row shows what was filled with **Undo the fill**. The prompt has a second answer, **Also replace tags that differ**, which asks again before it runs.
 - **A different genre or year is not a fault.** The file is as often right as the catalogue (a remaster's year, "Electro" against "Electronic"), so those two are shown on the finding as "differs from the library. Left as it is" and are not filed on their own. To have them filed, turn on **Flag genre differences** or **Flag year differences** in the Library Re-tag job's settings. A blank genre or year is always filed.
 - **Fixed tag findings keep their history.** In the Fixed view, a re-tag row shows every tag as it was and as it is now. **Undo changes** writes the old values back and reopens the finding. A cover that was embedded stays, since the old picture is not kept.
@@ -255,7 +256,7 @@ The background repair worker runs automated jobs on configurable schedules, incl
 |-----|--------------|
 | Track Number Repair | Fixes missing/incorrect track numbers against official tracklists |
 | Orphan File Detector | Finds audio files in your music library folder not tracked in the database |
-| Dead File Cleaner | Finds library entries whose file no longer exists. Each one has **Re-download** and **Remove**: Remove takes the track out of your library and downloads nothing, for files you moved away on purpose (select several and use Fix Selected to remove them together). When most of the library is missing at once it stops and marks nothing, because that is usually a disconnected drive. If you deleted the files yourself, answer the **Unreachable Library** finding with **They are gone** and each file is listed under Dead Files |
+| Dead File Cleaner | Finds library entries whose file no longer exists. Each one has **Re-download** and **Remove**: Remove takes the track out of your library and downloads nothing, for files you moved away on purpose (select several and use Fix Selected to remove them together). When most of the library is missing at once it stops and marks nothing, because that is usually a disconnected drive; the log then shows one path it can't reach and where those paths point (a folder that is there means deleted files, an old folder outside your library points at Tools > Update File Locations). A smaller group of missing files is marked even when they sit together (one artist, one import), as long as their library folder is there. If you deleted the files yourself, answer the **Unreachable Library** finding with **They are gone** and each file is listed under Dead Files |
 | AcoustID Scanner | Batch audio fingerprint verification across your library. Needs an AcoustID key. With **Enable Download Verification** off in Settings, new downloads are not checked and the scheduled scan is skipped, but **Run Now** still scans, so you can check your library when you choose |
 | Cover Art Filler | Checks the three places an album's cover lives: saved in the library, inside the audio files (when embedding art is on) and as cover.jpg in the album folder (when cover.jpg downloads are on). A cover file counts by any of its usual names in any case (cover, folder, front, album, albumart as jpg, jpeg, png or webp), and a Disc 1 / CD2 folder counts the one in the release folder above it. A saved library cover that no longer loads counts as missing. Each finding shows all three plus the cover a source found and which source, an empty box where there is none. Every box with a picture can be picked: the best one there is starts picked (the library's, then the folder's, then the one inside the files, then the found one), and the finding lists what **Apply Art** writes in each place with that pick. Apply Art puts the picked cover where one is missing; a cover you have is kept, except that picking the found cover over the library's replaces the library one. A finding for an album that has every cover closes on the next scan. **Change cover** on a finding opens the album page's picker to choose any cover instead. An artist photo is only suggested for an artist with none, and only applied with **Use for artist** |
 | Metadata Gap Filler | Completes missing fields (genre, year, …) from connected services |
@@ -274,7 +275,7 @@ The background repair worker runs automated jobs on configurable schedules, incl
 | Expired Download Cleaner | Proposes deleting watchlist/playlist-sourced downloads past their per-origin retention window; always keeps actively-mirrored playlists, watched artists, and tracks you've played more than once (optional auto-delete). Also cleans up after **Rotating** playlists: a song the playlist downloaded goes once it has left the playlist, with no retention window |
 | Genre Tag Cleanup | Re-applies the strict genre whitelist to genres stored before it was enabled — one finding per artist/album with off-whitelist genres |
 | Genre Enrichment | Adds conservatively translated genres from stored metadata and caches |
-| Library Re-tag | Rewrites tags + cover art from a fresh metadata-source pull, in place (no moves, renames, or re-matching) — dry-run findings show old → new for every track |
+| Library Re-tag | Rewrites tags + cover art from a fresh metadata-source pull, in place (no moves, renames, or re-matching) — dry-run findings show old → new for every track. An import fills the tags it left blank from what the library knows (genre, disc total) before it checks the file, so a fresh import doesn't file blanks as findings. Blanks the library learns about later are filled the same way while **Fill empty tags automatically** allows it (see Filled Tags), and only what differs is filed. Two spellings of one artist ("The" and case aside) are one credit |
 | Live/Commentary Cleaner | Finds live performances, commentary, interviews, and spoken-word content in the library |
 | Lossy Converter | Finds lossless files with no lossy copy alongside and converts them with ffmpeg using your configured codec/bitrate |
 | Lyrics Filler | Finds tracks with no \`.lrc\` sidecar, checks LRClib so instrumentals are never flagged, then fetches synced lyrics — writes the \`.lrc\` and embeds them |
@@ -362,7 +363,7 @@ The **Stats** page has two tabs, **Listening** and **Library**, with the tab, ra
 
 ![Listening Stats page with play totals, activity chart, and top artists](dash-stats.jpg)
 
-Listening data requires **Listening Stats** to be enabled in Settings → Library ("Enable listening stats collection from media server") — it polls play history from your active media server (Plex, Jellyfin, or Navidrome).
+Listening data requires **Listening Stats** to be enabled in Settings → Discovery → Recommendations ("Collect listening stats from your media server") — it polls play history from your active media server (Plex, Jellyfin, or Navidrome).
 
 ## Header controls
 
@@ -370,6 +371,23 @@ Listening data requires **Listening Stats** to be enabled in Settings → Librar
 - **Range picker** (Listening tab only) — **7 Days**, **30 Days**, **12 Months**, **All Time**.
 - **Sync now** — pulls the latest play history now; the line beside it reads "Last synced: …" or "Not synced yet". (In standalone mode this is replaced by the note "Standalone mode: manual sync unavailable".)
 - **Last.fm and ListenBrainz** — each service you've configured shows its account, a status (**Checking settings…**, **Configure in Settings**, **Syncing…**, **Sync failed**, **Sync paused**, **Up to date**, **Ready to sync**), a **Sync now** / **Resume sync** / **Retry sync** link, and a progress bar while syncing. Hover the status for detail like "Last synced … · next check in …".
+- **Import Spotify history**: brings in your Spotify streaming history from Spotify's privacy export. See below.
+
+## Import your Spotify history
+
+Ask Spotify for your data (Spotify account page → Privacy settings → Download your data). **Account data** arrives in a few days and covers the last year; **Extended streaming history** takes longer and covers every year you've used Spotify. Either works, and so does both.
+
+On the Stats page click **Import Spotify history**, then drop the zip Spotify sent (or the \`StreamingHistory_music\`, \`Streaming_History_Audio\` or \`endsong\` json files inside it) and click **Import**.
+
+- The file is read in your browser. Only music plays are sent to SoulSync, as plain rows (time, song, artist, album, Spotify track id). Nothing else in the export leaves your device.
+- Left out: plays under 30 seconds, podcasts, audiobooks and videos, and anything you played in a Spotify **private session**.
+- Each play lands in your own listening history as its own source, with its Spotify track id, so it matches the exact song in your library when the library knows that id (otherwise by title and artist).
+- A play ListenBrainz or Last.fm already brought in (Spotify scrobbled it there) is linked to that play, not added twice. Importing the same export again adds nothing.
+- **Count these plays in Stats and Your Year** is on by default. Turn it off to keep the history for your mixes and recommendations only: Daily Mixes, Repeat Rewind, Discover recommendations and stations still use it, while Stats, Your Year, the dashboard's week and the artist page leave it out. You can switch it later in the same window.
+- When it's done you get a summary, e.g. "12,340 plays from 2015 to 2024, 3,100 artists, 9,800 matched to your library", plus what was left out.
+- **Remove this import** takes every play it added back out. Plays from ListenBrainz or Last.fm stay.
+
+The admin's import goes into the shared listening history. Anyone else's goes into their own: importing makes your listening history yours, like connecting your own ListenBrainz does, so your stats and mixes read it and nobody else's do. Who can see it follows **Share my listening** like the rest of your history. Importing needs **Listening stats** in the profile's permissions.
 
 ## Listening tab
 
@@ -399,10 +417,24 @@ No data yet? You'll see 📊 **"No Listening Data Yet"** — enable Listening St
 5. **Top artists countdown** — ranked rows with art, name, plays.
 6. **The albums you lived in** — up to 4 album cards; click one to play it.
 7. **On repeat** — your top track with plays, first-played and most-recent dates.
-8. **Discoveries** — up to 8 artists whose very first play in your history landed inside this year.
-9. **When you listened** — your biggest day and most-likely hour.
-10. **Share card** — build a shareable year card: themes (midnight/ink/sunset/paper), layouts, up to 5 stats, toggleable runners-up and artwork.
+8. **Your sound** — your top genre and its share of what you played, with the next four under it. Genres come from your library's artists.
+9. **Discoveries** — up to 8 artists whose very first play in your history landed inside this year.
+10. **Your longest streak** — the most days in a row with music, and when it ran.
+11. **Your biggest day** — the day you played the most, how long, and who you played most that day.
+12. **Every day of it** — a calendar of the whole year, one square a day, darker the more you played.
+13. **When you listened** — the hour you press play most.
+14. **Share card** — build a shareable year card: themes (midnight/ink/sunset/paper), layouts, up to 5 stats, toggleable runners-up and artwork.
 :::
+
+**Your soundtrack.** The story plays your most played songs of the year that you own, in full through the player, each one starting a third of the way in and fading into the next after about 40 seconds. It starts by itself only when nothing else is playing; otherwise press **Play your soundtrack** at the top. **Mute** silences it without stopping, and closing the story fades it out (a song you started yourself is left playing).
+
+**Save your year as a playlist.** On the last slide, pick **Top 50** or **Top 100** and **Save as playlist**. It makes a playlist called **Your 2026** (the year of the story) under your playlists. Saving again updates the same playlist instead of making another one, and a renamed one keeps your name.
+
+**Save video.** Next to Save image, **Save video** records the story as a short video ending on your card, in the card's size and theme. It records in real time (about half a minute), as mp4 where your browser can and webm otherwise, with your soundtrack in it when it's playing.
+
+**December.** From 1 December to 15 January the dashboard shows **Your 2026 is ready** with a button into the story, and you get one note in your notifications. Hide the banner with **×**; it stays hidden until next year. Each profile has its own.
+
+The story counts the same plays as the rest of Stats: a private session never shows up in it.
 
 ## Library tab (not range-scoped)
 
@@ -444,7 +476,7 @@ Downloads are grouped into **batches** — one triggered download job (album syn
 - Old rows collapse into **"Earlier (N)"**; same-album history folds to one line; past 12 items a "Show N more" fold appears.
 - **Recent History** fold with a **Download History** button for the full download+import history.
 
-Status chips filter the view: **All / Active / Completed / Queued / Failed**.
+Status chips filter the view: **All / Active / Completed / Queued / Failed / Upgrades**. A quality upgrade (a download that replaces a file you already have) says so on its row: "Replacing MP3 320" while it's being found, "MP3 320 → FLAC" once the new file is in. **Upgrades** shows just those, whatever their status. On the artist page, a track whose upgrade is already on its way shows **↑ queued**, and the album's Upgrade button counts how many are queued.
 
 ## Clients tab — download-client management
 
@@ -478,6 +510,12 @@ Bulk: **✔ Approve all**, **🧹 Clean orphaned** (removes dead log rows whose 
 Files that **failed** verification and were **not** imported. Trigger badges: **DURATION / INTEGRITY**, **ACOUSTID MISMATCH**, **ACOUSTID UNVERIFIED**, **BIT DEPTH FILTER**. Alternative rejected candidates for the same track fold behind "▾ N more"; **🗑 Delete all N** clears a whole candidate group.
 
 Per-row: Play, Compare, Audit, **✔ Approve** (re-imports this exact file into the library, marked human-verified — nothing is renamed), **⤴ Recover** (legacy sidecars without embedded context go back to Staging for manual import), **🗑 Delete** (permanent).
+
+Quarantine clears itself of noise:
+
+- **Near-misses**: when a track's later candidate downloads fine, the files it quarantined on the way leave Review on their own. They go to the 🗑 Deleted recycle bin as "Near-miss, cleared from Review", so **↩ Restore** puts one back in Review. Turn it off with **Clear near-misses once the track downloads** in Settings > Downloads > Retry Logic.
+- **Automatic quality upgrades** never send anything to Review: if no candidate verifies, the file you already have stays and the rejected ones go to the recycle bin. An upgrade you start yourself still lands in Review like any download.
+- **Auto-reject old items** (off by default): set **Auto-reject Review items older than (days)** in the same place and older entries move to the recycle bin as "Review item expired".
 
 > [!TIP]
 > Lots of **DURATION** quarantines that turn out to be the right song? Raise **Duration tolerance** in Settings > Library > Post-Processing so future downloads with the same small drift go straight through.
@@ -620,6 +658,53 @@ Rules: each file is read once, read-only — nothing is written back to disk. On
 :::
 
 The button shows **Starting…** then **Scanning…** (disabled while busy) — there is no stop button, and a second run while one is active is rejected. No admin gate.
+`
+        },
+        {
+            id: 'dash-tool-filled-tags',
+            title: 'Filled Tags',
+            lede: 'The blank tags SoulSync filled from your library on its own, and how to undo them.',
+            body: `
+When the library learns something after a download (enrichment finds a genre, a media server sync brings a year, an edition gives a track total), the file's tags don't change by themselves. With **Fill empty tags automatically** on (Settings → Library → Post-Processing), SoulSync writes it into the tags the file left blank, so you don't get a Library Re-tag finding per file to apply.
+
+| Setting | What it writes |
+|---|---|
+| **Fill empty tags only** (the default while post-processing writes tags) | A tag that is blank in the file and known to the library: title, artist, album artist, album, year, genre, track and disc numbers and totals. A cover only when the file has none and the album already has one in your library. A tag the file has is never replaced |
+| **Fill and update** | Also replaces tags that differ from the library, the same write as applying the finding. A genre or year difference stays alone unless **Flag genre differences** / **Flag year differences** is on |
+| **Off** | Nothing. Blanks are filed as Library Re-tag findings, as before. An import does not fill blanks either |
+
+With post-processing off, nothing is filled whatever the setting says.
+
+**When it runs.** The Library Re-tag job fills while it compares, and files a finding only for what is left. Between jobs, the repair worker works through the open tag findings in small batches every ten minutes, never while a job or a library scan is running. **Fill Now** on the card starts a pass right away.
+
+**What it leaves alone** (the finding stays for you): hand-tagged files and every file of their album, albums or artists locked for tags, files in the download, staging, torrent or usenet download folders (where a seeding torrent's data lives), files changed in the last ten minutes or being written by something else, files SoulSync can't write (a read-only mount), findings you dismissed, and any write whose audio check fails (then nothing is written at all).
+
+**No loops.** SoulSync fills a tag in a file at most once. If you or another tagger clears it afterwards, it stays cleared; if you change it, your value stays.
+
+## The card
+
+The **Filled Tags** card (Tools → Metadata & Cache, admins only) shows how many tags were filled this week and the setting. Each run is listed (on its own, or a Library Re-tag run): **Show** lists its files with every tag before and after, **Undo** on a file or on the run puts the blanks back. A tag that was changed since the fill keeps its new value, and a cover the fill added is taken out again. What you undo is never filled again: it comes back as a Library Re-tag finding for you to decide. The Re-tag job's own **Auto apply** writes are listed and undone here too.
+`
+        },
+        {
+            id: 'dash-tool-file-locations',
+            title: 'Update File Locations',
+            lede: 'Moved your music library folder? Point the library at where the files are now.',
+            body: `
+The **Update File Locations** card (Tools → Database & Scanning, admins only) is for after you move the music library folder, for example from \`/app/Transfer\` to \`/music\` in Settings and in your docker-compose mount. Files keep playing after a move, but the library still names the old folder in the File column, Edit Track, findings and rename previews until this runs.
+
+::: steps
+1. Click **Check Locations**. Every record is read, nothing is written. The card lists each folder that moved with a count, like "12,340 files: /app/Transfer → /music", and what it would leave alone and why.
+2. Untick any folder pair you don't want, then click **Update N files** and confirm. It runs in the background with a progress bar and a **Stop** button; a stopped run picks up where it left off next time.
+3. Every run is listed under the buttons with an **Undo**.
+:::
+
+## What gets updated
+
+A record moves only when its file is not where it says, the file is found in exactly one place by the same path under one of your library folders (the music library folder or a music path under Settings → Library → Folders, never the download folder), and it is the same size the library recorded. Anything else is left alone: not found anywhere, found in two places, a different size, no size recorded, or a path some other record already holds. Files are never moved or touched, and the path your media server reports for a file is never changed.
+
+> [!NOTE]
+> A library scan (Refresh & Scan, Full Refresh, Deep Scan) does the same on its own, with one more rule: the old folder has to be gone or empty. If it still has files in it, the scan leaves the records for you to check here. Those runs show up on the card too and can be undone the same way.
 `
         },
         {

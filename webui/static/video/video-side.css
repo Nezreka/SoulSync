@@ -114,6 +114,51 @@ html[data-sidebar="collapsed"] .side-toggle-btn .side-toggle-icon {
     height: 16px;
 }
 
+/* ── The way into the player, under the toggle ─────────────────────────── */
+.open-player {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin-top: 8px;
+    padding: 8px 10px;
+    border: 1px solid var(--white-a07);
+    border-radius: 11px;
+    background: var(--white-a03);
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-decoration: none;
+    transition: color var(--dur-base) ease, background var(--dur-base) ease, border-color var(--dur-base) ease;
+}
+.open-player:hover,
+.open-player:focus-visible {
+    border-color: rgba(var(--accent-rgb), 0.45);
+    background: rgba(var(--accent-rgb), 0.12);
+    color: var(--text-primary);
+}
+.open-player-icon {
+    width: 13px;
+    height: 13px;
+    flex: none;
+    color: rgb(var(--accent-rgb));
+}
+html[data-sidebar="collapsed"] .open-player {
+    width: 46px;
+    margin-left: auto;
+    margin-right: auto;
+    padding: 9px 0;
+    border-radius: 13px;
+}
+html[data-sidebar="collapsed"] .open-player-label {
+    display: none;
+}
+html[data-sidebar="collapsed"] .open-player-icon {
+    width: 15px;
+    height: 15px;
+}
+
 /* ── Nav swap: music nav vs video nav ──────────────────────────────────── */
 /* The video nav reuses .sidebar-nav layout (same class) — only visibility
    differs. Hidden by default (music side); shown when data-side="video". */
@@ -5054,6 +5099,29 @@ body[data-side="video"] #gsearch-aura {
 .vms-query-btn { flex-shrink: 0; padding: 8px 16px; border-radius: var(--radius-md); border: 1px solid var(--white-a12);
     background: var(--white-a10); color: var(--text-1); font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
 .vms-query-btn:hover { background: var(--white-a14); }
+/* a show's scope: whole series, a season, or one episode (#2233) */
+.vms-scopes { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
+.vms-seg { display: inline-flex; padding: 3px; gap: 2px; border-radius: var(--radius-pill);
+    background: var(--white-a06); border: 1px solid var(--white-a10); }
+.vms-seg-btn { border: 0; background: none; color: var(--white-a70); font: inherit; font-size: 12.5px; font-weight: 700;
+    padding: 6px 14px; min-height: 32px; border-radius: var(--radius-pill); cursor: pointer;
+    transition: background var(--dur-fast), color var(--dur-fast); }
+.vms-seg-btn:hover { color: var(--text-1); background: var(--white-a06); }
+.vms-seg-btn[aria-pressed="true"] { color: var(--text-1); background: rgba(var(--accent-rgb), 0.28);
+    box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.55); }
+.vms-seg-btn:focus-visible, .vms-scope-sel:focus-visible { outline: 2px solid var(--white-a50); outline-offset: 2px; }
+.vms-scope-sel { appearance: none; -webkit-appearance: none; max-width: 100%; min-height: 34px; padding: 6px 30px 6px 12px;
+    border-radius: var(--radius-pill); border: 1px solid var(--white-a12); color: var(--text-1);
+    font: inherit; font-size: 12.5px; font-weight: 700; cursor: pointer;
+    background: var(--white-a08) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23fff' stroke-width='1.6' fill='none' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat right 11px center; }
+.vms-scope-sel:hover { background-color: var(--white-a14); }
+.vms-scope-sel[hidden] { display: none; }
+.vms-scope-sel option { background: var(--bg-raised); color: var(--text-1); }
+@media (max-width: 620px) {
+    .vms-seg { display: flex; width: 100%; }
+    .vms-seg-btn { flex: 1 1 0; padding: 8px 6px; min-height: 40px; }
+    .vms-scope-sel { flex: 1 1 0; min-width: 0; min-height: 40px; }
+}
 /* the title's quality profile picker (Get + Manual search) */
 .vdl-prof { display: inline-flex; align-items: center; gap: 8px; padding: 3px 4px 3px 12px;
     border-radius: var(--radius-pill); background: var(--white-a06); border: 1px solid var(--white-a12); }
@@ -5086,6 +5154,12 @@ body[data-side="video"] #gsearch-aura {
 .vdl-pack .vdl-r-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .vdl-pack-meta { font-size: 12px; font-weight: 600; color: var(--white-a55); white-space: nowrap; flex: 0 0 auto; }
 .vdl-pack-get { flex: 0 0 auto; }
+/* on a phone the name keeps its own line; what it covers and GET PACK wrap under it */
+@media (max-width: 620px) {
+    .vdl-pack .vdl-pack-head { flex-wrap: wrap; row-gap: 8px; }
+    .vdl-pack .vdl-r-title { flex: 1 1 calc(100% - 110px); }
+    .vdl-pack .vdl-pack-get { margin-left: auto; }
+}
 .vdl-pack-list {
     display: none; padding: 4px 12px 12px 30px; flex-direction: column; gap: 3px;
     border-top: 1px solid var(--white-a05);
@@ -5095,6 +5169,16 @@ body[data-side="video"] #gsearch-aura {
 .vdl-pack-ep-tag { flex: 0 0 auto; width: 54px; font-weight: 700; color: rgb(var(--accent-light-rgb)); font-family: ui-monospace, monospace; }
 .vdl-pack-ep-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--white-a70); }
 .vdl-pack-ep-sz { flex: 0 0 auto; color: var(--white-a40); font-variant-numeric: tabular-nums; }
+/* what a result covers that you already have (#2233) */
+.vdl-pack-ep--have .vdl-pack-ep-name { color: var(--white-a45); }
+.vdl-pack-ep-have { flex: 0 0 auto; font-size: 10.5px; font-weight: 700; color: rgb(var(--success-strong-rgb)); }
+.vdl-cover { flex: 0 0 auto; font-size: 10.5px; font-weight: 800; letter-spacing: 0.02em; white-space: nowrap;
+    padding: 2px 8px; border-radius: var(--radius-pill); color: var(--white-a70);
+    background: var(--white-a06); border: 1px solid var(--white-a10); }
+.vdl-cover--some { color: rgb(var(--warning-strong-rgb)); border-color: rgba(var(--warning-strong-rgb), 0.4); }
+.vdl-cover--all { color: rgb(var(--success-strong-rgb)); border-color: rgba(var(--success-strong-rgb), 0.4); }
+.vdl-r-ep { flex: 0 0 auto; font-size: 11px; font-weight: 800; font-family: ui-monospace, monospace;
+    color: rgb(var(--accent-light-rgb)); }
 
 /* Manual override — let the user GET a below-profile release they picked themselves.
    Brighten the otherwise-dimmed rejected card when it carries an override button,

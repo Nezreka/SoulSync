@@ -68,6 +68,18 @@ def wishlist_album_query(track_data) -> Dict[str, str]:
     }
 
 
+def _album_titles_of_wishlist(conn, album: str, artist: str) -> list:
+    """The track titles the wishlist holds for this album, any profile."""
+    titles = []
+    for name, data in conn.execute(
+            "SELECT json_extract(spotify_data, '$.name'), spotify_data FROM wishlist_tracks"
+            " WHERE json_extract(spotify_data, '$.album.name') = ?", (album,)):
+        query = wishlist_album_query(data)
+        if query['artist'].casefold() == (artist or '').casefold() and name:
+            titles.append(name)
+    return titles
+
+
 class MusicBrainzWorker:
     """Background worker for enriching library with MusicBrainz IDs"""
 
@@ -92,6 +104,10 @@ class MusicBrainzWorker:
             'pending': 0,
             'errors': 0
         }
+
+        # (album, artist) -> (time, (group, unread)): the rows of one wishlist
+        # album share one track-list check (_match_wishlist_album)
+        self._wishlist_verdicts: Dict[tuple, tuple] = {}
 
         # Retry configuration
         self.retry_days = 30  # Retry 'not_found' items after 30 days
@@ -372,6 +388,65 @@ class MusicBrainzWorker:
             if conn:
                 conn.close()
 
+    def _match_wishlist_album(self, item: Dict[str, Any]):
+        """(release group, unread) for a wishlist row's album.
+
+        The album is matched by title and artist, then checked against the
+        wishlist's own track titles: a band's self-titled records share title
+        and artist, and a record too new for MusicBrainz would otherwise get an
+        older namesake's group, and with it the wrong download. ``unread``:
+        the track list could not be fetched, so nothing was decided. Sibling
+        rows of one album share the answer for an hour.
+        """
+        album, artist = item['album'], item.get('artist') or ''
+        key = (album.casefold(), artist.casefold())
+        verdicts = self._wishlist_verdicts
+        cached = verdicts.get(key)
+        if cached and time.time() - cached[0] < 3600:
+            return cached[1]
+        try:
+            conn = self.db._get_connection()
+            try:
+                titles = _album_titles_of_wishlist(conn, album, artist)
+            finally:
+                conn.close()
+        except Exception as e:  # noqa: BLE001 - the check is a guard, not the match
+            logger.debug(f"Wishlist titles for '{album}' not read: {e}")
+            titles = []
+        checkable = len({t.strip().casefold() for t in titles} - {''}) >= 2
+        result = self.mb_service.match_release(album, artist or None,
+                                               track_titles=titles if checkable else None)
+        group, unread = None, False
+        if result and result.get('mbid'):
+            carries = (self.mb_service.release_carries_tracks(result['mbid'], titles)
+                       if checkable else True)
+            if carries is False:
+                # the best-scored namesake is not it: one of the others may be
+                try:
+                    other = self.mb_service.release_carrying_wishlist_tracks(
+                        album, artist or None, titles, skip=(result['mbid'],))
+                except Exception as exc:  # noqa: BLE001 - a lookup failure is "ask later"
+                    logger.debug(f"Wishlist album '{album}': other releases not read: {exc}")
+                    carries = None
+                else:
+                    if other and other.get('id'):
+                        result = {'mbid': other['id'],
+                                  'release_group_mbid': self.mb_service.release_group_of(other)}
+                        carries = True
+            if carries is None:
+                unread = True
+            elif carries:
+                group = (result.get('release_group_mbid')
+                         or self.mb_service.lookup_release_group(result['mbid']))
+            else:
+                logger.info(f"Wishlist album '{album}' by '{artist}': MusicBrainz release "
+                            f"{result['mbid']} has other tracks, not matched")
+        if not unread:
+            if len(verdicts) > 500:
+                verdicts.clear()
+            verdicts[key] = (time.time(), (group, unread))
+        return group, unread
+
     def _process_item(self, item: Dict[str, Any]):
         """Process a single item (artist, album, or track)"""
         try:
@@ -510,15 +585,18 @@ class MusicBrainzWorker:
 
             elif item_type == 'wishlist':
                 group = item.get('release_group') or None
+                unread = False
                 if not group and item.get('album'):
-                    result = self.mb_service.match_release(item['album'], item.get('artist') or None)
-                    if result and result.get('mbid'):
-                        group = (result.get('release_group_mbid')
-                                 or self.mb_service.lookup_release_group(result['mbid']))
+                    group, unread = self._match_wishlist_album(item)
                 if group:
                     self.mb_service.update_wishlist_release_group(item_id, group, 'matched')
                     self.stats['matched'] += 1
                     logger.info(f"Matched wishlist album '{item_name}' → release group {group}")
+                elif unread:
+                    # the track list could not be read: ask again later
+                    # rather than calling the album unknown
+                    self.mb_service.update_wishlist_release_group(item_id, None, 'error')
+                    self.stats['errors'] += 1
                 else:
                     self.mb_service.update_wishlist_release_group(item_id, None, 'not_found')
                     self.stats['not_found'] += 1

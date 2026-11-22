@@ -81,7 +81,7 @@ export function AlbumUpgradeModal({
           ) : (
             <ul className="album-upgrade-list">
               {tracks.map((track) => {
-                const hit = track.quality_upgrade as { current?: string };
+                const hit = track.quality_upgrade as { current?: string; queued?: boolean };
                 return (
                   <li className="album-upgrade-row" key={String(track.id)}>
                     <div className="album-upgrade-text">
@@ -89,7 +89,12 @@ export function AlbumUpgradeModal({
                         {typeof track.title === 'string' && track.title ? track.title : 'Unknown'}
                       </span>
                       {hit.current ? (
-                        <span className="album-upgrade-current">now {hit.current}</span>
+                        <span className="album-upgrade-current">
+                          now {hit.current}
+                          {hit.queued ? ' · upgrade queued' : ''}
+                        </span>
+                      ) : hit.queued ? (
+                        <span className="album-upgrade-current">upgrade queued</span>
                       ) : null}
                     </div>
                     <button

@@ -107,13 +107,17 @@ def _artist_id_sql(service: str) -> Optional[str]:
     return None
 
 
-def _credited(artists: Optional[Iterable[Any]]) -> list:
+def _credited(artists: Optional[Iterable[Any]], service: Optional[str] = None) -> list:
     """``[(provider id, name)]`` in credit order, artists without an id left out."""
+    from core.various_artists_ids import is_various_artists_id
     out = []
     for artist in artists or []:
         if isinstance(artist, dict):
             pid = artist.get("id")
-            if pid not in (None, ""):
+            # "Various Artists" is no artist: left out like one with no id,
+            # or every compilation went to whoever held its id (#2229)
+            if pid not in (None, "") and not is_various_artists_id(
+                    pid, artist.get("source") or service):
                 out.append((str(pid), str(artist.get("name") or "")))
     return out
 
@@ -132,8 +136,27 @@ def _store_snapshot(conn: Any, entity_type: str, entity_id: int, service: str,
          for position, (pid, name) in enumerate(credited)])
 
 
+def _credited_already(conn: Any, entity_type: str, entity_id: int, artist_id: int) -> bool:
+    """another artist row with this artist's name, spelling aside, is
+    already credited here: "The Chamber Orchestra Of London" from the source
+    beside the "Chamber Orchestra of London" the files named. a second credit
+    is the same orchestra twice in ARTIST (#2217)"""
+    from core.text.normalize import credit_name_key
+    junction, column = (("lib2_track_artists", "track_id") if entity_type == "track"
+                        else ("lib2_album_artists", "album_id"))
+    row = conn.execute("SELECT name FROM lib2_artists WHERE id=?", (int(artist_id),)).fetchone()
+    key = credit_name_key(row[0] if row else "")
+    if not key:
+        return False
+    return any(credit_name_key(name) == key for (name,) in conn.execute(
+        f"SELECT a.name FROM {junction} j JOIN lib2_artists a ON a.id = j.artist_id"
+        f" WHERE j.{column} = ? AND j.artist_id <> ?", (int(entity_id), int(artist_id))))
+
+
 def _insert_credit(conn: Any, entity_type: str, entity_id: int, artist_id: int,
                    position: int) -> int:
+    if _credited_already(conn, entity_type, entity_id, artist_id):
+        return 0
     if entity_type == "track":
         cur = conn.execute(
             "INSERT OR IGNORE INTO lib2_track_artists(track_id, artist_id, role, position)"
@@ -298,7 +321,7 @@ def link_credited_artists(conn: Any, entity_type: str, entity_id: int,
     sql = _artist_id_sql(service)
     if not sql or entity_type not in ("track", "album") or artists is None:
         return 0
-    credited = _credited(artists)
+    credited = _credited(artists, service)
     drop_source_credits(conn, entity_type, entity_id, service,
                         keep_provider_ids=[pid for pid, _name in credited])
     if len(credited) < 2:

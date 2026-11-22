@@ -100,6 +100,13 @@ ENV SOULSYNC_COMMIT_SHA=${COMMIT_SHA}
 COPY --chown=soulsync:soulsync . .
 COPY --chown=soulsync:soulsync --from=webui-builder /app/webui/static/dist /app/webui/static/dist
 
+# .br and .gz copies of every web UI text file (js, css, svg, json...), at max
+# compression: the server sends them to browsers that take them, so the first
+# load is about a fifth of the bytes. it runs by path and imports nothing from
+# the app. the server ignores any copy older than its file, so a copy can't go
+# stale
+RUN python core/webui/precompress.py /app/webui/static
+
 # Create runtime mount-point directories the app expects to exist.
 # NOTE: /app/data is for database FILES, /app/database is the Python package
 # NOTE: /app/Staging is required even though most users bind-mount it —
@@ -173,6 +180,8 @@ ENV VIDEO_DATABASE_PATH=/app/data/video_library.db
 # Same for audiobooks: without it database/audiobooks.db lived in the image
 # layer and every recreate wiped the audiobook wishlist and download history.
 ENV AUDIOBOOK_DATABASE_PATH=/app/data/audiobooks.db
+# And the player's own db (watch progress, favorite channels, home layouts).
+ENV PLAYER_DATABASE_PATH=/app/data/player.db
 ENV PUID=1000
 ENV PGID=1000
 ENV UMASK=022

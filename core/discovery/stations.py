@@ -60,8 +60,10 @@ def build_stations(database, profile_id: int = 1,
 
     top = database.get_top_artists('all', 120, profile_id=profile_id) or []
     recent = database.get_top_artists('30d', 120, profile_id=profile_id) or []
+    from core.discovery.favorite_seeds import favorite_artist_units
     seeds = build_recency_weighted_seeds(
-        top, {a['name']: a.get('play_count', 0) for a in recent})
+        top, {a['name']: a.get('play_count', 0) for a in recent},
+        favorites=favorite_artist_units(database, profile_id))
     # more / less like this reorders which of your artists become stations
     from core.discovery.feedback import Taste
     seeds = Taste.load(database, profile_id).adjust_seeds(seeds)

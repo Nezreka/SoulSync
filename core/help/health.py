@@ -429,6 +429,44 @@ def check_path_mapping() -> List[dict]:
     return out
 
 
+# below this share of the media server's music readable, Help warns
+COVERAGE_WARN_PCT = 50.0
+# a server this small isn't worth a warning
+COVERAGE_MIN_TRACKS = 50
+_SERVER_NAMES = {"plex": "Plex", "jellyfin": "Jellyfin", "navidrome": "Navidrome", "emby": "Emby"}
+
+
+def check_library_coverage() -> List[dict]:
+    """how much of the media server's music SoulSync can read directly. the
+    provider hands back the last coverage check (core.library.coverage),
+    running one when there is none recent"""
+    fn = _p("library_coverage")
+    if fn is None:
+        return []
+    result = fn() or {}
+    total = int(result.get("total_tracks") or 0)
+    pct = result.get("reachable_pct")
+    if not result.get("server") or pct is None or total < COVERAGE_MIN_TRACKS:
+        return []
+    name = _SERVER_NAMES.get(result["server"], str(result["server"]).title())
+    fix = [fix_settings("Open library folders", "library-folders")]
+    if pct >= COVERAGE_WARN_PCT:
+        return [finding("paths.library_coverage", "ok", "paths",
+                        f"SoulSync can read {pct:.0f}% of your {name} music")]
+    missing = [f for f in result.get("folders") or [] if f.get("status") != "covered"]
+    detail = (f"{name} has {total:,} tracks, and SoulSync can open about "
+              f"{int(result.get('reachable_tracks') or 0):,} of them itself. ")
+    if missing:
+        detail += (f"{len(missing)} of {name}'s music folders "
+                   f"{'is not a SoulSync library folder' if len(missing) == 1 else 'are not SoulSync library folders'}"
+                   " yet. Library folders shows each one and what it needs.")
+    else:
+        detail += "Library folders shows which files failed and why."
+    return [finding("paths.library_coverage", "warning", "paths",
+                    f"SoulSync can only read {pct:.0f}% of your {name} music", detail, fix,
+                    "lib-coverage")]
+
+
 def _video_settings() -> dict:
     fn = _p("video_settings")
     if fn is None:
@@ -604,6 +642,19 @@ def check_automations() -> List[dict]:
                     [fix_page("Open Automations", "/automations")], "wf-auto")]
 
 
+# ---------------------------------------------------------------- security
+def check_security() -> List[dict]:
+    """the auth proxy header is ignored without a trusted proxy list; an
+    install that set only the header must hear it, not just get a PIN screen"""
+    from core.security.auth_proxy import setup_problem
+    problem = setup_problem(_config_get)
+    if not problem:
+        return []
+    return [finding("security.auth_proxy_trusted", "warning", "security",
+                    "The auth proxy header is being ignored", problem,
+                    [fix_settings("Open Security settings", "security")], "prof-security")]
+
+
 # ---------------------------------------------------------------- setup + updates
 def check_setup() -> List[dict]:
     fn = _p("checklist")
@@ -650,11 +701,13 @@ def _plan() -> List[tuple]:
         ("download_clients", "download clients", check_download_clients, 2.0),
         ("paths", "folders", check_paths, 4.0),
         ("path_mapping", "path mapping", check_path_mapping, 4.0),
+        ("library_coverage", "library coverage", check_library_coverage, 8.0),
         ("disk", "free disk space", check_disk, 4.0),
         ("video", "the video side", check_video, 5.0),
         ("workers", "enrichment workers", check_workers, 2.0),
         ("review", "the review queue", check_review_queue, 4.0),
         ("automations", "automations", check_automations, 3.0),
+        ("security", "security settings", check_security, 2.0),
         ("setup", "setup", check_setup, 5.0),
         ("updates", "for updates", check_updates, 5.0),
     ]

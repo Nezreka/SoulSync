@@ -18,7 +18,7 @@ def _youtube(src: str) -> str:
 
 
 def _album_bundle(src: str) -> str:
-    """the album bundle CheckRow, from its id to the end of its props"""
+    """the album bundle switch, from its id to the end of its props"""
     panel = _youtube(src)
     start = panel.index('id="youtube-album-bundle"')
     return panel[start:panel.index('/>', start)]
@@ -26,17 +26,21 @@ def _album_bundle(src: str) -> str:
 
 def test_the_checkbox_sits_in_the_youtube_section_unchecked():
     panel = _youtube(PANEL)
-    # unchecked unless saved as on (a CheckRow renders a checkbox for this id)
+    # unchecked unless saved as on. a Switch (ui/parts.tsx) is a real
+    # <input type="checkbox">, so its id and checked are a tick box's
     assert "checked={d.youtube_album_bundle === true}" in _album_bundle(PANEL)
-    row = PANEL.split('function CheckRow(', 1)[1].split('\n}\n', 1)[0]
-    assert 'type="checkbox"' in row and 'id={id}' in row
+    switch = panel[:panel.index('id="youtube-album-bundle"')].rsplit('<', 1)[1]
+    assert switch.startswith('Switch')
+    parts = (ROOT / 'webui' / 'src' / 'features' / 'settings' / 'ui' / 'parts.tsx').read_text(encoding='utf-8')
+    fn = parts.split('export function Switch(', 1)[1].split('\n}\n', 1)[0]
+    assert 'type="checkbox"' in fn
     # same section as the other youtube download knobs
     assert panel.index('id="youtube-download-delay"') < panel.index('id="youtube-album-bundle"') \
         < panel.index('id="youtube-transcode"')
 
 
 def test_save_writes_it_under_download_source_where_the_album_flow_reads_it():
-    assert "store.set('download_source', 'youtube_album_bundle', checked)" in _album_bundle(PANEL)
+    assert "store.set('download_source', 'youtube_album_bundle', event.target.checked)" in _album_bundle(PANEL)
     # and the page save no longer writes it from a field that is not there
     assert "youtube_album_bundle" not in SETTINGS.split('async function saveSettings(', 1)[1]
 

@@ -117,6 +117,14 @@ TRIGGERS: list[dict] = [
      "description": "When Deezer takes an ARL again after a failure, or a new ARL signs in",
      "available": True, "scope": "music",
      "variables": ["user", "tier"]},
+    {"type": "soulseek_logged_out", "label": "Soulseek Logged Out", "icon": "x-circle",
+     "description": "When slskd loses its Soulseek login (a server ban, a reconnect). Soulseek downloads wait for it. Once per logout.",
+     "available": True, "scope": "music",
+     "variables": ["reason"]},
+    {"type": "soulseek_logged_in", "label": "Soulseek Logged Back In", "icon": "check-circle",
+     "description": "When slskd is logged in to Soulseek again after a logout, and waiting downloads resume",
+     "available": True, "scope": "music",
+     "variables": ["was_out_minutes"]},
     {"type": "wishlist_item_added", "label": "Wishlist Item Added", "icon": "plus-circle",
      "description": "When a track is added to wishlist", "available": True,
      "has_conditions": True, "condition_fields": ["artist", "title"],
@@ -713,7 +721,7 @@ _CATEGORY_RULES: list[tuple[str, tuple[str, ...]]] = [
     ("Playlists", ("playlist", "mirrored", "discover", "collections", "personalized",
                    # MetaSync's SIN charts arrive as playlists
                    "metasync")),
-    ("Downloads", ("download", "grab", "batch", "import", "rss", "seeding", "deezer_signin",
+    ("Downloads", ("download", "grab", "batch", "import", "rss", "seeding", "deezer_signin", "soulseek_logged",
                    "quarantine", "request", "search_and", "upgrade")),
     ("Library", ("scan", "database", "library", "enrich", "airing", "retag", "youtube", "issue",
                  # filling out albums you already own (#1711)

@@ -77,6 +77,7 @@ def test_rescue_is_wired_into_all_fetch_failure_branches():
     src = (_ROOT / "services" / "sync_service.py").read_text(encoding="utf-8",
                                                              errors="replace")
     # once for the lacks-ratingKey branch, once for the fetchItem exception,
-    # and once for the provider-ID match whose stored id went stale (#1885)
-    assert src.count("rescued = rescue_stale_plex_track(") == 3
+    # once for the provider-ID match whose stored id went stale (#1885), and
+    # once for a library row plex has no id for yet (#2235)
+    assert src.count("rescued = rescue_stale_plex_track(") == 4
     assert "[Stale-Key Rescue]" in src

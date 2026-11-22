@@ -343,6 +343,7 @@ function AdminAlbumActions({
   const [redownloadBusy, setRedownloadBusy] = useState(false);
   const [upgradingAlbum, setUpgradingAlbum] = useState(false);
   const upgradable = Number(album.upgradable_count) || 0;
+  const upgradeQueued = Number(album.upgrade_queued_count) || 0;
 
   const writeAllTags = () => {
     // writeAlbumTags (5449): only tracks that actually have a file.
@@ -448,14 +449,21 @@ function AdminAlbumActions({
         <button
           type="button"
           className="enhanced-upgrade-album-btn lib-btn"
-          title="Tracks on this album are below your quality profile. Find better copies."
+          title={
+            upgradeQueued
+              ? `Tracks on this album are below your quality profile. ${upgradeQueued} already on the Downloads page.`
+              : 'Tracks on this album are below your quality profile. Find better copies.'
+          }
           onClick={(e) => {
             e.stopPropagation();
             setUpgradingAlbum(true);
           }}
         >
           <span aria-hidden="true">↑</span>
-          <span>Upgrade {upgradable}</span>
+          <span>
+            Upgrade {upgradable}
+            {upgradeQueued ? ` · ${upgradeQueued} queued` : ''}
+          </span>
         </button>
       ) : null}
 

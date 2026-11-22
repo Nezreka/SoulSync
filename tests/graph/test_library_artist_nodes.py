@@ -115,9 +115,10 @@ def test_a_featured_credit_alone_is_not_a_library_artist(conn):
     """review 5 W3-TD-3: the 'artist' owned predicate also counts a featured
     credit on one owned track, so ~22k guest names became Taste Map nodes and
     dropped out of the Discovery Web's suggestions. a release of their own,
-    or leading most of a joint album (#2142), is what makes an artist the
-    library's. an album credit marked primary alone is not."""
-    _artist(conn, 'Topic')
+    or co-leading most of a joint album with its artist (#2142), is what
+    makes an artist the library's. an album credit marked primary alone is
+    not, and nor is leading a track on someone else's release alone."""
+    topic = _artist(conn, 'Topic')
     guest = _artist(conn, 'A7S', owned=False)
     joint = _artist(conn, 'Joint Act', owned=False)
     track = conn.execute("SELECT id FROM lib2_tracks LIMIT 1").fetchone()[0]
@@ -126,12 +127,23 @@ def test_a_featured_credit_alone_is_not_a_library_artist(conn):
                  "VALUES(?,?,'featured',1)", (track, guest))
     stray = _artist(conn, 'Stray Credit', owned=False)
     conn.execute("INSERT INTO lib2_track_artists(track_id, artist_id, role, position) "
-                 "VALUES(?,?,'primary',0)", (track, joint))
+                 "VALUES(?,?,'primary',0), (?,?,'primary',1)", (track, topic, track, joint))
+    # a track of someone else's release, led alone (#2142: Rampa on 16BL's mix)
+    lone = _artist(conn, 'Lone Lead', owned=False)
+    other = _artist(conn, 'Mix Host', owned=False)
+    mix = conn.execute("INSERT INTO lib2_albums(primary_artist_id, title) VALUES(?, 'Mix')",
+                       (other,)).lastrowid
+    mix_track = conn.execute("INSERT INTO lib2_tracks(album_id, title) VALUES(?, 'Cut')",
+                             (mix,)).lastrowid
+    conn.execute("INSERT INTO lib2_track_files(track_id, path, file_state) VALUES(?, ?, 'active')",
+                 (mix_track, "/music/Mix Host/Mix/cut.flac"))
+    conn.execute("INSERT INTO lib2_track_artists(track_id, artist_id, role, position) "
+                 "VALUES(?,?,'primary',0)", (mix_track, lone))
     conn.execute("INSERT INTO lib2_album_artists(album_id, artist_id, role) "
                  "VALUES(?,?,'primary')", (album, stray))
     conn.commit()
 
     owned, _meta, artists = load_library_artists(conn)
 
-    assert owned == {'topic', 'joint act'}
-    assert sorted(a[0] for a in artists) == ['Joint Act', 'Topic']
+    assert owned == {'topic', 'joint act', 'mix host'}
+    assert sorted(a[0] for a in artists) == ['Joint Act', 'Mix Host', 'Topic']

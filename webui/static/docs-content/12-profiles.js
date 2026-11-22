@@ -182,6 +182,7 @@ Movies and TV shows are separate, so a profile can have just one. A TV-only prof
 ## Music
 
 - **Music side**
+- **Use music apps**: listen from music apps paired in Settings > Devices. On for admins and members, off on the Kids template (see [Devices](#docs/devices))
 - **Music requests**: **Auto-approve**, **Require approval** or **Requests off**. With Require approval, what they add becomes a request (see [Requests](#docs/prof-requests)).
 - **Hide explicit music**: albums and tracks marked explicit are left out
 - **Allowed quality profiles** and **Default quality profile**: the music quality profiles they can pick
@@ -358,6 +359,15 @@ A profile's stats, Recently Played and recommendations read its own listening wh
 
 The card at the top of **My Account** says which one you are on.
 
+## Who sees your listening
+
+Your plays are yours. Two switches under **My Account → Your listening** (the admin has them too):
+
+- **Share my listening**: off for everyone, including profiles that existed before this switch. A **Blend** on Discover (a mix of what you and someone else play) is only made when you both have it on. The first time you open Made For You, Discover asks once; **Not now** stops the asking and leaves it off. With several people sharing, you get blends with the three whose taste is closest to yours (most artists in common).
+- **Private session**: while it's on, what you play in SoulSync's player isn't saved at all, so it never reaches your stats, mixes, blends or scrobbles. It turns itself off after 6 hours. Plays you make in a Plex, Jellyfin or Navidrome app are read from the server's own history, so those still count.
+
+Profiles without a listening source of their own all play into the shared history, so that history only counts as shared when **everyone** on it has Share my listening on. Profiles that are turned off don't count. Install-wide shelves (the seasonal Rewind) read the shared history plus the own history of people who share; your mix recipes only ever read your own plays.
+
 ## Your sidebar weather
 
 The weather line under your name shows your own town and its local time, never the admin's. Set it under **Profile & account → Sidebar weather**: type a town or ZIP and save. You can switch to °C and turn holiday decorations on or off there too. With no town set, you see no weather line. Admins set theirs in Settings → Appearance.
@@ -370,6 +380,8 @@ Your own plays can scrobble to your own accounts, from the moment you turn it on
 - **Last.fm**: **Sign in** under the Last.fm row. Writing scrobbles needs you to sign in to Last.fm once (reading them only needed your username). This needs the admin to have added a Last.fm API key and secret in Settings.
 
 Your plays never go to the admin's accounts, and the admin's never go to yours.
+
+When the web player starts a song, your accounts show it as **now playing**. A play is sent as soon as it counts as a scrobble (half the song or 4 minutes, whichever comes first) rather than in the next 5-minute batch; if a service is down, the batch tries again later.
 `
         },
         {
@@ -417,6 +429,14 @@ To turn it on you have to be signed in with OIDC yourself, and every profile tha
 Passwords aren't deleted. They just aren't used, and work again when the switch is off. The admin's password can't be removed while login mode is on, because it's the way back in.
 
 **If the provider is down:** set \`SOULSYNC_OIDC_ONLY_OVERRIDE=off\` on the container and restart. OIDC only is off while it's set (the saved setting stays on), so you can sign in with the admin password and fix things. An amber shield joins the buttons at the bottom right for admins as a reminder. Remove the variable and restart to turn OIDC only back on.
+
+## Auth proxy header
+
+Behind Authelia, Authentik or oauth2-proxy, Settings > Security > Reverse proxy > **Auth proxy user header** (for example \`Remote-User\`) lets someone the proxy already signed in skip the launch PIN.
+
+SoulSync only believes that header when the request comes straight from an address in **Trusted proxy addresses**: your proxy's IP or a range, like \`172.18.0.2\` or \`172.18.0.0/16\` (one per line or comma separated). It checks the address that really connected, never \`X-Forwarded-For\`, so nobody can fake their way onto the list.
+
+**The list starts empty, and an empty list means the header is ignored.** If you set the header before this list existed, people now get the PIN screen until you add the proxy's address; Help > Health shows a warning until you do. To find the address, check the proxy container's IP (\`docker inspect\`) or the Docker network's range.
 `
         },
         {
@@ -516,6 +536,114 @@ A profile that can only use the video side can't hide it, since it would have no
 Once **every** profile has Podcasts or Audiobooks hidden, an admin sees **Also pause its background jobs** under it. Paused, its scheduled checks and downloads stop. If anyone turns the part back on, they start again by themselves. **Run now** on the Automations page always works. The video side's jobs have their own switch on the video Automations page.
 
 First-run setup asks what SoulSync is for and starts you off with the rest hidden. A music-only install, for example, starts without podcasts, audiobooks and the video side. Profiles that existed before see a one-time card above **Customize** until they pick something (**Keep everything** counts).
+`
+        },
+        {
+            id: 'devices',
+            title: 'Devices: Listen Anywhere',
+            lede: 'Pair a phone, a car or a speaker app with a one-time code. Each device picks a profile and can only play.',
+            body: `
+**Settings > Devices** is where an admin pairs music apps with this server. It is for admins only.
+
+## Add a device
+
+1. Click **Add a device**. SoulSync shows a code like \`7KQ4-M2XD-9FHA-T3VB\` and a QR with the same thing in it.
+2. Type the code into the app, or scan the square. The code works **once**, for **10 minutes**. At most 20 codes wait at a time; cancel one you don't need under **Codes waiting to be used**.
+3. The app shows this server's **fingerprint** (12 characters). Check it matches the one under **This server** (and under Settings > System > Security). That is how you know it found this server and not another.
+4. The app asks which profile it is for. A profile with a PIN asks for it, and in login mode the profile's password is asked for. Wrong tries are slowed down the same way as signing in.
+
+A device that hasn't picked its profile yet shows as **No profile picked yet** with the time it has left. If nobody picks one within 15 minutes, it is dropped and needs a new code.
+
+The code is checked on this server, never stored as itself, and pairing only works over https or from your home network.
+
+## What a paired device can do
+
+It acts as the profile it picked, **only to listen**: browse the library, play, lyrics, artwork, scrobbles and play history, favorites, playlists and the queue. Never settings, downloads, people, API keys or anything for admins, even when the profile is an admin's. Every part of SoulSync a device can reach is on a short list; everything else turns it away.
+
+**Use music apps** is a permission (see [What each permission does](#docs/prof-permissions)). It is on for admins and members and off on the **Kids** template. A profile without it doesn't appear in the app's list, and turning it off stops a device that already picked that profile.
+
+## Unpairing
+
+- **Unpair** next to a device stops it at once.
+- **Sign out everywhere** on a profile, a new password, or turning the profile off unpairs that profile's devices too. Deleting a profile removes its devices.
+
+## Invite a person
+
+**Invite a person** at the bottom is the same list as **Settings > People > Invites**: a link someone opens to make their own profile, following the template you pick. It works once and runs out after the time you choose (a week unless you change it). They then sign in like anyone else and pair their own devices. Person invites never use device codes.
+`
+        },
+        {
+            id: 'devices-remote',
+            title: 'Reaching SoulSync From Outside',
+            lede: 'The addresses a device tries, and how to check the outside world can get in.',
+            body: `
+A paired device is given every address this server answers on, home ones first:
+
+- **Local**: found on their own. The address your browser is using, when it is a home one, and this machine's home-network addresses.
+- **Remote**: one address for outside your home. Type it under **This server** in Settings > Devices.
+- **Extra**: any others, one per line (a Tailscale name, say).
+
+## Ways in from outside
+
+SoulSync doesn't open anything on your router by itself. Pick one:
+
+- **Forward a port** on your router to this server, and put https in front of it (a reverse proxy with a certificate).
+- **Cloudflare Tunnel**: runs next to SoulSync, gives it an https address, no ports opened. Use the tunnel's address as the remote address.
+- **Tailscale**: your phone and this server on one private network. Add the server's Tailscale name as an extra address. Every device that listens needs Tailscale too.
+- **Your own domain** with a reverse proxy (Caddy, nginx, Traefik) and a certificate.
+
+> [!WARNING]
+> A remote address that starts with **http://** gets a loud warning. Over plain http, passwords, tokens and everything you play cross the internet readable by anyone on the way. Use https.
+
+## Check reachability
+
+**Check reachability** makes a one-time link on this server and fetches it through the remote address. An answer that carries the link's secret back proves the address leads to this very server. It runs from the server itself, so it can't prove the wider internet gets in: some routers loop their own public address back inside and some don't.
+
+So it also shows the same link as a QR. Turn wifi off on your phone and open it. The page then says **Reached from** the phone's address, and whether that was outside your network. The link works for 10 minutes.
+`
+        },
+        {
+            id: 'music-apps',
+            title: 'Music Apps',
+            lede: 'Play your library in a music app that speaks the Subsonic or OpenSubsonic API, as one profile.',
+            body: `
+Many music apps can play from a server that speaks the **Subsonic** or **OpenSubsonic** API. SoulSync speaks it at \`/rest\`, so those apps play straight from SoulSync. No app is required; use whichever you like.
+
+## Set one up
+
+1. Go to **Settings > Devices > Set up a music app** (admins only).
+2. Pick **whose music** it plays. Only profiles with **Use music apps** are listed (off on the Kids template; an admin can turn it on per profile).
+3. Give it a name (Phone, Car) and click **Set it up**.
+4. SoulSync shows the **server** address, the **username** (the profile's name), an **app password** and an **API key**, plus a QR with all of it. They are shown **once**. Copy them into the app now.
+
+How to add it in a few apps:
+
+- **Symfonium, Amperfy, play:Sub, Substreamer, DSub, Tempo**: add a server of the Subsonic kind, with the server, username and password.
+- **Feishin**: add a server, pick OpenSubsonic, then the server, username and password.
+- **Music Assistant**: add the Subsonic music provider with the server, username and password.
+- **Apps that take an API key**: paste the API key and leave the username and password empty.
+
+Away from home, use your remote address (see [Reaching SoulSync From Outside](#docs/devices-remote)).
+
+The app password is not the profile's password and only works for that one app. The profile's real password never works in a music app, and neither does an API key from Settings. Too many wrong passwords from one address are held off for a minute.
+
+The app shows up under **Paired devices**. **Unpair** it and it stops at once; set it up again for a new password.
+
+## What works
+
+- Browsing by artist, album, genre and folder, album lists (newest, A to Z, by artist, by year, by genre, random, most played, recently played, starred, top rated) and search, including apps that copy the whole library to the phone.
+- Playing and downloading for offline. When an app asks for a lower bitrate, songs are converted on the fly to **MP3** or **Opus** (pick which under **Convert to**; needs ffmpeg). Seeking works. **Songs converted at once** (4 by default) caps how many convert together; a song past that waits up to 20 seconds for its turn, then the app is told to try again. It never gets the bigger file instead, so an app on mobile data stays on mobile data sizes. An app that asks for the file as it is (or a bitrate the file already fits) always gets it straight away.
+- Cover art, lyrics (the file's own, a .lrc next to it, then LRCLib; synced lyrics stay synced), artist bios, similar songs and top songs.
+- **Starring** a song adds it to the profile's **Liked Songs**. Albums and artists can be starred and rated too. Starring a song the profile doesn't have adds it to the wishlist for a profile that may download, or makes a request for one that may only ask.
+- **Playlists**: the profile's own playlists can be made and edited in the app. Mirrored playlists and the Daily Mixes show up too, read-only.
+- **Plays** are recorded in SoulSync for that profile, the same as the web player: they feed Listening stats and mixes, and are scrobbled when the profile scrobbles. A **private session** keeps them out. What is playing now goes to Last.fm and ListenBrainz too.
+- The play queue is kept per app, so you can pick up where you left off.
+
+Each app only ever sees its own profile: that profile's library (its own library when it keeps one), its playlists, stars, ratings, queue and plays. A profile that hides explicit music doesn't see it in the app either. An app can only play: never settings, downloads, people or anything for admins.
+
+## Files SoulSync can't read
+
+SoulSync plays the files it can open. If your media server has music on drives SoulSync can't reach, those songs answer **SoulSync can't read this file** in the app. The best fix is a folder override (**Settings > Library > Folders**). Otherwise, under **Set up a music app**, turn on **Stream files SoulSync can't read through** your media server (Plex, Jellyfin or Navidrome; off by default, music only). SoulSync then plays those songs from the media server, marks them in the app (\`soulsyncStreamVia\`), and still records every play itself.
 `
         },
     ]

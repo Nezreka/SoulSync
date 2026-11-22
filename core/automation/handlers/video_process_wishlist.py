@@ -628,6 +628,13 @@ def search_context(item: Dict[str, Any], media_type: str) -> Dict[str, Any]:
     ids = {"tmdb_id": tmdb_id, "imdb_id": item.get("imdb_id")}
     if media_type != "movie":
         ids["tvdb_id"] = item.get("tvdb_id")
+    # a row with no imdb/tvdb id of its own takes TMDB's, the same ids the
+    # Get and Manual search modals search by (#2224)
+    if tmdb_id and any(not v for v in ids.values()):
+        tident = tmdb_identity(kind, tmdb_id)
+        for key in ids:
+            if not ids[key] and tident.get(key):
+                ids[key] = tident[key]
     ctx.update({k: v for k, v in ids.items() if v})
     return ctx
 

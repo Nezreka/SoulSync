@@ -15,7 +15,9 @@ admin can't see anyone else's plays anyway, which is the whole reason for this.
 
 from __future__ import annotations
 
-from typing import List, Optional
+import contextvars
+from contextlib import contextmanager
+from typing import FrozenSet, Iterator, List, Optional
 
 from utils.logging_config import get_logger
 
@@ -53,12 +55,19 @@ _JELLYFIN_OWNS_PILE = (
 )
 
 
+# a profile that imported its own history from a file (a spotify privacy
+# export) owns a pile too: those plays are that person's, never the admin's
+HISTORY_IMPORT_COLUMN = 'history_import_pile'
+
+
 def _owns_pile_sql(conn) -> str:
     """the "this profile has its own pile" condition, for the columns this
     schema has (an old one may not have the plex ones yet)"""
     cols = {r[1] for r in conn.execute("PRAGMA table_info(profiles)").fetchall()}
     parts = [_HAS_ACCOUNT]
     parts += [f"({c} IS NOT NULL AND {c} != '')" for c in MEDIA_ACCOUNT_COLUMNS if c in cols]
+    if HISTORY_IMPORT_COLUMN in cols:
+        parts.append(f"COALESCE({HISTORY_IMPORT_COLUMN}, 0) = 1")
     if 'jellyfin_user_id' in cols:
         parts.append(_JELLYFIN_OWNS_PILE)
     return " OR ".join(parts)
@@ -148,6 +157,67 @@ def owner_clause(owner: Optional[int], alias: str = "") -> str:
         owner_i = SHARED_OWNER
     prefix = f"{alias}." if alias else ""
     return f"+{prefix}profile_id = {owner_i}"
+
+
+# -- plays kept for taste only ----------------------------------------------
+
+# an imported spotify history can be kept out of stats and your year and only
+# feed taste (mixes, recommendations). its plays are ordinary history rows
+# under this source; a stats reader leaves them out for the piles that chose
+# taste only, every other reader sees them.
+TASTE_ONLY_SOURCE = 'spotify_export'
+TASTE_ONLY_TABLE = 'spotify_history_imports'
+
+_STATS_VIEW: contextvars.ContextVar = contextvars.ContextVar('listening_stats_view', default=None)
+
+
+def taste_only_owners(database) -> FrozenSet[int]:
+    """the piles whose imported spotify history is kept out of stats"""
+    conn = None
+    try:
+        conn = database._get_connection()
+        rows = conn.execute(
+            f"SELECT profile_id FROM {TASTE_ONLY_TABLE} WHERE include_in_stats = 0").fetchall()
+        return frozenset(int(r[0]) for r in rows)
+    except Exception as e:  # noqa: BLE001 - no table yet: nothing is taste only
+        logger.debug("taste-only piles lookup failed: %s", e)
+        return frozenset()
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+@contextmanager
+def stats_view(database) -> Iterator[None]:
+    """history read inside this is drawing stats (the stats page, its cache,
+    your year). a pile's taste-only plays stay out of it."""
+    token = _STATS_VIEW.set(taste_only_owners(database))
+    try:
+        yield
+    finally:
+        _STATS_VIEW.reset(token)
+
+
+def stats_exclusion_sql(owner: Optional[int], alias: str = "") -> str:
+    """" AND ..." that drops taste-only plays when a stats view is drawing
+    this pile, else ''. outside stats_view it is always ''."""
+    hidden = _STATS_VIEW.get()
+    if not hidden:
+        return ""
+    try:
+        owner_i = int(owner) if owner is not None else SHARED_OWNER
+    except (TypeError, ValueError):
+        owner_i = SHARED_OWNER
+    if owner_i not in hidden:
+        return ""
+    prefix = f"{alias}." if alias else ""
+    return f" AND {prefix}server_source != '{TASTE_ONLY_SOURCE}'"
+
+
+def stats_owner_clause(owner: Optional[int], alias: str = "") -> str:
+    """owner_clause for a stats reader: the pile, less its taste-only plays
+    while a stats view is on."""
+    return owner_clause(owner, alias) + stats_exclusion_sql(owner, alias)
 
 
 def play_duration_sql(alias: str = "") -> str:

@@ -2,12 +2,12 @@
   "legacy": {
     "hex": 3244,
     "rgbLiterals": 3868,
-    "important": 2069,
+    "important": 2068,
     "duplicateSelectors": 295
   },
   "modules": {
     "hex": 663,
-    "rgbLiterals": 625,
+    "rgbLiterals": 617,
     "important": 228
   },
   "distinctZIndexValues": 84,

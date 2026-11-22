@@ -328,6 +328,9 @@ NOT_A_SURFACE = {
     '/api/discover/popularity-backfill/cancel',  # backfill state, no rows
     '/api/discover/inbox/<int:item_id>/state',  # one success bool
     '/api/discover/inbox/dismiss-all',  # how many dismissed, no rows
+    '/api/discover/starter',  # the new-profile banner's state and your own picks
+    '/api/discover/starter/dismiss',  # one success bool
+    '/api/discover/starter/picks',  # your own picks echoed back, plus build progress
     '/api/discover/inbox/refresh',  # "started" ack for the background refresh
     # POST /api/discover/recipes returns a mix card, but mixes exclude blocked
     # artists at build time (skip_artist + blocked-fingerprint rebuild, pinned

@@ -557,7 +557,7 @@ def record_download_provenance(context: Dict[str, Any],
     try:
         from core.library2.autolink import link_download_into_library_v2
         linked_lib2_file_id = link_download_into_library_v2(
-            context, raise_on_error=require_library)
+            context, raise_on_error=require_library, fill_known_tags=True)
     except Exception as e:
         if require_library:
             raise RuntimeError(

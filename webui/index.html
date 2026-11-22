@@ -6,6 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>SoulSync - Music Sync & Manager</title>
     <meta name="soulsync-url-base" content="{{ request.script_root }}">
+    <meta name="soulsync-build" content="{{ soulsync_build }}">
     <script src="{{ url_for('static', filename='url-base.js', v=static_v) }}"></script>
     <!-- Collapsed sidebar (#1155). Has to run HERE, before the stylesheet
          resolves --sidebar-w, or the sidebar renders full width and snaps to the
@@ -19,6 +20,20 @@
                     document.documentElement.setAttribute('data-sidebar', 'collapsed');
                 }
             } catch (e) { /* localStorage blocked — full width, no harm */ }
+        })();
+    </script>
+    <!-- The player app (/player) paints over the manager, but only once the
+         React bundle has loaded and the shell knows the profile. Until then a
+         reload there (every profile switch is one) would flash the manager's
+         sidebar. Mark it before first paint; the rule below shows a dark
+         screen with the logo instead. The login, launch-PIN and profile
+         picker screens stay visible: they come first. -->
+    <script>
+        (function () {
+            try {
+                var path = window.SoulSyncURL ? window.SoulSyncURL.strip(location.pathname) : location.pathname;
+                if (/^\/player(\/|$)/.test(path)) document.documentElement.classList.add('ss-player-boot');
+            } catch (e) { /* no mark: the manager shows briefly, as before */ }
         })();
     </script>
     <!-- Console noise gate (#1210). The shipped UI makes ~1000 console.log
@@ -133,6 +148,25 @@
             --accent-rgb: {{ initial_accent_rgb }};
             --accent-light-rgb: {{ initial_accent_light_rgb }};
             --accent-neon-rgb: {{ initial_accent_neon_rgb }};
+        }
+    </style>
+    <style id="soulsync-player-boot">
+        html.ss-player-boot body { background: var(--bg-primary); }
+        /* opacity, not visibility: a child can set itself visible again (the
+           manager's nav does), but nothing inside can undo its parent's opacity.
+           the profile layers (a pin pad, a forgotten pin) open over the picker
+           and have to show too: hidden, a pin pad flashed and was gone */
+        html.ss-player-boot body > *:not([data-player-root]):not(#launch-pin-overlay):not(#login-overlay):not(#profile-picker-overlay):not(.pf-layer):not(#toast-container) {
+            opacity: 0;
+            pointer-events: none;
+        }
+        html.ss-player-boot body::after {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background: url("{{ url_for('static', filename='trans2.png') }}") center / 72px no-repeat;
+            opacity: 0.85;
+            pointer-events: none;
         }
     </style>
     <script>
@@ -333,6 +367,13 @@
                         <span>Video</span>
                     </button>
                 </div>
+                <!-- the player: watch and listen, a separate app (it has "Back to SoulSync") -->
+                <a class="open-player" href="{{ request.script_root }}/player" title="Open the player" data-tour="shell.open-player">
+                    <svg class="open-player-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                        <path d="M8 5.14v13.72a1 1 0 0 0 1.5.86l11.1-6.86a1 1 0 0 0 0-1.72L9.5 4.28A1 1 0 0 0 8 5.14z" />
+                    </svg>
+                    <span class="open-player-label">Open the player</span>
+                </a>
                 <div id="profile-indicator" class="profile-indicator" data-tour="shell.profile" style="display: none;">
                     <!-- opens the quick switch menu (init.js toggleProfileQuickSwitch) -->
                     <button type="button" id="profile-indicator-button" class="profile-indicator-main"

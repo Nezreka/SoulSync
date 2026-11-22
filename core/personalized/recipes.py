@@ -407,7 +407,10 @@ def library_pool(database, recipe: Recipe, profile_id: int, circle: Sequence[str
     """Owned tracks by the seeds' circle and/or in the genres, in the years;
     most-played first per artist, artists shuffled for the day."""
     from core.library2.sql_util import owned_sql
+    from core.listening_scope import listening_owner, owner_clause
     from core.metadata import normalize_image_url
+    # your own plays only: another person's listening never orders your mix
+    scope = owner_clause(listening_owner(database, profile_id), 'lh')
     with database._get_connection() as conn:
         cur = conn.cursor()
         # Library v2: the track's first credit, else the album's artist. Plays
@@ -418,7 +421,7 @@ def library_pool(database, recipe: Recipe, profile_id: int, circle: Sequence[str
             "COALESCE(credited.genres, ar.genres) AS artist_genres, "
             "al.title AS album, al.year, al.genres AS album_genres, "
             "COALESCE(al.image_url, ar.image_url) AS cover, "
-            "(SELECT COUNT(*) FROM listening_history lh WHERE lh.lib2_track_id = t.id) AS plays "
+            f"(SELECT COUNT(*) FROM listening_history lh WHERE lh.lib2_track_id = t.id AND {scope}) AS plays "
             "FROM lib2_tracks t JOIN lib2_albums al ON al.id = t.album_id "
             "JOIN lib2_artists ar ON ar.id = al.primary_artist_id "
             "LEFT JOIN lib2_artists credited ON credited.id = ("

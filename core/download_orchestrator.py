@@ -27,7 +27,7 @@ from utils.logging_config import get_logger
 from core.settings import config_manager
 from core.download_engine import DownloadEngine
 from core.download_plugins.registry import DownloadPluginRegistry, build_default_registry
-from core.download_plugins.types import TrackResult, AlbumResult, DownloadStatus
+from core.download_plugins.types import TrackResult, AlbumResult, DownloadStatus, track_candidates
 from core.quality.selection import load_search_mode
 from core.downloads.source_policy import resolve_source_policy
 from core.quality.source_map import quality_profile_context
@@ -139,10 +139,15 @@ class DownloadOrchestrator:
         # other source mirrors that path so files all land in one
         # tree. Sources without a `download_path` attribute (e.g.
         # Lidarr — pulls into Lidarr's own tree) silently skip.
-        new_path = Path(config_manager.get('soulseek.download_path', './downloads'))
+        soulseek_path = Path(config_manager.get('soulseek.download_path', './downloads'))
         for name, client in self.registry.all_plugins():
             if name == 'soulseek':
                 continue
+            # A source with a folder of its own (Lidarr's
+            # lidarr_download.download_path) keeps it.
+            own = getattr(client, 'own_download_path', None)
+            own_path = own() if callable(own) else None
+            new_path = Path(own_path) if own_path else soulseek_path
             if hasattr(client, 'download_path') and client.download_path != new_path:
                 client.download_path = new_path
                 try:
@@ -393,7 +398,8 @@ class DownloadOrchestrator:
 
         # Unpack tuple (tracks, albums) - defensive handling
         if isinstance(results, tuple):
-            tracks = results[0]
+            # files inside soulseek folder groups are candidates too (#2228)
+            tracks = track_candidates(results[0], results[1] if len(results) > 1 else None)
         else:
             tracks = results # Should not happen based on search() return type, but safe
 

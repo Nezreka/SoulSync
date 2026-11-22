@@ -1147,9 +1147,28 @@ def _fresh_provider_cache_and_lastfm_key(monkeypatch):
     monkeypatch.setattr(lastfm_fallback, "_deezer_get", lambda *a, **k: None)
     monkeypatch.setattr(listenbrainz_public, "_get", lambda *a, **k: None)
     monkeypatch.setattr(listenbrainz_public, "artist_mbid", lambda *a, **k: None)
+    # no saved listenbrainz token unless a test gives one; never the live
+    # settings or profiles
+    from core import listenbrainz_auth
+    listenbrainz_auth.reset()
+    monkeypatch.setattr(listenbrainz_auth, "_candidates", lambda: [])
     yield
+    listenbrainz_auth.reset()
     lastfm_client.reset_key_state()
     provider_cache.use_store(provider_cache.MemoryStore())
+
+
+@pytest.fixture(autouse=True)
+def _fresh_soulseek_session_and_koito_probe():
+    """the soulseek login state and the koito probe answers live per process.
+    each test starts logged-in-unknown with nothing probed: a chat test that
+    saw "logged out" must not park the next test's downloads."""
+    from core import listenbrainz_client, soulseek_session
+    soulseek_session._reset_for_tests()
+    listenbrainz_client._KOITO_SERVERS.clear()
+    yield
+    soulseek_session._reset_for_tests()
+    listenbrainz_client._KOITO_SERVERS.clear()
 
 
 @pytest.fixture(autouse=True)
@@ -1216,7 +1235,13 @@ def _fresh_fold_index():
     # one test's library must not name the next test's download
     from core.imports import library_names as _library_names
     _library_names.clear_cache()
+    # the library's other names for an artist (#2222) are read into a map
+    # kept per database; one test's artists must not answer the next one's
+    from core.library2 import artist_equivalence as _artist_equivalence
+    _artist_equivalence.clear_cache()
+    saved_equivalence_ttl, _artist_equivalence.INDEX_TTL = _artist_equivalence.INDEX_TTL, 0.0
     yield
+    _artist_equivalence.INDEX_TTL = saved_equivalence_ttl
     fold_index.CHECK_SECONDS = saved
     worker_queue.PROGRESS_SNAPSHOT_TTL = saved_ttl
     MusicDatabase._QUARANTINE_NAME_MAPS_TTL = saved_quarantine_ttl

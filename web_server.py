@@ -52,7 +52,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "3.6.8"
+_SOULSYNC_BASE_VERSION = "3.6.9"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -327,6 +327,13 @@ app.jinja_env.auto_reload = DEV_STATIC_NO_CACHE
 # / CSS doesn't require a server restart between edits.
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0 if DEV_STATIC_NO_CACHE else 31536000
 
+# brotli/gzip for pages, JSON and static text; never for streams, media,
+# downloads or ranges. registered first, so it runs after every other
+# after_request hook and sees the final body (core/http_compression.py).
+# SOULSYNC_COMPRESSION=0 turns it off.
+from core.http_compression import install as _install_compression
+_install_compression(app)
+
 _MIGRATION_BLOCKED_ENDPOINTS = frozenset({
     'start_download', 'start_matched_download', 'process_wishlist_api',
     'enriched_start', 'manual_start',
@@ -573,6 +580,13 @@ def _inject_static_cache_bust():
     return {'static_v': _get_static_v(), **_initial_appearance_context()}
 
 
+def _server_build_id():
+    """what this server serves: the version (with its commit) and the static
+    files' bust value. a tab whose page says something else is running old
+    JS, and the socket connect tells it so (webui/src/shell/build-check.ts)"""
+    return f"{SOULSYNC_VERSION}/{_get_static_v()}"
+
+
 @app.context_processor
 def _inject_soulsync_version():
     """Expose the version string to every Jinja template so the sidebar
@@ -580,7 +594,8 @@ def _inject_soulsync_version():
     edited at every release. The base version is the source of truth at
     `_SOULSYNC_BASE_VERSION`; bumping that single constant updates the UI
     everywhere it's rendered."""
-    return {'soulsync_version': SOULSYNC_VERSION, 'soulsync_base_version': _SOULSYNC_BASE_VERSION}
+    return {'soulsync_version': SOULSYNC_VERSION, 'soulsync_base_version': _SOULSYNC_BASE_VERSION,
+            'soulsync_build': _server_build_id()}
 
 
 @app.context_processor
@@ -632,6 +647,15 @@ app.config["SESSION_COOKIE_NAME"] = "soulsync_session"
 from core.security.reverse_proxy import apply_reverse_proxy_mode as _apply_reverse_proxy_mode
 if _apply_reverse_proxy_mode(app, config_manager.get):
     logger.info("[Security] Reverse-proxy mode ON: trusting X-Forwarded-* and Secure session cookie")
+# the auth proxy header only counts from security.auth_proxy_trusted; say so
+# loudly when the header is set without that list (it is ignored then)
+try:
+    from core.security.auth_proxy import setup_problem as _auth_proxy_problem
+    _proxy_problem = _auth_proxy_problem(config_manager.get)
+    if _proxy_problem:
+        logger.warning(f"[Security] {_proxy_problem}")
+except Exception as _proxy_exc:  # noqa: BLE001 - a log line never blocks startup
+    logger.debug(f"[Security] auth proxy setup check failed: {_proxy_exc}")
 
 # --- WebSocket (Socket.IO) Setup ---
 from core.socketio_cors import (
@@ -787,6 +811,116 @@ def _require_login_enabled():
         return _last_known_require_login
 
 
+# --- Paired devices (before_request hook) ---
+# Registered ahead of every other gate: a request with a device token is
+# answered here (core/connect/device_access.py). only routes that opt in
+# with @device_pick / @device_playback are reachable, and the login,
+# launch-PIN and profile gates below step aside for it (g.device_auth).
+def _device_refusal(status, code, words):
+    return jsonify({"success": False, "error": code, "message": words}), status
+
+
+@app.before_request
+def _device_token_gate():
+    from core.connect.device_access import OK, decide, device_access, request_token
+    token = request_token(request.headers)
+    # music apps (/rest, api/subsonic.py) sign in with their own parameters
+    # (an api key, or a username and app password) and are refused in their
+    # own envelope; a device token in the header stays the normal way
+    from api import subsonic as _ss
+    subsonic = not token and _ss.is_rest_path(request.path)
+    if not token and not subsonic:
+        return None
+    g.request_start_monotonic = time.perf_counter()
+    g.request_start_cpu = time.thread_time()
+
+    def refuse(status, code, words):
+        if subsonic:
+            from core.subsonic.auth import refusal_for
+            return _ss.error_response(*refusal_for(code))
+        return _device_refusal(status, code, words)
+
+    # one credential per request: a device token never rides with an api key
+    if request.headers.get('X-API-Key') or request.args.get('api_key'):
+        if subsonic:
+            _vals = request.values
+            if not any(_vals.get(k) for k in ("apiKey", "u", "p", "t", "s")):
+                # only an api key on /rest: not a device asking. step aside so
+                # the api-key gates judge it (a read key gets its 403 for
+                # scope) and the /rest view, which answers only paired
+                # devices, refuses the rest
+                return None
+            from core.subsonic.response import CONFLICTING_AUTH
+            return _ss.error_response(CONFLICTING_AUTH, "Send one way of signing in, not two.")
+        return _device_refusal(400, "device_one_credential", "Send the device token or an API key, not both.")
+    from core.connect import device_tokens as _dt
+    database = get_database()
+    try:
+        if subsonic:
+            row, refusal = _ss.authenticate(database)
+            if refusal is not None:
+                return refusal
+            if row is None:
+                # a public method (getOpenSubsonicExtensions) asked without
+                # credentials: nobody, and the gates below step aside
+                g.device_auth = True
+                g.device = None
+                g.profile_id = None
+                g.is_admin = False
+                g.can_download = False
+                g.profile_name = "Nobody"
+                g.allowed_sides = 'none'
+                g.perms, g.perms_source = None, 'none'
+                return None
+        else:
+            row = _dt.find(database, token)
+    except Exception as e:
+        logger.warning("device token lookup failed: %s", e)
+        if subsonic:
+            from core.subsonic.response import GENERIC
+            return _ss.error_response(GENERIC, "Couldn't check this app. Try again in a moment.")
+        return _device_refusal(503, "device_check_failed", "Couldn't check this device. Try again in a moment.")
+    view = app.view_functions.get(request.endpoint) if request.endpoint else None
+    status, code, words = decide(row, device_access(view) if view else None, time.time())
+    if status != OK:
+        return refuse(status, code, words)
+    g.device_auth = True
+    g.device = {k: row.get(k) for k in ('id', 'name', 'platform', 'app', 'kind', 'profile_id', 'scope')}
+    _dt.touch(database, row['id'], request.remote_addr or '')
+    # a device acts as its profile, never as an admin, and never downloads
+    g.is_admin = False
+    g.can_download = False
+    if row.get('profile_id') is None:
+        g.profile_id = None
+        g.profile_name = "Unpaired device"
+        g.allowed_sides = 'none'
+        g.perms, g.perms_source = None, 'none'
+        return None
+    pid = int(row['profile_id'])
+    try:
+        profile = database.get_profile(pid)
+        from core.connect.pick import may_use
+        if not may_use(database, profile, row.get('kind') or ''):
+            return refuse(403, "device_profile_not_allowed", "This profile can't use this app any more.")
+        from core.permission_store import effective_for as _perm_effective_for
+        g.perms, g.perms_source = _perm_effective_for(database, profile)
+    except Exception as e:
+        logger.warning("device %s: profile %s unreadable: %s", row.get('id'), pid, e)
+        if subsonic:
+            from core.subsonic.response import GENERIC
+            return _ss.error_response(GENERIC, "Couldn't check this app. Try again in a moment.")
+        return _device_refusal(503, "device_check_failed", "Couldn't check this device. Try again in a moment.")
+    g.profile_id = pid
+    g.profile_name = profile.get('name') or ("Profile %s" % pid)
+    g.allowed_sides = profile.get('allowed_sides') or 'music'
+    g.request_limit = int(profile.get('request_limit') or 0)
+    g.request_limit_days = int(profile.get('request_limit_days') or 7)
+    from core.permissions import page_denied
+    if page_denied(request.path, profile.get('allowed_pages'), bool(profile.get('is_admin'))):
+        return refuse(403, "page_not_allowed", "This profile can't open that.")
+    return None
+
+
 # --- API key scope (before_request hook) ---
 # Registered ahead of the login / launch-PIN / profile gates on purpose: each of
 # them waves a valid key through, so a read-scope key has to be held to its
@@ -805,6 +939,8 @@ def _enforce_login():
     reach the page shell + the login flow + the key-authed public API."""
     if not _require_login_enabled():
         return
+    if g.get('device_auth'):
+        return  # a paired device, answered by _device_token_gate
     # API keys are admin-minted: a valid key gets the same trust as the
     # /api/v1/* path exemption, so key-authed callers without cookie sessions
     # (e.g. the Companion extension's <img> tags on /api/image-proxy) pass.
@@ -843,6 +979,8 @@ def _enforce_launch_pin():
     # owns the gate and this no-ops.
     if _require_login_enabled():
         return
+    if g.get('device_auth'):
+        return  # a paired device, answered by _device_token_gate
     try:
         require_pin = bool(config_manager.get('security.require_pin_on_launch', False)) if config_manager else False
     except Exception:
@@ -857,13 +995,10 @@ def _enforce_launch_pin():
     # An auth proxy (Authelia/Authentik/oauth2-proxy) that already authenticated the
     # user counts as verified — opt-in via security.auth_proxy_header, OFF (empty)
     # by default so a direct install is unaffected.
-    from core.security.auth_proxy import trusted_proxy_user
-    try:
-        _proxy_header = config_manager.get('security.auth_proxy_header', '') or ''
-    except Exception:
-        _proxy_header = ''
+    # only from an address in security.auth_proxy_trusted
+    from core.security.auth_proxy import request_proxy_user
     _verified = bool(session.get('launch_pin_verified', False)) or bool(
-        trusted_proxy_user(request.headers.get, _proxy_header)
+        request_proxy_user(request, config_manager.get if config_manager else None)
     )
     if request_is_locked(
         request.path, request.method,
@@ -913,6 +1048,8 @@ app.config[_PERM_GATE_FLAG] = True
 @app.before_request
 def _set_profile_context():
     """Set g.profile_id from session for every request"""
+    if g.get('device_auth'):
+        return  # a paired device, answered by _device_token_gate
     g.request_start_monotonic = time.perf_counter()
     g.request_start_cpu = time.thread_time()
 
@@ -939,9 +1076,8 @@ def _set_profile_context():
     except Exception:
         require_pin = False
     if require_pin and not _require_login_enabled():
-        _proxy_header = (config_manager.get('security.auth_proxy_header', '') or '') if config_manager else ''
-        from core.security.auth_proxy import trusted_proxy_user
-        _proxy_authed = bool(trusted_proxy_user(request.headers.get, _proxy_header))
+        from core.security.auth_proxy import request_proxy_user
+        _proxy_authed = bool(request_proxy_user(request, config_manager.get if config_manager else None))
         if not session.get('launch_pin_verified', False) and not _proxy_authed:
             g.profile_id = None
             g.is_admin = False
@@ -3123,6 +3259,11 @@ def _shutdown_runtime_components():
 
     _stop_component(web_scan_manager, "web scan manager")
     _stop_component(automation_engine, "automation engine")
+    try:
+        from core.library import folder_watch as _folder_watch
+        _stop_component(_folder_watch.get_service(), "folder watch")
+    except Exception as e:
+        logger.error(f"Error stopping folder watch: {e}")
 
     # Persist API call history before shutting down worker pools.
     try:
@@ -3869,6 +4010,7 @@ def get_status():
             key: value for key, value in _status_cache['soulseek'].items()
             if key != 'source_cache_key'
         }
+        soulseek_data.update(_soulseek_login_fields())
 
         # Count active downloads for nav badge
         active_dl_count = 0
@@ -3919,15 +4061,6 @@ def _regenerate_batch_m3u(batch, tracks):
     """Regenerate M3U file for a completed batch using real library DB paths.
     Called from batch completion handler after all post-processing is done."""
     try:
-        from difflib import SequenceMatcher
-        try:
-            from unidecode import unidecode as _unidecode
-        except ImportError:
-            _unidecode = lambda x: x
-
-        def _norm(text):
-            return _unidecode(text).lower().strip() if text else ''
-
         playlist_name = batch.get('playlist_name', 'Playlist')
         db = get_database()
         active_server = config_manager.get_active_media_server()
@@ -3937,36 +4070,11 @@ def _regenerate_batch_m3u(batch, tracks):
         from core.playlists.batch_m3u import playlist_m3u_tracks
         tracks = playlist_m3u_tracks(batch, tracks, db)
 
-        # Resolve file paths from library DB
-        from collections import defaultdict
-        artist_groups = defaultdict(list)
-        for idx, t in enumerate(tracks):
-            artist_groups[t.get('artist', '') or ''].append((idx, t))
-
-        file_path_map = {}
-        for artist, group in artist_groups.items():
-            if not artist:
-                for idx, _ in group:
-                    file_path_map[idx] = None
-                continue
-            db_tracks = db.search_tracks(artist=artist, limit=500, server_source=active_server)
-            if not db_tracks:
-                for idx, _ in group:
-                    file_path_map[idx] = None
-                continue
-            db_entries = [(_norm(t.title), t) for t in db_tracks]
-            for idx, track in group:
-                name = track.get('name', '')
-                if not name:
-                    file_path_map[idx] = None
-                    continue
-                s_norm = _norm(name)
-                matched = None
-                for db_n, db_t in db_entries:
-                    if s_norm == db_n or SequenceMatcher(None, s_norm, db_n).ratio() >= 0.7:
-                        matched = db_t
-                        break
-                file_path_map[idx] = matched.file_path if matched else None
+        # Resolve file paths from library DB: one read, every credited artist
+        # (#2214), the same resolver the export uses
+        from core.library.m3u_resolve import resolve_m3u_paths
+        file_path_map = resolve_m3u_paths(
+            db.get_tracks_for_m3u_resolution(server_source=active_server), tracks)
 
         # Build M3U content
         import datetime as _dt
@@ -4090,61 +4198,18 @@ def generate_playlist_m3u():
         db = get_database()
         active_server = config_manager.get_active_media_server()
 
-        # --- fuzzy matching helpers (same logic as library_check_tracks) ---
         import re as _re
-        from difflib import SequenceMatcher
-        try:
-            from unidecode import unidecode as _unidecode
-        except ImportError:
-            _unidecode = lambda x: x
-
-        def _norm(text):
-            return _unidecode(text).lower().strip() if text else ''
-
-        def _clean(text):
-            s = _norm(text)
-            s = _re.sub(r'\s*[\[\(].*?[\]\)]', '', s)
-            s = _re.sub(r'\s*-\s*', ' ', s)
-            s = _re.sub(r'\s*feat\..*', '', s)
-            s = _re.sub(r'\s*featuring.*', '', s)
-            s = _re.sub(r'\s*ft\..*', '', s)
-            s = _re.sub(r'\s*\d{4}\s*remaster.*', '', s)
-            s = _re.sub(r'\s*remaster(ed)?.*', '', s)
-            return _re.sub(r'\s+', ' ', s).strip()
 
         # Resolve each track's library file path. We bulk-load the library ONCE and
-        # match in memory, keyed by cleaned artist, instead of issuing a
-        # search_tracks() query per distinct artist. The per-artist loop could
-        # block for a long time behind the enrichment/scan writers (SQLite lock
-        # contention) — which is exactly why "Export M3U" hung with nothing in the
-        # logs. One WAL-concurrent read can't be starved that way.
-        from collections import defaultdict
-        from core.text.title_match import choose_best_title_candidate
-        lib_by_artist = defaultdict(list)
-        for row in db.get_tracks_for_m3u_resolution(server_source=active_server):
-            lib_by_artist[_clean(row['artist'])].append(
-                (_norm(row['title']), _clean(row['title']), row['file_path'])
-            )
-
-        file_path_map = {}
-        for idx, track in enumerate(tracks):
-            name = track.get('name', '') or ''
-            artist = track.get('artist', '') or ''
-            if not name or not artist:
-                file_path_map[idx] = None
-                continue
-            candidates = lib_by_artist.get(_clean(artist))
-            if not candidates:
-                file_path_map[idx] = None
-                continue
-            s_norm, s_clean = _norm(name), _clean(name)
-            matched_path = choose_best_title_candidate(
-                s_norm,
-                s_clean,
-                candidates,
-                lambda left, right: SequenceMatcher(None, left, right).ratio(),
-            )
-            file_path_map[idx] = matched_path
+        # match in memory instead of issuing a search_tracks() query per distinct
+        # artist. The per-artist loop could block for a long time behind the
+        # enrichment/scan writers (SQLite lock contention) — which is exactly why
+        # "Export M3U" hung with nothing in the logs. One WAL-concurrent read can't
+        # be starved that way. Tracks are filed under every credited artist, so
+        # "A & B" resolves (#2214).
+        from core.library.m3u_resolve import resolve_m3u_paths
+        file_path_map = resolve_m3u_paths(
+            db.get_tracks_for_m3u_resolution(server_source=active_server), tracks)
 
         # where it will be saved, worked out up front so entries can be
         # relative to it. a content-only request has no folder: absolute.
@@ -8128,6 +8193,13 @@ def start_download():
 
 
 
+from core.download_plugins.types import track_candidates
+from core.downloads.streaming_pickup import PickupMisses, check_streaming_pickup
+
+# finished streaming downloads whose file hasn't turned up yet (#2231)
+_streaming_pickup_misses = PickupMisses()
+
+
 def _find_completed_file_robust(download_dir, api_filename, transfer_dir=None):
     """Thin wrapper around the shared file finder.
 
@@ -8530,6 +8602,10 @@ def get_download_status():
                         'direction': 'Download',  # Required by frontend
                         'error': getattr(download, 'error', None),
                     }
+                    _st_failure = _streaming_pickup_misses.failure(
+                        _make_context_key(download.username, download.filename))
+                    if _st_failure and not streaming_transfer['error']:
+                        streaming_transfer['error'] = f"Not imported: {_st_failure}"
                     all_transfers.append(streaming_transfer)
 
                     # Check if download is completed and needs post-processing
@@ -8543,8 +8619,20 @@ def get_download_status():
 
                         if context and context_key not in processed_download_ids:
                             download_dir = docker_resolve_path(config_manager.get('soulseek.download_path', './downloads'))
-                            found_result = _find_completed_file_robust(download_dir, download.filename)
-                            found_path = found_result[0] if found_result and found_result[0] else None
+                            # the plugin's reported path first: the saved name
+                            # often isn't the result title (#2231)
+                            _st_task_status = None
+                            if context.get('task_id'):
+                                with tasks_lock:
+                                    _st_task = download_tasks.get(context.get('task_id'))
+                                    if _st_task:
+                                        _st_task_status = ('completed' if _st_task.get('stream_processed')
+                                                           else _st_task.get('status'))
+                            _st_outcome, _st_value = check_streaming_pickup(
+                                download, context_key, download_dir,
+                                _find_completed_file_robust, _streaming_pickup_misses,
+                                task_status=_st_task_status)
+                            found_path = _st_value if _st_outcome == 'found' else None
 
                             if found_path:
                                 # Prevent two contexts from claiming the same physical file
@@ -8595,10 +8683,19 @@ def get_download_status():
                                 processing_thread = threading.Thread(target=process_streaming_download)
                                 processing_thread.daemon = True
                                 processing_thread.start()
-                            else:
-                                # File not found - likely already processed and moved to library
-                                # Mark as processed to prevent infinite checking
+                            elif _st_outcome == 'handled':
+                                # its task already moved on through the monitor path
                                 processed_download_ids.add(context_key)
+                            elif _st_outcome == 'gave_up':
+                                # never just mark it processed: a miss alone left the
+                                # file orphaned in the download folder (#2231)
+                                processed_download_ids.add(context_key)
+                                logger.error(f"[{source_label}] Gave up importing {context_key}: {_st_value}")
+                                streaming_transfer['error'] = f"Not imported: {_st_value}"
+                                if not context.get('task_id'):
+                                    direct_download_state.mark_status(
+                                        download.id, 'failed', error=f"Not imported: {_st_value}")
+                            # 'wait': not found yet, look again on a later poll
         except Exception as streaming_error:
             import traceback
             logger.error(f"Could not fetch YouTube/Tidal downloads for status: {streaming_error}")
@@ -9235,7 +9332,8 @@ def manual_search_for_task(task_id):
                 with candidate_binding(_search_profile):
                     result = run_async(client.search(query))
                 if isinstance(result, tuple):
-                    tracks = result[0] if result else []
+                    # files inside soulseek folder groups are candidates too (#2228)
+                    tracks = track_candidates(result[0], result[1] if len(result) > 1 else None) if result else []
                 else:
                     tracks = result or []
                 return src_name, tracks, None
@@ -11094,21 +11192,19 @@ def library_log_play():
     /api/library/log-play/eligible once the Last.fm threshold is reached.
     """
     try:
-        from core.playback.play_log import build_play_event
         data = request.get_json(silent=True) or {}
         track = data.get('track') or data
         played_at = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
-        duration_ms = data.get('duration_ms', 0)
-        event = build_play_event(track, played_at, duration_ms)
-        if not event:
+        # the listener's pile (#1293), never during a private session (checked
+        # here, not trusted to the page): the path music apps use too
+        from core.playback.record_play import record_play
+        out = record_play(get_database(), get_current_profile_id(), track if isinstance(track, dict) else {},
+                          played_at=played_at, duration_ms=data.get('duration_ms', 0))
+        if out["private"]:
+            return jsonify({"success": True, "skipped": True, "private": True}), 200
+        if out["skipped"]:
             return jsonify({"success": False, "skipped": True}), 200
-        # the play goes in the listener's pile (#1293). no own listenbrainz
-        # means the shared one, same as before.
-        from core.listening_scope import listening_owner
-        db = get_database()
-        event['profile_id'] = listening_owner(db, get_current_profile_id())
-        play_id = db.record_web_player_play(event)
-        return jsonify({"success": True, "play_id": play_id})
+        return jsonify({"success": True, "play_id": out["play_id"]})
     except Exception as e:
         logger.debug(f"log-play failed (non-fatal): {e}")
         return jsonify({"success": False, "error": str(e)}), 200
@@ -11132,9 +11228,45 @@ def library_log_play_eligible():
         # flip another pile's row.
         owner = listening_owner(db, get_current_profile_id())
         ok = db.mark_play_scrobble_eligible(data.get('play_id'), profile_id=owner)
+        if ok and listening_stats_worker is not None:
+            # send it now instead of at the next 5-minute batch; the batch
+            # stays as the retry for a send that fails
+            listening_stats_worker.request_scrobble_flush()
         return jsonify({"success": ok})
     except Exception as e:
         logger.debug(f"log-play/eligible failed (non-fatal): {e}")
+        return jsonify({"success": False, "error": str(e)}), 200
+
+
+@app.route('/api/library/now-playing', methods=['POST'])
+@requires("music.access")
+def library_now_playing():
+    """Tell this listener's scrobble accounts what the web player just
+    started (Last.fm track.updateNowPlaying, ListenBrainz playing_now).
+
+    Body: ``{track: {title, artist, album}, duration_ms}``. Fire-and-forget
+    from the player; the send runs in the background, so this answers at
+    once with how many account sets were queued. Never a scrobble.
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        track = data.get('track') or data
+        if not isinstance(track, dict):
+            return jsonify({"success": False, "queued": 0}), 200
+        try:
+            duration_seconds = int(data.get('duration_ms') or 0) / 1000.0
+        except (TypeError, ValueError):
+            duration_seconds = 0
+        from core.playback.now_playing import queue_now_playing
+        queued = queue_now_playing(get_database(), config_manager, get_current_profile_id(), {
+            'title': str(track.get('title') or ''),
+            'artist': str(track.get('artist') or ''),
+            'album': str(track.get('album') or ''),
+            'duration_seconds': duration_seconds,
+        })
+        return jsonify({"success": True, "queued": queued})
+    except Exception as e:
+        logger.debug(f"now-playing failed (non-fatal): {e}")
         return jsonify({"success": False, "error": str(e)}), 200
 
 _enrichment_locks = {svc: threading.Lock() for svc in ('audiodb', 'deezer', 'musicbrainz', 'spotify', 'itunes', 'lastfm', 'genius', 'tidal', 'qobuz', 'discogs', 'bandcamp', 'jiosaavn')}
@@ -11727,7 +11859,9 @@ def _inspect_sources_stream(track_obj, quality_profile_id, *, log_tag='Inspector
                 # the tier the APP default wants.
                 with quality_profile_context(quality_profile_id), \
                         (candidate_binding(_bind_to) if _bind_to is not None else nullcontext()):
-                    tracks_result, _ = run_async(client.search(q, timeout=20))
+                    tracks_result, _albums_result = run_async(client.search(q, timeout=20))
+                    # files inside soulseek folder groups are candidates too (#2228)
+                    tracks_result = track_candidates(tracks_result, _albums_result)
                 if not tracks_result:
                     continue
                 pairs = evaluate_candidates(tracks_result, track_obj, q, quality_profile_id)
@@ -16050,6 +16184,10 @@ def _tracks_with_mirrored_quality_profile(
 
 
 def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, serialize=False):
+    # a waiting wishlist batch keeps its tracks packed (#2242); the quality
+    # stamp below only reads a real list
+    from core.downloads.queued_tracks import unpack_tracks
+    tracks_json = unpack_tracks(tracks_json)
     batch = download_batches.get(batch_id, {})
     tracks_json, quality_profile_id = _tracks_with_mirrored_quality_profile(
         batch.get('playlist_id') or playlist_id,
@@ -18409,6 +18547,41 @@ def _jellyfin_recreated_playlist_id(playlist_name):
         return None
 
 
+def _not_on_server_refusal(active_server, track_id):
+    """a refusal when ``track_id`` is a library row's own id for a track the
+    active server has no id for yet, else None.
+
+    library search hands back the catalogue row id for a track the server
+    hasn't scanned yet. sent to the server, jellyfin dropped it without a
+    word and plex resolved it to an unrelated item (#2235). only that shape
+    is refused: an id the server knows, or one soulsync has never seen, goes
+    through as before. a read that fails says nothing, so it doesn't refuse."""
+    if not active_server or active_server == 'soulsync' or not str(track_id).isdigit():
+        return None
+    try:
+        database = get_database()
+        if database.get_track_by_server_id(str(track_id), active_server) is not None:
+            return None  # the server's own id for a library track
+        conn = database._get_connection()
+        try:
+            is_row = conn.execute("SELECT 1 FROM lib2_tracks WHERE id = ?",
+                                  (int(track_id),)).fetchone() is not None
+        finally:
+            conn.close()
+        if not is_row or database.server_track_id(int(track_id), active_server):
+            return None
+    except Exception as e:  # noqa: BLE001 - no answer is not a refusal
+        logger.debug(f"server track check for {track_id} failed: {e}")
+        return None
+    label = {'plex': 'Plex', 'jellyfin': 'Jellyfin', 'emby': 'Emby',
+             'navidrome': 'Navidrome'}.get(str(active_server).lower(), 'your server')
+    return jsonify({
+        "success": False,
+        "error": f"That track is in your library but not on {label} yet. "
+                 f"Scan the library on {label}, then in SoulSync, and try again.",
+    }), 400
+
+
 @app.route('/api/server/playlist/<playlist_id>/replace-track', methods=['POST'])
 @requires("music.playlist_sync")
 def server_playlist_replace_track(playlist_id):
@@ -18431,6 +18604,9 @@ def server_playlist_replace_track(playlist_id):
             active_server, playlist_id, playlist_name)
         if _sp_refusal is not None:
             return _sp_refusal
+        _unknown = _not_on_server_refusal(active_server, new_track_id)
+        if _unknown is not None:
+            return _unknown
 
         # Persist the correction, exactly as Find & Add does. This endpoint
         # used to edit the server playlist and store NOTHING, so a fixed bad
@@ -18674,6 +18850,10 @@ def server_playlist_add_track(playlist_id):
                     "error": f"Track is not on the active {active_server} server"
                 }), 400
             track_id = str(server_id)
+        else:
+            _unknown = _not_on_server_refusal(active_server, track_id)
+            if _unknown is not None:
+                return _unknown
         # #1289 item 7 + item 6: the frontend sends playlist_id=0 and a name.
         # If this name matches a mirrored playlist with a stored server link,
         # follow the stored server ID (survives server-side renames) instead
@@ -19101,6 +19281,9 @@ def library_search_tracks():
                 'bitrate': getattr(t, 'bitrate', 0),
                 'duration': getattr(t, 'duration', 0),
                 'server_source': getattr(t, 'server_source', ''),
+                # False: the server has no id for it yet, so ``id`` is the
+                # catalogue row's and can't go on a server playlist (#2235)
+                'on_server': getattr(t, 'server_id_known', None) is not False,
             })
 
         return jsonify({"success": True, "tracks": tracks})
@@ -19469,6 +19652,23 @@ def playlist_ownership_preview(playlist_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@app.route('/api/downloads/lidarr-whole-album', methods=['GET'])
+@requires("music.access")
+def lidarr_whole_album_option():
+    """Whether the download dialogs show "Whole album via Lidarr", and its
+    starting state. Shown only in hybrid mode with Lidarr and another source in
+    the chain: otherwise there is nothing to choose between."""
+    mode = (config_manager.get('download_source.mode', '') or '').lower()
+    order = [str(s).lower() for s in (config_manager.get('download_source.hybrid_order', []) or [])]
+    available = (mode == 'hybrid' and 'lidarr' in order and any(s != 'lidarr' for s in order)
+                 and bool(config_manager.get('lidarr_download.url', ''))
+                 and bool(config_manager.get('lidarr_download.api_key', '')))
+    return jsonify({
+        'available': available,
+        'default': bool(config_manager.get('lidarr_download.whole_album_default', True)),
+    })
+
+
 @app.route('/api/playlists/<playlist_id>/start-missing-process', methods=['POST'])
 @requires("music.access")
 def start_missing_tracks_process(playlist_id):
@@ -19501,6 +19701,10 @@ def start_missing_tracks_process(playlist_id):
     skip_acoustid = bool(data.get('skip_acoustid', False))
     # Blocklist override (Phase 2b): set by the modal's "download anyway" confirm.
     ignore_blocklist = bool(data.get('ignore_blocklist', False))
+    # "Whole album via Lidarr" (download dialog). None = the configured default.
+    lidarr_whole_album = data.get('lidarr_whole_album')
+    if lidarr_whole_album is not None:
+        lidarr_whole_album = bool(lidarr_whole_album)
     # Quality Profile chosen in the shared acquisition dialog. Search, Discover,
     # Library, album, single, discography and playlist-explorer all POST here, so
     # this one field gives every manual path the same explicit choice (P1-01).
@@ -19661,6 +19865,7 @@ def start_missing_tracks_process(playlist_id):
             'playlist_folder_mode': playlist_folder_mode,  # Organize downloads by playlist folder
             # Album context for artist album downloads (explicit folder structure)
             'is_album_download': is_album_download,
+            'lidarr_whole_album': lidarr_whole_album,
             'album_context': album_context,
             'artist_context': artist_context,
             'wing_it': wing_it,
@@ -19933,7 +20138,8 @@ def _update_and_save_sync_status(playlist_id, playlist_name, playlist_owner, sna
         # authoritative profile change must re-run the sync even when the track
         # list is byte-identical (P1-03).
         for key in ('matched_tracks', 'total_tracks', 'discovered_tracks', 'tracks_hash',
-                    'mirror_tracks_hash', 'quality_profile_id', 'sync_mode'):
+                    'mirror_tracks_hash', 'quality_profile_id', 'sync_mode',
+                    'unplaced_tracks'):
             if key in kwargs:
                 status[key] = kwargs[key]
         sync_statuses[playlist_id] = status
@@ -22908,6 +23114,33 @@ def _start_library_background():
     on_files_arrived(refresh_upgradable_counts)
     on_files_arrived(matcher.nudge)
     start_library_watch(connect)
+    _start_folder_watch()
+
+
+def _start_folder_watch():
+    """live folder watching (core/library/folder_watch.py): a change in a
+    music library folder rescans that album folder, a change in the Import
+    folder wakes the auto-import. held behind the library upgrade like the
+    workers: it writes to the catalogue"""
+    from core.library import folder_watch
+    from core.library2.migration_gate import defer_or_start
+
+    def _wake_import():
+        import api.import_routes as _imp
+        worker = _imp.auto_import_worker
+        if (worker is not None and worker.running and not worker.paused
+                and config_manager.get('auto_import.enabled', False)):
+            worker.trigger_scan()
+
+    def _busy():
+        # a full refresh indexes every file itself; the watcher waits for it
+        from api import database_admin as _db_admin
+        return (_db_admin.db_update_state or {}).get('status') == 'running'
+
+    service = folder_watch.install(folder_watch.FolderWatchService(
+        config_manager=config_manager, get_database=get_database,
+        trigger_import=_wake_import, busy=_busy))
+    defer_or_start(service, get_database())
 
 
 # never under pytest, for the same reason as the warmer
@@ -23252,6 +23485,18 @@ if automation_engine is not None and download_orchestrator is not None:
     except Exception as e:
         logger.debug(f"Deezer sign-in events not wired: {e}")
 
+# Soulseek login state: one poller asks slskd whether it is logged in to the
+# Soulseek server. Downloads wait on it, the Downloads page and dashboard show
+# a banner, and the 'Soulseek Logged Out' / 'Logged Back In' triggers fire.
+if download_orchestrator is not None:
+    try:
+        from core import soulseek_session as _soulseek_session
+        if automation_engine is not None:
+            _soulseek_session.set_event_emitter(automation_engine.emit)
+        _soulseek_session.start_poller(lambda: download_orchestrator.client('soulseek'), run_async)
+    except Exception as e:
+        logger.debug(f"Soulseek login poller not started: {e}")
+
 # --- Repair Worker API Endpoints: lifted to api/repair.py (wired near the
 # chat/labels/beatport blueprints below) ---
 # ================================================================================================
@@ -23296,11 +23541,29 @@ def _spotify_status_with_availability(spotify_status):
     return out
 
 
+def _soulseek_login_fields():
+    """slskd up but logged out of the Soulseek server (a ban, a reconnect):
+    what the Downloads and dashboard banner read, in both status payloads."""
+    try:
+        from core import soulseek_session as _slsk_session
+        snap = _slsk_session.snapshot()
+        out = bool(snap.get('logged_out'))
+        return {
+            'logged_out': out,
+            'logged_out_since': snap.get('since') if out else None,
+            'login_wait_minutes': round(_slsk_session.wait_seconds(config_manager) / 60),
+        }
+    except Exception as e:
+        logger.debug(f"soulseek login state unavailable: {e}")
+        return {}
+
+
 def _build_status_payload():
     """Build the same status payload used by GET /status, reading from the cache."""
     download_mode = config_manager.get('download_source.mode', 'hybrid')
     soulseek_data = dict(_status_cache.get('soulseek', {}))
     soulseek_data['source'] = download_mode
+    soulseek_data.update(_soulseek_login_fields())
     metadata_status = get_metadata_status_snapshot(spotify_client=spotify_client)
 
     # Count active downloads for nav badge
@@ -23936,9 +24199,8 @@ def _ws_connection_blocked():
         require_pin = bool(config_manager.get('security.require_pin_on_launch', False)) if config_manager else False
         if not require_login and not require_pin and not revoked:
             return False
-        proxy_header = (config_manager.get('security.auth_proxy_header', '') or '') if config_manager else ''
-        from core.security.auth_proxy import trusted_proxy_user
-        proxy_authed = bool(trusted_proxy_user(request.headers.get, proxy_header))
+        from core.security.auth_proxy import request_proxy_user
+        proxy_authed = bool(request_proxy_user(request, config_manager.get if config_manager else None))
         from core.security.ws_gate import is_ws_connection_blocked
         return is_ws_connection_blocked(
             require_login=require_login,
@@ -23967,6 +24229,12 @@ def handle_connect():
     # revocation sweep can drop it if that session is later revoked.
     _ws_store_snapshot()
     _ws_join_role_room()
+    # which build this server runs: an open tab from before an update offers
+    # a reload (never forces one)
+    try:
+        emit('server:build', {'build': _server_build_id()})
+    except Exception as e:  # noqa: BLE001 - the check is a nicety
+        logger.debug(f"server build emit failed: {e}")
     logger.info("WebSocket client connected")
 
 @socketio.on('disconnect')
@@ -24491,6 +24759,10 @@ app.register_blueprint(_bp_mc())
 from api.deleted_files import configure as _cfg_df, create_blueprint as _bp_df
 _cfg_df(config_manager_=config_manager, docker_resolve_path_=docker_resolve_path)
 app.register_blueprint(_bp_df())
+# Tools > Update File Locations: records follow a music library folder that moved (api/file_locations.py).
+from api.file_locations import configure as _cfg_fl, create_blueprint as _bp_fl
+_cfg_fl(get_database_=get_database)
+app.register_blueprint(_bp_fl())
 # Review-queue verification endpoints (api/verification.py).
 from api.verification import configure as _cfg_verif, create_blueprint as _bp_verif
 _cfg_verif(get_database_=get_database, config_manager_=config_manager,
@@ -24670,6 +24942,14 @@ app.register_blueprint(_bp_mpl())
 from api.user_playlists import configure as _cfg_upl, create_blueprint as _bp_upl
 _cfg_upl(get_database=get_database, config_manager=config_manager)
 app.register_blueprint(_bp_upl())
+# the /player app's own store: where each profile is in what it plays
+from api.player import create_blueprint as _bp_player
+app.register_blueprint(_bp_player())
+# ...and its playback: how to play an item and its bytes (session or paired device)
+from api.player_stream import create_blueprint as _bp_player_stream
+app.register_blueprint(_bp_player_stream())
+from api.player_tracks import create_blueprint as _bp_player_tracks
+app.register_blueprint(_bp_player_tracks())
 # MetaSync's SIN charts: offered as playlists, opened on demand
 from api.metasync_charts import configure as _cfg_msc, create_blueprint as _bp_msc
 _cfg_msc(get_database=get_database)
@@ -24794,6 +25074,17 @@ from api.mcp import configure as _cfg_mcp, create_blueprint as _bp_mcp
 _cfg_mcp(get_database=get_database, config_manager=config_manager,
          version=SOULSYNC_VERSION.split('+')[0])
 app.register_blueprint(_bp_mcp())
+
+# library coverage: how much of the media server's music SoulSync can read,
+# and the folder overrides the path resolver asks first
+from api.library_coverage import configure as _cfg_cov, create_blueprint as _bp_cov
+_cfg_cov(get_database=get_database, config_manager=config_manager,
+         media_server_engine_getter=lambda: media_server_engine)
+app.register_blueprint(_bp_cov())
+
+# live folder watching: what is watched and how (Settings > Library > Folders)
+from api.folder_watch import create_blueprint as _bp_folder_watch
+app.register_blueprint(_bp_folder_watch())
 
 # help sheet: health, report a problem, the log files (api/help.py)
 from api.help import configure as _cfg_help, create_blueprint as _bp_help
@@ -24960,6 +25251,26 @@ app.register_blueprint(_bp_sw())
 from api.metasync_settings import configure as _cfg_ms, create_blueprint as _bp_ms
 _cfg_ms(config_manager=config_manager)
 app.register_blueprint(_bp_ms())
+
+# listen anywhere (api/devices.py): this server's identity, paired devices,
+# invite codes and the address list for Settings > Devices
+from api.devices import configure as _cfg_dev, create_blueprint as _bp_dev
+_cfg_dev(get_database=get_database, config_manager=config_manager,
+         require_login_enabled=_require_login_enabled)
+app.register_blueprint(_bp_dev())
+
+# music apps (api/subsonic.py): the Subsonic / OpenSubsonic api at /rest,
+# on the same paired device tokens
+from api.subsonic import configure as _cfg_subsonic, create_blueprint as _bp_subsonic
+_cfg_subsonic(get_database=get_database, config_manager=config_manager,
+              serve_file=lambda path: _serve_audio_file_with_range(path),
+              resolve_path=lambda path: _resolve_library_file_path(path),
+              proxy_url=lambda url: _proxy_stream_url_with_range(url),
+              media_engine=lambda: media_server_engine,
+              flush_scrobbles=lambda: listening_stats_worker.request_scrobble_flush()
+              if listening_stats_worker is not None else None,
+              version=SOULSYNC_VERSION)
+app.register_blueprint(_bp_subsonic())
 
 # NOTE: the audiobook wishlist is NOT started here. It is drained by the shared
 # automation engine as the 'audiobook_process_wishlist' system automation, the same
@@ -26430,6 +26741,14 @@ def start_runtime_services():
         # Opt-out env for anyone who wants it off.
         if os.environ.get('SOULSYNC_NO_DISCOVER_WARMUP', '0') != '1':
             _start_discover_warmer()
+
+        # the server identity (core/connect/server_key.py): made or restored
+        # now, so its encrypted copy is in the database before any backup
+        try:
+            from core.connect.server_key import server_identity as _server_identity
+            logger.info("Server fingerprint: %s", _server_identity(get_database(), config_manager).fingerprint)
+        except Exception as _ident_err:
+            logger.error("Server identity unavailable: %s", _ident_err)
 
         _runtime_started = True
 

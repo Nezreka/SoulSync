@@ -47,6 +47,26 @@ def normalize_for_comparison(text: str) -> str:
     return text.lower().strip()
 
 
+def credit_name_key(text: str) -> str:
+    """one artist credit, spelling aside: case, accents, spacing and a
+    leading "The". "Chamber Orchestra of London" and "The Chamber Orchestra
+    Of London" are one credit; punctuation still counts (#2217)."""
+    folded = " ".join(normalize_for_comparison(text or "").split())
+    return folded[4:] if folded.startswith("the ") and len(folded) > 4 else folded
+
+
+def dedupe_credit_names(names) -> list:
+    """credit names in order, a later spelling of an earlier credit dropped"""
+    seen, out = set(), []
+    for name in names or ():
+        key = credit_name_key(name)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        out.append(name)
+    return out
+
+
 _NON_ALNUM_RE = re.compile(r'[^a-z0-9]')
 
 

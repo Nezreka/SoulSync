@@ -1694,6 +1694,10 @@ class RepairWorker:
                 # staleness picker anymore.
                 self._current_job_id = None
                 self._current_job_name = None
+                # idle: fill the blank tags the open tag findings point at,
+                # a small batch every few minutes (core/library2/tag_fill)
+                self._maybe_fill_tags()
+                self._maybe_queue_findings_followups()
                 if self._sleep_or_stop(5):
                     break
 
@@ -1979,6 +1983,66 @@ class RepairWorker:
         self._current_job_id = None
         self._current_job_name = None
         self._current_progress = {'scanned': 0, 'total': 0, 'percent': 0}
+
+    def _maybe_fill_tags(self, *, force: bool = False) -> Optional[dict]:
+        """One pass of the blank-tag fill queue, when it is due.
+
+        Runs on the worker thread between jobs, so it never runs beside a job
+        or a library scan (``_held``), and only while the worker is on. It
+        gives way the moment a job is queued. Never raises."""
+        now = time.monotonic()
+        if getattr(self, '_tag_fill_next', None) is None:
+            # not in the rush of a start: the first pass a couple of minutes in
+            self._tag_fill_next = now + 120
+        if not force and now < self._tag_fill_next:
+            return None
+        from core.library2 import tag_fill
+        self._tag_fill_next = now + tag_fill.QUEUE_INTERVAL_SECONDS
+        if not self.enabled or self._held or self.db is None:
+            return None
+
+        def stop() -> bool:
+            with self._force_run_lock:
+                queued = bool(self._force_run_queue)
+            return self._stop_event.is_set() or self._held or not self.enabled or queued
+
+        try:
+            return tag_fill.drain(self.db, self._config_manager, should_stop=stop)
+        except Exception as exc:  # noqa: BLE001 - the next pass tries again
+            logger.warning("Fill empty tags pass failed: %s", exc, exc_info=True)
+            return None
+
+    def _maybe_queue_findings_followups(self) -> int:
+        """Files a library repair changed the catalogue under (#2229), handed
+        to their jobs as a findings-only run: what the file now says wrong
+        shows up to apply, nothing is rewritten or moved on its own. Checked
+        once a minute while idle. Never raises."""
+        now = time.monotonic()
+        if now < getattr(self, '_followups_next', 0.0):
+            return 0
+        self._followups_next = now + 60
+        if self._held or self.db is None:
+            return 0
+        queued = 0
+        try:
+            from core.library2.various_artists_guard import take_findings_followups
+            conn = self.db._get_connection()
+            try:
+                waiting = take_findings_followups(conn)
+                conn.commit()
+            finally:
+                conn.close()
+            for job_id, paths in waiting.items():
+                if self.run_job_now(job_id, scope={'file_paths': paths, 'findings_only': True}):
+                    queued += 1
+        except Exception as exc:  # noqa: BLE001 - the next tick tries again
+            logger.warning("Queueing follow-up findings failed: %s", exc)
+        return queued
+
+    def request_tag_fill(self) -> None:
+        """Run the blank-tag fill on the next idle tick instead of waiting
+        for its interval (the Tools page's Fill now)."""
+        self._tag_fill_next = 0.0
 
     def _sleep_or_stop(self, seconds: float, step: float = 0.2) -> bool:
         """Sleep in small chunks so shutdown interrupts quickly."""
@@ -7747,6 +7811,8 @@ class RepairWorker:
 
         try:
             os.makedirs(os.path.dirname(dst), exist_ok=True)
+            from core.library import own_writes
+            own_writes.note(src, dst)
 
             # Case rename on case-insensitive FS
             if sys.platform in ('win32', 'darwin') and os.path.exists(dst):

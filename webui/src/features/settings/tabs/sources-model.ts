@@ -203,33 +203,44 @@ export async function fetchJson(url: string, init?: RequestInit): Promise<Record
   return (await response.json()) as Record<string, unknown>;
 }
 
-/** settings.js loadHybridSourceOrder: the saved chain, without retired
- *  sources, or the legacy primary + secondary; unready sources stay in it */
+/** the music chain as the server runs it (download_orchestrator.py): the
+ *  saved order, without retired sources, or the legacy primary + secondary,
+ *  in hybrid mode; the one source download_source.mode names in any other.
+ *  a fresh install that skipped onboarding has mode soulseek beside the
+ *  legacy soulseek + youtube pair, and the page showed Soulseek then YouTube
+ *  while only Soulseek ran (#2230). unready sources stay in it.
+ *  ``order``: what hybrid_order should hold, the chain itself in hybrid mode
+ *  and the saved order, kept as it was, in single-source mode */
 export function musicFromSettings(settings: SettingsPayload) {
   const source = (settings.download_source || {}) as Record<string, unknown>;
   const saved = source.hybrid_order;
   const status = (settings._source_status || {}) as Record<string, unknown>;
-  let music: string[];
-  let cleaned = false;
+  const savedMode = typeof source.mode === 'string' && source.mode ? source.mode : 'soulseek';
+  const mode = RETIRED_DOWNLOAD_SOURCES.has(savedMode) ? 'soulseek' : savedMode;
+  let chain: string[];
+  let kept: string[] = [];
+  let cleaned = mode !== savedMode;
   if (Array.isArray(saved) && saved.length > 0) {
-    music = (saved as string[]).filter((id) => !RETIRED_DOWNLOAD_SOURCES.has(id));
-    cleaned = music.length !== saved.length;
+    chain = (saved as string[]).filter((id) => !RETIRED_DOWNLOAD_SOURCES.has(id));
+    kept = chain;
+    cleaned = cleaned || chain.length !== saved.length;
   } else {
     const primary = typeof source.hybrid_primary === 'string' ? source.hybrid_primary : 'soulseek';
     const second =
       typeof source.hybrid_secondary === 'string' ? source.hybrid_secondary : 'youtube';
-    music = [primary || 'soulseek', second || 'youtube'].filter(
+    chain = [primary || 'soulseek', second || 'youtube'].filter(
       (id) => !RETIRED_DOWNLOAD_SOURCES.has(id),
     );
-    if (!music.length) music = ['soulseek'];
+    if (!chain.length) chain = ['soulseek'];
   }
+  const hybrid = mode === 'hybrid';
+  const music = hybrid ? chain : [mode];
   const unready: Record<string, boolean> = {};
   for (const src of HYBRID_SOURCES) {
     if (music.includes(src.id) && status[src.id] === false) unready[src.id] = true;
   }
-  const savedMode = typeof source.mode === 'string' && source.mode ? source.mode : 'soulseek';
-  const mode = RETIRED_DOWNLOAD_SOURCES.has(savedMode) ? 'soulseek' : savedMode;
-  return { music, unready, mode, cleaned: cleaned || mode !== savedMode };
+  const secondary = typeof source.hybrid_secondary === 'string' ? source.hybrid_secondary : null;
+  return { music, order: hybrid ? music : kept, secondary, unready, mode, cleaned };
 }
 
 /** what the old page's hidden selects held for this chain */
@@ -591,8 +602,12 @@ export function createSourcesModel({
     load(settings) {
       // the audiobook chain is loaded now: an open one shows it
       if (model.getState().kind === 'audiobooks') set({ order: audiobookChainOf(settings) });
-      const { music, unready, mode, cleaned } = musicFromSettings(settings);
-      const pair = legacyPair(music, model.getState().secondary);
+      const { music, order, secondary, unready, mode, cleaned } = musicFromSettings(settings);
+      const hybrid = mode === 'hybrid';
+      // single-source mode leaves the legacy pair as it is saved
+      const pair = hybrid
+        ? legacyPair(music, model.getState().secondary)
+        : { primary: null, secondary: secondary ?? model.getState().secondary };
       set({ music, unready, mode, secondary: pair.secondary });
       // a retired source dropped on load: the next save writes the chain
       // that works, as the old page's next full save did. this runs inside
@@ -600,9 +615,8 @@ export function createSourcesModel({
       if (cleaned) {
         store.patch('download_source', {
           mode,
-          hybrid_primary: pair.primary,
-          hybrid_secondary: pair.secondary,
-          hybrid_order: music.slice(),
+          ...(hybrid ? { hybrid_primary: pair.primary, hybrid_secondary: pair.secondary } : {}),
+          hybrid_order: order.slice(),
         });
       }
     },

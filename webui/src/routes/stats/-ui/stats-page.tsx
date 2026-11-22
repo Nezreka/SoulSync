@@ -69,6 +69,7 @@ import {
 import { STATS_TAB_VALUES } from '../-stats.types';
 import { fetchAlbumPlayTracks } from '../-year.api';
 import { Route } from '../route';
+import { SpotifyHistoryImport } from './spotify-history-import';
 import styles from './stats-page.module.css';
 import { YearStory } from './year-story';
 
@@ -90,9 +91,10 @@ export function StatsPage() {
 
   const navigate = useNavigate({ from: Route.fullPath });
   const queryClient = useQueryClient();
-  const { range, tab, story } = Route.useSearch();
+  const { range, tab, story, import: importParam } = Route.useSearch();
   const syncTimeoutRef = useRef<number | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const [spotifyImportOpen, setSpotifyImportOpen] = useState(importParam === 'spotify');
   const [listeningDetailFilter, setListeningDetailFilter] =
     useState<StatsListeningEventsFilter | null>(null);
 
@@ -353,10 +355,24 @@ export function StatsPage() {
                 running={listenbrainzMutation.isPending}
               />
             ) : null}
+            <span className={styles.syncItem}>
+              <b>Spotify</b>
+              <button
+                type="button"
+                className={styles.linkButton}
+                onClick={() => setSpotifyImportOpen(true)}
+                title="Import your streaming history from Spotify's privacy export"
+              >
+                Import Spotify history
+              </button>
+            </span>
           </div>
         </div>
 
         {story === 'year' ? <YearStory onClose={closeStory} /> : null}
+        {spotifyImportOpen ? (
+          <SpotifyHistoryImport onClose={() => setSpotifyImportOpen(false)} />
+        ) : null}
 
         {cachedStatsQuery.isPending ? (
           <SectionLoadingState />

@@ -585,6 +585,9 @@ export function VideoMassRenameCard() {
                 <span className="vbk-name">
                   <strong>{entries.length} file(s)</strong> differ from your templates
                   {preview?.unresolved ? ` · ${preview.unresolved} unresolved path(s) skipped` : ''}
+                  {preview?.held
+                    ? ` · ${preview.held} held back (an id their name uses isn't stored; see Naming Conformance)`
+                    : ''}
                 </span>
               </div>
               {entries.slice(0, 8).map((entry) => (
@@ -604,6 +607,11 @@ export function VideoMassRenameCard() {
             <div className="vbk-empty">
               No renames: none of your {preview.unresolved} file path(s) could be resolved to a file
               on disk (check Settings → Organization library paths).
+            </div>
+          ) : preview?.held ? (
+            <div className="vbk-empty">
+              No renames: {preview.held} file(s) are held back because an id their name uses isn't
+              stored yet. Naming Conformance lists those titles.
             </div>
           ) : (
             <div className="vbk-empty">Everything already matches your naming templates.</div>

@@ -147,7 +147,7 @@ describe('calls that cross out of the files the sync port deletes', () => {
     // Inverted rather than deleted, because the failure mode is a REGRESSION:
     // somebody appends a Settings helper to a sync file again and it quietly
     // becomes deletable-by-association.
-    // They moved again with the Connections tab: the Server Connections
+    // They moved again with the Connections tab: the Server connections
     // section is React (src/features/settings/tabs/connections-servers.tsx,
     // SETTINGS_PORT.md step 10c), and loads and sets each picker itself.
     const dir = resolve(process.cwd(), 'static');

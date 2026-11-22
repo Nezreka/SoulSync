@@ -263,11 +263,18 @@ def resolve_library_file_path_with_diagnostic(
     if not isinstance(file_path, str) or not file_path:
         return None, attempt
 
-    if os.path.exists(file_path):
+    from core.library.path_mappings import foreign_rooted
+    if not foreign_rooted(file_path) and os.path.exists(file_path):
         if library_root and not _inside_library_root(file_path, library_root):
             return None, attempt
         attempt.raw_path_existed = True
         return file_path, attempt
+
+    # a folder override the user set (Settings > Library > Folders) is asked
+    # before any guessing: it is the user's own word for where this mount is
+    override = _from_override(file_path)
+    if override and (not library_root or _inside_library_root(override, library_root)):
+        return override, attempt
 
     path_parts = [part for part in file_path.replace("\\", "/").split("/") if part]
     if not path_parts or ".." in path_parts:
@@ -323,6 +330,16 @@ def resolve_library_file_path_with_diagnostic(
     if resolved and not allowed(resolved):
         resolved = None
     return _unless_another_records(file_path, resolved), attempt
+
+
+def _from_override(file_path: str) -> Optional[str]:
+    """the user's folder override for this path, when one finds the file"""
+    try:
+        from core.library.path_mappings import local_path
+        return local_path(file_path, media_type="music")
+    except Exception as exc:  # noqa: BLE001 - the resolver never raises
+        logger.debug("folder override lookup failed for %r: %s", file_path, exc)
+        return None
 
 
 def _unless_another_records(file_path: str, found: Optional[str]) -> Optional[str]:

@@ -87,6 +87,9 @@ describe('YearStory', () => {
     window.showToast = vi.fn();
     server.use(
       http.get('/api/stats/cached', () => HttpResponse.json({ success: true })),
+      http.get('/api/stats/year/soundtrack', () =>
+        HttpResponse.json({ success: true, tracks: [] }),
+      ),
       http.get('/api/listening-stats/status', () => HttpResponse.json({ success: true })),
       http.get('/api/stats/db-storage', () => HttpResponse.json({ success: true, tables: [] })),
       http.get('/api/stats/library-disk-usage', () => HttpResponse.json({ success: true })),

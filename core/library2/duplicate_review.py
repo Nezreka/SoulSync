@@ -504,8 +504,14 @@ def _performer_names(credited: list, track_artist, subject: dict) -> list:
         except (TypeError, ValueError):
             pass
         names = [n for n in (track_artist, tag) if n and not is_various_artists_name(n)][:1]
-    return [str(n).casefold().strip() for name in names
-            for n in split_artist_credits(name or "") if n and not is_various_artists_name(n)]
+    from core.text.cross_script import romanized_forms
+    folded = [str(n).casefold().strip() for name in names
+              for n in split_artist_credits(name or "") if n and not is_various_artists_name(n)]
+    # a greek or cyrillic credit also answers to its latin spellings, so the
+    # copy a download filed under "Δέσποινα Βανδή" pairs with the library's
+    # "Despina Vandi" (#2222)
+    return list(dict.fromkeys(
+        [*folded, *(form.casefold() for n in folded for form in romanized_forms(n))]))
 
 
 def _strong_evidence(a: dict, b: dict) -> bool:

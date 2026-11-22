@@ -149,6 +149,30 @@ def _post_sync_automation_followup(
     )
 
 
+def _source_artist_names(value):
+    """the mirrored playlist's own artist names riding on a sync track (#2222),
+    as plain strings. None when the track carries none."""
+    if not isinstance(value, (list, tuple)):
+        value = [value] if value else []
+    names = []
+    for entry in value:
+        name = entry.get('name') if isinstance(entry, dict) else entry
+        if isinstance(name, str) and name.strip() and name.strip() not in names:
+            names.append(name.strip())
+    return names or None
+
+
+def _track_isrc(t):
+    """the matched recording's isrc on a sync track: top level (deezer,
+    tidal, itunes) or under external_ids (spotify). None when absent."""
+    if not isinstance(t, dict):
+        return None
+    ext = t.get('external_ids')
+    value = t.get('isrc') or (ext.get('isrc') if isinstance(ext, dict) else None)
+    value = str(value or '').strip().upper()
+    return value or None
+
+
 async def _database_only_find_track(spotify_track, candidate_pool=None):
     """Database-only track matcher used when no media server is connected.
 
@@ -174,6 +198,24 @@ async def _database_only_find_track(spotify_track, candidate_pool=None):
         # match under the latter, which a wing-it stub never equals (#1289)
         from core.sync.match_overrides import (
             cached_match_is_stale, drop_stale_cached_match, match_lookup_ids)
+        # every name the artist goes by (#2222), same as the media matcher
+        from core.sync.identity_match import (
+            identity_cache_rows, known_artist_names, sync_artist_names)
+        _source_names = sync_artist_names(spotify_track) or [str(a) for a in spotify_track.artists or []]
+        _known_names = []
+
+        def _known_artists():
+            if not _known_names:
+                _known_names.extend(known_artist_names(db, spotify_track) or _source_names)
+            return _known_names
+
+        def _cache_row_stale(**gate):
+            # the source's own names first, the library's other names only
+            # when those call it stale
+            if not cached_match_is_stale(db, artists=_source_names, **gate):
+                return False
+            return cached_match_is_stale(db, artists=_known_artists(), **gate)
+
         for _match_id in match_lookup_ids(spotify_track):
             # --- Sync match cache fast-path ---
             try:
@@ -188,18 +230,8 @@ async def _database_only_find_track(spotify_track, candidate_pool=None):
                         # wrong song forever. Revalidate auto-shaped rows;
                         # a proven-stale row is dropped and matching falls
                         # through to the durable manual match / fresh matcher.
-                        _artist_names = []
-                        for _a in spotify_track.artists:
-                            if isinstance(_a, str):
-                                _artist_names.append(_a)
-                            elif isinstance(_a, dict) and 'name' in _a:
-                                _artist_names.append(_a['name'])
-                            else:
-                                _artist_names.append(str(_a))
-                        if cached_match_is_stale(
-                            db,
+                        if _cache_row_stale(
                             title=original_title,
-                            artists=_artist_names,
                             album=getattr(spotify_track, 'album', None),
                             server_source=active_server,
                             cached_track_id=cached['server_track_id'],
@@ -255,11 +287,39 @@ async def _database_only_find_track(spotify_track, candidate_pool=None):
             except Exception as e:
                 logger.debug("durable manual match fast-path failed: %s", e)
 
+        # the same song saved under another provider's id (#2222), same as
+        # the media matcher
+        try:
+            _tried_ids = {str(i) for i in match_lookup_ids(spotify_track)}
+            for cached in identity_cache_rows(db, original_title, _known_artists(), active_server):
+                if str(cached.get('spotify_track_id')) in _tried_ids:
+                    continue
+                cached_row = db.get_track_by_server_id(cached['server_track_id'], active_server)
+                if not cached_row:
+                    continue
+                if _cache_row_stale(
+                        title=original_title, album=getattr(spotify_track, 'album', None),
+                        server_source=active_server, cached_track_id=cached['server_track_id'],
+                        cached_track_row=cached_row, threshold=0.80):
+                    continue
+
+                class DatabaseTrackIdentity:
+                    def __init__(self, db_t):
+                        self.ratingKey = db_t.id
+                        self.title = db_t.title
+                        self.id = db_t.id
+                logger.info(f"Sync cache hit by title + artist for '{original_title}' → server track "
+                            f"{cached['server_track_id']} (saved under source id {cached.get('spotify_track_id')})")
+                return DatabaseTrackIdentity(cached_row), cached['confidence']
+        except Exception as e:
+            logger.debug("sync match cache identity lookup failed: %s", e)
+
         # exact spotify id (#1885), same as the media matcher. not cached,
         # see the note there
         try:
             from core.artists.map import get_current_profile_id
-            from core.sync.provider_match import honorable_provider_rows
+            from itertools import chain
+            from core.sync.provider_match import honorable_isrc_rows, honorable_provider_rows
             # this matcher is patched onto sync_service, so the sync's own
             # profile wins over the ambient one
             try:
@@ -268,8 +328,10 @@ async def _database_only_find_track(spotify_track, candidate_pool=None):
             except Exception:
                 _profile_id = None
             _profile_id = _profile_id or get_current_profile_id()
-            provider_row = next(iter(honorable_provider_rows(
-                db, spotify_track, active_server, _profile_id)), None)
+            # the spotify id's rows, then the isrc's (#2222)
+            provider_row = next(chain(
+                honorable_provider_rows(db, spotify_track, active_server, _profile_id),
+                honorable_isrc_rows(db, spotify_track, active_server, _profile_id)), None)
             if provider_row is not None:
                 def _pv(name):
                     return (provider_row.get(name) if isinstance(provider_row, dict)
@@ -288,8 +350,8 @@ async def _database_only_find_track(spotify_track, candidate_pool=None):
         except Exception as e:
             logger.debug("provider-id match failed: %s", e)
 
-        # Try each artist
-        for artist in spotify_track.artists:
+        # Try each artist, then the playlist's own names for them (#2222)
+        for artist in (sync_artist_names(spotify_track) or spotify_track.artists):
             if isinstance(artist, str):
                 artist_name = artist
             elif isinstance(artist, dict) and 'name' in artist:
@@ -321,6 +383,14 @@ async def _database_only_find_track(spotify_track, candidate_pool=None):
 
             if db_track and confidence >= 0.80:
                 logger.info(f"Database match: '{db_track.title}' (confidence: {confidence:.2f})")
+                # #2235: no server id yet means nothing to send and nothing
+                # to cache; the sync reports it as not on the server
+                from core.sync.server_placement import server_item_id
+                if server_item_id(db_track) is None:
+                    from services.sync_service import NotOnServerTrack
+                    logger.info(f"'{db_track.title}' is in the library but {active_server} "
+                                f"has no id for it yet; it can't go on the playlist")
+                    return NotOnServerTrack(db_track), confidence
                 if spotify_id:
                     try:
                         from core.matching_engine import MusicMatchingEngine
@@ -391,6 +461,11 @@ def _record_library_membership(tracks_json, match_details) -> None:
                 # the sync's verdict, so the mirror's library check
                 # (core/playlists/library_check) leaves it alone
                 'library_checked_via': 'sync',
+                # on the server playlist, or why not (#2235). None when the
+                # sync couldn't read the playlist back, so an old answer
+                # never outlives the run that could have changed it
+                'server_placement': detail.get('server_placement') if found else None,
+                'server_placement_with': detail.get('folded_into') if found else None,
             })
             written += 1
         if written:
@@ -551,6 +626,8 @@ def _run_sync_task(
                 external_urls=t.get('external_urls'),
                 image_url=_track_image or None,
                 source_track_id=t.get('source_track_id') or None,
+                source_artists=_source_artist_names(t.get('source_artists')),
+                isrc=_track_isrc(t),
             )
             tracks.append(track)
             if i < 3:  # Log first 3 tracks for debugging
@@ -1018,6 +1095,9 @@ def _run_sync_task(
             # the mode it ran in, so the next scheduled run sees a mode
             # change as a change (#1704)
             sync_mode=sync_mode,
+            # matched but not on the server playlist (#2235): the next
+            # scheduled run must not skip while any are left
+            unplaced_tracks=getattr(result, 'unplaced_tracks', 0) or 0,
         )
         if _mirror_tracks_hash is not None:
             _status_kwargs['mirror_tracks_hash'] = _mirror_tracks_hash

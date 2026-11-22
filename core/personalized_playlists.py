@@ -304,8 +304,10 @@ class PersonalizedPlaylistsService:
         try:
             top = self.database.get_top_artists('all', 200, profile_id=pid) or []
             recent = self.database.get_top_artists('30d', 200, profile_id=pid) or []
+            from core.discovery.favorite_seeds import favorite_artist_units
             seeds = build_recency_weighted_seeds(
-                top, {a['name']: a.get('play_count', 0) for a in recent})
+                top, {a['name']: a.get('play_count', 0) for a in recent},
+                favorites=favorite_artist_units(self.database, pid))
             similars, _owned = _seed_edges(
                 self.database, [str(s['name']).strip().lower() for s in seeds], pid)
             artists = artist_affinity(seeds, similars)

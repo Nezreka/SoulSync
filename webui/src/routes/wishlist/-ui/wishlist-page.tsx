@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { useRoutedArtists } from '@/features/audiobook-routes/audiobook-routes.queries';
 import { useFeatureOn } from '@/platform/features';
+import { usePermMode } from '@/platform/shell/my-permissions';
 import { useProfile, useReactPageShell } from '@/platform/shell/route-controllers';
 import { ActionMenu } from '@/routes/artist-detail/-ui/action-menu';
 import { clearAudiobookWishlist } from '@/routes/audiobooks/-audiobooks.api';
@@ -18,6 +19,7 @@ import type {
 import { isVideoMedia } from '../-video.types';
 import {
   bulkWishlistActionChunked,
+  lidarrWholeAlbumQueryOptions,
   removeWishlistAlbum,
   removeWishlistTrack,
   setWishlistRetryProfile,
@@ -149,6 +151,18 @@ function MusicWishlistPage() {
   const statsQuery = useQuery(wishlistStatsQueryOptions(profileId));
   const cycleQuery = useQuery(wishlistCycleQueryOptions(profileId));
   const retryProfileQuery = useQuery(wishlistRetryProfileQueryOptions(profileId));
+  // "Whole album via Lidarr": on, grabs go to Lidarr (whole albums); off, to
+  // the next hybrid source. Starts at the setting's default.
+  // Asked only where it applies: the music list, for a profile that downloads.
+  const musicGet = usePermMode('music');
+  const lidarrOptionQuery = useQuery({
+    ...lidarrWholeAlbumQueryOptions(),
+    enabled: media !== 'audiobooks' && musicGet === 'download',
+  });
+  const [wholeAlbumChoice, setWholeAlbumChoice] = useState<boolean | null>(null);
+  const lidarrWholeAlbum = lidarrOptionQuery.data?.available
+    ? (wholeAlbumChoice ?? lidarrOptionQuery.data.default)
+    : undefined;
   const albumsQuery = useQuery(wishlistTracksQueryOptions(profileId, 'albums'));
   const singlesQuery = useQuery(wishlistTracksQueryOptions(profileId, 'singles'));
   const photosQuery = useQuery(wishlistArtistPhotosQueryOptions(profileId));
@@ -292,7 +306,7 @@ function MusicWishlistPage() {
   }, [processing, run]);
 
   const startRun = useMutation({
-    mutationFn: (scope: WishlistRunScope) => startWishlistDownload(scope),
+    mutationFn: (scope: WishlistRunScope) => startWishlistDownload(scope, lidarrWholeAlbum),
     onSuccess: (result) => {
       if (result.alreadyRunning) {
         window.showToast?.('The wishlist is already downloading', 'info');
@@ -357,7 +371,7 @@ function MusicWishlistPage() {
     // Chunked: the endpoint caps a call at 200 ids, and "grab the artist"
     // on a 500-track wishlist must not 400.
     mutationFn: ({ action, ids }: { action: WishlistBulkAction; ids: string[] }) =>
-      bulkWishlistActionChunked(action, ids),
+      bulkWishlistActionChunked(action, ids, { lidarrWholeAlbum }),
     onSuccess: (response, { action, ids }) => {
       const results = response.results ?? [];
       const okCount = results.filter((r) => r.ok).length;
@@ -553,6 +567,8 @@ function MusicWishlistPage() {
                   onGrabArtist={onGrabArtist}
                   onBulkAction={(action, ids) => bulkAction.mutateAsync({ action, ids })}
                   bulkBusy={bulkAction.isPending}
+                  lidarrWholeAlbum={lidarrWholeAlbum}
+                  onLidarrWholeAlbumChange={setWholeAlbumChoice}
                 />
               </section>
             )}
@@ -920,6 +936,8 @@ function MusicWishlistPage() {
                     onGrabArtist={onGrabArtist}
                     onBulkAction={(action, ids) => bulkAction.mutateAsync({ action, ids })}
                     bulkBusy={bulkAction.isPending}
+                    lidarrWholeAlbum={lidarrWholeAlbum}
+                    onLidarrWholeAlbumChange={setWholeAlbumChoice}
                     zoned
                     onRetryIds={onRetryIds}
                   />

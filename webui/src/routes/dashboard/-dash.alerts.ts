@@ -10,12 +10,14 @@
  * state — no second opinion about what "down" means.
  */
 
+import { soulseekLoginNotice } from '@/features/downloads/soulseek-login';
+
 import type { ServiceStatusPayload } from './-dash.api';
 
 import { genericServiceCard, metadataSourceCard, soulseekCard } from './-dash.services';
 
 export interface DashAlert {
-  key: 'metadata' | 'server' | 'download';
+  key: 'metadata' | 'server' | 'download' | 'soulseek-login';
   label: string;
   /** The service view's own status text ("Disconnected", "Rate limited"...). */
   detail: string;
@@ -51,6 +53,19 @@ export function serviceAlerts(payload: ServiceStatusPayload | null): DashAlert[]
       detail: server.statusText,
       severity: severityOf(server.indicatorClass),
     });
+  }
+
+  // logged out of the Soulseek server says more than "Disconnected": the
+  // downloads are waiting for the login, not failing
+  const login = soulseekLoginNotice(payload);
+  if (login) {
+    alerts.push({
+      key: 'soulseek-login',
+      label: login.title,
+      detail: login.detail,
+      severity: 'warn',
+    });
+    return alerts;
   }
 
   const dl = soulseekCard(payload.soulseek || {});

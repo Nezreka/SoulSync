@@ -31,6 +31,10 @@ import unicodedata
 from difflib import SequenceMatcher
 from typing import Any, Iterator, List, Optional
 
+# cyrillic to latin the way spotify's own metadata spells it, every table
+# keyed (core.text.cross_script has the tables and why there are three)
+from core.text.cross_script import CYRILLIC_FOLDS as _CYRILLIC_FOLDS
+from core.text.cross_script import CYRILLIC_RE as _CYRILLIC_RE
 from utils.logging_config import get_logger
 
 logger = get_logger("sync.provider_match")
@@ -43,32 +47,6 @@ _DURATION_TOLERANCE_MS = 2000
 # as the compare view's artist gate (playlist_reconcile).
 _ARTIST_AGREE_THRESHOLD = 0.6
 _VARIOUS_ARTISTS = {"various artists", "various", "va"}
-
-# cyrillic to latin the way spotify's own metadata spells it. covers russian,
-# ukrainian, belarusian and serbian letters. latin text passes through.
-_CYRILLIC_BASE = {
-    "а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "е": "e",
-    "ё": "yo", "ж": "zh", "з": "z", "и": "i", "й": "y", "к": "k",
-    "л": "l", "м": "m", "н": "n", "о": "o", "п": "p", "р": "r",
-    "с": "s", "т": "t", "у": "u", "ф": "f", "х": "kh", "ц": "ts",
-    "ч": "ch", "ш": "sh", "щ": "shch", "ъ": "", "ы": "y", "ь": "",
-    "э": "e", "ю": "yu", "я": "ya",
-    "і": "i", "ї": "yi", "є": "ye", "ґ": "g", "ў": "u",
-    "ђ": "dj", "ј": "j", "љ": "lj", "њ": "nj", "ћ": "c", "џ": "dzh",
-}
-# every table gets keyed, agreeing under one is enough. ё is spelled both
-# ways on spotify ("Yolka" the artist, "Elka" the tree), and х is often one
-# letter ("Horosho", "Mihail"). no table folds г or ґ to "h" or щ to "sh":
-# those merge different letters, and Голод (hunger) would key the same as
-# Холод (cold). spellings that need them fall through to the fuzzy matcher.
-_CYRILLIC_FOLDS = (
-    str.maketrans(_CYRILLIC_BASE),
-    str.maketrans({**_CYRILLIC_BASE, "ё": "e"}),
-    str.maketrans({**_CYRILLIC_BASE, "х": "h"}),
-)
-
-_CYRILLIC_RE = re.compile(r"[Ѐ-ӿ]")  # U+0400 to U+04FF
-
 
 def _forms(text: str) -> List[str]:
     """the spellings a name is keyed under. cyrillic only goes through the
@@ -221,7 +199,7 @@ def _row_is_corroborated(row: Any, lookup_id: str, track: Any, db: Any) -> bool:
     row_ms = _row_value(row, "duration")
     if not durations_agree_ms(source_ms, row_ms):
         return False
-    artists = artists_agree(getattr(track, "artists", None),
+    artists = artists_agree(_source_artists_of(track),
                             [_row_value(row, "artist_name"), _row_value(row, "track_artist")])
     if artists == "close":
         return True
@@ -363,6 +341,69 @@ def honorable_provider_rows(db: Any, track: Any, server_source: str,
         row_id = _row_value(row, "id")
         if provider_match_rejected(db, profile_id, server_source, track, row_id):
             logger.info("provider id match for '%s' -> %s skipped, unmatched by the user "
+                        "or the rejection state is unknown", getattr(track, "name", "?"), row_id)
+            continue
+        yield row
+
+
+def _source_artists_of(track: Any) -> List[Any]:
+    """the track's artists plus the mirrored playlist's own names for them
+    (#2222: itunes "Δέσποινα Βανδή", the playlist "Despina Vandi")."""
+    names = list(getattr(track, "artists", None) or [])
+    extra = getattr(track, "source_artists", None)
+    if isinstance(extra, (list, tuple)):
+        names += list(extra)
+    return names
+
+
+def _isrc_row_is_corroborated(row: Any, isrc: str, track: Any, db: Any) -> bool:
+    row_id = _row_value(row, "id")
+    if not isinstance(row_id, (str, int)) or isinstance(row_id, bool) or not str(row_id).strip():
+        return False
+    if not _titles_agree(getattr(track, "name", None), _row_value(row, "title"), db):
+        return False
+    if not durations_agree_ms(_row_value(track, "duration_ms"), _row_value(row, "duration")):
+        return False
+    # an isrc names one recording on every provider, so unlike a spotify id
+    # stamped from a name search it needs no duration to cross scripts. it
+    # still has to agree on the artist when the names can be compared: a
+    # compilation can carry a wrong isrc
+    return artists_agree(_source_artists_of(track),
+                         [_row_value(row, "artist_name"), _row_value(row, "track_artist")]) \
+        in ("close", "cross_script")
+
+
+def isrc_library_matches(db: Any, track: Any, server_source: str = None) -> List[Any]:
+    """every library row carrying the track's isrc that corroborates (#2222).
+    empty when the track has no isrc or the db can't look one up."""
+    isrc = str(getattr(track, "isrc", None) or "").strip().upper()
+    getter = getattr(db, "get_tracks_by_isrc", None)
+    if not isrc or not callable(getter):
+        return []
+    try:
+        rows = list(_call_id_getter(getter, isrc, server_source) or [])
+    except Exception as e:  # noqa: BLE001 - a failed lookup is a miss
+        logger.debug("isrc lookup failed for %s: %s", isrc, e)
+        return []
+    matches = []
+    for row in rows:
+        try:
+            if _isrc_row_is_corroborated(row, isrc, track, db):
+                matches.append(row)
+            else:
+                logger.debug("isrc %s row %s didn't corroborate", isrc, _row_value(row, "id"))
+        except Exception as e:  # noqa: BLE001 - an unreadable row is a miss
+            logger.debug("isrc match: row unreadable for %s: %s", isrc, e)
+    return matches
+
+
+def honorable_isrc_rows(db: Any, track: Any, server_source: str,
+                        profile_id: Any) -> Iterator[Any]:
+    """the corroborated isrc rows the user hasn't unmatched, in order."""
+    for row in isrc_library_matches(db, track, server_source):
+        row_id = _row_value(row, "id")
+        if provider_match_rejected(db, profile_id, server_source, track, row_id):
+            logger.info("isrc match for '%s' -> %s skipped, unmatched by the user "
                         "or the rejection state is unknown", getattr(track, "name", "?"), row_id)
             continue
         yield row

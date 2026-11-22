@@ -43,8 +43,9 @@ def _run(monkeypatch, before, after=None, *, scan_result=None):
     )
     # the read-only look before any write sees what the scan would report
     monkeypatch.setattr(
-        "core.repair_jobs.dead_file_cleaner._count_unreachable",
-        lambda _context, subjects: int((scan_result or {}).get("missing") or 0),
+        "core.repair_jobs.dead_file_cleaner._unreachable_paths",
+        lambda _context, subjects: [s["path"] for s in subjects][
+            :int((scan_result or {}).get("missing") or 0)],
     )
     findings = []
     context = JobContext(
@@ -142,8 +143,8 @@ def _unreachable(monkeypatch, *, total, missing, deferred=0, server=None):
                 "mass_missing_deferred": lost if deferred else 0}
     monkeypatch.setattr("core.library2.scan.rescan_files", rescan)
     monkeypatch.setattr("core.library2.paths.resolve_lib2_path", lambda *_a, **_k: None)
-    monkeypatch.setattr("core.repair_jobs.dead_file_cleaner._count_unreachable",
-                        lambda _context, _subjects: missing)
+    monkeypatch.setattr("core.repair_jobs.dead_file_cleaner._unreachable_paths",
+                        lambda _context, subjects: [s["path"] for s in subjects][:missing])
     progress = []
     context = JobContext(
         db=SimpleNamespace(), transfer_folder="/music",
@@ -166,7 +167,7 @@ def test_a_mass_unreachable_library_says_it_is_a_mapping_problem(monkeypatch):
     assert "600 of 600 files" in result.stopped_early
     assert "/music/0.flac" in result.stopped_early
     assert "Report Real Path" in result.stopped_early
-    assert any(p.get("log_type") == "error" and "path-mapping" in p.get("log_line", "")
+    assert any(p.get("log_type") == "warning" and "path-mapping" in p.get("log_line", "")
                for p in progress)
 
 
@@ -192,8 +193,8 @@ def test_the_saved_guard_settings_still_decide(monkeypatch):
     monkeypatch.setattr("core.library2.scan.rescan_files", lambda _db, **kw: {
         "scanned": len(kw["file_ids"]) - 18, "missing": 18})
     monkeypatch.setattr("core.library2.paths.resolve_lib2_path", lambda *_a, **_k: None)
-    monkeypatch.setattr("core.repair_jobs.dead_file_cleaner._count_unreachable",
-                        lambda _context, _subjects: 18)
+    monkeypatch.setattr("core.repair_jobs.dead_file_cleaner._unreachable_paths",
+                        lambda _context, subjects: [s["path"] for s in subjects][:18])
 
     def run(settings):
         context = JobContext(
@@ -355,3 +356,144 @@ def test_the_answer_lists_the_files_under_dead_files(tmp_path, monkeypatch):
     # asked again with nothing left to clear: says so, changes nothing
     again = cleaner.confirm_unreachable_gone(db, None, lambda **kw: findings.append(kw) or True)
     assert again["success"] is False and len(findings) == 59
+
+
+# --- #2216: a run of deleted files is dead files, not an outage ----------------
+
+def _job_over(conn, db, config=None):
+    """the job against a real catalogue and the real scan"""
+    from core.repair_jobs import dead_file_cleaner as cleaner
+
+    def subjects(_db, _config, **_kw):
+        return [{**_subject(row["id"], row["file_state"] or "active"), "path": row["path"],
+                 "track_id": row["track_id"]}
+                for row in conn.execute("SELECT id, track_id, path, file_state FROM lib2_track_files")]
+    findings, progress = [], []
+    context = JobContext(
+        db=db, transfer_folder="/music",
+        config_manager=config or SimpleNamespace(get=lambda key, default=None: default,
+                                                 get_active_media_server=lambda: None),
+        create_finding=lambda **kw: findings.append(kw) or True,
+        report_progress=lambda **kw: progress.append(kw))
+    import core.library2.maintenance_subjects as ms
+    original = ms.active_file_subjects
+    ms.active_file_subjects = subjects
+    try:
+        result = cleaner.DeadFileCleanerJob().scan(context)
+    finally:
+        ms.active_file_subjects = original
+    return result, findings, progress
+
+
+def test_files_deleted_next_to_each_other_become_dead_file_findings(tmp_path, monkeypatch):
+    """carlosjfcasero: 168 of 3748 files gone, all in one 500-file chunk. the
+    scan's quarter-of-the-batch outage test read that chunk as a dropped
+    mount, so every run said "storage outage" and nothing was ever filed"""
+    from core.library2 import scan
+
+    db, conn, root = _real_library(tmp_path, monkeypatch, 200)
+    lost = set(range(70, 130))  # 60 in a row: 30% of the set, 30% of the chunk
+    for i in range(200):
+        if i not in lost:
+            (root / f"{i}.flac").write_bytes(b"present")
+    assert len(lost) >= scan.MASS_MISSING_MIN and len(lost) > scan.MASS_MISSING_SHARE * 200
+
+    first, findings, _ = _job_over(conn, db)
+    assert first.stopped_early == ""
+    assert findings == []  # the first healthy miss only marks them suspected
+    states = {r[0] for r in conn.execute(
+        "SELECT file_state FROM lib2_track_files WHERE track_id BETWEEN 71 AND 130")}
+    assert states == {"missing_suspected"}
+
+    second, findings, _ = _job_over(conn, db)
+    assert second.stopped_early == ""
+    assert {f["finding_type"] for f in findings} == {"dead_file"}
+    assert len(findings) == 60
+    # the files that are there are left alone
+    assert {r[0] for r in conn.execute(
+        "SELECT file_state FROM lib2_track_files WHERE track_id <= 70")} == {"active"}
+
+
+def test_an_emptied_library_root_still_holds_every_miss(tmp_path, monkeypatch):
+    """the per-file root check still guards the job: with the share test off,
+    an empty mount point advances nothing"""
+    db, conn, _root = _real_library(tmp_path, monkeypatch, 10)
+    config = SimpleNamespace(
+        get=lambda key, default=None: {"max_unresolved_fraction": 1.0}
+        if key.endswith(".settings") else default,
+        get_active_media_server=lambda: None)
+    monkeypatch.setattr("core.library2.paths._configured_library_roots",
+                        lambda _cm=None: [str(_root)])
+    result, findings, _ = _job_over(conn, db, config)
+    _job_over(conn, db, config)
+    assert {r[0] for r in conn.execute("SELECT file_state FROM lib2_track_files")} == {"active"}
+    assert findings == []
+
+
+def test_the_example_path_is_one_that_cannot_be_reached(monkeypatch):
+    """the sample only looked at the first 200 files: unreachable files past
+    them logged "Example path: unknown" """
+    before = [_subject(i) for i in range(400)]
+    monkeypatch.setattr("core.library2.maintenance_subjects.active_file_subjects",
+                        lambda *_a, **_k: list(before))
+    monkeypatch.setattr("core.library2.paths.resolve_lib2_path",
+                        lambda path, config_manager=None: None if int(
+                            path.rsplit("/", 1)[1].split(".")[0]) >= 250 else path)
+    monkeypatch.setattr("os.path.exists", lambda _p: True)
+    monkeypatch.setattr("core.library2.paths.resolve_lib2_ancestor", lambda *_a, **_k: None)
+    config = SimpleNamespace(
+        get=lambda key, default=None: {"max_unresolved_fraction": 0.3}
+        if key.endswith(".settings") else default,
+        get_active_media_server=lambda: None)
+    context = JobContext(db=SimpleNamespace(), transfer_folder="/music",
+                         config_manager=config, create_finding=lambda **_k: True)
+    result = DeadFileCleanerJob().scan(context)
+    assert "150 of 400 files" in result.stopped_early
+    assert "Example path: /music/250.flac" in result.stopped_early
+    assert "unknown" not in result.stopped_early
+
+
+def _report(monkeypatch, paths, *, ancestor=None, bases=("/music/library",)):
+    from core.repair_jobs import dead_file_cleaner as cleaner
+
+    monkeypatch.setattr("core.library2.paths.resolve_lib2_ancestor",
+                        lambda *_a, **_k: ancestor)
+    monkeypatch.setattr("core.library.path_resolver.library_base_dirs",
+                        lambda _cm=None: list(bases))
+    logged = []
+    monkeypatch.setattr(cleaner.logger, "warning", lambda *a: logged.append(("warning", a)))
+    monkeypatch.setattr(cleaner.logger, "info", lambda *a: logged.append(("info", a)))
+    monkeypatch.setattr(cleaner.logger, "error", lambda *a: logged.append(("error", a)))
+    context = JobContext(
+        db=SimpleNamespace(), transfer_folder="/music",
+        config_manager=SimpleNamespace(get=lambda key, default=None: default,
+                                       get_active_media_server=lambda: "jellyfin"),
+        create_finding=lambda **_k: True)
+    reason = cleaner._unreachable_report(context, missing=len(paths), checked=100, paths=paths)
+    return reason, logged
+
+
+def test_paths_under_an_old_folder_point_at_update_file_locations(monkeypatch):
+    reason, _ = _report(monkeypatch, ["/app/Transfer/A/B/1.flac", "/app/Transfer/C/D/2.flac"])
+    assert "/app/Transfer" in reason
+    assert "Update File Locations" in reason
+
+
+def test_paths_whose_folders_are_there_are_deleted_files(monkeypatch):
+    reason, _ = _report(monkeypatch, ["/music/library/A/B/1.flac"], ancestor="/music/library/A/B")
+    assert "deleted or renamed outside SoulSync" in reason
+    assert "Music Paths" not in reason
+
+
+def test_paths_under_the_library_folder_keep_the_mapping_advice(monkeypatch):
+    reason, _ = _report(monkeypatch, ["/music/library/A/B/1.flac", "/music/library/C/2.flac"])
+    assert "Music Paths" in reason and "Update File Locations" not in reason
+
+
+def test_the_same_report_is_a_warning_once_not_an_error_every_run(monkeypatch):
+    from core.repair_jobs import dead_file_cleaner as cleaner
+    monkeypatch.setattr(cleaner, "_LAST_REPORT", {})
+    _, first = _report(monkeypatch, ["/x/1.flac"])
+    _, again = _report(monkeypatch, ["/x/1.flac"])
+    assert [level for level, _ in first] == ["warning"]
+    assert [level for level, _ in again] == ["info"]

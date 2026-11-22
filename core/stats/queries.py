@@ -16,7 +16,9 @@ import traceback
 from datetime import date, timedelta
 from typing import Any, Callable, Optional
 
-from core.listening_scope import listening_owner, owner_clause, owner_key, play_duration_sql
+from core.listening_scope import (
+    listening_owner, owner_key, play_duration_sql, stats_owner_clause, stats_view,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +104,18 @@ _PLAYABLE_TRACK_SQL = """
 """
 
 
+def _drawing_stats(fn):
+    """the function reads history for stats: a pile's taste-only plays (an
+    imported history kept for mixes and recommendations) stay out."""
+    import functools
+
+    @functools.wraps(fn)
+    def wrapper(database, *args, **kwargs):
+        with stats_view(database):
+            return fn(database, *args, **kwargs)
+    return wrapper
+
+
 def _name_key(name: Any) -> str:
     from core.library2.importer import normalize_name
 
@@ -144,6 +158,7 @@ def get_cached_stats(database, image_url_fixer: ImageUrlFixer, time_range: str,
     }
 
 
+@_drawing_stats
 def get_year_in_listening(database, image_url_fixer: ImageUrlFixer,
                           profile_id: Optional[int] = None) -> dict:
     """The Year in Listening story — cached by the worker, computed on miss.
@@ -255,11 +270,13 @@ def get_album_play_tracks(database, album_id, image_url_fixer: ImageUrlFixer) ->
     ]
 
 
+@_drawing_stats
 def get_overview(database, time_range: str, profile_id: Optional[int] = None) -> dict:
     """Aggregate listening stats for a time range."""
     return database.get_listening_stats(time_range, profile_id=profile_id)
 
 
+@_drawing_stats
 def get_top_artists(database, image_url_fixer: ImageUrlFixer, time_range: str, limit: int,
                     profile_id: Optional[int] = None) -> list[dict]:
     """Top artists by play count, enriched with image / Last.fm stats / soul_id."""
@@ -286,6 +303,7 @@ def get_top_artists(database, image_url_fixer: ImageUrlFixer, time_range: str, l
     return artists
 
 
+@_drawing_stats
 def get_top_albums(database, image_url_fixer: ImageUrlFixer, time_range: str, limit: int,
                    profile_id: Optional[int] = None) -> list[dict]:
     """Top albums by play count, enriched with album thumb."""
@@ -310,6 +328,7 @@ def get_top_albums(database, image_url_fixer: ImageUrlFixer, time_range: str, li
     return albums
 
 
+@_drawing_stats
 def get_top_tracks(database, image_url_fixer: ImageUrlFixer, time_range: str, limit: int,
                    profile_id: Optional[int] = None) -> list[dict]:
     """Top tracks by play count, enriched with album thumb."""
@@ -335,11 +354,13 @@ def get_top_tracks(database, image_url_fixer: ImageUrlFixer, time_range: str, li
     return tracks
 
 
+@_drawing_stats
 def get_timeline(database, time_range: str, granularity: str, profile_id: Optional[int] = None) -> Any:
     """Play count per time period for chart rendering."""
     return database.get_listening_timeline(time_range, granularity, profile_id=profile_id)
 
 
+@_drawing_stats
 def get_genres(database, time_range: str, profile_id: Optional[int] = None) -> Any:
     """Genre distribution by play count."""
     return database.get_genre_breakdown(time_range, profile_id=profile_id)
@@ -533,6 +554,7 @@ def get_library_disk_usage(database) -> dict:
     return _as_payload(value, refreshing, pending, failed)
 
 
+@_drawing_stats
 def get_recent_tracks(database, limit: int, image_url_fixer: Optional[ImageUrlFixer] = None,
                       profile_id: Optional[int] = None) -> list[dict]:
     """Recently played tracks from listening_history.
@@ -543,7 +565,7 @@ def get_recent_tracks(database, limit: int, image_url_fixer: Optional[ImageUrlFi
     None). Art passes through ``image_url_fixer`` because server-synced thumb
     URLs need auth and die in the browser — same treatment as resolve_track.
     """
-    scope = owner_clause(listening_owner(database, profile_id), 'lh')
+    scope = stats_owner_clause(listening_owner(database, profile_id), 'lh')
     conn = database._get_connection()
     try:
         cursor = conn.cursor()
@@ -590,6 +612,7 @@ def get_recent_tracks(database, limit: int, image_url_fixer: Optional[ImageUrlFi
     ]
 
 
+@_drawing_stats
 def get_listening_events(
     database,
     image_url_fixer: Optional[ImageUrlFixer],
@@ -868,6 +891,7 @@ def _library_album_cover(cursor, title) -> Optional[str]:
     return f"/api/library/v2/artwork/album/{int(row[0])}" if row else None
 
 
+@_drawing_stats
 def get_weekly_digest(database, profile_id: Optional[int] = None) -> dict:
     """This-week listening digest for the dashboard banner.
 
@@ -886,7 +910,7 @@ def get_weekly_digest(database, profile_id: Optional[int] = None) -> dict:
     renders nothing in that case (the calm-page rule).
     """
     owner = listening_owner(database, profile_id)
-    scope = owner_clause(owner, 'lh')
+    scope = stats_owner_clause(owner, 'lh')
     window = "lh.played_at >= datetime('now', '-7 days')"
     # the + keeps sqlite off idx_listening_artist. "artist IS NOT NULL" reads
     # as a range on that index, so without it sqlite walked every play ever
@@ -925,7 +949,7 @@ def get_weekly_digest(database, profile_id: Optional[int] = None) -> dict:
                 SELECT COUNT(*) FROM week
                 WHERE NOT EXISTS (
                     SELECT 1 FROM listening_history o
-                    WHERE o.artist = week.artist AND {owner_clause(owner, 'o')}
+                    WHERE o.artist = week.artist AND {stats_owner_clause(owner, 'o')}
                       AND +o.played_at < datetime('now', '-7 days')
                 )"""
         )

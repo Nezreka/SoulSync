@@ -600,7 +600,8 @@ class SoulseekClient(DownloadSourcePlugin):
                 year=year,
                 free_upload_slots=first_track.free_upload_slots,
                 upload_speed=first_track.upload_speed,
-                queue_length=first_track.queue_length
+                queue_length=first_track.queue_length,
+                grouped_hits=True,
             )
             
             album_results.append(album)
@@ -2929,15 +2930,18 @@ class SoulseekClient(DownloadSourcePlugin):
         from urllib.parse import quote
         return quote(str(part), safe="")
 
-    async def get_chat_connection_state(self) -> Dict[str, Any]:
-        """Chat requires a Soulseek login, not merely a reachable slskd API.
+    async def get_login_state(self) -> Optional[bool]:
+        """Is slskd connected and logged in to the Soulseek server?
 
-        slskd exposes server state at /api/v0/server in standard releases,
-        and /api/v0/server/state in some builds. Probe both so endpoint differences
-        do not falsely lock users out of chat. slskd 0.26.2 made the server
+        True / False from slskd's own server state, None when slskd didn't
+        answer (unreachable, or no endpoint carried the state). slskd
+        exposes it at /api/v0/server in standard releases and
+        /api/v0/server/state in some builds. slskd 0.26.2 made the server
         controller admin-only, so non-admin api keys get a 403 there; the
         application state (any role) carries the same block under 'server'.
         """
+        if not self.base_url:
+            return None
         for endpoint in ('server', 'server/state', 'application'):
             state = await self._make_request('GET', endpoint)
             if endpoint == 'application' and isinstance(state, dict):
@@ -2945,11 +2949,26 @@ class SoulseekClient(DownloadSourcePlugin):
             if isinstance(state, dict) and any(k in state for k in ('isConnected', 'IsConnected', 'isLoggedIn', 'IsLoggedIn')):
                 connected = state.get('isConnected', state.get('IsConnected', False))
                 logged_in = state.get('isLoggedIn', state.get('IsLoggedIn', False))
-                if connected is True and logged_in is True:
-                    return {"connected": True}
-                return {"connected": False, "code": "slskd_disconnected",
-                        "error": "slskd is not connected and logged in to Soulseek. Reconnect in slskd, then try again. Your message has not been sent."}
+                return connected is True and logged_in is True
+        return None
 
+    async def get_chat_connection_state(self) -> Dict[str, Any]:
+        """Chat requires a Soulseek login, not merely a reachable slskd API.
+
+        Asks slskd live (see get_login_state) and shares the answer with the
+        process-wide login state the download path and banner read.
+        """
+        logged_in = await self.get_login_state()
+        try:
+            from core import soulseek_session
+            soulseek_session.note(logged_in)
+        except Exception as e:  # noqa: BLE001 - chat never fails on the shared state
+            logger.debug("soulseek session note failed: %s", e)
+        if logged_in is True:
+            return {"connected": True}
+        if logged_in is False:
+            return {"connected": False, "code": "slskd_disconnected",
+                    "error": "slskd is not connected and logged in to Soulseek. Reconnect in slskd, then try again. Your message has not been sent."}
         return {"connected": False, "code": "slskd_unavailable",
                 "error": "Cannot check slskd's Soulseek connection. Check that slskd is running and its API key is valid."}
 

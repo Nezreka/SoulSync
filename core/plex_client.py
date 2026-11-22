@@ -977,6 +977,21 @@ class PlexClient(MediaServerBase):
             logger.error(f"Error reconciling Plex playlist '{playlist_name}': {e}")
             return False
 
+    def read_playlist_track_ids(self, playlist_name: str, playlist_id=None) -> Optional[List[str]]:
+        """what the server playlist holds right now, for the sync's readback
+        (#2235). None when it can't be read, never a guess: [] means empty."""
+        if not self.ensure_connection():
+            return None
+        try:
+            try:
+                playlist = self._target_playlist(playlist_name, playlist_id)
+            except NotFound:
+                return None
+            return [str(i.ratingKey) for i in playlist.items() if hasattr(i, 'ratingKey')]
+        except Exception as e:
+            logger.debug(f"Plex playlist readback for '{playlist_name}' failed: {e}")
+            return None
+
     def get_playlist_track_ids(self, playlist_id, playlist_name: str = "") -> List[str]:
         """The playlist's current track ratingKeys, in current order. [] if missing."""
         if not self.ensure_connection():
@@ -1338,6 +1353,27 @@ class PlexClient(MediaServerBase):
         except Exception as exc:
             logger.error(f"Error getting recently updated albums: {exc}")
             return []
+
+    def get_music_library_folders(self) -> List[Dict[str, Any]]:
+        """every music library on the server with its folders, as Plex names
+        them: ``[{library, folders}]``. All of them, not only the selected
+        one: the library coverage check lists everything Plex has."""
+        if not self.ensure_connection() or not self._can_query() or not self.server:
+            return []
+        out: List[Dict[str, Any]] = []
+        try:
+            sections = [s for s in self.server.library.sections() if s.type == 'artist']
+        except Exception as exc:
+            logger.debug(f"Could not list music sections: {exc}")
+            return []
+        for section in sections:
+            try:
+                folders = [str(loc) for loc in (section.locations or []) if loc]
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(f"Could not read locations for section '{getattr(section, 'title', '?')}': {exc}")
+                folders = []
+            out.append({"library": str(getattr(section, 'title', '') or ''), "folders": folders})
+        return out
 
     def get_music_library_locations(self) -> List[str]:
         """Folder roots configured for the music library scope.

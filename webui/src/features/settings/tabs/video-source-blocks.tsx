@@ -1,8 +1,8 @@
 /**
- * The video side's blocks in the Sources tab's torrent and usenet panels
- * (SETTINGS_PORT.md, video pass V2a): the seeding goals with their
- * per-indexer overrides, what happens to a usenet job once imported, and
- * grabbing the next release when one fails. Were video-settings.js; they are
+ * The video side's groups in the torrent and usenet sheets ("For video"):
+ * the seeding goals with their per-indexer overrides, and what happens to a
+ * usenet job once imported. (Grabbing the next release when one fails moved
+ * to Downloads > Behaviour, Video.) Were video-settings.js; they are
  * keys of the video downloads config (video-downloads.ts), saved whole when a
  * field is left or a box ticked or a mode picked. The page saved the four
  * seeding goals only when another of these fields saved (nothing listened to
@@ -11,8 +11,43 @@
 
 import { useEffect, useState } from 'react';
 
+import {
+  ActionRow,
+  Btn,
+  FieldNote,
+  Item,
+  Items,
+  NumberField,
+  Row,
+  Select,
+  Switch,
+  itemClass,
+} from '../ui';
 import { useCommit } from './commit';
 import { useVideoDownloads, videoDownloads } from './video-downloads';
+
+/** the seeding goals' help, said once for music and once for video */
+export const SEED_MORE = (
+  <>
+    Both at 0 means a torrent is never removed. <strong>SoulSync</strong>: SoulSync watches the
+    client and removes the torrent when a goal is met (your imported library copy is separate and
+    never touched). <strong>Torrent client</strong>: SoulSync writes the ratio and time limit into
+    the client, which enforces them itself. It shows in the client's share-limit dialog and works
+    even when SoulSync is off.
+  </>
+);
+
+export const SEED_MODES = [
+  { value: 'soulsync', label: 'SoulSync (watches the client and removes)' },
+  { value: 'client', label: 'Torrent client (writes its own seed limit)' },
+];
+
+/** what happens to a usenet job once imported: music and video say the same */
+export const USENET_REMOVE = [
+  { value: 'off', label: 'Leave it in the client' },
+  { value: 'history', label: "Remove it from the client's history" },
+  { value: 'files', label: "Remove it and delete what's left in its folder" },
+];
 
 type Rules = Record<string, Record<string, number>>;
 interface Indexer {
@@ -44,7 +79,7 @@ export function VideoSeedingGoals() {
       const r = await fetch('/api/prowlarr/indexers', { headers: { Accept: 'application/json' } });
       const d = r.ok ? ((await r.json()) as { success?: boolean; indexers?: Indexer[] }) : null;
       if (!d || !d.success) {
-        setNote("Prowlarr isn't configured yet (Settings → Indexers & Downloaders).");
+        setNote("Prowlarr isn't set up yet (Downloads, Sources, Indexers).");
         return;
       }
       // usenet has no seeding, so no rules that can never fire
@@ -67,141 +102,113 @@ export function VideoSeedingGoals() {
     videoDownloads.edit({ seed_overrides: all });
   }
 
-  const num = (idx: Indexer, field: string, ph: string, step: string) => {
+  const num = (idx: Indexer, field: string, ph: string, step: string, name: string) => {
     const r = rules[String(idx.id)] || {};
     const v = r[field];
     return (
-      <input
-        type="number"
+      <NumberField
         min="0"
         step={step}
         placeholder={ph}
+        aria-label={`${name} for ${idx.name}`}
         data-vseed-idx={idx.id}
         data-vseed-field={field}
         key={`${field}-${loads}`}
         defaultValue={v === undefined || v === null ? '' : v}
-        style={{ maxWidth: '78px' }}
         onInput={(event) => setRule(idx.id, field, (event.target as HTMLInputElement).value)}
       />
     );
   };
 
   return (
-    <div className="form-group" id="video-seeding-goals">
-      <label>Seeding goals (torrents):</label>
-      <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
-        <span className="settings-hint">Ratio</span>{' '}
-        <input
-          type="number"
+    <div id="video-seeding-goals">
+      <Row
+        field
+        label="Seed until a ratio of"
+        htmlFor="video-seed-ratio"
+        help="Remove a finished torrent once it reaches this ratio or the hours below, whichever comes first."
+        more={SEED_MORE}
+      >
+        <NumberField
           id="video-seed-ratio"
           min="0"
           step="0.1"
-          style={{ maxWidth: '90px' }}
           placeholder="0"
           ref={saveRatio}
           value={config ? str(config.seed_ratio_goal ?? 0) : ''}
           onChange={(event) => videoDownloads.edit({ seed_ratio_goal: event.target.value })}
-        />{' '}
-        <span className="settings-hint">or hours seeded</span>{' '}
-        <input
-          type="number"
+        />
+      </Row>
+      <Row field sub label="Or hours seeded" htmlFor="video-seed-hours">
+        <NumberField
           id="video-seed-hours"
+          unit="hours"
           min="0"
           step="1"
-          style={{ maxWidth: '90px' }}
           placeholder="0"
           ref={saveHours}
           value={config ? str(config.seed_time_goal_hours ?? 0) : ''}
           onChange={(event) => videoDownloads.edit({ seed_time_goal_hours: event.target.value })}
-        />{' '}
-        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12.5px' }}>
-          <input
-            type="checkbox"
-            id="video-seed-remove-data"
-            checked={config ? config.seed_remove_data !== false : true}
-            onChange={(event) =>
-              void videoDownloads.change({ seed_remove_data: event.target.checked })
-            }
-          />{' '}
-          also delete the client's copy
-        </label>
-      </div>
-      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '8px' }}>
-        <span className="settings-hint">Enforced by</span>{' '}
-        <select
+        />
+      </Row>
+      <Row sub label="Also delete the client's copy" htmlFor="video-seed-remove-data">
+        <Switch
+          id="video-seed-remove-data"
+          checked={config ? config.seed_remove_data !== false : true}
+          onChange={(event) =>
+            void videoDownloads.change({ seed_remove_data: event.target.checked })
+          }
+        />
+      </Row>
+      <Row field sub label="Enforced by" htmlFor="video-seed-mode">
+        <Select
           id="video-seed-mode"
-          className="form-select"
-          style={{ maxWidth: '260px' }}
           value={config ? str(config.seed_mode) || 'soulsync' : 'soulsync'}
           onChange={(event) => void videoDownloads.change({ seed_mode: event.target.value })}
+          options={SEED_MODES}
+        />
+      </Row>
+      <div id="video-seed-per-indexer">
+        <ActionRow
+          label="Per-indexer goals"
+          help="A private tracker wants a ratio or a week of seeding, a public one wants nothing. Leave a box blank to use the goal above; type 0 to exempt that tracker."
         >
-          <option value="soulsync">SoulSync (watches the client + removes)</option>
-          <option value="client">Torrent client (writes its own seed limit)</option>
-        </select>
-      </div>
-      <small className="settings-hint">
-        Both at 0 = never remove (the old behavior). <strong>SoulSync</strong>: SS polls the client
-        and removes when a goal is hit (your imported library copy is separate and never touched).{' '}
-        <strong>Torrent client</strong>: SS writes the ratio/time limit into the client (arr-style)
-        and lets it enforce — it shows in the client's share-limit dialog and works even when SS is
-        off.
-      </small>
-      <div id="video-seed-per-indexer" style={{ marginTop: '12px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-          <span className="settings-hint">Per-indexer overrides</span>{' '}
-          <button
-            className="test-button"
-            type="button"
-            id="video-seed-idx-refresh"
-            onClick={() => void loadIndexers()}
-          >
+          <Btn small id="video-seed-idx-refresh" onClick={() => void loadIndexers()}>
             Load indexers
-          </button>
-        </div>
-        <small className="settings-hint" style={{ display: 'block', margin: '6px 0 8px' }}>
-          Sonarr/Radarr put seed rules on the indexer, not globally — a private tracker needs a
-          ratio or a week of seeding, a public one needs nothing. Leave a box <strong>blank</strong>{' '}
-          to inherit the goal above; type <strong>0</strong> to exempt that tracker from it.{' '}
-          <strong>Pack hrs</strong> is the longer window season packs get (blank = same as Hours).
-        </small>
-        <div id="video-seed-idx-rows" className="ind-indexer-list" ref={saveRules}>
+          </Btn>
+        </ActionRow>
+        <FieldNote>
+          Sonarr and Radarr put seed rules on the indexer, not globally. <strong>Pack hours</strong>{' '}
+          is the longer window season packs get (blank means the same as Hours).
+        </FieldNote>
+        <Items id="video-seed-idx-rows" ref={saveRules}>
           {note !== null ? (
-            <em className="settings-hint">{note}</em>
+            <FieldNote>{note}</FieldNote>
           ) : indexers === null ? (
-            <em className="settings-hint">
-              Click Load indexers to list the torrent indexers from Prowlarr.
-            </em>
+            <FieldNote>Load indexers to list the torrent indexers from Prowlarr.</FieldNote>
           ) : !indexers.length ? (
-            <em className="settings-hint">
+            <FieldNote>
               No torrent indexers in Prowlarr. Usenet never seeds, so only torrent indexers show
               here.
-            </em>
+            </FieldNote>
           ) : (
             indexers.map((idx) => (
-              <div
-                key={idx.id}
-                className="ind-indexer-card"
-                style={{ gap: '8px', flexWrap: 'wrap' }}
-              >
-                <span className="ind-indexer-card-id">#{idx.id}</span>
-                <span className="ind-indexer-card-name">{idx.name}</span>
-                {idx.privacy ? (
-                  <span className="ind-indexer-card-privacy">{idx.privacy}</span>
-                ) : null}
-                <span
-                  style={{ marginLeft: 'auto', display: 'flex', gap: '6px', alignItems: 'center' }}
-                >
-                  <span className="settings-hint">Ratio</span>
-                  {num(idx, 'ratio', 'inherit', '0.1')}
-                  <span className="settings-hint">Hours</span>
-                  {num(idx, 'hours', 'inherit', '1')}
-                  <span className="settings-hint">Pack hrs</span>
-                  {num(idx, 'pack_hours', 'same', '1')}
+              <Item key={idx.id} data-indexer="">
+                <span className={itemClass.dim}>#{idx.id}</span>
+                <span className={itemClass.main}>{idx.name}</span>
+                {idx.privacy ? <span className={itemClass.dim}>{idx.privacy}</span> : null}
+                <span className={itemClass.cells}>
+                  <span className={itemClass.dim}>Ratio</span>
+                  {num(idx, 'ratio', 'inherit', '0.1', 'Ratio')}
+                  <span className={itemClass.dim}>Hours</span>
+                  {num(idx, 'hours', 'inherit', '1', 'Hours')}
+                  <span className={itemClass.dim}>Pack hours</span>
+                  {num(idx, 'pack_hours', 'same', '1', 'Pack hours')}
                 </span>
-              </div>
+              </Item>
             ))
           )}
-        </div>
+        </Items>
       </div>
     </div>
   );
@@ -211,47 +218,21 @@ export function VideoUsenetBlocks() {
   const { config } = useVideoDownloads();
   useEffect(() => void videoDownloads.load(), []);
   return (
-    <>
-      <div className="form-group" id="video-usenet-remove-completed-group">
-        <label>When a usenet download has imported (video):</label>
-        <select
-          id="video-usenet-remove-completed"
-          className="form-select"
-          value={config ? str(config.usenet_remove_completed) || 'off' : 'off'}
-          onChange={(event) =>
-            void videoDownloads.change({ usenet_remove_completed: event.target.value })
-          }
-        >
-          <option value="off">Leave it in the client</option>
-          <option value="history">Remove it from the client's history</option>
-          <option value="files">Remove it and delete what's left in its folder</option>
-        </select>
-        <div className="setting-help-text">
-          SoulSync already clears the file it imported; this also takes the job out of the client
-          and, with the last option, deletes what it left behind (nfo, sample). Failed and
-          import-failed downloads keep their job for Manual import, and a season pack only goes when
-          every episode in it imported.
-        </div>
-      </div>
-      <div className="form-group" id="video-redownload-failed-group">
-        <label className="checkbox-label">
-          <input
-            type="checkbox"
-            id="video-redownload-failed"
-            checked={config ? config.redownload_failed !== false : true}
-            onChange={(event) =>
-              void videoDownloads.change({ redownload_failed: event.target.checked })
-            }
-          />{' '}
-          When a video download fails, grab the next best release
-        </label>
-        <div className="setting-help-text">
-          When SABnzbd or the torrent client fails a movie or episode, or a torrent stalls, that
-          release is blocklisted and the next one your quality profile ranks is grabbed right away.
-          It stops after 5 failed releases of the same title in 2 days, and you get the failed
-          notification when nothing else could be taken.
-        </div>
-      </div>
-    </>
+    <Row
+      stack
+      id="video-usenet-remove-completed-group"
+      label="When a download has imported"
+      htmlFor="video-usenet-remove-completed"
+      help="SoulSync already clears the file it imported; this also takes the job out of the client and, with the last option, deletes what it left behind (nfo, sample). Failed and import-failed downloads keep their job for Manual import, and a season pack only goes when every episode in it imported."
+    >
+      <Select
+        id="video-usenet-remove-completed"
+        value={config ? str(config.usenet_remove_completed) || 'off' : 'off'}
+        onChange={(event) =>
+          void videoDownloads.change({ usenet_remove_completed: event.target.value })
+        }
+        options={USENET_REMOVE}
+      />
+    </Row>
   );
 }

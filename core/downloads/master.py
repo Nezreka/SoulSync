@@ -426,6 +426,53 @@ def preview_ownership(db, tracks_json, *, album_context, artist_context, is_albu
     return results
 
 
+def release_group_id_of(tracks_json) -> Optional[str]:
+    """The MusicBrainz release group every requested track belongs to, or None.
+
+    Wishlist rows carry the id the MusicBrainz worker matched. Tracks without
+    one are ignored; tracks that disagree make the answer None.
+    """
+    groups = set()
+    for entry in tracks_json or []:
+        if isinstance(entry, dict):
+            value = str(entry.get('musicbrainz_release_group_id') or '').strip()
+            if value:
+                groups.add(value)
+    return groups.pop() if len(groups) == 1 else None
+
+
+def bundle_release_year_of(tracks_json) -> Optional[str]:
+    """The release year every requested track's album gives, or None.
+
+    Tells a band's same-titled albums apart in Lidarr. Tracks without a date
+    are ignored; tracks that disagree make the answer None. (not
+    release_year_of above: that one reads one album context, and a second
+    def under its name replaced it for every caller.)
+    """
+    years = set()
+    for entry in tracks_json or []:
+        if isinstance(entry, dict):
+            album = entry.get('album') if isinstance(entry.get('album'), dict) else {}
+            value = str(album.get('release_date') or '')[:4]
+            if value.isdigit():
+                years.add(value)
+    return years.pop() if len(years) == 1 else None
+
+
+def bundle_release_type_of(tracks_json) -> Optional[str]:
+    """The album type every requested track's album gives ('album',
+    'single', 'compilation', 'ep'), or None. Tells an album from its
+    same-titled single in Lidarr."""
+    types = set()
+    for entry in tracks_json or []:
+        if isinstance(entry, dict):
+            album = entry.get('album') if isinstance(entry.get('album'), dict) else {}
+            value = str(album.get('album_type') or '').strip().lower()
+            if value:
+                types.add(value)
+    return types.pop() if len(types) == 1 else None
+
+
 def expected_release_duration_seconds(tracks_json) -> Optional[int]:
     """Total playing time of the requested release, or None if unknown.
 
@@ -692,15 +739,32 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
     # batch fills (#1199) -- the one decided when it was created, which for an
     # admin is the library they had selected, not their own. this runs on a
     # pool thread with no request context.
+    from core.downloads.queued_tracks import unpack_tracks
     from core.library_scope import batch_scope, library_scope
     with tasks_lock:
-        _batch = dict(download_batches.get(batch_id) or {})
+        _row = download_batches.get(batch_id)
+        _batch = dict(_row or {})
+    # a batch waits in its pool until a worker is free (#2242). stopped or
+    # cleared while it waited, it must not start: the analysis used to set the
+    # phase back to 'analysis' and run the whole album anyway
+    if _row is None or _batch.get('phase') == 'cancelled':
+        logger.info("Batch %s was %s before it started; not running it", batch_id,
+                    'cleared' if _row is None else 'stopped')
+        return None
+    tracks_json = unpack_tracks(tracks_json)
     with library_scope(batch_scope(_batch)):
-        return _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps, serialize)
+        _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps)
+    # serialize=True (the album pool): hold this pool slot until the album
+    # finishes so only a few albums are ever in flight at once (#740 / Sokhi).
+    # waited out here, not inside the worker, so the album's search results,
+    # candidate folders and analysis die with the worker's frame instead of
+    # living for the whole download (#2242)
+    if serialize:
+        _wait_for_batch_drain(batch_id)
+    return None
 
 
-def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: MasterDeps,
-                                     serialize: bool = False):
+def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: MasterDeps):
     try:
         # PHASE 1: ANALYSIS
         with tasks_lock:
@@ -733,6 +797,7 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
         # non-English artists whose native-script metadata AcoustID can't
         # reconcile with the romanized request).
         batch_skip_acoustid = False
+        batch_check_owned = False
         with tasks_lock:
             if batch_id in download_batches:
                 force_download_all = download_batches[batch_id].get('force_download_all', False)
@@ -750,6 +815,7 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
                     download_batches[batch_id].get('source_playlist_ref') or ''
                 ).strip()
                 batch_skip_acoustid = bool(download_batches[batch_id].get('skip_acoustid', False))
+                batch_check_owned = bool(download_batches[batch_id].get('check_owned_before_download', False))
         # a Library v2 wishlist -- the admin's, or one filling a profile's own
         # library (#1199) -- carries upgrade intents; asked once, off the lock
         from core.library_scope import library_scope_for_profile
@@ -858,6 +924,22 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
                 db, batch_album_context, batch_artist_context,
                 alias_cache=alias_cache)
 
+        # #2221: an auto wishlist batch is force_download_all, and the
+        # cycle-start library sweep stops at its time budget. the tracks it
+        # did not reach are checked here, each just before it would download,
+        # so a budgeted sweep never sends an owned track to download.
+        owned_checker = None
+        if force_download_all and batch_check_owned and playlist_id == 'wishlist':
+            try:
+                from core.wishlist.processing import BatchOwnedChecker
+                owned_checker = BatchOwnedChecker(
+                    db, int(batch_profile_id or 1), tracks_json,
+                    deps.config_manager.get_active_media_server(),
+                    logger=logger, log_prefix="[Wishlist Batch]")
+            except Exception as _oc_err:  # noqa: BLE001 - the batch runs as it always did
+                logger.warning(f"[Wishlist Batch] Library check unavailable for {batch_id}: {_oc_err}")
+                owned_checker = None
+
         for i, track_data in enumerate(tracks_json):
             # Use original table index if provided (for partial track selection),
             # otherwise fall back to enumeration index
@@ -914,6 +996,28 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
                     })
                     continue
 
+            if owned_checker is not None:
+                try:
+                    _is_owned, _owned_track = owned_checker.check(track_data)
+                except Exception as _oc_err:  # noqa: BLE001 - one track's check must not stop the batch
+                    logger.debug(f"[Wishlist Batch] Library check failed for '{track_name}': {_oc_err}")
+                    _is_owned, _owned_track = False, None
+                if _is_owned:
+                    analysis_results.append({
+                        'track_index': track_index,
+                        'track': track_data,
+                        'found': True,
+                        'confidence': 1.0,
+                        'match_reason': 'already_owned',
+                        'matched_file_path': getattr(_owned_track, 'file_path', None),
+                        'matched_track_id': getattr(_owned_track, 'id', None),
+                    })
+                    with tasks_lock:
+                        if batch_id in download_batches:
+                            download_batches[batch_id]['analysis_processed'] = i + 1
+                            download_batches[batch_id]['analysis_results'] = analysis_results.copy()
+                    continue
+
             # Skip database check if force download is enabled
             if force_download_all:
                 logger.warning(f"[Force Download] Skipping database check for '{track_name}' - treating as missing")
@@ -948,6 +1052,9 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
                     download_batches[batch_id]['analysis_processed'] = i + 1
                     # Store incremental results for live updates
                     download_batches[batch_id]['analysis_results'] = analysis_results.copy()
+
+        if owned_checker is not None:
+            owned_checker.finish()
 
         missing_tracks = [res for res in analysis_results if not res['found']]
 
@@ -1144,6 +1251,8 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
             batch_artist_context = batch.get('artist_context')
             batch_is_album = batch.get('is_album_download', False)
             batch_private_album_bundle = bool(batch.get('album_bundle_private_staging'))
+            batch_lidarr_whole_album = _album_bundle_dispatch.lidarr_whole_album(
+                batch, deps.config_manager.get)
             batch_playlist_folder_mode = batch.get('playlist_folder_mode', False)
             batch_playlist_name = batch.get('playlist_name', 'Unknown Playlist')
 
@@ -1153,6 +1262,9 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
         # owned album would still trigger a release download.
         _bundle_state = _BatchStateAccessImpl()
         _album_bundle_sources = _resolve_album_bundle_sources(deps.config_manager)
+        if not batch_lidarr_whole_album:
+            # "Whole album via Lidarr" off: the next source gets the album
+            _album_bundle_sources = [s for s in _album_bundle_sources if s != 'lidarr']
         _album_bundle_staged = batch_private_album_bundle
 
         def _configured_bundle_plugin(source):
@@ -1193,7 +1305,7 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
                     return None
             return plugin
 
-        def _bundle_plugin_kwargs():
+        def _bundle_plugin_kwargs(source=None):
             """What the album plugins need beyond album/artist/staging.
 
             Both dispatch sites send the same thing, and a key is omitted
@@ -1207,6 +1319,18 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
             _duration = expected_release_duration_seconds(tracks_json)
             if _duration:
                 kwargs['expected_duration_seconds'] = _duration
+            if source == 'lidarr':
+                # Lidarr looks albums up in MusicBrainz: the id finds the
+                # exact release group where a text search often cannot.
+                _group = release_group_id_of(tracks_json)
+                if _group:
+                    kwargs['release_group_id'] = _group
+                _year = bundle_release_year_of(tracks_json)
+                if _year:
+                    kwargs['release_year'] = _year
+                _type = bundle_release_type_of(tracks_json)
+                if _type:
+                    kwargs['release_type'] = _type
             return kwargs or None
 
         def _stamp_terminal_bundle_failure():
@@ -1248,7 +1372,7 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
                     plugin_resolver=lambda _name, _plugin=plugin: _plugin,
                     state=_bundle_state,
                     source_override=source,
-                    plugin_kwargs=_bundle_plugin_kwargs(),
+                    plugin_kwargs=_bundle_plugin_kwargs(source),
                 ):
                     _stamp_terminal_bundle_failure()
                     return True
@@ -1649,6 +1773,7 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
                 batch_album_explicit = album_explicit_flag(
                     batch_album_context, [r.get('track') or {} for r in analysis_results])
 
+            _upgrade_pairs = []
             for res in missing_tracks:
                 task_id = str(uuid.uuid4())
                 track_info = res['track'].copy()
@@ -1901,20 +2026,24 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
                 }
                 if is_upgrade_intent(_upgrade_intent):
                     download_tasks[task_id][_UPGRADE_INTENT_KEY] = _upgrade_intent
+                    _upgrade_pairs.append((task_id, _upgrade_intent.track_id))
                 download_batches[batch_id]['queue'].append(task_id)
+
+        # what each upgrade replaces, for its Downloads row ("MP3 320 → FLAC")
+        # and the library's "upgrade queued" badge. read off tasks_lock
+        if _upgrade_pairs:
+            from core.downloads.upgrade_rows import stamp_tasks as _stamp_upgrade_rows
+            _stamp_upgrade_rows(db, _upgrade_pairs)
 
         deps.download_monitor.start_monitoring(batch_id)
         deps.start_next_batch_of_downloads(batch_id)
 
         # Album-bundle batches run on the dedicated album pool and pass
-        # serialize=True: hold this pool slot until the album finishes so only a
-        # few albums are ever in flight at once, instead of every album batch
-        # immediately starting and flooding the shared download pool with
-        # 'searching' tracks (#740 / Sokhi). The residual + playlist + manual
-        # paths run on the shared download pool and DON'T serialize (blocking
-        # there would steal an actual download worker).
-        if serialize:
-            _wait_for_batch_drain(batch_id)
+        # serialize=True; run_full_missing_tracks_process holds the pool slot
+        # until the album drains, once this frame and its search results are
+        # gone (#2242). The residual + playlist + manual paths run on the
+        # shared download pool and DON'T serialize (blocking there would steal
+        # an actual download worker).
 
     except Exception as e:
         logger.error(f"Master worker for batch {batch_id} failed: {e}")

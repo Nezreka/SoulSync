@@ -321,8 +321,8 @@ describe('ToolsPage shell', () => {
       cards: [...section.querySelectorAll('.tool-card')].map((card) => card.id),
     }));
     // Section order and per-section card order both come from index.html.
-    // All ELEVEN cards are present (not twelve — the region has 11 .tool-card
-    // divs; the maintenance hero is a separate block, not a card).
+    // The eleven vanilla cards, plus Update File Locations and Filled Tags
+    // (the maintenance hero is a separate block, not a card).
     expect(sections).toEqual([
       {
         title: 'Database & Scanning',
@@ -331,11 +331,17 @@ describe('ToolsPage shell', () => {
           'reconcile-ids-card',
           'duplicate-cleaner-card',
           'media-scan-card',
+          'file-locations-card',
         ],
       },
       {
         title: 'Metadata & Cache',
-        cards: ['metadata-updater-card', 'discovery-pool-card', 'manual-library-match-card'],
+        cards: [
+          'metadata-updater-card',
+          'tag-fills-card',
+          'discovery-pool-card',
+          'manual-library-match-card',
+        ],
       },
       {
         title: 'Management',

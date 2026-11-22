@@ -989,64 +989,6 @@ button.albumRenameBadge:focus-visible {
 
 /* --- artist cards --- */
 
-.mediaServerBadges {
-  position: absolute;
-  z-index: 2;
-  top: 18px;
-  right: 18px;
-  display: flex;
-  align-items: center;
-}
-
-.mediaServerRecognitionBadge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 2px;
-  min-width: 23px;
-  min-height: 21px;
-  padding: 2px 5px;
-  border: 1px solid rgba(134, 239, 172, 0.14);
-  border-radius: 6px;
-  background: rgba(16, 42, 31, 0.48);
-  color: rgba(187, 247, 208, 0.62);
-  font-size: 8px;
-  font-weight: 650;
-  line-height: 1;
-  white-space: nowrap;
-  transition:
-    border-color 0.12s ease,
-    background 0.12s ease,
-    color 0.12s ease;
-}
-
-.mediaServerRecognitionBadge:hover {
-  border-color: rgba(134, 239, 172, 0.38);
-  background: rgba(16, 55, 38, 0.82);
-  color: rgba(220, 252, 231, 0.94);
-}
-
-.mediaServerRecognitionBadge svg {
-  width: 10px;
-  height: 10px;
-  flex: 0 0 auto;
-  stroke-width: 1.7;
-}
-
-.mediaServerRecognitionCheck {
-  color: rgba(74, 222, 128, 0.78);
-  font-size: 8px;
-  font-weight: 800;
-}
-
-.mediaServerRecognitionCount {
-  min-width: 8px;
-  color: rgba(255, 255, 255, 0.52);
-  font-size: 8px;
-  font-variant-numeric: tabular-nums;
-  text-align: center;
-}
-
 /* dev's grid: covers ease in from the dark tile once loaded, not a pop */
 .artFade {
   transition: opacity var(--dur-slowest) ease-out;

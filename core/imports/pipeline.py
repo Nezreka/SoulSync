@@ -110,6 +110,29 @@ __all__ = [
     "post_process_matched_download_with_verification",
 ]
 
+# what an artist context can carry as the artist's provider id
+_ARTIST_ID_KEYS = ("id", "artist_id", "source_artist_id", "spotify_artist_id",
+                   "itunes_artist_id", "deezer_id", "deezer_artist_id", "discogs_id",
+                   "soul_id", "musicbrainz_id", "mbid", "provider_ids", "external_ids")
+
+
+def _take_artist_identity(artist_context: dict, name: str, artist: Any) -> None:
+    """The artist context becomes ``name``, with ``artist``'s id or none.
+
+    a context named "Various Artists" carries the compilation's id (spotify's
+    0LyfQWJT6nXafLPZqxe9Of). renaming it to the track's singer and keeping
+    that id paired the singer with it: the library stored it on them, and every
+    later compilation was found by it and renamed after them (#2229). the id
+    belonged to the old name, so it goes with it."""
+    for key in _ARTIST_ID_KEYS:
+        artist_context.pop(key, None)
+    artist_context['name'] = name
+    if isinstance(artist, dict):
+        from core.various_artists_ids import is_various_artists_id
+        own = str(artist.get('id') or '').strip()
+        if own and not is_various_artists_id(own, artist.get('source') or artist.get('provider')):
+            artist_context['id'] = own
+
 
 def _retire_replaced_library_file(path: str, reason: str, context) -> None:
     """A library file an import supersedes goes to the deleted-files folder of
@@ -914,8 +937,10 @@ def _maybe_stage_album_track(context, final_path):
                 else:
                     # an own-library profile's batch stages under its folder (#1199)
                     from core.audiobook_routing import routed_root_for_context
-                    from core.imports.paths import import_owner_id, library_root_for_profile
+                    from core.imports.paths import (
+                        import_owner_id, library_root_for_profile, lidarr_root_for_context)
                     transfer_dir = (routed_root_for_context(context)
+                                    or lidarr_root_for_context(context)
                                     or library_root_for_profile(import_owner_id(batch))
                                     or docker_resolve_path(
                                         config_manager.get('soulseek.transfer_path', './Transfer')))
@@ -1046,7 +1071,7 @@ def _recover_moved_file_bookkeeping(context, artist_context=None, album_info=Non
     try:
         from core.library2.autolink import link_download_into_library_v2
         linked_lib2_file_id = link_download_into_library_v2(
-            context, raise_on_error=True)
+            context, raise_on_error=True, fill_known_tags=True)
         if linked_lib2_file_id is None:
             raise RuntimeError("The Library did not create a file row")
         from core.settings import config_manager
@@ -1261,6 +1286,8 @@ def _merge_upgraded_album_folder(context, artist_context, album_info, old_album_
                 )
                 continue
             try:
+                from core.library import own_writes
+                own_writes.note(src, dst)
                 shutil.move(src, dst)
             except OSError as e:
                 logger.error("[M5] Upgrade merge: could not move %s -> %s: %s", src, dst, e)
@@ -2028,14 +2055,15 @@ def _post_process_matched_download(context_key, context, file_path, runtime, met
                 _first = _ti_artists[0]
                 _name = _first.get('name', '') if isinstance(_first, dict) else str(_first)
                 if _name and _name.strip().lower() not in _junk_artist_names:
-                    artist_context['name'] = _name.strip()
+                    _take_artist_identity(artist_context, _name.strip(),
+                                          _first if isinstance(_first, dict) else None)
                     logger.info(f"[Unknown Artist Guard] Resolved from track_info.artists: '{_name}'")
                     _resolved = True
 
             if not _resolved:
                 _os_artist = original_search_guard.get('artist') or original_search_guard.get('artist_name') or ''
                 if isinstance(_os_artist, str) and _os_artist.strip().lower() not in _junk_artist_names:
-                    artist_context['name'] = _os_artist.strip()
+                    _take_artist_identity(artist_context, _os_artist.strip(), None)
                     logger.info(f"[Unknown Artist Guard] Resolved from original_search_result: '{_os_artist}'")
                     _resolved = True
 
@@ -2055,7 +2083,9 @@ def _post_process_matched_download(context_key, context, file_path, runtime, met
                                     _d_first = _d_artists[0]
                                     _d_name = _d_first.get('name', '') if isinstance(_d_first, dict) else str(_d_first)
                                     if _d_name and _d_name.strip().lower() not in _junk_artist_names:
-                                        artist_context['name'] = _d_name.strip()
+                                        _take_artist_identity(
+                                            artist_context, _d_name.strip(),
+                                            _d_first if isinstance(_d_first, dict) else None)
                                         logger.info(f"[Unknown Artist Guard] Resolved from metadata API: '{_d_name}'")
                                         _resolved = True
                     except Exception as _guard_err:

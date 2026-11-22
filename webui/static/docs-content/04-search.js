@@ -65,7 +65,7 @@ Narrow results by:
             title: 'Download Sources',
             lede: 'Ten download sources plus Hybrid mode — configure them in Settings and let SoulSync pick the best one.',
             body: `
-SoulSync downloads from multiple sources. Connect each source in **Settings → Sources**, and set their try-order (the hybrid chain) in **Settings → Downloads**. Each has different strengths:
+SoulSync downloads from multiple sources. Connect each source and set their try-order (the hybrid chain) in **Settings → Downloads → Sources**. Each has different strengths:
 
 | Source | Description | Best for |
 |--------|-------------|----------|
@@ -83,7 +83,7 @@ SoulSync downloads from multiple sources. Connect each source in **Settings → 
 
 Torrent and Usenet search each Prowlarr indexer on its own, so one slow or broken indexer never costs you the others' results. When some indexers fail, a note above the results names them (click **Details** for each one's error), so you know the list may be missing releases.
 
-![Download source settings with the hybrid chain, Soulseek first and YouTube as fallback](dl-sources.jpg)
+![Downloads, Sources: the music order, Soulseek tried first, then YouTube, then Qobuz](dl-sources.jpg)
 
 > [!TIP]
 > **Hybrid mode** is recommended for most users. It tries your primary source first, then falls back through your configured priority order. Order all sources via drag-and-drop in Settings → Downloads.

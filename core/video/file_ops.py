@@ -42,20 +42,45 @@ def same_path(a: str, b: str) -> bool:
     return os.path.normcase(os.path.normpath(a)) == os.path.normcase(os.path.normpath(b))
 
 
-def expected_path(row: dict, real: str, roots: List[str], settings: dict) -> Optional[str]:
-    """where the current naming templates put this file, on the library root
-    it already sits under, or None when it sits under no configured root."""
+def name_check(row: dict, real: str, roots: List[str], settings: dict) -> Dict[str, Any]:
+    """{path, why, missing}: where the current naming templates put this file,
+    on the library root it already sits under. path is None when that isn't
+    known, and why says which: 'outside' (under no configured root),
+    'languages' (not probed yet) or 'ids' (an id the name uses isn't stored,
+    and the name without it differs from the file's own, which may carry the
+    id). a file already named the way the template renders without the id
+    conforms, so nothing is held back for it."""
     from core.video import organization
     from core.video.library_roots import containing_root
     root = containing_root(real, roots or [])
     if not root:
-        return None
+        return {"path": None, "why": "outside", "missing": []}
     fields = naming_fields(row)
     if organization.languages_unknown(row.get("scope"), fields, settings):
-        return None   # not probed yet: its right name isn't known
+        return {"path": None, "why": "languages", "missing": []}
     fields["quality"] = file_quality(fields.get("quality"), real)
     ext = os.path.splitext(real)[1]
-    return organization.render_path(row.get("scope"), root, fields, settings, ext)["path"]
+    want = organization.render_path(row.get("scope"), root, fields, settings, ext)["path"]
+    missing = organization.missing_ids(row.get("scope"), fields, settings)
+    if missing and not same_path(real, want):
+        # renaming now would strip the '{imdb-tt...}' its name may carry
+        return {"path": None, "why": "ids", "missing": missing}
+    return {"path": want, "why": None, "missing": []}
+
+
+def expected_path(row: dict, real: str, roots: List[str], settings: dict) -> Optional[str]:
+    """where the current naming templates put this file, or None when that
+    isn't known yet (see name_check)."""
+    return name_check(row, real, roots, settings)["path"]
+
+
+# why a file has no template path, in the words the library tab shows
+NAME_UNKNOWN = {
+    "outside": "This file sits outside your library folders, so it has no template path.",
+    "languages": "This file's languages haven't been read yet, so its template name isn't known.",
+    "ids": "Your naming template uses an id this title has none stored for, so the file keeps "
+           "its name rather than lose the id it may carry. Set it in Manage, under Matches.",
+}
 
 
 def move_sidecars(old_path: str, new_path: str) -> int:
@@ -307,9 +332,10 @@ def rename_plan(db, file_id, *, resolve: Optional[Callable] = None,
     roots = finder.roots(row.get("scope")) if finder else library_roots(db, row.get("scope"))
     if not roots:
         return {"error": "No library folder is configured for this type."}
-    want = expected_path(row, real, roots, finder.settings() if finder else organization.load(db))
+    check = name_check(row, real, roots, finder.settings() if finder else organization.load(db))
+    want = check["path"]
     if not want:
-        return {"error": "This file sits outside your library folders, so it has no template path."}
+        return {"error": NAME_UNKNOWN.get(check["why"], NAME_UNKNOWN["outside"])}
     return {"current": real, "expected": want, "conforms": same_path(real, want)}
 
 

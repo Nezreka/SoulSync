@@ -433,12 +433,15 @@ def _album_page_ids(conn, members: set, frm: str, where: str, order: str,
 
 def list_albums(conn, *, search: str = "", sort: str = "title", monitored: str = "all",
                 page: int = 1, limit: int = 75, letter: str = "all",
-                source_filter: str = "") -> Tuple[List[Dict[str, Any]], int]:
+                source_filter: str = "",
+                review_filter: str = "", genre: str = "",
+                label: str = "") -> Tuple[List[Dict[str, Any]], int]:
     """The whole library by release (upstream's album browse, A07).
 
     The releases the artist list counts -- a library row, or one this library
     monitors -- in the caller's library, newest-first or by title or year.
-    Unknown years sort last either way.
+    Unknown years sort last either way. ``review_filter`` is the padlock
+    (#2223): 'reviewed' keeps the locked releases, 'unreviewed' the rest.
     """
     page = max(1, int(page))
     limit = max(1, min(int(limit), 500))
@@ -460,6 +463,17 @@ def list_albums(conn, *, search: str = "", sort: str = "title", monitored: str =
         filters.append(f"{album_monitored} = 1")
     elif monitored == "unmonitored":
         filters.append(f"{album_monitored} = 0")
+    if genre:
+        # the player's genre pages: the release's own genres, else its artist's
+        params["genre"] = str(genre).strip().lower()[:80]
+        filters.append("(EXISTS (SELECT 1 FROM json_each(al.genres) gg"
+                       " WHERE LOWER(gg.value) = :genre)"
+                       " OR EXISTS (SELECT 1 FROM lib2_artists ga, json_each(ga.genres) gg"
+                       " WHERE ga.id = al.primary_artist_id AND LOWER(gg.value) = :genre))")
+    if label:
+        # the player's label pages: releases on that label
+        params["label"] = str(label).strip().lower()[:120]
+        filters.append("LOWER(COALESCE(al.label, '')) = :label")
     if letter and letter != "all":
         # the alphabet bar, by the album's title, same rule as the artists
         from database.music_database import _library_stripped_sql
@@ -483,6 +497,15 @@ def list_albums(conn, *, search: str = "", sort: str = "title", monitored: str =
             parts.append(f"COALESCE(al.{source}_id,'') <> ''")
         predicate = "(" + " OR ".join(parts) + ")"
         filters.append(f"NOT {predicate}" if str(source_filter).startswith("!") else predicate)
+    # #2223: locked or not. a lock row is the lock (no scopes left deletes
+    # it). locked goes from the locks outward, there are few of them; not
+    # locked is one primary-key probe per release
+    if review_filter == "reviewed":
+        filters.append("al.id IN (SELECT rlk.entity_id FROM lib2_entity_locks rlk"
+                       " WHERE rlk.entity_type='album')")
+    elif review_filter == "unreviewed":
+        filters.append("NOT EXISTS (SELECT 1 FROM lib2_entity_locks rlk"
+                       " WHERE rlk.entity_type='album' AND rlk.entity_id=al.id)")
     order = _ALBUM_SORTS.get(sort, _ALBUM_SORTS["title"])
     offset = (page - 1) * limit
     joined = ("FROM lib2_albums al LEFT JOIN lib2_artists ar"
@@ -1329,39 +1352,34 @@ def _own_release_ids(conn, album_rows, group) -> set:
     a soundtrack with one verse) belongs under Appears On, not in the
     discography beside their own albums.
 
-    The album junction can't tell: it files every track artist who isn't the
-    release's main artist as "featured", the co-headliner of a collaboration
-    and a one-verse guest alike. The track credits can. A release is theirs
-    when they are its main artist, or the lead credit on more than half its
-    tracks (a collaboration). Exactly half is a split single: one side each,
-    and it stays with the artist credited first. One the library holds no tracks of yet (a
-    provider discography entry) goes by its album credit."""
+    A release is theirs when it is filed under them (its main artist), or
+    when they co-lead it (sql_util.co_lead_sql; the Artists list reads the
+    same rule): the lead credit on more than half its tracks, shared with
+    the album's own artist or backed by a primary album credit. Leading a
+    track on someone else's release is a guest: Rampa leads track 8 of
+    16BL's dj mix (#2142). Exactly half is a split single: one side each,
+    and it stays with the artist credited first (#2003). One the library
+    holds no tracks of yet (a provider discography entry) goes by its album
+    credit."""
+    from .sql_util import co_lead_sql
     group = [int(g) for g in group]
     own = {int(r["id"]) for r in album_rows if r["primary_artist_id"] in group}
     rest = [int(r["id"]) for r in album_rows if int(r["id"]) not in own]
     if not rest:
         return own
     marks = ",".join("?" for _ in group)
-    led = {}
-    for row in conn.execute(
-        f"""SELECT t.album_id, COUNT(DISTINCT t.id) AS total,
-                   COUNT(DISTINCT CASE WHEN x.artist_id IN ({marks})
-                                        AND COALESCE(x.role, 'primary') = 'primary'
-                                       THEN t.id END) AS led
-              FROM lib2_tracks t
-              LEFT JOIN lib2_track_artists x ON x.track_id = t.id
-             WHERE t.album_id IN (SELECT value FROM json_each(?))
-             GROUP BY t.album_id""",
-        (*group, json.dumps(rest)),
-    ):
-        led[int(row["album_id"])] = (int(row["total"] or 0), int(row["led"] or 0))
+    for member in group:
+        # an int, inlined: the expression appears three times in the rule
+        own.update(int(row[0]) for row in conn.execute(
+            f"""SELECT al.id FROM lib2_albums al
+                 WHERE al.id IN (SELECT value FROM json_each(?))
+                   AND {co_lead_sql(str(int(member)), 'al', 'own')}""",
+            (json.dumps(rest),)))
+    held = {int(row[0]) for row in conn.execute(
+        "SELECT DISTINCT album_id FROM lib2_tracks WHERE album_id IN (SELECT value FROM json_each(?))",
+        (json.dumps(rest),))}
     for album_id in rest:
-        total, lead = led.get(album_id, (0, 0))
-        # more than half: a split single, one side each, belongs to the
-        # artist it is credited to first, and appears on the other (#2003)
-        if total and lead * 2 > total:
-            own.add(album_id)
-        elif not total and conn.execute(
+        if album_id not in own and album_id not in held and conn.execute(
                 f"SELECT 1 FROM lib2_album_artists WHERE album_id=? AND artist_id IN ({marks})",
                 (album_id, *group)).fetchone():
             own.add(album_id)
@@ -2044,6 +2062,7 @@ def _missing_track_placeholder(track_number: int, *, disc_number: int = 1,
         "bpm": None,
         "explicit": None,
         "popular": False,
+        "popular_source": None,
         "style": None,
         "mood": None,
         "isrc": None,
@@ -2157,10 +2176,12 @@ def get_album(conn, album_id: int) -> Optional[Dict[str, Any]]:
         album_for_tracks["primary_artist_id"] = artist["id"]
     tracks = _serialize_tracks(conn, track_rows, album_for_tracks)
     # #2144: the album's hits, from the last.fm playcount already on the rows.
-    from core.library2.track_popularity import popular_ids_for_rows
-    popular = popular_ids_for_rows(track_rows)
+    # last.fm's numbers, or listenbrainz's when last.fm knows too little
+    from core.library2.track_popularity import popular_for_rows
+    popular, popular_source = popular_for_rows(track_rows)
     for t in tracks:
         t["popular"] = t.get("id") in popular
+        t["popular_source"] = popular_source if t["popular"] else None
     present_count = sum(1 for t in tracks if t["file_status"] != "missing")
 
     upgrades_available = _apply_quality_verdicts(conn, tracks)

@@ -333,6 +333,47 @@ class LastFMClient:
             logger.error(f"Last.fm scrobble error: {e}")
             return False
 
+    @rate_limited
+    def update_now_playing(self, artist: str, track: str, album: str = '',
+                           duration_seconds: int = 0) -> bool:
+        """Tell Last.fm what is playing right now (track.updateNowPlaying).
+
+        Not a scrobble: Last.fm shows it on the profile until the track ends.
+        A refused key sends nothing.
+        """
+        if not self.can_scrobble() or not artist or not track:
+            return False
+        if key_rejection(self.api_key):
+            return False
+        params = {
+            'method': 'track.updateNowPlaying',
+            'api_key': self.api_key,
+            'sk': self.session_key,
+            'artist': artist,
+            'track': track,
+        }
+        if album:
+            params['album'] = album
+        if duration_seconds and int(duration_seconds) > 0:
+            params['duration'] = str(int(duration_seconds))
+        params['api_sig'] = self._sign_request(params)
+        params['format'] = 'json'
+        try:
+            response = self.session.post(self.BASE_URL, data=params, timeout=10)
+            data = response.json()
+            if 'nowplaying' in data:
+                note_key_accepted(self.api_key)
+                return True
+            error = data.get('error', 'Unknown')
+            if _int_code(error) in KEY_REJECTED_CODES:
+                note_key_rejected(self.api_key, _int_code(error), data.get('message', ''))
+                return False
+            logger.debug(f"Last.fm now playing failed: {data.get('message', error)}")
+            return False
+        except Exception as e:
+            logger.debug(f"Last.fm now playing error: {e}")
+            return False
+
     def _make_request(self, method: str, params: Dict = None, timeout: int = 10, raise_on_transient: bool = False,
                       ignore_key_memory: bool = False) -> Optional[Dict]:
         """Make a request to the Last.fm API.

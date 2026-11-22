@@ -70,6 +70,15 @@ def get_scope_artist(context: Any) -> Optional[str]:
     return None
 
 
+def scope_findings_only(context: Any) -> bool:
+    """A run that may only file findings, whatever the job's own auto-apply
+    or live setting says: the repair worker hands a library repair's files
+    to Re-tag and Reorganize this way, so nothing changes on disk unasked
+    (#2229)."""
+    scope = getattr(context, "scope", None)
+    return isinstance(scope, dict) and bool(scope.get("findings_only"))
+
+
 def _file_scope_key(path: Any) -> Optional[str]:
     value = str(path or "").strip().replace("\\", "/")
     if not value:

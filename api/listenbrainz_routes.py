@@ -168,6 +168,11 @@ def refresh_listenbrainz():
 # LAST.FM TRACK RADIO
 # ========================================
 
+# listenbrainz wants a token for an artist's top tracks since nov 2026
+LB_TOP_TRACKS_NOTE = ("Top tracks from ListenBrainz need a connected ListenBrainz account "
+                      "(Settings > Connections); until then they come from Deezer.")
+
+
 @bp.route('/api/lastfm/configured', methods=['GET'])
 @requires("music.discover")
 def lastfm_configured():
@@ -178,10 +183,16 @@ def lastfm_configured():
     """
     lf = _lastfm_worker().client if _lastfm_worker() else None
     configured = bool(lf and lf.api_key)
+    from core import listenbrainz_auth
     from core.lastfm_client import lastfm_key_status
     status = lastfm_key_status(lf.api_key if configured else '')
+    lb_top_tracks = listenbrainz_auth.available()
+    message = status['message']
+    if message and not lb_top_tracks:
+        message = f"{message} {LB_TOP_TRACKS_NOTE}"
     return jsonify({"configured": configured, "usable": status['usable'],
-                    "key_rejected": status['key_rejected'], "message": status['message']})
+                    "key_rejected": status['key_rejected'], "message": message,
+                    "listenbrainz_top_tracks": lb_top_tracks})
 
 
 @bp.route('/api/lastfm/search/tracks', methods=['GET'])

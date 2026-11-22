@@ -110,6 +110,13 @@ def ensure_media_mapping_schema(cursor: Any) -> None:
         "CREATE INDEX IF NOT EXISTS idx_lib2_media_mappings_server "
         "ON lib2_media_server_mappings(server_source, entity_type, server_id)"
     )
+    # the library coverage check counts and samples a server's tracks under
+    # one of its folders: a range on this index, never a table scan
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_lib2_media_mappings_track_path "
+        "ON lib2_media_server_mappings(server_source, server_path) "
+        "WHERE entity_type = 'track'"
+    )
     for entity_type, table in ENTITY_TABLES.items():
         cursor.execute(
             f"""CREATE TRIGGER IF NOT EXISTS trg_{table}_delete_media_mappings

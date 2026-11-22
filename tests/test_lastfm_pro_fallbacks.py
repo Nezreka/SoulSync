@@ -325,6 +325,9 @@ def free(monkeypatch):
     monkeypatch.setattr(fb, '_deezer_get', deezer_get)
     monkeypatch.setattr(lbp, '_get', lb_get)
     monkeypatch.setattr(lbp, 'artist_mbid', lambda name: 'MBID-1' if lb else None)
+    # a connected listenbrainz account: its top recordings need a token
+    from core import listenbrainz_auth
+    monkeypatch.setattr(listenbrainz_auth, '_candidates', lambda: ['lb-token'])
     return {'asked': asked, 'deezer': deezer, 'lb': lb}
 
 

@@ -41,7 +41,7 @@ import {
   getUnmatchedStagingFiles,
   IMPORT_PLACEHOLDER_IMAGE,
 } from '../-import.helpers';
-import { describeFile, describeItemFiles, formatBitrate } from '../-import.inbox';
+import { describeFile, describeItemFiles, formatBitrate, siblingRelease } from '../-import.inbox';
 import styles from './import-page.module.css';
 import { fallbackImage, getErrorMessage, useImportQueueActions } from './import-shared';
 
@@ -245,7 +245,13 @@ function AlbumMatcher({ item }: { item: ImportInboxItem }) {
       const known = item.album_id
         ? found.find((album) => String(album.id) === String(item.album_id))
         : undefined;
-      const first = known ?? (item.status === 'needs_review' ? found[0] : undefined);
+      // #2220: what's left of a folder whose other tracks already imported
+      // opens on their release, even when this search didn't list it (it
+      // came from another source, or past the first page). picking another
+      // edition put the leftovers on a second copy of the album.
+      const sibling = known ? null : siblingRelease(item);
+      if (sibling) setCandidates((current) => [sibling, ...current]);
+      const first = known ?? sibling ?? (item.status === 'needs_review' ? found[0] : undefined);
       if (first) void pick(first);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps

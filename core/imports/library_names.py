@@ -18,6 +18,11 @@ the way the importer finds it.
     spelling on the artist page wants that spelling, and the importer files
     a same-named download under that artist. Only when exactly one library
     artist goes by that name, so two Nirvanas are never guessed between.
+  * by another spelling of the name (#2222), when no library artist goes by
+    the source's: itunes says "Δέσποινα Βανδή", the library holds "Despina
+    Vandi" (the greek romanized, or a musicbrainz alias the library stored,
+    core.library2.artist_equivalence). Only when exactly one library artist
+    answers, so the download joins it instead of a second folder.
 
 The library's name is its effective name: a name set on the artist page
 (the ``name`` metadata override, ARCH-04) wins over the scanned one, the same
@@ -57,6 +62,14 @@ _PROVIDERS = ("spotify", "musicbrainz", "deezer", "itunes", "audiodb", "discogs"
 # what download contexts put in an artist's id slot when they have none
 _PLACEHOLDER_IDS = frozenset({"explicit_artist", "from_sync_modal", "unknown", "none",
                               "null", "undefined", "0"})
+
+
+def _no_id(provider: str, value: str) -> bool:
+    """a placeholder, or a provider's "Various Artists" id: neither says who
+    an artist is. a compilation's spotify id found the one artist holding it
+    and renamed every compilation download after them (#2229)"""
+    from core.various_artists_ids import is_various_artists_id
+    return value.lower() in _PLACEHOLDER_IDS or is_various_artists_id(value, provider)
 
 
 def _get_db():
@@ -195,6 +208,8 @@ def _resolve(conn, name: str, ids: Dict[str, str]) -> Optional[str]:
         # by name: only a pin changes anything, and only when one library
         # artist goes by that name
         same = _going_by(conn, name)
+        if not same:
+            return _equivalent(conn, name, ids)
         if len(same) != 1:
             return None
         if _different(_stored_ids(conn, same).get(same[0], {}), ids):
@@ -228,6 +243,24 @@ def _resolve(conn, name: str, ids: Dict[str, str]) -> Optional[str]:
                    for o in others for h in hits):
                 return None
     return target
+
+
+def _equivalent(conn, name: str, ids: Dict[str, str]) -> Optional[str]:
+    """the library artist ``name`` is under another script or musicbrainz
+    name (#2222): itunes' "Δέσποινα Βανδή" is the library's "Despina
+    Vandi". only when exactly one library artist answers, and it holds no
+    id from these providers that disagrees."""
+    from core.library2.artist_equivalence import equivalent_artist_names
+    found: set = set()
+    for other in equivalent_artist_names(conn, name):
+        found.update(_going_by(conn, other))
+    if len(found) != 1:
+        return None
+    artist_id = next(iter(found))
+    if _different(_stored_ids(conn, [artist_id]).get(artist_id, {}), ids):
+        return None
+    target = _effective_names(conn, [artist_id]).get(artist_id, "").strip()
+    return target if target and _fold(target) != _fold(name) else None
 
 
 def name_taken_by(conn, artist_id: int, name: Any) -> Optional[Dict[str, Any]]:
@@ -264,7 +297,7 @@ def library_artist_name(name: Any, ids: Optional[Dict[str, Any]] = None) -> Opti
     for provider, value in (ids or {}).items():
         provider = provider_of(provider)
         value = str(value or "").strip()
-        if provider and value and value.lower() not in _PLACEHOLDER_IDS:
+        if provider and value and not _no_id(provider, value):
             clean[provider] = value
     key = (name, tuple(sorted(clean.items())))
     now = time.monotonic()
@@ -335,10 +368,10 @@ def library_names(context: Any, artist: Any = None) -> Dict[str, str]:
                                    or entry.get("provider") or source)
             ids: Dict[str, str] = {}
             value = str(entry.get("id") or "").strip()
-            if provider and value and value.lower() not in _PLACEHOLDER_IDS:
+            if provider and value and not _no_id(provider, value):
                 ids[provider] = value
             mbid = str(entry.get("musicbrainz_id") or entry.get("mbid") or "").strip()
-            if mbid:
+            if mbid and not _no_id("musicbrainz", mbid):
                 ids["musicbrainz"] = mbid
             if ids:
                 # every id this download gives the same name, together

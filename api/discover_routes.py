@@ -125,11 +125,20 @@ def _discover_bylt_key():
         return 'unknown'
 
 
+def _profile_dial():
+    """This profile's adventurousness: its own dial, else the global default."""
+    from core.discovery.adventurousness import profile_level
+    cfg = config_manager
+    if cfg is None:
+        from core.settings import config_manager as cfg
+    return profile_level(get_database(), get_current_profile_id(), cfg)
+
+
 def _discover_dial_key():
     # The dial re-ranks similar-artists live; committing it must bust the key.
+    # Per profile: one person's dial never re-ranks another's shelf.
     try:
-        from core.settings import config_manager
-        return str(config_manager.get('discover.adventurousness', 0.3))
+        return str(_profile_dial())
     except Exception:
         return '0.3'
 
@@ -466,10 +475,7 @@ def get_discover_similar_artists():
         active_source = _get_active_discovery_source()
         from core.settings import config_manager
         active_server = config_manager.get_active_media_server()
-        try:
-            _adv_level = float(config_manager.get('discover.adventurousness', 0.3) or 0)
-        except (TypeError, ValueError):
-            _adv_level = 0.0
+        _adv_level = _profile_dial()
 
         # The dial drives candidate SELECTION here (not just the re-rank below): the pool shifts from
         # consensus picks toward obscure long-tail deep cuts as you turn it up.
@@ -482,6 +488,13 @@ def get_discover_similar_artists():
         )
 
         if not similar_artists:
+            # a new profile: fill the shelf from the charts until it has taste
+            # of its own (core/discovery/cold_start.py)
+            from core.discovery import cold_start
+            if cold_start.is_new_profile(database, get_current_profile_id()):
+                starter = _starter_cards(database)
+                return jsonify({"success": True, "artists": starter, "source": 'deezer',
+                                "count": len(starter), "starter": True})
             return jsonify({"success": True, "artists": [], "source": active_source, "count": 0})
 
         # Explainability: resolve which of the user's OWN artists point to each
@@ -494,6 +507,16 @@ def get_discover_similar_artists():
         except Exception as e:
             logger.debug("recommendation-sources lookup failed: %s", e)
             sources_by_name = {}
+        # artists picked on discover's starter banner: "because you picked X"
+        try:
+            from core.discovery.cold_start import picked_sources
+            picked_by_name = picked_sources(
+                database, get_current_profile_id(),
+                [a.similar_artist_name for a in similar_artists
+                 if a.similar_artist_name not in sources_by_name])
+        except Exception as e:  # noqa: BLE001
+            logger.debug("picked-sources lookup failed: %s", e)
+            picked_by_name = {}
 
         # Artists already filtered by source in SQL
         result_artists = []
@@ -529,9 +552,14 @@ def get_discover_similar_artists():
                 artist_data["popularity"] = artist.popularity
             # "because you have X, Y, Z" — the artists of yours that point here
             because = sources_by_name.get(artist.similar_artist_name) or []
-            artist_data["explanation"] = _explanation(
-                'similar_to', because,
-                _consensus_confidence(len(because) or artist.occurrence_count))
+            picked = picked_by_name.get(artist.similar_artist_name) or []
+            if not because and picked:
+                artist_data["explanation"] = _explanation(
+                    'picked', picked, _consensus_confidence(len(picked)))
+            else:
+                artist_data["explanation"] = _explanation(
+                    'similar_to', because,
+                    _consensus_confidence(len(because) or artist.occurrence_count))
             result_artists.append(artist_data)
 
         # Re-rank: genre/tag affinity (always-on) + the adventurousness popularity penalty (dial).
@@ -616,24 +644,34 @@ def get_discover_similar_artists():
 @bp.route('/api/discover/adventurousness', methods=['GET', 'POST'])
 @requires("music.discover")
 def discover_adventurousness():
-    """Get/set the global Discover adventurousness dial (0..1). Shares the config key
-    ``discover.adventurousness`` with the Settings -> Discovery slider, so the two controls stay in
-    sync (change one, the other reflects it on next load). Read-only-safe; clamps to [0, 1]."""
+    """Get/set this profile's Discover adventurousness dial (0..1).
+
+    GET returns ``{value, default, own}``: the dial this profile's Discover
+    uses, the global default (Settings > Discovery), and whether the profile
+    has its own value. POST ``{value}`` stores the profile's own dial
+    (clamped to [0, 1]); POST ``{reset: true}`` clears it so the profile
+    follows the default again. The global default is only changed in
+    Settings, by an admin.
+    """
+    from core.discovery import adventurousness as adv
     try:
+        database = get_database()
+        profile_id = get_current_profile_id()
         if request.method == 'POST':
             data = request.get_json(silent=True) or {}
-            try:
-                v = float(data.get('value'))
-            except (TypeError, ValueError):
-                return jsonify({"success": False, "error": "value must be a number"}), 400
-            v = max(0.0, min(1.0, v))
-            config_manager.set('discover.adventurousness', v)
-            return jsonify({"success": True, "value": v})
-        try:
-            v = float(config_manager.get('discover.adventurousness', 0.3) or 0)
-        except (TypeError, ValueError):
-            v = 0.3
-        return jsonify({"success": True, "value": max(0.0, min(1.0, v))})
+            if data.get('reset') is True:
+                adv.set_own_level(database, profile_id, None)
+            else:
+                try:
+                    v = adv.clamp(data.get('value'))
+                except ValueError:
+                    return jsonify({"success": False, "error": "value must be a number"}), 400
+                if not adv.set_own_level(database, profile_id, v):
+                    return jsonify({"success": False, "error": "could not save the dial"}), 500
+        own = adv.own_level(database, profile_id)
+        default = adv.global_level(config_manager)
+        return jsonify({"success": True, "value": own if own is not None else default,
+                        "default": default, "own": own is not None})
     except Exception as e:
         logger.error(f"adventurousness endpoint error: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
@@ -776,12 +814,9 @@ def get_discover_listening_recommendations():
         except (ValueError, TypeError):
             stored = []
 
-        try:
-            level = float(config_manager.get('discover.adventurousness', 0.3) or 0)
-        except (TypeError, ValueError):
-            level = 0.0
+        level = _profile_dial()
 
-        # Quality re-rank (aurral parity, always-on): the adventurousness dial BLENDS the weights —
+        # Quality re-rank (always on): the adventurousness dial BLENDS the weights —
         # genre/tag affinity boosts on-taste candidates (leash loosens as you get adventurous); novelty
         # penalises recs you've already heard (pull tightens). Additive — no genre match / no plays
         # leaves the score untouched, and at the default dial the weights equal the old constants.
@@ -3969,3 +4004,146 @@ def get_discover_genre_playlist(genre_name):
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ── a filled discover for new profiles (core/discovery/cold_start.py) ────────
+
+# where the spotify history import lives: the stats page opens its dialog on
+# ?import=spotify. the banner offers it only while that import's route exists.
+SPOTIFY_IMPORT_HREF = '/stats?import=spotify'
+SPOTIFY_IMPORT_ROUTE = '/api/listening-import/spotify'
+
+
+def _spotify_import_offer():
+    """{available, href}: is a spotify history import route registered."""
+    try:
+        from flask import current_app
+        for rule in current_app.url_map.iter_rules():
+            text = str(rule.rule).lower()
+            if text == SPOTIFY_IMPORT_ROUTE:
+                return {'available': True, 'href': SPOTIFY_IMPORT_HREF}
+    except Exception as e:  # noqa: BLE001
+        logger.debug("spotify import route check failed: %s", e)
+    return {'available': False, 'href': None}
+
+
+def _beatport_cached_home():
+    """beatport's homepage lists when they are already cached, else None."""
+    try:
+        from api.beatport import get_cached_beatport_data
+        return [get_cached_beatport_data('homepage', key)
+                for key in ('top_10_lists', 'hero_tracks')]
+    except Exception as e:  # noqa: BLE001
+        logger.debug("beatport cache unreadable: %s", e)
+        return None
+
+
+def _starter_cards(database, limit=24):
+    from core.discovery import cold_start
+    return cold_start.starter_shelf(database, _get_deezer_client(), limit=limit,
+                                    beatport_cache=_beatport_cached_home())
+
+
+def _starter_invalidate(profile_id):
+    """the shelves and hero picked artists feed, for this profile."""
+    invalidate_discover_shelf_cache()
+    try:
+        from core.discovery.hero import _HERO_CACHE
+        for key in [k for k in list(_HERO_CACHE) if k and k[0] == profile_id]:
+            _HERO_CACHE.pop(key, None)
+    except Exception as e:  # noqa: BLE001
+        logger.debug("hero cache drop failed: %s", e)
+
+
+def _starter_fetch_similar(pick):
+    """similar artists for one picked artist, the way the watchlist scan gets
+    them (music-map, matched to every metadata source). deezer's related
+    artists stand in when that finds nothing."""
+    from core.discovery import cold_start
+    rows = []
+    try:
+        from core.watchlist_scanner import WatchlistScanner
+        scanner = WatchlistScanner(_spotify_client(), get_database())
+        found = scanner._fetch_similar_artists_from_musicmap(
+            pick['name'], limit=cold_start.SIMILAR_PER_PICK) or []
+        rows = [dict(similar_artist_name=s['name'],
+                     similar_artist_spotify_id=s.get('spotify_id'),
+                     similar_artist_itunes_id=s.get('itunes_id'),
+                     similar_artist_deezer_id=s.get('deezer_id'),
+                     similar_artist_musicbrainz_id=s.get('musicbrainz_id'),
+                     similarity_rank=rank, image_url=s.get('image_url'),
+                     genres=s.get('genres'), popularity=s.get('popularity', 0))
+                for rank, s in enumerate(found, 1) if s.get('name')]
+    except Exception as e:  # noqa: BLE001
+        logger.debug("music-map similar artists for %s failed: %s", pick.get('name'), e)
+    if not rows:
+        rows = cold_start.related_artists(_get_deezer_client(), pick.get('deezer_id'))
+    return rows
+
+
+@bp.route('/api/discover/starter', methods=['GET'])
+@requires("music.discover")
+def get_discover_starter():
+    """is this profile new to discover: its seed count, the banner, the
+    accounts it could connect and the picked artists' build progress."""
+    try:
+        from core.discovery import cold_start
+        pid = get_current_profile_id()
+        data = cold_start.status(get_database(), pid, config_manager.get,
+                                 spotify_import=_spotify_import_offer())
+        return jsonify({"success": True, **data})
+    except Exception as e:
+        logger.error(f"Error reading discover starter state: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@bp.route('/api/discover/starter/dismiss', methods=['POST'])
+@requires("music.discover")
+def dismiss_discover_starter():
+    from core.discovery import cold_start
+    cold_start.dismiss(get_database(), get_current_profile_id())
+    return jsonify({"success": True})
+
+
+@bp.route('/api/discover/starter/artists', methods=['GET'])
+@requires("music.discover")
+@_hide_blocked({'artists': ARTISTS})
+def get_discover_starter_artists():
+    """popular artists for the picker: one genre's chart, or a search."""
+    from core.discovery import cold_start
+    client = _get_deezer_client()
+    query = (request.args.get('q') or '').strip()
+    try:
+        genre = int(request.args.get('genre', 0))
+    except (TypeError, ValueError):
+        genre = 0
+    if query:
+        artists = cold_start.search_artists(client, query, limit=18)
+    else:
+        artists = cold_start.picker_artists(client, genre, limit=30)
+    genres = [{'id': gid, 'name': name} for gid, name in cold_start.PICKER_GENRES]
+    return jsonify({"success": True, "artists": artists, "genres": genres,
+                    "genre": genre, "query": query})
+
+
+@bp.route('/api/discover/starter/picks', methods=['POST'])
+@requires("music.discover")
+def save_discover_starter_picks():
+    """keep the picked artists as this profile's seeds and build its first
+    recommendations from them now, in the background."""
+    from core.discovery import cold_start
+    body = request.get_json(silent=True) or {}
+    incoming = [p for p in (cold_start.clean_pick(a) for a in (body.get('artists') or [])) if p]
+    if not incoming:
+        return jsonify({"success": False, "error": "Pick at least one artist"}), 400
+    database = get_database()
+    pid = get_current_profile_id()
+    picks = cold_start.save_picks(database, pid, incoming)
+    new_keys = {p['deezer_id'] or p['name'] for p in incoming}
+    to_build = [p for p in picks if (p['deezer_id'] or p['name']) in new_keys]
+    _starter_invalidate(pid)
+    build = cold_start.start_build(database, pid, to_build, _starter_fetch_similar,
+                                   on_progress=lambda: _starter_invalidate(pid))
+    return jsonify({"success": True, "picked": picks, "build": build,
+                    "seeds": len(cold_start.taste_seed_names(database, pid)),
+                    "threshold": cold_start.SEED_THRESHOLD})

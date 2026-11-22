@@ -198,9 +198,9 @@ def create_invite():
     once; only its hash is stored."""
     body = request.get_json(silent=True) or {}
     try:
-        hours = max(1, min(720, int(body.get("expires_hours") or 72)))
+        hours = max(1, min(720, int(body.get("expires_hours") or 168)))
     except (TypeError, ValueError):
-        hours = 72
+        hours = 168
     try:
         preset = _clean_preset(body.get("preset"))
     except _BadPreset as exc:

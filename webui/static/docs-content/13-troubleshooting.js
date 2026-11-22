@@ -100,6 +100,7 @@ Each problem has a plain title, a line on why, a fix button when there is one, a
 | Workers | enrichment workers that are paused or stopped | Resume |
 | Downloads | downloads waiting in review | Open review |
 | Automations | an automation whose last run failed | open it |
+| Security | the auth proxy header is set but no trusted proxy address is, so the header is being ignored | open Security settings |
 | Setup | unfinished setup items | each item's own action |
 | Updates | an update is out, and how important it is | release notes |
 
@@ -125,14 +126,14 @@ Logs live in the \`logs/\` directory (in Docker: \`/app/logs/\`):
 | \`acoustid.log\` | AcoustID fingerprinting activity |
 | \`source_reuse.log\` | Source reuse / download source decisions |
 
-The Settings → Logs tab streams live logs with real-time operational diagnostics, so you can watch activity as it happens without SSHing into the box.
+**Settings → System → Logs** streams live logs with real-time operational diagnostics, so you can watch activity as it happens without SSHing into the box.
 
 > [!TIP]
 > When something breaks, start with \`app.log\` — it carries the request and worker trail for nearly every failure. Raise the [log level](#set-other) to Debug first if you need more detail, then drop it back to Info afterward.
 
 ## Downloading logs
 
-Admins can download every log from the **Logs** tile in the Help panel, or with the **Download** button on the Settings › Logs tab. The list shows each log with its older copies (\`app.log.1\`, \`.2\`, \`.3\`), how big each one is and when it was last written. Download one file, one log with all its older copies, or everything as one zip with a README that says what is inside.
+Admins can download every log from the **Logs** tile in the Help panel, or with the **Download** button on Settings › System › Logs. The list shows each log with its older copies (\`app.log.1\`, \`.2\`, \`.3\`), how big each one is and when it was last written. Download one file, one log with all its older copies, or everything as one zip with a README that says what is inside.
 
 **Remove secrets** is on by default: every line has its keys and tokens removed as it downloads. Turning it off asks you once first, because raw logs can contain API keys and tokens.
 `
@@ -213,6 +214,14 @@ Secrets show as \`***\` so you can see the redaction happened. API keys, tokens,
 3. Check \`app.log\` and \`post_processing.log\` for the specific failure.
 4. Try the [track redownload wizard](#lib-redownload) to search a different source.
 
+## "SoulSync was updated. Reload this tab"
+
+A tab you left open while SoulSync was updated is still running the old version. It notices when it reconnects and offers a **Reload** button instead of breaking on the next page you open. Nothing reloads by itself, so finish what you're doing first. The same note shows if a page fails to load because its file went away with the update.
+
+## "Waiting for Soulseek login"
+
+slskd is running but logged out of the Soulseek server, often a temporary ban or a reconnect. A banner on Downloads and the dashboard says so. Soulseek downloads wait instead of failing: a search waits before it runs, and a transfer the logout broke is asked for again from the same peer once slskd is back, so no retries are used up and nothing falls back to a worse source. If Soulseek isn't first in your hybrid order, searches simply leave it out until it's back. After **Wait for Soulseek login** (Settings, Downloads, Soulseek; 45 minutes by default, 0 to never wait) a waiting track moves on to your next source. Add a **Soulseek Logged Out** automation with a notification to hear about it. The video side holds its Soulseek downloads the same way.
+
 ## Import folder not detected
 
 - Confirm the import path (Settings \u2192 Library \u2192 Folders \u2192 **Import Folder**) uses the **container path** (e.g. \`/app/Staging\` in Docker), not the host path.
@@ -245,6 +254,7 @@ This gives you an \`https://your-device.tailnet.ts.net\` address that satisfies 
 
 - Open the artist in the [Enhanced Library Manager](#lib-enhanced) and check the service match chips — a wrong Spotify or MusicBrainz link poisons everything downstream.
 - Manually search and link the correct ID, then run enrichment again.
+- A compilation track filed and tagged under an artist who isn't on it: an older build could store a compilation's "Various Artists" id on one real artist, and later compilations were found by it. The update takes that id off, gives those tracks back to their own artist, and runs Library Re-tag and Library Reorganize on just those files. The wrong tags and file names show up as findings on the Tools page; nothing is renamed until you apply them.
 
 ## Automation didn't fire
 
@@ -258,6 +268,7 @@ This gives you an \`https://your-device.tailnet.ts.net\` address that satisfies 
 From 1 December 2026 Last.fm only accepts API keys from accounts with a **Last.fm Pro** subscription. Without one:
 
 - Top tracks, similar artists, Radio and the seasonal mixes keep working from ListenBrainz and Deezer, and what Last.fm already told SoulSync stays cached.
+- ListenBrainz now asks for an account token before it shares an artist's top tracks. Connect ListenBrainz in Settings (the global token or any profile's) and SoulSync sends it; without one, top tracks and the album flame come from Deezer and your library instead.
 - Scrobbles to Last.fm wait in the queue rather than being lost. Turn on **Scrobble plays to ListenBrainz** in Settings to keep scrobbling now.
 - Last.fm history import stops. Import from ListenBrainz instead.
 

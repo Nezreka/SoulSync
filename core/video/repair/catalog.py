@@ -89,6 +89,10 @@ VIDEO_FINDING_TYPE_META = {
         "confirm": "Each file is renamed to its template name. Sidecars and subtitles "
                    "come along, and nothing is ever overwritten.",
     },
+    "naming_id_missing": {
+        "label": "Naming: Id Missing", "verb": "Re-enrich",
+        "blurb": "Titles whose names use an id they don't have stored, so their files aren't renamed.",
+    },
     "shelf_life": {
         "label": "Shelf Life", "verb": "Delete Title", "destructive": True,
         "blurb": "Titles that have earned their space least: unwatched, easy to get back, big.",

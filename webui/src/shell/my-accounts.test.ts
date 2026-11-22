@@ -11,6 +11,7 @@ import { server } from '@/test/msw';
 
 import {
   _maLastfmScrobbleSignIn,
+  _maPrivateUntil,
   _maPlexConnect,
   closeMyAccountsModal,
   openMyAccountsModal,
@@ -47,6 +48,10 @@ function mockAccount({
   weather = WEATHER_OFF as Record<string, unknown>,
   perms = MEMBER_PERMS as Record<string, unknown>,
   asks = {} as Record<string, unknown>,
+  privacy = { share_listening: false, asked: false, private_session: false } as Record<
+    string,
+    unknown
+  >,
 } = {}) {
   server.use(
     http.get('/api/profiles/me/permissions', () =>
@@ -64,6 +69,9 @@ function mockAccount({
     ),
     http.get('/api/profiles/me/asks', () => HttpResponse.json({ success: true, asks })),
     http.get('/api/weather', () => HttpResponse.json(weather)),
+    http.get('/api/profiles/me/listening-privacy', () =>
+      HttpResponse.json({ success: true, ...privacy }),
+    ),
     http.get('/api/profiles/me/navidrome-libraries', () =>
       HttpResponse.json({ success: true, ...navidromeLibraries }),
     ),
@@ -203,13 +211,23 @@ describe('My Account', () => {
       'What you can do',
       'Media server',
       'Music services',
+      'Your listening',
       'Sidebar weather',
     ]);
     expect(body().textContent).toContain(
       'Signed in as kim. Your playlists sync to your own account.',
     );
     const names = [...body().querySelectorAll('.ma-row-name')].map((n) => n.textContent);
-    expect(names).toEqual(['Navidrome', 'Spotify', 'Tidal', 'ListenBrainz', 'Last.fm', 'Weather']);
+    expect(names).toEqual([
+      'Navidrome',
+      'Spotify',
+      'Tidal',
+      'ListenBrainz',
+      'Last.fm',
+      'Share my listening',
+      'Private session',
+      'Weather',
+    ]);
   });
 
   it('the old My Settings entry point opens the same modal', async () => {
@@ -523,7 +541,9 @@ describe('My Account', () => {
     mockAccount({ isAdmin: true });
     openMyAccountsModal();
     await vi.waitFor(() => expect(body().textContent).toContain("They're set up in Settings"));
-    expect(body().querySelector('.ma-section')).toBeNull();
+    // their listening switches are their own, so they stay; nothing else does
+    const titles = [...body().querySelectorAll('.ma-section-title')].map((h) => h.textContent);
+    expect(titles).toEqual(['Your listening']);
   });
 });
 
@@ -916,5 +936,73 @@ describe('What you can do', () => {
     await opened();
     await vi.waitFor(() => expect(row('requests')).toContain('you see everyone’s'));
     expect(row('requests')).not.toContain('moderator');
+  });
+});
+
+describe('My Account: your listening', () => {
+  it('share my listening starts off and says nobody gets a blend from you', async () => {
+    mockAccount();
+    capturePosts('/api/profiles/me/listening-privacy', {
+      success: true,
+      share_listening: true,
+      asked: true,
+      private_session: false,
+    });
+    await opened();
+    const share = body().querySelector<HTMLInputElement>('[data-ma-privacy="share"]');
+    expect(share?.checked).toBe(false);
+    expect(body().querySelector('#ma-sub-share')?.textContent).toMatch(/^Off\./);
+    share!.checked = true;
+    share!.dispatchEvent(new Event('change', { bubbles: true }));
+    await vi.waitFor(() => expect(posted).toHaveLength(1));
+    expect(posted[0].body).toEqual({ share_listening: true });
+    await vi.waitFor(() =>
+      expect(body().querySelector('#ma-sub-share')?.textContent).toMatch(/^On\./),
+    );
+    expect(toasts).toContain('Sharing your listening for blends');
+  });
+
+  it('a private session says when it ends', async () => {
+    mockAccount();
+    capturePosts('/api/profiles/me/listening-privacy', {
+      success: true,
+      share_listening: false,
+      private_session: true,
+      private_until: '2026-11-20 18:00:00',
+    });
+    await opened();
+    const priv = body().querySelector<HTMLInputElement>('[data-ma-privacy="private"]');
+    priv!.checked = true;
+    priv!.dispatchEvent(new Event('change', { bubbles: true }));
+    await vi.waitFor(() => expect(posted).toHaveLength(1));
+    expect(posted[0].body).toEqual({ private_session: true });
+    const ends = _maPrivateUntil('2026-11-20 18:00:00');
+    expect(ends).not.toBe('');
+    await vi.waitFor(() =>
+      expect(body().querySelector('#ma-sub-private')?.textContent).toContain(`On until ${ends}`),
+    );
+  });
+
+  it('a refused save keeps the switch where it was', async () => {
+    mockAccount();
+    server.use(
+      http.post('/api/profiles/me/listening-privacy', () =>
+        HttpResponse.json({ success: false }, { status: 500 }),
+      ),
+    );
+    await opened();
+    const share = body().querySelector<HTMLInputElement>('[data-ma-privacy="share"]');
+    share!.checked = true;
+    share!.dispatchEvent(new Event('change', { bubbles: true }));
+    await vi.waitFor(() => expect(toasts).toContain("Couldn't save that. Try again."));
+    expect(body().querySelector<HTMLInputElement>('[data-ma-privacy="share"]')?.checked).toBe(
+      false,
+    );
+  });
+
+  it('the admin gets the switches too', async () => {
+    mockAccount({ isAdmin: true });
+    await opened();
+    expect(body().querySelector('[data-ma-privacy="share"]')).not.toBeNull();
   });
 });

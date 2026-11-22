@@ -110,7 +110,14 @@ def _schedule_file_recovery(task_id, batch_id, task, deps):
         try:
             download_dir = deps.docker_resolve_path(deps.config_manager.get('soulseek.download_path', './downloads'))
             transfer_dir = deps.docker_resolve_path(deps.config_manager.get('soulseek.transfer_path', './Transfer'))
-            found, _ = deps.find_completed_file(download_dir, identity[3], transfer_dir)
+            found = None
+            if identity[4] and identity[4] != 'soulseek':
+                # a streaming file is named by the source, not the result
+                # title, so ask for the path it reported first (#2231)
+                from core.downloads.streaming_pickup import reported_file_for
+                found = reported_file_for(deps.download_orchestrator, deps.run_async, identity[2])
+            if not found:
+                found, _ = deps.find_completed_file(download_dir, identity[3], transfer_dir)
             with tasks_lock:
                 current = download_tasks.get(task_id)
                 if current is not task or _recovery_identity(current) != identity:
@@ -367,6 +374,14 @@ def _apply_engine_state_fallback(
     task_status['progress'] = _engine_progress_pct(record)
 
 
+def _row_extras(task: dict) -> dict:
+    """Fields every live row carries beside the status words: for a quality
+    upgrade, the file it replaces (core/downloads/upgrade_rows.py), so the
+    row reads "MP3 320 → FLAC" and the Upgrades filter can find it."""
+    info = task.get('upgrade_of')
+    return {'upgrade_of': dict(info) if isinstance(info, dict) else None}
+
+
 def _attach_live_detail(task_status: dict, task: dict, live_info: Optional[dict]) -> None:
     """Decorate one per-task payload with its live_detail (#1156).
 
@@ -474,6 +489,7 @@ def build_batch_status_data(batch_id: str, batch: dict, live_transfers_lookup: d
                 # "2/5" while the quarantine-retry engine walks candidates.
                 'retry_info': task.get('retry_info'),
                 'retry_trigger': task.get('retry_trigger'),
+                **_row_extras(task),
             }
             # A book/release is monitored as a multi-file job by its own client
             # monitor. Music's single-file timeout/recovery must not mutate it.
@@ -981,6 +997,7 @@ def build_unified_downloads_response(limit: int, deps: StatusDeps) -> dict:
                 'quality': task.get('quality') or '',
                 'retry_info': task.get('retry_info'),
                 'retry_trigger': task.get('retry_trigger'),
+                **_row_extras(task),
                 'batch_id': batch_id,
                 'batch_name': batch.get('playlist_name') or batch.get('album_name') or task.get('batch_name') or '',
                 'batch_source': batch.get('source_page') or batch.get('initiated_from') or task.get('batch_source') or '',

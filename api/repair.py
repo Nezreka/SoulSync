@@ -505,6 +505,102 @@ def repair_finding_undo(finding_id):
         logger.error(f"Error undoing finding {finding_id}: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
+# ── Filled tags: what SoulSync wrote into files on its own, and its undo ──
+
+def _tag_fill_db():
+    worker = _repair_worker()
+    return getattr(worker, 'db', None) if worker is not None else None
+
+
+@bp.route('/api/repair/tag-fills', methods=['GET'])
+@requires("admin.tools")
+def repair_tag_fills():
+    """The blank tags filled lately: the fill setting, totals over ``days``
+    (default 7) and the most recent runs."""
+    try:
+        db = _tag_fill_db()
+        if db is None:
+            return jsonify({'success': False, 'error': 'Repair worker not initialized'}), 400
+        from core.library2 import tag_fill
+        from core.settings import config_manager
+        data = tag_fill.summary(db, days=_safe_int(request.args.get('days'), 7),
+                                limit=_safe_int(request.args.get('limit'), 20))
+        return jsonify({'success': True, 'mode': tag_fill.fill_mode(config_manager),
+                        'undo': tag_fill.undo_state(), **data}), 200
+    except Exception as e:
+        logger.error(f"Error reading filled tags: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@bp.route('/api/repair/tag-fills/files', methods=['GET'])
+@requires("admin.tools")
+def repair_tag_fill_files():
+    """Every file one run filled (``run``), each with its tags before and after."""
+    try:
+        db = _tag_fill_db()
+        run = (request.args.get('run') or '').strip()
+        if db is None or not run:
+            return jsonify({'success': False, 'error': 'run is required'}), 400
+        from core.library2 import tag_fill
+        return jsonify({'success': True, 'files': tag_fill.batch_files(
+            db, run, limit=_safe_int(request.args.get('limit'), 500))}), 200
+    except Exception as e:
+        logger.error(f"Error reading filled tags for a run: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@bp.route('/api/repair/tag-fills/<int:fill_id>/undo', methods=['POST'])
+@admin_only
+def repair_tag_fill_undo(fill_id):
+    """Put one file's filled tags back to blank. They are not filled again."""
+    try:
+        db = _tag_fill_db()
+        if db is None:
+            return jsonify({'success': False, 'error': 'Repair worker not initialized'}), 400
+        from core.library2 import tag_fill
+        result = tag_fill.undo_fill(db, fill_id)
+        return jsonify(result), 200 if result.get('success') else 400
+    except Exception as e:
+        logger.error(f"Error undoing filled tags {fill_id}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@bp.route('/api/repair/tag-fills/undo-run', methods=['POST'])
+@admin_only
+def repair_tag_fill_undo_run():
+    """Undo every file one run filled, in the background (``{"run": id}``)."""
+    try:
+        db = _tag_fill_db()
+        run = str((request.get_json(silent=True) or {}).get('run') or '').strip()
+        if db is None or not run:
+            return jsonify({'success': False, 'error': 'run is required'}), 400
+        from core.library2 import tag_fill
+        result = tag_fill.start_undo_batch(db, run)
+        return jsonify(result), 202 if result.get('success') else 400
+    except Exception as e:
+        logger.error(f"Error undoing a fill run: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@bp.route('/api/repair/tag-fills/run', methods=['POST'])
+@admin_only
+def repair_tag_fill_run():
+    """Fill now: the next idle moment of the repair worker runs a pass."""
+    try:
+        worker = _repair_worker()
+        if worker is None:
+            return jsonify({'success': False, 'error': 'Repair worker not initialized'}), 400
+        from core.library2 import tag_fill
+        from core.settings import config_manager
+        mode = tag_fill.fill_mode(config_manager)
+        if mode == 'off':
+            return jsonify({'success': False, 'error': 'Fill empty tags automatically is off'}), 400
+        worker.request_tag_fill()
+        return jsonify({'success': True, 'mode': mode}), 202
+    except Exception as e:
+        logger.error(f"Error starting a fill pass: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @bp.route('/api/repair/findings/<int:finding_id>/reopen', methods=['POST'])
 @admin_only
 def repair_finding_reopen(finding_id):

@@ -164,7 +164,7 @@ LB = [{"artist_mbid": MBID, "total_listen_count": 812345, "total_user_count": 23
 
 def _http(**over):
     answers = {fb.WIKIDATA_API: WIKIDATA, fb.WIKIPEDIA_SUMMARY: WIKI_PAGE,
-               fb.LISTENBRAINZ_POPULARITY: LB}
+               fb.LISTENBRAINZ_POPULARITY: LB, fb.LISTENBRAINZ_TOP_RECORDINGS: []}
     answers.update(over)
     return _Http(answers)
 
@@ -428,3 +428,196 @@ def test_the_library_artist_payload_carries_about(db):
     with closing(db._get_connection()) as conn:
         about = get_artist(conn, 1)["about"]
     assert (about["bio_source"], about["tags_source"]) == ("wikipedia", "musicbrainz")
+
+
+# ── track popularity from listenbrainz, for the album flame ─────────────────
+
+TOP_RECORDINGS = [
+    {"recording_mbid": "rec-angel", "recording_name": "Angel", "total_listen_count": 5400,
+     "total_user_count": 900},
+    {"recording_mbid": "rec-teardrop", "recording_name": "Teardrop", "total_listen_count": 9100,
+     "total_user_count": 1500},
+    {"recording_mbid": "rec-inertia", "recording_name": "Inertia Creeps", "total_listen_count": 3000,
+     "total_user_count": 700},
+]
+
+
+def _tracks(db):
+    with closing(db._get_connection()) as conn:
+        return {r[0]: json.loads(r[1] or "{}") for r in conn.execute(
+            "SELECT title, enrichment FROM lib2_tracks ORDER BY id")}
+
+
+def _add_track(db, title, enrichment=None, mbid=None):
+    with closing(db._get_connection()) as conn:
+        conn.execute("INSERT INTO lib2_tracks(album_id,title,enrichment,musicbrainz_id) "
+                     "VALUES(1,?,?,?)", (title, json.dumps(enrichment or {}), mbid))
+        conn.commit()
+
+
+class TestTrackPopularity:
+    @pytest.fixture(autouse=True)
+    def _listenbrainz_connected(self, monkeypatch):
+        """the top recordings need a listenbrainz token"""
+        from core import listenbrainz_auth
+        monkeypatch.setattr(listenbrainz_auth, "_candidates", lambda: ["lb-token"])
+
+    def _fetcher(self, recordings=TOP_RECORDINGS):
+        return fb.ArtistAboutFallback(
+            mb_client=_MB(MB_ARTIST), audiodb_client=_AudioDB(), deezer_client=_Deezer(),
+            http=_http(**{fb.LISTENBRAINZ_TOP_RECORDINGS: recordings}))
+
+    def test_tracks_without_a_lastfm_count_get_listenbrainz_listens(self, db):
+        _add_track(db, "Teardrop (Remastered)", mbid="rec-teardrop")
+        _add_track(db, "Inertia Creeps", {"lastfm": {"playcount": 123456}})
+
+        assert fb.fill_artist(db._get_connection, 1, self._fetcher())
+
+        tracks = _tracks(db)
+        assert tracks["Angel"]["listenbrainz"] == {"listen_count": 5400, "listeners": 900}
+        # by recording mbid when the title differs
+        assert tracks["Teardrop (Remastered)"]["listenbrainz"]["listen_count"] == 9100
+        # a track last.fm already counts is left to last.fm
+        assert "listenbrainz" not in tracks["Inertia Creeps"]
+        assert fb.TRACKS_CHECK_KEY in _enrichment(db)
+
+    def test_not_asked_again_within_the_ttl(self, db):
+        http = _http(**{fb.LISTENBRAINZ_TOP_RECORDINGS: []})
+        fetcher = fb.ArtistAboutFallback(mb_client=_MB(MB_ARTIST), audiodb_client=_AudioDB(),
+                                         deezer_client=_Deezer(), http=http)
+        fb.fill_artist(db._get_connection, 1, fetcher)
+        asked = [u for u in http.calls if u.startswith(fb.LISTENBRAINZ_TOP_RECORDINGS)]
+        assert len(asked) == 1
+        assert not fb.fill_artist(db._get_connection, 1, fetcher)
+        with closing(db._get_connection()) as conn:
+            assert fb.next_due_artist(conn, 0) == (None, None)
+
+    def test_an_artist_lastfm_fully_knows_is_still_asked_for_its_tracks(self, db):
+        """last.fm has the artist's bio and numbers, but no track counts (a new
+        album since the key stopped working): the flame still needs them"""
+        _set_enrichment(db, {"lastfm": FULL_LASTFM})
+        with closing(db._get_connection()) as conn:
+            row, _cursor = fb.next_due_artist(conn, 0)
+            assert row is not None and row["id"] == 1
+        assert fb.fill_artist(db._get_connection, 1, self._fetcher())
+        assert _tracks(db)["Angel"]["listenbrainz"]["listen_count"] == 5400
+
+    def test_listenbrainz_down_leaves_the_tracks_due(self, db):
+        fetcher = fb.ArtistAboutFallback(
+            mb_client=_MB(MB_ARTIST), audiodb_client=_AudioDB(), deezer_client=_Deezer(),
+            http=_http(**{fb.LISTENBRAINZ_TOP_RECORDINGS: fb.SourceError("503")}))
+        fb.fill_artist(db._get_connection, 1, fetcher)
+        assert fb.TRACKS_CHECK_KEY not in _enrichment(db)
+
+    def test_no_mbid_no_track_request(self, db):
+        with closing(db._get_connection()) as conn:
+            conn.execute("UPDATE lib2_artists SET musicbrainz_id = NULL")
+            conn.commit()
+            row = fb.load_artist(conn, 1)
+            assert fb.tracks_due(conn, row) is False
+
+    def test_the_album_flames_from_listenbrainz_after_the_fill(self, db):
+        from core.library2 import queries as Q
+        recordings = [{"recording_mbid": "", "recording_name": f"Song {i}",
+                       "total_listen_count": n} for i, n in enumerate([4000, 300, 280, 260, 250])]
+        for i in range(5):
+            _add_track(db, f"Song {i}")
+        fb.fill_artist(db._get_connection, 1, self._fetcher(recordings))
+        with closing(db._get_connection()) as conn:
+            tracks = Q.get_album(conn, 1)["tracks"]
+        flamed = [(t["title"], t["popular_source"]) for t in tracks if t.get("popular")]
+        assert flamed == [("Song 0", "listenbrainz")]
+
+
+class TestTrackPopularityWithoutAToken:
+    """listenbrainz answers 401 for top recordings without a token (nov 2026)."""
+
+    def _fetcher(self, http):
+        return fb.ArtistAboutFallback(mb_client=_MB(MB_ARTIST), audiodb_client=_AudioDB(),
+                                      deezer_client=_Deezer(), http=http)
+
+    def test_no_token_asks_nothing_and_stamps_nothing(self, db):
+        _set_enrichment(db, {"lastfm": FULL_LASTFM})
+        http = _http(**{fb.LISTENBRAINZ_TOP_RECORDINGS: TOP_RECORDINGS})
+        fb.fill_artist(db._get_connection, 1, self._fetcher(http))
+        assert not [u for u in http.calls if u.startswith(fb.LISTENBRAINZ_TOP_RECORDINGS)]
+        assert fb.TRACKS_CHECK_KEY not in _enrichment(db)
+        # due only for its tracks: the sweep doesn't loop on it
+        with closing(db._get_connection()) as conn:
+            assert fb.next_due_artist(conn, 0) == (None, None)
+
+    def test_connecting_listenbrainz_makes_the_tracks_due_again(self, db, monkeypatch):
+        _set_enrichment(db, {"lastfm": FULL_LASTFM})
+        fb.fill_artist(db._get_connection, 1, self._fetcher(_http()))
+        from core import listenbrainz_auth
+        monkeypatch.setattr(listenbrainz_auth, "_candidates", lambda: ["lb-token"])
+        listenbrainz_auth.reset()
+        with closing(db._get_connection()) as conn:
+            row, _cursor = fb.next_due_artist(conn, 0)
+            assert row is not None and row["id"] == 1
+        http = _http(**{fb.LISTENBRAINZ_TOP_RECORDINGS: TOP_RECORDINGS})
+        assert fb.fill_artist(db._get_connection, 1, self._fetcher(http))
+        assert _tracks(db)["Angel"]["listenbrainz"]["listen_count"] == 5400
+
+    def test_fill_artist_never_asks_for_the_tracks_without_a_token(self, db):
+        """the fill's own gate, apart from the fetcher's"""
+        asked = []
+
+        class _Fetcher(fb.ArtistAboutFallback):
+            def top_recordings(self, mbid):
+                asked.append(mbid)
+                return []
+
+        _set_enrichment(db, {"lastfm": FULL_LASTFM})
+        fb.fill_artist(db._get_connection, 1, _Fetcher(
+            mb_client=_MB(MB_ARTIST), audiodb_client=_AudioDB(), deezer_client=_Deezer(), http=_http()))
+        assert asked == []
+        assert fb.TRACKS_CHECK_KEY not in _enrichment(db)
+
+    def test_top_recordings_raise_without_a_token(self):
+        http = _http()
+        with pytest.raises(fb.SourceError):
+            self._fetcher(http).top_recordings(MBID)
+        assert http.calls == []
+
+
+class _Response:
+    def __init__(self, status, payload=None):
+        self.status_code, self._payload = status, payload
+
+    def json(self):
+        return self._payload
+
+
+class TestHttpToken:
+    @pytest.fixture
+    def sent(self, monkeypatch):
+        import requests
+        calls, answer = [], {"status": 200}
+
+        def request(method, url, **kw):
+            calls.append((url, kw.get("headers") or {}))
+            return _Response(answer["status"], [])
+        monkeypatch.setattr(requests, "request", request)
+        monkeypatch.setattr(fb, "_throttle", lambda host: None)
+        return calls, answer
+
+    def test_listenbrainz_gets_the_token_and_wikipedia_does_not(self, sent, monkeypatch):
+        from core import listenbrainz_auth
+        monkeypatch.setattr(listenbrainz_auth, "_candidates", lambda: ["lb-token"])
+        listenbrainz_auth.reset()
+        calls, _answer = sent
+        fb._http_json("GET", fb.LISTENBRAINZ_TOP_RECORDINGS + MBID, host="api.listenbrainz.org")
+        fb._http_json("GET", fb.WIKIPEDIA_SUMMARY + "X", host="en.wikipedia.org")
+        assert calls[0][1]["Authorization"] == "Token lb-token"
+        assert "Authorization" not in calls[1][1]
+
+    def test_a_401_sets_the_token_aside_and_is_a_source_error(self, sent, monkeypatch):
+        from core import listenbrainz_auth
+        monkeypatch.setattr(listenbrainz_auth, "_candidates", lambda: ["lb-token"])
+        listenbrainz_auth.reset()
+        _calls, answer = sent
+        answer["status"] = 401
+        with pytest.raises(fb.SourceError):
+            fb._http_json("GET", fb.LISTENBRAINZ_TOP_RECORDINGS + MBID, host="api.listenbrainz.org")
+        assert listenbrainz_auth.token() is None

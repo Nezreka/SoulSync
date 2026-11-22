@@ -877,15 +877,20 @@ describe('Library V2 artist detail — All Releases views', () => {
     expect(document.querySelectorAll('.artist-hero-numbers')).toHaveLength(1);
   });
 
-  it('places compact media-server recognition beside the size in the compact header', async () => {
+  it('puts a logo pill per recognising server beside the size in the header', async () => {
     renderArtist('/library?artist=1');
 
-    const recognition = await screen.findByLabelText('Recognised by Navidrome and Plex');
-    expect(recognition).toHaveAttribute('title', 'Recognised by Navidrome and Plex');
-    expect(recognition).toHaveTextContent('✓2');
-    expect(recognition.parentElement).toContainElement(screen.getByText('2.00 KB'));
-    expect(screen.queryByText('Navidrome')).not.toBeInTheDocument();
-    expect(screen.queryByText('Plex')).not.toBeInTheDocument();
+    const navidrome = await screen.findByRole('img', { name: 'Recognised by Navidrome' });
+    const plex = screen.getByRole('img', { name: 'Recognised by Plex' });
+    expect(navidrome).toHaveAttribute('title', 'Recognised by Navidrome');
+    expect(navidrome).toHaveTextContent('Navidrome');
+    expect(plex).toHaveTextContent('Plex');
+    expect(navidrome.querySelector('img')).toHaveAttribute(
+      'src',
+      '/static/img/brands/navidrome.png',
+    );
+    expect(navidrome.parentElement).toContainElement(screen.getByText('2.00 KB'));
+    expect(plex.parentElement).toBe(navidrome.parentElement);
   });
 
   /** "Missing" is monitored+absent now (§44/LV2-CNT-01) — so a release the

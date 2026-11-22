@@ -80,7 +80,8 @@ const libraryV2SearchObject = z.object({
     .catch(false),
   /** 'upgradable' (could be better; artists and songs) or 'lossless' (songs) */
   quality: z.enum(['', 'lossless', 'upgradable']).default('').catch(''),
-  /** #2046: artists whose albums are all reviewed and locked, or not yet */
+  /** #2046: artists whose albums are all reviewed and locked, or not yet;
+   *  #2223: on the album list, locked albums or unlocked ones */
   review: z.enum(['', 'reviewed', 'unreviewed']).default('').catch(''),
   view: z.enum(['table', 'cards', 'discovery']).default('cards').catch('cards'),
   /** #2107: turn the artist sort around */
@@ -695,6 +696,8 @@ export interface LibraryV2Track {
   is_missing?: boolean;
   /** #2144: one of the album's most played tracks on Last.fm (album detail only). */
   popular?: boolean;
+  /** whose play counts ranked it: Last.fm, or ListenBrainz when Last.fm knows too little */
+  popular_source?: 'lastfm' | 'listenbrainz' | null;
   /** Quality vs the album's profile (null when missing or not measurable). */
   meets_profile?: boolean | null;
   upgrade_candidate?: boolean | null;

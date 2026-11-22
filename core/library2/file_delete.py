@@ -814,6 +814,8 @@ def _execute_delete_items(
             conn.commit()
 
         try:
+            from core.library import own_writes
+            own_writes.note(item["path"])
             unlink(item["path"])
         except Exception as exc:  # noqa: BLE001
             error = str(exc) or exc.__class__.__name__

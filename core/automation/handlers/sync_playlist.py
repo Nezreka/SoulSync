@@ -301,6 +301,14 @@ def _sync_single_mirrored_playlist(
                 # files a manual match under it, so the sync needs both (#1289)
                 'source_track_id': t.get('source_track_id') or '',
             }
+            # the playlist's own artist, which discovery's match can spell
+            # in another script ("Δέσποινα Βανδή" for "Despina Vandi"): the
+            # sync matches under both (#2222)
+            _mirror_artist = (t.get('artist_name') or '').strip()
+            if _mirror_artist:
+                _track_entry['source_artists'] = [_mirror_artist]
+            if md.get('isrc'):
+                _track_entry['isrc'] = md['isrc']
             if md.get('track_number'):
                 _track_entry['track_number'] = md['track_number']
             if md.get('disc_number'):
@@ -438,6 +446,13 @@ def _sync_single_mirrored_playlist(
         # sync changes nothing above, and skipping then never re-matched or
         # wishlisted it (#1417). checked last, it is the only part that reads
         # the library.
+        # "matched" is soulsync's answer, not the server's: a mirror sat at
+        # 167 matched with 149 on the jellyfin playlist and every run skipped
+        # (#2235). the last run's readback has to say every matched track
+        # made it. a status from before the readback existed can't say, so
+        # it runs once and the readback answers from then on
+        last_unplaced = last_status.get('unplaced_tracks')
+        all_placed = last_unplaced == 0
         unchanged = (
             not force_sync
             and not mirror_changed
@@ -445,6 +460,7 @@ def _sync_single_mirrored_playlist(
             and not sync_mode_changed
             and last_hash == tracks_hash
             and last_matched >= len(tracks_json)
+            and all_placed
         )
         library_lost = False
         if unchanged:
@@ -495,6 +511,19 @@ def _sync_single_mirrored_playlist(
                 log_line=(
                     f'Forcing sync: playlist changed ({tracks_added} added) or '
                     f'{skipped_count} track(s) need discovery'
+                ),
+                log_type='info',
+            )
+        elif (not force_sync and not mirror_changed and not quality_profile_changed
+              and not sync_mode_changed and last_hash == tracks_hash
+              and last_matched >= len(tracks_json) and not all_placed):
+            deps.update_progress(
+                auto_id,
+                log_line=(
+                    f'{last_unplaced} track(s) in the library were not on the server '
+                    f'playlist last time, running sync'
+                    if last_unplaced else
+                    'Checking the server playlist holds every matched track, running sync'
                 ),
                 log_type='info',
             )

@@ -6,7 +6,7 @@ SoulSync includes a full REST API at `/api/v1/` that lets you control everything
 
 ### 1. Generate an API Key
 
-Go to **Settings** in the SoulSync web UI and find the **SoulSync API** section. Click **Generate API Key**, give it a label, and copy the key immediately — it's only shown once.
+Go to **Settings** in the SoulSync web UI and open **System › API**. Under **New API key**, give it a label and click **Generate key**, then copy the key immediately — it's only shown once.
 
 Alternatively, if no keys exist yet, use the bootstrap endpoint. It needs no key, but only the admin may call it: on a single-profile install with no login or launch PIN that's any request, otherwise send your signed-in admin session cookie (or just use Settings).
 
@@ -157,6 +157,125 @@ Each kind (music, movies, TV, audiobooks) can be set to have an admin pick the r
 - Download automatically instead: `POST /api/requests/music/awaiting/auto` `{profile_id, key}`, `POST /api/requests/media/<id>/auto`, `POST /api/video/requests/<id>/auto` (a show joins the watchlist then).
 - The requester's list says it too: music and book rows in status `awaiting_selection`, video rows with `awaiting_selection: true` (nothing picked yet) or `picking: true` (a picked release is downloading).
 
+### Listening history and your plays (web UI routes)
+
+Each works on the caller's own listening history: the admin's is the shared one, a member's is their own.
+
+- Spotify streaming history, from Spotify's privacy export. The browser reads the export and sends only music plays; the file never comes to the server. All five need **Listening stats** (`music.stats`).
+  - `GET /api/listening-import/spotify`: `{imported, include_in_stats, plays, first_played, last_played, artists, matched, linked, updated_at, max_batch}`. `plays` are the plays the import added, `linked` the ones already in the history from ListenBrainz or Last.fm, `matched` the added plays linked to a library track.
+  - `POST /api/listening-import/spotify/batch` `{rows: [{ended_at, ms_played, track, artist, album?, uri?, coarse?}], include_in_stats?}`: at most `max_batch` (5000) rows. `ended_at` is the stream's end in utc (`2024-01-15T08:23:45Z`, or `2019-03-02 21:14` with `coarse: true` for account data). Plays under 30 seconds, podcast or audiobook rows and rows marked `incognito` or `episode` are dropped. Answers `{received, kept, added, merged, dropped: {short, podcast, private, invalid}}`. A member's first import makes their listening history their own.
+  - `POST /api/listening-import/spotify/finish`: refreshes the stats and returns the summary.
+  - `POST /api/listening-import/spotify/settings` `{include_in_stats}`: off keeps the import out of Stats, Your Year, the dashboard's week and the artist page; recommendations and mixes still use it. `404` when nothing is imported.
+  - `DELETE /api/listening-import/spotify`: removes every play the import added (`{removed}`); plays from other sources stay.
+- `GET /api/library/v2/artists/<id>/your-plays` (Library): `{listening: {play_count, first_played, last_played, plays_30d, rank, artists_played, months: [{month, plays}], top_tracks: [{title, album, play_count, last_played, track_id, album_id, thumb_url}]}}`, or `listening: null` when the caller never played them. A play counts when it names the artist or one of its aliases, or is linked to one of its library tracks.
+- Album tracks (`GET /api/library/v2/albums/<id>`) carry `popular_source`, `lastfm` or `listenbrainz`, on the tracks marked `popular`.
+
+### A new profile's Discover (web UI routes)
+
+A profile with fewer than five taste seeds (artists played at least twice, watchlist artists, artists it picked) is new. Everything here is per profile.
+
+- `GET /api/discover/starter`: `{seeds, threshold, needs_seeds, dismissed, show_banner, picked: [{name, deezer_id, image_url}], connections: {listenbrainz, lastfm}, spotify_import: {available, href}, build: {state, done, total, stored}}`. `build.state` is `idle`, `running`, `done` or `failed`.
+- `POST /api/discover/starter/dismiss`: hide the banner for this profile.
+- `GET /api/discover/starter/artists?genre=<deezer genre id>` or `?q=<search>`: `{artists: [{name, deezer_id, image_url, popularity}], genres: [{id, name}]}` for the picker. Blocked artists are left out.
+- `POST /api/discover/starter/picks` `{artists: [{name, deezer_id, image_url}]}`: keep them as this profile's picked artists and fetch their similar artists in the background (`build` reports progress). An empty list is a `400`.
+- While a profile is new and has no recommendations, `GET /api/discover/similar-artists` answers chart picks with `starter: true`, each with `explanation: {kind: "trending", seeds: [{name: "Deezer's Rock chart"}]}`, and the hero does the same. Recommendations from picked artists carry `explanation.kind: "picked"`.
+
+### Your Year extras (web UI routes)
+
+Everything reads the same twelve-month window and listening pile as `GET /api/stats/year`.
+
+- `GET /api/stats/year` now also has `days` (`[{date, plays, minutes}]`, every day with music), `streak` (`{days, start, end}`, the longest run), `top_genres` (`[{genre, plays, share}]`, from the library's artists) and `peak_day.minutes` / `peak_day.top_artist`. A year cached before these arrives without them until the worker rebuilds it.
+- `POST /api/stats/year/playlist` `{size: 50 | 100}`: the year's most played songs into this profile's user playlist "Your <year>". Saving again updates the same playlist. `{id, name, track_count, created}`; `400` when nothing was played.
+- `GET /api/stats/year/soundtrack`: `{tracks}`, up to three of the year's top songs that are in the library with a file, in the player's queue shape plus `start_ms` and `duration_ms`.
+- `GET /api/stats/year/banner`: `{show, year}`, true from Dec 1 to Jan 15 when there is a year to show and this profile hasn't hidden it. The first time it shows, the profile gets one notification. `POST /api/stats/year/banner/dismiss` hides it until next season.
+
+### Update file locations (web UI routes, admins only)
+
+After the music library folder moves, these point the library's file records at where the files are now. Files are never touched, and the media server's own path for a file is never changed. One job runs at a time, in the background.
+
+- `POST /api/library/file-locations/preview`: check every record, write nothing. The finished result (on `/status` as `preview`) has `counts` per outcome (`repoint`, `present`, `not_found`, `ambiguous`, `different_file`, `unverified`, `outside_library`, `partial_match`, `claimed`, `old_root_live`) and `groups`: `[{old_root, new_root, count, examples}]`.
+- `POST /api/library/file-locations/apply` `{groups?: [{old_root, new_root}]}`: move the records, every one checked again; `groups` limits it to those folder pairs. An interrupted apply continues in the same run.
+- `GET /api/library/file-locations/status`: `{status, action, checked, total, result, preview, error, runs}`. `runs` lists recent runs, manual, from library scans and from folder watching (`kind`: `manual`, `scan`, `watch`), with `id`, `kind`, `status`, `repointed` and `groups`.
+- `POST /api/library/file-locations/runs/<id>/undo`: put a run's records back. A record changed since is left as it is. `POST /api/library/file-locations/stop` stops the running job.
+
+### Live folder watching (web UI routes, admins only)
+
+- `GET /api/library/folder-watch`: `{enabled, running, live_available, watching, last_change, last_change_folder, pending, poll_minutes, roots}`. Each root: `{path, kind: "library"|"import", setting: "auto"|"live"|"polling"|"off", mode: "live"|"polling"|"off", reason, note, reachable, poll_minutes, last_change, last_check, changes, pending}`. Times are Unix seconds. `live_available` is false when the `watchdog` package is missing (every folder is then polled).
+- `POST /api/library/folder-watch/refresh`: read the settings again now (after a save), then the same answer.
+
+Settings: `library.watch_folders` (default true), `library.watch_poll_minutes` (15), `library.watch_root_modes` (`{folder: mode}`), `library.watch_max_live_folders` (100000). A change reaches open pages as the `library:changed` socket event.
+
+### Library coverage and folder overrides (web UI routes, admins only)
+
+How much of the media server's music SoulSync can read directly, folder by folder. Each folder is sampled (up to 40 real files, opened and size-checked), never scanned whole.
+
+- `GET /api/library/coverage`: the last check, or a new one when there is none. `?refresh=1` always runs a new one. `{server, folders_from: "server"|"inferred", relative_paths, total_tracks, outside_folders, reachable_tracks, reachable_pct, docker, folders}`. Each folder: `{library, server_folder, tracks, local_folder, found_by: "override"|"same"|"learned"|"suffix"|null, status: "covered"|"partly_covered"|"not_library"|"not_mounted", library_folder, library_parts, volume_example (Docker, not mounted), sampled, readable, readable_pct, reasons: {reason: count}, examples: [{server_path, local_path, reason, why}], reachable_tracks}`. Reasons: `ok`, `not_mounted`, `missing`, `permission`, `size`, `unreadable`, `not_a_file`, `not_library`. Navidrome doesn't say which folders it uses, so its folders are worked out from its track paths (`folders_from: "inferred"`); `relative_paths: true` means Report Real Path is off.
+- `POST /api/library/coverage/folder` `{server_folder, local_folder?, library?}`: one folder, checked now. With `local_folder` it is checked as if SoulSync saw it there; nothing is saved.
+- `POST /api/library/coverage/check-path` `{path}`: `{exists, is_dir, readable, entries, sample, library_folder}` for a typed folder.
+- `GET /api/library/path-mappings` `?media_type=music|video`: folder overrides, `[{id, media_type, server_kind, server_prefix, local_prefix, enabled, verified_at, verify}]`.
+- `POST /api/library/path-mappings` `{server_prefix, local_prefix, media_type?: "music", server_kind?: "", this_server?: bool}` adds one (the same server folder saves over itself); `PUT /api/library/path-mappings/<id>` changes one; `DELETE` removes it. `this_server: true` limits it to the active media server.
+- `POST /api/library/path-mappings/<id>/verify`: samples the files under it and stores `verify` and `verified_at`.
+
+An override renames a folder: "the server's `/data/music` is `/music` here". It never gives SoulSync access to a drive. Every server path SoulSync turns into its own asks the overrides first (the longest matching server folder wins, Windows paths compare without case), then the mounts it learned itself, then the trailing-folder match against its library folders. An override whose folder is missing is skipped, so it never hides a file.
+
+### Paired devices: listen anywhere (web UI and app routes)
+
+Settings > Devices pairs music apps with this server. A device gets its own token, never an API key. The admin routes are `@admin_only`; the device's own routes take the token in `X-Device-Token: sdt_...` (or `Authorization: Bearer sdt_...`) and no cookie. A request may carry a device token or an API key, not both (`400 device_one_credential`).
+
+A device token reaches only routes that opt in. Everything else answers `403 device_not_allowed` before it runs; an unknown or unpaired token gets `401 device_token_invalid`, one that missed its pick window `401 device_pick_expired`, and an unprofiled one on anything but its pick `403 device_pick_first`. A device never acts as an admin, even when its profile is one.
+
+Admin:
+
+- `GET /api/devices/identity`: `{lookup_id, fingerprint, public_key}`. The server fingerprint is the lookup ID's first 12 characters.
+- `GET /api/devices`: `{devices: [{id, name, platform, app, kind, profile_id, profile_name, scope, created_at, last_seen_at, last_ip, state, pick_seconds_left}]}`. `state` is `live` or `unprofiled` (waiting for its pick; `pick_seconds_left` says how long). Unpaired and expired ones are left off.
+- `PATCH /api/devices/<id>` `{name}`: rename. `DELETE /api/devices/<id>`: unpair now.
+- `POST /api/devices/profiles/<profile_id>/revoke`: unpair every device of a profile, `{revoked}`. Sign out everywhere, a new password and turning a profile off do the same; deleting a profile removes its devices.
+- `GET /api/devices/codes`: `{codes: [{id, note, created_at, expires_at, seconds_left, wrong_tries}]}`, the codes still waiting. Never the codes themselves.
+- `POST /api/devices/codes` `{note?}`: `201 {id, code, code_hash, expires_at, seconds_left, payload, payload_text, warnings}`. `code` is shown this once, as `XXXX-XXXX-XXXX-XXXX` (16 characters of Crockford base32, about 80 bits). It works once, for 10 minutes. `code_hash` is the SHA-256 hex of the code's 16 characters (uppercase, no dashes). `payload` is `{v, lookup_id, fingerprint, addresses, code}` and `payload_text` its compact JSON, what the QR carries. `409` when 20 codes already wait.
+- `DELETE /api/devices/codes/<id>`: cancel a waiting code.
+- `GET /api/devices/server`: `{lookup_id, fingerprint, public_key, addresses: [{kind, url}], remote_url, custom_urls, warnings, probe, guidance}`. `addresses` lists `local` ones first, then `remote`, then `custom`. `warnings` says so for a plain http address outside the home network.
+- `PUT /api/devices/addresses` `{remote_url, custom_urls}`: save the remote address (blank clears it) and up to 5 extra ones. `400` with the reason for an address that won't work. Answers like `GET /api/devices/server`.
+- `POST /api/devices/reachability`: a new one-time probe, and the server fetching its own remote address with it. `{result: {ok, code, words} | null, probe: {nonce, path, url, seconds_left, hits}, guidance}`. `result` is null with no remote address. `code` is `ok`, `not_this_server`, `blocked`, `certificate`, `timeout`, `dns` or `unreachable`.
+- `GET /api/devices/reachability`: `{probe}`, the newest probe and its `hits: [{ip, at, via, from_home}]` (`via` is `self` for the server's own fetch, `outside` for anything else, like a phone on mobile data).
+
+Open, no sign-in (these pass the login, launch PIN and profile gates):
+
+- `POST /api/devices/redeem` `{code, name, platform?, app?}`: `201 {token, device_id, pick_seconds, server: {lookup_id, fingerprint, public_key}}`. Burns the code; the token is shown this once and starts unprofiled. Every bad code answers `404 unknown_or_expired_code` the same way. Wrong codes from one address are held to 10 a minute (`429`, `Retry-After`), and 5 wrong tries on one code lock it. Plain http only works from this machine or the home network; anything else gets `403 https_required`.
+- `GET /api/devices/reachability/<nonce>`: the one-time probe URL. `{soulsync_probe: <nonce>}` (a small page for a browser) while the probe lives, else `404`.
+
+The device itself:
+
+- `GET /api/devices/me`: `{device, server}`: its name, `state`, profile and how long it has left to pick.
+- `GET /api/devices/me/profiles`: `{profiles: [{id, name, avatar_color, avatar_url, needs}]}`, the profiles it may pick. `needs` is `password` in login mode, `pin` for a profile with a PIN, else null. A music app only sees profiles with **Use music apps** (`music.apps`). `409` once it has picked.
+- `POST /api/devices/me/profile` `{profile_id, pin?, password?}`: the pick, once. The same checks as `POST /api/profiles/select` (wrong tries throttled the same way); a profile with a PIN always asks for it here. `404` for a profile that isn't on its list, `409` once picked or past its 15 minutes.
+
+Person invites are the same as Settings > People > Invites: `GET/POST /api/profiles/invites` (admin, or an admin API key). `POST` takes `{preset: {template_id}, note?, expires_hours?}`; a new one lasts a week (168 hours, 1 to 720) unless `expires_hours` says otherwise, works once, and whoever opens it makes their own profile following that template.
+
+### Music apps: the Subsonic / OpenSubsonic API (`/rest`)
+
+SoulSync answers the Subsonic API (version 1.16.1) with the OpenSubsonic additions at `/rest/<method>` and `/rest/<method>.view`, GET or POST (form fields count like query ones). `f=json`, `f=jsonp&callback=<name>` or XML (the default). Every answer is HTTP 200 with `subsonic-response`: `{status, version, type: "soulsync", serverVersion, openSubsonic: true}`, and on a refusal `error: {code, message}`.
+
+Signing in is always a paired music app, never an API key and never a profile's own password:
+
+- `apiKey=<device token>` (OpenSubsonic `apiKeyAuthentication`), on its own.
+- `u=<profile name>` with `t=md5(app password + s)` and `s=<salt>`, or `p=<app password>` / `p=enc:<hex>`.
+
+Error codes: `10` a required parameter is missing, `40` wrong username or password (also after 10 wrong tries a minute from one address), `43` an API key with a username or password, `44` an unknown or unpaired API key, `50` not allowed (no profile picked yet, the profile lost **Use music apps**, or something a music app may not do), `70` not found (also a song this profile can't play, or a file SoulSync can't read with the media server switch off), `0` anything else. A device token in `X-Device-Token` works on `/rest` too, with the device gate's JSON refusals. `getOpenSubsonicExtensions` answers without signing in: `apiKeyAuthentication`, `formPost`, `songLyrics`, `transcodeOffset`.
+
+Ids are typed: `ar-<id>` artist, `al-<id>` album, `tr-<id>` song (a bare number is a song), `pl-<id>` playlist, `mx-<n>` a Daily Mix. One music folder, id `1`.
+
+Methods: `ping`, `getLicense`, `getOpenSubsonicExtensions`, `tokenInfo`, `getUser` (its own profile only), `getScanStatus`, `getMusicFolders`, `getIndexes`, `getArtists`, `getArtist`, `getAlbum`, `getSong`, `getMusicDirectory`, `getGenres`, `getAlbumList` / `getAlbumList2` (`random`, `newest`, `highest`, `frequent`, `recent`, `alphabeticalByName`, `alphabeticalByArtist`, `starred`, `byYear`, `byGenre`; `size` up to 500), `getRandomSongs`, `getSongsByGenre`, `search2` / `search3` (an empty query pages through the whole library), `getStarred` / `getStarred2`, `star` / `unstar` (`id`, `albumId`, `artistId`, each repeatable), `setRating`, `scrobble` (`submission=true` records the play, `false` is now playing), `getNowPlaying` (this profile's), `getPlaylists`, `getPlaylist`, `createPlaylist`, `updatePlaylist`, `deletePlaylist`, `getCoverArt` (`size`), `getLyrics`, `getLyricsBySongId`, `stream`, `download`, `getSimilarSongs` / `getSimilarSongs2`, `getTopSongs`, `getArtistInfo` / `getArtistInfo2`, `getAlbumInfo` / `getAlbumInfo2`, `getPlayQueue`, `savePlayQueue`. `getBookmarks`, `getPodcasts`, `getNewestPodcasts`, `getInternetRadioStations` and `getShares` answer empty; `startScan` answers `50`.
+
+What a request sees is its profile's: its library (own-library rules), less explicit music when the profile hides it, its playlists, stars, ratings, play queue (one per app) and plays. A starred song is a Liked Song. Starring a song the profile has no file for adds it to the wishlist (may download) or makes a request (may only ask), else `50`. Mirrored playlists, Liked Songs and Daily Mixes are `readonly: true`.
+
+`stream`: the file with `Range` / `206`, unless `format` (`mp3`, `opus`) or `maxBitRate` asks for less, then converted by ffmpeg on the fly (`timeOffset` seconds to start later, `estimateContentLength=true` for a `Content-Length`). `format=raw` always sends the file. At most 4 conversions run at once; past that, and without ffmpeg, the file goes out as it is. A song whose file SoulSync can't read is `70`, unless its media server's switch is on: then SoulSync proxies that server's stream, the response carries `soulsyncStreamVia: <server>` and the song in every list carries the field `soulsyncStreamVia`.
+
+Admin (Settings > Devices > Set up a music app):
+
+- `GET /api/devices/music-apps`: `{profiles: [{id, name}], addresses, bridge: [{id, name, on, active}], transcode_format, transcode_slots, slots_range: [min, max], formats, ffmpeg}`. `profiles` are the ones with Use music apps.
+- `POST /api/devices/music-apps` `{profile_id, name?}`: `201 {device_id, name, server, addresses, username, password, api_key, qr_text}`. A paired device for that profile with its own app password (kept encrypted) and API key, both shown this once. Unpair it like any device; its password goes with it. `400` for a profile without Use music apps.
+- `PUT /api/devices/music-apps/settings` `{bridge?: {plex|jellyfin|navidrome: bool}, transcode_format?: "mp3"|"opus", transcode_slots?: 1-16}`: answers like the GET. `transcode_slots` is how many songs convert at once (4 by default); a stream past that waits up to 20 s for a slot, in arrival order, then gets Subsonic error 0 ("busy converting, try again"), never the original file. Each switch is "Stream files SoulSync can't read through <server>", off by default.
+
 ---
 
 ## MCP for AI clients
@@ -165,7 +284,7 @@ SoulSync can act as an MCP server, so an AI app like Claude can search for music
 
 ### Turn it on
 
-Go to **Settings > Advanced > SoulSync API > MCP for AI Clients** and tick **Answer MCP requests at /mcp**. While it's off, `/mcp` answers `404`.
+Go to **Settings > System > API > MCP for AI clients** and tick **Answer MCP requests at /mcp**. While it's off, `/mcp` answers `404`.
 
 ### Connect a client
 
@@ -207,7 +326,7 @@ Some request apps only know how to talk to Lidarr. SoulSync can answer as Lidarr
 
 ### Turn it on
 
-Go to **Settings > Advanced > SoulSync API > Lidarr Compatible API**:
+Go to **Settings > System > API > Lidarr compatible API**:
 
 1. Tick **Answer as Lidarr at /lidarr**. While it's off, every `/lidarr` route answers `404`.
 2. Pick **Requests go to profile**. Requested albums land on that profile's wishlist.
@@ -236,7 +355,7 @@ Apps built for Seerr (Jellyseerr, Overseerr) can use SoulSync's video side inste
 
 ### Turn it on
 
-Go to **Settings > System > SoulSync API > Seerr Compatible API**:
+Go to **Settings > System > API > Seerr compatible API**:
 
 1. Tick **Answer as Seerr at /seerr**. While it's off, every `/seerr` route answers `404`.
 2. Pick **Jellyfin users with no profile request as**.
@@ -261,6 +380,149 @@ Each Jellyfin user requests as the SoulSync profile that picked that Jellyfin us
 ### Supported routes
 
 All under `/seerr/api/v1`: `status`, `auth/me`, `user`, `discover/trending`, `discover/movies` (plus `upcoming`, `studio`, `genre`), `discover/tv` (plus `upcoming`, `network`, `genre`), `discover/genreslider`, `search`, `movie` and `tv` (details, `similar`, `recommendations`), `person` (with `combined_credits`), `collection`, `request` (list, create, cancel) and `media`. Seerr's watch-later list, outside ratings and Radarr/Sonarr service lists answer empty, since SoulSync doesn't keep them.
+
+---
+
+## Player home layout
+
+The player's home page is laid out per profile and per screen, so a TV and a phone on one profile can each look different. Every player app (web, phone, TV) reads the same layout and draws it the same way. The contract lives in `core/player/home_layout.py`.
+
+These routes use the signed-in session (the player's own), not an API key. Each profile only ever sees and changes its own.
+
+### The layout
+
+```json
+{
+  "version": 1,
+  "billboard": true,
+  "rows": [
+    {"id": "continue", "style": "wide", "on": true},
+    {"id": "top-movies", "style": "ranked", "on": true},
+    {"id": "genre:movie:Horror", "style": "large", "on": true}
+  ]
+}
+```
+
+- `billboard`: the big rotating banner of what's new at the top.
+- `rows`: drawn top to bottom. Skip a row that's `on: false`, one your app doesn't know, or one with nothing to show.
+- `id`: a row from the catalog, or `genre:<movie|show>:<genre name>` for a genre row someone added.
+- `style`: one of the four below. A row only takes the styles the catalog lists for it.
+
+| Style | Draw it as |
+|---|---|
+| `standard` | the row's own cards: posters, squares or stills |
+| `large` | the same cards, bigger |
+| `wide` | 16:9 stills (a title's backdrop) |
+| `ranked` | the first ten as posters, numbered 1 to 10 |
+
+Every row on home is from the profile's own library.
+
+### Routes
+
+- `GET /api/player/home-layout?device=<id>`: `{layout, scope, catalog}`. `scope` is `device` when this screen has its own layout, `all` when it uses the profile's shared one, and `null` for the default. The layout is always clean: rows the server no longer has are dropped, a style a row can't take goes back to its default, and rows added since it was saved come back at the end, turned off.
+- `PUT /api/player/home-layout` with `{layout, device}`: saves it for this screen, or for every screen with `device: "*"`. Add `from_device: "<id>"` with `"*"` to make this screen follow the shared layout from then on. A layout that isn't this shape answers `400`.
+- `DELETE /api/player/home-layout?device=<id>`: this screen goes back to the shared layout. Without `device`, every screen of the profile goes back to the default.
+
+`device` is an id your app makes once and keeps: 8 to 64 letters, numbers, `-` or `_`.
+
+### Playback
+
+How the player, and paired apps, play something. Both routes take the signed-in session or a paired device's token (`X-Device-Token`), and both go through one check (`core/player/playable.py`):
+
+1. A profile. Signed out, or a device that hasn't picked a profile, answers `401`.
+2. The section: the profile's permission for that kind of item. A paired app only plays what its kind of app is for; a music app plays tracks.
+3. The item: in the profile's library and inside its limits (a kids rating cap, hidden explicit music), with a file to play.
+
+`item_type` is `track` (library v2 id), `movie` or `episode` (library id), `youtube` (a downloaded video's id) or `audiobook` (its library key). `?part=` picks a movie or episode file version (a media file id), or an audiobook's part (0 based).
+
+- `GET /api/player/playable/<item_type>/<item_id>`: `{mode, url, mime, duration, parts, chapters, verdict}`, how to play it, never where the file is. `parts` and `chapters` are an audiobook's timeline, read from its files: each part's `start` and `duration` in seconds on the book's clock, and each chapter's `start` and `title`. `verdict` is a video file's direct-play verdict (`yes`, `maybe` or `no`, with `reasons`).
+- `GET /api/player/stream/<item_type>/<item_id>`: the bytes, with `Range` support (`206`), so a player can seek. A file SoulSync can't reach is relayed from your media server.
+
+Refusals are `{error, message}`: `403 restricted` for something over the profile's limits, `404` for something not in the library or without a file. Podcast episodes don't come here: they stream from the feed's host through the podcast side's audio proxy.
+
+#### Converting video for a browser
+
+A video a browser can't play as it is (an MKV, HEVC, AC3 or DTS sound) is converted by ffmpeg as it streams. Only what has to change is converted: a stream a browser already plays is copied untouched, so a common H.264 file with AC3 sound only has its sound converted. Video is converted to H.264 (on the GPU when there's one that works: NVIDIA, Intel Quick Sync, VA-API or Apple; the CPU otherwise), at 1080p at most, and HDR is tone mapped so it doesn't come out washed out. Sound becomes stereo AAC.
+
+- `playable` for a movie, episode or YouTube video adds, when it's converted, `transcode: {video, audio, reasons, quality, tonemap, encoder}` (`video` and `audio` are `copy` or what they become; `reasons` reads like "AC3 audio to AAC"), and `url` points at the converted stream. A file that may play (`verdict: maybe`) keeps its direct `url` and adds `fallback_url`, the converted stream to switch to if the browser can't play it. `?q=1080p|720p|480p` asks for a smaller picture, converted. `transcode_unavailable` says why a file that needs converting can't be (no ffmpeg).
+- `GET /api/player/transcode/<item_type>/<item_id>?q=&part=&t=`: the converted stream, fragmented MP4, from `t` seconds. It can't seek by `Range`: to seek, start a new one at the new `t`. A few run at once; past that it answers `503 busy`.
+- `GET /api/player/transcode/<item_type>/<item_id>/start?t=`: where a stream asked to start at `t` really starts, `{start, seek}`. Copied video can only start at a keyframe, so request `t=seek` and count the stream's time from `start`.
+
+#### Playlists (music)
+
+- `GET /api/player/playlists`: this profile's playlists as `{yours, mirrored}`. Yours (Liked Songs first) are the ones made in SoulSync; mirrored ones follow Spotify, Deezer and the rest. Request lists stay out. Each is `{id, name, description, kind, liked, source, owner, track_count, image_url, cover_tiles, updated_at}`.
+- `GET /api/player/playlists/<id>`: one of them with `songs`, each `{position, title, artist, album, album_id, artist_id, duration_ms, image_url, added_at, track_id}`. `track_id` is the library track it plays (the match identify stamped, else the library's own match by name, the same one Subsonic apps get), or null when this profile can't play it (not in its library, or explicit on a profile that hides it). Also `duration_ms` and `playable_count`.
+- Changing your playlists uses the playlist routes the music side already has (`/api/user-playlists`, `/api/mirrored-playlists/<id>/custom-name`, `DELETE /api/mirrored-playlists/<id>`).
+
+#### Discovery playlists
+
+- `GET /api/player/discover-playlists`: what Discover made for this profile, as playlists in `sections`, each `{id, label, playlists}`, in this order (an empty one is left out): `made` "Made for you" (Flow, the daily mixes, On Repeat, Repeat Rewind and blends, the mood mixes), `fresh` "New for you" (Fresh Tape, The Archives, Your Listening Mix, the season's mix), `picks` "Picks" (Hidden Gems, Popular Picks, Discovery Shuffle and the other stored picks, like Time Machine decades), `listenbrainz` "ListenBrainz" (its playlists and Last.fm radio, once cached). Each is `{key, name, blurb, section, owned, track_count, cover_tiles, updated_at}`; `owned` is true when every song is already in the library. The list only reads what's stored: nothing is built or fetched for it. Flow is made when it's opened, so its `track_count` is null. On Repeat and the blends show once Discover (or the player) has made them recently. Artists the profile blocked are left out, the same as on Discover. All three need Discover (`music.discover`), the same as the manager's Discover page: a profile with it off gets `403`.
+- `GET /api/player/discover-playlists/<key>`: one of them with `songs`, each `{position, title, artist, album, duration_ms, image_url, track_id, album_id, artist_id, unplayable, wanted}`, plus `playable_count` and `hides_explicit`. Songs match the library the same way playlist songs do (the library track a mix carries, else by title and artist); `track_id` is the track it plays, or null with `unplayable` saying why (`missing` or `explicit`). `wanted` is true when the song is already on this profile's wishlist. An unknown key is `404 {error: "not_found"}`.
+- `POST /api/player/discover-playlists/<key>/get` with `{positions?: [int]}`: puts the songs you don't have (`unplayable: "missing"`; all of them, or just those positions) on this profile's wishlist, through the same add as the download dialog's Add to Wishlist. Answers `{added, already, skipped}`: `already` were on the wishlist, `skipped` had nothing to key a wishlist row by or were refused. A profile that can't request music gets the usual `403`.
+
+#### An artist's popular songs
+
+- `GET /api/player/music/artist/<artist_id>/top?limit=10`: the artist's most played songs this profile can play (play count, then newest), their own albums and the songs they're credited on. A song on two releases shows once, its most played copy. `[{track_id, title, artist, duration_ms, album_id, album, plays, explicit}]`.
+
+#### Lyrics
+
+- `GET /api/player/lyrics/track/<track_id>`: a library track's lyrics, `{success, synced, plain, source}`, the same answer as `POST /api/lyrics/fetch` (the `.lrc` beside the file and the file's own tags first, then LRCLib). Asked by track id: the server finds the file itself, so a client never sends a path. A track this profile can't play is refused the same way playback refuses it.
+
+#### Player settings
+
+- `GET /api/player/settings`: this profile's player settings and what each does: `share_activity` (others see what you play on Watching now; default on), `autoplay_next` (the next episode plays on its own), `still_watching_after` (episodes in a row nobody touched before asking; 0 never asks). Kept in player.db, the same on every screen of the profile.
+- `PUT /api/player/settings` with `{key: value}`: all saved or none (an unknown key or a bad value is a 400). Turning `share_activity` off takes the profile off Watching now at once.
+
+#### Watching now
+
+- `POST /api/player/presence` with `{session, item_type, item_id, position, duration, playing, live, channel?, meta?}`: a screen is playing something. Sent every 15 seconds and on a start, pause or change; forgotten 75 seconds after the last one. Kept in memory only. A profile that doesn't share gets `{shared: false}` and nothing is kept.
+- `DELETE /api/player/presence?session=`: the screen stopped.
+- `GET /api/player/presence`: what's playing right now, `{sessions: [{profile, item_type, item_id, position, duration, playing, live, channel, meta, started, seen, you}], sharing}`. Your own screens come first with `you: true` (kept only while you share); then others, only profiles that share and only what this profile may see (its media access and its rating cap).
+- `GET /api/player/presence/together`: titles you and others (that share) both started in the last two months, your place and theirs. A show counts as one title, whichever episode each of you is on.
+
+#### Comments and marks
+
+- `GET /api/player/notes/<item_type>/<item_id>`: a title's notes: comments (no time; newest first) then marks (a moment in seconds; in time order). Yours, and what others shared. `item_type` is movie, show, episode, track, album, audiobook, youtube or podcast_episode. A title this profile may not see (its media access, its rating cap) is a 404.
+- `POST /api/player/notes/<item_type>/<item_id>` with `{body}` posts a comment (always shared, can't be empty), or with `{at, body?, shared?}` keeps a mark (a note is optional; yours alone unless `shared`). Up to 1000 characters.
+- `PATCH /api/player/note/<id>` with `{body?, shared?}`: your own note. `DELETE /api/player/note/<id>`: your own note, or for an admin anyone's shared one.
+
+#### Guide channels and your lineup
+
+- `GET /api/player/guide/channels`: the channels people made: `{server: [...], mine: [...], can_edit_server}`. A server channel is an admin's, for everyone; a profile's own only it sees. Each is `{id, scope, spec}`.
+- `POST /api/player/guide/channels` with `{scope: mine|server, spec}`: make one (a server one needs an admin). `PUT /api/player/guide/channels/<id>` with `{spec}` changes it, `DELETE` removes it: your own, or for an admin a server one.
+- A spec: `{name, kinds: [movies, tv], genres, decades, studios, networks, collection, min_score, kids, added_days, show, people: [{id, name}], order: shuffle|in_order}`. `people` (up to five) makes a channel of their films and shows. Lists match any of their values; `show` makes a marathon (one show, start to finish). The guide schedules it from its catalog like the channels it makes itself.
+- `GET /api/player/guide/lineup`: this profile's arrangement, `[{channel_id, position, hidden, name}]`, for any channel (the guide's own too). `PUT` with `{entries: [{channel_id, hidden?, name?}]}` in order replaces it; an empty list puts the guide's order back. Kept in player.db, the same on every screen.
+
+#### What the guide knows beyond its catalog
+
+- `GET /api/player/guide/watched`: `{movies: [ids], episodes: [ids]}` this profile has seen (the library's watch state for whoever's it is, plus what the player saw played through). Channels air the unseen first; a marathon starts at the next unseen episode.
+- `GET /api/player/guide/people?q=`: people in the library by name, the ones in most owned titles first: `[{id, name, photo_url, titles, job}]`. `GET /api/player/guide/people/<id>`: `{name, movies: [ids], shows: [ids]}`, their owned films and their shows.
+- `GET /api/player/guide/reminders`: what this profile asked to be told about, still to come. `POST` with `{channel_id, starts_at (epoch seconds, within two weeks), program_key, title, subtitle?, channel_name?}` adds one; `DELETE ?channel_id=&starts_at=` takes it off. Gone an hour after the start. Whichever screen of the profile is open rings it.
+
+#### Watched
+
+- `POST /api/player/watched` with `{item_type, item_id}`: a movie or episode is into its credits (92% of the way): it counts as watched, in SoulSync's video library and on the media server account, for the profile whose watch state it is (the same rules as the detail page's watched toggle). Returns `{watched}`: false for anything else, or a profile that keeps no watch state of its own. `POST /api/player/progress/finish` does the same for a movie or episode played to the end.
+
+#### Audio and subtitle tracks
+
+- `GET /api/player/tracks/<item_type>/<item_id>?part=`: `{audio, subtitles}`, read from the file (with ffprobe, its header only) and the subtitle files beside it (`Movie.en.srt`, `Movie.es.forced.srt`). An audio track is `{index, language, title, codec, channels, layout, default, plays}`; a subtitle is `{id, language, title, codec, kind, forced, sdh, default, external}`, where `id` is `s<n>` (in the file) or `x<n>` (a file beside it), and `kind` is `text` or `image` (PGS, VobSub).
+- `GET /api/player/subtitle/<item_type>/<item_id>?sub=s0`: a text subtitle as WebVTT. Made once and cached: an embedded one means reading the whole file the first time.
+- To play another audio track, ask `playable` (or `transcode`) with `&audio=<index>`; to draw an image subtitle into the picture, `&burn=<n>` (its number among the file's subtitles). Both go through the converter: a browser only plays a file's first audio track.
+
+
+### Watchlist
+
+Each profile keeps a watchlist of things to watch later, shared by all its screens, in `player.db`.
+
+- `GET /api/player/watchlist`: `{items: [{item_type, item_id, meta, added_at}]}`, newest first.
+- `PUT /api/player/watchlist` with `{item_type, item_id, meta?}`: adds it, or keeps its place and refreshes `meta` if it's already there. `item_type` is `movie` or `show` (by library id) or `youtube` (by video id). `meta` takes `title`, `subtitle`, `artwork`, `backdrop` and `href`, mostly for YouTube; links from SoulSync's image cache aren't kept, since they expire.
+- `DELETE /api/player/watchlist?item_type=&item_id=`: takes it off.
+
+A watchlist holds up to 1000 titles. Draw only what your catalog has: a title that left the library, or one over a kids profile's rating cap, stays on the list but isn't shown. The home layout's `watchlist` row is this list.
+
+### The catalog
+
+`catalog` comes with every `GET`, so an app never has to hard-code the rows: `{version, styles: [{id, label}], rows: [{id, label, hint, styles, style, on}], genre_row, max_rows}`. Use `label` and `hint` in your editor, `styles` for the style picker, and `style` and `on` as each row's defaults.
 
 ---
 
@@ -1749,6 +2011,14 @@ The pick is saved with `POST /api/profiles/me/server-library` and `{"server_type
 
 `GET /api/profiles` also returns `own_library_unsupported_reason` (null when own libraries work on the active server). Turning a profile to `library_mode: "own"` on Navidrome needs Navidrome 0.58+ and the shared library's music folder picked in Settings.
 
+#### Who sees your listening: `GET` / `POST /api/profiles/me/listening-privacy`
+
+Session route, the signed-in profile's own (an admin can't answer for anyone else). `GET` returns `share_listening` (blends may use your plays), `asked` (you've answered the one-time ask), `ask` (Discover should ask now: not answered yet and someone else is on the server), `private_session` and `private_until` (UTC, when it turns itself off), and `own_pile`.
+
+`POST` takes any of `{"share_listening": true|false}` (also counts as answered), `{"asked": true}` ("not now": stops the asking, changes nothing else) and `{"private_session": true|false}` (on for 6 hours). It answers with the same object.
+
+Both are off for every profile until that profile turns them on. A blend only exists when both sides' listening is shared, and the shared history (owner 1) only counts as shared when every profile playing into it has `share_listening` on. During a private session `POST /api/library/log-play` answers `{"success": true, "skipped": true, "private": true}` and records nothing, so there is no play to scrobble.
+
 #### What a profile shows: `GET` / `POST /api/profiles/me/features`
 
 Session routes (the signed-in browser, not an API key) behind **Customize** in the sidebar. Each profile hides the parts of SoulSync it doesn't use. This is a preference, not access: hidden pages still open from a link and their background jobs keep running. Page access stays with `allowed_pages`.
@@ -1953,6 +2223,19 @@ Get retag queue statistics.
 | `artists` | int | Number of distinct artists in the queue |
 
 ---
+
+
+### Filled tags (web UI routes)
+
+With **Fill empty tags automatically** on (`metadata_enhancement.fill_empty_tags`: `off`, `fill` (the default while post-processing writes tags) or `update`), SoulSync writes what the library knows into the tags a file left blank. These routes back the Tools page's **Filled Tags** card. Reading needs `admin.tools`; the POST routes are admin only.
+
+| Route | What it does |
+|-------|--------------|
+| `GET /api/repair/tag-fills?days=7&limit=20` | `{mode, days, files, fields, covers, runs: [{batch_id, source, at, files, fields, covers, undone}], undo}`: what was filled over `days`, and the latest runs. `undo` is the state of a run being undone |
+| `GET /api/repair/tag-fills/files?run=<batch_id>` | Every file one run filled: `{id, file_id, path, mode, status, fields: [{key, label, before, after}], cover, filled_at, undone_at, undo}` |
+| `POST /api/repair/tag-fills/<id>/undo` | Puts one file's filled tags back to blank (a tag changed since is kept and named in `kept`). Undone tags are never filled again |
+| `POST /api/repair/tag-fills/undo-run` | `{"run": "<batch_id>"}`. Undoes a whole run in the background (`202`); progress shows in `undo` |
+| `POST /api/repair/tag-fills/run` | Runs a fill pass on the repair worker's next idle moment (`202`); `400` when the setting is off |
 
 ### ListenBrainz
 
@@ -2509,6 +2792,12 @@ The video search the web UI runs (`POST /api/video/downloads/search`, `/download
 - `score` is still the total of the three groups, and `format_score` / `formats` are unchanged.
 
 A `query` in the search body (`/downloads/search/start`, `/downloads/search`) is run as typed on every source: one text search, no ids or structured search added. Leave it out for the usual search.
+
+A show's search (#2233) takes `scope` `series` (complete packs), `season` (with `season`) or `episode` (with `season` and `episode`):
+
+- `with_episodes: true` on a `season` search (a `with_episodes=1` query parameter on the poll) judges that season's single episodes as themselves instead of rejecting them as not a season pack, so packs and episodes come back together.
+- each result of a show in your library carries `cover: {have, total}`: the episodes it covers by the library's episode list and how many of them you already have. A Soulseek pack's `files` each get `have: true` for the ones you have.
+- an `episode` search fills in the show's `series_type`, `air_date`, `absolute` and scene numbering (`alt_season`, `alt_episode`) from the library when the body doesn't send them, and searches and judges by them like the wishlist does.
 
 The quality profile (`GET/POST /api/video/downloads/quality` and the named profiles) adds `preferred_movie_gb` and `preferred_episode_gb`: a tie-break, closer ranks higher, in tenths of a GB, `0` = off (the default), clamped to the max size.
 

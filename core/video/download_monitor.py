@@ -1099,6 +1099,46 @@ def _walk(root: str):
             yield os.path.join(dirpath, f)
 
 
+# Soulseek logged out (core.soulseek_session): download id -> when its wait
+# began. Held rows spend no retry and no stall time; a transfer the logout
+# broke is asked for again from the same peer once the login is back.
+_login_hold: dict = {}
+
+
+def _hold_for_soulseek_login(db, dl, transfers) -> bool:
+    """True when this slskd row is held for the Soulseek login this tick."""
+    from core import soulseek_session
+    dl_id = dl.get("id")
+    if soulseek_session.is_logged_out():
+        started = _login_hold.setdefault(dl_id, time.time())
+        if time.time() - started >= soulseek_session.wait_seconds():
+            return False          # waited long enough: the normal path takes it
+        try:
+            # the stall clock holds still while nobody can download anything
+            db.update_video_download(dl_id, progress_at=_now())
+        except Exception:  # noqa: BLE001 - a missed clock bump is harmless
+            logger.debug("video download %s: stall clock hold failed", dl_id)
+        return True
+    started = _login_hold.pop(dl_id, None)
+    if started is None:
+        return False
+    t = find_transfer(transfers, dl.get("username"), dl.get("filename"))
+    if not t or classify_state(t.get("state")) != "failed":
+        # it rode out the logout, or slskd forgot it (the normal path checks
+        # whether the file landed before it counts that as a miss)
+        return False
+    again = start_download(dl.get("username"), dl.get("filename"), dl.get("size_bytes") or 0)
+    if not again.get("ok"):
+        return False              # the normal path retries or fails it
+    logger.info("video download %s: Soulseek login back, asked %s again", dl_id, dl.get("username"))
+    _misses.pop(dl_id, None)
+    try:
+        db.update_video_download(dl_id, status="queued", error=None, progress_at=_now())
+    except Exception:  # noqa: BLE001
+        logger.debug("video download %s: requeue persist failed", dl_id)
+    return True
+
+
 _GIVE_UP_AFTER = 8       # consecutive 'transfer gone, no file' polls before failing it
 _misses: dict = {}       # download id -> consecutive missing polls
 # A usenet job SAB has just been handed first sits as a 'Grabbing' placeholder
@@ -2111,6 +2151,8 @@ def _tick(db) -> bool:
     from core.video.client_download import process_active_client_download
     for dl in active:
         live_ids.add(dl["id"])
+        if dl.get("source") not in ("torrent", "usenet") and _hold_for_soulseek_login(db, dl, transfers):
+            continue
         if dl.get("source") in ("torrent", "usenet"):
             # torrent/usenet grabs are tracked via the shared client (by client_ref), not slskd.
             upd = process_active_client_download(dl, organizer=organizer,

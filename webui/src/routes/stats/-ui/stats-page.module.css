@@ -1394,3 +1394,81 @@
     transition: none;
   }
 }
+
+/* ── Spotify history import ─────────────────────────────────────────────── */
+.spotifyImport {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  font-size: 14px;
+}
+
+.spotifyLead {
+  margin: 0;
+  color: var(--white-a65);
+}
+
+.spotifyCurrent {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.spotifyCurrent b {
+  color: var(--white-a70);
+  font-weight: 500;
+}
+
+.spotifyDrop {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 88px;
+  padding: 16px;
+  border: 1px dashed var(--white-a35);
+  border-radius: 12px;
+  color: var(--white-a65);
+  text-align: center;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.spotifyDrop:hover,
+.spotifyDropOn,
+.spotifyDrop:focus-within {
+  border-color: rgb(var(--accent-rgb));
+  color: var(--text-1);
+}
+
+.spotifyFile {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.spotifyCheck {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--white-a70);
+}
+
+.spotifyCheck input {
+  margin-top: 3px;
+  accent-color: rgb(var(--accent-rgb));
+}
+
+.spotifyProgress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--white-a65);
+}
+
+.spotifyProgress progress {
+  width: 100%;
+  height: 4px;
+  accent-color: rgb(var(--accent-rgb));
+}

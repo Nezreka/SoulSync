@@ -37,8 +37,10 @@ _MAX_AGE = "86400"
 
 
 def is_api_path(path: str | None) -> bool:
-    """True for paths that belong to the JSON API surface."""
-    return bool(path) and path.startswith("/api/")
+    """True for paths that belong to the JSON API surface, and the music
+    apps' /rest (browser-based music apps call it cross-origin; it signs in
+    with its own parameters, never a cookie)."""
+    return bool(path) and (path.startswith("/api/") or path.startswith("/rest/"))
 
 
 def preflight_headers(path: str | None, method: str | None) -> dict[str, str] | None:

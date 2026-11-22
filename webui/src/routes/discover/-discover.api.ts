@@ -331,7 +331,9 @@ export function fetchDecadeTracks(
 
 // ── Adventurousness dial ──────────────────────────────────────────────────
 
-export function fetchAdventurousness(): Promise<DiscoverResult & { value?: number }> {
+export function fetchAdventurousness(): Promise<
+  DiscoverResult & { value?: number; default?: number; own?: boolean }
+> {
   return readJson(apiClient.get('discover/adventurousness'));
 }
 

@@ -34,6 +34,7 @@ export const ANCHORS = {
   'shell.activity': { file: 'index.html', what: 'the Server Activity button', check: 'html' },
   'shell.notifications': { file: 'index.html', what: 'the notifications bell', check: 'html' },
   'shell.help': { file: 'index.html', what: 'the ? button', check: 'html' },
+  'shell.open-player': { file: 'index.html', what: 'the Open the player link', check: 'html' },
 
   // music Search (React)
   'search.field': {

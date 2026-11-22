@@ -89,6 +89,7 @@ describe('shellRouteManifest', () => {
       'audiobooks',
       'sample-studio',
       'calendar',
+      'player',
     ]);
     // Sync was the 13th and last big music page; Settings went React last
     // (SETTINGS_PORT.md step V4c). `help` stands in as a route that genuinely

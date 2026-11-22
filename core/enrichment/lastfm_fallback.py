@@ -8,6 +8,11 @@ free sources, only for the fields last.fm has nothing for:
   the artist's musicbrainz id (musicbrainz url relations, then wikidata)
 - tags: musicbrainz genres, else musicbrainz tags
 - popularity: listenbrainz listeners and listens, and deezer fans
+- track popularity: listenbrainz listen counts for the artist's top
+  recordings, onto each track last.fm has no playcount for, so an album's
+  popular flame still shows (core.library2.track_popularity). listenbrainz
+  wants a token for those since nov 2026: with no saved listenbrainz token
+  the tracks are not asked (and not stamped, so connecting it fills them)
 
 every source writes its own bucket in ``lib2_artists.enrichment``, never the
 ``lastfm`` one, so stored last.fm data is never touched and wins again the
@@ -23,11 +28,12 @@ from __future__ import annotations
 import re
 import threading
 import time
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, Optional, Set, Tuple
 from urllib.parse import quote, unquote
 
 from core.library2.artist_about import (
-    CHECK_KEY, check_stamp, fallback_due, load_enrichment,
+    CHECK_KEY, FALLBACK_TTL_DAYS, check_stamp, fallback_due, load_enrichment,
 )
 from utils.logging_config import get_logger
 
@@ -36,7 +42,11 @@ logger = get_logger("lastfm_fallback")
 USER_AGENT = "SoulSync/2 (https://github.com/Nezreka/SoulSync)"
 WIKIDATA_API = "https://www.wikidata.org/w/api.php"
 WIKIPEDIA_SUMMARY = "https://en.wikipedia.org/api/rest_v1/page/summary/"
+LISTENBRAINZ_HOST = "api.listenbrainz.org"
 LISTENBRAINZ_POPULARITY = "https://api.listenbrainz.org/1/popularity/artist"
+LISTENBRAINZ_TOP_RECORDINGS = "https://api.listenbrainz.org/1/popularity/top-recordings-for-artist/"
+# in the artist's enrichment: when its tracks' listenbrainz counts were asked
+TRACKS_CHECK_KEY = "track_popularity_fallback"
 
 # wikimedia and listenbrainz have no client in the repo. one request a second
 # each, well under what either asks of a polite client
@@ -61,16 +71,24 @@ def _throttle(host: str) -> None:
 def _http_json(method: str, url: str, *, params=None, json_body=None,
                host: str = "") -> Optional[Any]:
     """json, or None on a 404. anything else that is not a 200 raises
-    SourceError."""
+    SourceError. listenbrainz api calls carry the saved token when there is
+    one; a 401 to it puts that token aside for a while."""
     import requests
 
-    _throttle(host or url.split("/")[2])
+    from core import listenbrainz_auth
+
+    host = host or url.split("/")[2]
+    _throttle(host)
+    headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
+    tok = listenbrainz_auth.token() if host == LISTENBRAINZ_HOST else None
+    headers.update(listenbrainz_auth.headers(tok))
     try:
         response = requests.request(
-            method, url, params=params, json=json_body, timeout=10,
-            headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
+            method, url, params=params, json=json_body, timeout=10, headers=headers)
     except requests.RequestException as exc:
         raise SourceError(str(exc)) from exc
+    if response.status_code == 401 and tok:
+        listenbrainz_auth.reject(tok)
     if response.status_code == 404:
         return None
     if response.status_code != 200:
@@ -195,6 +213,31 @@ class ArtistAboutFallback:
             return out or None
         return None
 
+    def top_recordings(self, mbid: str) -> list:
+        """the artist's most listened recordings on listenbrainz:
+        [{mbid, title, listens, listeners}]. SourceError when it is down, or
+        when there is no listenbrainz token (it answers 401 without one)."""
+        from core import listenbrainz_auth
+        if not listenbrainz_auth.available():
+            listenbrainz_auth.note_missing()
+            raise SourceError("listenbrainz top recordings need a token")
+        data = self._http("GET", LISTENBRAINZ_TOP_RECORDINGS + quote(str(mbid), safe=""),
+                          host="api.listenbrainz.org")
+        rows = data.get("payload") if isinstance(data, dict) else data
+        out = []
+        for row in rows or []:
+            if not isinstance(row, dict):
+                continue
+            listens = row.get("total_listen_count")
+            if not isinstance(listens, (int, float)) or listens <= 0:
+                continue
+            users = row.get("total_user_count")
+            out.append({"mbid": str(row.get("recording_mbid") or ""),
+                        "title": str(row.get("recording_name") or ""),
+                        "listens": int(listens),
+                        "listeners": int(users) if isinstance(users, (int, float)) and users > 0 else None})
+        return out
+
     def _deezer_fans(self, deezer_id: str) -> Optional[int]:
         info = self.deezer().get_artist_info(str(deezer_id)) or {}
         fans = (info.get("followers") or {}).get("total")
@@ -298,6 +341,78 @@ def _due(row) -> Set[str]:
     return fallback_due(load_enrichment(row["enrichment"]), mbid)
 
 
+_NO_TRACK_COUNT = (
+    "(CASE WHEN json_valid(t.enrichment) THEN json_extract(t.enrichment, '$.lastfm.playcount') END) IS NULL "
+    "AND (CASE WHEN json_valid(t.enrichment) THEN json_extract(t.enrichment, '$.listenbrainz.listen_count') END) IS NULL"
+)
+
+
+def tracks_due(conn, row, now: Optional[datetime] = None,
+               ttl_days: int = FALLBACK_TTL_DAYS) -> bool:
+    """whether to ask listenbrainz for this artist's track counts: it has an
+    mbid, wasn't asked in the ttl (or got its mbid since), and some track of
+    its has neither a last.fm playcount nor a listenbrainz count."""
+    mbid, _audiodb, _deezer = _ids(row)
+    if not mbid:
+        return False
+    stamp = load_enrichment(row["enrichment"]).get(TRACKS_CHECK_KEY)
+    if isinstance(stamp, dict) and str(stamp.get("mbid") or "") == str(mbid):
+        try:
+            checked = datetime.fromisoformat(str(stamp.get("checked_at")).replace("Z", "+00:00"))
+            if checked.tzinfo is None:
+                checked = checked.replace(tzinfo=timezone.utc)
+            if (now or datetime.now(timezone.utc)) - checked < timedelta(days=ttl_days):
+                return False
+        except ValueError:
+            pass
+    return conn.execute(
+        f"SELECT 1 FROM lib2_tracks t JOIN lib2_albums al ON al.id = t.album_id "
+        f"WHERE al.primary_artist_id = ? AND {_NO_TRACK_COUNT} LIMIT 1",
+        (int(row["id"]),)).fetchone() is not None
+
+
+def _tracks_askable() -> bool:
+    """the top recordings need a listenbrainz token. without one an artist is
+    not due for its tracks, so the sweep neither loops on it nor stamps it."""
+    from core import listenbrainz_auth
+    if listenbrainz_auth.available():
+        return True
+    listenbrainz_auth.note_missing()
+    return False
+
+
+def _write_track_counts(conn, artist_id: int, recordings: list) -> int:
+    """put each recording's listens on the artist's tracks that last.fm has
+    no playcount for: by recording mbid, else by title. returns tracks written."""
+    from core.library2.provider_writes import write_provider_enrichment
+    by_mbid: Dict[str, Dict[str, Any]] = {}
+    by_title: Dict[str, Dict[str, Any]] = {}
+    for rec in recordings:
+        if rec["mbid"]:
+            by_mbid.setdefault(rec["mbid"], rec)
+        key = rec["title"].strip().casefold()
+        if key and (key not in by_title or rec["listens"] > by_title[key]["listens"]):
+            by_title[key] = rec
+    written = 0
+    rows = conn.execute(
+        "SELECT t.id, t.title, t.musicbrainz_id FROM lib2_tracks t "
+        "JOIN lib2_albums al ON al.id = t.album_id "
+        "WHERE al.primary_artist_id = ? AND (CASE WHEN json_valid(t.enrichment) THEN "
+        "json_extract(t.enrichment, '$.lastfm.playcount') END) IS NULL",
+        (int(artist_id),)).fetchall()
+    for track_id, title, mbid in rows:
+        rec = by_mbid.get(str(mbid or "")) or by_title.get(str(title or "").strip().casefold())
+        if rec is None:
+            continue
+        payload = {"listen_count": rec["listens"]}
+        if rec.get("listeners"):
+            payload["listeners"] = rec["listeners"]
+        write_provider_enrichment(conn, entity_type="track", entity_id=int(track_id),
+                                  service="listenbrainz", payload=payload)
+        written += 1
+    return written
+
+
 def next_due_artist(conn, after_id: int, *, batch: int = 500,
                     max_batches: int = 20):
     """(row, cursor) for the next artist past ``after_id`` whose fallbacks are
@@ -312,8 +427,9 @@ def next_due_artist(conn, after_id: int, *, batch: int = 500,
             f"ORDER BY e.id LIMIT ?", (cursor, batch)).fetchall()
         if not rows:
             return None, None
+        tracks_ok = _tracks_askable()
         for row in rows:
-            if _due(row):
+            if _due(row) or (tracks_ok and tracks_due(conn, row)):
                 return row, int(row["id"])
         cursor = int(rows[-1]["id"])
     return None, cursor
@@ -341,14 +457,25 @@ def fill_artist(connect: Callable[[], Any], artist_id: int,
         if row is None:
             return False
         needs = _due(row)
-        if not needs:
+        tracks = _tracks_askable() and tracks_due(conn, row)
+        if not needs and not tracks:
             return False
         mbid, audiodb_id, deezer_id = _ids(row)
     finally:
         conn.close()
 
-    buckets, failed = (fetcher or ArtistAboutFallback()).fetch(
-        needs=needs, mbid=mbid, audiodb_id=audiodb_id, deezer_id=deezer_id)
+    fetcher = fetcher or ArtistAboutFallback()
+    buckets, failed = ({}, False)
+    if needs:
+        buckets, failed = fetcher.fetch(
+            needs=needs, mbid=mbid, audiodb_id=audiodb_id, deezer_id=deezer_id)
+    recordings, tracks_failed = None, False
+    if tracks:
+        try:
+            recordings = fetcher.top_recordings(mbid)
+        except SourceError as exc:
+            logger.debug("listenbrainz top recordings failed for %s: %s", mbid, exc)
+            tracks_failed = True
 
     conn = connect()
     try:
@@ -360,9 +487,14 @@ def fill_artist(connect: Callable[[], Any], artist_id: int,
                 continue
             write_provider_enrichment(conn, entity_type="artist", entity_id=int(artist_id),
                                       service=service, payload=payload)
-        if not failed:
+        if needs and not failed:
             write_provider_enrichment(conn, entity_type="artist", entity_id=int(artist_id),
                                       service=CHECK_KEY, payload=check_stamp(mbid))
+        if recordings:
+            _write_track_counts(conn, int(artist_id), recordings)
+        if tracks and not tracks_failed:
+            write_provider_enrichment(conn, entity_type="artist", entity_id=int(artist_id),
+                                      service=TRACKS_CHECK_KEY, payload=check_stamp(mbid))
         conn.commit()
     finally:
         conn.close()
@@ -372,6 +504,6 @@ def fill_artist(connect: Callable[[], Any], artist_id: int,
 
 
 __all__ = [
-    "ArtistAboutFallback", "SourceError", "fill_artist", "load_artist",
-    "next_due_artist", "wiki_links",
+    "ArtistAboutFallback", "SourceError", "TRACKS_CHECK_KEY", "fill_artist", "load_artist",
+    "next_due_artist", "tracks_due", "wiki_links",
 ]

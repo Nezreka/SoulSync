@@ -281,7 +281,7 @@ def auto_import_clear_completed():
             base_sql = (
                 "DELETE FROM auto_import_history "
                 "WHERE status IN ('completed', 'partial', 'approved', 'failed', "
-                "'needs_identification', 'rejected', 'processing')"
+                "'needs_identification', 'rejected', 'processing', 'retried')"
             )
             if active_hashes:
                 placeholders = ','.join('?' * len(active_hashes))

@@ -278,8 +278,10 @@ def test_settings_normalize_recycle_keys():
 def test_settings_ui_has_the_recycle_fields():
     for frag in ("recycle_deletes", "recycle_keep_days", "recycle_path"):
         assert frag in _ORG, frag
+    # Library > Import and files, Video (settings-bic phase 4)
     for frag in ('id="vo-recycle"', 'id="vo-recycle-days"', 'id="vo-recycle-path"',
-                 'field="recycle_deletes"', 'field="recycle_keep_days"', 'field="recycle_path"'):
+                 'field="recycle_deletes"', 'field="recycle_keep_days"',
+                 "useField('recycle_path')"):
         assert frag in _PANEL, frag
 
 

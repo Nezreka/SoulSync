@@ -16,7 +16,7 @@ _ROOT = Path(__file__).resolve().parent.parent
 # the loader and the tiles are React now (SETTINGS_PORT.md step 7a)
 _TABS = _ROOT / "webui" / "src" / "features" / "settings" / "tabs"
 _MODEL = (_TABS / "sources-model.ts").read_text(encoding="utf-8")
-_TILES = (_TABS / "sources-tab.tsx").read_text(encoding="utf-8")
+_TILES = (_TABS / "downloads" / "sources-view.tsx").read_text(encoding="utf-8")
 
 
 def test_loader_never_unchecks_saved_sources():
@@ -30,10 +30,15 @@ def test_loader_never_unchecks_saved_sources():
 def test_unready_row_explains_itself():
     # the old hidden legacy list named Prowlarr in a tooltip nobody could see
     # (the chain widget had replaced it). the place it shows is the tile
-    tile = _TILES.split("const tile = (src: SourceMeta) => {", 1)[1]
-    assert "unready || dot === 'warn'" in tile
-    assert "needs setup" in tile
-    assert "src-tile-chip--warn" in tile
+    # (settings-bic) the place it shows now is the order itself: the row says
+    # it is skipped, its status says "Needs setup", it is drawn as a warning,
+    # and its one coloured button is "Set up"
+    words = (_TABS / "downloads" / "words.ts").read_text(encoding="utf-8")
+    assert "if (unready[id]) return 'Skipped until it is set up';" in words
+    assert "if (inOrder && state.unready[id]) return { tone: 'warn', text: 'Needs setup' };" in words
+    assert "set up yet" in words  # and the sentence at the top names it
+    assert "warn: !!unready[id]," in _TILES
+    assert "Set up" in _TILES.split("const settingsButton", 1)[1].split("};", 1)[0]
 
 
 def test_backend_skips_unready_sources_at_download_time():

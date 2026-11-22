@@ -102,12 +102,7 @@ export function PeopleTab({ active, opened }: SettingsTabProps) {
   };
 
   return (
-    <section
-      className={css.root}
-      data-stg={PEOPLE_TAB}
-      data-people=""
-      aria-label="People and access"
-    >
+    <section className={css.root} data-people="" hidden={!active} aria-label="People and access">
       <div className={css.pills} role="tablist" aria-label="People and access">
         {PILLS.map(([id, label], i) => (
           <button

@@ -75,6 +75,26 @@ export interface YearDiscovery {
   soul_id?: string | null;
 }
 
+/** One day with music, for the calendar. */
+export interface YearDay {
+  date: string;
+  plays: number;
+  minutes: number;
+}
+
+export interface YearStreak {
+  days: number;
+  start: string | null;
+  end: string | null;
+}
+
+export interface YearGenre {
+  genre: string;
+  plays: number;
+  /** share of the plays the library could put a genre on, 0..1 */
+  share: number;
+}
+
 export interface YearInListening {
   period: YearPeriod;
   has_data: boolean;
@@ -84,8 +104,18 @@ export interface YearInListening {
   top_albums: YearAlbum[];
   top_tracks: YearTrack[];
   discoveries: YearDiscovery[];
-  peak_day: { date: string | null; plays: number };
+  peak_day: {
+    date: string | null;
+    plays: number;
+    minutes?: number;
+    top_artist?: string | null;
+  };
   top_hour: { hour: number | null; plays: number };
+  /** Optional: a year cached before these existed arrives without them, and
+   *  their slides are simply left out until the worker rebuilds it. */
+  days?: YearDay[];
+  streak?: YearStreak;
+  top_genres?: YearGenre[];
   cached?: boolean;
 }
 
@@ -103,6 +133,10 @@ export type YearSlideKind =
   | 'artist-countdown'
   | 'top-albums'
   | 'top-track'
+  | 'top-genre'
   | 'discoveries'
+  | 'streak'
+  | 'busiest-day'
+  | 'calendar'
   | 'when'
   | 'card';

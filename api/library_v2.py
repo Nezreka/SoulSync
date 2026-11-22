@@ -1723,7 +1723,12 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 sort=request.args.get("sort", "title"),
                 monitored=request.args.get("monitored", "all"), page=page, limit=limit,
                 letter=(request.args.get("letter") or "all").lower(),
-                source_filter=request.args.get("source", ""))
+                source_filter=request.args.get("source", ""),
+                # #2223: reviewed (locked) | unreviewed
+                review_filter=request.args.get("review", ""),
+                # the player's genre and label pages
+                genre=request.args.get("genre", ""),
+                label=request.args.get("label", ""))
         for album in albums:
             _apply_artwork_urls(album, "album")
         total_pages = (total + limit - 1) // limit
@@ -2311,6 +2316,22 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             _apply_artwork_urls(entry, "album",
                                 prefer_remote=_is_uncached_discography_row(entry))
         return jsonify({"success": True, "artist": data})
+
+    @_route("/api/library/v2/artists/<int:artist_id>/your-plays")
+    def lib2_artist_your_plays(artist_id):
+        """you and this artist: your own plays of them from your listening
+        pile (plays, first and last listened, rank, the last 12 months and
+        the songs you play most). listening null when you never played them."""
+        from core.library2.artist_listening import artist_listening
+        with closing(_conn()) as conn:
+            if not conn.execute("SELECT 1 FROM lib2_artists WHERE id = ?", (artist_id,)).fetchone():
+                return _fail("Artist not found", 404)
+            try:
+                listening = artist_listening(get_database(), conn, artist_id, _profile())
+            except Exception as e:  # noqa: BLE001 - the page shows nothing rather than fail
+                logger.error("your plays for artist %s failed: %s", artist_id, e)
+                return _fail("Could not read your plays", 500)
+        return jsonify({"success": True, "listening": listening})
 
     @_route("/api/library/v2/artists/<int:artist_id>/aliases")
     def lib2_get_artist_aliases(artist_id):

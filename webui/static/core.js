@@ -946,6 +946,12 @@ function initializeWebSocket() {
         }
     });
 
+    // the server says which build it runs on every connect; the shell's
+    // build check offers a reload when it isn't the one this tab loaded
+    socket.on('server:build', (d) => {
+        window.dispatchEvent(new CustomEvent('ss:server-build', { detail: d || {} }));
+    });
+
     // Phase 1 event listeners
     socket.on('status:update', handleServiceStatusUpdate);
     socket.on('watchlist:count', handleWatchlistCountUpdate);

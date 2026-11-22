@@ -67,14 +67,15 @@ describe('owned artist track extras', () => {
     expect(screen.getByPlaceholderText('Search for the track…')).toBeInTheDocument();
   });
 
-  it('offers "I Have This" on a missing slot instead of queue actions', () => {
+  it('offers move and copy on a missing slot instead of queue actions', () => {
     const track = lib2Track({ id: null, title: 'Glory Box', file: null });
     wrap(
       <OwnedTrackMoreMenu track={track} albumId={9} albumTitle="Dummy" artistName="Portishead" />,
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'More for Glory Box' }));
-    expect(screen.getByRole('menuitem', { name: 'I Have This…' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Move a track here…' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Copy a track here…' })).toBeInTheDocument();
     expect(screen.queryByRole('menuitem', { name: 'Play next' })).not.toBeInTheDocument();
   });
 
@@ -191,7 +192,7 @@ describe('leftover rows', () => {
       <OwnedTrackMoreMenu track={tracks[2]} albumId={9} albumTitle="Labor Days" artistName="A" />,
     );
     fireEvent.click(screen.getByRole('button', { name: 'More for Bonus' }));
-    expect(screen.getByRole('menuitem', { name: 'I Have This…' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Copy a track here…' })).toBeInTheDocument();
     expect(screen.queryByRole('menuitem', { name: 'Remove This Row…' })).toBeNull();
   });
 });

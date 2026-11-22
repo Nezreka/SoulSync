@@ -112,6 +112,20 @@ def _fold_matches_by_rating_key(matched: list) -> tuple:
     return kept, folds
 
 
+class NotOnServerTrack:
+    """a match the library has and the media server doesn't know yet (#2235).
+
+    no ratingKey, so nothing is sent for it: the dedupe skips it and the
+    readback reports it not_on_server. the title is kept for the review."""
+
+    def __init__(self, db_track):
+        self.ratingKey = None
+        self.id = None
+        self.title = getattr(db_track, 'title', '') or ''
+        self.artist = getattr(db_track, 'artist_name', '') or ''
+        self.album = getattr(db_track, 'album_title', '') or ''
+
+
 def _source_label(spotify_track) -> str:
     artists = getattr(spotify_track, 'artists', None) or []
     artist = _artist_name(artists[0]) if artists else ''
@@ -384,6 +398,9 @@ class SyncResult:
     # source entries that resolved to a library track already on the playlist
     # (synced_tracks + duplicate_tracks == matched_tracks)
     duplicate_tracks: int = 0
+    # matched tracks the server playlist doesn't hold after the write, read
+    # back from the server (#2235). they are in the library, not on the playlist
+    unplaced_tracks: int = 0
 
     @property
     def success_rate(self) -> float:
@@ -789,6 +806,11 @@ class PlaylistSyncService:
             # longer on the server (#1754); filled in the write branch below
             # and read back when the per-track history details are built.
             server_missing_results: set = set()
+            # what the server playlist really holds after the write (#2235):
+            # MatchResults (by identity) the server doesn't hold, and whether
+            # the playlist could be read back at all (None = no answer)
+            unplaced_results: set = set()
+            placement_known = False
             if is_request_list or server_type == 'soulsync':
                 step_title = "Request list: library check complete" if is_request_list else "Standalone: library check complete"
                 self._update_progress(
@@ -863,20 +885,25 @@ class PlaylistSyncService:
                         getattr(lib, 'title', ''), getattr(lib, 'artist', '') or '',
                         _source_label(keeper.spotify_track), dropped.confidence,
                     )
-                if len(plex_tracks) < len(valid_tracks):
+                _keyed = [t for t in valid_tracks if getattr(t, 'ratingKey', None) is not None]
+                if len(plex_tracks) < len(_keyed):
                     logger.info(
-                        f"Deduplicated {len(valid_tracks) - len(plex_tracks)} duplicate ratingKeys "
-                        f"({len(valid_tracks)} → {len(plex_tracks)} tracks)"
+                        f"Deduplicated {len(_keyed) - len(plex_tracks)} duplicate ratingKeys "
+                        f"({len(_keyed)} → {len(plex_tracks)} tracks)"
                     )
 
                 # Server IDs the playlist write's guard dropped as no
                 # longer on the server (#1754); the write dispatch below
                 # fills this from its in-thread readback.
                 _write_skipped_ids: list = []
+                _navidrome_id_kw: dict = {}
                 if not media_client:
                     logger.error("No active media client available for playlist sync")
                     sync_success = False
-                elif not matched_tracks and media_client.is_connected():
+                elif not plex_tracks and media_client.is_connected():
+                    # nothing the server can take: no match at all, or only
+                    # matches the server has no id for yet (#2235). either
+                    # way an existing playlist must not be emptied
                     # #1543: a zero-match scan must not wipe an EXISTING
                     # server playlist — but a brand-new mirror has no server
                     # playlist yet, and the first pipeline run should leave
@@ -1082,6 +1109,17 @@ class PlaylistSyncService:
                         except Exception as _row_err:  # noqa: BLE001 - bookkeeping
                             logger.warning(
                                 "dead library row cleanup failed: %s", _row_err)
+                # #2235: read the playlist back. "matched" is soulsync's
+                # answer, the playlist is the server's, and jellyfin answers
+                # 204 to an add it quietly drops. a mirror read 167 in library
+                # against a 149-track jellyfin playlist and nothing said why.
+                # a match the server has no id for is known not to be on it
+                # even when the write failed, so that part always runs
+                if media_client is not None and matched_tracks:
+                    unplaced_results, placement_known, synced_tracks = await self._read_back_placement(
+                        media_client, server_type, playlist.name,
+                        _navidrome_id_kw.get('playlist_id'),
+                        matched_tracks, synced_tracks, read_server=sync_success)
                 # Not in library (for wishlist), not "total minus playlist size".
                 failed_tracks = unmatched_count
 
@@ -1169,6 +1207,16 @@ class PlaylistSyncService:
                     # found, but not on the playlist as its own entry: the file
                     # it matched is already there under this other source track
                     detail['folded_into'] = _source_label(keeper.spotify_track)
+                if _is_found:
+                    # where it stands on the server playlist (#2235)
+                    from core.sync.server_placement import (
+                        DUPLICATE, NOT_ON_SERVER, ON_PLAYLIST)
+                    if id(mr) in unplaced_results:
+                        detail['server_placement'] = NOT_ON_SERVER
+                    elif keeper is not None:
+                        detail['server_placement'] = DUPLICATE
+                    elif placement_known:
+                        detail['server_placement'] = ON_PLAYLIST
                 _match_details.append(detail)
 
             result = SyncResult(
@@ -1183,6 +1231,7 @@ class PlaylistSyncService:
                 wishlist_added_count=wishlist_added_count,
                 match_details=_match_details,
                 duplicate_tracks=len(folds),
+                unplaced_tracks=len(unplaced_results),
             )
 
             logger.info(f"Sync completed: {result.success_rate:.1f}% success rate")
@@ -1204,6 +1253,62 @@ class PlaylistSyncService:
             if not getattr(self, 'syncing_playlists', None):
                 self._cancelled = False
     
+    async def _read_back_placement(self, media_client, server_type, playlist_name,
+                                   playlist_id, matched_tracks, synced_tracks, *,
+                                   read_server: bool = True):
+        """read the server playlist back after a write and say which matched
+        tracks it doesn't hold (#2235).
+
+        returns ``(unplaced_result_ids, known, synced_tracks)``: the
+        MatchResults (by id()) that aren't on the playlist, whether the
+        playlist could be read at all, and synced_tracks corrected to what
+        the server really holds. a playlist that can't be read changes
+        nothing: no answer is not "all missing"."""
+        from core.sync.server_placement import missing_from_server, norm_id
+        # a match with no server id never went out at all: the dedupe drops
+        # a None key without a word, so it counted as matched and synced
+        no_id = {id(r) for r in matched_tracks
+                 if r.plex_track is not None
+                 and not norm_id(getattr(r.plex_track, 'ratingKey', None))}
+        reader = getattr(media_client, 'read_playlist_track_ids', None) if read_server else None
+        server_ids = None
+        if callable(reader):
+            try:
+                server_ids = await run_blocking(reader, playlist_name, playlist_id)
+            except Exception as read_err:  # noqa: BLE001 - a readback never fails a sync
+                logger.debug("playlist readback for %r failed: %s", playlist_name, read_err)
+                server_ids = None
+        if not isinstance(server_ids, (list, tuple)):
+            server_ids = None  # only a real list is an answer
+        # the ids this sync wanted on the playlist, once each. read off the
+        # matches still standing, so a dead id the write guard already moved
+        # to missing (#1754) isn't counted twice
+        sent = {norm_id(getattr(r.plex_track, 'ratingKey', None))
+                for r in matched_tracks if r.plex_track is not None} - {''}
+        missing = missing_from_server(sent, server_ids)
+        unplaced = set(no_id)
+        if missing:
+            unplaced.update(
+                id(r) for r in matched_tracks
+                if r.plex_track is not None
+                and norm_id(getattr(r.plex_track, 'ratingKey', None)) in missing)
+        if server_ids is not None:
+            synced_tracks = len(sent) - len(missing)
+        elif not read_server:
+            pass  # the write failed: synced stays what the caller said (0)
+        else:
+            synced_tracks = max(0, min(synced_tracks, len(sent)))
+        if unplaced:
+            names = [f"'{getattr(r.plex_track, 'title', '') or getattr(r.spotify_track, 'name', '')}' "
+                     f"(server id {getattr(r.plex_track, 'ratingKey', None) or 'none'})"
+                     for r in matched_tracks if id(r) in unplaced]
+            logger.warning(
+                "Playlist '%s': %d track(s) are in the library but the %s playlist "
+                "doesn't hold them (the server doesn't know them under these ids yet; "
+                "a library scan on the server and in SoulSync usually fixes it): %s",
+                playlist_name, len(unplaced), server_type, ", ".join(names[:10]))
+        return unplaced, server_ids is not None, synced_tracks
+
     def _drop_skipped_unmatched_wishlist(self, playlist, unmatched_tracks,
                                           total_tracks=0, matched_tracks=()):
         """Clear the unmatched list when this sync skips the sync-time
@@ -1446,6 +1551,27 @@ class PlaylistSyncService:
                 cached_match_is_stale, drop_stale_cached_match, match_lookup_ids)
             cache_db = MusicDatabase()
 
+            # every name the artist goes by: the matched source's, the
+            # playlist's own, and the library's other names for them (#2222)
+            from core.sync.identity_match import (
+                identity_cache_rows, known_artist_names, sync_artist_names)
+            _known_names: List[str] = []
+
+            def _known_artists() -> List[str]:
+                if not _known_names:
+                    _known_names.extend(known_artist_names(cache_db, spotify_track)
+                                        or [_artist_name(a) for a in spotify_track.artists])
+                return _known_names
+
+            def _cache_row_stale(**gate) -> bool:
+                # the source's own names first: the library's other names cost
+                # a lookup, so they're only asked when those call it stale
+                if not cached_match_is_stale(
+                        cache_db, artists=sync_artist_names(spotify_track)
+                        or [_artist_name(a) for a in spotify_track.artists], **gate):
+                    return False
+                return cached_match_is_stale(cache_db, artists=_known_artists(), **gate)
+
             def _materialize(server_track_id):
                 """Turn a stored library track id into the actual server item the
                 sync needs (DB row for Jellyfin/Navidrome/SoulSync, Plex fetchItem)."""
@@ -1487,10 +1613,8 @@ class PlaylistSyncService:
                             # today's matcher; a proven-stale row is dropped
                             # and matching falls through to the durable manual
                             # match and then the fresh matcher, like a miss.
-                            if cached_match_is_stale(
-                                cache_db,
+                            if _cache_row_stale(
                                 title=original_title,
-                                artists=[_artist_name(a) for a in spotify_track.artists],
                                 album=getattr(spotify_track, 'album', None),
                                 server_source=active_server,
                                 cached_track_id=cached['server_track_id'],
@@ -1562,6 +1686,37 @@ class PlaylistSyncService:
                     logger.debug(f"Durable manual match lookup error: {durable_err}")
             # --- End match fast-path ---
 
+            # the same song under another provider's id (#2222): a deezer sync
+            # cached the pairing, this sync carries the itunes id. looked up by
+            # title + every name of the artist, then held to the same checks
+            # as an id hit: still the track, not stale, not unmatched
+            if self._cancelled:
+                return None, 0.0
+            try:
+                _tried_ids = {str(i) for i in match_lookup_ids(spotify_track)}
+                for cached in identity_cache_rows(cache_db, original_title, _known_artists(), active_server):
+                    if str(cached.get('spotify_track_id')) in _tried_ids:
+                        continue
+                    actual_track = _materialize(cached['server_track_id'])
+                    if not actual_track:
+                        continue
+                    if _cache_row_stale(
+                            title=original_title,
+                            album=getattr(spotify_track, 'album', None),
+                            server_source=active_server,
+                            cached_track_id=cached['server_track_id'],
+                            cached_track_row=cache_db.get_track_by_server_id(
+                                cached['server_track_id'], active_server),
+                            threshold=0.7):
+                        continue
+                    if self._match_was_rejected(spotify_track, active_server, cached['server_track_id']):
+                        continue
+                    logger.info(f"Sync cache hit by title + artist for '{original_title}' → server track "
+                                f"{cached['server_track_id']} (saved under source id {cached.get('spotify_track_id')})")
+                    return actual_track, cached['confidence']
+            except Exception as identity_err:
+                logger.debug(f"Sync cache identity lookup error: {identity_err}")
+
             # exact spotify id (#1885). a library artist filed in another
             # script never matches by name below, so the track went missing
             # and the mirror's saved link got cleared. runs after the
@@ -1572,13 +1727,18 @@ class PlaylistSyncService:
                 return None, 0.0
             try:
                 from core.artists.map import get_current_profile_id
+                from itertools import chain
                 from core.sync.provider_match import (
-                    honorable_provider_rows, rescue_is_the_provider_row)
+                    honorable_isrc_rows, honorable_provider_rows, rescue_is_the_provider_row)
                 _provider_profile = _sync_profile_id.get() or get_current_profile_id()
                 # every row gets a turn, the first can be a duplicate whose
-                # key went stale while a sibling is the live one
-                for provider_row in honorable_provider_rows(
-                        cache_db, spotify_track, active_server, _provider_profile):
+                # key went stale while a sibling is the live one. the isrc
+                # rows come after the spotify id's: one recording id on every
+                # provider, so an itunes-matched track still finds what a
+                # deezer sync matched (#2222)
+                for provider_row in chain(
+                        honorable_provider_rows(cache_db, spotify_track, active_server, _provider_profile),
+                        honorable_isrc_rows(cache_db, spotify_track, active_server, _provider_profile)):
                     _provider_id = (provider_row.get("id") if isinstance(provider_row, dict)
                                     else provider_row.id)
                     actual_track = _materialize(_provider_id)
@@ -1603,8 +1763,10 @@ class PlaylistSyncService:
             except Exception as provider_err:
                 logger.debug(f"Provider-ID match lookup error: {provider_err}")
 
-            # Try each artist (same as modal logic)
-            for artist in spotify_track.artists:
+            # Try each artist (same as modal logic), then the playlist's own
+            # names for them (#2222). the library's other names for each are
+            # check_track_exists' own alias retry
+            for artist in (sync_artist_names(spotify_track) or spotify_track.artists):
                 if self._cancelled:
                     return None, 0.0
 
@@ -1651,6 +1813,22 @@ class PlaylistSyncService:
 
                     if db_track and confidence >= 0.7:
                         logger.debug(f"Database match found for '{original_title}' by '{artist_name}': '{db_track.title}' with confidence {confidence:.2f}")
+
+                        # #2235: a library row the server has no id for yet
+                        # comes back with its catalogue id. sending that to
+                        # the server is what dropped tracks without a word,
+                        # and caching it pinned the bogus id for every sync
+                        from core.sync.server_placement import server_item_id
+                        if server_item_id(db_track) is None:
+                            if server_type == "plex":
+                                # plex can still be asked live, by name
+                                rescued = rescue_stale_plex_track(media_client, db_track, artist_name)
+                                if rescued is not None:
+                                    return rescued, confidence
+                            logger.info(
+                                f"'{db_track.title}' is in the library but {server_type} has no id "
+                                f"for it yet (not scanned there); it can't go on the playlist")
+                            return NotOnServerTrack(db_track), confidence
 
                         # Save to sync match cache for next time
                         if spotify_id:

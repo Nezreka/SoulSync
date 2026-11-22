@@ -145,6 +145,9 @@ def build_live_detail(task: Dict[str, Any], live_info: Optional[Dict[str, Any]],
             if task.get("release_title"):
                 detail["release_title"] = str(task["release_title"])
             _add_shared_history(detail, task)
+        if task.get("waiting_for_login"):
+            # slskd lost its Soulseek login: the task is held, not failing
+            detail["waiting"] = "Waiting for Soulseek login"
     except Exception:
         # decoration only — a malformed task must not break the status frame
         return detail or None

@@ -1,21 +1,33 @@
 /**
- * Connections > Server Activity: the upload cap the drawer's bandwidth bar
+ * System > Server Activity (its own pill since settings-bic phase 3; it was
+ * under the media server on Connections): the upload cap the drawer's bandwidth bar
  * measures against, the plex.tv location lookup, how long the play log
  * keeps plays (and a button that empties it), and the ready-made messages
  * the Stop sheet offers. Saved through /api/server-activity/settings, each
  * change on its own. Admin only, like the drawer (#2155): a 403 draws nothing.
  */
 
-import { useEffect, useState } from 'react';
+import { type ReactNode, useEffect, useState } from 'react';
 
 import type { ServerActivitySettings } from '@/shell/server-activity-types';
 
 import { clearPlays, getSettings, saveSettings } from '@/features/server-activity/api';
 
-import { Section } from './parts';
-import css from './server-activity-settings.module.css';
-
-const TAB = 'connections';
+import {
+  Btn,
+  Card,
+  DangerRow,
+  FieldLine,
+  itemClass,
+  Note,
+  NumberField,
+  Row,
+  SectionLabel,
+  Select,
+  Switch,
+  TextField,
+} from '../ui';
+import s from '../ui/settings.module.css';
 const MAX_PRESETS = 12;
 
 export const RETENTION = [
@@ -29,9 +41,14 @@ export const RETENTION = [
 
 const toast = (message: string, type: string) => window.showToast?.(message, type);
 
-export function ServerActivitySettingsCard() {
+export function ServerActivitySettingsCard({
+  denied,
+}: {
+  denied?: ReactNode;
+} = {}) {
   const [settings, setSettings] = useState<ServerActivitySettings | null>(null);
   const [hidden, setHidden] = useState(false);
+  const [failed, setFailed] = useState(false);
   const [upload, setUpload] = useState('');
   const [draft, setDraft] = useState('');
 
@@ -47,12 +64,18 @@ export function ServerActivitySettingsCard() {
         setUpload(result.data.settings.upload_mbps ? String(result.data.settings.upload_mbps) : '');
       })
       .catch(() => {
-        // left the page first
+        // left the page first, or the server never answered
+        if (!ctrl.signal.aborted) setFailed(true);
       });
     return () => ctrl.abort();
   }, []);
 
-  if (hidden || !settings) return null;
+  if (hidden) return denied ?? null;
+  if (failed)
+    return (
+      <Note>Server Activity's settings did not load. Open this page again to try once more.</Note>
+    );
+  if (!settings) return null;
 
   const save = async (patch: Partial<ServerActivitySettings>, done?: string) => {
     const result = await saveSettings(patch);
@@ -112,18 +135,22 @@ export function ServerActivitySettingsCard() {
   };
 
   return (
-    <Section tab={TAB} title="Server Activity" hint="Live streams, the play log and stop messages">
-      <div className="settings-group" data-stg={TAB} data-server-activity-settings>
-        <div className="form-group">
-          <label htmlFor="sa-upload-mbps">Upload speed (Mbps)</label>
-          <input
+    <div data-server-activity-settings="" data-ui="">
+      <SectionLabel title="Now playing" hint="What the drawer measures and shows" />
+      <Card>
+        <Row
+          label="Upload speed"
+          htmlFor="sa-upload-mbps"
+          field
+          help="Your internet upload. Now playing shows remote streams as a share of it, so you see when people away from home are close to the limit. Leave it empty for no bar."
+        >
+          <NumberField
             id="sa-upload-mbps"
-            className="form-input"
-            type="number"
             min="0"
             step="any"
             inputMode="decimal"
             placeholder="Not set"
+            unit="Mbps"
             value={upload}
             onChange={(event) => setUpload(event.target.value)}
             onBlur={saveUpload}
@@ -131,34 +158,30 @@ export function ServerActivitySettingsCard() {
               if (event.key === 'Enter') saveUpload();
             }}
           />
-          <small className="settings-hint">
-            Your internet upload. Now playing shows remote streams as a share of it, so you see when
-            people away from home are close to the limit. Leave it empty for no bar.
-          </small>
-        </div>
+        </Row>
+        <Row
+          label="Show where remote viewers are"
+          htmlFor="sa-geo-lookup"
+          help="Looks up the city of a remote address at plex.tv with your Plex token, the way Tautulli does, and remembers it for 30 days. Home addresses are never looked up. Off keeps every address on this server."
+        >
+          <Switch
+            id="sa-geo-lookup"
+            checked={settings.geo_lookup}
+            onChange={(event) => void save({ geo_lookup: event.target.checked })}
+          />
+        </Row>
+      </Card>
 
-        <div className="form-group">
-          <label className="checkbox-label">
-            <input
-              type="checkbox"
-              id="sa-geo-lookup"
-              checked={settings.geo_lookup}
-              onChange={(event) => void save({ geo_lookup: event.target.checked })}
-            />{' '}
-            Show where remote viewers are
-          </label>
-          <small className="settings-hint">
-            Looks up the city of a remote address at plex.tv with your Plex token, the way Tautulli
-            does, and remembers it for 30 days. Home addresses are never looked up. Off keeps every
-            address on this server.
-          </small>
-        </div>
-
-        <div className="form-group">
-          <label htmlFor="sa-retention">Keep plays for</label>
-          <select
+      <SectionLabel title="Play log" hint="SoulSync's own history, which History and Stats read" />
+      <Card>
+        <Row
+          label="Keep plays for"
+          htmlFor="sa-retention"
+          field
+          help="It is small, so forever is the default. Older plays are removed once an hour."
+        >
+          <Select
             id="sa-retention"
-            className="form-select"
             value={settings.retention_days}
             onChange={(event) => void save({ retention_days: Number(event.target.value) })}
           >
@@ -170,45 +193,48 @@ export function ServerActivitySettingsCard() {
                 {r.label}
               </option>
             ))}
-          </select>
-          <small className="settings-hint">
-            SoulSync's own play log, which History and Stats read. It is small, so forever is the
-            default. Older plays are removed once an hour.
-          </small>
-          <div className="form-actions">
-            <button type="button" className="test-button" onClick={() => void clear()}>
-              Clear play log
-            </button>
-          </div>
-        </div>
+          </Select>
+        </Row>
+        <DangerRow
+          label="Clear the play log"
+          help="Every finished play goes; History and Stats start again from now."
+          action="Clear play log"
+          onAction={() => void clear()}
+        />
+      </Card>
 
-        <div className="form-group">
-          <label htmlFor="sa-preset-new">Stop messages</label>
-          <small className="settings-hint">
-            Ready-made messages the Stop sheet offers. The viewer sees the one you pick when their
-            stream ends.
-          </small>
-          <ul className={css.presets} aria-label="Stop messages">
-            {presets.map((preset) => (
-              <li key={preset}>
-                <span>{preset}</span>
-                <button
-                  type="button"
-                  aria-label={`Remove "${preset}"`}
-                  title="Remove"
-                  onClick={() => void save({ stop_presets: presets.filter((p) => p !== preset) })}
-                >
-                  ×
-                </button>
-              </li>
-            ))}
-          </ul>
+      <SectionLabel
+        title="Stop messages"
+        hint="Ready-made messages the Stop sheet offers. The viewer sees the one you pick when their stream ends."
+      />
+      <Card>
+        <div className={s.cardPad}>
+          {presets.length ? (
+            <ul className={s.items} aria-label="Stop messages">
+              {presets.map((preset) => (
+                <li key={preset} className={s.item}>
+                  <span className={itemClass.main}>{preset}</span>
+                  <Btn
+                    kind="ghost"
+                    small
+                    iconOnly
+                    icon="x"
+                    aria-label={`Remove "${preset}"`}
+                    title="Remove"
+                    onClick={() => void save({ stop_presets: presets.filter((p) => p !== preset) })}
+                  />
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className={s.listEmpty}>No messages yet.</p>
+          )}
           {presets.length < MAX_PRESETS ? (
-            <div className="path-input-group">
-              <input
+            <FieldLine>
+              <TextField
+                full
                 id="sa-preset-new"
-                className="form-input"
-                type="text"
+                aria-label="A new stop message"
                 maxLength={240}
                 placeholder="Add a message"
                 value={draft}
@@ -220,20 +246,15 @@ export function ServerActivitySettingsCard() {
                   }
                 }}
               />
-              <button
-                type="button"
-                className="test-button"
-                disabled={!draft.trim()}
-                onClick={addPreset}
-              >
+              <Btn small icon="plus" disabled={!draft.trim()} onClick={addPreset}>
                 Add
-              </button>
-            </div>
+              </Btn>
+            </FieldLine>
           ) : (
-            <small className="settings-hint">That's the most it keeps ({MAX_PRESETS}).</small>
+            <p className={s.listEmpty}>That's the most it keeps ({MAX_PRESETS}).</p>
           )}
         </div>
-      </div>
-    </Section>
+      </Card>
+    </div>
   );
 }

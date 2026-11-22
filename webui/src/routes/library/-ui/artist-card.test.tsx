@@ -28,8 +28,8 @@ const artist: LibraryV2ArtistSummary = {
 };
 
 describe('library v2 artist card semantics', () => {
-  it('summarises media-server recognition without showing provider names on the card', () => {
-    render(
+  it('shows each recognising server as its own logo badge beside the watchlist toggle', () => {
+    const { container } = render(
       <QueryClientProvider client={createTestQueryClient()}>
         <LibraryV2CanWriteContext.Provider value>
           <ArtistCard
@@ -40,11 +40,20 @@ describe('library v2 artist card semantics', () => {
       </QueryClientProvider>,
     );
 
-    const recognition = screen.getByLabelText('Recognised by Jellyfin and Plex');
-    expect(recognition).toHaveAttribute('title', 'Recognised by Jellyfin and Plex');
-    expect(recognition).toHaveTextContent('✓2');
+    const jellyfin = screen.getByRole('img', { name: 'Recognised by Jellyfin' });
+    const plex = screen.getByRole('img', { name: 'Recognised by Plex' });
+    expect(jellyfin).toHaveAttribute('title', 'Recognised by Jellyfin');
+    expect(plex).toHaveAttribute('title', 'Recognised by Plex');
+    // logos, not names, on the artwork
     expect(screen.queryByText('Jellyfin')).not.toBeInTheDocument();
     expect(screen.queryByText('Plex')).not.toBeInTheDocument();
+    // a sibling of the open button and the toggle, holding no control of its own
+    const group = container.querySelector('[data-media-server-badges="card"]');
+    expect(group?.parentElement?.tagName).toBe('ARTICLE');
+    expect(group?.querySelector('button, input, a')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Open Independent Controls' })).not.toContainElement(
+      plex,
+    );
   });
 
   it('keeps card navigation and monitoring as sibling buttons', async () => {

@@ -222,14 +222,14 @@ Use one, or build a **hybrid chain** in the order you prefer. If a source can't 
 
 | Source | Notes |
 |---|---|
-| **Soulseek** | via slskd. Whole-album grabs from one peer, peer quality scoring, search throttling, free-disk guard |
+| **Soulseek** | via slskd. Whole-album grabs from one peer, peer quality scoring, search throttling, free-disk guard. When slskd loses its Soulseek login (a ban, a reconnect), downloads wait for it with a banner and a **Soulseek Logged Out** automation trigger, then resume from the same peer |
 | **Tidal** | device-flow login, up to FLAC 24-bit Hi-Res |
 | **Qobuz** | up to Hi-Res Max (24-bit/192 kHz) |
 | **Deezer** | ARL token, FLAC → MP3 320 → MP3 128 fallback |
 | **HiFi** | free lossless via public instances, no account, automatic failover |
 | **YouTube** | yt-dlp, cookies supported |
 | **SoundCloud** | anonymous; a free account's token gets the original file when the uploader allows downloads |
-| **Lidarr** | hand an album to Lidarr's indexers, import only the tracks you need |
+| **Lidarr** | hand an album to Lidarr's indexers: an album request is one lookup (by MusicBrainz release group when known), one add and one search, then SoulSync imports the tracks. In a hybrid chain a "Whole album via Lidarr" switch in the download dialogs and the wishlist picks Lidarr or the next source |
 | **Torrent** | Prowlarr search; qBittorrent, Transmission, Deluge or aria2; seeding goals; archive extraction; an option to start SoulSync's torrents on a qBittorrent that adds them stopped |
 | **Usenet** | Prowlarr search; SABnzbd or NZBGet, sent the NZB file itself (no Prowlarr link or api key in their queue); remote path mappings |
 
@@ -249,8 +249,8 @@ Live batches with speed and ETA, "download this next", and a step-by-step detail
 
 - **Quality profiles**: named profiles built from a ranked ladder of formats, bit depths, sample rates and bitrates, with a cutoff. Start from *Audiophile*, *Balanced* or *Space Saver*, then assign profiles per playlist, artist or wishlist item. **Upgrade until cutoff** keeps chasing a better copy, and a file is only ever replaced by a measured upgrade.
 - **Verification**: AcoustID fingerprinting, real-audio checks with ffmpeg (catches padded previews), silence, duration (with an adjustable tolerance) and integrity guards, and a **fake-lossless** detector.
-- **Quarantine & review**: anything that fails is held with its reason and uploader. Approve it, recover it to staging, or delete it. Removed files go to a **recycle bin** with configurable retention. The trash icon at the top of the Library opens it.
-- **Tagging**: Picard-style **MusicBrainz release preflight** pins one release per album so every track agrees. Tags are written with mutagen (ID3v2.4, FLAC, Vorbis, MP4), enriched in the order you choose.
+- **Quarantine & review**: anything that fails is held with its reason and uploader. Approve it, recover it to staging, or delete it. Removed files go to a **recycle bin** with configurable retention. The trash icon at the top of the Library opens it. Review stays quiet on its own: near-misses leave once a later candidate for the same track imports, automatic quality upgrades never send anything to Review (your current file stays), and old items can age out after N days (off by default). All of it lands in the recycle bin, restorable.
+- **Tagging**: Picard-style **MusicBrainz release preflight** pins one release per album so every track agrees. Tags are written with mutagen (ID3v2.4, FLAC, Vorbis, MP4), enriched in the order you choose. What the library learns later (a genre, a year, a track total) is filled into the tags a file left blank on its own, never over a tag the file has, and every fill can be undone from **Tools → Filled Tags** (**Fill empty tags automatically**: fill only, fill and update, or off).
 - **Extras**: preferred-source cover art with a minimum size, synced lyrics from LRClib, **ReplayGain 2.0** (track + album), optional lossy copies (MP3 / Opus / AAC), and **atomic album publishing** so half-downloaded albums never appear in your server.
 - **File organization**: templates for albums, singles, compilations, playlists, music videos, podcasts and audiobooks (`$albumartist/$album/$track - $title` and friends). Every template shows the path it makes right under it as you type.
 
@@ -262,7 +262,7 @@ Live batches with speed and ETA, "download this next", and a step-by-step detail
 - **Release labels**: beets-compatible `$atypes`, so `[2017][EP][Live] Audiotree Live` and a plain `[2019] Tokyo` come out of the same template.
 - **Explicit and clean**: `$explicit` / `$contentrating` badges (`[E]`, `[C]`) so explicit and clean versions never share a filename.
 - **Artists that share a name**: `$albumartistclash` / `$albumartistinfo` / `$albumartistcomposite` (MusicBrainz disambiguation, else country and genre) so two artists called Nirvana get their own folders.
-- **One name per artist**: downloads are filed and tagged under the name your library uses, found by id, so a source that still says "Machine Gun Kelly" files into your `mgk/` folder. Set your own name per artist in **Artist Settings**.
+- **One name per artist**: downloads are filed and tagged under the name your library uses, found by id, so a source that still says "Machine Gun Kelly" files into your `mgk/` folder, and an iTunes "Δέσποινα Βανδή" into your `Despina Vandi/` one. Set your own name per artist in **Artist Settings**.
 - **Lookalike characters**: an opt-in mode keeps `AC∕DC` and `What's Going On？` instead of underscoring them.
 - **Live preview**: the path under each template updates as you type, for a plain, explicit or multi-disc release, or an artist that shares its name.
 
@@ -274,8 +274,10 @@ A personal front page shaped by your library, your listening and your watchlist.
 
 - **Start Here**: a "next best move" card plus zones for *For You*, *New & Missing*, *Your Taste Map* and *Browse & Build*.
 - **Your Mixes**: *Fresh Tape* (new from artists you follow), *The Archives* (your Spotify Discover Weekly, refreshed weekly), *Hidden Gems*, *Popular Picks*, *Discovery Shuffle*, *Your Listening Mix*, and decade *Time Machine* mixes. Download or sync any of them to your server.
-- **Adventurousness dial**: drag from "safe" to "deep cuts" and the recommendations re-rank live.
+- **A full Discover from day one**: a new profile sees trending picks from Deezer's genre charts, SoulSync Charts and Beatport, each saying where it came from, plus a banner to connect ListenBrainz or Last.fm or **pick five artists you love**. Picks seed that profile's recommendations straight away instead of waiting for a scan.
+- **Adventurousness dial**: drag from "safe" to "deep cuts" and the recommendations re-rank live. Each profile has its own dial; one that never turned it follows the default set in Settings.
 - **Shelves**: Recommended artists, Because you listen to…, New releases for you, New in your genres, Albums you're missing, More from your labels, Deep cuts.
+- **What you love counts**: Liked Songs, songs you starred or rated highly on your media server, and the artists on your Watchlist seed recommendations, Daily Mixes and stations next to what you play, per profile, weighed against your own play counts.
 - **Stations**: endless artist radio, or a stable 40-track snapshot you can download or sync.
 - **Outside picks**: **Deezer Curated** editorial playlists (no key needed), **ListenBrainz** recommendations, and **Last.fm Radio**.
 - **SoulSync Charts**: what the SoulSync network is wishlisting, keeping and playing this week, as playlists that open ready to sync (needs [MetaSync](#metasync--soulsync-charts), and the shelf hides itself without it).
@@ -290,6 +292,8 @@ A personal front page shaped by your library, your listening and your watchlist.
 - **Fix a wrong match** by pasting the artist's link or ID from Spotify, Apple Music, Deezer, Discogs, Tidal, Qobuz and more. The watchlist follows the fix.
 - **Artist pages**: full discography with ownership, and live records, compilations, soundtracks, remixes and spoken word in sections of their own. Live completion bars for albums / EPs / singles, a bio, tags and listener numbers (Last.fm first; without a working key, TheAudioDB or Wikipedia, MusicBrainz, ListenBrainz and Deezer fill in and say so), top tracks, a flame on each album's most played tracks (Last.fm), similar artists, a **music video player**, and **concerts** (Ticketmaster dates and Setlist.fm setlists you can play from your own library).
 - **Gap-fill** pulls in releases your other metadata sources know about.
+- **Live folder watching**: copy an album in, retag it elsewhere, rename or delete files by hand, and the Library catches up a few seconds later, one album at a time, with no scan. Moved files keep their plays, padlocks and history (undoable from Tools). Local disks are watched live, network shares checked on a timer; temp files, half-finished copies and SoulSync's own writes are ignored, and a drive that goes away is never read as a mass delete. Settings → Library → Folders shows every watched folder and how.
+- **Your media server's folders** (Settings → Library → Folders → Music): every folder Plex, Jellyfin or Navidrome keeps music in, whether SoulSync scans it, and how much of it SoulSync can read directly (a sample of real files from each folder). A folder SoulSync sees but doesn't scan adds as a library folder in one click; one it can't see says why, with the compose volume line in Docker. Names don't have to match: SoulSync finds `/data/music` as its own `/music` on its own, and a folder override covers the rare setup it can't work out. Help warns when SoulSync can read less than half of the server's music.
 - **Label pages**: a label's full catalog with owned / missing filters. Follow a label for new releases or its whole backlog.
 
 <details>
@@ -297,9 +301,9 @@ A personal front page shaped by your library, your listening and your watchlist.
 
 <br>
 
-- **Enhanced view**: inline tag editing, bulk BPM / mood / style edits, and writing tags to files with a diff preview. **Use File Tags** takes the Library's metadata from your files instead (fields, album year, and which album a track is on) and can release those values again later. Also ReplayGain, reorganize with a path preview (the artist page counts the files a rename would move, per album), move an album to another artist (the files move, nothing is left behind), move a track you have into an album's missing slot (**Move a track here**: the file moves and is retagged, no copy, no import), re-identify a track, remove a leftover row with no file that a retag left beside the song, redownload with source picking, and delete (database only, or files too).
+- **Enhanced view**: inline tag editing, bulk BPM / mood / style edits, and writing tags to files with a diff preview. **Use File Tags** takes the Library's metadata from your files instead (fields, album year, and which album a track is on) and can release those values again later. Also ReplayGain, reorganize with a path preview (the artist page counts the files a rename would move, per album), move an album to another artist (the files move, nothing is left behind), move a track you have into an album's missing slot (**Move a track here**: the file moves and is retagged, no copy, no import) or copy one and keep the original (**Copy a track here**), re-identify a track, remove a leftover row with no file that a retag left beside the song, redownload with source picking, and delete (database only, or files too).
 - **Fix matches**: change artwork from any source, inspect the database record, and forget wrong matches per source.
-- **Lock what you have reviewed**: the padlock on an album or artist marks it reviewed and keeps every automated job off it: scans, enrichment, repair jobs, retags, reorganize and upgrades. Switch off any part you still want handled. Missing tracks still download, a missing or damaged file is still reported, and anything you do by hand still works. The sheet shows what the lock kept away and whether a file changed since your review. Filter the library by **Reviewed** / **Not reviewed**.
+- **Lock what you have reviewed**: the padlock on an album or artist marks it reviewed and keeps every automated job off it: scans, enrichment, repair jobs, retags, reorganize and upgrades. Switch off any part you still want handled. Missing tracks still download, a missing or damaged file is still reported, and anything you do by hand still works. The sheet shows what the lock kept away and whether a file changed since your review. Filter artists by **Reviewed** / **Not reviewed**, and the Albums view by **Locked** / **Unlocked** (Filters button, alongside the Wishlist and metadata filters).
 
 </details>
 
@@ -332,6 +336,7 @@ An inbox for everything in your staging folder, with a Picard-style matcher.
 - Findings sorted by what a fix would do (safe, needs your call, review only), **undo** on every dismiss, and keyboard triage (`j` / `k` / `f` / `d`).
 - **Over 40 maintenance jobs**, each with its own schedule.
 - **Database updater** (incremental, full refresh or deep scan), manual library matching, **backups with restore**, a metadata cache browser, and **config export/import** (optionally with credentials).
+- **Update file locations** after moving the music library folder: the library's records follow the files to the new folder (checked, grouped by folder, undoable; scans do it on their own once the old folder is gone).
 
 <details>
 <summary><b>What the maintenance jobs cover</b></summary>
@@ -352,11 +357,12 @@ An inbox for everything in your staging folder, with a Picard-style matcher.
 ## Listening stats & scrobbling
 
 - **Listening stats**: plays, time, top artists / albums / tracks, genres, when you listen, streaks, and how much of what you own you actually play.
-- **Your Year**: a full-screen, Wrapped-style story of your year, ending in a card studio that exports shareable images using your real album art.
-- **Scrobbling** to Last.fm and ListenBrainz from Plex, Jellyfin or Navidrome. ListenBrainz is the recommended one: from 1 December 2026 Last.fm API keys need a Last.fm Pro subscription.
-- **Last.fm is optional**: without a key, or with one Last.fm no longer accepts, top tracks, similar artists, Radio and Your Artists fill in from ListenBrainz, Deezer and your own plays, and earlier Last.fm answers stay cached.
+- **Your Year**: a full-screen, Wrapped-style story of your year, with your streak, biggest day, top genre and a calendar of every day, played over your own top songs in full. Save it as a "Your <year>" playlist, export the card as an image or the whole story as a video, and from December 1 the dashboard tells you it's ready.
+- **Scrobbling** to Last.fm and ListenBrainz from Plex, Jellyfin, Navidrome and the web player. ListenBrainz is the recommended one: from 1 December 2026 Last.fm API keys need a Last.fm Pro subscription. The web player also sends **now playing** when a song starts, and a play is sent the moment it counts (half the song or 4 minutes) instead of in the next batch. Self-hosted **Maloja** and **Koito** work through the ListenBrainz card, with one-click address buttons.
+- **Last.fm is optional**: without a key, or with one Last.fm no longer accepts, top tracks, similar artists, Radio and Your Artists fill in from ListenBrainz, Deezer and your own plays, the album flame ranks tracks on ListenBrainz listens (ListenBrainz top tracks need a connected ListenBrainz account), and earlier Last.fm answers stay cached.
 - **Per-profile**: a profile with its own Plex account, Jellyfin user, ListenBrainz or Last.fm gets its own stats and recommendations, and can scrobble its plays to its own account.
-- **History import** from Last.fm, ListenBrainz and Maloja.
+- **History import** from Last.fm, ListenBrainz, Maloja and Koito, and **Spotify streaming history** from Spotify's privacy export (account data or extended history). The export is read in your browser and only music plays are sent; plays under 30 seconds, podcasts and private-session plays stay out. Plays already in your history from ListenBrainz or Last.fm aren't doubled, it can count in Stats and Your Year or feed only your mixes and recommendations, and **Remove this import** takes it back out.
+- **You and this artist**: on every artist page you've played, your plays, your rank for them, first and last listened, a year of plays per month, and the songs of theirs you play most.
 
 ## Player & radio
 
@@ -410,7 +416,7 @@ A complete video side with its own database, pages and pipeline. Switch sides fr
 
 | Worker | Adds |
 |---|---|
-| **TMDB**, **TVDB** | Core metadata, seasons and episodes |
+| **TMDB**, **TVDB** | Core metadata, seasons and episodes. TVDB also fills a show's missing IMDb and TMDB ids from the ids it links the series to |
 | **OMDb** | IMDb, Rotten Tomatoes and Metacritic ratings |
 | **fanart.tv** | Artwork |
 | **OpenSubtitles** | Subtitles |
@@ -518,7 +524,7 @@ The Library page is your movies and shows three ways: posters, a sortable table 
 - **Overlay Studio**: a Kometa-style visual poster editor. Layers, dynamic fields (resolution, HDR, codecs, ratings, awards, streaming service…) and per-scope rules. Always rendered from a clean base, so overlays never stack and can be undone.
 - **Collection Studio**: smart-filter and list collections from TMDB, IMDb, Trakt and MDBList, with presets, seasonal windows, generated artwork, and wishlisting missing members.
 - **Poster Manager** for TMDB posters, including textless ones.
-- **Maintenance jobs**: broken files, duplicates, naming, quality upgrades, watched cleanup and more, on the same Tools page as music (health score, findings inbox, fix-all in the background). Plus backups and mass rename.
+- **Maintenance jobs**: broken files, duplicates, naming, quality upgrades, watched cleanup and more, on the same Tools page as music (health score, findings inbox, fix-all in the background). Plus backups and mass rename. A name that uses an id the title has none stored for (`{imdb-$imdbid}`) is left alone rather than renamed without its tag, and the naming check says which titles wait on an id.
 - **Server Activity**: what's playing on Plex and Jellyfin in one drawer: the file against what's sent, why a stream is converted in plain words, the transcoder, where a remote viewer is, chapter and whole-book progress for audiobooks, and stop with a message on both servers. SoulSync keeps its own play log (forever by default, with a retention setting and a clear button), so History and Stats (the same drawer, widened) show how long, how well and from where, with Plex's own history filling in the time before. Admins only; its options sit under Settings, Connections.
 - **Watch Together** in chat: vote on a title and watch together.
 
@@ -566,10 +572,13 @@ A visual **WHEN → DO → THEN** builder shared by music and video.
 - **Make SoulSync yours**: every profile picks what shows up, from **Customize** at the bottom of the sidebar (or Settings → Appearance). Start from **Simple** or **Everything**, then switch single parts on or off. Each template has its own Sidebar & look, and admins can set it for one person and lock it.
 - **Own library per profile** (Plex / Jellyfin / Navidrome 0.58+): a profile can have its own folder and server library. On Navidrome the profile picks its library under its own Navidrome login; its scans read only that library and its playlists are written as that user.
 - **Content caps**: G / PG / PG-13 / R per profile for movies, with TV following it or set on its own, and hide explicit music.
+- **Devices** (Settings > Devices): pair a phone, car or speaker app with a one-time code (or its QR). Each device picks a profile, with that profile's PIN or password, and can only play: never settings, downloads or people. Unpair any device at once. **Use music apps** is a permission, off on the Kids template. The page also holds this server's addresses (home ones found on their own, plus your remote address), a reachability check with a phone link for mobile data, and person invites.
+- **Music apps** (Subsonic / OpenSubsonic API at `/rest`): play your library in any music app that speaks it. **Set up a music app** in Settings > Devices gives one profile its own app password and API key (shown once, with a QR). Browsing, search, album lists, streaming with on-the-fly MP3/Opus conversion, offline downloads, lyrics, cover art, stars (they are Liked Songs), ratings, playlists (yours editable, mirrored ones and Daily Mixes read-only), the play queue and plays recorded like the web player's. Each app sees only its own profile, hidden explicit music stays hidden, and files SoulSync can't read can be played through your media server if you turn that on.
 
 ### Security
 
 - An admin PIN with brute-force limits, or full **username/password login** with recovery questions.
+- Each server has its own identity (`server_key` next to the database) and a **server fingerprint** under Settings > System > Security that paired apps show too. Database backups carry it, encrypted: keep backups private, and never run a restored copy next to the original.
 - Sign in with Plex or with your own OIDC provider, or **OIDC only**, which turns every other sign-in off. If the provider is ever down, `SOULSYNC_OIDC_ONLY_OVERRIDE=off` and a restart let the admin back in with their password. Setup and troubleshooting: [docs/guides/OIDC.md](docs/guides/OIDC.md).
 - Or trust a forward-auth header from Authelia, Authentik or oauth2-proxy.
 - Reverse-proxy and sub-path aware.
@@ -610,7 +619,7 @@ Soulseek rooms and private messages through slskd, in a Discord-style layout.
 | **Lidarr compatible API** | `/lidarr`, so request apps that only speak Lidarr (Singarr, MusicSeerr 1.x) can send their album requests to SoulSync instead. |
 | **Seerr compatible API** | `/seerr`, so apps built for Seerr (Jellyseerr, Overseerr), like Litefin's Jellyfin plugin, can browse and request movies and shows through SoulSync's video side. |
 
-The MCP server and the Lidarr and Seerr compatible APIs are off until you turn them on in **Settings → System → SoulSync API**. Full reference: [Support/API.md](Support/API.md), including [MCP for AI clients](Support/API.md#mcp-for-ai-clients).
+The MCP server and the Lidarr and Seerr compatible APIs are off until you turn them on in **Settings → System → API**. Full reference: [Support/API.md](Support/API.md), including [MCP for AI clients](Support/API.md#mcp-for-ai-clients).
 
 ## Help
 
@@ -622,7 +631,7 @@ The MCP server and the Lidarr and Seerr compatible APIs are off until you turn t
 ## Mobile, PWA & theming
 
 - Fully responsive, and installable as a **PWA** (cover art cached for speed, never stale pages).
-- Accent colours (presets or any custom colour), a sidebar visualizer, background particles, worker orbs, and **Reduce Visual Effects** / **Max Performance** switches for low-power devices.
+- Accent colours (presets or any custom colour), a sidebar visualizer, background particles, worker orbs, and **Reduce visual effects** / **Max performance** switches for low-power devices (kept per device).
 
 ## Companion browser extension
 
@@ -824,7 +833,7 @@ cd webui && npm ci && npm run dev
 ### 1. Connect slskd (optional)
 
 1. Add an API key in slskd's `settings.yml` under `web > authentication > api_keys`, then restart slskd.
-2. In SoulSync: **Settings → Connections → Soulseek**, paste the URL and key (or use **Auto-detect**).
+2. In SoulSync: **Settings → Downloads → Sources → Soulseek**, paste the URL and key (or use **Auto-detect**).
 3. **Share some files in slskd.** Leechers get banned by the network.
 
 ### 2. Connect Spotify (optional)
@@ -848,11 +857,11 @@ Everything else lives in **Settings**:
 | Tab | What to set |
 |---|---|
 | **Connections** | Your media server. Use your machine's real IP, not `localhost` (inside Docker that means the container itself). |
-| **Sources / Downloads** | Pick a source or build your hybrid chain. |
+| **Downloads** | Your sources and their order (one source, or a hybrid chain), and how downloads behave. |
 | **Quality** | Pick a preset or build a quality profile. |
 | **Library** | Your folders and file-naming templates. |
 
-Settings save as you change them. If you'd rather press save yourself, turn off **Save settings as I change them** under **System → Saving**.
+Settings save as you change them. If you'd rather press save yourself, turn off **Save settings as I change them** under **System → General**.
 
 ### 4. Docker paths
 
@@ -862,12 +871,14 @@ Settings save as you change them. If you'd rather press save yourself, turn off 
 | Logs | `/app/logs` | |
 | Databases | `/app/data` | Use a **named volume** (`soulsync_database:/app/data`). Bind-mounting a host path here can hide files the app needs. |
 | Downloads | `/app/downloads` | The same folder slskd and your clients download to |
-| Music library folder | `/app/Transfer` | Where organized music is filed. Set Settings → Library → Folders → Music Library Folder to this path |
+| Music library folder | `/app/Transfer` | Where organized music is filed. Set Settings → Library → Folders → Music library folder to this path |
 | Import | `/app/Staging` | Optional, for importing music you already have |
 | Music videos | `/app/MusicVideos` | Optional |
 | Podcasts / audiobooks | `/app/podcasts`, `/app/audiobooks` | Optional |
 | Video | `/media/movies`, `/media/tv`, `/media/youtube` | Optional, for the video side |
 | Video extras | `/media/anime`, `/media/movies-4k`, `/media/tv-4k` | Optional: the anime and 4K libraries, commented out in the compose file |
+
+If your media server keeps music on more drives than SoulSync's library folder, mount those into SoulSync too and add them as library folders. **Settings → Library → Folders → Music → Your media server's folders** lists every folder the server uses and which ones SoulSync can't read yet.
 
 **Environment variables**
 
@@ -878,6 +889,7 @@ Settings save as you change them. If you'd rather press save yourself, turn off 
 | `SOULSYNC_URL_BASE` | Serve under a sub-path. See [docs/REVERSE_PROXY_SUBPATH.md](docs/REVERSE_PROXY_SUBPATH.md). |
 | `SOULSYNC_LOG_LEVEL` | Log verbosity |
 | `SOULSYNC_GUNICORN_THREADS` | Request threads, default 32. Every open browser tab holds one for its websocket. |
+| `SOULSYNC_COMPRESSION` | `0` turns off SoulSync's own brotli/gzip compression of pages, JSON and web UI files (on by default). |
 
 ### 5. Sign in with OIDC (optional)
 

@@ -712,3 +712,30 @@ def test_a_staging_file_this_task_already_tried_is_not_offered_again(tmp_path):
     # another task wanting the same song still gets it
     _seed_task('t2')
     assert ds.try_staging_match('t2', 'b1', track, deps) is True
+
+
+@pytest.mark.parametrize('source, lands_in', [('lidarr', 'lidarr-imports'), ('torrent', 'transfer')])
+def test_a_lidarr_bundle_is_claimed_into_the_lidarr_imports_folder(tmp_path, monkeypatch, source, lands_in):
+    """lidarr_download.transfer_path takes a lidarr bundle's files, in the same
+    spelling post-processing uses for them; other bundles keep the transfer folder."""
+    from core.imports import paths
+
+    src_file = tmp_path / 'private' / 'Hello.flac'
+    src_file.parent.mkdir()
+    src_file.write_bytes(b'fake audio')
+    cfg = {'lidarr_download.transfer_path': str(tmp_path / 'lidarr-imports')}
+    monkeypatch.setattr(paths, '_get_config_manager',
+                        lambda: type('C', (), {'get': staticmethod(lambda k, d=None: cfg.get(k, d))}))
+
+    def get_batch_field(_batch_id, field):
+        return {'album_bundle_source': source, 'album_bundle_private_staging': True}.get(field)
+
+    deps = _build_deps(
+        transfer_path=str(tmp_path / 'transfer'),
+        staging_files=[{'full_path': str(src_file), 'title': 'Hello', 'artist': 'Artist One'}],
+        get_batch_field=get_batch_field,
+    )
+    _seed_task('t_lidarr')
+
+    assert ds.try_staging_match('t_lidarr', 'b_lidarr', _Track(), deps) is True
+    assert (tmp_path / lands_in / 'Hello.flac').exists()

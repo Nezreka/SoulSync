@@ -95,10 +95,6 @@ function applyAccentColor(hex) {
 
     // Store for instant restore on next page load
     localStorage.setItem('soulsync-accent', hex);
-
-    // Update preview swatch if it exists
-    const swatch = document.getElementById('accent-preview-swatch');
-    if (swatch) swatch.style.background = hex;
 }
 
 function applyParticlesSetting(enabled) {
@@ -593,6 +589,8 @@ function isPageAllowed(pageId) {
     if (currentProfile.id === 1) return true;
     const normalizedPageId = normalizeProfilePageId(pageId);
     if (normalizedPageId === 'help' || normalizedPageId === 'issues') return true;
+    // the player app gates each section by its own media access
+    if (normalizedPageId === 'player') return true;
     // requests: admins answer them, profiles without download rights make them
     // (and moderators answer them, #2166: profile-nav.js holds the rule)
     if (normalizedPageId === 'requests') {
@@ -1767,6 +1765,8 @@ async function selectProfile(profileId) {
         const data = await res.json();
         _pfLastSelect = data;
         if (data.success) {
+            // the player app's who's-watching gate skips a pick made just now
+            try { sessionStorage.setItem('ss-profile-picked-at', String(Date.now())); } catch (e) { /* private mode */ }
             setCurrentProfile(data.profile);
             // New handshake for the switched profile's session (#1837);
             // the connect handler re-joins the profile room.
@@ -2431,7 +2431,7 @@ function openInviteCreator() {
         subtitle: 'Whoever opens it picks a name and joins following the template you choose here.',
         size: 'small', layerClass: 'pf-layer--small',
     });
-    let hours = 72;
+    let hours = 168;
 
     // what they start as (#2166): a template, fine-tuned per person later
     const templatePick = pfTemplatePicker({ label: 'They start as' });
