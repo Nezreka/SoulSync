@@ -159,7 +159,7 @@ def has_filter(ffmpeg: str, name: str) -> bool:
     if key not in _filters:
         try:
             out = subprocess.run([ffmpeg, "-hide_banner", "-filters"], capture_output=True,  # noqa: S603
-                                 text=True, timeout=20).stdout
+                                 text=True, errors="replace", timeout=20).stdout
             _filters[key] = any(line.split()[1:2] == [name] for line in out.splitlines() if line.strip())
         except Exception:  # noqa: BLE001 - can't tell: no
             _filters[key] = False
@@ -342,7 +342,7 @@ def seek_point(ffprobe: str, source: str, t: float) -> tuple:
            "-show_entries", "frame=pts_time", "-of", "csv=p=0",
            "-read_intervals", f"{max(0.0, t - 30):.3f}%{t + 15:.3f}", source]
     try:
-        out = subprocess.run(cmd, capture_output=True, text=True, timeout=30).stdout  # noqa: S603 - our own argv
+        out = subprocess.run(cmd, capture_output=True, text=True, errors="replace", timeout=30).stdout  # noqa: S603 - our own argv
     except Exception:  # noqa: BLE001 - no answer: start where asked
         logger.debug("keyframe probe failed for %s", source, exc_info=True)
         return t, t

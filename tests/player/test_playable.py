@@ -301,7 +301,7 @@ def test_hides_explicit_reads_the_profile_not_itself(monkeypatch):
 
 def test_music_reads_settings_from_where_they_live(tmp_path):
     """the real path lookup, not stubbed: settings moved to core.settings and
-    every track broke (no module named config.settings)"""
+    every track broke (the old settings module path was gone)"""
     from core.player.sources import music
     assert music._on_disk(str(tmp_path / "gone.flac")) is None
     song = tmp_path / "here.flac"

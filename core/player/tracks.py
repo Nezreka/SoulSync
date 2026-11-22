@@ -115,7 +115,7 @@ def probe(ffprobe: str, source: str, key: Any) -> Dict[str, List[Dict[str, Any]]
            "stream=index,codec_type,codec_name,channels,channel_layout:stream_tags=language,title"
            ":stream_disposition=default,forced", "-of", "json", source]
     try:
-        out = subprocess.run(cmd, capture_output=True, text=True, timeout=60).stdout  # noqa: S603 - our own argv
+        out = subprocess.run(cmd, capture_output=True, text=True, errors="replace", timeout=60).stdout  # noqa: S603 - our own argv
         tracks = parse_probe(json.loads(out or "{}"))
     except Exception:  # noqa: BLE001 - no tracks is still a playable video
         logger.warning("couldn't read the tracks of %s", source if "://" not in source else "a relayed stream",
