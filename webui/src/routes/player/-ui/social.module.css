@@ -340,11 +340,11 @@ a.togetherTitle:hover {
   flex-direction: column;
   overflow: hidden;
   border: 1px solid var(--white-a08);
-  border-radius: calc(var(--radius-lg) * 1.25);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.018));
+  border-radius: var(--radius-xl);
+  background: linear-gradient(180deg, var(--white-a05), var(--white-a02));
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.06),
-    0 12px 32px rgba(0, 0, 0, 0.24);
+    inset 0 1px 0 var(--white-a06),
+    0 12px 32px var(--black-a25);
 }
 
 .groupWide {
@@ -437,7 +437,7 @@ a.togetherTitle:hover {
 }
 
 .row:hover {
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--white-a02);
 }
 
 .rowStacked {
@@ -469,7 +469,7 @@ a.togetherTitle:hover {
 .saveError {
   padding: calc(var(--u) * 0.7) calc(var(--u) * 1.35);
   border-top: 1px solid var(--white-a06);
-  color: #f87171;
+  color: var(--danger-light);
   font-size: calc(var(--u) * 0.84);
   font-weight: 600;
 }
@@ -485,16 +485,16 @@ a.togetherTitle:hover {
   overflow: hidden;
   border: 1px solid var(--white-a10);
   border-radius: var(--radius-lg);
-  background: #06070b;
+  background: var(--pl-bg);
 }
 
 .subPreviewScene {
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(ellipse at 70% 25%, rgba(56, 189, 248, 0.22), transparent 55%),
-    radial-gradient(ellipse at 25% 75%, rgba(var(--accent-rgb), 0.18), transparent 60%),
-    linear-gradient(135deg, #121726 0%, #090b12 65%, #111520 100%);
+    radial-gradient(ellipse at 70% 25%, var(--white-a08), transparent 55%),
+    radial-gradient(ellipse at 25% 75%, rgba(var(--accent-rgb), 0.2), transparent 60%),
+    linear-gradient(135deg, var(--white-a06) 0%, var(--pl-bg) 65%, var(--white-a04) 100%);
   transition: opacity var(--dur-fast) ease;
 }
 
@@ -503,12 +503,12 @@ a.togetherTitle:hover {
   z-index: 1;
   max-width: 92%;
   padding: calc(var(--u) * 0.28) calc(var(--u) * 0.65);
-  border-radius: calc(var(--radius-sm) * 1.2);
-  color: #fff;
+  border-radius: var(--radius-sm);
+  color: var(--pl-text);
   font-weight: 650;
   line-height: 1.35;
   text-align: center;
-  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.85);
+  text-shadow: 0 2px 6px var(--black-a85);
   transition:
     font-size var(--dur-fast) ease,
     background var(--dur-fast) ease;
@@ -527,7 +527,7 @@ a.togetherTitle:hover {
 }
 
 .subPreviewText[data-box='true'] {
-  background: rgba(0, 0, 0, 0.72);
+  background: var(--black-a70);
   backdrop-filter: blur(6px);
 }
 
@@ -539,7 +539,7 @@ a.togetherTitle:hover {
   padding: calc(var(--u) * 0.28);
   border: 1px solid var(--white-a08);
   border-radius: var(--radius-md);
-  background: rgba(0, 0, 0, 0.28);
+  background: var(--black-a30);
 }
 
 .segBtn {
@@ -547,7 +547,7 @@ a.togetherTitle:hover {
   min-width: calc(var(--u) * 4.2);
   padding: calc(var(--u) * 0.48) calc(var(--u) * 0.8);
   border: 1px solid transparent;
-  border-radius: calc(var(--radius-md) - 3px);
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--pl-text-2);
   font: inherit;
@@ -568,7 +568,7 @@ a.togetherTitle:hover {
 .segBtn[data-on='true'] {
   border-color: rgba(var(--accent-rgb), 0.45);
   background: rgba(var(--accent-rgb), 0.18);
-  color: #fff;
+  color: var(--pl-text);
   box-shadow: 0 2px 10px rgba(var(--accent-rgb), 0.16);
 }
 
@@ -592,7 +592,7 @@ a.togetherTitle:hover {
   padding: calc(var(--u) * 0.7) calc(var(--u) * 0.85);
   border: 1px solid var(--white-a10);
   border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--white-a03);
   color: var(--pl-text);
   font: inherit;
   text-align: left;
@@ -640,7 +640,7 @@ a.togetherTitle:hover {
   padding: calc(var(--u) * 0.48) calc(var(--u) * 0.95);
   border: 1px solid var(--white-a10);
   border-radius: var(--radius-pill);
-  background: rgba(255, 255, 255, 0.035);
+  background: var(--white-a04);
   color: var(--pl-text-2);
   font: inherit;
   font-size: calc(var(--u) * 0.84);
@@ -661,7 +661,7 @@ a.togetherTitle:hover {
 .themeChip[data-on='true'] {
   border-color: rgba(var(--accent-rgb), 0.55);
   background: rgba(var(--accent-rgb), 0.18);
-  color: #fff;
+  color: var(--pl-text);
 }
 
 /* customize home action link */
@@ -688,7 +688,7 @@ a.togetherTitle:hover {
 .actionLink:hover {
   border-color: rgba(var(--accent-rgb), 0.7);
   background: rgba(var(--accent-rgb), 0.24);
-  color: #fff;
+  color: var(--pl-text);
 }
 
 .actionLink svg {
@@ -720,8 +720,8 @@ a.togetherTitle:hover {
   width: calc(var(--u) * 1.2);
   height: calc(var(--u) * 1.2);
   border-radius: var(--radius-circle);
-  background: #fff;
-  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.35);
+  background: var(--pl-text);
+  box-shadow: 0 2px 5px var(--black-a35);
   content: '';
   transition: transform var(--dur-fast) var(--pl-ease);
 }

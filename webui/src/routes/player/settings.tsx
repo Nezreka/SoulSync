@@ -113,10 +113,7 @@ function Group({
   children: React.ReactNode;
 }) {
   return (
-    <section
-      className={wide ? `${s.group} ${s.groupWide}` : s.group}
-      aria-label={title}
-    >
+    <section className={wide ? `${s.group} ${s.groupWide}` : s.group} aria-label={title}>
       <div className={s.groupHead}>
         <div className={s.groupHeadTop}>
           <span className={s.groupIcon} aria-hidden="true">
@@ -182,8 +179,7 @@ function SettingsPage() {
   const [trailers, setTrailers] = useTrailersSetting();
   const mine = settings.data?.settings;
   const busy = save.isPending;
-  const activeBrightness =
-    BRIGHTNESS_STEPS.find((v) => Math.abs(v - brightness) < 0.01) ?? 1;
+  const activeBrightness = BRIGHTNESS_STEPS.find((v) => Math.abs(v - brightness) < 0.01) ?? 1;
   const activeFit = FITS.find((f) => f.key === fit);
 
   const updateLocal = (fn: () => void) => {
@@ -197,8 +193,7 @@ function SettingsPage() {
         <div>
           <PageTitle>Player settings</PageTitle>
           <p className={s.settingsLead}>
-            Profile preferences follow you to every screen. Display preferences stay on this
-            device.
+            Profile preferences follow you to every screen. Display preferences stay on this device.
           </p>
         </div>
         <span className={s.savedBadge} data-visible={saved ? 'true' : undefined} role="status">
@@ -278,7 +273,10 @@ function SettingsPage() {
           note="Preview updates live as you adjust."
         >
           <div className={s.subPreview} aria-hidden="true">
-            <div className={s.subPreviewScene} style={{ opacity: Math.max(0.35, activeBrightness) }} />
+            <div
+              className={s.subPreviewScene}
+              style={{ opacity: Math.max(0.35, activeBrightness) }}
+            />
             <span
               className={s.subPreviewText}
               data-size={subs.size}
@@ -375,7 +373,11 @@ function SettingsPage() {
             </div>
           </Row>
 
-          <Row stacked label="Screen brightness" help="Dims the video picture for watching in the dark.">
+          <Row
+            stacked
+            label="Screen brightness"
+            help="Dims the video picture for watching in the dark."
+          >
             <div className={s.segGroup} role="radiogroup" aria-label="Brightness">
               {ORDERED_BRIGHTNESS.map((v) => {
                 const on = Math.abs(v - activeBrightness) < 0.01;
@@ -416,7 +418,11 @@ function SettingsPage() {
           badge="This screen"
           note="Visual ambiance and your home dashboard."
         >
-          <Row stacked label="Music visuals" help="Animated backdrop shown in full-screen Now Playing.">
+          <Row
+            stacked
+            label="Music visuals"
+            help="Animated backdrop shown in full-screen Now Playing."
+          >
             <div className={s.chipWrap} role="radiogroup" aria-label="Music visuals">
               {THEMES.map((t) => {
                 const on = visual === t.id;
@@ -442,12 +448,7 @@ function SettingsPage() {
             label="Home dashboard layout"
             help="Show, hide, reorder, and restyle your home rails for this screen or across all devices."
           >
-            <Link
-              to="/player"
-              search={{ customize: true }}
-              className={s.actionLink}
-              data-nav
-            >
+            <Link to="/player" search={{ customize: true }} className={s.actionLink} data-nav>
               <HomeIcon />
               <span>Customize Home</span>
               <ChevronIcon />
