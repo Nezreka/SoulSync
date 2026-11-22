@@ -181,7 +181,7 @@ export function DevicesPage({ opened, active }: SettingsTabProps) {
         <div className={s.cards} aria-label="Devices">
           <Card
             title="Pair a device"
-            hint="Pair a phone, a car or a speaker app with a one-time code. It picks a profile and can only play: never settings, downloads or people."
+            hint="Pair the SoulSync app on a phone, tablet, TV, or car with a one-time code for movies, shows, music, podcasts, and audiobooks. It picks a profile and can only play: never settings, downloads, or people."
             actions={
               <Btn kind="primary" id="devices-add" busy={busy} onClick={() => void add()}>
                 Add a device
