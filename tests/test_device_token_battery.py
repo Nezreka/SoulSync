@@ -88,6 +88,23 @@ OPTED_IN = {
     "player.guide_reminders": A.PLAYBACK,
     "player.add_guide_reminder": A.PLAYBACK,
     "player.remove_guide_reminder": A.PLAYBACK,
+    # read-only browse, detail, and artwork GET routes used by /player
+    "video_api.video_poster": A.PLAYBACK,
+    "video_api.video_backdrop": A.PLAYBACK,
+    "video_api.video_show_detail": A.PLAYBACK,
+    "video_api.video_movie_detail": A.PLAYBACK,
+    "video_api.video_person_detail": A.PLAYBACK,
+    "video_api.video_detail_extras": A.PLAYBACK,
+    "lib2_list_albums": A.PLAYBACK,
+    "lib2_list_songs": A.PLAYBACK,
+    "lib2_list_artists": A.PLAYBACK,
+    "lib2_get_artist": A.PLAYBACK,
+    "lib2_get_album": A.PLAYBACK,
+    "lib2_artwork": A.PLAYBACK,
+    "podcasts_api.show_detail": A.PLAYBACK,
+    "podcasts_api.podcasts_watchlist_list": A.PLAYBACK,
+    "audiobooks_api.library": A.PLAYBACK,
+    "audiobooks_api.library_cover": A.PLAYBACK,
 }
 
 IGNORED = {"HEAD", "OPTIONS"}

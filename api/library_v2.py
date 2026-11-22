@@ -16,6 +16,8 @@ Registered from ``web_server.py`` via ``register_library_v2_routes(app, ...)``.
 
 from __future__ import annotations
 
+from core.connect.device_access import device_playback
+
 import functools
 import json
 import os
@@ -1707,6 +1709,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         })
 
     @_route("/api/library/v2/albums")
+    @device_playback
     def lib2_list_albums():
         """The library by release (A07): search, sort, monitored filter, paging."""
         from core.library2 import queries as Q
@@ -1761,6 +1764,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         return songs
 
     @_route("/api/library/v2/songs")
+    @device_playback
     def lib2_list_songs():
         """The library's songs (upstream #1906), paged; limit up to 500 so Play
         all can queue a whole search in one call."""
@@ -1796,6 +1800,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         return jsonify({"success": True, "copies": _song_payload(copies)})
 
     @_route("/api/library/v2/artists")
+    @device_playback
     def lib2_list_artists():
         from core.library2 import queries as Q
         search = request.args.get("search", "")
@@ -2305,6 +2310,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                         "monitored": monitor})
 
     @_route("/api/library/v2/artists/<int:artist_id>")
+    @device_playback
     def lib2_get_artist(artist_id):
         from core.library2 import queries as Q
         with closing(_conn()) as conn:
@@ -2459,6 +2465,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                          daemon=True).start()
 
     @_route("/api/library/v2/albums/<int:album_id>")
+    @device_playback
     def lib2_get_album(album_id):
         from core.library2 import queries as Q
         with closing(_conn()) as conn:
@@ -3071,6 +3078,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         return response
 
     @_route("/api/library/v2/artwork/<kind>/<int:eid>")
+    @device_playback
     def lib2_artwork(kind, eid):
         if kind not in ("artist", "album"):
             return "", 404

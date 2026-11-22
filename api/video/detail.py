@@ -8,6 +8,8 @@ Reads only video.db; isolated from the music API.
 
 from __future__ import annotations
 
+from core.connect.device_access import device_playback
+
 from flask import jsonify, request
 
 from utils.logging_config import get_logger
@@ -256,6 +258,7 @@ def register_routes(bp):
         return jsonify({"success": True, "history": rows})
 
     @bp.route("/detail/show/<int:show_id>", methods=["GET"])
+    @device_playback
     def video_show_detail(show_id):
         from . import get_video_db
         from .kids import rating_allowed, restricted_response, video_cap
@@ -274,6 +277,7 @@ def register_routes(bp):
         return jsonify(data)
 
     @bp.route("/detail/movie/<int:movie_id>", methods=["GET"])
+    @device_playback
     def video_movie_detail(movie_id):
         from . import get_video_db
         from .kids import rating_allowed, restricted_response, video_cap
@@ -439,6 +443,7 @@ def register_routes(bp):
         return jsonify(d)
 
     @bp.route("/person/<int:tmdb_id>", methods=["GET"])
+    @device_playback
     def video_person_detail(tmdb_id):
         """In-app person page: bio + filmography (each credit annotated owned/not)."""
         try:
@@ -459,6 +464,7 @@ def register_routes(bp):
         return jsonify(d)
 
     @bp.route("/detail/<kind>/<int:item_id>/extras", methods=["GET"])
+    @device_playback
     def video_detail_extras(kind, item_id):
         """Live TMDB extras (trailer / where-to-watch / similar) for the detail page."""
         if kind not in ("movie", "show"):

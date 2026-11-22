@@ -7,6 +7,8 @@ browser). Falls back to 404 so the frontend shows its placeholder.
 
 from __future__ import annotations
 
+from core.connect.device_access import device_playback
+
 from flask import Response, abort, request, send_file
 from werkzeug.exceptions import HTTPException
 
@@ -174,10 +176,12 @@ def register_routes(bp):
             abort(404)
 
     @bp.route("/poster/<kind>/<int:item_id>", methods=["GET"])
+    @device_playback
     def video_poster(kind, item_id):
         return _stream_art(kind, item_id, "poster")
 
     @bp.route("/backdrop/<kind>/<int:item_id>", methods=["GET"])
+    @device_playback
     def video_backdrop(kind, item_id):
         return _stream_art(kind, item_id, "backdrop")
 

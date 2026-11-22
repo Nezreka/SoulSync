@@ -52,6 +52,8 @@ tell which half of the app asked.
 
 from __future__ import annotations
 
+from core.connect.device_access import device_playback
+
 import os
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Optional, Tuple
@@ -1058,6 +1060,7 @@ def create_audiobooks_blueprint() -> Blueprint:
     # ------------------------------------------------------------------
 
     @bp.route("/library", methods=["GET"])
+    @device_playback
     @requires("books.access")
     def library():
         """Indexed local books and the most recent folder scan.
@@ -1155,6 +1158,7 @@ def create_audiobooks_blueprint() -> Blueprint:
         return jsonify({"success": True, "book": db.get_library_entry(asin)})
 
     @bp.route("/library/<asin>/cover", methods=["GET"])
+    @device_playback
     @requires("books.access")
     def library_cover(asin: str):
         row = get_audiobook_db().get_library_entry(asin)
