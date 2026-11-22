@@ -110,7 +110,9 @@ function MoreSheet({
 function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
   const sections = useSections();
   const entries = NAV.filter((entry) => entry.visible(sections));
-  const current = currentEntry(entries, useRouterState({ select: (r) => r.location.pathname }));
+  const pathname = useRouterState({ select: (r) => r.location.pathname });
+  const current = currentEntry(entries, pathname);
+  const onSettings = pathname === '/player/settings' || pathname.startsWith('/player/settings/');
   // how many others are playing something right now
   const watching = useQuery(watchingNowQuery()).data?.sessions.filter((x) => !x.you).length ?? 0;
   const [more, setMore] = useState(false);
@@ -182,6 +184,8 @@ function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => 
         <Link
           to="/player/settings"
           className={s.managerLink}
+          data-current={onSettings ? 'true' : undefined}
+          aria-current={onSettings ? 'page' : undefined}
           title={collapsed ? 'Player settings' : undefined}
           data-nav
         >

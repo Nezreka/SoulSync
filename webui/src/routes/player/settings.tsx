@@ -1,15 +1,15 @@
 /**
- * player settings. two kinds, said plainly on the page:
- *   * yours, on every screen (kept on the server): sharing what you play,
- *     the next episode playing on its own, when to ask if you're still there
- *   * this screen's (kept in this browser): video quality, how subtitles
- *     look, brightness, the picture's shape, the music visuals
- * every change saves at once.
+ * player settings. two scopes, stated plainly:
+ *   * profile (synced across every screen): sharing what you play,
+ *     autoplaying the next episode, when to ask if you're still watching
+ *   * this screen (kept in this browser): video quality, picture shape,
+ *     brightness, background trailers, subtitle look, music visuals
+ * every change saves immediately.
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { createFileRoute } from '@tanstack/react-router';
-import { useState } from 'react';
+import { createFileRoute, Link } from '@tanstack/react-router';
+import { useEffect, useRef, useState } from 'react';
 
 import { THEMES } from '@/lib/visualizer';
 
@@ -17,7 +17,16 @@ import type { PlayerSettings } from './-player.api';
 
 import { QUALITIES, type Quality } from './-engine/engine';
 import { playerSettingsQuery, savePlayerSettings } from './-player.api';
-import { PageTitle, PlayerLink } from './-ui/kit';
+import {
+  CheckIcon,
+  ChevronIcon,
+  HomeIcon,
+  MovieIcon,
+  MusicIcon,
+  PlayIcon,
+  TvIcon,
+} from './-ui/icons';
+import { PageTitle } from './-ui/kit';
 import { QUALITY_LABELS } from './-ui/playback/controls';
 import {
   BRIGHTNESS_STEPS,
@@ -28,9 +37,14 @@ import {
   useFit,
 } from './-ui/playback/use-picture';
 import { getEngine, usePlayer } from './-ui/playback/use-player';
-import { setSubtitleStyle, useSubtitleStyle } from './-ui/playback/use-subtitle-style';
+import {
+  setSubtitleStyle,
+  useSubtitleStyle,
+  type SubtitleSize,
+} from './-ui/playback/use-subtitle-style';
 import { setVisual, useVisual } from './-ui/playback/visuals';
 import s from './-ui/social.module.css';
+import { useTrailersSetting } from './-ui/trailer';
 
 export const Route = createFileRoute('/player/settings')({
   component: SettingsPage,
@@ -64,14 +78,16 @@ function Switch({
 function Row({
   label,
   help,
+  stacked,
   children,
 }: {
   label: string;
   help?: string;
+  stacked?: boolean;
   children: React.ReactNode;
 }) {
   return (
-    <div className={s.row}>
+    <div className={stacked ? `${s.row} ${s.rowStacked}` : s.row}>
       <span className={s.rowText}>
         <span className={s.rowLabel}>{label}</span>
         {help ? <span className={s.rowHelp}>{help}</span> : null}
@@ -82,31 +98,71 @@ function Row({
 }
 
 function Group({
+  icon,
   title,
+  badge,
   note,
+  wide,
   children,
 }: {
+  icon: React.ReactNode;
   title: string;
+  badge: string;
   note?: string;
+  wide?: boolean;
   children: React.ReactNode;
 }) {
   return (
-    <section className={s.group} aria-label={title}>
+    <section
+      className={wide ? `${s.group} ${s.groupWide}` : s.group}
+      aria-label={title}
+    >
       <div className={s.groupHead}>
-        <h2 className={s.groupTitle}>{title}</h2>
-        {note ? <p className={s.groupNote}>{note}</p> : null}
+        <div className={s.groupHeadTop}>
+          <span className={s.groupIcon} aria-hidden="true">
+            {icon}
+          </span>
+          <div className={s.groupHeadText}>
+            <div className={s.groupTitleRow}>
+              <h2 className={s.groupTitle}>{title}</h2>
+              <span className={s.scopePill}>{badge}</span>
+            </div>
+            {note ? <p className={s.groupNote}>{note}</p> : null}
+          </div>
+        </div>
       </div>
-      {children}
+      <div className={s.groupBody}>{children}</div>
     </section>
   );
 }
 
 const ASK_AFTER = [0, 2, 3, 4, 5, 8];
+const SUBTITLE_SIZES: { value: SubtitleSize; label: string }[] = [
+  { value: 'small', label: 'Small' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'large', label: 'Large' },
+];
+const ORDERED_BRIGHTNESS = [...BRIGHTNESS_STEPS].reverse();
 
 function SettingsPage() {
   const queryClient = useQueryClient();
   const settings = useQuery(playerSettingsQuery());
-  const [saved, setSaved] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+  const timerRef = useRef<number | null>(null);
+
+  const flashSaved = () => {
+    setSaved(true);
+    if (timerRef.current) window.clearTimeout(timerRef.current);
+    timerRef.current = window.setTimeout(() => setSaved(false), 1800);
+  };
+
+  useEffect(
+    () => () => {
+      if (timerRef.current) window.clearTimeout(timerRef.current);
+    },
+    [],
+  );
+
   const save = useMutation({
     mutationFn: (changes: Partial<PlayerSettings>) => savePlayerSettings(changes),
     onSuccess: (next) => {
@@ -114,26 +170,52 @@ function SettingsPage() {
         old ? { ...old, settings: next } : old,
       );
       void queryClient.invalidateQueries({ queryKey: ['player', 'watching-now'] });
-      setSaved('Saved');
-      window.setTimeout(() => setSaved(null), 1800);
+      flashSaved();
     },
   });
+
   const player = usePlayer();
   const subs = useSubtitleStyle();
   const brightness = useBrightness();
   const fit = useFit();
   const visual = useVisual();
+  const [trailers, setTrailers] = useTrailersSetting();
   const mine = settings.data?.settings;
   const busy = save.isPending;
+  const activeBrightness =
+    BRIGHTNESS_STEPS.find((v) => Math.abs(v - brightness) < 0.01) ?? 1;
+  const activeFit = FITS.find((f) => f.key === fit);
+
+  const updateLocal = (fn: () => void) => {
+    fn();
+    flashSaved();
+  };
 
   return (
     <>
-      <PageTitle>Player settings</PageTitle>
-      <div className={s.settings}>
-        <Group title="You, on every screen" note={saved ?? 'Kept with your profile.'}>
+      <div className={s.settingsHeader}>
+        <div>
+          <PageTitle>Player settings</PageTitle>
+          <p className={s.settingsLead}>
+            Profile preferences follow you to every screen. Display preferences stay on this
+            device.
+          </p>
+        </div>
+        <span className={s.savedBadge} data-visible={saved ? 'true' : undefined} role="status">
+          <CheckIcon /> Saved
+        </span>
+      </div>
+
+      <div className={s.settingsGrid}>
+        <Group
+          icon={<PlayIcon />}
+          title="Playback & profile"
+          badge="All screens"
+          note="Synced with your SoulSync profile."
+        >
           <Row
             label="Share what I'm playing"
-            help="Others on this server see what you watch or listen to on Watching now, and can join you there. Turn it off and you're gone from it at once."
+            help="Show your live session on Watching now so others can join you."
           >
             <Switch
               label="Share what I'm playing"
@@ -142,132 +224,236 @@ function SettingsPage() {
               onChange={(v) => save.mutate({ share_activity: v })}
             />
           </Row>
+
           <Row
-            label="Play the next episode on its own"
-            help="Off: an episode ends and waits for you."
+            label="Autoplay next episode"
+            help="Automatically start the next episode when one finishes."
           >
             <Switch
-              label="Play the next episode on its own"
+              label="Autoplay next episode"
               on={mine?.autoplay_next ?? true}
               busy={!mine || busy}
               onChange={(v) => save.mutate({ autoplay_next: v })}
             />
           </Row>
+
           <Row
-            label="Ask if I'm still watching"
-            help="After this many episodes in a row with nobody touching anything."
+            stacked
+            label="Still watching check"
+            help="Pause and ask after consecutive episodes with no activity."
           >
-            <select
-              className={s.select}
-              value={mine?.still_watching_after ?? 3}
-              disabled={!mine || busy}
-              onChange={(e) => save.mutate({ still_watching_after: Number(e.target.value) })}
-              aria-label="Ask if I'm still watching"
-            >
-              {ASK_AFTER.map((n) => (
-                <option key={n} value={n}>
-                  {n ? `After ${n} episodes` : 'Never'}
-                </option>
-              ))}
-            </select>
+            <div className={s.segGroup} role="radiogroup" aria-label="Ask if I'm still watching">
+              {ASK_AFTER.map((n) => {
+                const on = (mine?.still_watching_after ?? 3) === n;
+                return (
+                  <button
+                    key={n}
+                    type="button"
+                    role="radio"
+                    aria-checked={on}
+                    className={s.segBtn}
+                    data-on={on ? 'true' : undefined}
+                    disabled={!mine || busy}
+                    onClick={() => save.mutate({ still_watching_after: n })}
+                    data-nav
+                  >
+                    {n === 0 ? 'Never' : `${n} eps`}
+                  </button>
+                );
+              })}
+            </div>
           </Row>
+
           {save.isError ? (
-            <Row label="That didn't save" help="Try again in a moment.">
-              <span />
-            </Row>
+            <div className={s.saveError} role="alert">
+              Couldn't save that change — try again in a moment.
+            </div>
           ) : null}
         </Group>
 
-        <Group title="This screen" note="Kept in this browser, so a TV and a phone can differ.">
-          <Row
-            label="Video quality"
-            help="Lower plays smoother on a slow connection. Original never converts unless it has to."
-          >
-            <select
-              className={s.select}
-              value={player.quality}
-              onChange={(e) => getEngine().setQuality(e.target.value as Quality)}
-              aria-label="Video quality"
+        <Group
+          icon={<MovieIcon />}
+          title="Subtitles"
+          badge="This screen"
+          note="Preview updates live as you adjust."
+        >
+          <div className={s.subPreview} aria-hidden="true">
+            <div className={s.subPreviewScene} style={{ opacity: Math.max(0.35, activeBrightness) }} />
+            <span
+              className={s.subPreviewText}
+              data-size={subs.size}
+              data-box={subs.box ? 'true' : undefined}
             >
-              {QUALITIES.map((q) => (
-                <option key={q} value={q}>
-                  {QUALITY_LABELS[q].label} · {QUALITY_LABELS[q].detail}
-                </option>
-              ))}
-            </select>
+              The night is darkest just before the dawn.
+            </span>
+          </div>
+
+          <Row stacked label="Subtitle size">
+            <div className={s.segGroup} role="radiogroup" aria-label="Subtitle size">
+              {SUBTITLE_SIZES.map((opt) => {
+                const on = subs.size === opt.value;
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    role="radio"
+                    aria-checked={on}
+                    className={s.segBtn}
+                    data-on={on ? 'true' : undefined}
+                    onClick={() => updateLocal(() => setSubtitleStyle({ size: opt.value }))}
+                    data-nav
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
           </Row>
-          <Row label="Subtitle size">
-            <select
-              className={s.select}
-              value={subs.size}
-              onChange={(e) =>
-                setSubtitleStyle({ size: e.target.value as 'small' | 'medium' | 'large' })
-              }
-              aria-label="Subtitle size"
-            >
-              <option value="small">Small</option>
-              <option value="medium">Medium</option>
-              <option value="large">Large</option>
-            </select>
-          </Row>
-          <Row label="Dark box behind subtitles" help="Easier to read over a bright picture.">
+
+          <Row label="Dark backing box" help="Improves contrast over bright scenes.">
             <Switch
               label="Dark box behind subtitles"
               on={subs.box}
-              onChange={(v) => setSubtitleStyle({ box: v })}
+              onChange={(v) => updateLocal(() => setSubtitleStyle({ box: v }))}
             />
-          </Row>
-          <Row label="Brightness" help="Dims the picture, for watching in the dark.">
-            <select
-              className={s.select}
-              value={String(BRIGHTNESS_STEPS.find((v) => Math.abs(v - brightness) < 0.01) ?? 1)}
-              onChange={(e) => setBrightness(Number(e.target.value))}
-              aria-label="Brightness"
-            >
-              {BRIGHTNESS_STEPS.map((v) => (
-                <option key={v} value={String(v)}>
-                  {v === 1 ? 'Full' : `${Math.round(v * 100)}%`}
-                </option>
-              ))}
-            </select>
-          </Row>
-          <Row label="Picture shape" help={FITS.find((f) => f.key === fit)?.detail}>
-            <select
-              className={s.select}
-              value={fit}
-              onChange={(e) => setFit(e.target.value as typeof fit)}
-              aria-label="Picture shape"
-            >
-              {FITS.map((f) => (
-                <option key={f.key} value={f.key}>
-                  {f.label}
-                </option>
-              ))}
-            </select>
-          </Row>
-          <Row label="Music visuals" help="What moves behind the song in now playing.">
-            <select
-              className={s.select}
-              value={visual}
-              onChange={(e) => setVisual(e.target.value as typeof visual)}
-              aria-label="Music visuals"
-            >
-              {THEMES.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name}
-                </option>
-              ))}
-            </select>
           </Row>
         </Group>
 
-        <p className={s.groupNote}>
-          Your home page has its own settings:{' '}
-          <PlayerLink href="/player" data-nav>
-            customize it from Home
-          </PlayerLink>
-          .
-        </p>
+        <Group
+          wide
+          icon={<TvIcon />}
+          title="Video & display"
+          badge="This screen"
+          note="Tailored for this browser, TV, or phone."
+        >
+          <Row
+            stacked
+            label="Video quality"
+            help="Lower plays smoother on slow connections. Original plays directly whenever possible."
+          >
+            <div className={s.choiceGrid} role="radiogroup" aria-label="Video quality">
+              {QUALITIES.map((q) => {
+                const on = player.quality === q;
+                return (
+                  <button
+                    key={q}
+                    type="button"
+                    role="radio"
+                    aria-checked={on}
+                    className={s.choiceCard}
+                    data-on={on ? 'true' : undefined}
+                    onClick={() => updateLocal(() => getEngine().setQuality(q as Quality))}
+                    data-nav
+                  >
+                    <span className={s.choiceTitle}>{QUALITY_LABELS[q].label}</span>
+                    <span className={s.choiceDetail}>{QUALITY_LABELS[q].detail}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </Row>
+
+          <Row stacked label="Picture shape" help={activeFit?.detail}>
+            <div className={s.segGroup} role="radiogroup" aria-label="Picture shape">
+              {FITS.map((f) => {
+                const on = fit === f.key;
+                return (
+                  <button
+                    key={f.key}
+                    type="button"
+                    role="radio"
+                    aria-checked={on}
+                    className={s.segBtn}
+                    data-on={on ? 'true' : undefined}
+                    onClick={() => updateLocal(() => setFit(f.key))}
+                    data-nav
+                  >
+                    {f.label}
+                  </button>
+                );
+              })}
+            </div>
+          </Row>
+
+          <Row stacked label="Screen brightness" help="Dims the video picture for watching in the dark.">
+            <div className={s.segGroup} role="radiogroup" aria-label="Brightness">
+              {ORDERED_BRIGHTNESS.map((v) => {
+                const on = Math.abs(v - activeBrightness) < 0.01;
+                return (
+                  <button
+                    key={v}
+                    type="button"
+                    role="radio"
+                    aria-checked={on}
+                    className={s.segBtn}
+                    data-on={on ? 'true' : undefined}
+                    onClick={() => updateLocal(() => setBrightness(v))}
+                    data-nav
+                  >
+                    {v === 1 ? 'Full' : `${Math.round(v * 100)}%`}
+                  </button>
+                );
+              })}
+            </div>
+          </Row>
+
+          <Row
+            label="Background trailers"
+            help="Automatically play muted trailers behind movie and show detail pages."
+          >
+            <Switch
+              label="Background trailers"
+              on={trailers}
+              onChange={(v) => updateLocal(() => setTrailers(v))}
+            />
+          </Row>
+        </Group>
+
+        <Group
+          wide
+          icon={<MusicIcon />}
+          title="Music & home"
+          badge="This screen"
+          note="Visual ambiance and your home dashboard."
+        >
+          <Row stacked label="Music visuals" help="Animated backdrop shown in full-screen Now Playing.">
+            <div className={s.chipWrap} role="radiogroup" aria-label="Music visuals">
+              {THEMES.map((t) => {
+                const on = visual === t.id;
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={on}
+                    className={s.themeChip}
+                    data-on={on ? 'true' : undefined}
+                    onClick={() => updateLocal(() => setVisual(t.id as typeof visual))}
+                    data-nav
+                  >
+                    {t.name}
+                  </button>
+                );
+              })}
+            </div>
+          </Row>
+
+          <Row
+            label="Home dashboard layout"
+            help="Show, hide, reorder, and restyle your home rails for this screen or across all devices."
+          >
+            <Link
+              to="/player"
+              search={{ customize: true }}
+              className={s.actionLink}
+              data-nav
+            >
+              <HomeIcon />
+              <span>Customize Home</span>
+              <ChevronIcon />
+            </Link>
+          </Row>
+        </Group>
       </div>
     </>
   );

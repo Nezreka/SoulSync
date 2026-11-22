@@ -44,6 +44,10 @@ import { RankedRail } from './-ui/top10';
 import { useWatchlist, watchlistCard } from './-ui/watchlist';
 
 export const Route = createFileRoute('/player/')({
+  validateSearch: (search: Record<string, unknown>): { customize?: boolean } =>
+    search.customize === true || search.customize === '1' || search.customize === 1
+      ? { customize: true }
+      : {},
   component: PlayerHome,
 });
 
@@ -157,8 +161,9 @@ function PlayerHome() {
   const books = useQuery({ ...booksQuery(), enabled: sections.audiobooks });
   const podcasts = useQuery({ ...podcastSubsQuery(), enabled: sections.podcasts });
   const saved = useQuery(homeLayoutQuery(device));
+  const { customize } = Route.useSearch();
   const [draft, setDraft] = useState<HomeLayout | null>(null);
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState(!!customize);
   // the server's layout (already clean); while it loads, or if it can't be
   // read, every row in the order home builds them
   const layout = useMemo<HomeLayout>(
