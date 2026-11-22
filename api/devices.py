@@ -350,12 +350,14 @@ def _addresses():
 
 def _server_payload():
     from core.connect import reachability as R
+    from core.connect import rendezvous as RV
     from core.connect.addresses import configured, warnings
     from core.connect.server_key import public_view
     addrs = _addresses()
     conf = configured(config_manager.get)
     return {**public_view(_identity()), "addresses": addrs, **conf, "warnings": warnings(addrs),
-            "probe": _probe_view(R.latest(), conf["remote_url"]), "guidance": R.GUIDANCE}
+            "probe": _probe_view(R.latest(), conf["remote_url"]), "guidance": R.GUIDANCE,
+            "upnp": RV.upnp_status(config_manager)}
 
 
 def _probe_view(probe, remote_url):
@@ -396,6 +398,17 @@ def save_addresses():
         return jsonify({"success": False, "error": f"At most {MAX_CUSTOM} extra addresses"}), 400
     config_manager.set(REMOTE_KEY, remote or "")
     config_manager.set(CUSTOM_KEY, custom)
+    return jsonify({"success": True, **_server_payload()})
+
+
+@bp.route("/api/devices/upnp", methods=["PUT"])
+@admin_only
+def save_upnp():
+    """{enabled: bool}: toggle automatic UPnP IGD / NAT-PMP port forwarding."""
+    from core.connect import rendezvous as RV
+    body = request.get_json(silent=True) or {}
+    enabled = bool(body.get("enabled", False))
+    RV.set_upnp_enabled(enabled, get_database, config_manager)
     return jsonify({"success": True, **_server_payload()})
 
 

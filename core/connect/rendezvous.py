@@ -34,6 +34,7 @@ log = logging.getLogger("soulsync.connect.rendezvous")
 DEFAULT_SERVICE_URL = "https://connect.ssync.net"
 ZONE = "connect.ssync.net"
 DEFAULT_TLS_PORT = 8443
+UPNP_CONFIG_KEY = "connect.upnp_enabled"
 _RENEW_INTERVAL_SECONDS = 12 * 3600
 
 _LIVE_SQL = "used_at IS NULL AND cancelled_at IS NULL AND locked_at IS NULL AND expires_at > ?"
@@ -233,6 +234,56 @@ def _start_https_listener(app, store: CertificateStore, host: str, port: int) ->
     log.info("connect https: listening on https://%s:%s (cert %s)", host, port, store.fingerprint()[:12])
 
 
+def upnp_enabled(config_manager=None) -> bool:
+    """Whether automatic UPnP IGD / NAT-PMP port forwarding is opted in (default: False)."""
+    if config_manager is None:
+        return False
+    try:
+        return bool(config_manager.get(UPNP_CONFIG_KEY, False))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def upnp_status(config_manager=None) -> dict:
+    """Live status of automatic UPnP / NAT-PMP port forwarding for Settings > Devices."""
+    enabled = upnp_enabled(config_manager)
+    tls_port = connect_tls_port(config_manager)
+    m = _upnp_mapper.mapping if _upnp_mapper is not None else None
+    return {
+        "enabled": enabled,
+        "active": bool(enabled and m is not None),
+        "method": m.method if (enabled and m is not None) else None,
+        "external_ip": m.external_ip if (enabled and m is not None) else None,
+        "external_port": m.external_port if (enabled and m is not None) else None,
+        "internal_port": tls_port,
+    }
+
+
+def set_upnp_enabled(enabled: bool, get_database, config_manager) -> dict:
+    """Toggle automatic UPnP / NAT-PMP port forwarding immediately and persist."""
+    global _upnp_mapper
+    want = bool(enabled)
+    config_manager.set(UPNP_CONFIG_KEY, want)
+    tls_port = connect_tls_port(config_manager)
+    if want:
+        if _upnp_mapper is None:
+            from .upnp import UpnpPortMapper
+
+            _, store = _identity_and_store(get_database, config_manager)
+            _upnp_mapper = UpnpPortMapper(
+                tls_port,
+                cert_fingerprint_provider=store.fingerprint,
+            )
+            _upnp_mapper.start()
+        elif _upnp_mapper.mapping is None:
+            _upnp_mapper.map_once()
+    else:
+        if _upnp_mapper is not None:
+            _upnp_mapper.stop()
+            _upnp_mapper = None
+    return upnp_status(config_manager)
+
+
 def start_runtime(app, get_database, config_manager) -> None:
     """Background Connect bootstrap: obtain/renew the wildcard TLS cert, start
     the dedicated HTTPS listener, and connect the rendezvous WebSocket.
@@ -259,7 +310,7 @@ def start_runtime(app, get_database, config_manager) -> None:
                     if store.fingerprint():
                         if _https_server is None or renewed:
                             _start_https_listener(app, store, host, tls_port)
-                        if _upnp_mapper is None:
+                        if upnp_enabled(config_manager) and _upnp_mapper is None:
                             from .upnp import UpnpPortMapper
 
                             _upnp_mapper = UpnpPortMapper(

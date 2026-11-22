@@ -29,6 +29,7 @@ import {
   Row,
   Say,
   StatusWords,
+  Switch,
   Tag,
   TextArea,
   TextField,
@@ -55,6 +56,7 @@ import {
   renameDevice,
   revokeDevice,
   saveAddresses,
+  setUpnpEnabled,
   type ServerInfo,
 } from './api';
 import css from './devices.module.css';
@@ -421,6 +423,7 @@ function ThisServer({
   const [checking, setChecking] = useState(false);
   const [result, setResult] = useState<CheckResult | null>(null);
   const [probe, setProbe] = useState<Probe | null>(null);
+  const [upnpBusy, setUpnpBusy] = useState(false);
 
   // the saved addresses fill the fields when they change, not on every
   // reload (the page looks again every few seconds while a code is up)
@@ -476,6 +479,25 @@ function ThisServer({
     setProbe(r.data.probe);
   };
 
+  const toggleUpnp = async (enabled: boolean) => {
+    setUpnpBusy(true);
+    const r = await setUpnpEnabled(enabled);
+    setUpnpBusy(false);
+    if (!r.ok) {
+      toast(r.message, 'error');
+      return;
+    }
+    toast(
+      enabled
+        ? r.data.upnp?.active
+          ? `Remote access open on port ${r.data.upnp.external_port}`
+          : 'Automatic port forwarding enabled (no UPnP router responded)'
+        : 'Automatic port forwarding turned off',
+      'info',
+    );
+    onSaved();
+  };
+
   const outside = probe?.hits.filter((h) => h.via === 'outside') ?? [];
   const last = outside[outside.length - 1];
   return (
@@ -498,6 +520,35 @@ function ThisServer({
         ) : (
           <Note info>No addresses found yet. Add the remote address below.</Note>
         )}
+      </Row>
+      <Row
+        label="Automatic remote access (UPnP / NAT-PMP)"
+        htmlFor="devices-upnp-toggle"
+        help="Optional. Asks your home router to open a port for mobile data automatically (off by default — leave off if you use a manual forward, Tailscale, or a reverse proxy)."
+      >
+        <div className={css.stack}>
+          <FieldLine>
+            <Switch
+              id="devices-upnp-toggle"
+              checked={!!server.upnp?.enabled}
+              disabled={upnpBusy}
+              onChange={(e) => void toggleUpnp(e.target.checked)}
+            />
+            {server.upnp?.enabled ? (
+              server.upnp.active ? (
+                <StatusWords tone="ok">
+                  {`Active — ${server.upnp.external_ip ?? 'WAN'}:${server.upnp.external_port} → ${server.upnp.internal_port} (${server.upnp.method === 'natpmp' ? 'NAT-PMP' : 'UPnP'})`}
+                </StatusWords>
+              ) : (
+                <StatusWords tone="warn">
+                  {`No UPnP / NAT-PMP router responded. Forward TCP ${server.upnp.internal_port} manually.`}
+                </StatusWords>
+              )
+            ) : (
+              <span className={itemClass.dim}>Off (LAN only unless forwarded manually)</span>
+            )}
+          </FieldLine>
+        </div>
       </Row>
       <Row
         field

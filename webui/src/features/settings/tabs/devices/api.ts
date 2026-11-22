@@ -145,6 +145,15 @@ export interface Guidance {
   body: string;
 }
 
+export interface UpnpStatus {
+  enabled: boolean;
+  active: boolean;
+  method: 'upnp' | 'natpmp' | null;
+  external_ip: string | null;
+  external_port: number | null;
+  internal_port: number;
+}
+
 export interface ServerInfo extends ServerIdentity {
   addresses: Address[];
   remote_url: string | null;
@@ -152,6 +161,7 @@ export interface ServerInfo extends ServerIdentity {
   warnings: string[];
   probe: Probe | null;
   guidance: Guidance[];
+  upnp?: UpnpStatus;
 }
 
 export interface CheckResult {
@@ -165,6 +175,9 @@ export const getServer = (signal?: AbortSignal) =>
 
 export const saveAddresses = (remote_url: string, custom_urls: string[]) =>
   call<ServerInfo>('/api/devices/addresses', json('PUT', { remote_url, custom_urls }));
+
+export const setUpnpEnabled = (enabled: boolean) =>
+  call<ServerInfo>('/api/devices/upnp', json('PUT', { enabled }));
 
 export const checkReachability = () =>
   call<{ result: CheckResult | null; probe: Probe; guidance: Guidance[] }>(
