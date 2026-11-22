@@ -31,55 +31,55 @@ Keys (host.tsx `onGlobalKey`): `?` (not while typing) and `F1` toggle, `Ctrl/Cmd
 
 Owner is the phase that built it; anyone may change it now, keep its tests green.
 
-| File | Owner | What |
-|---|---|---|
-| `host.tsx` | P2 | root, install order, `window.SoulSyncHelp`, keys, button state, status poll, page tracking |
-| `sheet.tsx` | P2 | the dialog: header (back, title, close, search), body, footer, focus, Esc, phone trap |
-| `store.ts` | P2 | open, view stack, query, page, isAdmin, status, version |
-| `views.ts`, `view-props.ts` | P2 | view ids, titles, which are wide, which are admin only; what a view gets |
-| `outlet.tsx` | P2 | view id to component |
-| `home.tsx` | P2 | Home: status card, On this page (heading, answers), Read more, More tiles, Get help |
-| `ui.tsx` | P2 | shared pieces: `Label`, `List`, `Row`, `Tile`, `Button`, `Actions`, `Kbd`, `Placeholder` |
-| `icons.tsx` | P2 | the sheet's icon set |
-| `help.module.css` | P2 | the sheet, Home and the shared pieces |
-| `api.ts` | P2, P4 | typed client for `/api/help/*` and `/api/update-check`; `postFix` posts `/api/` routes only |
-| `page.ts` | P2 | which page (`pageIdFrom`), which side, who is looking |
-| `links.ts` | P2 | where links go: pages, `openArticleInSheet`, `openArticleInDocs`, Discord, GitHub |
-| `pages/index.ts` | P2 | the On this page registry and its types (`PageHelp`, `PageAnswer`, `UseAnswers`, `UseHeading`) |
-| `pages/base.ts` | P2 | every page's title, summary and articles |
-| `pages/register.ts` | P2, P5 | imports base.ts and each page file |
-| `pages/kit.tsx` | P5 | what page files build from: `useLive`, `useFeedOrPoll`, `useHealthFindings`, words (`plural`, `spoken`, `ago`), pieces (`Why`, `WhyRow`, `Act`, ...), `runFix` and `FindingBody` for Health findings in an answer |
-| `pages/answers.module.css` | P5 | the answers' rows, bars and actions |
-| `pages/{active-downloads,video-downloads,requests,wishlist,import,settings,library,search}.tsx` | P5 | live answers per page; settings also names its tab (`useHeading`) |
-| `pages/answers.test-utils.tsx` | P5 | renders answers the way Home does, for the page tests |
-| `search/index.ts` | P3 | the one index: actions, settings (`features/settings/search-entries.ts`), pages, articles; member filtering; recents |
-| `search/rank.ts` | P3 | matching and ranking, snippets |
-| `search/actions.ts` | P3 | the things search can do, each with its permission |
-| `search/docs.ts` | P3 | the docs articles, from docs.js's registry (`window.SoulSyncDocs.sections()`) |
-| `search/docs.test-utils.ts` | P8 | runs the real docs.js and docs-content files for tests |
-| `search/markdown.tsx` | P3 | the docs' markdown as React, for the article view |
-| `search/results.tsx` | P3 | the inline results view |
-| `search/palette.tsx` | P3 | the Ctrl/Cmd K palette (combobox, groups, "Search music for ...") |
-| `search/search.module.css` | P3 | results and palette |
-| `article.tsx`, `article.module.css` | P3 | a docs article read in the sheet, "Open in Help & Docs" |
-| `health.tsx` | P4 | Health: summary, Needs you, Worth a look, Finish setting up, Running fine, the fixes |
-| `fixes.ts` | P4 | the one fix runner (`runFix`) and openers (`openSettings`, `openPage`), used by Health and the page answers |
-| `report.tsx` | P4 | Report a problem: what happened, the switchable parts with their exact text, GitHub, Discord, file |
-| `logs.tsx` | P4 | Logs: every log and its backups, one file, one log or all as a zip, Remove secrets |
-| `format.ts` | P4 | sizes and times in plain words |
-| `glyphs.tsx` | P4 | the extra icons the admin views use |
-| `switch.tsx` | P4 | the on/off switch Report and Logs use |
-| `admin.module.css` | P4 | Health, Report and Logs |
-| `release-notes.ts` | P6 | the release notes, the one file to edit at release time; `installReleaseNotes` |
-| `whats-new.tsx`, `whats-new.module.css` | P6 | What's new, with Show me |
-| `shortcut-registry.ts` | P6 | every keyboard shortcut, each pointing at its handler |
-| `shortcuts.tsx`, `shortcuts.module.css` | P6 | the Shortcuts view |
-| `tours/tours.ts` | P6 | the three tours: Getting around, Your first download, Your first video request |
-| `tours/anchors.ts` | P6 | every `data-tour` anchor and the component that writes it |
-| `tours/engine.ts` | P6 | the running tour: steps, skip a missing anchor, spotlight |
-| `tours/layer.tsx`, `tours/tour.module.css` | P6 | the scrim and the step card |
-| `tours/navigate.ts`, `tours/place.ts` | P6 | getting to a step's page and finding its anchor; where the card goes |
-| `tours/index.tsx` | P6 | `installTours`, `window.SoulSyncTours`, the tour root |
+| File                                                                                            | Owner  | What                                                                                                                                                                                                              |
+| ----------------------------------------------------------------------------------------------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `host.tsx`                                                                                      | P2     | root, install order, `window.SoulSyncHelp`, keys, button state, status poll, page tracking                                                                                                                        |
+| `sheet.tsx`                                                                                     | P2     | the dialog: header (back, title, close, search), body, footer, focus, Esc, phone trap                                                                                                                             |
+| `store.ts`                                                                                      | P2     | open, view stack, query, page, isAdmin, status, version                                                                                                                                                           |
+| `views.ts`, `view-props.ts`                                                                     | P2     | view ids, titles, which are wide, which are admin only; what a view gets                                                                                                                                          |
+| `outlet.tsx`                                                                                    | P2     | view id to component                                                                                                                                                                                              |
+| `home.tsx`                                                                                      | P2     | Home: status card, On this page (heading, answers), Read more, More tiles, Get help                                                                                                                               |
+| `ui.tsx`                                                                                        | P2     | shared pieces: `Label`, `List`, `Row`, `Tile`, `Button`, `Actions`, `Kbd`, `Placeholder`                                                                                                                          |
+| `icons.tsx`                                                                                     | P2     | the sheet's icon set                                                                                                                                                                                              |
+| `help.module.css`                                                                               | P2     | the sheet, Home and the shared pieces                                                                                                                                                                             |
+| `api.ts`                                                                                        | P2, P4 | typed client for `/api/help/*` and `/api/update-check`; `postFix` posts `/api/` routes only                                                                                                                       |
+| `page.ts`                                                                                       | P2     | which page (`pageIdFrom`), which side, who is looking                                                                                                                                                             |
+| `links.ts`                                                                                      | P2     | where links go: pages, `openArticleInSheet`, `openArticleInDocs`, Discord, GitHub                                                                                                                                 |
+| `pages/index.ts`                                                                                | P2     | the On this page registry and its types (`PageHelp`, `PageAnswer`, `UseAnswers`, `UseHeading`)                                                                                                                    |
+| `pages/base.ts`                                                                                 | P2     | every page's title, summary and articles                                                                                                                                                                          |
+| `pages/register.ts`                                                                             | P2, P5 | imports base.ts and each page file                                                                                                                                                                                |
+| `pages/kit.tsx`                                                                                 | P5     | what page files build from: `useLive`, `useFeedOrPoll`, `useHealthFindings`, words (`plural`, `spoken`, `ago`), pieces (`Why`, `WhyRow`, `Act`, ...), `runFix` and `FindingBody` for Health findings in an answer |
+| `pages/answers.module.css`                                                                      | P5     | the answers' rows, bars and actions                                                                                                                                                                               |
+| `pages/{active-downloads,video-downloads,requests,wishlist,import,settings,library,search}.tsx` | P5     | live answers per page; settings also names its tab (`useHeading`)                                                                                                                                                 |
+| `pages/answers.test-utils.tsx`                                                                  | P5     | renders answers the way Home does, for the page tests                                                                                                                                                             |
+| `search/index.ts`                                                                               | P3     | the one index: actions, settings (`features/settings/search-entries.ts`), pages, articles; member filtering; recents                                                                                              |
+| `search/rank.ts`                                                                                | P3     | matching and ranking, snippets                                                                                                                                                                                    |
+| `search/actions.ts`                                                                             | P3     | the things search can do, each with its permission                                                                                                                                                                |
+| `search/docs.ts`                                                                                | P3     | the docs articles, from docs.js's registry (`window.SoulSyncDocs.sections()`)                                                                                                                                     |
+| `search/docs.test-utils.ts`                                                                     | P8     | runs the real docs.js and docs-content files for tests                                                                                                                                                            |
+| `search/markdown.tsx`                                                                           | P3     | the docs' markdown as React, for the article view                                                                                                                                                                 |
+| `search/results.tsx`                                                                            | P3     | the inline results view                                                                                                                                                                                           |
+| `search/palette.tsx`                                                                            | P3     | the Ctrl/Cmd K palette (combobox, groups, "Search music for ...")                                                                                                                                                 |
+| `search/search.module.css`                                                                      | P3     | results and palette                                                                                                                                                                                               |
+| `article.tsx`, `article.module.css`                                                             | P3     | a docs article read in the sheet, "Open in Help & Docs"                                                                                                                                                           |
+| `health.tsx`                                                                                    | P4     | Health: summary, Needs you, Worth a look, Finish setting up, Running fine, the fixes                                                                                                                              |
+| `fixes.ts`                                                                                      | P4     | the one fix runner (`runFix`) and openers (`openSettings`, `openPage`), used by Health and the page answers                                                                                                       |
+| `report.tsx`                                                                                    | P4     | Report a problem: what happened, the switchable parts with their exact text, GitHub, Discord, file                                                                                                                |
+| `logs.tsx`                                                                                      | P4     | Logs: every log and its backups, one file, one log or all as a zip, Remove secrets                                                                                                                                |
+| `format.ts`                                                                                     | P4     | sizes and times in plain words                                                                                                                                                                                    |
+| `glyphs.tsx`                                                                                    | P4     | the extra icons the admin views use                                                                                                                                                                               |
+| `switch.tsx`                                                                                    | P4     | the on/off switch Report and Logs use                                                                                                                                                                             |
+| `admin.module.css`                                                                              | P4     | Health, Report and Logs                                                                                                                                                                                           |
+| `release-notes.ts`                                                                              | P6     | the release notes, the one file to edit at release time; `installReleaseNotes`                                                                                                                                    |
+| `whats-new.tsx`, `whats-new.module.css`                                                         | P6     | What's new, with Show me                                                                                                                                                                                          |
+| `shortcut-registry.ts`                                                                          | P6     | every keyboard shortcut, each pointing at its handler                                                                                                                                                             |
+| `shortcuts.tsx`, `shortcuts.module.css`                                                         | P6     | the Shortcuts view                                                                                                                                                                                                |
+| `tours/tours.ts`                                                                                | P6     | the three tours: Getting around, Your first download, Your first video request                                                                                                                                    |
+| `tours/anchors.ts`                                                                              | P6     | every `data-tour` anchor and the component that writes it                                                                                                                                                         |
+| `tours/engine.ts`                                                                               | P6     | the running tour: steps, skip a missing anchor, spotlight                                                                                                                                                         |
+| `tours/layer.tsx`, `tours/tour.module.css`                                                      | P6     | the scrim and the step card                                                                                                                                                                                       |
+| `tours/navigate.ts`, `tours/place.ts`                                                           | P6     | getting to a step's page and finding its anchor; where the card goes                                                                                                                                              |
+| `tours/index.tsx`                                                                               | P6     | `installTours`, `window.SoulSyncTours`, the tour root                                                                                                                                                             |
 
 Outside this folder: `routes/active-downloads/-dl.feed.ts` (the Downloads page's poll, shared with the answers), `features/settings/search-entries.ts` (what search finds in Settings), `features/settings/page-tabs.ts` (the Settings tab you're on).
 
