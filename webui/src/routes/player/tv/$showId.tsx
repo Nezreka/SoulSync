@@ -53,19 +53,24 @@ export const Route = createFileRoute('/player/tv/$showId')({
 });
 
 function EpisodeRow({
+  showId,
   episode,
   files,
   position,
   duration,
   onPlay,
+  onOpen,
   filesKnown = true,
 }: {
+  showId: number;
   episode: DetailEpisode;
   files: VideoFile[];
   position?: number;
   duration?: number | null;
   /** play this episode (and the rest of the show after it), in this version */
   onPlay?: (fileId?: number) => void;
+  /** open this episode's dedicated detail page */
+  onOpen?: () => void;
   /** the show's file list has arrived (until then, ownership is the show's word) */
   filesKnown?: boolean;
 }) {
@@ -86,15 +91,15 @@ function EpisodeRow({
         data-missing={owned ? undefined : 'true'}
         role="button"
         tabIndex={0}
-        aria-label={owned ? `Play episode ${episode.episode_number}` : undefined}
-        aria-disabled={owned ? undefined : 'true'}
-        onClick={() => owned && onPlay?.()}
+        aria-label={`Open episode ${episode.episode_number}: ${episode.title || `Episode ${episode.episode_number}`}`}
+        onClick={() => onOpen?.()}
         onKeyDown={(e) => {
-          if ((e.key === 'Enter' || e.key === ' ') && owned) {
+          if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault();
-            onPlay?.();
+            onOpen?.();
           }
         }}
+        data-show-id={showId}
         data-nav
       >
         <div className={s.rowArt}>
@@ -366,6 +371,7 @@ function ShowPage() {
                     return (
                       <EpisodeRow
                         key={episode.id}
+                        showId={id}
                         episode={episode}
                         files={filesByEpisode.get(episode.id) ?? []}
                         position={
@@ -377,6 +383,12 @@ function ShowPage() {
                         }
                         duration={row?.duration_seconds}
                         onPlay={(fileId) => playFrom(episode.id, fileId)}
+                        onOpen={() =>
+                          void navigate({
+                            to: '/player/tv/$showId/episode/$episodeId',
+                            params: { showId: String(id), episodeId: String(episode.id) },
+                          })
+                        }
                         filesKnown={!!files.data}
                       />
                     );

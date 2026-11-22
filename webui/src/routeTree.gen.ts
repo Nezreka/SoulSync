@@ -78,6 +78,7 @@ import { Route as PlayerMusicArtistArtistIdRouteImport } from './routes/player/m
 import { Route as PlayerMusicAlbumAlbumIdRouteImport } from './routes/player/music/album.$albumId'
 import { Route as PlayerMoviesStudioNameRouteImport } from './routes/player/movies/studio.$name'
 import { Route as PlayerMoviesCollectionCollectionIdRouteImport } from './routes/player/movies/collection.$collectionId'
+import { Route as PlayerTvShowIdEpisodeEpisodeIdRouteImport } from './routes/player/tv/$showId_.episode.$episodeId'
 
 const LibraryV2Route = LibraryV2RouteImport.update({
   id: '/library-v2',
@@ -428,6 +429,12 @@ const PlayerMoviesCollectionCollectionIdRoute =
     path: '/movies/collection/$collectionId',
     getParentRoute: () => PlayerRouteRoute,
   } as any)
+const PlayerTvShowIdEpisodeEpisodeIdRoute =
+  PlayerTvShowIdEpisodeEpisodeIdRouteImport.update({
+    id: '/tv/$showId_/episode/$episodeId',
+    path: '/tv/$showId/episode/$episodeId',
+    getParentRoute: () => PlayerRouteRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -499,6 +506,7 @@ export interface FileRoutesByFullPath {
   '/player/music/playlist/$playlistId': typeof PlayerMusicPlaylistPlaylistIdRoute
   '/player/title/$kind/$tmdbId': typeof PlayerTitleKindTmdbIdRoute
   '/player/tv/network/$name': typeof PlayerTvNetworkNameRoute
+  '/player/tv/$showId/episode/$episodeId': typeof PlayerTvShowIdEpisodeEpisodeIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -566,6 +574,7 @@ export interface FileRoutesByTo {
   '/player/music/playlist/$playlistId': typeof PlayerMusicPlaylistPlaylistIdRoute
   '/player/title/$kind/$tmdbId': typeof PlayerTitleKindTmdbIdRoute
   '/player/tv/network/$name': typeof PlayerTvNetworkNameRoute
+  '/player/tv/$showId/episode/$episodeId': typeof PlayerTvShowIdEpisodeEpisodeIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -638,6 +647,7 @@ export interface FileRoutesById {
   '/player/music/playlist/$playlistId': typeof PlayerMusicPlaylistPlaylistIdRoute
   '/player/title/$kind/$tmdbId': typeof PlayerTitleKindTmdbIdRoute
   '/player/tv/network/$name': typeof PlayerTvNetworkNameRoute
+  '/player/tv/$showId_/episode/$episodeId': typeof PlayerTvShowIdEpisodeEpisodeIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -711,6 +721,7 @@ export interface FileRouteTypes {
     | '/player/music/playlist/$playlistId'
     | '/player/title/$kind/$tmdbId'
     | '/player/tv/network/$name'
+    | '/player/tv/$showId/episode/$episodeId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -778,6 +789,7 @@ export interface FileRouteTypes {
     | '/player/music/playlist/$playlistId'
     | '/player/title/$kind/$tmdbId'
     | '/player/tv/network/$name'
+    | '/player/tv/$showId/episode/$episodeId'
   id:
     | '__root__'
     | '/'
@@ -849,6 +861,7 @@ export interface FileRouteTypes {
     | '/player/music/playlist/$playlistId'
     | '/player/title/$kind/$tmdbId'
     | '/player/tv/network/$name'
+    | '/player/tv/$showId_/episode/$episodeId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -1365,6 +1378,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PlayerMoviesCollectionCollectionIdRouteImport
       parentRoute: typeof PlayerRouteRoute
     }
+    '/player/tv/$showId_/episode/$episodeId': {
+      id: '/player/tv/$showId_/episode/$episodeId'
+      path: '/tv/$showId/episode/$episodeId'
+      fullPath: '/player/tv/$showId/episode/$episodeId'
+      preLoaderRoute: typeof PlayerTvShowIdEpisodeEpisodeIdRouteImport
+      parentRoute: typeof PlayerRouteRoute
+    }
   }
 }
 
@@ -1441,6 +1461,7 @@ interface PlayerRouteRouteChildren {
   PlayerMusicPlaylistPlaylistIdRoute: typeof PlayerMusicPlaylistPlaylistIdRoute
   PlayerTitleKindTmdbIdRoute: typeof PlayerTitleKindTmdbIdRoute
   PlayerTvNetworkNameRoute: typeof PlayerTvNetworkNameRoute
+  PlayerTvShowIdEpisodeEpisodeIdRoute: typeof PlayerTvShowIdEpisodeEpisodeIdRoute
 }
 
 const PlayerRouteRouteChildren: PlayerRouteRouteChildren = {
@@ -1475,6 +1496,7 @@ const PlayerRouteRouteChildren: PlayerRouteRouteChildren = {
   PlayerMusicPlaylistPlaylistIdRoute: PlayerMusicPlaylistPlaylistIdRoute,
   PlayerTitleKindTmdbIdRoute: PlayerTitleKindTmdbIdRoute,
   PlayerTvNetworkNameRoute: PlayerTvNetworkNameRoute,
+  PlayerTvShowIdEpisodeEpisodeIdRoute: PlayerTvShowIdEpisodeEpisodeIdRoute,
 }
 
 const PlayerRouteRouteWithChildren = PlayerRouteRoute._addFileChildren(

@@ -167,9 +167,24 @@ def device_me():
     row = T.get(db, dev["id"]) or {}
     out = T.public_row(row)
     out.pop("last_ip", None)
+    profile_info = None
+    pid = row.get("profile_id")
+    if pid is not None:
+        try:
+            prof = db.get_profile(int(pid))
+            if prof:
+                profile_info = {
+                    "id": int(prof["id"]),
+                    "name": prof.get("name") or "",
+                    "avatar_color": prof.get("avatar_color"),
+                    "avatar_url": prof.get("avatar_url"),
+                }
+        except Exception:  # noqa: BLE001
+            profile_info = None
     return jsonify({
         "success": True,
         "device": out,
+        "profile": profile_info,
         "server": public_view(_identity()),
         "addresses": R.current_addresses(get_database, config_manager),
     })
