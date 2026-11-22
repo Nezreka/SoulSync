@@ -22,6 +22,8 @@ database/*.db.backup_*
 database/*.histbak
 database/backups/
 database/api_call_history.json
+database/connect_cert_*.pem
+database/connect_acme_account_key.pem
 # Runtime caches/download state are instance data, never source assets.
 database/lib2_artwork/
 /downloads/

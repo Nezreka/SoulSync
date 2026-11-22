@@ -26434,6 +26434,14 @@ def start_runtime_services():
         except Exception as _ckpt_err:
             logger.debug(f"could not start the wal checkpoint thread: {_ckpt_err}")
 
+        # SoulSync Connect: obtain/renew wildcard TLS cert, serve HTTPS for
+        # paired mobile/TV apps, and open the blind rendezvous WebSocket.
+        try:
+            from core.connect import rendezvous as _connect_rendezvous
+            _connect_rendezvous.start_runtime(app, get_database, config_manager)
+        except Exception as _connect_err:
+            logger.debug(f"could not start connect runtime: {_connect_err}")
+
         # One-time repair: purge artist album-list cache entries poisoned by
         # partial watchlist probes (limit=5/max_pages=1 results stored in the
         # full-discography slot — artist pages showed only the newest handful

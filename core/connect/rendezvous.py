@@ -17,7 +17,10 @@ from __future__ import annotations
 
 import ipaddress
 import logging
+import os
 import socket
+import ssl
+import threading
 import time
 
 from . import dns_labels
@@ -30,10 +33,33 @@ log = logging.getLogger("soulsync.connect.rendezvous")
 
 DEFAULT_SERVICE_URL = "https://connect.ssync.net"
 ZONE = "connect.ssync.net"
+DEFAULT_TLS_PORT = 8443
+_RENEW_INTERVAL_SECONDS = 12 * 3600
 
 _LIVE_SQL = "used_at IS NULL AND cancelled_at IS NULL AND locked_at IS NULL AND expires_at > ?"
 
 _client: PresenceClient | None = None
+_https_server = None
+_runtime_thread: threading.Thread | None = None
+_runtime_lock = threading.Lock()
+
+
+def connect_tls_port(config_manager=None) -> int:
+    """Port for the dedicated Connect HTTPS listener (default 8443)."""
+    env_val = os.environ.get("SOULSYNC_CONNECT_TLS_PORT")
+    if env_val:
+        try:
+            return int(env_val)
+        except ValueError:
+            pass
+    if config_manager is not None:
+        try:
+            cfg = config_manager.get("connect.tls_port", None)
+            if cfg:
+                return int(cfg)
+        except Exception:  # noqa: BLE001
+            pass
+    return DEFAULT_TLS_PORT
 
 
 def dns_id(identity: ServerIdentity) -> str:
@@ -147,7 +173,7 @@ def _identity_and_store(get_database, config_manager):
     return identity, CertificateStore(state_dir())
 
 
-def start(get_database, config_manager) -> PresenceClient | None:
+def start(get_database, config_manager, *, port: int | None = None) -> PresenceClient | None:
     """Start presence if the server has a certificate. Idempotent."""
     global _client
     if _client is not None:
@@ -156,7 +182,7 @@ def start(get_database, config_manager) -> PresenceClient | None:
     if not store.fingerprint():
         log.info("connect rendezvous: no TLS certificate yet; presence not started")
         return None
-    from .addresses import web_port
+    tls_port = port if port is not None else connect_tls_port(config_manager)
 
     service_url = ""
     try:
@@ -170,13 +196,71 @@ def start(get_database, config_manager) -> PresenceClient | None:
         registrations_provider=lambda: _registrations(db),
         is_live=lambda code_hash: _is_live(db, code_hash),
         address_provider=lambda observed: build_address_list(
-            identity, observed_public_ip=observed, lan_ips=_local_lan_ips(), port=web_port()
+            identity, observed_public_ip=observed, lan_ips=_local_lan_ips(), port=tls_port
         ),
         cert_fingerprint_provider=store.fingerprint,
     )
     _client.start()
-    log.info("connect rendezvous: presence started for %s", identity.fingerprint)
+    log.info("connect rendezvous: presence started for %s (https port %s)", identity.fingerprint, tls_port)
     return _client
+
+
+def _start_https_listener(app, store: CertificateStore, host: str, port: int) -> None:
+    """Start (or restart on cert renewal) the dedicated Connect HTTPS listener."""
+    global _https_server
+    if _https_server is not None:
+        try:
+            _https_server.shutdown()
+        except Exception:  # noqa: BLE001
+            pass
+        _https_server = None
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+    ctx.load_cert_chain(certfile=str(store.chain_path), keyfile=str(store.key_path))
+    from werkzeug.serving import make_server
+
+    srv = make_server(host, port, app, threaded=True, ssl_context=ctx)
+    _https_server = srv
+    threading.Thread(target=srv.serve_forever, daemon=True, name="ConnectHttpsListener").start()
+    log.info("connect https: listening on https://%s:%s (cert %s)", host, port, store.fingerprint()[:12])
+
+
+def start_runtime(app, get_database, config_manager) -> None:
+    """Background Connect bootstrap: obtain/renew the wildcard TLS cert, start
+    the dedicated HTTPS listener, and connect the rendezvous WebSocket.
+
+    Safe to call once from start_runtime_services(); never blocks startup and
+    skips automatically inside pytest or when SOULSYNC_CONNECT_DISABLE=1.
+    """
+    global _runtime_thread
+    if os.environ.get("PYTEST_CURRENT_TEST") or os.environ.get("SOULSYNC_CONNECT_DISABLE") == "1":
+        return
+    with _runtime_lock:
+        if _runtime_thread is not None:
+            return
+
+        def _worker() -> None:
+            host = os.environ.get("SOULSYNC_WEB_BIND_HOST", "0.0.0.0")
+            tls_port = connect_tls_port(config_manager)
+            backoff = 15
+            while True:
+                try:
+                    renewed = ensure_certificate(get_database, config_manager)
+                    _, store = _identity_and_store(get_database, config_manager)
+                    if store.fingerprint():
+                        if _https_server is None or renewed:
+                            _start_https_listener(app, store, host, tls_port)
+                        start(get_database, config_manager, port=tls_port)
+                        backoff = 15
+                        time.sleep(_RENEW_INTERVAL_SECONDS)
+                        continue
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("connect runtime: setup attempt failed (%s); retrying in %ss", exc, backoff)
+                time.sleep(backoff)
+                backoff = min(backoff * 2, 600)
+
+        _runtime_thread = threading.Thread(target=_worker, daemon=True, name="ConnectRuntime")
+        _runtime_thread.start()
 
 
 def register_created(code_hash_hex: str, ttl_seconds: int) -> None:
