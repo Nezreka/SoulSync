@@ -155,8 +155,10 @@ def format_busy_threads(before: Dict[int, float], after: Dict[int, float],
         where = ""
         frame = frames.get(idents.get(tid))
         if frame is not None:
-            last = traceback.extract_stack(frame)[-1]
-            where = f" at {last.filename.rsplit('SoulSync', 1)[-1]}:{last.lineno} {last.name}"
+            # straight from the frame: traceback.extract_stack read every
+            # frame's source line, and linecache then kept each whole file
+            code = frame.f_code
+            where = f" at {code.co_filename.rsplit('SoulSync', 1)[-1]}:{frame.f_lineno} {code.co_name}"
         lines.append(f"  {names.get(tid, f'thread {tid}')}: {cpu / elapsed * 100:.0f}% of a core{where}")
     return (f"The server used {total / elapsed * 100:.0f}% of a core over the last "
             f"{elapsed:.0f}s; busiest threads:\n" + "\n".join(lines))
@@ -195,7 +197,9 @@ def _innermost_app_frame(thread_name: str) -> str:
     frame = sys._current_frames().get(idents.get(thread_name))
     if frame is None:
         return "its stack is gone"
-    for entry in reversed(traceback.extract_stack(frame)):
+    # lookup_lines=False: only file, line and function are needed, and reading
+    # the source lines made linecache keep every file of the stack
+    for entry in reversed(traceback.StackSummary.extract(traceback.walk_stack(frame), lookup_lines=False)[::-1]):
         path = entry.filename.replace("\\", "/")
         if "/site-packages/" in path or "/lib/python" in path:
             continue
