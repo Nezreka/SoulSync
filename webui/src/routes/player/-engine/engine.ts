@@ -329,7 +329,7 @@ export class PlayerEngine {
   jump(index: number) {
     this.saveNow();
     this.set({ queue: Q.goTo(this.state.queue, index) });
-    void this.load();
+    void this.load({ live: this.state.live });
   }
 
   next() {
@@ -885,11 +885,12 @@ export class PlayerEngine {
     });
   }
 
-  /** once per play: into the credits of a movie or episode, it's watched */
+  /** once per play: into the credits of a movie or episode, it's watched (guide/live only marks movies) */
   private checkWatched(position: number) {
     const item = this.state.item;
     const duration = this.state.duration;
     if (!item || (item.type !== 'movie' && item.type !== 'episode')) return;
+    if (this.state.live && item.type !== 'movie') return;
     if (!duration || position < duration * WATCHED_AT) return;
     const key = `${item.type}:${item.id}`;
     if (this.state.watchedKey === key) return;
@@ -924,7 +925,7 @@ export class PlayerEngine {
     this.chosen();
     if (to === null) return;
     this.set({ queue: Q.goTo(this.state.queue, to) });
-    void this.load();
+    void this.load({ live: this.state.live });
   }
 
   private onEnded() {
@@ -959,7 +960,7 @@ export class PlayerEngine {
       this.autoRun++;
     }
     this.set({ queue: Q.goTo(this.state.queue, to) });
-    void this.load();
+    void this.load({ live: this.state.live });
   }
 
   private crossfadeInFlightKey: string | null = null;
@@ -993,7 +994,7 @@ export class PlayerEngine {
     this.save(true);
     this.stopSaving();
     this.set({ queue: Q.goTo(this.state.queue, to) });
-    void this.load();
+    void this.load({ live: this.state.live });
   }
 
   private checkSleep() {

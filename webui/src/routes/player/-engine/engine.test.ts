@@ -151,17 +151,33 @@ describe('player engine', () => {
     expect(t.saves).toEqual([]);
   });
 
-  it('a guide channel joined mid-way saves nothing of its own', async () => {
+  it('a guide channel joined mid-way saves nothing of its own, even when advancing to the next item', async () => {
+    const marked: string[] = [];
     const t = setup({
       saved: { position: 10, finished: false },
       playable: (item) => ({ url: `/s/${item.type}/${item.id}`, duration: 5400 }),
     });
-    t.engine.playItems([movie('1')], 0, { startAt: 600, live: true });
+    (t.engine as unknown as { deps: EngineDeps }).deps.watched = (i) => marked.push(`${i.type}:${i.id}`);
+    const ep1: PlayItem = { type: 'episode', id: '101', title: 'Ep 1' };
+    const mov2: PlayItem = movie('202');
+    t.engine.playItems([ep1, mov2], 0, { startAt: 600, live: true });
     await t.flush();
     expect(t.media.video!.currentTime).toBe(600);
+    t.media.video!.duration = 5400;
+    t.media.video!.tick(5100); // >92% of episode on live guide: should NOT mark episode watched
+    t.every10s();
+    expect(t.saves).toEqual([]);
+    expect(marked).toEqual([]);
+    // Advance to next item in guide queue: live flag must stay true
+    t.media.video!.finish();
+    await t.flush();
+    expect(t.engine.getState().live).toBe(true);
+    t.media.video!.duration = 5400;
     t.media.video!.tick(700);
     t.every10s();
     expect(t.saves).toEqual([]);
+    t.media.video!.tick(5100); // >92% of movie on live guide: DOES mark movie watched
+    expect(marked).toEqual(['movie:202']);
   });
 
   it('a file a browser cannot play says so instead of playing', async () => {

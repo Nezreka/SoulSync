@@ -712,7 +712,7 @@ export function GuideDetail({
             type="button"
             data-nav
             onClick={() => {
-              playItems(startQueue);
+              playItems(startQueue, 0, { startAt: 0, live: true });
               onClose();
             }}
             style={{
