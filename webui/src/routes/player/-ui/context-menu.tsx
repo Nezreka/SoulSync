@@ -261,7 +261,7 @@ export function ContextMenuHost() {
       }
       if (target.kind === 'show' && Number.isFinite(idNum)) {
         const show = await qc.fetchQuery(showDetailQuery(idNum));
-        const eps = episodeItems(show);
+        const eps = episodeItems(show, show.seasons ?? []);
         if (eps.length) {
           playItems(eps, 0);
           closeContextMenu();
@@ -270,6 +270,7 @@ export function ContextMenuHost() {
       }
       if (target.kind === 'album' && Number.isFinite(idNum)) {
         const album = await qc.fetchQuery(albumQuery(idNum));
+        if (!album) throw new Error('album not found');
         const items = albumItems(album);
         if (items.length) {
           playItems(items, shuffle ? Math.floor(Math.random() * items.length) : 0);
@@ -308,6 +309,7 @@ export function ContextMenuHost() {
     try {
       if (target.kind === 'album' && Number.isFinite(idNum)) {
         const album = await qc.fetchQuery(albumQuery(idNum));
+        if (!album) throw new Error('album not found');
         const items = albumItems(album);
         if (items.length) {
           getEngine().append(items);
@@ -341,10 +343,11 @@ export function ContextMenuHost() {
     setBusyMsg('Loading tracks…');
     try {
       const album = await qc.fetchQuery(albumQuery(idNum));
+      if (!album) throw new Error('album not found');
       const items = albumItems(album);
       const songs: SongRef[] = items.map((it) => ({
         title: it.title,
-        artist: it.subtitle,
+        artist: it.subtitle ?? '',
         album: album.title,
         duration_ms: it.duration ? Math.round(it.duration * 1000) : null,
         lib2_track_id: Number(it.id),
