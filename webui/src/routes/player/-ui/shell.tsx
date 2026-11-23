@@ -5,7 +5,7 @@
  */
 
 import { useQuery } from '@tanstack/react-query';
-import { Link, Outlet, useRouterState } from '@tanstack/react-router';
+import { Link, Outlet, useRouter, useRouterState } from '@tanstack/react-router';
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 
@@ -29,9 +29,59 @@ import { NAV, NAV_GROUPS, useSections, type NavEntry } from './sections';
 import { Sheet } from './sheet';
 import { focusFirstIn, useSpatialNav } from './use-spatial-nav';
 
+const TOP_LEVEL_PATHS = new Set([
+  '/player',
+  '/player/',
+  '/player/guide',
+  '/player/movies',
+  '/player/tv',
+  '/player/music',
+  '/player/youtube',
+  '/player/podcasts',
+  '/player/audiobooks',
+  '/player/watchlist',
+  '/player/watching',
+  '/player/collections',
+  '/player/settings',
+]);
+
+function fallbackParentFor(pathname: string): string {
+  if (pathname.startsWith('/player/movies/')) return '/player/movies';
+  if (pathname.startsWith('/player/tv/')) return '/player/tv';
+  if (pathname.startsWith('/player/music/')) return '/player/music';
+  if (pathname.startsWith('/player/youtube/')) return '/player/youtube';
+  if (pathname.startsWith('/player/podcasts/')) return '/player/podcasts';
+  if (pathname.startsWith('/player/audiobooks/')) return '/player/audiobooks';
+  if (pathname.startsWith('/player/collections/')) return '/player/collections';
+  return '/player';
+}
+
 const CARD_SCALE_RANGE: CardSizeRange = { min: 64, max: 160, base: 100 };
 
 const COLLAPSE_KEY = 'ss-player-side-collapsed';
+
+function SmartBackButton({ pathname }: { pathname: string }) {
+  const router = useRouter();
+  const handleBack = () => {
+    if (window.history.length > 1) {
+      router.history.back();
+    } else {
+      void router.navigate({ to: fallbackParentFor(pathname) });
+    }
+  };
+  return (
+    <button
+      type="button"
+      className={s.smartBackBtn}
+      onClick={handleBack}
+      aria-label="Go back"
+      data-nav
+    >
+      <BackIcon />
+      <span>Back</span>
+    </button>
+  );
+}
 
 function readCollapsed(): boolean {
   try {
@@ -304,6 +354,7 @@ export function PlayerShell({ profileId }: { profileId: number | null }) {
       <Sidebar collapsed={collapsed} onToggle={toggleCollapsed} />
       <main className={s.main} ref={mainRef} onScroll={onMainScroll}>
         <div className={s.header} data-scrolled={scrolled ? 'true' : undefined}>
+          {!TOP_LEVEL_PATHS.has(pathname) ? <SmartBackButton pathname={pathname} /> : null}
           <Search />
           <div className={s.headerEnd}>
             <ProfileChip

@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react';
 
 import type { DetailEpisode, VideoFile } from '../-player.types';
 
-import { remaining, runtime, shortDate } from '../-lib/format';
+import { remaining, shortDate } from '../-lib/format';
 import { backdropSet, remoteImage, stillSet, WIDE_SIZES } from '../-lib/images';
 import { episodeItems } from '../-lib/play-items';
 import { backdropUrl, fraction, moreLikeThis, posterUrl, proxiedImage } from '../-lib/rails';
@@ -155,11 +155,14 @@ function EpisodeRow({
     reqResult?.state === 'on-the-way' ||
     reqResult?.state === 'owned';
   return (
-    <div>
+    <div
+      className={s.episodeCard}
+      data-expanded={expanded ? 'true' : undefined}
+      data-watched={episode.watched ? 'true' : undefined}
+      data-missing={owned ? undefined : 'true'}
+    >
       <div
-        className={s.row}
-        data-media="true"
-        data-missing={owned ? undefined : 'true'}
+        className={s.episodeHeader}
         role="button"
         tabIndex={0}
         aria-expanded={expanded}
@@ -175,7 +178,7 @@ function EpisodeRow({
         data-nav
       >
         <div
-          className={s.rowArt}
+          className={s.episodeStill}
           onClick={(e) => {
             if (owned) {
               e.stopPropagation();
@@ -189,6 +192,25 @@ function EpisodeRow({
             sizes={WIDE_SIZES}
             alt={`Episode ${episode.episode_number}`}
           />
+          <div className={s.episodeStillVignette} aria-hidden="true" />
+          <span className={s.episodeNumBadge}>
+            E{String(episode.episode_number).padStart(2, '0')}
+          </span>
+          {episode.watched ? (
+            <span className={s.episodeWatchedBadge} title="Watched" aria-label="Watched">
+              ✓
+            </span>
+          ) : null}
+          {owned ? (
+            <span className={s.episodePlayOrb} aria-hidden="true">
+              ▶
+            </span>
+          ) : (
+            <span className={s.episodeMissingPill}>MISSING</span>
+          )}
+          {seconds ? (
+            <span className={s.episodeRuntimeBadge}>{Math.max(1, Math.round(seconds / 60))}m</span>
+          ) : null}
           {done !== undefined ? (
             <div className={s.rowBar}>
               <div className={s.progressFill} style={{ width: `${done * 100}%` }} />
@@ -197,14 +219,14 @@ function EpisodeRow({
         </div>
         <div className={s.rowMain}>
           <span className={s.rowTitle}>
-            {episode.episode_number}. {episode.title || `Episode ${episode.episode_number}`}
+            {episode.title || `Episode ${episode.episode_number}`}
           </span>
           <span className={s.rowSub}>
             {[
               shortDate(episode.air_date),
-              runtime(seconds),
               episode.rating ? `★ ${episode.rating.toFixed(1)}` : '',
-              owned ? '' : 'not in your library',
+              best?.resolution ? resolutionLabel(best.resolution) : '',
+              owned ? '' : 'Not in library',
             ]
               .filter(Boolean)
               .join(' · ')}
@@ -218,20 +240,18 @@ function EpisodeRow({
           {canRequestEpisode ? (
             <button
               type="button"
-              className={reqDone ? s.ghostBtn : s.playBtn}
+              className={reqDone ? s.btn : s.epActionPrimary}
               disabled={reqBusy || reqDone}
               onClick={(e) => {
                 e.stopPropagation();
                 void handleRequestEpisode();
               }}
-              style={{ padding: '6px 12px', fontSize: '0.8rem', minHeight: 32 }}
+              style={reqDone ? { height: 34, padding: '0 13px', fontSize: '0.8rem' } : { height: 34, padding: '0 14px', fontSize: '0.8rem' }}
               data-nav
             >
               {reqLabel}
             </button>
           ) : null}
-          {episode.watched ? <Badge tone="yes">Watched</Badge> : null}
-          {best?.resolution ? <Badge>{resolutionLabel(best.resolution)}</Badge> : null}
           {files.length > 1 ? (
             <button
               type="button"
@@ -252,26 +272,18 @@ function EpisodeRow({
         </div>
       </div>
       {expanded ? (
-        <div
-          className={s.rowMore}
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 14,
-            padding: '16px 18px',
-            borderRadius: 14,
-            background: 'rgba(255, 255, 255, 0.03)',
-            border: '1px solid var(--pl-line, rgba(255,255,255,0.08))',
-            marginTop: 6,
-          }}
-        >
-          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
-            <Badge>{epCode}</Badge>
-            {best?.resolution ? <Badge>{resolutionLabel(best.resolution)}</Badge> : null}
-            {best?.dynamic_range ? <Badge>{best.dynamic_range}</Badge> : null}
-            {best?.atmos ? <Badge>Atmos</Badge> : null}
+        <div className={s.episodeExpandBody}>
+          <div className={s.episodeChipRow}>
+            <span className={s.epChipAccent}>{epCode}</span>
+            {best?.resolution ? (
+              <span className={s.epChip}>{resolutionLabel(best.resolution)}</span>
+            ) : null}
+            {best?.dynamic_range ? <span className={s.epChip}>{best.dynamic_range}</span> : null}
+            {best?.atmos ? <span className={s.epChip}>Atmos</span> : null}
             {episode.rating || epExtra.data?.rating ? (
-              <Badge>★ {(episode.rating ?? epExtra.data?.rating ?? 0).toFixed(1)}</Badge>
+              <span className={s.epChipGold}>
+                ★ {(episode.rating ?? epExtra.data?.rating ?? 0).toFixed(1)}
+              </span>
             ) : null}
             {langs.audio.length ? (
               <span style={{ fontSize: '0.8rem', color: 'var(--pl-text-2)' }}>
@@ -286,26 +298,35 @@ function EpisodeRow({
           </div>
 
           {overview ? (
-            <p style={{ margin: 0, color: 'var(--pl-text-2)', fontSize: '0.93rem', lineHeight: 1.6 }}>
+            <p style={{ margin: 0, color: 'var(--pl-text-2)', fontSize: '0.94rem', lineHeight: 1.62 }}>
               {overview}
             </p>
           ) : null}
 
-          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10 }}>
+          <div className={s.episodeChipRow}>
             {owned ? (
-              <PlayButton
-                label={position && done !== undefined && done < 1 ? 'Resume episode' : 'Play episode'}
-                onPlay={() => onPlay?.()}
-              />
+              <button
+                type="button"
+                className={s.epActionPrimary}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onPlay?.();
+                }}
+                data-nav
+              >
+                <span aria-hidden="true">▶</span>
+                {position && done !== undefined && done < 1 ? 'Resume episode' : 'Play episode'}
+              </button>
             ) : canRequestEpisode ? (
               <button
                 type="button"
-                className={reqDone ? s.ghostBtn : s.playBtn}
+                className={reqDone ? s.btn : s.epActionPrimary}
                 disabled={reqBusy || reqDone}
                 onClick={(e) => {
                   e.stopPropagation();
                   void handleRequestEpisode();
                 }}
+                style={reqDone ? { height: 36, padding: '0 14px', fontSize: '0.82rem' } : undefined}
                 data-nav
               >
                 {reqLabel}
@@ -323,47 +344,37 @@ function EpisodeRow({
           </div>
 
           {epCrew.length > 0 ? (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 18px', fontSize: '0.84rem' }}>
-              {epCrew.map((c, idx) => (
-                <span key={`${c.job}-${c.name}-${idx}`} style={{ color: 'var(--pl-text-2)' }}>
-                  <strong style={{ color: 'var(--pl-text-3, #8f98ab)', fontWeight: 600 }}>
-                    {c.job}:{' '}
-                  </strong>
-                  {c.tmdb_id ? (
-                    <Link
-                      to="/player/person/$personId"
-                      params={{ personId: String(c.tmdb_id) }}
-                      style={{ color: 'var(--pl-text)', textDecoration: 'none', fontWeight: 500 }}
-                      data-nav
-                    >
-                      {c.name}
-                    </Link>
-                  ) : (
-                    <span style={{ color: 'var(--pl-text)' }}>{c.name}</span>
-                  )}
-                </span>
-              ))}
+            <div className={s.episodeChipRow}>
+              {epCrew.map((c, idx) =>
+                c.tmdb_id ? (
+                  <Link
+                    key={`${c.job}-${c.name}-${idx}`}
+                    to="/player/person/$personId"
+                    params={{ personId: String(c.tmdb_id) }}
+                    className={s.episodeCrewChip}
+                    data-nav
+                  >
+                    <span className={s.episodeCrewJob}>{c.job}:</span>
+                    <span>{c.name}</span>
+                  </Link>
+                ) : (
+                  <span key={`${c.job}-${c.name}-${idx}`} className={s.episodeCrewChip}>
+                    <span className={s.episodeCrewJob}>{c.job}:</span>
+                    <span>{c.name}</span>
+                  </span>
+                ),
+              )}
             </div>
           ) : null}
 
           {guestStars.length > 0 ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <span
-                style={{
-                  fontSize: '0.76rem',
-                  fontWeight: 700,
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.07em',
-                  color: 'var(--pl-text-2)',
-                }}
-              >
-                Guest stars & cast
-              </span>
+              <span className={s.episodeSubheading}>Guest stars &amp; cast</span>
               <HScroll className={s.people}>
                 {guestStars.map((g, idx) => {
                   const content = (
                     <>
-                      <span className={s.personArt}>
+                      <span className={s.personPhoto}>
                         <Art src={remoteImage(g.photo)} alt={g.name} />
                       </span>
                       <span className={s.personName}>{g.name}</span>
@@ -390,7 +401,7 @@ function EpisodeRow({
             </div>
           ) : epExtra.isLoading && showTmdbId ? (
             <span style={{ fontSize: '0.82rem', color: 'var(--pl-text-2)' }}>
-              Loading episode cast & details…
+              Loading episode cast &amp; details…
             </span>
           ) : null}
 
@@ -400,7 +411,7 @@ function EpisodeRow({
         </div>
       ) : null}
       {open && !expanded ? (
-        <div className={s.rowMore}>
+        <div className={s.episodeExpandBody}>
           <VersionPicker files={files} onChange={(fileId) => onPlay?.(fileId)} />
         </div>
       ) : null}
@@ -554,30 +565,45 @@ function ShowPage() {
       <DetailLayout
         main={
           <>
-            <Section title="Episodes">
+            <Section title={seasons.length > 1 ? `Seasons (${seasons.length})` : 'Episodes'}>
               {seasons.length > 1 ? (
-                <HScroll className={s.seasonPicker}>
+                <HScroll className={s.seasonStrip}>
                   {seasons.map((x) => {
-                    const owned = x.episode_owned ?? 0;
-                    const total = x.episode_total ?? x.episodes.length;
+                    const sOwned = x.episode_owned ?? 0;
+                    const sTotal = Math.max(x.episode_total ?? 0, x.episodes.length);
+                    const pct = sTotal > 0 ? Math.min(100, Math.round((sOwned / sTotal) * 100)) : 0;
+                    const label =
+                      x.title?.trim() ||
+                      (x.season_number === 0 ? 'Specials' : `Season ${x.season_number}`);
+                    const art =
+                      x.has_poster && x.id > 0
+                        ? posterUrl('season', x.id, 342)
+                        : show.has_poster !== false
+                          ? posterUrl('show', id, 342)
+                          : null;
                     return (
                       <button
                         key={x.season_number}
                         type="button"
-                        className={s.seasonPill}
+                        className={s.seasonCard}
                         aria-pressed={x.season_number === current?.season_number}
-                        data-empty={owned === 0 ? 'true' : undefined}
-                        title={`${owned} of ${total} episodes in your library`}
+                        title={`${sOwned} of ${sTotal} episodes in your library`}
                         onClick={() =>
                           void navigate({ search: { season: x.season_number }, replace: true })
                         }
                         data-nav
                       >
-                        {x.season_number === 0
-                          ? 'Specials'
-                          : seasons.length > 8
-                            ? `S${x.season_number}`
-                            : `Season ${x.season_number}`}
+                        <span className={s.seasonPoster}>
+                          <Art src={art} alt={label} />
+                          <span className={s.seasonVignette} aria-hidden="true" />
+                          <span className={s.seasonCountPill}>
+                            {sOwned}/{sTotal}
+                          </span>
+                          <span className={s.seasonBar} aria-hidden="true">
+                            <span className={s.seasonBarFill} style={{ width: `${pct}%` }} />
+                          </span>
+                        </span>
+                        <span className={s.seasonCardTitle}>{label}</span>
                       </button>
                     );
                   })}
@@ -594,20 +620,20 @@ function ShowPage() {
                   </span>
                   {(current.episode_owned ?? 0) <
                   (current.episode_total ?? current.episodes.length) ? (
-                    <label className={s.check}>
-                      <input
-                        type="checkbox"
-                        checked={onlyMine}
-                        onChange={(e) => setOnlyMine(e.target.checked)}
-                        data-nav
-                      />{' '}
-                      Only what I have
-                    </label>
+                    <button
+                      type="button"
+                      className={s.filterPill}
+                      aria-pressed={onlyMine}
+                      onClick={() => setOnlyMine((v) => !v)}
+                      data-nav
+                    >
+                      {onlyMine ? '✓ In library only' : 'In library only'}
+                    </button>
                   ) : null}
                 </div>
               ) : null}
 
-              <div className={s.list} aria-label="Episodes">
+              <div className={s.episodeList} aria-label="Episodes">
                 {(current?.episodes ?? [])
                   .filter((e) => !onlyMine || e.owned !== false)
                   .slice()

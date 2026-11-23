@@ -2939,11 +2939,13 @@
 .infoPanel {
   display: flex;
   flex-direction: column;
-  gap: calc(var(--u) * 0.7);
-  padding: calc(var(--u) * 1.1) calc(var(--u) * 1.2);
-  border: 1px solid var(--pl-line);
-  border-radius: var(--radius-sheet);
-  background: var(--white-a03);
+  gap: calc(var(--u) * 0.75);
+  padding: calc(var(--u) * 1.2) calc(var(--u) * 1.3);
+  border: 1px solid var(--white-a08);
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(24, 26, 38, 0.78), rgba(16, 18, 27, 0.72));
+  backdrop-filter: blur(14px);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
 .infoPanel .facts {
@@ -3394,6 +3396,478 @@
   align-items: center;
   justify-content: space-between;
   gap: calc(var(--u) * 0.8);
+}
+
+/* ── Android-parity Cinema Season Poster Strip & Episode Cards ───────── */
+
+.seasonStrip {
+  display: flex;
+  gap: calc(var(--u) * 0.9);
+  padding: calc(var(--u) * 0.35) calc(var(--u) * 0.15) calc(var(--u) * 0.85);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.seasonCard {
+  flex: none;
+  width: calc(var(--u) * 8.4);
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 0.45);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: transform 180ms var(--pl-ease);
+}
+
+.seasonCard:hover {
+  transform: translateY(-3px);
+}
+
+.seasonPoster {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  border-radius: 13px;
+  overflow: hidden;
+  background: rgba(22, 24, 34, 0.9);
+  border: 1px solid var(--white-a10);
+  transition:
+    border-color 180ms ease,
+    box-shadow 180ms ease;
+}
+
+.seasonCard[aria-pressed='true'] .seasonPoster {
+  border-color: var(--accent);
+  box-shadow:
+    0 0 0 1px var(--accent),
+    0 12px 28px rgba(var(--accent-rgb), 0.24);
+}
+
+.seasonPoster img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.76;
+  transition:
+    opacity 180ms ease,
+    transform 240ms var(--pl-ease);
+}
+
+.seasonCard[aria-pressed='true'] .seasonPoster img,
+.seasonCard:hover .seasonPoster img {
+  opacity: 1;
+}
+
+.seasonCard:hover .seasonPoster img {
+  transform: scale(1.03);
+}
+
+.seasonVignette {
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 46%;
+  background: linear-gradient(180deg, transparent, rgba(0, 0, 0, 0.86));
+  pointer-events: none;
+}
+
+.seasonCountPill {
+  position: absolute;
+  left: 8px;
+  bottom: 10px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.76);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #fff;
+  font-size: calc(var(--u) * 0.72);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.seasonCard[aria-pressed='true'] .seasonCountPill {
+  background: var(--accent);
+  border-color: transparent;
+  color: #090b10;
+}
+
+.seasonBar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.seasonBarFill {
+  height: 100%;
+  background: var(--accent);
+}
+
+.seasonCardTitle {
+  font-size: calc(var(--u) * 0.86);
+  font-weight: 600;
+  color: var(--pl-text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.seasonCard[aria-pressed='true'] .seasonCardTitle {
+  color: var(--pl-text);
+  font-weight: 700;
+}
+
+.episodeList {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 0.75);
+}
+
+.episodeCard {
+  border-radius: 15px;
+  background: linear-gradient(180deg, rgba(22, 24, 35, 0.82), rgba(16, 18, 27, 0.76));
+  border: 1px solid var(--white-a08);
+  transition:
+    background 180ms ease,
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    transform 180ms var(--pl-ease);
+  overflow: hidden;
+}
+
+.episodeCard:hover {
+  background: linear-gradient(180deg, rgba(28, 31, 44, 0.9), rgba(20, 22, 33, 0.86));
+  border-color: var(--white-a15);
+}
+
+.episodeCard[data-expanded='true'] {
+  background: linear-gradient(180deg, rgba(28, 31, 46, 0.95), rgba(19, 21, 32, 0.92));
+  border-color: rgba(var(--accent-rgb), 0.55);
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.42);
+}
+
+.episodeCard[data-watched='true']:not([data-expanded='true']) {
+  border-color: rgba(var(--accent-rgb), 0.25);
+}
+
+.episodeCard[data-missing='true'] {
+  background: rgba(16, 18, 26, 0.55);
+}
+
+.episodeHeader {
+  display: grid;
+  grid-template-columns: calc(var(--u) * 14.5) 1fr auto;
+  align-items: center;
+  gap: calc(var(--u) * 1.1);
+  padding: calc(var(--u) * 0.8);
+  cursor: pointer;
+}
+
+@media (max-width: 720px) {
+  .episodeHeader {
+    grid-template-columns: calc(var(--u) * 9.5) 1fr;
+  }
+}
+
+.episodeStill {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  border-radius: 10px;
+  overflow: hidden;
+  background: rgba(10, 12, 18, 0.9);
+  border: 1px solid var(--white-a08);
+}
+
+.episodeStill img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 220ms var(--pl-ease);
+}
+
+.episodeCard[data-missing='true'] .episodeStill img {
+  opacity: 0.48;
+}
+
+.episodeStill:hover img {
+  transform: scale(1.04);
+}
+
+.episodeStillVignette {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.28) 0%, transparent 45%, rgba(0, 0, 0, 0.62) 100%);
+  pointer-events: none;
+}
+
+.episodeNumBadge {
+  position: absolute;
+  top: 7px;
+  left: 7px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.74);
+  backdrop-filter: blur(6px);
+  color: #fff;
+  font-size: calc(var(--u) * 0.72);
+  font-weight: 800;
+  letter-spacing: 0.03em;
+}
+
+.episodeWatchedBadge {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #080a0f;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  font-weight: 900;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+.episodePlayOrb {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 38px;
+  height: 38px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(6px);
+  border: 1px solid rgba(255, 255, 255, 0.36);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  transition:
+    transform 160ms var(--pl-ease),
+    background 160ms ease,
+    border-color 160ms ease;
+}
+
+.episodeStill:hover .episodePlayOrb {
+  transform: translate(-50%, -50%) scale(1.1);
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #090b10;
+}
+
+.episodeMissingPill {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.76);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: var(--pl-text-2);
+  font-size: calc(var(--u) * 0.68);
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.episodeRuntimeBadge {
+  position: absolute;
+  right: 7px;
+  bottom: 7px;
+  padding: 2px 6px;
+  border-radius: 5px;
+  background: rgba(0, 0, 0, 0.74);
+  color: rgba(255, 255, 255, 0.92);
+  font-size: calc(var(--u) * 0.7);
+  font-weight: 650;
+}
+
+.episodeExpandBody {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 0.95);
+  padding: calc(var(--u) * 0.9) calc(var(--u) * 1.1) calc(var(--u) * 1.15);
+  border-top: 1px solid var(--white-a08);
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.episodeChipRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.episodeCrewChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 11px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--white-a10);
+  font-size: calc(var(--u) * 0.8);
+  color: var(--pl-text-2);
+  text-decoration: none;
+  transition: background 140ms ease, border-color 140ms ease;
+}
+
+.episodeCrewChip:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: var(--white-a20);
+  color: var(--pl-text);
+}
+
+.episodeCrewJob {
+  color: var(--pl-text-3);
+  font-weight: 600;
+}
+
+.episodeSubheading {
+  font-size: calc(var(--u) * 0.74);
+  font-weight: 750;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--pl-text-3);
+}
+
+.epChip,
+.epChipAccent,
+.epChipGold {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: calc(var(--u) * 0.76);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.epChip {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--pl-text);
+}
+
+.epChipAccent {
+  background: rgba(var(--accent-rgb), 0.16);
+  border: 1px solid rgba(var(--accent-rgb), 0.42);
+  color: var(--accent-light, #a78bfa);
+}
+
+.epChipGold {
+  background: rgba(245, 197, 24, 0.16);
+  border: 1px solid rgba(245, 197, 24, 0.34);
+  color: #f5c518;
+}
+
+.epActionPrimary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  height: 36px;
+  padding: 0 18px;
+  border: none;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #090b10;
+  font: inherit;
+  font-size: calc(var(--u) * 0.84);
+  font-weight: 750;
+  cursor: pointer;
+  transition:
+    filter 140ms ease,
+    transform 140ms var(--pl-ease);
+}
+
+.epActionPrimary:hover {
+  filter: brightness(1.08);
+}
+
+.epActionPrimary:active {
+  transform: scale(0.97);
+}
+
+.epActionPrimary:disabled {
+  opacity: 0.65;
+  cursor: default;
+  transform: none;
+}
+
+.filterPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 13px;
+  border-radius: 999px;
+  border: 1px solid var(--white-a12);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--pl-text-2);
+  font: inherit;
+  font-size: calc(var(--u) * 0.8);
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease;
+}
+
+.filterPill:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--pl-text);
+}
+
+.filterPill[aria-pressed='true'] {
+  background: rgba(var(--accent-rgb), 0.2);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.smartBackBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: calc(var(--u) * 2.55);
+  padding: 0 calc(var(--u) * 0.95) 0 calc(var(--u) * 0.7);
+  border-radius: 999px;
+  border: 1px solid var(--white-a12);
+  background: rgba(20, 22, 32, 0.72);
+  backdrop-filter: blur(12px);
+  color: var(--pl-text);
+  font: inherit;
+  font-size: calc(var(--u) * 0.86);
+  font-weight: 600;
+  cursor: pointer;
+  flex: none;
+  transition:
+    background 140ms ease,
+    border-color 140ms ease,
+    transform 140ms var(--pl-ease);
+}
+
+.smartBackBtn:hover {
+  background: rgba(34, 38, 54, 0.88);
+  border-color: var(--white-a24);
+}
+
+.smartBackBtn:active {
+  transform: scale(0.96);
+}
+
+.smartBackBtn svg {
+  width: calc(var(--u) * 1.05);
+  height: calc(var(--u) * 1.05);
 }
 
 .crewList {

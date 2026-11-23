@@ -87,7 +87,7 @@ export function ReportIssueButton({
     <>
       <button
         type="button"
-        className={s.ghostBtn}
+        className={s.btn}
         onClick={(e) => {
           e.stopPropagation();
           handleOpen();
@@ -95,10 +95,24 @@ export function ReportIssueButton({
         data-nav
         style={
           compact
-            ? { padding: '7px 12px', fontSize: '0.84rem', minHeight: 34 }
-            : undefined
+            ? { height: 36, padding: '0 14px', fontSize: '0.82rem', gap: 6 }
+            : { gap: 7 }
         }
       >
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" />
+          <line x1="4" y1="22" x2="4" y2="15" />
+        </svg>
         Report issue
       </button>
       {open
@@ -135,10 +149,10 @@ export function ReportIssueButton({
                   </div>
                   <button
                     type="button"
-                    className={s.ghostBtn}
+                    className={s.btn}
                     onClick={() => setOpen(false)}
                     disabled={submitting}
-                    style={{ padding: '4px 10px', minHeight: 30, fontSize: '0.82rem' }}
+                    style={{ height: 32, padding: '0 12px', fontSize: '0.82rem' }}
                   >
                     Close
                   </button>
@@ -229,7 +243,7 @@ export function ReportIssueButton({
                     <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
                       <button
                         type="button"
-                        className={s.ghostBtn}
+                        className={s.btn}
                         onClick={() => setOpen(false)}
                         disabled={submitting}
                       >
@@ -237,7 +251,7 @@ export function ReportIssueButton({
                       </button>
                       <button
                         type="button"
-                        className={s.playBtn}
+                        className={s.btnPrimary}
                         onClick={() => void handleSubmit()}
                         disabled={submitting}
                       >
