@@ -92,6 +92,11 @@ OPTED_IN = {
     "player.guide_reminders": A.PLAYBACK,
     "player.add_guide_reminder": A.PLAYBACK,
     "player.remove_guide_reminder": A.PLAYBACK,
+    "player.player_downloads_list": A.PLAYBACK,
+    "player.player_downloads_log": A.PLAYBACK,
+    "player.player_downloads_removed": A.PLAYBACK,
+    "player.player_admin_users": A.PLAYBACK,
+    "player.player_admin_user_downloads": A.PLAYBACK,
     # read-only browse, detail, and artwork GET routes used by /player
     "video_api.video_poster": A.PLAYBACK,
     "video_api.video_backdrop": A.PLAYBACK,

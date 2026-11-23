@@ -1514,3 +1514,124 @@ def delete_watch_party(party_id):
     except parties.PartyError as e:
         return _bad(e)
     return jsonify({"success": True, "deleted": deleted})
+
+
+# ── Offline Downloads Tracking & Admin User Management ───────────────────────
+
+
+@bp.route("/api/player/downloads", methods=["GET"])
+@device_playback
+@self_only
+def player_downloads_list():
+    """List this profile's downloaded items and whether downloads are enabled."""
+    from core.player import downloads
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    include_removed = request.args.get("include_removed", "").lower() in ("1", "true", "yes")
+    perm = downloads.get_permission(player_db(), pid)
+    items = downloads.list_for_profile(player_db(), pid, include_removed=include_removed)
+    return jsonify({
+        "success": True,
+        "allow_downloads": perm["allow_downloads"],
+        "max_items": perm["max_items"],
+        "is_admin": _is_admin(),
+        "downloads": items,
+    })
+
+
+@bp.route("/api/player/downloads", methods=["POST"])
+@device_playback
+@self_only
+def player_downloads_log():
+    """Log an offline download (movie, episode, youtube, podcast, audiobook, track, album)."""
+    from core.player import downloads
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    perm = downloads.get_permission(player_db(), pid)
+    if not perm["allow_downloads"] and not _is_admin():
+        return jsonify({
+            "success": False,
+            "error": "downloads_disabled",
+            "message": "Downloads have been disabled for your profile by an admin.",
+        }), 403
+    body = request.get_json(silent=True) or {}
+    try:
+        row = downloads.log_download(
+            player_db(),
+            pid,
+            item_type=body.get("item_type") or "",
+            item_id=str(body.get("item_id") or ""),
+            title=body.get("title") or "",
+            subtitle=body.get("subtitle"),
+            artwork=body.get("artwork"),
+            device_id=body.get("device_id") or "web",
+            device_name=body.get("device_name") or "Web Browser",
+            quality=body.get("quality") or "original",
+            size_bytes=int(body.get("size_bytes") or 0),
+        )
+    except ValueError as e:
+        return _bad(e)
+    return jsonify({"success": True, "download": row})
+
+
+@bp.route("/api/player/downloads/removed", methods=["POST"])
+@device_playback
+@self_only
+def player_downloads_removed():
+    """Sync deletion of a downloaded item from a user's device back to the server."""
+    from core.player import downloads
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    body = request.get_json(silent=True) or {}
+    dl_id = body.get("id")
+    updated = downloads.mark_removed(
+        player_db(),
+        pid,
+        download_id=int(dl_id) if dl_id is not None else None,
+        item_type=body.get("item_type"),
+        item_id=str(body.get("item_id")) if body.get("item_id") is not None else None,
+        device_id=body.get("device_id"),
+    )
+    return jsonify({"success": True, "updated": updated})
+
+
+@bp.route("/api/player/admin/users", methods=["GET"])
+@device_playback
+def player_admin_users():
+    """Admin-only overview of all profiles, download permissions, and device downloads."""
+    from core.player import downloads
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    if not _is_admin():
+        return jsonify({"success": False, "error": "forbidden", "message": "Admin access required."}), 403
+    profiles = get_database().get_all_profiles() or []
+    filter_pid = request.args.get("profile_id")
+    overview = downloads.admin_overview(
+        player_db(),
+        profiles,
+        filter_profile_id=int(filter_pid) if filter_pid and filter_pid.isdigit() else None,
+        filter_type=request.args.get("item_type") or None,
+        filter_status=request.args.get("status") or None,
+    )
+    return jsonify({"success": True, **overview})
+
+
+@bp.route("/api/player/admin/users/<int:target_profile_id>/downloads", methods=["PUT"])
+@device_playback
+def player_admin_user_downloads(target_profile_id: int):
+    """Admin-only toggle for a user's offline download permission and optional item cap."""
+    from core.player import downloads
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    if not _is_admin():
+        return jsonify({"success": False, "error": "forbidden", "message": "Admin access required."}), 403
+    body = request.get_json(silent=True) or {}
+    allow = bool(body.get("allow_downloads", True))
+    max_items = int(body.get("max_items") or 0)
+    perm = downloads.set_permission(player_db(), target_profile_id, allow, max_items)
+    return jsonify({"success": True, "profile_id": target_profile_id, **perm})

@@ -49,6 +49,7 @@ import {
   Ratings,
 } from '../-ui/video-facts';
 import { CastRow, VersionPicker } from '../-ui/video-parts';
+import { DownloadMediaButton } from '../-ui/download-button';
 import { ReportIssueButton } from '../-ui/report-issue';
 import { WatchlistButton } from '../-ui/watchlist';
 
@@ -331,6 +332,15 @@ function EpisodeRow({
               >
                 {reqLabel}
               </button>
+            ) : null}
+            {owned ? (
+              <DownloadMediaButton
+                itemType="episode"
+                itemId={String(episode.id)}
+                title={epIssueTitle}
+                subtitle={showTitle}
+                artwork={`/api/video/poster/episode/${episode.id}`}
+              />
             ) : null}
             <ReportIssueButton
               entityType="episode"

@@ -16,6 +16,16 @@ import { THEMES } from '@/lib/visualizer';
 import type { PlayerSettings } from './-player.api';
 
 import { QUALITIES, type Quality } from './-engine/engine';
+import {
+  CROSSFADE_OPTIONS,
+  PREFETCH_OPTIONS,
+  setCrossfadeSeconds,
+  setPrefetchCount,
+  setSmartGapless,
+  useCrossfadeSeconds,
+  usePrefetchCount,
+  useSmartGapless,
+} from './-engine/crossfade';
 import { playerSettingsQuery, savePlayerSettings } from './-player.api';
 import {
   CheckIcon,
@@ -176,6 +186,9 @@ function SettingsPage() {
   const brightness = useBrightness();
   const fit = useFit();
   const visual = useVisual();
+  const crossfadeSec = useCrossfadeSeconds();
+  const smartGapless = useSmartGapless();
+  const prefetchCount = usePrefetchCount();
   const [trailers, setTrailers] = useTrailersSetting();
   const mine = settings.data?.settings;
   const busy = save.isPending;
@@ -459,8 +472,71 @@ function SettingsPage() {
           icon={<MusicIcon />}
           title="Music & home"
           badge="This screen"
-          note="Visual ambiance and your home dashboard."
+          note="Crossfade, lookahead caching, visuals, and your home dashboard."
         >
+          <Row
+            stacked
+            label="Crossfade"
+            help="Equal-power blend between songs on playlists, shuffles, and Artist Mixes."
+          >
+            <div className={s.segGroup} role="radiogroup" aria-label="Crossfade">
+              {CROSSFADE_OPTIONS.map((sec) => {
+                const on = crossfadeSec === sec;
+                return (
+                  <button
+                    key={sec}
+                    type="button"
+                    role="radio"
+                    aria-checked={on}
+                    className={s.segBtn}
+                    data-on={on ? 'true' : undefined}
+                    onClick={() => updateLocal(() => setCrossfadeSeconds(sec))}
+                    data-nav
+                  >
+                    {sec === 0 ? 'Off' : `${sec}s`}
+                  </button>
+                );
+              })}
+            </div>
+          </Row>
+
+          <Row
+            label="Smart album gapless"
+            help="Automatically disable crossfade when consecutive tracks come from the same album."
+          >
+            <Switch
+              label="Smart album gapless"
+              on={smartGapless}
+              onChange={(v) => updateLocal(() => setSmartGapless(v))}
+            />
+          </Row>
+
+          <Row
+            stacked
+            label="Pre-cache upcoming songs"
+            help="Silently pre-loads the next queued tracks so crossfades and skips start instantaneously."
+          >
+            <div className={s.segGroup} role="radiogroup" aria-label="Pre-cache upcoming songs">
+              {PREFETCH_OPTIONS.map((cnt) => {
+                const on = prefetchCount === cnt;
+                return (
+                  <button
+                    key={cnt}
+                    type="button"
+                    role="radio"
+                    aria-checked={on}
+                    className={s.segBtn}
+                    data-on={on ? 'true' : undefined}
+                    onClick={() => updateLocal(() => setPrefetchCount(cnt))}
+                    data-nav
+                  >
+                    {cnt === 0 ? 'Off' : `Next ${cnt}`}
+                  </button>
+                );
+              })}
+            </div>
+          </Row>
+
           <Row
             stacked
             label="Music visuals"

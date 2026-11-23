@@ -101,6 +101,21 @@ export function remoteImage(url: string | null | undefined, size: ImgSize = 'car
   if (!url) return null;
   if (url.startsWith('/')) return appURL(url);
   if (!/^https?:\/\//.test(url)) return null;
+  // Relative-normalize SoulSync's own API artwork URLs saved by mobile clients
+  // (e.g. https://192.168.x.x:8443/api/video/backdrop/...) so desktop loads them
+  // directly from the current origin instead of routing through the remote proxy.
+  try {
+    const parsed = new URL(url);
+    if (
+      parsed.pathname.startsWith('/api/video/') ||
+      parsed.pathname.startsWith('/api/library/') ||
+      parsed.pathname.startsWith('/api/player/')
+    ) {
+      return appURL(`${parsed.pathname}${parsed.search}`);
+    }
+  } catch {
+    // fall through
+  }
   const card = size === 'card';
 
   // tmdb: /t/p/<size>/

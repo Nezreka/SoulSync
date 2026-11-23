@@ -1,577 +1,614 @@
-import { useQuery } from '@tanstack/react-query';
-import { createFileRoute, Link } from '@tanstack/react-router';
-import { useMemo, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
+import clsx from 'clsx';
+import { useEffect, useMemo, useState } from 'react';
 
-import { apiClient } from '@/app/api-client';
+import type { AcqState, CalendarEpisode, CalendarMovie, CalendarScope, CalendarView } from '../calendar/-calendar.types';
 
-import { remoteImage } from './-lib/images';
-import { posterUrl } from './-lib/rails';
-import { requestOptionsQuery, requestTitle, type RequestMode, type RequestResult } from './-player.api';
-import { Art, Empty, PageTitle, styles as s } from './-ui/kit';
-import { NotPartOfProfile } from './-ui/not-part';
-import { useSections } from './-ui/sections';
+import { calendarQueryOptions, followedQueryOptions } from '../calendar/-calendar.api';
+import { backdropOf, stillOf } from '../calendar/-calendar.art';
+import {
+  MO,
+  WD_FULL,
+  addDays,
+  airMins,
+  byAirTime,
+  daysOf,
+  episodeCode,
+  fmtMins,
+  groupDrops,
+  isoOf,
+  orderedCounts,
+  parseISO,
+  showHue,
+  stateLabel,
+  stepAnchor,
+  weekStart,
+  windowFor,
+  windowRange,
+  windowTitle,
+} from '../calendar/-calendar.model';
+import { CalendarHero } from '../calendar/-ui/calendar-hero';
+import { AgendaView, MonthView, WeekView } from '../calendar/-ui/calendar-views';
+import styles from '../calendar/-ui/calendar.module.css';
+import { StatePill } from '../calendar/-ui/state-pill';
+import { requestOptionsQuery, requestTitle } from './-player.api';
+import s from './-ui/player.module.css';
+
+type PlayerCalView = CalendarView | 'cards';
+type StateFilter = 'all' | AcqState;
 
 export const Route = createFileRoute('/player/calendar')({
-  component: CalendarPage,
+  component: PlayerCalendarPage,
 });
 
-interface CalendarEpisode {
-  id?: number;
-  show_id?: number | null;
-  show_title?: string;
-  tmdb_id?: number | null;
-  season_number: number;
-  episode_number: number;
-  title?: string | null;
-  air_date: string;
-  has_file?: boolean | number;
-  has_poster?: boolean;
-  poster_url?: string | null;
-  acq?: string;
-  progress?: number | null;
+function useNow(ms = 60_000): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = window.setInterval(() => setNow(Date.now()), ms);
+    return () => window.clearInterval(t);
+  }, [ms]);
+  return now;
 }
 
-interface CalendarMovie {
-  id?: number;
-  tmdb_id: number;
-  title: string;
-  year?: number | null;
-  release_date?: string;
-  event_date?: string;
-  event_kind?: string;
-  poster_url?: string | null;
-  library_id?: number | null;
-  acq?: string;
-  progress?: number | null;
-}
+function PlayerCalendarPage() {
+  const navigate = useNavigate();
+  const qc = useQueryClient();
+  const now = useNow();
+  const clientToday = isoOf(new Date(now));
 
-interface CalendarPayload {
-  today: string;
-  start: string;
-  end: string;
-  days: number;
-  episodes: CalendarEpisode[];
-  movies: CalendarMovie[];
-}
+  const [view, setView] = useState<PlayerCalView>('week');
+  const [anchor, setAnchor] = useState<string>(clientToday);
+  const [scope, setScope] = useState<CalendarScope>('watchlist');
+  const [filter, setFilter] = useState<StateFilter>('all');
+  const [openEp, setOpenEp] = useState<CalendarEpisode | null>(null);
+  const [requestedKeys, setRequestedKeys] = useState<Record<string, 'done' | 'error'>>({});
 
-type CalFilter = 'all' | 'owned' | 'upcoming' | 'missing';
+  const baseView: CalendarView = view === 'cards' ? 'agenda' : view;
+  const win = windowFor(baseView, anchor);
+  const params = { start: win.start, days: win.days, scope, specials: false };
 
-function isoDate(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-}
+  const modeQuery = useQuery(requestOptionsQuery());
+  const requestMode = modeQuery.data?.modes?.show ?? modeQuery.data?.modes?.movie ?? 'none';
+  const canRequest = requestMode === 'download' || requestMode === 'ask';
+  const reqVerb = requestMode === 'download' ? 'Get' : 'Request';
 
-function addDays(baseIso: string, delta: number): string {
-  const [y, m, d] = baseIso.split('-').map(Number);
-  const dt = new Date(y, (m || 1) - 1, (d || 1) + delta);
-  return isoDate(dt);
-}
+  // profileId 0 uses the current active session profile on the server
+  const query = useQuery(calendarQueryOptions(0, params));
+  const followed = useQuery(followedQueryOptions(0, params));
+  const data = query.data;
+  const today = data?.today ?? clientToday;
+  const autoOn = data?.automations?.airing?.enabled ?? true;
 
-function formatDayHeading(dayIso: string, todayIso: string): string {
-  if (dayIso === todayIso) return 'Today';
-  if (dayIso === addDays(todayIso, 1)) return 'Tomorrow';
-  if (dayIso === addDays(todayIso, -1)) return 'Yesterday';
-  const [y, m, d] = dayIso.split('-').map(Number);
-  const dt = new Date(y, (m || 1) - 1, d || 1);
-  return dt.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
-}
+  const episodes = useMemo(() => {
+    const own = data?.episodes ?? [];
+    const seen = new Set(
+      own.map((e) => `${e.show_tmdb_id}|${e.season_number}|${e.episode_number}`),
+    );
+    const extra = (followed.data?.episodes ?? []).filter(
+      (e) => !seen.has(`${e.show_tmdb_id}|${e.season_number}|${e.episode_number}`),
+    );
+    return [...own, ...extra];
+  }, [data, followed.data]);
+  const movies = data?.movies ?? [];
 
-function acqTone(acq: string | undefined): { label: string; bg: string; border: string; color: string } {
-  switch (acq) {
-    case 'owned':
-      return {
-        label: 'In library',
-        bg: 'rgba(16, 185, 129, 0.16)',
-        border: 'rgba(16, 185, 129, 0.45)',
-        color: '#6ee7b7',
-      };
-    case 'downloading':
-      return {
-        label: 'Downloading',
-        bg: 'rgba(59, 130, 246, 0.16)',
-        border: 'rgba(59, 130, 246, 0.45)',
-        color: '#93c5fd',
-      };
-    case 'queued':
-    case 'wanted':
-      return {
-        label: 'On wishlist',
-        bg: 'rgba(168, 85, 247, 0.16)',
-        border: 'rgba(168, 85, 247, 0.45)',
-        color: '#d8b4fe',
-      };
-    case 'missing':
-    case 'failed':
-      return {
-        label: 'Missing',
-        bg: 'rgba(245, 158, 11, 0.16)',
-        border: 'rgba(245, 158, 11, 0.45)',
-        color: '#fcd34d',
-      };
-    default:
-      return {
-        label: 'Coming soon',
-        bg: 'rgba(255, 255, 255, 0.06)',
-        border: 'rgba(255, 255, 255, 0.14)',
-        color: 'var(--pl-text-2)',
-      };
-  }
-}
-
-function CalendarPage() {
-  const sections = useSections();
-  const [days, setDays] = useState<7 | 14 | 28>(14);
-  const [startOffset, setStartOffset] = useState(-3);
-  const [scope, setScope] = useState<'all' | 'watchlist'>('all');
-  const [filter, setFilter] = useState<CalFilter>('all');
-  const [reqState, setReqState] = useState<Record<string, RequestResult | 'busy'>>({});
-
-  const todayIso = useMemo(() => isoDate(new Date()), []);
-  const startIso = useMemo(() => addDays(todayIso, startOffset), [todayIso, startOffset]);
-
-  const cal = useQuery({
-    queryKey: ['player', 'calendar', startIso, days, scope],
-    queryFn: () =>
-      apiClient
-        .get('video/calendar', { searchParams: { start: startIso, days, scope } })
-        .json<CalendarPayload>(),
-    enabled: sections.video,
-    staleTime: 2 * 60_000,
-  });
-
-  const followed = useQuery({
-    queryKey: ['player', 'calendar-followed', startIso, days],
-    queryFn: () =>
-      apiClient
-        .get('video/calendar/followed', { searchParams: { start: startIso, days } })
-        .json<{ episodes?: CalendarEpisode[] }>(),
-    enabled: sections.video,
-    staleTime: 5 * 60_000,
-  });
-
-  const reqOpts = useQuery({ ...requestOptionsQuery(), enabled: sections.video });
-  const showMode: RequestMode = reqOpts.data?.show ?? 'none';
-  const movieMode: RequestMode = reqOpts.data?.movie ?? 'none';
-
-  const realToday = cal.data?.today ?? todayIso;
-
-  type UnifiedEntry =
-    | { kind: 'episode'; key: string; date: string; ep: CalendarEpisode }
-    | { kind: 'movie'; key: string; date: string; mv: CalendarMovie };
-
-  const groupedByDate = useMemo(() => {
-    const allEps = [...(cal.data?.episodes ?? []), ...(followed.data?.episodes ?? [])];
-    const seenEp = new Set<string>();
-    const entries: UnifiedEntry[] = [];
-    for (const ep of allEps) {
-      if (!ep.air_date) continue;
-      const dedupe = `${ep.tmdb_id ?? ep.show_id ?? ep.show_title}-S${ep.season_number}E${ep.episode_number}`;
-      if (seenEp.has(dedupe)) continue;
-      seenEp.add(dedupe);
-      entries.push({ kind: 'episode', key: `ep:${dedupe}`, date: ep.air_date, ep });
-    }
-    for (const mv of cal.data?.movies ?? []) {
-      const dt = mv.event_date || mv.release_date;
-      if (!dt) continue;
-      entries.push({
-        kind: 'movie',
-        key: `mv:${mv.tmdb_id}:${mv.event_kind ?? dt}`,
-        date: dt,
-        mv,
+  const requestMutation = useMutation({
+    mutationFn: async (payload: {
+      key: string;
+      kind: 'episode' | 'movie';
+      tmdbId: number;
+      title: string;
+      seasonNumber?: number;
+      episodeNumber?: number;
+      year?: number | null;
+    }) => {
+      await requestTitle({
+        kind: payload.kind,
+        tmdb_id: payload.tmdbId,
+        title: payload.title,
+        year: payload.year ?? undefined,
+        season: payload.seasonNumber,
+        episode: payload.episodeNumber,
+        get: requestMode === 'download',
       });
-    }
+      return payload.key;
+    },
+    onSuccess: (key) => {
+      setRequestedKeys((prev) => ({ ...prev, [key]: 'done' }));
+      void qc.invalidateQueries({ queryKey: ['video-calendar'] });
+    },
+    onError: (_err, vars) => {
+      setRequestedKeys((prev) => ({ ...prev, [vars.key]: 'error' }));
+    },
+  });
 
-    const filtered = entries.filter((entry) => {
-      const acq = entry.kind === 'episode' ? entry.ep.acq : entry.mv.acq;
-      if (filter === 'owned') return acq === 'owned';
-      if (filter === 'missing') return acq === 'missing' || acq === 'failed';
-      if (filter === 'upcoming') return acq === 'unaired' || entry.date > realToday;
-      return true;
-    });
+  const visibleEps = filter === 'all' ? episodes : episodes.filter((e) => e.acq === filter);
+  const visibleMovies = filter === 'all' ? movies : movies.filter((m) => m.acq === filter);
+  const counts = orderedCounts([...episodes, ...movies]);
+  const currentWindow = today >= win.start && today <= addDays(win.start, win.days - 1);
+  const isThisWeek = baseView !== 'month' && weekStart(anchor) === weekStart(today);
 
-    const map = new Map<string, UnifiedEntry[]>();
-    for (const entry of filtered) {
-      const list = map.get(entry.date);
-      if (list) list.push(entry);
-      else map.set(entry.date, [entry]);
-    }
-    return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]));
-  }, [cal.data, followed.data, filter, realToday]);
+  const go = (dir: -1 | 1) => setAnchor((cur) => stepAnchor(baseView, cur, dir));
+  const goToday = () => setAnchor(clientToday);
 
-  if (!sections.video) return <NotPartOfProfile what="Calendar" single />;
-
-  const handleRequestEpisode = async (key: string, ep: CalendarEpisode) => {
-    if (!ep.tmdb_id || showMode === 'none' || reqState[key] === 'busy') return;
-    setReqState((prev) => ({ ...prev, [key]: 'busy' }));
-    const res = await requestTitle({
-      kind: 'episode',
-      tmdb_id: ep.tmdb_id,
-      title: ep.show_title || 'TV Show',
-      season: ep.season_number,
-      episode: ep.episode_number,
-      get: showMode === 'download',
-    });
-    setReqState((prev) => ({ ...prev, [key]: res }));
+  const isEpisodeRequestable = (ep: CalendarEpisode) => {
+    const aired = ep.air_date <= today;
+    return aired && ep.acq === 'missing' && !!ep.show_tmdb_id;
   };
 
-  const handleRequestMovie = async (key: string, mv: CalendarMovie) => {
-    if (!mv.tmdb_id || movieMode === 'none' || reqState[key] === 'busy') return;
-    setReqState((prev) => ({ ...prev, [key]: 'busy' }));
-    const res = await requestTitle({
-      kind: 'movie',
-      tmdb_id: mv.tmdb_id,
-      title: mv.title,
-      year: mv.year ?? null,
-      poster_url: mv.poster_url ?? null,
-      get: movieMode === 'download',
-    });
-    setReqState((prev) => ({ ...prev, [key]: res }));
+  const isMovieRequestable = (m: CalendarMovie) => {
+    const aired = m.date <= today;
+    return aired && m.acq === 'missing' && !!m.tmdb_id;
   };
 
-  const renderReqLabel = (st: RequestResult | 'busy' | undefined, mode: RequestMode) => {
-    if (st === 'busy') return 'Submitting…';
-    if (st && typeof st === 'object') {
-      if (st.state === 'got') return 'Added to wishlist ✓';
-      if (st.state === 'asked') return st.already ? 'Already requested ✓' : 'Requested ✓';
-      if (st.state === 'on-the-way') return 'On the way ✓';
-      if (st.state === 'owned') return 'In library ✓';
-    }
-    return mode === 'download' ? 'Get' : 'Request';
-  };
-
-  const isReqDone = (st: RequestResult | 'busy' | undefined) =>
-    !!st &&
-    typeof st === 'object' &&
-    (st.state === 'got' || st.state === 'asked' || st.state === 'on-the-way' || st.state === 'owned');
+  const modalEp = openEp ? (episodes.find((e) => e.id === openEp.id) ?? openEp) : null;
 
   return (
-    <>
-      <PageTitle>Release Calendar</PageTitle>
-
-      {/* Window navigation + Scope + Status filters */}
-      <div
-        className={s.toolbar}
-        style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', justifyContent: 'space-between' }}
-      >
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-          <button
-            type="button"
-            className={s.filterPill}
-            onClick={() => setStartOffset((o) => o - days)}
-            data-nav
-          >
-            ← Prev
-          </button>
-          <button
-            type="button"
-            className={s.filterPill}
-            aria-pressed={startOffset === -3}
-            onClick={() => setStartOffset(-3)}
-            data-nav
-          >
-            Today
-          </button>
-          <button
-            type="button"
-            className={s.filterPill}
-            onClick={() => setStartOffset((o) => o + days)}
-            data-nav
-          >
-            Next →
-          </button>
-          <span style={{ width: 6 }} />
-          {([7, 14, 28] as const).map((d) => (
-            <button
-              key={d}
-              type="button"
-              className={s.filterPill}
-              aria-pressed={days === d}
-              onClick={() => setDays(d)}
-              data-nav
-            >
-              {d === 7 ? 'Week' : d === 14 ? '2 Weeks' : 'Month'}
-            </button>
-          ))}
-        </div>
-
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-          {(
-            [
-              ['all', 'All'],
-              ['owned', 'In library'],
-              ['upcoming', 'Coming soon'],
-              ['missing', 'Missing'],
-            ] as const
-          ).map(([id, label]) => (
-            <button
-              key={id}
-              type="button"
-              className={s.filterPill}
-              aria-pressed={filter === id}
-              onClick={() => setFilter(id)}
-              data-nav
-            >
-              {label}
-            </button>
-          ))}
-          <button
-            type="button"
-            className={s.filterPill}
-            aria-pressed={scope === 'watchlist'}
-            onClick={() => setScope((v) => (v === 'all' ? 'watchlist' : 'all'))}
-            data-nav
-          >
-            {scope === 'watchlist' ? '✓ Followed only' : 'All shows'}
-          </button>
-        </div>
-      </div>
-
-      {cal.isLoading ? <div className={s.skeleton} style={{ height: '42vh', marginTop: 16 }} /> : null}
-
-      {!cal.isLoading && groupedByDate.length === 0 ? (
-        <div className={s.rail}>
-          <Empty title="Nothing on the calendar in this window">
-            Try switching to a wider window or toggling between All shows and Followed.
-          </Empty>
-        </div>
-      ) : null}
-
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 22, marginTop: 14 }}>
-        {groupedByDate.map(([dayIso, items]) => {
-          const isToday = dayIso === realToday;
-          return (
-            <section key={dayIso} aria-label={dayIso}>
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 10,
-                  marginBottom: 10,
-                }}
-              >
-                <h2
-                  className={s.sectionTitle}
-                  style={isToday ? { color: 'var(--accent-light, #a78bfa)' } : undefined}
+    <div style={{ maxWidth: 1440, margin: '0 auto', padding: '16px 24px 64px' }}>
+      <div className={styles.page}>
+        {/* Manager-grade Top Header */}
+        <header className={styles.top}>
+          <div>
+            <h1 className={styles.title}>{windowTitle(baseView, anchor, today)}</h1>
+            <div className={styles.range}>{windowRange(baseView, anchor)}</div>
+          </div>
+          <div className={styles.tools}>
+            <div className={styles.seg} role="group" aria-label={baseView === 'month' ? 'Month' : 'Week'}>
+              <button type="button" className={styles.segIcon} onClick={() => go(-1)} aria-label="Previous">
+                ‹
+              </button>
+              <button type="button" onClick={goToday} disabled={currentWindow && anchor === clientToday}>
+                Today
+              </button>
+              <button type="button" className={styles.segIcon} onClick={() => go(1)} aria-label="Next">
+                ›
+              </button>
+            </div>
+            <div className={styles.seg} role="group" aria-label="View">
+              {([
+                ['week', 'Week'],
+                ['cards', 'Cards'],
+                ['agenda', 'Agenda'],
+                ['month', 'Month'],
+              ] as const).map(([v, label]) => (
+                <button
+                  key={v}
+                  type="button"
+                  className={clsx(v === view && styles.segOn)}
+                  aria-pressed={v === view}
+                  onClick={() => setView(v)}
                 >
-                  {formatDayHeading(dayIso, realToday)}
-                </h2>
-                <span style={{ fontSize: '0.8rem', color: 'var(--pl-text-3)' }}>{dayIso}</span>
-              </div>
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className={styles.seg} role="group" aria-label="Shows">
+              <button
+                type="button"
+                className={clsx(scope === 'watchlist' && styles.segOn)}
+                aria-pressed={scope === 'watchlist'}
+                onClick={() => setScope('watchlist')}
+              >
+                Watchlist
+              </button>
+              <button
+                type="button"
+                className={clsx(scope === 'all' && styles.segOn)}
+                aria-pressed={scope === 'all'}
+                onClick={() => setScope('all')}
+              >
+                All library
+              </button>
+            </div>
+          </div>
+        </header>
 
-              <div className={s.episodeList}>
-                {items.map((entry) => {
-                  if (entry.kind === 'episode') {
-                    const ep = entry.ep;
-                    const tone = acqTone(ep.acq);
-                    const code = `S${String(ep.season_number).padStart(2, '0')}E${String(ep.episode_number).padStart(2, '0')}`;
-                    const aired = ep.air_date <= realToday;
-                    const canRequest =
-                      aired &&
-                      (ep.acq === 'missing' || ep.acq === 'failed') &&
-                      !!ep.tmdb_id &&
-                      showMode !== 'none';
-                    const st = reqState[entry.key];
-                    const art = ep.show_id
-                      ? posterUrl('show', ep.show_id, 342)
-                      : remoteImage(ep.poster_url);
+        {/* Next Up Diagonal Billboard Hero */}
+        {!query.isLoading && (
+          <CalendarHero
+            episodes={episodes}
+            today={today}
+            now={now}
+            currentWeek={isThisWeek}
+            autoOn={autoOn}
+            onOpen={(ep) => setOpenEp(ep)}
+          />
+        )}
 
-                    return (
-                      <div key={entry.key} className={s.episodeCard}>
+        {/* Filter Bar with Live State Counts */}
+        {counts.length > 0 && (
+          <div className={styles.filters} role="group" aria-label="Filter by status">
+            <button
+              type="button"
+              className={clsx(styles.chip, filter === 'all' && styles.chipOn)}
+              onClick={() => setFilter('all')}
+            >
+              All <span>{episodes.length + movies.length}</span>
+            </button>
+            {counts.map(([st, n]) => (
+              <button
+                key={st}
+                type="button"
+                className={clsx(styles.chip, filter === st && styles.chipOn)}
+                data-state={st}
+                onClick={() => setFilter(filter === st ? 'all' : st)}
+              >
+                <i className={styles.dot} data-state={st} />
+                {stateLabel(st)} <span>{n}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Calendar Content */}
+        {query.isLoading ? (
+          <div style={{ padding: '48px 0', textAlign: 'center', color: 'var(--text-muted, #9aa0b4)' }}>
+            Loading release schedule…
+          </div>
+        ) : visibleEps.length === 0 && visibleMovies.length === 0 ? (
+          <div style={{ padding: '48px 0', textAlign: 'center', color: 'var(--text-muted, #9aa0b4)' }}>
+            Nothing scheduled in this window.
+          </div>
+        ) : view === 'week' ? (
+          <WeekView
+            start={win.start}
+            today={today}
+            now={now}
+            episodes={visibleEps}
+            movies={visibleMovies}
+            autoOn={autoOn}
+            onOpen={(ep) => setOpenEp(ep)}
+          />
+        ) : view === 'agenda' ? (
+          <AgendaView
+            start={win.start}
+            days={win.days}
+            today={today}
+            episodes={visibleEps}
+            movies={visibleMovies}
+            autoOn={autoOn}
+            onOpen={(ep) => setOpenEp(ep)}
+          />
+        ) : view === 'month' ? (
+          <MonthView
+            start={win.start}
+            anchor={anchor}
+            today={today}
+            episodes={visibleEps}
+            movies={visibleMovies}
+            autoOn={autoOn}
+            onOpen={(ep) => setOpenEp(ep)}
+            onPickDay={(d) => {
+              setAnchor(d);
+              setView('cards');
+            }}
+          />
+        ) : (
+          /* Visual Cards View: 16:9 stills/backdrops grouped by day with direct Request / Open actions */
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
+            {daysOf(win.start, win.days).map((day) => {
+              const dayEps = visibleEps.filter((e) => e.air_date === day).sort(byAirTime);
+              const dayMvs = visibleMovies.filter((m) => m.date === day);
+              if (!dayEps.length && !dayMvs.length) return null;
+              const d = parseISO(day);
+              const groups = groupDrops(dayEps);
+              return (
+                <section key={day}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+                    <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>
+                      {WD_FULL[d.getDay()]}, {MO[d.getMonth()]} {d.getDate()}
+                    </h3>
+                    {day === today && <span className={styles.agToday}>TODAY</span>}
+                    <span style={{ fontSize: 12, opacity: 0.6 }}>
+                      {dayEps.length + dayMvs.length} {dayEps.length + dayMvs.length === 1 ? 'item' : 'items'}
+                    </span>
+                  </div>
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(auto-fill, minmax(270px, 1fr))',
+                      gap: 14,
+                    }}
+                  >
+                    {dayMvs.map((m) => {
+                      const reqKey = `movie:${m.tmdb_id}`;
+                      const reqState = requestedKeys[reqKey];
+                      const showReq = canRequest && isMovieRequestable(m) && reqState !== 'done';
+                      return (
                         <div
+                          key={`m-${m.tmdb_id}-${m.type}`}
                           style={{
+                            borderRadius: 14,
+                            overflow: 'hidden',
+                            background: 'rgba(255,255,255,0.04)',
+                            border: '1px solid rgba(255,255,255,0.09)',
                             display: 'flex',
-                            alignItems: 'center',
-                            gap: 14,
-                            padding: '10px 14px',
+                            flexDirection: 'column',
                           }}
                         >
                           <div
                             style={{
-                              width: 50,
-                              aspectRatio: '2 / 3',
-                              borderRadius: 8,
-                              overflow: 'hidden',
-                              background: 'rgba(255,255,255,0.06)',
-                              flex: 'none',
+                              position: 'relative',
+                              aspectRatio: '16/9',
+                              background: '#14151f',
+                              cursor: m.movie_id ? 'pointer' : 'default',
+                            }}
+                            onClick={() => {
+                              if (m.movie_id) void navigate({ to: `/player/movies/${m.movie_id}` });
                             }}
                           >
-                            <Art src={art} alt={ep.show_title ?? ''} />
-                          </div>
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                              {ep.show_id ? (
-                                <Link
-                                  to="/player/tv/$showId"
-                                  params={{ showId: String(ep.show_id) }}
-                                  search={{ season: ep.season_number }}
-                                  style={{
-                                    color: 'var(--pl-text)',
-                                    fontWeight: 700,
-                                    fontSize: '0.96rem',
-                                    textDecoration: 'none',
-                                  }}
-                                  data-nav
-                                >
-                                  {ep.show_title}
-                                </Link>
-                              ) : (
-                                <span style={{ fontWeight: 700, fontSize: '0.96rem' }}>
-                                  {ep.show_title}
-                                </span>
-                              )}
-                              <span className={s.epChipAccent}>{code}</span>
+                            {m.poster_url && (
+                              <img
+                                src={m.poster_url}
+                                alt=""
+                                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                              />
+                            )}
+                            <div style={{ position: 'absolute', top: 10, right: 10 }}>
+                              <StatePill state={reqState === 'done' ? 'wishlist' : m.acq} />
                             </div>
-                            {ep.title ? (
-                              <div
-                                style={{
-                                  fontSize: '0.84rem',
-                                  color: 'var(--pl-text-2)',
-                                  marginTop: 2,
-                                  overflow: 'hidden',
-                                  textOverflow: 'ellipsis',
-                                  whiteSpace: 'nowrap',
-                                }}
-                              >
-                                {ep.title}
-                              </div>
-                            ) : null}
                           </div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 'none' }}>
-                            <span
-                              style={{
-                                padding: '3px 10px',
-                                borderRadius: 999,
-                                fontSize: '0.76rem',
-                                fontWeight: 700,
-                                background: tone.bg,
-                                border: `1px solid ${tone.border}`,
-                                color: tone.color,
-                              }}
-                            >
-                              {ep.acq === 'downloading' && ep.progress
-                                ? `Downloading ${Math.round(ep.progress)}%`
-                                : tone.label}
-                            </span>
-                            {canRequest ? (
-                              <button
-                                type="button"
-                                className={isReqDone(st) ? s.btn : s.epActionPrimary}
-                                disabled={st === 'busy' || isReqDone(st)}
-                                onClick={() => void handleRequestEpisode(entry.key, ep)}
-                                style={{ height: 32, padding: '0 13px', fontSize: '0.78rem' }}
-                                data-nav
-                              >
-                                {renderReqLabel(st, showMode)}
-                              </button>
-                            ) : null}
+                          <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 6, flex: 1 }}>
+                            <div style={{ fontWeight: 700, fontSize: 15 }}>🎬 {m.title}</div>
+                            <div style={{ fontSize: 12, opacity: 0.7 }}>
+                              {m.type === 'cinema' ? 'In cinemas' : 'Home release'}
+                              {m.year ? ` · ${m.year}` : ''}
+                            </div>
+                            <div style={{ marginTop: 'auto', paddingTop: 8, display: 'flex', gap: 8 }}>
+                              {m.movie_id && m.acq === 'owned' && (
+                                <Link to={`/player/movies/${m.movie_id}`} className={s.btn}>
+                                  Open movie
+                                </Link>
+                              )}
+                              {showReq && (
+                                <button
+                                  type="button"
+                                  className={s.btnPrimary}
+                                  disabled={requestMutation.isPending}
+                                  onClick={() =>
+                                    requestMutation.mutate({
+                                      key: reqKey,
+                                      kind: 'movie',
+                                      tmdbId: m.tmdb_id,
+                                      title: m.title,
+                                      year: m.year,
+                                    })
+                                  }
+                                >
+                                  {reqVerb} movie
+                                </button>
+                              )}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    );
-                  }
+                      );
+                    })}
 
-                  const mv = entry.mv;
-                  const tone = acqTone(mv.acq);
-                  const aired = entry.date <= realToday;
-                  const canRequest =
-                    aired &&
-                    (mv.acq === 'missing' || mv.acq === 'failed') &&
-                    !!mv.tmdb_id &&
-                    movieMode !== 'none';
-                  const st = reqState[entry.key];
-                  const art = mv.library_id
-                    ? posterUrl('movie', mv.library_id, 342)
-                    : remoteImage(mv.poster_url);
-
-                  return (
-                    <div key={entry.key} className={s.episodeCard}>
-                      <div
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 14,
-                          padding: '10px 14px',
-                        }}
-                      >
+                    {groups.map((g) => {
+                      const ep = g.lead;
+                      const art = stillOf(ep, 500) || backdropOf(ep, 780);
+                      const time = fmtMins(airMins(ep.airs_time));
+                      const reqKey = `ep:${ep.show_tmdb_id}:${ep.season_number}:${ep.episode_number}`;
+                      const reqState = requestedKeys[reqKey];
+                      const showReq = canRequest && isEpisodeRequestable(ep) && reqState !== 'done';
+                      return (
                         <div
+                          key={g.key}
                           style={{
-                            width: 50,
-                            aspectRatio: '2 / 3',
-                            borderRadius: 8,
+                            borderRadius: 14,
                             overflow: 'hidden',
-                            background: 'rgba(255,255,255,0.06)',
-                            flex: 'none',
+                            background: 'rgba(255,255,255,0.04)',
+                            border: '1px solid rgba(255,255,255,0.09)',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            ['--vcal-h' as string]: showHue(ep.show_title),
                           }}
                         >
-                          <Art src={art} alt={mv.title} />
-                        </div>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                            {mv.library_id ? (
-                              <Link
-                                to="/player/movies/$movieId"
-                                params={{ movieId: String(mv.library_id) }}
-                                style={{
-                                  color: 'var(--pl-text)',
-                                  fontWeight: 700,
-                                  fontSize: '0.96rem',
-                                  textDecoration: 'none',
-                                }}
-                                data-nav
-                              >
-                                {mv.title}
-                              </Link>
-                            ) : (
-                              <span style={{ fontWeight: 700, fontSize: '0.96rem' }}>
-                                {mv.title}
-                              </span>
-                            )}
-                            <span className={s.epChipGold}>Movie</span>
-                          </div>
-                          {mv.event_kind ? (
-                            <div style={{ fontSize: '0.82rem', color: 'var(--pl-text-2)', marginTop: 2 }}>
-                              {mv.event_kind === 'digital' ? 'Digital release' : 'Theatrical release'}
-                            </div>
-                          ) : null}
-                        </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 'none' }}>
-                          <span
+                          <div
                             style={{
-                              padding: '3px 10px',
-                              borderRadius: 999,
-                              fontSize: '0.76rem',
-                              fontWeight: 700,
-                              background: tone.bg,
-                              border: `1px solid ${tone.border}`,
-                              color: tone.color,
+                              position: 'relative',
+                              aspectRatio: '16/9',
+                              background: 'linear-gradient(135deg, hsla(var(--vcal-h), 55%, 24%, 0.7), #12131c)',
+                              cursor: 'pointer',
                             }}
+                            onClick={() => setOpenEp(ep)}
                           >
-                            {tone.label}
-                          </span>
-                          {canRequest ? (
-                            <button
-                              type="button"
-                              className={isReqDone(st) ? s.btn : s.epActionPrimary}
-                              disabled={st === 'busy' || isReqDone(st)}
-                              onClick={() => void handleRequestMovie(entry.key, mv)}
-                              style={{ height: 32, padding: '0 13px', fontSize: '0.78rem' }}
-                              data-nav
+                            {art && (
+                              <img
+                                src={art}
+                                alt=""
+                                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                              />
+                            )}
+                            <div
+                              style={{
+                                position: 'absolute',
+                                top: 10,
+                                left: 10,
+                                background: 'rgba(0,0,0,0.68)',
+                                backdropFilter: 'blur(8px)',
+                                padding: '3px 8px',
+                                borderRadius: 6,
+                                fontSize: 11,
+                                fontWeight: 700,
+                              }}
                             >
-                              {renderReqLabel(st, movieMode)}
-                            </button>
-                          ) : null}
+                              {episodeCode(g)}
+                            </div>
+                            <div style={{ position: 'absolute', top: 10, right: 10 }}>
+                              <StatePill state={reqState === 'done' ? 'wishlist' : g.acq} />
+                            </div>
+                          </div>
+                          <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 4, flex: 1 }}>
+                            <div style={{ fontWeight: 700, fontSize: 15 }}>{ep.show_title}</div>
+                            <div style={{ fontSize: 12.5, opacity: 0.8 }}>
+                              {g.eps.length > 1
+                                ? `${g.eps.length} episodes`
+                                : ep.title || 'TBA'}
+                            </div>
+                            <div style={{ fontSize: 11.5, opacity: 0.6 }}>
+                              {[time, ep.network].filter(Boolean).join(' · ')}
+                            </div>
+                            <div style={{ marginTop: 'auto', paddingTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                              {ep.show_id && !ep.not_in_library && (
+                                <Link to={`/player/tv/${ep.show_id}`} className={s.btn}>
+                                  Open show
+                                </Link>
+                              )}
+                              {showReq && (
+                                <button
+                                  type="button"
+                                  className={s.btnPrimary}
+                                  disabled={requestMutation.isPending}
+                                  onClick={() =>
+                                    requestMutation.mutate({
+                                      key: reqKey,
+                                      kind: 'episode',
+                                      tmdbId: ep.show_tmdb_id!,
+                                      title: `${ep.show_title} · S${ep.season_number}E${ep.episode_number}`,
+                                      seasonNumber: ep.season_number,
+                                      episodeNumber: ep.episode_number,
+                                    })
+                                  }
+                                >
+                                  {reqVerb} episode
+                                </button>
+                              )}
+                              {reqState === 'done' && (
+                                <span style={{ fontSize: 12, color: '#6ee7b7', fontWeight: 600 }}>
+                                  ✓ {requestMode === 'download' ? 'Added to wishlist' : 'Requested'}
+                                </span>
+                              )}
+                            </div>
+                          </div>
                         </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </section>
-          );
-        })}
+                      );
+                    })}
+                  </div>
+                </section>
+              );
+            })}
+          </div>
+        )}
       </div>
-    </>
+
+      {/* Player-Native Episode Detail Modal (for Week / Agenda / Month / Hero clicks) */}
+      {modalEp && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 80,
+            background: 'rgba(0,0,0,0.72)',
+            backdropFilter: 'blur(8px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 20,
+          }}
+          onClick={() => setOpenEp(null)}
+        >
+          <div
+            style={{
+              width: '100%',
+              maxWidth: 520,
+              borderRadius: 18,
+              overflow: 'hidden',
+              background: '#14151f',
+              border: '1px solid rgba(255,255,255,0.12)',
+              boxShadow: '0 24px 64px rgba(0,0,0,0.6)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ position: 'relative', aspectRatio: '16/9', background: '#0e0f17' }}>
+              {(stillOf(modalEp, 780) || backdropOf(modalEp, 1280)) && (
+                <img
+                  src={(stillOf(modalEp, 780) || backdropOf(modalEp, 1280))!}
+                  alt=""
+                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                />
+              )}
+              <button
+                type="button"
+                onClick={() => setOpenEp(null)}
+                aria-label="Close"
+                style={{
+                  position: 'absolute',
+                  top: 12,
+                  right: 12,
+                  width: 34,
+                  height: 34,
+                  borderRadius: '50%',
+                  border: '1px solid rgba(255,255,255,0.2)',
+                  background: 'rgba(0,0,0,0.65)',
+                  color: '#fff',
+                  cursor: 'pointer',
+                  fontSize: 16,
+                }}
+              >
+                ✕
+              </button>
+            </div>
+            <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>{modalEp.show_title}</h2>
+                <StatePill state={modalEp.acq} large />
+              </div>
+              <div style={{ fontSize: 14, opacity: 0.85 }}>
+                S{modalEp.season_number} E{modalEp.episode_number}
+                {modalEp.title ? ` · ${modalEp.title}` : ''}
+              </div>
+              <div style={{ fontSize: 12.5, opacity: 0.65 }}>
+                {[modalEp.air_date, fmtMins(airMins(modalEp.airs_time)), modalEp.network]
+                  .filter(Boolean)
+                  .join(' · ')}
+              </div>
+              {modalEp.overview && (
+                <p style={{ margin: '4px 0 0', fontSize: 13.5, lineHeight: 1.5, opacity: 0.8 }}>
+                  {modalEp.overview}
+                </p>
+              )}
+              <div style={{ display: 'flex', gap: 10, marginTop: 10, flexWrap: 'wrap' }}>
+                {modalEp.show_id && !modalEp.not_in_library && (
+                  <Link to={`/player/tv/${modalEp.show_id}`} className={s.btnPrimary}>
+                    Open in Player
+                  </Link>
+                )}
+                {canRequest && isEpisodeRequestable(modalEp) && (() => {
+                  const key = `ep:${modalEp.show_tmdb_id}:${modalEp.season_number}:${modalEp.episode_number}`;
+                  const st = requestedKeys[key];
+                  return st === 'done' ? (
+                    <span style={{ alignSelf: 'center', fontSize: 13, color: '#6ee7b7', fontWeight: 600 }}>
+                      ✓ {requestMode === 'download' ? 'Added to wishlist' : 'Requested'}
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      className={s.btnPrimary}
+                      disabled={requestMutation.isPending}
+                      onClick={() =>
+                        requestMutation.mutate({
+                          key,
+                          kind: 'episode',
+                          tmdbId: modalEp.show_tmdb_id!,
+                          title: `${modalEp.show_title} · S${modalEp.season_number}E${modalEp.episode_number}`,
+                          seasonNumber: modalEp.season_number,
+                          episodeNumber: modalEp.episode_number,
+                        })
+                      }
+                    >
+                      {reqVerb} episode
+                    </button>
+                  );
+                })()}
+                <button type="button" className={s.btn} onClick={() => setOpenEp(null)}>
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

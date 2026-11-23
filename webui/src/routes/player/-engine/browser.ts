@@ -13,6 +13,7 @@ import type { Tracks } from './tracks';
 import type { MediaKind, PlayItem } from './types';
 
 import { progressPayload } from '../-lib/progress';
+import { getCachedTrackBlobUrl } from './crossfade';
 
 const STORE_PREFIX = 'ss-player:';
 const PLAYABLE_TIMEOUT_MS = 90_000;
@@ -45,6 +46,12 @@ function tagScreen(url: string): string {
 }
 
 async function playable(item: PlayItem, quality: Quality, pick: TrackPick): Promise<Playable> {
+  if (item.type === 'track') {
+    const cachedBlob = getCachedTrackBlobUrl(item.id);
+    if (cachedBlob) {
+      return { url: cachedBlob, duration: item.duration ?? null, via: 'cache' };
+    }
+  }
   if (item.type === 'podcast_episode') {
     if (!item.url) throw new Error('This episode has no audio address.');
     // podcast audio lives on the feed's host: the podcast side's checked proxy fetches it

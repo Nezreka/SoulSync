@@ -44,6 +44,7 @@ import {
   Ratings,
 } from '../-ui/video-facts';
 import { CastRow, VersionPicker } from '../-ui/video-parts';
+import { DownloadMediaButton } from '../-ui/download-button';
 import { ReportIssueButton } from '../-ui/report-issue';
 import { WatchlistButton } from '../-ui/watchlist';
 
@@ -134,6 +135,15 @@ function MoviePage() {
             ) : null}
             <WatchlistButton kind="movie" id={id} />
             <TrailerButton kind="movie" id={id} />
+            {best ? (
+              <DownloadMediaButton
+                itemType="movie"
+                itemId={String(id)}
+                title={m.title}
+                subtitle={m.year ? String(m.year) : undefined}
+                artwork={m.has_poster ? `/api/video/poster/movie/${id}` : undefined}
+              />
+            ) : null}
             <ReportIssueButton entityType="movie" entityId={id} title={m.title} />
             {ends ? (
               <span className={s.notYet}>

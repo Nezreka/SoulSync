@@ -341,12 +341,13 @@ function GuidePage() {
       const mine = premieres.get(c.id);
       return {
         ...c,
-        // shows in blocks of two, films in the evening, the unseen first
+        // cable-style show rotation (no back-to-back same show), films in the evening, unseen first
         schedule: {
           seen,
           seenKey,
           daypart: true,
-          blocks: 2,
+          blocks: 1,
+          rotateShows: true,
           today: startOfLocalDay(today),
           premieres: mine,
           premiereKey: mine?.map((p) => `${p.item.key}@${p.at}`).join(','),

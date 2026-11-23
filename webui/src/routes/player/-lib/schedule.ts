@@ -167,6 +167,13 @@ export interface ScheduleOptions {
    * something, then one of something else
    */
   blocks?: number;
+  /**
+   * cable/satellite-style show rotation: every show on the channel gets an
+   * equal turn in each round (instead of long-running shows dominating by
+   * episode count) and the same show never airs back-to-back when >= 2 shows
+   * are in the pool.
+   */
+  rotateShows?: boolean;
   /** what's new on this channel and when it airs; premiereKey names them */
   premieres?: readonly Premiere[];
   premiereKey?: string;
@@ -194,7 +201,9 @@ export function scheduleDay(
 ): GuideProgram[] {
   const key = `${channelId}|${startOfLocalDay(day.getTime())}|${options.ordered ? 1 : 0}|${
     options.daypart ? 1 : 0
-  }|${options.seenKey ?? ''}|${options.today ?? ''}|${options.blocks ?? 1}|${options.premiereKey ?? ''}`;
+  }|${options.seenKey ?? ''}|${options.today ?? ''}|${options.blocks ?? 1}|${
+    options.rotateShows ? 1 : 0
+  }|${options.premiereKey ?? ''}`;
   let days = dayCache.get(pool);
   if (!days) {
     days = new Map();
@@ -341,12 +350,71 @@ function scheduleDayUncached(
     };
   };
 
+  // Cable/satellite-style show rotation: group episodes by show so a 200-episode
+  // show doesn't drown out a 10-episode show, and never repeat the same show
+  // back-to-back when >= 2 shows are on the channel.
+  const drawRotatedShows = (pool: readonly GuideItem[], salt: number) => {
+    const byShow = new Map<string, GuideItem[]>();
+    const nonEpisodes: GuideItem[] = [];
+    for (const item of pool) {
+      const showKey = item.kind === 'episode' ? item.href || item.title : null;
+      if (showKey) {
+        const list = byShow.get(showKey);
+        if (list) list.push(item);
+        else byShow.set(showKey, [item]);
+      } else {
+        nonEpisodes.push(item);
+      }
+    }
+    const showKeys = [...byShow.keys()];
+    if (showKeys.length < 2) return draw(pool, salt);
+
+    // Order each show's episodes: unseen first, then seen, starting from a daily offset
+    const queues = new Map<string, { list: GuideItem[]; idx: number }>();
+    for (const sk of showKeys) {
+      const eps = byShow.get(sk)!;
+      const ordered = seen
+        ? [...eps.filter((x) => !seen.has(x.key)), ...eps.filter((x) => seen.has(x.key))]
+        : eps;
+      const startOffset = seen ? 0 : hashSeed(`${channelId}|${sk}|${dayKey(new Date(dayStart))}`) % ordered.length;
+      queues.set(sk, { list: ordered, idx: startOffset });
+    }
+    // Mix any non-episode items (e.g. YouTube) in as their own bucket if present
+    if (nonEpisodes.length) {
+      const shuffled = seededShuffle(nonEpisodes, seed + salt + 31337);
+      queues.set('__other__', { list: shuffled, idx: 0 });
+      showKeys.push('__other__');
+    }
+
+    let round = 0;
+    let roundOrder = seededShuffle(showKeys, seed + salt);
+    let pos = 0;
+    let lastShow: string | null = null;
+    return () => {
+      if (pos >= roundOrder.length) {
+        round += 1;
+        roundOrder = seededShuffle(showKeys, seed + salt + round * 997);
+        // Prevent back-to-back repeat across round boundary
+        if (roundOrder.length > 1 && roundOrder[0] === lastShow) {
+          [roundOrder[0], roundOrder[1]] = [roundOrder[1], roundOrder[0]];
+        }
+        pos = 0;
+      }
+      const sk = roundOrder[pos++];
+      lastShow = sk;
+      const q = queues.get(sk)!;
+      const item = q.list[q.idx % q.list.length];
+      q.idx = (q.idx + 1) % q.list.length;
+      return item;
+    };
+  };
+
   const films = options.daypart ? items.filter((x) => x.kind === 'movie') : [];
   const shows = options.daypart ? items.filter((x) => x.kind !== 'movie') : [];
   if (films.length && shows.length) {
     // a mixed channel keeps to the clock: films in the evening, episodes by day
     const film = draw(films, 1);
-    const show = draw(shows, 2);
+    const show = options.rotateShows ? drawRotatedShows(shows, 2) : draw(shows, 2);
     while (cursor < dayEnd) {
       const next = filmHour(cursor) ? film() : show();
       if (!next) break;
@@ -355,7 +423,7 @@ function scheduleDayUncached(
     return out;
   }
 
-  const next = draw(items, 0);
+  const next = options.rotateShows ? drawRotatedShows(items, 0) : draw(items, 0);
   while (cursor < dayEnd) {
     const item = next();
     if (!item) break;

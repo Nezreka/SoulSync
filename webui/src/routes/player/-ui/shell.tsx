@@ -42,6 +42,8 @@ const TOP_LEVEL_PATHS = new Set([
   '/player/audiobooks',
   '/player/watchlist',
   '/player/watching',
+  '/player/downloads',
+  '/player/admin-users',
   '/player/collections',
   '/player/settings',
 ]);

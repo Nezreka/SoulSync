@@ -15,6 +15,7 @@ import { clock } from '../../-engine/timeline';
 import { playlistEdits, playlistQuery, playlistsQuery } from '../../-player.api';
 import { DownloadIcon, GripIcon, HeartIcon, PlayIcon, PlusIcon, XIcon } from '../icons';
 import { PlayerLink } from '../kit';
+import { DownloadMediaButton } from '../download-button';
 import { getEngine, usePlayer } from '../playback/use-player';
 import { RetryImg } from '../retry-img';
 import { openAddToPlaylist } from './add-to-playlist';
@@ -374,19 +375,29 @@ export function TrackList({
                 </button>
               ) : null}
               {playable && row.song ? (
-                <button
-                  type="button"
-                  className={s.trackBtn}
-                  aria-label={`Add ${row.title} to a playlist`}
-                  title="Add to playlist"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    openAddToPlaylist([row.song!]);
-                  }}
-                  data-nav
-                >
-                  <PlusIcon />
-                </button>
+                <>
+                  <button
+                    type="button"
+                    className={s.trackBtn}
+                    aria-label={`Add ${row.title} to a playlist`}
+                    title="Add to playlist"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openAddToPlaylist([row.song!]);
+                    }}
+                    data-nav
+                  >
+                    <PlusIcon />
+                  </button>
+                  <DownloadMediaButton
+                    itemType="track"
+                    itemId={String(row.song.id)}
+                    title={row.title}
+                    subtitle={row.subtitle ?? undefined}
+                    artwork={row.artwork ?? undefined}
+                    compact
+                  />
+                </>
               ) : null}
               {!playable && row.onMissingAction ? (
                 <button

@@ -22,6 +22,12 @@ import type { Chapter, ItemType, MediaKind, Part, PlayItem, RepeatMode } from '.
 import type { Cue } from './vtt';
 
 import * as Q from './queue';
+import {
+  getCrossfadeSeconds,
+  prefetchUpcomingTracks,
+  shouldCrossfade,
+  startEqualPowerCrossfade,
+} from './crossfade';
 import { bookTime, locate, nextChapterStart, previousChapterStart } from './timeline';
 import { pickAudio, pickSubtitle } from './tracks';
 import { LONG_FORM, MEDIA_KIND } from './types';
@@ -814,6 +820,7 @@ export class PlayerEngine {
       this.set({ position });
       this.checkWatched(position);
       this.checkSleep();
+      this.checkCrossfadeAndPrefetch(el, position);
       this.updatePositionState();
     });
     el.addEventListener('progress', () => {
@@ -951,6 +958,40 @@ export class PlayerEngine {
       }
       this.autoRun++;
     }
+    this.set({ queue: Q.goTo(this.state.queue, to) });
+    void this.load();
+  }
+
+  private crossfadeInFlightKey: string | null = null;
+  private cancelCrossfade: (() => void) | null = null;
+  private lastPrefetchKey: string | null = null;
+
+  private checkCrossfadeAndPrefetch(el: HTMLMediaElement, position: number) {
+    const item = this.state.item;
+    if (!item || item.type !== 'track' || this.state.status !== 'playing') return;
+    const qKey = `${this.state.queue.index}:${item.id}:${this.state.queue.items.length}`;
+    if (this.lastPrefetchKey !== qKey) {
+      this.lastPrefetchKey = qKey;
+      prefetchUpcomingTracks(this.state.queue.items, this.state.queue.index);
+    }
+    const dur = this.state.duration || (Number.isFinite(el.duration) ? el.duration : 0);
+    const cfSec = getCrossfadeSeconds();
+    if (cfSec <= 0 || dur <= cfSec + 2) return;
+    const remaining = dur - position;
+    if (remaining > cfSec || remaining <= 0.35) return;
+    const fadeKey = `${this.state.queue.index}:${item.id}`;
+    if (this.crossfadeInFlightKey === fadeKey) return;
+    const to = Q.nextIndex(this.state.queue, true);
+    if (to === null) return;
+    const nextItem = this.state.queue.items[to];
+    if (!shouldCrossfade(item, nextItem, cfSec)) return;
+
+    this.crossfadeInFlightKey = fadeKey;
+    this.cancelCrossfade?.();
+    const vol = this.state.muted ? 0 : Math.min(1, this.state.volume);
+    this.cancelCrossfade = startEqualPowerCrossfade(el, Math.min(cfSec, remaining), vol);
+    this.save(true);
+    this.stopSaving();
     this.set({ queue: Q.goTo(this.state.queue, to) });
     void this.load();
   }
