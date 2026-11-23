@@ -241,11 +241,39 @@ def _add_cast_cors(resp):
     return resp
 
 
+_CAST_NATIVE_VIDEO_MIMES = {"video/mp4", "video/webm"}
+
+
+def _cast_needs_transcode(item_type: str, source) -> bool:
+    if item_type not in VIDEO_TYPES:
+        return False
+    mime = (source.mime or "").lower()
+    return mime not in _CAST_NATIVE_VIDEO_MIMES
+
+
+def _cast_lan_http_origin() -> str | None:
+    """Plain HTTP LAN origin (http://<lan_ip>:<http_port>) for Chromecast.
+
+    Chromecast's Chromium engine refuses self-signed HTTPS certs (like SoulSync's
+    Connect port 8443), so casting on the same LAN uses SoulSync's plain HTTP
+    listener (default port 8008).
+    """
+    try:
+        from core.connect.addresses import _http_port
+        from core.connect.upnp import primary_lan_ip
+        ip = primary_lan_ip()
+        if not ip:
+            return None
+        return f"http://{ip}:{_http_port()}"
+    except Exception:  # noqa: BLE001
+        return None
+
+
 @bp.route("/api/player/cast-token", methods=["POST"])
 @requires_any(*SECTIONS)
 @device_playback
 def create_cast_token():
-    """Mint a short-lived, item-scoped signed stream URL for Chromecast Default Media Receiver."""
+    """Mint a short-lived, item-scoped signed stream URL for Chromecast Styled Media Receiver."""
     from core.player.playable import Refused, resolve
     body = request.get_json(silent=True) or {}
     item_type = str(body.get("item_type") or "").strip()
@@ -264,11 +292,15 @@ def create_cast_token():
     pid = int(getattr(g, "profile_id", 1) or 1)
     ct = _sign_cast_token(pid, item_type, item_id, part_str)
     stream_path = f"/api/player/cast-stream/{item_type}/{quote(item_id, safe='')}?ct={quote(ct, safe='')}"
+    lan_origin = _cast_lan_http_origin()
+    needs_tx = _cast_needs_transcode(item_type, source)
     return jsonify({
         "success": True,
         "token": ct,
         "stream_path": stream_path,
-        "content_type": source.mime or "application/octet-stream",
+        "stream_url": f"{lan_origin}{stream_path}" if lan_origin else None,
+        "artwork_base_url": lan_origin,
+        "content_type": "video/mp4" if needs_tx else (source.mime or "application/octet-stream"),
         "expires_in": _CAST_TOKEN_TTL,
     })
 
@@ -293,6 +325,25 @@ def cast_stream(item_type, item_id):
     except Exception:  # noqa: BLE001
         logger.exception("cast-stream failed for %s %s", item_type, item_id)
         return _add_cast_cors(jsonify({"success": False, "error": "failed"})), 500
+    if _cast_needs_transcode(item_type, source):
+        from flask import Response
+        from core.player import transcode as T
+        ffmpeg = T.ffmpeg_path()
+        if ffmpeg:
+            p = _plan_for(source, "original", 0, None, 0)
+            origin = source.path if source.mode == "file" else source.url
+            cmd = T.command(ffmpeg, origin, p, 0.0, T.encoder(ffmpeg), T.has_filter(ffmpeg, "zscale"))
+            try:
+                body = T.stream(cmd, owner=f"cast-{pid}")
+                resp = Response(
+                    body,
+                    mimetype=T.MIME,
+                    direct_passthrough=True,
+                    headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+                )
+                return _add_cast_cors(resp)
+            except Exception:  # noqa: BLE001
+                logger.exception("cast transcode fallback failed for %s %s", item_type, item_id)
     if source.mode == "file":
         try:
             resp = send_file(source.path, mimetype=source.mime, conditional=True, as_attachment=False)
