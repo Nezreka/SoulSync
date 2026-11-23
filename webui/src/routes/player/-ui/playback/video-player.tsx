@@ -31,6 +31,7 @@ import {
   VolumeControl,
 } from './controls';
 import { EndScreen } from './end-screen';
+import { PartyReactionsOverlay, setActiveWatchPartyId } from './party-reactions';
 import { EpisodesPanel } from './episodes-panel';
 import { FindSubtitles } from './find-subtitles';
 import {
@@ -218,6 +219,7 @@ function FullPlayer({ state, onLeave }: { state: PlayerState; onLeave: () => voi
         </div>
       ) : null}
 
+      <PartyReactionsOverlay hudVisible={!idle} />
       <div className={s.fullTop}>
         <button
           type="button"

@@ -32,6 +32,7 @@ import { Avatar, nameOf } from './-ui/channel-viewers';
 import { PlayIcon } from './-ui/icons';
 import { Empty, PageTitle, PlayerLink, styles as k } from './-ui/kit';
 import { channelByIdTune } from './-ui/playback/tuner';
+import { setActiveWatchPartyId } from './-ui/playback/party-reactions';
 import { playItems } from './-ui/playback/use-player';
 import s from './-ui/social.module.css';
 import wp from './-ui/watch-party.module.css';
@@ -728,6 +729,7 @@ function WatchPartyRoomModal({
     const item = itemOf(p.item_type, p.item_id, p.meta);
     if (!item) return;
     if (audioRef.current) audioRef.current.pause();
+    setActiveWatchPartyId(p.id);
     playItems([item], 0, { startAt: p.live_position });
   };
 
