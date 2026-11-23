@@ -1169,9 +1169,11 @@ export type RequestResult =
 
 /** file it through the video side's own request route: its rules, its quotas */
 export async function requestTitle(body: {
-  kind: 'movie' | 'show';
+  kind: 'movie' | 'show' | 'episode';
   tmdb_id: number;
   title: string;
+  season?: number;
+  episode?: number;
   year?: number | string | null;
   poster_url?: string | null;
   /** a profile that may download (admins always) gets it now: straight to the wishlist */

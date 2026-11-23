@@ -13,9 +13,13 @@ import {
   episodeExtraQuery,
   extrasQuery,
   progressLookupQuery,
+  requestOptionsQuery,
+  requestTitle,
   showDetailQuery,
   showFilesQuery,
   videoCatalogQuery,
+  type RequestMode,
+  type RequestResult,
 } from '../-player.api';
 import { Comments } from '../-ui/comments';
 import {
@@ -67,6 +71,7 @@ function EpisodeRow({
   duration,
   onPlay,
   filesKnown = true,
+  requestMode = 'none',
 }: {
   showId: number;
   showTitle: string;
@@ -80,9 +85,13 @@ function EpisodeRow({
   onPlay?: (fileId?: number) => void;
   /** the show's file list has arrived (until then, ownership is the show's word) */
   filesKnown?: boolean;
+  /** profile's show request permission ('download' | 'ask' | 'none') */
+  requestMode?: RequestMode;
 }) {
   const [open, setOpen] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [reqBusy, setReqBusy] = useState(false);
+  const [reqResult, setReqResult] = useState<RequestResult | null>(null);
   const epExtra = useQuery({
     ...episodeExtraQuery(showTmdbId ?? 0, seasonNumber, episode.episode_number),
     enabled: expanded && !!showTmdbId && showTmdbId > 0,
@@ -106,6 +115,45 @@ function EpisodeRow({
   const epCrew = epExtra.data?.crew ?? [];
   const epCode = `S${String(seasonNumber).padStart(2, '0')}E${String(episode.episode_number).padStart(2, '0')}`;
   const epIssueTitle = `${showTitle} · ${epCode}${episode.title ? ` — ${episode.title}` : ''}`;
+  const canRequestEpisode = !owned && !!showTmdbId && showTmdbId > 0 && requestMode !== 'none';
+  const handleRequestEpisode = async () => {
+    if (!canRequestEpisode || !showTmdbId || reqBusy) return;
+    setReqBusy(true);
+    try {
+      const res = await requestTitle({
+        kind: 'episode',
+        tmdb_id: showTmdbId,
+        title: showTitle,
+        season: seasonNumber,
+        episode: episode.episode_number,
+        get: requestMode === 'download',
+      });
+      setReqResult(res);
+    } finally {
+      setReqBusy(false);
+    }
+  };
+  const reqLabel =
+    reqResult?.state === 'got'
+      ? 'Added to wishlist'
+      : reqResult?.state === 'asked'
+        ? reqResult.already
+          ? 'Already requested'
+          : 'Requested'
+        : reqResult?.state === 'on-the-way'
+          ? 'On the way'
+          : reqResult?.state === 'owned'
+            ? 'In library'
+            : reqBusy
+              ? 'Requesting…'
+              : requestMode === 'download'
+                ? 'Get episode'
+                : 'Request episode';
+  const reqDone =
+    reqResult?.state === 'got' ||
+    reqResult?.state === 'asked' ||
+    reqResult?.state === 'on-the-way' ||
+    reqResult?.state === 'owned';
   return (
     <div>
       <div
@@ -167,6 +215,21 @@ function EpisodeRow({
           {!expanded && episode.overview ? <span className={s.rowText}>{episode.overview}</span> : null}
         </div>
         <div className={s.rowEnd}>
+          {canRequestEpisode ? (
+            <button
+              type="button"
+              className={reqDone ? s.ghostBtn : s.playBtn}
+              disabled={reqBusy || reqDone}
+              onClick={(e) => {
+                e.stopPropagation();
+                void handleRequestEpisode();
+              }}
+              style={{ padding: '6px 12px', fontSize: '0.8rem', minHeight: 32 }}
+              data-nav
+            >
+              {reqLabel}
+            </button>
+          ) : null}
           {episode.watched ? <Badge tone="yes">Watched</Badge> : null}
           {best?.resolution ? <Badge>{resolutionLabel(best.resolution)}</Badge> : null}
           {files.length > 1 ? (
@@ -234,6 +297,19 @@ function EpisodeRow({
                 label={position && done !== undefined && done < 1 ? 'Resume episode' : 'Play episode'}
                 onPlay={() => onPlay?.()}
               />
+            ) : canRequestEpisode ? (
+              <button
+                type="button"
+                className={reqDone ? s.ghostBtn : s.playBtn}
+                disabled={reqBusy || reqDone}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void handleRequestEpisode();
+                }}
+                data-nav
+              >
+                {reqLabel}
+              </button>
             ) : null}
             <ReportIssueButton
               entityType="episode"
@@ -241,6 +317,9 @@ function EpisodeRow({
               title={epIssueTitle}
               compact
             />
+            {reqResult?.state === 'error' ? (
+              <span style={{ fontSize: '0.82rem', color: '#ff7b7b' }}>{reqResult.message}</span>
+            ) : null}
           </div>
 
           {epCrew.length > 0 ? (
@@ -338,6 +417,8 @@ function ShowPage() {
   const detail = useQuery({ ...showDetailQuery(id), enabled: ok, retry: false });
   const catalog = useQuery({ ...videoCatalogQuery(), enabled: ok });
   const extras = useQuery({ ...extrasQuery('show', id), enabled: ok });
+  const reqOptions = useQuery({ ...requestOptionsQuery(), enabled: ok });
+  const showRequestMode: RequestMode = reqOptions.data?.show ?? 'none';
 
   const seasons = useMemo(
     () =>
@@ -552,6 +633,7 @@ function ShowPage() {
                         duration={row?.duration_seconds}
                         onPlay={(fileId) => playFrom(episode.id, fileId)}
                         filesKnown={!!files.data}
+                        requestMode={showRequestMode}
                       />
                     );
                   })}
