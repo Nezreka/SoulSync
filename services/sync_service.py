@@ -1387,7 +1387,9 @@ class PlaylistSyncService:
                 # Check if we have original track data with full album objects
                 original_track_data = None
                 if hasattr(self, '_original_tracks_map') and self._original_tracks_map:
-                    original_track_data = self._original_tracks_map.get(spotify_track.id)
+                    original_track_data = self._original_tracks_map.get(
+                        getattr(spotify_track, 'source_track_id', None) or spotify_track.id
+                    )
 
                 # Use original data if available (preserves album images), otherwise convert
                 if original_track_data:

@@ -44,7 +44,10 @@ def build_original_tracks_map(tracks_json: Optional[List[Dict[str, Any]]]) -> Di
     for t in tracks_json or []:
         if not isinstance(t, dict):
             continue
-        track_id = t.get('id', '')
+        # The native source id is the row's identity when it has one: two
+        # versions (clean/explicit) can share the metadata id but not the
+        # source id, and keying by metadata let one overwrite the other.
+        track_id = t.get('source_track_id') or t.get('id', '')
         if track_id:
             out[str(track_id)] = normalize_wishlist_track(t)
     return out

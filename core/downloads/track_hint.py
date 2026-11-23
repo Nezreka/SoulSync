@@ -63,8 +63,64 @@ def deezer_track_id(track_data: Dict[str, Any]) -> Optional[str]:
     return None
 
 
+_MIRROR_SOURCE_CACHE: Dict[int, str] = {}
+
+
+def _mirrored_playlist_source(mirrored_playlist_id: Any) -> str:
+    """the mirrored playlist's service, e.g. 'tidal' or 'deezer'"""
+    try:
+        mid = int(mirrored_playlist_id)
+    except (TypeError, ValueError):
+        return ""
+    if mid in _MIRROR_SOURCE_CACHE:
+        return _MIRROR_SOURCE_CACHE[mid]
+    source = ""
+    try:
+        from database.music_database import get_database
+        playlist = get_database().get_mirrored_playlist(mid) or {}
+        source = str(playlist.get("source") or "").strip().lower()
+    except Exception:
+        source = ""
+    if source:
+        # a failed/unknown lookup is retried; only a real answer is cached
+        _MIRROR_SOURCE_CACHE[mid] = source
+    return source
+
+
+def _source_info(track_data: Dict[str, Any]) -> Dict[str, Any]:
+    # same shape the task worker already uses for provenance (dict or JSON)
+    from core.downloads.origin import _parse_source_info
+    return _parse_source_info(track_data.get("source_info"))
+
+
+def tidal_track_id(track_data: Dict[str, Any]) -> Optional[str]:
+    """the playlist's own tidal id, when the wishlist row came from a tidal
+    playlist. other providers use numeric ids too, so the playlist source has
+    to agree before the id is trusted"""
+    if not isinstance(track_data, dict):
+        return None
+    # a wishlist task keeps the native id in the nested spotify data; a direct
+    # playlist batch (organize mode) puts it on the flat track.
+    nested = track_data.get("track_data") or track_data.get("spotify_data") or {}
+    if not isinstance(nested, dict):
+        nested = {}
+    track_id = str(track_data.get("source_track_id") or nested.get("source_track_id") or "").strip()
+    if not track_id.isdigit():
+        return None
+    info = _source_info(track_data)
+    source = str(info.get("source") or "").strip().lower()
+    if not source:
+        mid = info.get("mirrored_playlist_id")
+        if mid in (None, ""):
+            playlist_id = str(info.get("playlist_id") or "")
+            if playlist_id.startswith("auto_mirror_"):
+                mid = playlist_id[len("auto_mirror_"):]
+        source = _mirrored_playlist_source(mid)
+    return track_id if source == "tidal" else None
+
+
 def hint_from_track(track_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """{title, artist, album, deezer_id} for a download task's track. the artist is
+    """{title, artist, album, duration_ms, deezer_id, tidal_id} for a download task's track. the artist is
     the track's own first artist, not the album artist: a soundtrack's album
     artist ("Alan Menken, Aladdin - Cast, Disney") names nobody on the song"""
     if not isinstance(track_data, dict):
@@ -83,8 +139,19 @@ def hint_from_track(track_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
                          'source': track_data.get('_source') or track_data.get('source') or track_data.get('provider'),
                          'artist': {'name': artist},
                          'album': deepcopy(track_data.get('album')) if isinstance(track_data.get('album'), dict) else {'name': album}}
-    return {'catalogue_context': catalogue_context, "title": title, "artist": artist, "album": str(album).strip(),
-            "deezer_id": deezer_track_id(track_data)}
+    try:
+        duration_ms = int(track_data.get("duration_ms") or 0)
+    except (TypeError, ValueError):
+        duration_ms = 0
+    return {
+        "catalogue_context": catalogue_context,
+        "title": title,
+        "artist": artist,
+        "album": str(album).strip(),
+        "duration_ms": duration_ms,
+        "deezer_id": deezer_track_id(track_data),
+        "tidal_id": tidal_track_id(track_data),
+    }
 
 
-__all__ = ["track_hint_context", "current_track_hint", "hint_from_track", "deezer_track_id"]
+__all__ = ["track_hint_context", "current_track_hint", "hint_from_track", "deezer_track_id", "tidal_track_id"]

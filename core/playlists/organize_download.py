@@ -34,6 +34,7 @@ def mirrored_tracks_to_download_json(
                 'album': album_obj,
                 'duration_ms': md.get('duration_ms', 0),
                 'id': md.get('id', ''),
+                'source_track_id': t.get('source_track_id') or '',
             }
             if md.get('track_number'):
                 entry['track_number'] = md['track_number']
@@ -74,6 +75,7 @@ def mirrored_tracks_to_download_json(
                 'album': album_obj,
                 'duration_ms': t.get('duration_ms', 0),
                 'id': t['source_track_id'],
+                'source_track_id': t['source_track_id'],
             }
             if quality_profile_id is not None:
                 entry['quality_profile_id'] = quality_profile_id
