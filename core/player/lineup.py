@@ -61,7 +61,7 @@ def ensure_schema(db: Any) -> None:
 
 # ── a channel's spec ─────────────────────────────────────────────────────
 
-KINDS = ("movies", "tv")
+KINDS = ("movies", "tv", "youtube")
 ORDERS = ("shuffle", "in_order")
 
 
@@ -100,10 +100,10 @@ def clean_spec(raw: Any) -> Dict[str, Any]:
     if not name:
         raise LineupError("give the channel a name")
     show = _int(raw.get("show"), "show", 1, 2**31)
-    kinds = [k for k in _str_list(raw.get("kinds"), "kinds", 2) if k in KINDS]
+    kinds = [k for k in _str_list(raw.get("kinds"), "kinds", 3) if k in KINDS]
     people = _people(raw.get("people"))
     if not kinds and not show:
-        raise LineupError("pick movies, tv, or a show")
+        raise LineupError("pick movies, tv, youtube, or a show")
     decades = [_int(d, "decades", 1900, 2100) for d in (raw.get("decades") or [])]
     if not isinstance(raw.get("decades") or [], list) or len(decades) > 20:
         raise LineupError("decades must be a list")
@@ -124,6 +124,7 @@ def clean_spec(raw: Any) -> Dict[str, Any]:
         "decades": sorted({d for d in decades if d is not None and d % 10 == 0}),
         "studios": _str_list(raw.get("studios"), "studios"),
         "networks": _str_list(raw.get("networks"), "networks"),
+        "youtube_channels": _str_list(raw.get("youtube_channels"), "youtube_channels"),
         "collection": (collection or "").strip()[:120] or None,
         "min_score": round(float(min_score), 1) if min_score is not None else None,
         "kids": bool(raw.get("kids")),

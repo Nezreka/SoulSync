@@ -536,11 +536,12 @@ export function numberChannels(channels: readonly Channel[]): Channel[] {
 /** what goes on a channel someone made (core/player/lineup.py clean_spec) */
 export interface ChannelSpec {
   name: string;
-  kinds: ('movies' | 'tv')[];
+  kinds: ('movies' | 'tv' | 'youtube')[];
   genres: string[];
   decades: number[];
   studios: string[];
   networks: string[];
+  youtube_channels?: string[];
   collection: string | null;
   min_score: number | null;
   kids: boolean;
@@ -572,6 +573,7 @@ export const EMPTY_SPEC: ChannelSpec = {
   decades: [],
   studios: [],
   networks: [],
+  youtube_channels: [],
   collection: null,
   min_score: null,
   kids: false,
@@ -630,10 +632,10 @@ export function specBlurb(spec: ChannelSpec, showTitle?: string | null): string 
   if (spec.show) return `${showTitle ?? 'one show'}, start to finish`;
   return [
     (spec.people ?? []).map((p) => p.name).join(', '),
-    spec.kinds.map((k) => (k === 'tv' ? 'TV' : 'movies')).join(' + '),
+    spec.kinds.map((k) => (k === 'tv' ? 'TV' : k === 'youtube' ? 'YouTube' : 'movies')).join(' + '),
     spec.genres.slice(0, 2).join(', '),
     spec.decades.length ? spec.decades.map((d) => `${d}s`).join(', ') : '',
-    [...spec.studios, ...spec.networks].slice(0, 2).join(', '),
+    [...spec.studios, ...spec.networks, ...(spec.youtube_channels ?? [])].slice(0, 2).join(', '),
     spec.collection ?? '',
     spec.min_score != null ? `★ ${spec.min_score}+` : '',
     spec.added_days ? `added in ${spec.added_days} days` : '',
@@ -659,6 +661,18 @@ export function specPool(
     pool.push(
       ...catalog.shows.filter((x) => specMatches(spec, x, 'tv', now, people)).flatMap(episodeItems),
     );
+  if (spec.kinds.includes('youtube')) {
+    const ytChans = spec.youtube_channels ?? [];
+    pool.push(
+      ...catalog.youtube
+        .filter((y) => {
+          if (spec.people?.length) return false;
+          if (!sameWord(ytChans, y.channel_title) && !sameWord(ytChans, y.channel_id)) return false;
+          return true;
+        })
+        .map(youtubeItem),
+    );
+  }
   return pool;
 }
 

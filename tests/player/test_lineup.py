@@ -108,3 +108,13 @@ def test_a_channel_of_someones_work():
     assert spec["people"] == [{"id": 5, "name": "Robert De Niro"}]
     with pytest.raises(lineup.LineupError):
         lineup.clean_spec({"name": "x", "kinds": ["movies"], "people": [{"id": i, "name": "p"} for i in range(1, 8)]})
+
+
+def test_youtube_source_and_channel_filter():
+    spec = lineup.clean_spec({
+        "name": "Retro Tech TV",
+        "kinds": ["youtube", "tv"],
+        "youtube_channels": ["LGR", "Technology Connections", "LGR"],
+    })
+    assert spec["kinds"] == ["youtube", "tv"]
+    assert spec["youtube_channels"] == ["LGR", "Technology Connections"]
