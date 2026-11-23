@@ -90,6 +90,8 @@ export function WeekView({
   movies,
   autoOn,
   onOpen,
+  onOpenMovie,
+  playerLinks = false,
 }: {
   start: string;
   today: string;
@@ -98,6 +100,8 @@ export function WeekView({
   movies: CalendarMovie[];
   autoOn: boolean;
   onOpen: Open;
+  onOpenMovie?: (m: CalendarMovie) => void;
+  playerLinks?: boolean;
 }) {
   const days = daysOf(start, 7);
   const eps = byDay(episodes, (e) => e.air_date);
@@ -135,10 +139,10 @@ export function WeekView({
               {dayMovies.map((m) => (
                 <a
                   key={`m${m.tmdb_id}${m.type}`}
-                  href={movieHref(m)}
+                  href={playerLinks ? (m.movie_id ? `/player/movies/${m.movie_id}` : '#') : movieHref(m)}
                   className={clsx(styles.tile, styles.tileMovie)}
                   data-state={m.acq}
-                  onClick={(e) => clickOpen(e, () => openMovieDetail(m))}
+                  onClick={(e) => clickOpen(e, () => (onOpenMovie ? onOpenMovie(m) : openMovieDetail(m)))}
                   title={`${m.title}${m.year ? ` (${m.year})` : ''} · ${MOVIE_TYPE[m.type]}`}
                 >
                   <span className={styles.tileShow}>🎬 {m.title}</span>
@@ -160,7 +164,7 @@ export function WeekView({
                   <div key={g.key} className={styles.tileWrap}>
                     {label && <div className={styles.band}>{label}</div>}
                     <a
-                      href={showHref(g.lead)}
+                      href={playerLinks ? (g.lead.show_id ? `/player/tv/${g.lead.show_id}` : '#') : showHref(g.lead)}
                       className={styles.tile}
                       data-state={g.acq}
                       style={{ '--vcal-h': showHue(g.lead.show_title) } as CSSProperties}
@@ -208,6 +212,8 @@ export function AgendaView({
   movies,
   autoOn,
   onOpen,
+  onOpenMovie,
+  playerLinks = false,
 }: {
   start: string;
   days: number;
@@ -216,6 +222,8 @@ export function AgendaView({
   movies: CalendarMovie[];
   autoOn: boolean;
   onOpen: Open;
+  onOpenMovie?: (m: CalendarMovie) => void;
+  playerLinks?: boolean;
 }) {
   const eps = byDay(episodes, (e) => e.air_date);
   const mvs = byDay(movies, (m) => m.date);
@@ -267,9 +275,9 @@ export function AgendaView({
             {dayMovies.map((m) => (
               <a
                 key={`m${m.tmdb_id}${m.type}`}
-                href={movieHref(m)}
+                href={playerLinks ? (m.movie_id ? `/player/movies/${m.movie_id}` : '#') : movieHref(m)}
                 className={styles.row}
-                onClick={(e) => clickOpen(e, () => openMovieDetail(m))}
+                onClick={(e) => clickOpen(e, () => (onOpenMovie ? onOpenMovie(m) : openMovieDetail(m)))}
               >
                 <span className={clsx(styles.rowTime, styles.rowTimeNone)}>All day</span>
                 <span className={clsx(styles.thumb, styles.thumbPoster)}>
@@ -303,7 +311,7 @@ export function AgendaView({
               return (
                 <a
                   key={g.key}
-                  href={showHref(ep)}
+                  href={playerLinks ? (ep.show_id ? `/player/tv/${ep.show_id}` : '#') : showHref(ep)}
                   className={styles.row}
                   onClick={(e) => clickOpen(e, () => onOpen(ep))}
                   data-cal-ep={String(ep.id)}

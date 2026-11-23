@@ -62,10 +62,15 @@ function PlayerCalendarPage() {
   const [scope, setScope] = useState<CalendarScope>('watchlist');
   const [filter, setFilter] = useState<StateFilter>('all');
   const [openEp, setOpenEp] = useState<CalendarEpisode | null>(null);
+  const [openMovie, setOpenMovie] = useState<CalendarMovie | null>(null);
   const [requestedKeys, setRequestedKeys] = useState<Record<string, 'done' | 'error'>>({});
 
   const baseView: CalendarView = view === 'cards' ? 'agenda' : view;
-  const win = windowFor(baseView, anchor);
+  // Player rolling 7-day window: 5 days look-behind + Today + 1 day look-ahead (Tomorrow)
+  const win =
+    baseView === 'month'
+      ? windowFor('month', anchor)
+      : { start: addDays(anchor, -5), days: 7 };
   const params = { start: win.start, days: win.days, scope, specials: false };
 
   const modeQuery = useQuery(requestOptionsQuery());
@@ -141,6 +146,14 @@ function PlayerCalendarPage() {
     return aired && m.acq === 'missing' && !!m.tmdb_id;
   };
 
+  const handleOpenMovie = (m: CalendarMovie) => {
+    if (m.movie_id) {
+      void navigate({ to: `/player/movies/${m.movie_id}` });
+    } else {
+      setOpenMovie(m);
+    }
+  };
+
   const modalEp = openEp ? (episodes.find((e) => e.id === openEp.id) ?? openEp) : null;
 
   return (
@@ -149,8 +162,18 @@ function PlayerCalendarPage() {
         {/* Manager-grade Top Header */}
         <header className={styles.top}>
           <div>
-            <h1 className={styles.title}>{windowTitle(baseView, anchor, today)}</h1>
-            <div className={styles.range}>{windowRange(baseView, anchor)}</div>
+            <h1 className={styles.title}>
+              {baseView === 'month'
+                ? windowTitle('month', anchor, today)
+                : anchor === clientToday
+                  ? 'Recent & Tomorrow'
+                  : windowTitle(baseView, anchor, today)}
+            </h1>
+            <div className={styles.range}>
+              {baseView === 'month'
+                ? windowRange('month', anchor)
+                : `${MO[parseISO(win.start).getMonth()]} ${parseISO(win.start).getDate()} – ${MO[parseISO(addDays(win.start, win.days - 1)).getMonth()]} ${parseISO(addDays(win.start, win.days - 1)).getDate()}`}
+            </div>
           </div>
           <div className={styles.tools}>
             <div className={styles.seg} role="group" aria-label={baseView === 'month' ? 'Month' : 'Week'}>
@@ -258,6 +281,8 @@ function PlayerCalendarPage() {
             movies={visibleMovies}
             autoOn={autoOn}
             onOpen={(ep) => setOpenEp(ep)}
+            onOpenMovie={handleOpenMovie}
+            playerLinks
           />
         ) : view === 'agenda' ? (
           <AgendaView
@@ -268,6 +293,8 @@ function PlayerCalendarPage() {
             movies={visibleMovies}
             autoOn={autoOn}
             onOpen={(ep) => setOpenEp(ep)}
+            onOpenMovie={handleOpenMovie}
+            playerLinks
           />
         ) : view === 'month' ? (
           <MonthView
@@ -605,6 +632,85 @@ function PlayerCalendarPage() {
                   Close
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Player-Native Movie Modal (for unowned/missing movies — never opens Manager!) */}
+      {openMovie && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 80,
+            background: 'rgba(0,0,0,0.72)',
+            backdropFilter: 'blur(8px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 20,
+          }}
+          onClick={() => setOpenMovie(null)}
+        >
+          <div
+            style={{
+              width: '100%',
+              maxWidth: 460,
+              borderRadius: 18,
+              overflow: 'hidden',
+              background: '#14151f',
+              border: '1px solid rgba(255,255,255,0.12)',
+              boxShadow: '0 24px 64px rgba(0,0,0,0.6)',
+              padding: 22,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 12,
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+              <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>🎬 {openMovie.title}</h2>
+              <StatePill state={openMovie.acq} large />
+            </div>
+            <div style={{ fontSize: 13, opacity: 0.72 }}>
+              {[
+                openMovie.type === 'cinema' ? 'In cinemas' : 'Home release',
+                openMovie.date,
+                openMovie.year ? String(openMovie.year) : null,
+              ]
+                .filter(Boolean)
+                .join(' · ')}
+            </div>
+            <div style={{ display: 'flex', gap: 10, marginTop: 8 }}>
+              {canRequest && isMovieRequestable(openMovie) && (() => {
+                const key = `movie:${openMovie.tmdb_id}`;
+                const st = requestedKeys[key];
+                return st === 'done' ? (
+                  <span style={{ alignSelf: 'center', fontSize: 13, color: '#6ee7b7', fontWeight: 600 }}>
+                    ✓ {requestMode === 'download' ? 'Added to wishlist' : 'Requested'}
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    className={s.btnPrimary}
+                    disabled={requestMutation.isPending}
+                    onClick={() =>
+                      requestMutation.mutate({
+                        key,
+                        kind: 'movie',
+                        tmdbId: openMovie.tmdb_id,
+                        title: openMovie.title,
+                        year: openMovie.year,
+                      })
+                    }
+                  >
+                    {reqVerb} movie
+                  </button>
+                );
+              })()}
+              <button type="button" className={s.btn} onClick={() => setOpenMovie(null)}>
+                Close
+              </button>
             </div>
           </div>
         </div>
