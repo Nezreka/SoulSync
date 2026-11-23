@@ -31,11 +31,6 @@ import {
   VolumeControl,
 } from './controls';
 import { EndScreen } from './end-screen';
-import {
-  handleWatchPartyPlayerToggle,
-  PartyReactionsOverlay,
-  setActiveWatchPartyId,
-} from './party-reactions';
 import { EpisodesPanel } from './episodes-panel';
 import { FindSubtitles } from './find-subtitles';
 import {
@@ -49,6 +44,11 @@ import {
   StatsIcon,
 } from './icons';
 import { MarkButton, useMarks } from './marks';
+import {
+  handleWatchPartyPlayerToggle,
+  PartyReactionsOverlay,
+  setActiveWatchPartyId,
+} from './party-reactions';
 import s from './playback.module.css';
 import { SeekBar } from './seek-bar';
 import { StatsOverlay } from './stats';

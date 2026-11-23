@@ -38,7 +38,13 @@ function trackArtists(track: LibTrack): string {
 
 function qualityBadgeClass(label: string): string {
   const up = label.toUpperCase();
-  if (up.includes('24') || up.includes('HI-RES') || up.includes('96') || up.includes('192') || up.includes('DSD')) {
+  if (
+    up.includes('24') ||
+    up.includes('HI-RES') ||
+    up.includes('96') ||
+    up.includes('192') ||
+    up.includes('DSD')
+  ) {
     return m.qualityHiRes;
   }
   if (up.includes('FLAC') || up.includes('ALAC') || up.includes('WAV') || up.includes('LOSSLESS')) {
@@ -83,7 +89,9 @@ function AlbumPage() {
     .filter(({ track }) => !isLibTrackOwned(track));
   const totalMs = owned.reduce((sum, t) => sum + (t.duration ?? 0), 0);
   const discs = new Set(a.tracks.map((t) => t.disc_number ?? 1)).size;
-  const qualities = [...new Set(owned.map((t) => fileQuality(t.file)).filter((q): q is string => !!q))];
+  const qualities = [
+    ...new Set(owned.map((t) => fileQuality(t.file)).filter((q): q is string => !!q)),
+  ];
   const albumArtist = a.primary_artist?.name;
   const queue = albumItems(a);
 
@@ -211,15 +219,13 @@ function AlbumPage() {
                 className={s.btn}
                 onClick={() =>
                   openAddToPlaylist(
-                    a.tracks
-                      .filter(isLibTrackOwned)
-                      .map((t) => ({
-                        title: t.title,
-                        artist: trackArtists(t) || albumArtist || '',
-                        album: a.title,
-                        duration_ms: t.duration ?? null,
-                        lib2_track_id: Number(t.id),
-                      })),
+                    a.tracks.filter(isLibTrackOwned).map((t) => ({
+                      title: t.title,
+                      artist: trackArtists(t) || albumArtist || '',
+                      album: a.title,
+                      duration_ms: t.duration ?? null,
+                      lib2_track_id: Number(t.id),
+                    })),
                   )
                 }
                 data-nav
@@ -301,7 +307,11 @@ function AlbumPage() {
 
       {/* Album Technical & Release Footer */}
       <div className={m.albumFooter}>
-        {a.release_date ? <span>Released {a.release_date}</span> : a.year ? <span>{a.year}</span> : null}
+        {a.release_date ? (
+          <span>Released {a.release_date}</span>
+        ) : a.year ? (
+          <span>{a.year}</span>
+        ) : null}
         <span>
           {a.tracks.length} {a.tracks.length === 1 ? 'track' : 'tracks'}
           {totalMs ? ` · ${runtime(totalMs / 1000)}` : ''}

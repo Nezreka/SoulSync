@@ -49,10 +49,14 @@ export function handleWatchPartyPlayerToggle(): boolean {
   const isPlaying = st.status === 'playing' || st.status === 'buffering';
   if (isPlaying) {
     engine.pause();
-    void watchPartyApi.state(pid, { action: 'pause', position: st.position }).catch(() => undefined);
+    void watchPartyApi
+      .state(pid, { action: 'pause', position: st.position })
+      .catch(() => undefined);
   } else {
     // Keep local video paused while the 5-second server resume countdown runs!
-    void watchPartyApi.state(pid, { action: 'resume', position: st.position }).catch(() => undefined);
+    void watchPartyApi
+      .state(pid, { action: 'resume', position: st.position })
+      .catch(() => undefined);
   }
   return true;
 }
@@ -144,41 +148,42 @@ export function PartyReactionsOverlay({ hudVisible }: { hudVisible: boolean }) {
   }, []);
 
   // Poll Watch Party state & sync play/pause/countdown/reactions
-  const applyPartySync = useCallback(
-    (p: WatchParty) => {
-      setParty(p);
-      if (typeof p.server_now === 'number') {
-        serverOffsetSecRef.current = p.server_now - Date.now() / 1000;
+  const applyPartySync = useCallback((p: WatchParty) => {
+    setParty(p);
+    if (typeof p.server_now === 'number') {
+      serverOffsetSecRef.current = p.server_now - Date.now() / 1000;
+    }
+    const estServerNow = Date.now() / 1000 + serverOffsetSecRef.current;
+    const engine = getEngine();
+    const st = engine.getState();
+    if (st.kind !== 'video') return;
+
+    const recentlyActed = Date.now() - lastLocalActionAtRef.current < 1500;
+    const inResumeCountdown = typeof p.resume_at === 'number' && p.resume_at > estServerNow;
+
+    if (p.status === 'paused' || inResumeCountdown) {
+      if (st.status === 'playing' && !recentlyActed) {
+        engine.pause();
       }
-      const estServerNow = Date.now() / 1000 + serverOffsetSecRef.current;
-      const engine = getEngine();
-      const st = engine.getState();
-      if (st.kind !== 'video') return;
-
-      const recentlyActed = Date.now() - lastLocalActionAtRef.current < 1500;
-      const inResumeCountdown = typeof p.resume_at === 'number' && p.resume_at > estServerNow;
-
-      if (p.status === 'paused' || inResumeCountdown) {
-        if (st.status === 'playing' && !recentlyActed) {
-          engine.pause();
-        }
-        const targetPos = p.position ?? p.live_position ?? 0;
-        if (Math.abs(st.position - targetPos) > 2.5 && !recentlyActed) {
-          engine.seek(targetPos);
-        }
-      } else if (p.status === 'playing' && !inResumeCountdown) {
-        if (st.status === 'paused' && !recentlyActed) {
-          if (Math.abs(st.position - p.live_position) > 2.5) {
-            engine.seek(p.live_position);
-          }
-          engine.play();
-        } else if (st.status === 'playing' && Math.abs(st.position - p.live_position) > 4.5 && !recentlyActed) {
+      const targetPos = p.position ?? p.live_position ?? 0;
+      if (Math.abs(st.position - targetPos) > 2.5 && !recentlyActed) {
+        engine.seek(targetPos);
+      }
+    } else if (p.status === 'playing' && !inResumeCountdown) {
+      if (st.status === 'paused' && !recentlyActed) {
+        if (Math.abs(st.position - p.live_position) > 2.5) {
           engine.seek(p.live_position);
         }
+        engine.play();
+      } else if (
+        st.status === 'playing' &&
+        Math.abs(st.position - p.live_position) > 4.5 &&
+        !recentlyActed
+      ) {
+        engine.seek(p.live_position);
       }
-    },
-    [],
-  );
+    }
+  }, []);
 
   useEffect(() => {
     if (!partyId) {
@@ -232,7 +237,11 @@ export function PartyReactionsOverlay({ hudVisible }: { hudVisible: boolean }) {
   // Automatically start video playback the exact moment the 5-second countdown finishes
   const prevResumeRemainingRef = useRef<number | null>(null);
   useEffect(() => {
-    if (prevResumeRemainingRef.current !== null && resumeRemainingSec === null && party?.status === 'playing') {
+    if (
+      prevResumeRemainingRef.current !== null &&
+      resumeRemainingSec === null &&
+      party?.status === 'playing'
+    ) {
       const engine = getEngine();
       const st = engine.getState();
       if (st.kind === 'video' && st.status === 'paused') {
@@ -313,7 +322,7 @@ export function PartyReactionsOverlay({ hudVisible }: { hudVisible: boolean }) {
     peeBreak && peeBreak.ends_at > estServerNow
       ? Math.max(0, Math.ceil(peeBreak.ends_at - estServerNow))
       : 0;
-  const isMyPeeBreak = !!peeBreak && (me?.profile_id === peeBreak.profile_id);
+  const isMyPeeBreak = !!peeBreak && me?.profile_id === peeBreak.profile_id;
   const canResumePeeBreak = isMyPeeBreak || !!party?.is_host;
   const peeCooldownSec = party?.pee_cooldown_remaining ?? 0;
 

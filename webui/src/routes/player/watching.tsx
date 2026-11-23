@@ -31,8 +31,8 @@ import {
 import { Avatar, nameOf } from './-ui/channel-viewers';
 import { PlayIcon } from './-ui/icons';
 import { Empty, PageTitle, PlayerLink, styles as k } from './-ui/kit';
-import { channelByIdTune } from './-ui/playback/tuner';
 import { setActiveWatchPartyId } from './-ui/playback/party-reactions';
+import { channelByIdTune } from './-ui/playback/tuner';
 import { playItems } from './-ui/playback/use-player';
 import s from './-ui/social.module.css';
 import wp from './-ui/watch-party.module.css';
@@ -204,7 +204,11 @@ function WatchPartyCard({
           : `LOBBY OPEN · ${party.ready_count}/${party.member_count} READY`;
 
   return (
-    <article className={wp.cinemaCard} style={{ cursor: 'pointer' }} onClick={() => onOpen(party.id)}>
+    <article
+      className={wp.cinemaCard}
+      style={{ cursor: 'pointer' }}
+      onClick={() => onOpen(party.id)}
+    >
       {art ? <img className={wp.cinemaBg} src={art} alt="" loading="lazy" /> : null}
       <div className={wp.cinemaScrim} />
 
@@ -284,7 +288,8 @@ function SharedTitleCard({
   const art = remoteImage(me.meta.artwork) ?? remoteImage(me.meta.backdrop);
   const title = me.meta.parent_title ?? me.meta.title ?? 'Something';
   const item = itemOf(me.item_type, me.item_id, me.meta);
-  const canParty = me.item_type === 'movie' || me.item_type === 'episode' || me.item_type === 'youtube';
+  const canParty =
+    me.item_type === 'movie' || me.item_type === 'episode' || me.item_type === 'youtube';
 
   return (
     <article className={wp.sharedCard}>
@@ -388,7 +393,8 @@ function CreatePartyModal({
           title: m.title,
           meta: {
             title: m.title,
-            subtitle: [m.year, m.content_rating, m.genres?.[0]].filter(Boolean).join(' · ') || 'Movie',
+            subtitle:
+              [m.year, m.content_rating, m.genres?.[0]].filter(Boolean).join(' · ') || 'Movie',
             artwork: m.has_poster ? `/api/video/poster/movie/${m.id}?w=342` : undefined,
             backdrop: m.has_backdrop ? `/api/video/backdrop/movie/${m.id}?w=1280` : undefined,
             href: `/player/movies/${m.id}`,
@@ -481,7 +487,7 @@ function CreatePartyModal({
                   THEATER PREMIERE SETUP
                 </span>
                 <h2 className={wp.modalTitle}>
-                  {picked ? picked.meta.title ?? picked.title : 'Start a Watch Party'}
+                  {picked ? (picked.meta.title ?? picked.title) : 'Start a Watch Party'}
                 </h2>
                 <p className={wp.modalSub}>
                   {picked
@@ -551,9 +557,7 @@ function CreatePartyModal({
                         }}
                       />
                     ) : (
-                      <div className={wp.pickerFallback}>
-                        {c.title.charAt(0).toUpperCase()}
-                      </div>
+                      <div className={wp.pickerFallback}>{c.title.charAt(0).toUpperCase()}</div>
                     )}
                     <span className={wp.pickerBadge}>
                       {c.item_type === 'movie' ? 'FILM' : 'TV'}
@@ -571,9 +575,23 @@ function CreatePartyModal({
             })}
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 10 }}>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+              gap: 10,
+            }}
+          >
             <div>
-              <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.07em', color: 'var(--pl-text-3)', marginBottom: 6 }}>
+              <div
+                style={{
+                  fontSize: 11,
+                  fontWeight: 800,
+                  letterSpacing: '0.07em',
+                  color: 'var(--pl-text-3)',
+                  marginBottom: 6,
+                }}
+              >
                 ROOM TITLE
               </div>
               <input
@@ -584,7 +602,15 @@ function CreatePartyModal({
               />
             </div>
             <div>
-              <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.07em', color: 'var(--pl-text-3)', marginBottom: 6 }}>
+              <div
+                style={{
+                  fontSize: 11,
+                  fontWeight: 800,
+                  letterSpacing: '0.07em',
+                  color: 'var(--pl-text-3)',
+                  marginBottom: 6,
+                }}
+              >
                 SHOWTIME
               </div>
               <div className={wp.pillToggleRow}>
@@ -616,7 +642,15 @@ function CreatePartyModal({
           ) : null}
 
           <div>
-            <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.07em', color: 'var(--pl-text-3)', marginBottom: 6 }}>
+            <div
+              style={{
+                fontSize: 11,
+                fontWeight: 800,
+                letterSpacing: '0.07em',
+                color: 'var(--pl-text-3)',
+                marginBottom: 6,
+              }}
+            >
               THEATER OPTIONS
             </div>
             <div className={wp.pillToggleRow}>
@@ -646,7 +680,15 @@ function CreatePartyModal({
 
           {error ? <p style={{ color: '#f87171', fontSize: 12.5, margin: 0 }}>{error}</p> : null}
 
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, paddingTop: 4 }}>
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              gap: 10,
+              paddingTop: 4,
+            }}
+          >
             <span style={{ fontSize: 12, color: 'var(--pl-text-3)' }}>
               {picked ? `Selected: ${picked.title}` : 'Select a movie or show above to continue'}
             </span>
@@ -688,13 +730,7 @@ interface RoomFloatingBubble {
   swayPx: number;
 }
 
-function WatchPartyRoomModal({
-  partyId,
-  onClose,
-}: {
-  partyId: string;
-  onClose: () => void;
-}) {
+function WatchPartyRoomModal({ partyId, onClose }: { partyId: string; onClose: () => void }) {
   const qc = useQueryClient();
   const roomQ = useQuery(watchPartyQuery(partyId));
   const party = roomQ.data;
@@ -787,9 +823,7 @@ function WatchPartyRoomModal({
   // Synced SoulSync library lobby music while in the waiting room
   const lobbyTrack = party?.lobby_track ?? null;
   const playLobbyAudio =
-    !lobbyMuted &&
-    !!lobbyTrack &&
-    (party?.status === 'lobby' || party?.status === 'scheduled');
+    !lobbyMuted && !!lobbyTrack && (party?.status === 'lobby' || party?.status === 'scheduled');
 
   useEffect(() => {
     const el = audioRef.current;
@@ -802,7 +836,10 @@ function WatchPartyRoomModal({
     if (el.src !== new URL(url, window.location.origin).href) {
       el.src = url;
     }
-    if (typeof lobbyTrack.live_position === 'number' && Math.abs(el.currentTime - lobbyTrack.live_position) > 3) {
+    if (
+      typeof lobbyTrack.live_position === 'number' &&
+      Math.abs(el.currentTime - lobbyTrack.live_position) > 3
+    ) {
       el.currentTime = lobbyTrack.live_position;
     }
     void el.play().catch(() => {
@@ -829,9 +866,9 @@ function WatchPartyRoomModal({
   const poster = remoteImage(party.meta.artwork) ?? remoteImage(party.meta.backdrop);
   const bg = remoteImage(party.meta.backdrop) ?? poster;
   const majorityReady =
-    party.majority_ready ??
-    (party.member_count > 0 && party.ready_count * 2 > party.member_count);
-  const canStartFromLobby = party.is_host || (party.member_count > 1 && majorityReady) || party.can_control;
+    party.majority_ready ?? (party.member_count > 0 && party.ready_count * 2 > party.member_count);
+  const canStartFromLobby =
+    party.is_host || (party.member_count > 1 && majorityReady) || party.can_control;
   const isRateLimited = Date.now() < rateLimitedUntil;
   const peeBreak = party.pee_break ?? null;
   const isMyPeeBreak = !!peeBreak && me?.profile_id === peeBreak.profile_id;
@@ -1010,7 +1047,8 @@ function WatchPartyRoomModal({
                     </span>
                   ) : (
                     <span className={wp.waitingMajorityPill}>
-                      {party.ready_count} of {party.member_count} Ready · Majority or Host starts stream
+                      {party.ready_count} of {party.member_count} Ready · Majority or Host starts
+                      stream
                     </span>
                   )}
                 </div>
@@ -1027,7 +1065,8 @@ function WatchPartyRoomModal({
                       {peeBreak.profile?.name ?? 'Someone'} called a 5-minute pee break!
                     </div>
                     <div style={{ fontSize: 11.5, color: '#fcd34d' }}>
-                      Stream is paused for everyone until they return and click Resume (5s countdown).
+                      Stream is paused for everyone until they return and click Resume (5s
+                      countdown).
                     </div>
                   </div>
                 </div>
@@ -1438,11 +1477,7 @@ function WatchingPage() {
           </div>
           <div className={wp.sharedGrid}>
             {together.data.map((t) => (
-              <SharedTitleCard
-                key={t.key}
-                t={t}
-                onStartParty={(seed) => setCreateSeed(seed)}
-              />
+              <SharedTitleCard key={t.key} t={t} onStartParty={(seed) => setCreateSeed(seed)} />
             ))}
           </div>
         </section>

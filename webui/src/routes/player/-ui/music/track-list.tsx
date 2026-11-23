@@ -13,10 +13,10 @@ import type { SongRef } from '../../-player.api';
 
 import { clock } from '../../-engine/timeline';
 import { playlistEdits, playlistQuery, playlistsQuery } from '../../-player.api';
-import { DownloadIcon, GripIcon, HeartIcon, PlayIcon, PlusIcon, XIcon } from '../icons';
 import { openContextMenu } from '../context-menu';
-import { PlayerLink } from '../kit';
 import { DownloadMediaButton } from '../download-button';
+import { DownloadIcon, GripIcon, HeartIcon, PlayIcon, PlusIcon, XIcon } from '../icons';
+import { PlayerLink } from '../kit';
 import { getEngine, usePlayer } from '../playback/use-player';
 import { RetryImg } from '../retry-img';
 import { openAddToPlaylist } from './add-to-playlist';
@@ -267,7 +267,13 @@ export function TrackList({
                 downloadId: playable && row.trackId !== null ? String(row.trackId) : null,
                 onRequest: !playable ? (row.onMissingAction ?? row.onRequest) : undefined,
                 extraActions: onRemove
-                  ? [{ label: 'Remove from playlist', onSelect: () => onRemove(index), danger: true }]
+                  ? [
+                      {
+                        label: 'Remove from playlist',
+                        onSelect: () => onRemove(index),
+                        danger: true,
+                      },
+                    ]
                   : undefined,
               });
             }}
@@ -366,7 +372,11 @@ export function TrackList({
             </div>
             <span
               className={s.trackActions}
-              style={liked || justQueued || (!playable && row.onMissingAction) ? { opacity: 1 } : undefined}
+              style={
+                liked || justQueued || (!playable && row.onMissingAction)
+                  ? { opacity: 1 }
+                  : undefined
+              }
             >
               {playable && row.song ? (
                 <button
@@ -440,7 +450,9 @@ export function TrackList({
                     fontWeight: 600,
                     borderRadius: 999,
                     border: '1px solid rgba(255,255,255,0.16)',
-                    background: row.missingActionDone ? 'rgba(255,255,255,0.06)' : 'rgba(var(--accent-rgb), 0.22)',
+                    background: row.missingActionDone
+                      ? 'rgba(255,255,255,0.06)'
+                      : 'rgba(var(--accent-rgb), 0.22)',
                     color: '#fff',
                   }}
                   disabled={row.missingActionBusy || row.missingActionDone}

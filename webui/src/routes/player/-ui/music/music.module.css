@@ -984,7 +984,12 @@
 .mixVignette {
   position: absolute;
   inset: 0;
-  background: linear-gradient(180deg, rgba(0, 0, 0, 0.15) 0%, transparent 45%, rgba(0, 0, 0, 0.72) 100%);
+  background: linear-gradient(
+    180deg,
+    rgba(0, 0, 0, 0.15) 0%,
+    transparent 45%,
+    rgba(0, 0, 0, 0.72) 100%
+  );
   pointer-events: none;
 }
 
@@ -1028,7 +1033,10 @@
   display: grid;
   place-items: center;
   font-size: 13px;
-  transition: background 150ms ease, color 150ms ease, transform 150ms var(--pl-ease);
+  transition:
+    background 150ms ease,
+    color 150ms ease,
+    transform 150ms var(--pl-ease);
 }
 
 .mixCard:hover .mixPlayOrb {

@@ -54,7 +54,12 @@ export function MyDownloadsPanel() {
       if (statusFilter === 'downloaded' && r.status === 'removed') return false;
       if (statusFilter === 'removed' && r.status !== 'removed') return false;
       if (typeFilter !== 'all' && r.item_type !== typeFilter) return false;
-      if (q && !r.title.toLowerCase().includes(q) && !(r.subtitle ?? '').toLowerCase().includes(q) && !r.device_name.toLowerCase().includes(q)) {
+      if (
+        q &&
+        !r.title.toLowerCase().includes(q) &&
+        !(r.subtitle ?? '').toLowerCase().includes(q) &&
+        !r.device_name.toLowerCase().includes(q)
+      ) {
         return false;
       }
       return true;

@@ -15,7 +15,6 @@ import { THEMES } from '@/lib/visualizer';
 
 import type { PlayerSettings } from './-player.api';
 
-import { QUALITIES, type Quality } from './-engine/engine';
 import {
   CROSSFADE_OPTIONS,
   PREFETCH_OPTIONS,
@@ -26,6 +25,7 @@ import {
   usePrefetchCount,
   useSmartGapless,
 } from './-engine/crossfade';
+import { QUALITIES, type Quality } from './-engine/engine';
 import { playerSettingsQuery, savePlayerSettings } from './-player.api';
 import {
   CheckIcon,

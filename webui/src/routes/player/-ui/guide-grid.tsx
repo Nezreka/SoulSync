@@ -557,7 +557,16 @@ export function GuideDetail({
           </div>
 
           {/* Info & Live Progress */}
-          <div style={{ flex: 1, minWidth: 0, paddingRight: 28, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div
+            style={{
+              flex: 1,
+              minWidth: 0,
+              paddingRight: 28,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 8,
+            }}
+          >
             <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
               <span
                 style={{
@@ -761,9 +770,7 @@ export function GuideDetail({
           type="button"
           aria-pressed={favorite}
           aria-label={
-            favorite
-              ? `Remove ${channel.name} from favorites`
-              : `Add ${channel.name} to favorites`
+            favorite ? `Remove ${channel.name} from favorites` : `Add ${channel.name} to favorites`
           }
           title={favorite ? 'Favorite channel' : 'Favorite channel'}
           onClick={() => onFavorite(channel)}
@@ -814,7 +821,7 @@ export function GuideDetail({
       />
 
       {/* Up Next / In This Set Timeline */}
-      {(block || later.length > 0) ? (
+      {block || later.length > 0 ? (
         <div
           style={{
             padding: '14px 24px 20px',
@@ -887,7 +894,8 @@ export function GuideDetail({
                     {t.title}
                     {t.subtitle ? (
                       <span style={{ color: 'rgba(255,255,255,0.55)', fontWeight: 400 }}>
-                        {' '}· {t.subtitle}
+                        {' '}
+                        · {t.subtitle}
                       </span>
                     ) : null}
                   </span>

@@ -9,11 +9,7 @@ import type { LibAlbum, LibArtist, LibSong, Pagination } from '../-player.types'
 
 import { albumArtwork, libraryThumb, remoteImage } from '../-lib/images';
 import { songItems } from '../-lib/play-items';
-import {
-  discoverPlaylistsQuery,
-  musicChannelsQuery,
-  playlistsQuery,
-} from '../-player.api';
+import { discoverPlaylistsQuery, musicChannelsQuery, playlistsQuery } from '../-player.api';
 import {
   CardGrid,
   CardRail,
@@ -171,10 +167,7 @@ function MusicBrowse() {
   };
 
   const discoverList = (discover.data ?? []).flatMap((sec) => sec.playlists);
-  const allPlaylists = [
-    ...(playlists.data?.yours ?? []),
-    ...(playlists.data?.mirrored ?? []),
-  ];
+  const allPlaylists = [...(playlists.data?.yours ?? []), ...(playlists.data?.mirrored ?? [])];
 
   return (
     <>
@@ -241,7 +234,11 @@ function MusicBrowse() {
                 <div className={m.mixMosaic}>
                   {(albums.data?.items ?? []).slice(0, 4).map((al) => {
                     const art = libraryThumb(al.image_url) ?? remoteImage(al.remote_image_url);
-                    return art ? <img key={al.id} src={art} alt="" loading="lazy" /> : <span key={al.id} />;
+                    return art ? (
+                      <img key={al.id} src={art} alt="" loading="lazy" />
+                    ) : (
+                      <span key={al.id} />
+                    );
                   })}
                 </div>
                 <div className={m.mixVignette} aria-hidden="true" />
@@ -374,15 +371,8 @@ function MusicBrowse() {
         songs.data.items.length ? (
           <>
             <div className={s.heroActions} style={{ marginTop: 8 }}>
-              <PlayButton
-                label="Play all"
-                onPlay={() => playItems(songItems(songs.data!.items))}
-              />
-              <PlayButton
-                label="Shuffle"
-                primary={false}
-                onPlay={playLibraryShuffle}
-              />
+              <PlayButton label="Play all" onPlay={() => playItems(songItems(songs.data!.items))} />
+              <PlayButton label="Shuffle" primary={false} onPlay={playLibraryShuffle} />
             </div>
             <div className={m.albumTrackCard}>
               <TrackList

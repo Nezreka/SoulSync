@@ -376,7 +376,9 @@ function scheduleDayUncached(
       const ordered = seen
         ? [...eps.filter((x) => !seen.has(x.key)), ...eps.filter((x) => seen.has(x.key))]
         : eps;
-      const startOffset = seen ? 0 : hashSeed(`${channelId}|${sk}|${dayKey(new Date(dayStart))}`) % ordered.length;
+      const startOffset = seen
+        ? 0
+        : hashSeed(`${channelId}|${sk}|${dayKey(new Date(dayStart))}`) % ordered.length;
       queues.set(sk, { list: ordered, idx: startOffset });
     }
     // Mix any non-episode items (e.g. YouTube) in as their own bucket if present

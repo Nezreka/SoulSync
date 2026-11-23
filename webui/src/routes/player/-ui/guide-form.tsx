@@ -296,7 +296,10 @@ export function ChannelForm({
               />
             </Field>
             {spec.kinds.includes('youtube') && options.youtubeChannels.length ? (
-              <Field label="YouTube channels" hint="videos from any of these (or leave blank for all)">
+              <Field
+                label="YouTube channels"
+                hint="videos from any of these (or leave blank for all)"
+              >
                 <Chips
                   label="YouTube channels"
                   options={options.youtubeChannels.map((x) => ({ value: x, label: x }))}

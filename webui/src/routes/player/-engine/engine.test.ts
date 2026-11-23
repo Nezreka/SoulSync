@@ -157,7 +157,8 @@ describe('player engine', () => {
       saved: { position: 10, finished: false },
       playable: (item) => ({ url: `/s/${item.type}/${item.id}`, duration: 5400 }),
     });
-    (t.engine as unknown as { deps: EngineDeps }).deps.watched = (i) => marked.push(`${i.type}:${i.id}`);
+    (t.engine as unknown as { deps: EngineDeps }).deps.watched = (i) =>
+      marked.push(`${i.type}:${i.id}`);
     const ep1: PlayItem = { type: 'episode', id: '101', title: 'Ep 1' };
     const mov2: PlayItem = movie('202');
     t.engine.playItems([ep1, mov2], 0, { startAt: 600, live: true });

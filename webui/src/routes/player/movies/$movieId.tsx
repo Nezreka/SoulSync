@@ -27,10 +27,12 @@ import {
   RelatedDiscoveryRails,
   Section,
 } from '../-ui/detail';
+import { DownloadMediaButton } from '../-ui/download-button';
 import { Badge, Hero, PlayButton, VerdictBadge, styles as s } from '../-ui/kit';
 import { CrewList, mergeCrew, StudioLink, VideoGenreLinks } from '../-ui/links';
 import { NotFound, NotPartOfProfile } from '../-ui/not-part';
 import { playItems } from '../-ui/playback/use-player';
+import { ReportIssueButton } from '../-ui/report-issue';
 import { useSections } from '../-ui/sections';
 import { BackgroundTrailer, TrailerButton } from '../-ui/trailer';
 import {
@@ -44,8 +46,6 @@ import {
   Ratings,
 } from '../-ui/video-facts';
 import { CastRow, VersionPicker } from '../-ui/video-parts';
-import { DownloadMediaButton } from '../-ui/download-button';
-import { ReportIssueButton } from '../-ui/report-issue';
 import { WatchlistButton } from '../-ui/watchlist';
 
 export const Route = createFileRoute('/player/movies/$movieId')({

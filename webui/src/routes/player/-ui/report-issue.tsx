@@ -12,12 +12,20 @@ interface IssueCategory {
 
 export const VIDEO_ISSUE_CATEGORIES: readonly IssueCategory[] = [
   { id: 'playback_issue', label: "Won't play / buffers / stutters", for: ['movie', 'episode'] },
-  { id: 'audio_issue', label: 'Audio problem (sync, language, missing)', for: ['movie', 'episode'] },
+  {
+    id: 'audio_issue',
+    label: 'Audio problem (sync, language, missing)',
+    for: ['movie', 'episode'],
+  },
   { id: 'subtitle_issue', label: 'Subtitle problem', for: ['movie', 'episode'] },
   { id: 'bad_quality', label: 'Poor video quality', for: ['movie', 'episode'] },
   { id: 'missing_content', label: 'Missing episodes or seasons', for: ['show'] },
   { id: 'wrong_match', label: 'Matched to the wrong title', for: ['movie', 'show'] },
-  { id: 'wrong_metadata', label: 'Wrong details (year, summary, genres…)', for: ['movie', 'show', 'episode'] },
+  {
+    id: 'wrong_metadata',
+    label: 'Wrong details (year, summary, genres…)',
+    for: ['movie', 'show', 'episode'],
+  },
   { id: 'wrong_poster', label: 'Wrong poster / artwork', for: ['movie', 'show'] },
   { id: 'duplicate', label: 'Duplicate copies', for: ['movie', 'show'] },
   { id: 'other', label: 'Something else', for: ['movie', 'show', 'episode'] },
@@ -94,9 +102,7 @@ export function ReportIssueButton({
         }}
         data-nav
         style={
-          compact
-            ? { height: 36, padding: '0 14px', fontSize: '0.82rem', gap: 6 }
-            : { gap: 7 }
+          compact ? { height: 36, padding: '0 14px', fontSize: '0.82rem', gap: 6 } : { gap: 7 }
         }
       >
         <svg
@@ -140,10 +146,25 @@ export function ReportIssueButton({
                   color: 'var(--pl-text, #f5f7fb)',
                 }}
               >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'flex-start',
+                    gap: 12,
+                  }}
+                >
                   <div>
-                    <h3 style={{ margin: 0, fontSize: '1.12rem', fontWeight: 700 }}>Report an issue</h3>
-                    <p style={{ margin: '4px 0 0', fontSize: '0.88rem', color: 'var(--pl-text-2, #a8b0c0)' }}>
+                    <h3 style={{ margin: 0, fontSize: '1.12rem', fontWeight: 700 }}>
+                      Report an issue
+                    </h3>
+                    <p
+                      style={{
+                        margin: '4px 0 0',
+                        fontSize: '0.88rem',
+                        color: 'var(--pl-text-2, #a8b0c0)',
+                      }}
+                    >
                       {title}
                     </p>
                   </div>
@@ -175,7 +196,15 @@ export function ReportIssueButton({
                 ) : (
                   <>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                      <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--pl-text-2, #a8b0c0)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                      <span
+                        style={{
+                          fontSize: '0.8rem',
+                          fontWeight: 600,
+                          color: 'var(--pl-text-2, #a8b0c0)',
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.06em',
+                        }}
+                      >
                         What&apos;s wrong?
                       </span>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
@@ -211,7 +240,13 @@ export function ReportIssueButton({
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                       <label
                         htmlFor="issue-desc"
-                        style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--pl-text-2, #a8b0c0)', textTransform: 'uppercase', letterSpacing: '0.06em' }}
+                        style={{
+                          fontSize: '0.8rem',
+                          fontWeight: 600,
+                          color: 'var(--pl-text-2, #a8b0c0)',
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.06em',
+                        }}
                       >
                         Details (optional)
                       </label>

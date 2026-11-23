@@ -105,7 +105,11 @@ export function inferContextTargetFromCard(
   let downloadType: DownloadItemType | null = null;
   let downloadId: string | null = null;
 
-  if (card.source?.itemType === 'movie' || card.preview?.kind === 'movie' || /\/player\/movies\/(\d+)/.test(href)) {
+  if (
+    card.source?.itemType === 'movie' ||
+    card.preview?.kind === 'movie' ||
+    /\/player\/movies\/(\d+)/.test(href)
+  ) {
     kind = 'movie';
     id = id ?? String(card.preview?.id ?? href.match(/\/player\/movies\/(\d+)/)?.[1] ?? '');
     if (id) {
@@ -121,7 +125,11 @@ export function inferContextTargetFromCard(
   } else if (/\/player\/tv\/(\d+)\?season=(\d+)/.test(href)) {
     kind = 'season';
     id = href.match(/\/player\/tv\/(\d+)/)?.[1] ?? id;
-  } else if (card.source?.itemType === 'show' || card.preview?.kind === 'show' || /\/player\/tv\/(\d+)/.test(href)) {
+  } else if (
+    card.source?.itemType === 'show' ||
+    card.preview?.kind === 'show' ||
+    /\/player\/tv\/(\d+)/.test(href)
+  ) {
     kind = 'show';
     id = id ?? String(card.preview?.id ?? href.match(/\/player\/tv\/(\d+)/)?.[1] ?? '');
   } else if (card.play?.kind === 'album' || /\/player\/music\/album\/(\d+)/.test(href)) {
@@ -133,14 +141,20 @@ export function inferContextTargetFromCard(
       downloadType = 'track';
       downloadId = id;
     }
-  } else if (card.source?.itemType === 'audiobook' || /\/player\/audiobooks\/([^/?#]+)/.test(href)) {
+  } else if (
+    card.source?.itemType === 'audiobook' ||
+    /\/player\/audiobooks\/([^/?#]+)/.test(href)
+  ) {
     kind = 'audiobook';
     id = id ?? href.match(/\/player\/audiobooks\/([^/?#]+)/)?.[1] ?? null;
     if (id) {
       downloadType = 'audiobook';
       downloadId = id;
     }
-  } else if (card.source?.itemType === 'podcast_episode' || /\/player\/podcasts\/([^/?#]+)/.test(href)) {
+  } else if (
+    card.source?.itemType === 'podcast_episode' ||
+    /\/player\/podcasts\/([^/?#]+)/.test(href)
+  ) {
     kind = 'podcast';
     id = id ?? href.match(/\/player\/podcasts\/([^/?#]+)/)?.[1] ?? null;
     if (card.source?.itemType === 'podcast_episode' && id) {

@@ -34,7 +34,8 @@ function releaseCards(releases: LibRelease[]): RailCard[] {
   return releases.map((r) => ({
     key: `rel${r.id}`,
     title: r.title,
-    subtitle: [r.year ? String(r.year) : '', r.album_type ?? ''].filter(Boolean).join(' · ') || undefined,
+    subtitle:
+      [r.year ? String(r.year) : '', r.album_type ?? ''].filter(Boolean).join(' · ') || undefined,
     art: libraryThumb(r.image_url) ?? remoteImage(r.remote_image_url),
     href: `/player/music/album/${r.id}`,
     play: { kind: 'album' as const, id: Number(r.id) },
@@ -122,9 +123,7 @@ function ArtistPage() {
   const singles = ownedReleases(a.singles);
   const appears = ownedReleases(a.appears_on);
   const allOwned = [...albums, ...eps, ...singles];
-  const latest = allOwned
-    .slice()
-    .sort((x, y) => (y.year ?? 0) - (x.year ?? 0))[0];
+  const latest = allOwned.slice().sort((x, y) => (y.year ?? 0) - (x.year ?? 0))[0];
   const about = plainText(a.about?.bio) || plainText(a.summary);
   const tags = [
     ...(a.about?.tags ?? []),
@@ -132,9 +131,7 @@ function ArtistPage() {
     ...(a.mood ? [a.mood] : []),
   ].filter((t, i, arr) => t && arr.indexOf(t) === i);
   const image = a.image_url ?? a.remote_image_url;
-  const scene =
-    image ??
-    allOwned.map((r) => r.image_url ?? r.remote_image_url).find(Boolean);
+  const scene = image ?? allOwned.map((r) => r.image_url ?? r.remote_image_url).find(Boolean);
 
   const discAll: { id: DiscFilter; label: string; count: number }[] = [
     { id: 'all', label: 'All releases', count: allOwned.length + appears.length },
@@ -163,7 +160,8 @@ function ArtistPage() {
             ) : null}
             {eps.length + singles.length ? (
               <span>
-                {eps.length + singles.length} single{eps.length + singles.length === 1 ? '' : 's'} &amp; EPs
+                {eps.length + singles.length} single{eps.length + singles.length === 1 ? '' : 's'}{' '}
+                &amp; EPs
               </span>
             ) : null}
             <MusicGenreLinks genres={(a.genres ?? []).slice(0, 4)} />
@@ -185,7 +183,11 @@ function ArtistPage() {
       {/* Latest Release Spotlight (Apple Music / Plexamp signature) */}
       {latest ? (
         <div className={m.latestCard}>
-          <Link to="/player/music/album/$albumId" params={{ albumId: String(latest.id) }} className={m.latestArt}>
+          <Link
+            to="/player/music/album/$albumId"
+            params={{ albumId: String(latest.id) }}
+            className={m.latestArt}
+          >
             <Art
               src={libraryThumb(latest.image_url) ?? remoteImage(latest.remote_image_url)}
               alt={latest.title}

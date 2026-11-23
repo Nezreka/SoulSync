@@ -540,7 +540,11 @@ export const watchPartyQuery = (partyId: string) =>
   queryOptions({
     queryKey: ['player', 'party', partyId],
     queryFn: async () =>
-      (await apiClient.get(`player/parties/${encodeURIComponent(partyId)}`).json<{ party: WatchParty }>()).party,
+      (
+        await apiClient
+          .get(`player/parties/${encodeURIComponent(partyId)}`)
+          .json<{ party: WatchParty }>()
+      ).party,
     staleTime: 1_500,
     refetchInterval: 2_500,
   });
@@ -580,7 +584,11 @@ export const watchPartyApi = {
         .post(`player/parties/${encodeURIComponent(partyId)}/state`, { json: payload })
         .json<{ party: WatchParty }>()
     ).party,
-  chat: async (partyId: string, kind: 'chat' | 'reaction', body: string): Promise<WatchPartyMessage> =>
+  chat: async (
+    partyId: string,
+    kind: 'chat' | 'reaction',
+    body: string,
+  ): Promise<WatchPartyMessage> =>
     (
       await apiClient
         .post(`player/parties/${encodeURIComponent(partyId)}/chat`, { json: { kind, body } })

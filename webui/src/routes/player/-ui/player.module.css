@@ -3034,7 +3034,9 @@
   border-radius: 16px;
   background: linear-gradient(180deg, rgba(24, 26, 38, 0.78), rgba(16, 18, 27, 0.72));
   backdrop-filter: blur(14px);
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  box-shadow:
+    0 10px 28px rgba(0, 0, 0, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
 .infoPanel .facts {
@@ -3690,7 +3692,12 @@
 .episodeStillVignette {
   position: absolute;
   inset: 0;
-  background: linear-gradient(180deg, rgba(0, 0, 0, 0.28) 0%, transparent 45%, rgba(0, 0, 0, 0.62) 100%);
+  background: linear-gradient(
+    180deg,
+    rgba(0, 0, 0, 0.28) 0%,
+    transparent 45%,
+    rgba(0, 0, 0, 0.62) 100%
+  );
   pointer-events: none;
 }
 
@@ -3805,7 +3812,9 @@
   font-size: calc(var(--u) * 0.8);
   color: var(--pl-text-2);
   text-decoration: none;
-  transition: background 140ms ease, border-color 140ms ease;
+  transition:
+    background 140ms ease,
+    border-color 140ms ease;
 }
 
 .episodeCrewChip:hover {
