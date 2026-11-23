@@ -92,7 +92,7 @@ export function inferContextTargetFromCard(
     href?: string;
     source?: { itemType: string; itemId: string };
     preview?: { kind: 'movie' | 'show'; id: number };
-    play?: { kind: string; id: number | string };
+    play?: { kind: string; id?: number | string };
   },
   opts?: {
     onOpen?: () => void;
@@ -105,7 +105,11 @@ export function inferContextTargetFromCard(
   let downloadType: DownloadItemType | null = null;
   let downloadId: string | null = null;
 
-  if (card.source?.itemType === 'movie' || card.preview?.kind === 'movie' || /\/player\/movies\/(\d+)/.test(href)) {
+  if (
+    card.source?.itemType === 'movie' ||
+    card.preview?.kind === 'movie' ||
+    /\/player\/movies\/(\d+)/.test(href)
+  ) {
     kind = 'movie';
     id = id ?? String(card.preview?.id ?? href.match(/\/player\/movies\/(\d+)/)?.[1] ?? '');
     if (id) {
@@ -121,7 +125,11 @@ export function inferContextTargetFromCard(
   } else if (/\/player\/tv\/(\d+)\?season=(\d+)/.test(href)) {
     kind = 'season';
     id = href.match(/\/player\/tv\/(\d+)/)?.[1] ?? id;
-  } else if (card.source?.itemType === 'show' || card.preview?.kind === 'show' || /\/player\/tv\/(\d+)/.test(href)) {
+  } else if (
+    card.source?.itemType === 'show' ||
+    card.preview?.kind === 'show' ||
+    /\/player\/tv\/(\d+)/.test(href)
+  ) {
     kind = 'show';
     id = id ?? String(card.preview?.id ?? href.match(/\/player\/tv\/(\d+)/)?.[1] ?? '');
   } else if (card.play?.kind === 'album' || /\/player\/music\/album\/(\d+)/.test(href)) {
@@ -133,14 +141,20 @@ export function inferContextTargetFromCard(
       downloadType = 'track';
       downloadId = id;
     }
-  } else if (card.source?.itemType === 'audiobook' || /\/player\/audiobooks\/([^/?#]+)/.test(href)) {
+  } else if (
+    card.source?.itemType === 'audiobook' ||
+    /\/player\/audiobooks\/([^/?#]+)/.test(href)
+  ) {
     kind = 'audiobook';
     id = id ?? href.match(/\/player\/audiobooks\/([^/?#]+)/)?.[1] ?? null;
     if (id) {
       downloadType = 'audiobook';
       downloadId = id;
     }
-  } else if (card.source?.itemType === 'podcast_episode' || /\/player\/podcasts\/([^/?#]+)/.test(href)) {
+  } else if (
+    card.source?.itemType === 'podcast_episode' ||
+    /\/player\/podcasts\/([^/?#]+)/.test(href)
+  ) {
     kind = 'podcast';
     id = id ?? href.match(/\/player\/podcasts\/([^/?#]+)/)?.[1] ?? null;
     if (card.source?.itemType === 'podcast_episode' && id) {
@@ -247,7 +261,7 @@ export function ContextMenuHost() {
       }
       if (target.kind === 'show' && Number.isFinite(idNum)) {
         const show = await qc.fetchQuery(showDetailQuery(idNum));
-        const eps = episodeItems(show);
+        const eps = episodeItems(show, show.seasons ?? []);
         if (eps.length) {
           playItems(eps, 0);
           closeContextMenu();
@@ -256,6 +270,7 @@ export function ContextMenuHost() {
       }
       if (target.kind === 'album' && Number.isFinite(idNum)) {
         const album = await qc.fetchQuery(albumQuery(idNum));
+        if (!album) throw new Error('album not found');
         const items = albumItems(album);
         if (items.length) {
           playItems(items, shuffle ? Math.floor(Math.random() * items.length) : 0);
@@ -294,6 +309,7 @@ export function ContextMenuHost() {
     try {
       if (target.kind === 'album' && Number.isFinite(idNum)) {
         const album = await qc.fetchQuery(albumQuery(idNum));
+        if (!album) throw new Error('album not found');
         const items = albumItems(album);
         if (items.length) {
           getEngine().append(items);
@@ -327,10 +343,11 @@ export function ContextMenuHost() {
     setBusyMsg('Loading tracks…');
     try {
       const album = await qc.fetchQuery(albumQuery(idNum));
+      if (!album) throw new Error('album not found');
       const items = albumItems(album);
       const songs: SongRef[] = items.map((it) => ({
         title: it.title,
-        artist: it.subtitle,
+        artist: it.subtitle ?? '',
         album: album.title,
         duration_ms: it.duration ? Math.round(it.duration * 1000) : null,
         lib2_track_id: Number(it.id),

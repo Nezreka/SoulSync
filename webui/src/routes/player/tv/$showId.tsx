@@ -33,10 +33,12 @@ import {
   RelatedDiscoveryRails,
   Section,
 } from '../-ui/detail';
+import { DownloadMediaButton } from '../-ui/download-button';
 import { Art, Badge, Hero, HScroll, PlayButton, VerdictBadge, styles as s } from '../-ui/kit';
 import { CrewList, mergeCrew, NetworkLink, VideoGenreLinks } from '../-ui/links';
 import { NotFound, NotPartOfProfile } from '../-ui/not-part';
 import { playItems } from '../-ui/playback/use-player';
+import { ReportIssueButton } from '../-ui/report-issue';
 import { useSections } from '../-ui/sections';
 import { BackgroundTrailer, TrailerButton } from '../-ui/trailer';
 import {
@@ -49,8 +51,6 @@ import {
   Ratings,
 } from '../-ui/video-facts';
 import { CastRow, VersionPicker } from '../-ui/video-parts';
-import { DownloadMediaButton } from '../-ui/download-button';
-import { ReportIssueButton } from '../-ui/report-issue';
 import { WatchlistButton } from '../-ui/watchlist';
 
 export const Route = createFileRoute('/player/tv/$showId')({
@@ -243,9 +243,7 @@ function EpisodeRow({
           ) : null}
         </div>
         <div className={s.rowMain}>
-          <span className={s.rowTitle}>
-            {episode.title || `Episode ${episode.episode_number}`}
-          </span>
+          <span className={s.rowTitle}>{episode.title || `Episode ${episode.episode_number}`}</span>
           <span className={s.rowSub}>
             {[
               shortDate(episode.air_date),
@@ -259,7 +257,9 @@ function EpisodeRow({
               ? ` · ${remaining(position, duration ?? seconds)}`
               : ''}
           </span>
-          {!expanded && episode.overview ? <span className={s.rowText}>{episode.overview}</span> : null}
+          {!expanded && episode.overview ? (
+            <span className={s.rowText}>{episode.overview}</span>
+          ) : null}
         </div>
         <div className={s.rowEnd}>
           {canRequestEpisode ? (
@@ -271,7 +271,11 @@ function EpisodeRow({
                 e.stopPropagation();
                 void handleRequestEpisode();
               }}
-              style={reqDone ? { height: 34, padding: '0 13px', fontSize: '0.8rem' } : { height: 34, padding: '0 14px', fontSize: '0.8rem' }}
+              style={
+                reqDone
+                  ? { height: 34, padding: '0 13px', fontSize: '0.8rem' }
+                  : { height: 34, padding: '0 14px', fontSize: '0.8rem' }
+              }
               data-nav
             >
               {reqLabel}
@@ -323,7 +327,14 @@ function EpisodeRow({
           </div>
 
           {overview ? (
-            <p style={{ margin: 0, color: 'var(--pl-text-2)', fontSize: '0.94rem', lineHeight: 1.62 }}>
+            <p
+              style={{
+                margin: 0,
+                color: 'var(--pl-text-2)',
+                fontSize: '0.94rem',
+                lineHeight: 1.62,
+              }}
+            >
               {overview}
             </p>
           ) : null}

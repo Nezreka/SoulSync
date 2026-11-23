@@ -9315,6 +9315,24 @@
       },
       "asked": true
     },
+    "#devices-upnp-toggle": {
+      "sel": "#devices-upnp-toggle",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": false,
+      "to": false,
+      "saves": {
+        "requests": [
+          {
+            "method": "PUT",
+            "url": "/api/devices/upnp",
+            "body": "{\"enabled\":true}"
+          }
+        ]
+      },
+      "asked": true
+    },
     "#devices-remote-url": {
       "sel": "#devices-remote-url",
       "kind": "text",
@@ -14390,7 +14408,7 @@
     "#stg-view-devices-all \"More about this setting\"": {
       "label": "More about this setting",
       "anchor": "stg-view-devices-all",
-      "count": 2,
+      "count": 3,
       "sides": ["music", "video"],
       "scenario": "music"
     },

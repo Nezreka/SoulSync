@@ -1349,20 +1349,22 @@ def _hydrate_party_profiles(party: dict, who: dict) -> dict:
 def _pick_default_lobby_track() -> dict | None:
     """Pick a random owned track from the music library for the theater waiting room."""
     try:
+        from core.library2.sql_util import owned_sql
         from database.music_database import get_database
         db = get_database()
         with db._get_connection() as conn:
             row = conn.execute(
-                "SELECT t.id, t.title, COALESCE(a.name, '') AS artist, t.album_id, t.duration "
-                "FROM tracks t "
-                "LEFT JOIN artists a ON a.id = t.artist_id "
-                "WHERE t.file_path IS NOT NULL AND t.file_path != '' "
+                "SELECT t.id, t.title, COALESCE(NULLIF(t.track_artist, ''), ar.name, '') AS artist, t.album_id, t.duration "
+                "FROM lib2_tracks t "
+                "JOIN lib2_albums al ON al.id = t.album_id "
+                "LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id "
+                f"WHERE {owned_sql('track', 't')} "
                 "ORDER BY RANDOM() LIMIT 1"
             ).fetchone()
             if not row:
                 return None
             tid, title, artist, album_id, duration = row
-            dur_ms = int(duration) if duration and duration > 10000 else (int(duration * 1000) if duration else 210000)
+            dur_ms = int(duration) if duration else 210000
             return {
                 "track_id": str(tid),
                 "title": title or "Lobby Music",

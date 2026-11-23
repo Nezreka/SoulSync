@@ -471,7 +471,16 @@ export function RelatedDiscoveryRails({
         return { person, cards: cards.slice(0, 18) };
       })
       .filter((entry) => entry.cards.length > 0);
-  }, [featuredPeople, personQueries, ownedMoviesByTmdb, ownedShowsByTmdb, kind, selfId, movieById, showById]);
+  }, [
+    featuredPeople,
+    personQueries,
+    ownedMoviesByTmdb,
+    ownedShowsByTmdb,
+    kind,
+    selfId,
+    movieById,
+    showById,
+  ]);
 
   // 3. Same studio (movies) or network (TV shows)
   const makerRail = useMemo(() => {

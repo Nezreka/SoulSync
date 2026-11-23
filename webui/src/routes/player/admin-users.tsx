@@ -29,7 +29,17 @@ const MEDIA_TYPES: { id: '' | DownloadItemType; label: string }[] = [
 
 function ShieldIcon() {
   return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
       <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
     </svg>
   );
@@ -37,7 +47,17 @@ function ShieldIcon() {
 
 function DownloadCloudIcon() {
   return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
       <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
       <polyline points="7 10 12 15 17 10" />
       <line x1="12" y1="15" x2="12" y2="3" />
@@ -97,10 +117,12 @@ function AdminUsersDownloadsPage() {
           marginBottom: 16,
         }}
       >
-        <PageTitle
-          title="Users & Downloads"
-          subtitle="Manage your offline downloads, per-user download permissions, and device activity."
-        />
+        <div>
+          <PageTitle>Users & Downloads</PageTitle>
+          <p style={{ margin: '4px 0 0', fontSize: 14, lineHeight: 1.45, opacity: 0.55 }}>
+            Manage your offline downloads, per-user download permissions, and device activity.
+          </p>
+        </div>
         <div
           style={{
             display: 'inline-flex',
@@ -126,9 +148,7 @@ function AdminUsersDownloadsPage() {
                   padding: '7px 16px',
                   borderRadius: 999,
                   border: 'none',
-                  background: on
-                    ? 'rgba(var(--accent-rgb, 129,140,248), 0.28)'
-                    : 'transparent',
+                  background: on ? 'rgba(var(--accent-rgb, 129,140,248), 0.28)' : 'transparent',
                   color: on ? '#fff' : 'rgba(255,255,255,0.68)',
                   fontSize: 13,
                   fontWeight: on ? 700 : 500,
@@ -195,7 +215,15 @@ function AdminUsersDownloadsPage() {
                   borderLeft: `3px solid ${kpi.accent}`,
                 }}
               >
-                <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', opacity: 0.6 }}>
+                <div
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 600,
+                    letterSpacing: '0.04em',
+                    textTransform: 'uppercase',
+                    opacity: 0.6,
+                  }}
+                >
                   {kpi.label}
                 </div>
                 <div style={{ fontSize: 22, fontWeight: 800, marginTop: 4 }}>{kpi.value}</div>
@@ -216,7 +244,8 @@ function AdminUsersDownloadsPage() {
                     <span className={s.scopePill}>Admin</span>
                   </div>
                   <p className={s.groupNote}>
-                    Click a profile to filter their downloads below, or toggle offline download access.
+                    Click a profile to filter their downloads below, or toggle offline download
+                    access.
                   </p>
                 </div>
               </div>
@@ -236,7 +265,15 @@ function AdminUsersDownloadsPage() {
                       transition: 'background 140ms ease',
                     }}
                   >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0, flex: 1 }}>
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 12,
+                        minWidth: 0,
+                        flex: 1,
+                      }}
+                    >
                       <div
                         style={{
                           width: 34,
@@ -265,7 +302,9 @@ function AdminUsersDownloadsPage() {
                               textTransform: 'uppercase',
                               padding: '2px 7px',
                               borderRadius: 999,
-                              background: u.is_admin ? 'rgba(129,140,248,0.18)' : 'rgba(255,255,255,0.06)',
+                              background: u.is_admin
+                                ? 'rgba(129,140,248,0.18)'
+                                : 'rgba(255,255,255,0.06)',
                               color: u.is_admin ? '#c7d2fe' : 'rgba(255,255,255,0.65)',
                             }}
                           >
@@ -287,8 +326,9 @@ function AdminUsersDownloadsPage() {
                           )}
                         </div>
                         <span className={s.rowHelp}>
-                          {u.active_downloads} on device · {formatBytes(u.active_bytes)} · {u.active_devices}{' '}
-                          {u.active_devices === 1 ? 'device' : 'devices'} · {u.removed_downloads} removed
+                          {u.active_downloads} on device · {formatBytes(u.active_bytes)} ·{' '}
+                          {u.active_devices} {u.active_devices === 1 ? 'device' : 'devices'} ·{' '}
+                          {u.removed_downloads} removed
                         </span>
                       </div>
                     </div>
@@ -298,7 +338,9 @@ function AdminUsersDownloadsPage() {
                       onClick={(e) => e.stopPropagation()}
                     >
                       {u.is_admin ? (
-                        <span style={{ fontSize: 12, opacity: 0.55, fontWeight: 500 }}>Always allowed</span>
+                        <span style={{ fontSize: 12, opacity: 0.55, fontWeight: 500 }}>
+                          Always allowed
+                        </span>
                       ) : (
                         <>
                           <span style={{ fontSize: 12, opacity: 0.7 }}>
@@ -377,11 +419,13 @@ function AdminUsersDownloadsPage() {
                 </div>
 
                 <div className={s.segGroup} role="radiogroup" aria-label="Status">
-                  {([
-                    ['', 'All'],
-                    ['downloaded', 'On device'],
-                    ['removed', 'Removed'],
-                  ] as const).map(([st, lbl]) => {
+                  {(
+                    [
+                      ['', 'All'],
+                      ['downloaded', 'On device'],
+                      ['removed', 'Removed'],
+                    ] as const
+                  ).map(([st, lbl]) => {
                     const on = statusFilter === st;
                     return (
                       <button
@@ -440,7 +484,15 @@ function AdminUsersDownloadsPage() {
                   const active = d.status === 'downloaded';
                   return (
                     <div key={d.id} className={s.row}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0, flex: 1 }}>
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 12,
+                          minWidth: 0,
+                          flex: 1,
+                        }}
+                      >
                         <div
                           style={{
                             width: 36,
@@ -459,14 +511,25 @@ function AdminUsersDownloadsPage() {
                           }}
                         >
                           {d.artwork ? (
-                            <img src={d.artwork} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                            <img
+                              src={d.artwork}
+                              alt=""
+                              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                            />
                           ) : (
                             d.item_type.slice(0, 3)
                           )}
                         </div>
                         <div style={{ minWidth: 0 }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <span className={s.rowLabel} style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            <span
+                              className={s.rowLabel}
+                              style={{
+                                whiteSpace: 'nowrap',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                              }}
+                            >
                               {d.title}
                             </span>
                             <span
@@ -481,9 +544,12 @@ function AdminUsersDownloadsPage() {
                             </span>
                           </div>
                           <span className={s.rowHelp}>
-                            {d.profile_name} · {d.device_name} · {d.quality} · {formatBytes(d.size_bytes)} ·{' '}
+                            {d.profile_name} · {d.device_name} · {d.quality} ·{' '}
+                            {formatBytes(d.size_bytes)} ·{' '}
                             {new Date(d.downloaded_at).toLocaleString()}
-                            {d.removed_at ? ` · Removed ${new Date(d.removed_at).toLocaleString()}` : ''}
+                            {d.removed_at
+                              ? ` · Removed ${new Date(d.removed_at).toLocaleString()}`
+                              : ''}
                           </span>
                         </div>
                       </div>

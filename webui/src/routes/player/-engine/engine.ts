@@ -21,13 +21,13 @@ import type { Tracks, TrackPrefs } from './tracks';
 import type { Chapter, ItemType, MediaKind, Part, PlayItem, RepeatMode } from './types';
 import type { Cue } from './vtt';
 
-import * as Q from './queue';
 import {
   getCrossfadeSeconds,
   prefetchUpcomingTracks,
   shouldCrossfade,
   startEqualPowerCrossfade,
 } from './crossfade';
+import * as Q from './queue';
 import { bookTime, locate, nextChapterStart, previousChapterStart } from './timeline';
 import { pickAudio, pickSubtitle } from './tracks';
 import { LONG_FORM, MEDIA_KIND } from './types';

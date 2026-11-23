@@ -180,10 +180,12 @@ export function WeekView({
                       tabIndex={playerLinks ? 0 : undefined}
                       className={styles.tile}
                       data-state={g.acq}
-                      style={{
-                        '--vcal-h': showHue(g.lead.show_title),
-                        ...(playerLinks ? { cursor: 'pointer' } : {}),
-                      } as CSSProperties}
+                      style={
+                        {
+                          '--vcal-h': showHue(g.lead.show_title),
+                          ...(playerLinks ? { cursor: 'pointer' } : {}),
+                        } as CSSProperties
+                      }
                       onClick={(e) => {
                         if (playerLinks) {
                           e.preventDefault();

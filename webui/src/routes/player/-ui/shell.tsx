@@ -13,9 +13,9 @@ import { useCardSize, type CardSizeRange } from '@/components/card-size';
 import { appURL } from '@/platform/url-base';
 
 import { profilesQuery, watchingNowQuery } from '../-player.api';
+import { ContextMenuHost } from './context-menu';
 import { BackIcon, ChevronIcon, ExitIcon, GearIcon, MoreIcon } from './icons';
 import { AddToPlaylistHost } from './music/add-to-playlist';
-import { ContextMenuHost } from './context-menu';
 import { useNowPlaying } from './now-playing';
 import { MusicView } from './playback/music-view';
 import { usePlayerSync } from './playback/presence';

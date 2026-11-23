@@ -252,6 +252,14 @@ describe('the request flow', () => {
         if (url.startsWith('/api/video/downloads/quality/profiles')) body = { profiles };
         else if (url.includes('/series-type'))
           body = showType ?? { owned: false, anime_folder: false };
+        else if (url === '/api/video/requests/options')
+          // the no-kind call is the access one: the server answers the mode
+          // for each kind there, and the dialog fields only come with ?kind=
+          body = {
+            success: true,
+            modes: { movie: options.mode, show: options.mode, youtube: options.mode },
+            moderator: false,
+          };
         else if (url.startsWith('/api/video/requests/options')) body = options;
         else if (url === '/api/video/requests' && init?.method === 'POST') {
           posts.push(JSON.parse(typeof init.body === 'string' ? init.body : '{}'));
