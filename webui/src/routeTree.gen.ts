@@ -42,6 +42,9 @@ import { Route as PlayerWatchlistRouteImport } from './routes/player/watchlist'
 import { Route as PlayerWatchingRouteImport } from './routes/player/watching'
 import { Route as PlayerSettingsRouteImport } from './routes/player/settings'
 import { Route as PlayerGuideRouteImport } from './routes/player/guide'
+import { Route as PlayerDownloadsRouteImport } from './routes/player/downloads'
+import { Route as PlayerCalendarRouteImport } from './routes/player/calendar'
+import { Route as PlayerAdminUsersRouteImport } from './routes/player/admin-users'
 import { Route as LabelDetailIdRouteImport } from './routes/label-detail/$id'
 import { Route as ImportSinglesRouteImport } from './routes/import/singles'
 import { Route as ImportAutoRouteImport } from './routes/import/auto'
@@ -243,6 +246,21 @@ const PlayerSettingsRoute = PlayerSettingsRouteImport.update({
 const PlayerGuideRoute = PlayerGuideRouteImport.update({
   id: '/guide',
   path: '/guide',
+  getParentRoute: () => PlayerRouteRoute,
+} as any)
+const PlayerDownloadsRoute = PlayerDownloadsRouteImport.update({
+  id: '/downloads',
+  path: '/downloads',
+  getParentRoute: () => PlayerRouteRoute,
+} as any)
+const PlayerCalendarRoute = PlayerCalendarRouteImport.update({
+  id: '/calendar',
+  path: '/calendar',
+  getParentRoute: () => PlayerRouteRoute,
+} as any)
+const PlayerAdminUsersRoute = PlayerAdminUsersRouteImport.update({
+  id: '/admin-users',
+  path: '/admin-users',
   getParentRoute: () => PlayerRouteRoute,
 } as any)
 const LabelDetailIdRoute = LabelDetailIdRouteImport.update({
@@ -468,6 +486,9 @@ export interface FileRoutesByFullPath {
   '/import/auto': typeof ImportAutoRoute
   '/import/singles': typeof ImportSinglesRoute
   '/label-detail/$id': typeof LabelDetailIdRoute
+  '/player/admin-users': typeof PlayerAdminUsersRoute
+  '/player/calendar': typeof PlayerCalendarRoute
+  '/player/downloads': typeof PlayerDownloadsRoute
   '/player/guide': typeof PlayerGuideRoute
   '/player/settings': typeof PlayerSettingsRoute
   '/player/watching': typeof PlayerWatchingRoute
@@ -536,6 +557,9 @@ export interface FileRoutesByTo {
   '/import/auto': typeof ImportAutoRoute
   '/import/singles': typeof ImportSinglesRoute
   '/label-detail/$id': typeof LabelDetailIdRoute
+  '/player/admin-users': typeof PlayerAdminUsersRoute
+  '/player/calendar': typeof PlayerCalendarRoute
+  '/player/downloads': typeof PlayerDownloadsRoute
   '/player/guide': typeof PlayerGuideRoute
   '/player/settings': typeof PlayerSettingsRoute
   '/player/watching': typeof PlayerWatchingRoute
@@ -609,6 +633,9 @@ export interface FileRoutesById {
   '/import/auto': typeof ImportAutoRoute
   '/import/singles': typeof ImportSinglesRoute
   '/label-detail/$id': typeof LabelDetailIdRoute
+  '/player/admin-users': typeof PlayerAdminUsersRoute
+  '/player/calendar': typeof PlayerCalendarRoute
+  '/player/downloads': typeof PlayerDownloadsRoute
   '/player/guide': typeof PlayerGuideRoute
   '/player/settings': typeof PlayerSettingsRoute
   '/player/watching': typeof PlayerWatchingRoute
@@ -683,6 +710,9 @@ export interface FileRouteTypes {
     | '/import/auto'
     | '/import/singles'
     | '/label-detail/$id'
+    | '/player/admin-users'
+    | '/player/calendar'
+    | '/player/downloads'
     | '/player/guide'
     | '/player/settings'
     | '/player/watching'
@@ -751,6 +781,9 @@ export interface FileRouteTypes {
     | '/import/auto'
     | '/import/singles'
     | '/label-detail/$id'
+    | '/player/admin-users'
+    | '/player/calendar'
+    | '/player/downloads'
     | '/player/guide'
     | '/player/settings'
     | '/player/watching'
@@ -823,6 +856,9 @@ export interface FileRouteTypes {
     | '/import/auto'
     | '/import/singles'
     | '/label-detail/$id'
+    | '/player/admin-users'
+    | '/player/calendar'
+    | '/player/downloads'
     | '/player/guide'
     | '/player/settings'
     | '/player/watching'
@@ -1124,6 +1160,27 @@ declare module '@tanstack/react-router' {
       path: '/guide'
       fullPath: '/player/guide'
       preLoaderRoute: typeof PlayerGuideRouteImport
+      parentRoute: typeof PlayerRouteRoute
+    }
+    '/player/downloads': {
+      id: '/player/downloads'
+      path: '/downloads'
+      fullPath: '/player/downloads'
+      preLoaderRoute: typeof PlayerDownloadsRouteImport
+      parentRoute: typeof PlayerRouteRoute
+    }
+    '/player/calendar': {
+      id: '/player/calendar'
+      path: '/calendar'
+      fullPath: '/player/calendar'
+      preLoaderRoute: typeof PlayerCalendarRouteImport
+      parentRoute: typeof PlayerRouteRoute
+    }
+    '/player/admin-users': {
+      id: '/player/admin-users'
+      path: '/admin-users'
+      fullPath: '/player/admin-users'
+      preLoaderRoute: typeof PlayerAdminUsersRouteImport
       parentRoute: typeof PlayerRouteRoute
     }
     '/label-detail/$id': {
@@ -1431,6 +1488,9 @@ const ImportRouteRouteWithChildren = ImportRouteRoute._addFileChildren(
 )
 
 interface PlayerRouteRouteChildren {
+  PlayerAdminUsersRoute: typeof PlayerAdminUsersRoute
+  PlayerCalendarRoute: typeof PlayerCalendarRoute
+  PlayerDownloadsRoute: typeof PlayerDownloadsRoute
   PlayerGuideRoute: typeof PlayerGuideRoute
   PlayerSettingsRoute: typeof PlayerSettingsRoute
   PlayerWatchingRoute: typeof PlayerWatchingRoute
@@ -1465,6 +1525,9 @@ interface PlayerRouteRouteChildren {
 }
 
 const PlayerRouteRouteChildren: PlayerRouteRouteChildren = {
+  PlayerAdminUsersRoute: PlayerAdminUsersRoute,
+  PlayerCalendarRoute: PlayerCalendarRoute,
+  PlayerDownloadsRoute: PlayerDownloadsRoute,
   PlayerGuideRoute: PlayerGuideRoute,
   PlayerSettingsRoute: PlayerSettingsRoute,
   PlayerWatchingRoute: PlayerWatchingRoute,

@@ -289,8 +289,8 @@ def _probe_cast_media(source) -> tuple[str, str, float | None]:
                     v_codec = cname
                 elif ctype == "audio" and not a_codec:
                     a_codec = cname
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("ffprobe cast media probe failed for %s: %s", source.path, exc)
     if len(_CAST_PROBE_CACHE) > 500:
         _CAST_PROBE_CACHE.clear()
     _CAST_PROBE_CACHE[source.path] = (v_codec, a_codec, dur)

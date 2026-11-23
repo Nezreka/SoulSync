@@ -183,8 +183,8 @@ def _upnp_get_external_ip(control_url: str, service_type: str) -> str | None:
         for elem in root.iter():
             if elem.tag.endswith("NewExternalIPAddress") and elem.text:
                 return elem.text.strip()
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as exc:  # noqa: BLE001
+        log.debug("connect upnp: failed parsing external IP response: %s", exc)
     return None
 
 
@@ -473,7 +473,7 @@ class UpnpPortMapper:
         if m and m.method == "upnp" and m.control_url and m.service_type:
             try:
                 _upnp_delete_mapping(m.control_url, m.service_type, m.external_port)
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as exc:  # noqa: BLE001
+                log.debug("connect upnp: delete mapping on stop failed: %s", exc)
         with self._lock:
             self._mapping = None

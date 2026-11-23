@@ -1600,6 +1600,7 @@ def player_downloads_removed():
 
 @bp.route("/api/player/admin/users", methods=["GET"])
 @device_playback
+@self_only
 def player_admin_users():
     """Admin-only overview of all profiles, download permissions, and device downloads."""
     from core.player import downloads
@@ -1622,6 +1623,7 @@ def player_admin_users():
 
 @bp.route("/api/player/admin/users/<int:target_profile_id>/downloads", methods=["PUT"])
 @device_playback
+@self_only
 def player_admin_user_downloads(target_profile_id: int):
     """Admin-only toggle for a user's offline download permission and optional item cap."""
     from core.player import downloads

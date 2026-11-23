@@ -59,8 +59,8 @@ def connect_tls_port(config_manager=None) -> int:
             cfg = config_manager.get("connect.tls_port", None)
             if cfg:
                 return int(cfg)
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as exc:  # noqa: BLE001
+            log.debug("connect_tls_port config lookup failed: %s", exc)
     return DEFAULT_TLS_PORT
 
 
@@ -254,8 +254,8 @@ def _start_https_listener(app, store: CertificateStore, host: str, port: int) ->
     if _https_server is not None:
         try:
             _https_server.shutdown()
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as exc:  # noqa: BLE001
+            log.debug("connect_tls_port config lookup failed: %s", exc)
         _https_server = None
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ctx.minimum_version = ssl.TLSVersion.TLSv1_2
