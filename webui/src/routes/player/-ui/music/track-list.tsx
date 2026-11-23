@@ -389,14 +389,16 @@ export function TrackList({
                   >
                     <PlusIcon />
                   </button>
-                  <DownloadMediaButton
-                    itemType="track"
-                    itemId={String(row.song.id)}
-                    title={row.title}
-                    subtitle={row.subtitle ?? undefined}
-                    artwork={row.artwork ?? undefined}
-                    compact
-                  />
+                  {row.trackId !== null ? (
+                    <DownloadMediaButton
+                      itemType="track"
+                      itemId={String(row.trackId)}
+                      title={row.title}
+                      subtitle={row.artist ?? row.song?.artist ?? undefined}
+                      artwork={row.art ?? undefined}
+                      compact
+                    />
+                  ) : null}
                 </>
               ) : null}
               {!playable && row.onMissingAction ? (

@@ -8,7 +8,7 @@ import type { LibTrack } from '../-player.types';
 import { runtime } from '../-lib/format';
 import { libraryThumb, remoteImage } from '../-lib/images';
 import { fileQuality, ownedReleases } from '../-lib/music';
-import { albumItems } from '../-lib/play-items';
+import { albumItems, isLibTrackOwned } from '../-lib/play-items';
 import { albumQuery, artistQuery, requestMusicTrack } from '../-player.api';
 import { Comments } from '../-ui/comments';
 import { DownloadIcon, PlusIcon } from '../-ui/icons';
@@ -63,10 +63,10 @@ function AlbumPage() {
   const a = album.data;
   if (!a) return <NotFound what="Album" />;
 
-  const owned = a.tracks.filter((t) => !t.is_missing && t.id);
+  const owned = a.tracks.filter(isLibTrackOwned);
   const missing = a.tracks
     .map((track, index) => ({ track, index, key: String(track.id ?? `missing-${index}`) }))
-    .filter(({ track }) => track.is_missing || !track.id);
+    .filter(({ track }) => !isLibTrackOwned(track));
   const totalMs = owned.reduce((sum, t) => sum + (t.duration ?? 0), 0);
   const discs = new Set(a.tracks.map((t) => t.disc_number ?? 1)).size;
   const qualities = [...new Set(owned.map((t) => fileQuality(t.file)).filter((q): q is string => !!q))];
@@ -198,7 +198,7 @@ function AlbumPage() {
                 onClick={() =>
                   openAddToPlaylist(
                     a.tracks
-                      .filter((t) => !t.is_missing && t.id)
+                      .filter(isLibTrackOwned)
                       .map((t) => ({
                         title: t.title,
                         artist: trackArtists(t) || albumArtist || '',
@@ -236,7 +236,7 @@ function AlbumPage() {
           label="Tracks"
           rows={a.tracks.map((track, index) => {
             const artists = trackArtists(track);
-            const playable = !track.is_missing && !!track.id;
+            const playable = isLibTrackOwned(track);
             const rowKey = String(track.id ?? `missing-${index}`);
             const st = reqState[rowKey];
             const missingLabel =

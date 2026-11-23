@@ -180,6 +180,9 @@ export interface LibTrack {
   duration?: number | null;
   explicit?: boolean;
   is_missing?: boolean;
+  file_status?: string | null;
+  file_count?: number;
+  server_track_id?: string | number | null;
   artists?: { id?: number; name: string }[] | string[];
   file?: LibTrackFile | null;
 }
