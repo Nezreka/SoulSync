@@ -604,3 +604,246 @@
   background: rgba(var(--accent-rgb), 0.2);
   color: #fff;
 }
+
+/* ── Cinema Proscenium Stage & Pleated Velvet Curtain Unfurl ── */
+
+.theaterStage {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 16px;
+  overflow: hidden;
+  background: #06070c;
+  border: 1px solid rgba(255, 215, 130, 0.18);
+  box-shadow:
+    0 24px 60px rgba(0, 0, 0, 0.72),
+    inset 0 0 80px rgba(0, 0, 0, 0.75);
+}
+
+.stageScreen {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: brightness(0.72) contrast(1.06);
+  transition: filter 1.6s ease, transform 2.2s cubic-bezier(0.22, 1, 0.36, 1);
+  transform: scale(1.04);
+}
+
+.theaterStage[data-open='true'] .stageScreen {
+  filter: brightness(0.95) contrast(1.04);
+  transform: scale(1);
+}
+
+.stageGlow {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse at 50% 0%, rgba(255, 198, 107, 0.22), transparent 55%),
+    radial-gradient(ellipse at 50% 100%, rgba(0, 0, 0, 0.8), transparent 60%);
+  pointer-events: none;
+  z-index: 2;
+}
+
+.curtainLeft,
+.curtainRight {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 52%;
+  z-index: 4;
+  background-image:
+    repeating-linear-gradient(
+      90deg,
+      rgba(128, 12, 26, 0.98) 0px,
+      rgba(166, 18, 38, 0.98) 14px,
+      rgba(86, 6, 16, 0.99) 28px,
+      rgba(142, 14, 30, 0.98) 42px
+    ),
+    linear-gradient(180deg, rgba(0, 0, 0, 0.45) 0%, rgba(0, 0, 0, 0.05) 35%, rgba(0, 0, 0, 0.52) 100%);
+  background-blend-mode: multiply;
+  box-shadow: inset 0 0 42px rgba(0, 0, 0, 0.65);
+  transition: transform 1.85s cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: transform;
+}
+
+.curtainLeft {
+  left: 0;
+  border-right: 2px solid rgba(255, 206, 118, 0.45);
+  transform: translateX(0%);
+}
+
+.curtainRight {
+  right: 0;
+  border-left: 2px solid rgba(255, 206, 118, 0.45);
+  transform: translateX(0%);
+}
+
+.theaterStage[data-open='true'] .curtainLeft {
+  transform: translateX(-86%) skewX(-3deg);
+}
+
+.theaterStage[data-open='true'] .curtainRight {
+  transform: translateX(86%) skewX(3deg);
+}
+
+.curtainValance {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 22px;
+  z-index: 6;
+  background:
+    repeating-linear-gradient(
+      90deg,
+      #6b0714 0px,
+      #9e0e22 18px,
+      #4a030c 36px
+    );
+  border-bottom: 2px solid rgba(255, 210, 125, 0.65);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.65);
+  pointer-events: none;
+}
+
+.stageCenterOverlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 24px;
+  gap: 8px;
+  pointer-events: none;
+  transition: opacity 0.65s ease;
+}
+
+.stageMarquee {
+  padding: 14px 24px;
+  border-radius: 14px;
+  background: rgba(10, 7, 12, 0.72);
+  border: 1px solid rgba(255, 210, 125, 0.38);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.65);
+  max-width: 82%;
+}
+
+.stageEyebrow {
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: #f6c978;
+  margin-bottom: 4px;
+}
+
+.stageTitle {
+  font-size: clamp(18px, 2.4vw, 26px);
+  font-weight: 850;
+  color: #fff;
+  margin: 0;
+  line-height: 1.15;
+}
+
+.stageSub {
+  font-size: 12.5px;
+  color: rgba(255, 255, 255, 0.78);
+  margin-top: 4px;
+}
+
+.countdownRing {
+  width: 84px;
+  height: 84px;
+  border-radius: 50%;
+  border: 3px solid #f6c978;
+  background: rgba(8, 6, 12, 0.82);
+  box-shadow: 0 0 36px rgba(246, 201, 120, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 38px;
+  font-weight: 900;
+  color: #fff;
+}
+
+/* ── Theater Seating Row ── */
+
+.seatRow {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, rgba(128, 12, 26, 0.1) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.seat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 64px;
+  padding: 8px 10px 6px;
+  border-radius: 12px 12px 6px 6px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 3px solid rgba(166, 18, 38, 0.65);
+}
+
+.seatReady {
+  border-color: rgba(34, 197, 94, 0.45);
+  border-bottom-color: #22c55e;
+  background: rgba(34, 197, 94, 0.08);
+}
+
+.seatName {
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.9);
+  max-width: 72px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.seatTag {
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #86efac;
+}
+
+/* ── Floating Cinema Emoji Reactions ── */
+
+@keyframes floatReaction {
+  0% {
+    opacity: 0;
+    transform: translateY(12px) scale(0.7);
+  }
+  18% {
+    opacity: 1;
+    transform: translateY(-10px) scale(1.1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-120px) scale(0.95);
+  }
+}
+
+.floatingReaction {
+  position: absolute;
+  bottom: 18px;
+  z-index: 7;
+  font-size: 26px;
+  pointer-events: none;
+  animation: floatReaction 2.2s ease-out forwards;
+  filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.6));
+}

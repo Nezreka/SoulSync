@@ -626,8 +626,61 @@ function WatchPartyRoomModal({
   const party = roomQ.data;
   const [chatText, setChatText] = useState('');
   const [lobbyMuted, setLobbyMuted] = useState(false);
+  const [countdown, setCountdown] = useState<number | null>(null);
+  const [curtainsOpen, setCurtainsOpen] = useState(false);
+  const [floatingEmojis, setFloatingEmojis] = useState<{ id: number; emoji: string; leftPct: number }[]>([]);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const autoJoined = useRef(false);
+  const lastMsgCount = useRef(0);
+
+  // Keep curtain state synced with party status (unfurl smoothly on showtime!)
+  useEffect(() => {
+    if (!party) return;
+    if (party.status === 'playing' || party.status === 'paused') {
+      setCurtainsOpen(true);
+    } else if (countdown === null) {
+      setCurtainsOpen(false);
+    }
+  }, [party?.status, countdown, party]);
+
+  // Float quick-reaction emojis up across the cinema stage when new reactions arrive
+  useEffect(() => {
+    const msgs = party?.messages ?? [];
+    if (msgs.length > lastMsgCount.current) {
+      const added = msgs.slice(lastMsgCount.current);
+      const bursts = added
+        .filter((m) => QUICK_EMOJIS.includes(m.body.trim()))
+        .map((m, idx) => ({
+          id: Date.now() + idx,
+          emoji: m.body.trim(),
+          leftPct: 16 + ((m.id * 19 + idx * 17) % 68),
+        }));
+      if (bursts.length) {
+        setFloatingEmojis((prev) => [...prev.slice(-10), ...bursts]);
+        window.setTimeout(() => {
+          const ids = new Set(bursts.map((b) => b.id));
+          setFloatingEmojis((prev) => prev.filter((x) => !ids.has(x.id)));
+        }, 2300);
+      }
+    }
+    lastMsgCount.current = msgs.length;
+  }, [party?.messages]);
+
+  const startShowtimeWithCurtain = async (p: WatchParty) => {
+    if (countdown !== null) return;
+    setCountdown(3);
+    await new Promise((r) => window.setTimeout(r, 850));
+    setCountdown(2);
+    await new Promise((r) => window.setTimeout(r, 850));
+    setCountdown(1);
+    await new Promise((r) => window.setTimeout(r, 850));
+    setCountdown(null);
+    setCurtainsOpen(true);
+    const updated = await watchPartyApi.state(p.id, { action: 'start' });
+    refresh();
+    // Let the velvet curtains glide apart before opening the full synced video player!
+    window.setTimeout(() => launchSyncedVideo(updated), 1450);
+  };
 
   // Auto-join room on open
   useEffect(() => {
@@ -740,6 +793,68 @@ function WatchPartyRoomModal({
 
         <div className={wp.roomGrid}>
           <div className={wp.roomMain}>
+            {/* 16:9 Cinema Proscenium Stage with Pleated Velvet Curtains */}
+            <div className={wp.theaterStage} data-open={curtainsOpen ? 'true' : 'false'}>
+              {bg ? <img className={wp.stageScreen} src={bg} alt="" /> : null}
+              <div className={wp.stageGlow} />
+              <div className={wp.curtainValance} />
+              <div className={wp.curtainLeft} />
+              <div className={wp.curtainRight} />
+
+              <div className={wp.stageCenterOverlay}>
+                {countdown !== null ? (
+                  <div className={wp.countdownRing}>{countdown}</div>
+                ) : !curtainsOpen ? (
+                  <div className={wp.stageMarquee}>
+                    <div className={wp.stageEyebrow}>
+                      {party.status === 'scheduled'
+                        ? `PREMIERE · ${countdownText(party.scheduled_for, Date.now() / 1000)}`
+                        : 'FEATURE PRESENTATION'}
+                    </div>
+                    <h3 className={wp.stageTitle}>{party.title}</h3>
+                    <div className={wp.stageSub}>
+                      {party.members.filter((m) => m.ready).length} of {party.members.length} seats ready
+                      {party.meta.subtitle ? ` · ${party.meta.subtitle}` : ''}
+                    </div>
+                  </div>
+                ) : (
+                  <div className={wp.stageMarquee} style={{ opacity: 0.92 }}>
+                    <div className={wp.stageEyebrow}>
+                      {party.status === 'playing' ? '● NOW SCREENING' : '❚❚ SCREENING PAUSED'}
+                    </div>
+                    <h3 className={wp.stageTitle}>{party.title}</h3>
+                    <div className={wp.stageSub}>Synced at {clock(party.live_position)}</div>
+                  </div>
+                )}
+              </div>
+
+              {floatingEmojis.map((fe) => (
+                <span
+                  key={fe.id}
+                  className={wp.floatingReaction}
+                  style={{ left: `${fe.leftPct}%` }}
+                  aria-hidden="true"
+                >
+                  {fe.emoji}
+                </span>
+              ))}
+            </div>
+
+            {/* Curved Theater Seating Row */}
+            {party.members.length > 0 ? (
+              <div className={wp.seatRow} aria-label="Seated audience">
+                {party.members.map((m) => (
+                  <div key={m.profile_id} className={`${wp.seat} ${m.ready ? wp.seatReady : ''}`}>
+                    <Avatar profile={m.profile} />
+                    <span className={wp.seatName}>{m.profile.name}</span>
+                    <span className={wp.seatTag} style={!m.ready ? { color: 'rgba(255,255,255,0.45)' } : undefined}>
+                      {m.is_host ? '★ Host' : m.ready ? '✓ Ready' : 'Seated'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+
             {/* Synced SoulSync Library Lobby Music */}
             {lobbyTrack && (party.status === 'lobby' || party.status === 'scheduled') ? (
               <div className={wp.lobbyMusicBox}>
@@ -802,14 +917,11 @@ function WatchPartyRoomModal({
                     <button
                       type="button"
                       className={wp.startPartyBtn}
-                      onClick={async () => {
-                        const updated = await watchPartyApi.state(party.id, { action: 'start' });
-                        refresh();
-                        launchSyncedVideo(updated);
-                      }}
+                      disabled={countdown !== null}
+                      onClick={() => void startShowtimeWithCurtain(party)}
                     >
                       <PlayIcon />
-                      Start Feature Presentation
+                      {countdown !== null ? `Starting in ${countdown}…` : 'Unfurl Curtains & Start'}
                     </button>
                   ) : null}
                   <button
