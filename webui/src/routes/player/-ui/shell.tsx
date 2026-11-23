@@ -234,7 +234,7 @@ function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => 
         />
       ) : null}
       <div className={s.sideFoot}>
-        {access.isAdmin ? (
+        {sections.isAdmin ? (
           <Link
             to="/player/admin-users"
             className={s.managerLink}
