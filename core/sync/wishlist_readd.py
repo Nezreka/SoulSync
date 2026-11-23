@@ -37,17 +37,13 @@ def normalize_wishlist_track(track: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def build_original_tracks_map(tracks_json: Optional[List[Dict[str, Any]]]) -> Dict[str, Dict[str, Any]]:
-    """``{track_id: normalized_track}`` for a sync's tracks_json — the full-fidelity
-    map the live sync builds before auto-wishlisting unmatched tracks. One source of
-    truth so the re-add matches the auto-add exactly."""
+    """Normalized tracks keyed by playlist ID first, then by catalogue ID."""
     out: Dict[str, Dict[str, Any]] = {}
     for t in tracks_json or []:
         if not isinstance(t, dict):
             continue
-        # The native source id is the row's identity when it has one: two
-        # versions (clean/explicit) can share the metadata id but not the
-        # source id, and keying by metadata let one overwrite the other.
-        track_id = t.get('source_track_id') or t.get('id', '')
+        # Two playlist versions can share the same catalogue match.
+        track_id = t.get("source_track_id") or t.get("id")
         if track_id:
             out[str(track_id)] = normalize_wishlist_track(t)
     return out
@@ -60,10 +56,8 @@ def reconstruct_sync_track_data(
 ) -> Optional[Dict[str, Any]]:
     """Return the wishlist-add ``spotify_track_data`` for re-adding a synced track.
 
-    Resolves the track the SAME way the auto-add did: the normalized tracks_json
-    entry (``build_original_tracks_map``), looked up by the track_result's
-    ``source_track_id`` — so the payload (full album object + images + album_type +
-    total_tracks + artists-as-dicts) is identical to the original auto-add.
+    Uses the same normalized tracks_json entry as auto-add. History stores the
+    catalogue ID in ``source_track_id`` and the native ID in ``playlist_track_id``.
 
     Only 'wishlist' rows are eligible. Falls back to a normalized rebuild from the
     track_result's own fields (with the album cover from its image_url) when the
@@ -83,11 +77,17 @@ def reconstruct_sync_track_data(
     if is_stub_id(sid) and not should_wishlist_stub(tr.get('artist'), tr.get('name'), sid):
         return None
 
-    # Primary: the exact normalized track the auto-add used.
-    if sid:
-        payload = build_original_tracks_map(tracks).get(sid)
-        if payload:
+    playlist_track_id = str(tr.get("playlist_track_id") or "")
+    originals = build_original_tracks_map(tracks)
+    if playlist_track_id:
+        if payload := originals.get(playlist_track_id):
             return payload
+    elif sid:
+        # Older history only stored the catalogue ID. Don't guess a native ID
+        # when more than one playlist version matched that catalogue track.
+        matches = [track for track in originals.values() if str(track.get("id") or "") == sid]
+        if len(matches) == 1:
+            return matches[0]
 
     # Fallback: rebuild from the track_result fields, through the SAME normalizer so
     # the shape matches, and seed the album cover from the row's image_url.
@@ -99,6 +99,7 @@ def reconstruct_sync_track_data(
         album['images'] = [{'url': tr['image_url']}]
     return normalize_wishlist_track({
         'id': sid,
+        **({"source_track_id": playlist_track_id} if playlist_track_id else {}),
         'name': tr.get('name') or '',
         'artists': [{'name': tr.get('artist') or ''}],
         'album': album,

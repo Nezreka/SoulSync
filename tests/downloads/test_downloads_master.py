@@ -1608,6 +1608,63 @@ def test_organize_by_playlist_keeps_provenance_not_routing(monkeypatch):
     assert info['_playlist_name'] == 'My Mix'          # provenance preserved
 
 
+def test_organize_tidal_playlist_dispatches_the_native_track_id(monkeypatch):
+    import asyncio
+    from unittest.mock import Mock
+
+    from core.download_orchestrator import DownloadOrchestrator
+    from core.downloads.track_hint import hint_from_track
+    from core.playlists.organize_download import mirrored_tracks_to_download_json
+    from core.tidal_download_client import TidalDownloadClient
+
+    db = _FakeDB()
+    monkeypatch.setattr("database.music_database.MusicDatabase", lambda: db)
+    monkeypatch.setattr("core.tidal_download_client.quality_tier_for_source", lambda *args, **kwargs: "lossless")
+    _seed_batch(
+        "tidal-batch",
+        playlist_folder_mode=True,
+        organize_by_playlist=True,
+        batch_source="tidal",
+        source_playlist_ref="tidal-playlist",
+    )
+    tracks = mirrored_tracks_to_download_json(
+        [
+            {
+                "source_track_id": "303656585",
+                "artist_name": "Becky Hill",
+                "album_name": "Disconnect",
+                "duration_ms": 165000,
+                "extra_data": {"spotify_hint": {"id": "catalogue-id", "name": "Disconnect"}},
+            }
+        ]
+    )
+    mw.run_full_missing_tracks_process("tidal-batch", "P1", tracks, _build_deps())
+    (task_id,) = download_batches["tidal-batch"]["queue"]
+    track = download_tasks[task_id]["track_info"]
+    assert track["id"] == "catalogue-id"
+
+    client = TidalDownloadClient.__new__(TidalDownloadClient)
+    client.session = SimpleNamespace(access_token="token", country_code="GB")
+    client.is_available = lambda: True
+    client._engine = SimpleNamespace(worker=SimpleNamespace(dispatch=Mock(return_value="download-id")))
+    response = Mock()
+    response.json.return_value = {"data": {"attributes": {"title": "Disconnect", "isrc": "GBUM72306588"}}}
+    client._get_with_rate_limit_retry = Mock(return_value=response)
+    orchestrator = DownloadOrchestrator.__new__(DownloadOrchestrator)
+    orchestrator.mode = "tidal"
+    orchestrator._client = lambda name: client
+    orchestrator.registry = SimpleNamespace(display_name=lambda name: name)
+
+    candidates, albums = asyncio.run(orchestrator.search("Becky Hill Disconnect", track_hint=hint_from_track(track)))
+    (candidate,) = candidates
+    assert not albums
+    assert candidate.duration == 165000
+    assert candidate._source_metadata["isrc"] == "GBUM72306588"
+    assert client._get_with_rate_limit_retry.call_args.args[0].endswith("/tracks/303656585")
+    assert asyncio.run(client.download(candidate.username, candidate.filename)) == "download-id"
+    assert client._engine.worker.dispatch.call_args.kwargs["target_id"] == 303656585
+
+
 # ---------------------------------------------------------------------------
 # Hand-off to monitor + start_next_batch
 # ---------------------------------------------------------------------------

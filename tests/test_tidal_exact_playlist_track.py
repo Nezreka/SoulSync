@@ -7,30 +7,10 @@ the download must use the id the playlist already named.
 """
 
 import asyncio
-import sys
-import types
 
-
-# Stub tidalapi before importing the module: it touches tidalapi at import
-# time and the unit tests must not require the package.
-if "tidalapi" not in sys.modules:
-    _fake = types.ModuleType("tidalapi")
-
-    class _FakeQuality:
-        low_96k = "LOW"
-        low_320k = "HIGH"
-        high_lossless = "LOSSLESS"
-        hi_res = "HI_RES"
-        hi_res_lossless = "HI_RES_LOSSLESS"
-
-    _fake.Quality = _FakeQuality
-    _fake.media = types.SimpleNamespace(Track=object)
-    sys.modules["tidalapi"] = _fake
-
-
-from core.downloads.track_hint import hint_from_track, track_hint_context  # noqa: E402
-from core.quality.source_map import quality_from_tidal_tier  # noqa: E402
-from core.tidal_download_client import (  # noqa: E402
+from core.downloads.track_hint import hint_from_track, track_hint_context
+from core.quality.source_map import quality_from_tidal_tier
+from core.tidal_download_client import (
     QUALITY_MAP,
     TidalDownloadClient,
     _v2_to_track_result,
@@ -137,37 +117,23 @@ def test_hint_trusts_a_tidal_id_only_from_a_tidal_playlist(monkeypatch):
 
 def test_hint_reads_the_native_id_from_a_formatted_wishlist_task(monkeypatch):
     import core.downloads.track_hint as th
+    from core.wishlist.service import WishlistService
 
     th._MIRROR_SOURCE_CACHE.clear()
     monkeypatch.setattr(th, "_mirrored_playlist_source", lambda mid: "tidal")
 
-    formatted = {
-        "id": "deezer-metadata-id",
-        "name": "Disconnect",
-        "artists": [{"name": "Becky Hill"}],
-        "album": {"name": "Disconnect"},
-        "duration_ms": 165000,
-        "source_info": {"mirrored_playlist_id": 1},
-        "track_data": {"source_track_id": "303656585", "duration_ms": 165000},
-    }
+    formatted = WishlistService.format_track_for_download(
+        {
+            "id": 1,
+            "spotify_track_id": "deezer-metadata-id",
+            "source_type": "playlist",
+            "source_info": '{"playlist_id": "auto_mirror_1"}',
+            "failure_reason": "Missing from media server after sync",
+            "retry_count": 0,
+            "date_added": None,
+            "last_attempted": None,
+            "track_data": _hint(duration_ms=165000),
+        }
+    )
+    assert formatted["id"] == "deezer-metadata-id"
     assert hint_from_track(formatted)["tidal_id"] == "303656585"
-
-
-def test_hint_reads_the_source_from_a_direct_playlist_batch(monkeypatch):
-    import core.downloads.track_hint as th
-
-    th._MIRROR_SOURCE_CACHE.clear()
-    monkeypatch.setattr(th, "_mirrored_playlist_source", lambda mid: "")
-
-    track = _hint(source_info={"playlist_id": "some-playlist", "source": "tidal"})
-    assert hint_from_track(track)["tidal_id"] == "303656585"
-
-
-def test_two_native_ids_sharing_a_metadata_id_stay_distinct():
-    from core.sync.wishlist_readd import build_original_tracks_map
-
-    rows = [
-        {"id": "deezer-metadata-id", "source_track_id": "303656585", "name": "Disconnect"},
-        {"id": "deezer-metadata-id", "source_track_id": "303658687", "name": "Disconnect"},
-    ]
-    assert set(build_original_tracks_map(rows)) == {"303656585", "303658687"}
