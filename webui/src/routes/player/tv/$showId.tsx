@@ -599,6 +599,25 @@ function ShowPage() {
               }
               why="There are no episodes on disk yet."
             />
+            {upNextId || firstOwnedEpisode ? (
+              <Link
+                to="/player/watching"
+                search={{
+                  start: `episode:${upNextId ?? firstOwnedEpisode}`,
+                  title: next
+                    ? `${show.title} · S${next.season_number} E${next.episode_number}`
+                    : show.title,
+                  artwork: show.has_poster !== false ? `/api/video/poster/show/${id}` : undefined,
+                  backdrop:
+                    show.has_backdrop !== false ? `/api/video/backdrop/show/${id}` : undefined,
+                }}
+                className={s.btn}
+                title="Start a Watch Party for this show"
+                data-nav
+              >
+                🍿 Watch Party
+              </Link>
+            ) : null}
             <WatchlistButton kind="show" id={id} />
             <TrailerButton kind="show" id={id} />
             <ReportIssueButton entityType="show" entityId={id} title={show.title} />

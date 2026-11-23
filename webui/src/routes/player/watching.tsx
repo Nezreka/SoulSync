@@ -38,6 +38,22 @@ import s from './-ui/social.module.css';
 import wp from './-ui/watch-party.module.css';
 
 export const Route = createFileRoute('/player/watching')({
+  validateSearch: (
+    raw: Record<string, unknown>,
+  ): {
+    party?: string;
+    start?: string;
+    title?: string;
+    artwork?: string;
+    backdrop?: string;
+  } => ({
+    party: typeof raw.party === 'string' && raw.party.trim() ? raw.party.trim() : undefined,
+    start: typeof raw.start === 'string' && raw.start.trim() ? raw.start.trim() : undefined,
+    title: typeof raw.title === 'string' && raw.title.trim() ? raw.title.trim() : undefined,
+    artwork: typeof raw.artwork === 'string' && raw.artwork.trim() ? raw.artwork.trim() : undefined,
+    backdrop:
+      typeof raw.backdrop === 'string' && raw.backdrop.trim() ? raw.backdrop.trim() : undefined,
+  }),
   component: WatchingPage,
 });
 
@@ -100,7 +116,13 @@ function place(p: {
 
 // ── Cinema-Grade Watching Now Card ──────────────────────────────────────────
 
-function CinemaNowCard({ x }: { x: WatchingSession }) {
+function CinemaNowCard({
+  x,
+  onStartParty,
+}: {
+  x: WatchingSession;
+  onStartParty?: (seed: PartySeed) => void;
+}) {
   const item = itemOf(x.item_type, x.item_id, x.meta);
   const art = remoteImage(x.meta.backdrop) ?? remoteImage(x.meta.artwork);
   const part = x.duration ? Math.min(1, x.position / x.duration) : null;
@@ -169,6 +191,24 @@ function CinemaNowCard({ x }: { x: WatchingSession }) {
             >
               <PlayIcon />
               {x.live && x.channel ? 'Tune in' : `Join at ${clock(x.position)}`}
+            </button>
+          ) : null}
+          {onStartParty &&
+          (x.item_type === 'movie' || x.item_type === 'episode' || x.item_type === 'youtube') ? (
+            <button
+              type="button"
+              className={wp.glassBtn}
+              onClick={() =>
+                onStartParty({
+                  item_type: x.item_type as 'movie' | 'episode' | 'youtube',
+                  item_id: x.item_id,
+                  title: x.meta.title ?? 'Untitled',
+                  meta: x.meta,
+                })
+              }
+              data-nav
+            >
+              🍿 Watch Party
             </button>
           ) : null}
           {detailsHref ? (
@@ -779,7 +819,22 @@ function WatchPartyRoomModal({ partyId, onClose }: { partyId: string; onClose: (
   const launchSyncedVideo = (p: WatchParty, opts?: { withCurtain?: boolean }) => {
     const item = itemOf(p.item_type, p.item_id, p.meta);
     if (!item) return;
-    if (audioRef.current) audioRef.current.pause();
+    const el = audioRef.current;
+    if (el && !el.paused) {
+      // Smooth 480ms theater fade-out as velvet curtains part
+      const startVol = el.volume || 1;
+      const steps = 8;
+      let step = 0;
+      const fade = window.setInterval(() => {
+        step += 1;
+        el.volume = Math.max(0, startVol * (1 - step / steps));
+        if (step >= steps) {
+          window.clearInterval(fade);
+          el.pause();
+          el.volume = startVol;
+        }
+      }, 60);
+    }
     setActiveWatchPartyId(p.id, { triggerCurtain: opts?.withCurtain ?? true });
     playItems([item], 0, { startAt: p.live_position });
     onClose();
@@ -964,6 +1019,18 @@ function WatchPartyRoomModal({ partyId, onClose }: { partyId: string; onClose: (
               </p>
             </div>
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className={wp.glassBtn}
+                onClick={() => {
+                  const link = `${window.location.origin}/player/watching?party=${encodeURIComponent(party.id)}`;
+                  void navigator.clipboard?.writeText(link).catch(() => undefined);
+                  setRoomError(null);
+                }}
+                title="Copy direct invite link to this Watch Party"
+              >
+                🔗 Share Link
+              </button>
               {party.is_member ? (
                 <button
                   type="button"
@@ -1369,6 +1436,7 @@ function WatchPartyRoomModal({ partyId, onClose }: { partyId: string; onClose: (
 
 function WatchingPage() {
   const qc = useQueryClient();
+  const search = Route.useSearch();
   const now = useQuery(watchingNowQuery());
   const together = useQuery(togetherQuery());
   const partiesQ = useQuery(watchPartiesQuery());
@@ -1376,14 +1444,59 @@ function WatchingPage() {
   const [createSeed, setCreateSeed] = useState<PartySeed | null | undefined>(undefined);
   const [activePartyId, setActivePartyId] = useState<string | null>(null);
   const [nowSec, setNowSec] = useState(() => Date.now() / 1000);
+  const consumedSearchRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const key = `${search.party ?? ''}|${search.start ?? ''}`;
+    if (!key || key === '|' || consumedSearchRef.current === key) return;
+    consumedSearchRef.current = key;
+    if (search.party) {
+      setActivePartyId(search.party);
+    } else if (search.start) {
+      const [kind, ...rest] = search.start.split(':');
+      const itemId = rest.join(':');
+      if ((kind === 'movie' || kind === 'episode' || kind === 'youtube') && itemId) {
+        setCreateSeed({
+          item_type: kind,
+          item_id: itemId,
+          title: search.title ?? 'Watch Party',
+          meta: {
+            title: search.title,
+            artwork: search.artwork,
+            backdrop: search.backdrop,
+          },
+        });
+      }
+    }
+  }, [search.party, search.start, search.title, search.artwork, search.backdrop]);
 
   useEffect(() => {
     const id = window.setInterval(() => setNowSec(Date.now() / 1000), 15_000);
     return () => window.clearInterval(id);
   }, []);
 
+  const jumpIntoLiveParty = async (party: WatchParty) => {
+    const item = itemOf(party.item_type, party.item_id, party.meta);
+    if (!item) {
+      setActivePartyId(party.id);
+      return;
+    }
+    try {
+      if (!party.is_member) {
+        await watchPartyApi.join(party.id, { ready: true });
+      }
+      const fresh = (await watchPartyApi.get(party.id)) ?? party;
+      setActiveWatchPartyId(fresh.id, { triggerCurtain: true });
+      playItems([item], 0, { startAt: fresh.live_position });
+    } catch {
+      setActivePartyId(party.id);
+    }
+  };
+
   const sessions = now.data?.sessions ?? [];
   const parties = partiesQ.data ?? [];
+  const featuredParty = parties[0] ?? null;
+  const extraParties = parties.slice(1);
   const sharing = settings.data?.settings.share_activity ?? true;
 
   return (
@@ -1411,39 +1524,141 @@ function WatchingPage() {
         </p>
       ) : null}
 
-      {/* Section 1: Watch Parties (Live Lobbies & Scheduled Premieres) */}
-      <section className={k.rail} aria-label="Watch Parties">
-        <div className={k.railHead}>
-          <h2 className={k.sectionTitle}>Watch Parties</h2>
-          {parties.length ? (
-            <span className={k.railMore}>
-              {parties.length} {parties.length === 1 ? 'room' : 'rooms'}
-            </span>
-          ) : null}
-        </div>
-        {parties.length ? (
-          <div className={wp.cinemaGrid}>
-            {parties.map((p) => (
-              <WatchPartyCard
-                key={p.id}
-                party={p}
-                nowSec={nowSec}
-                onOpen={(id) => setActivePartyId(id)}
-              />
-            ))}
-          </div>
-        ) : (
-          <Empty title="No active Watch Parties">
-            Open a theater waiting room with music from your library, or schedule a movie night for
-            the household.
-          </Empty>
-        )}
-      </section>
+      {/* Section 1: Cinema Lounge Spotlight / Active Watch Parties */}
+      {featuredParty ? (
+        <section className={k.rail} aria-label="Featured Watch Party">
+          {(() => {
+            const art =
+              remoteImage(featuredParty.meta.backdrop) ?? remoteImage(featuredParty.meta.artwork);
+            const isLive = featuredParty.status === 'playing' || featuredParty.status === 'paused';
+            const statusLabel =
+              featuredParty.status === 'playing'
+                ? `LIVE NOW · ${clock(featuredParty.live_position)}`
+                : featuredParty.status === 'paused'
+                  ? `PAUSED · ${clock(featuredParty.live_position)}`
+                  : featuredParty.status === 'scheduled'
+                    ? `SCHEDULED · ${countdownText(featuredParty.scheduled_for, nowSec)}`
+                    : `THEATER LOBBY OPEN · ${featuredParty.ready_count}/${featuredParty.member_count} READY`;
+            return (
+              <article className={wp.theaterHero}>
+                {art ? <img className={wp.theaterHeroBg} src={art} alt="" /> : null}
+                <div className={wp.theaterHeroScrim} />
+                <div className={wp.theaterHeroContent}>
+                  <div className={wp.theaterHeroEyebrow}>
+                    <span className={wp.livePill}>
+                      <span
+                        className={`${wp.liveDot} ${isLive ? wp.liveDotActive : wp.liveDotLobby}`}
+                        aria-hidden="true"
+                      />
+                      {statusLabel}
+                    </span>
+                    <span className={wp.whoChip}>
+                      <Avatar profile={featuredParty.host_profile} />
+                      <span>
+                        {featuredParty.member_count}{' '}
+                        {featuredParty.member_count === 1 ? 'viewer' : 'viewers'}
+                      </span>
+                    </span>
+                  </div>
 
-      {/* Section 2: Right Now (Redesigned Cinema Backdrop Cards) */}
-      <section className={k.rail} aria-label="Right now">
+                  <h2 className={wp.theaterHeroTitle}>{featuredParty.title}</h2>
+                  <p className={wp.theaterHeroSub}>
+                    Hosted by {featuredParty.host_profile?.name ?? 'Host'}
+                    {featuredParty.meta.subtitle ? ` · ${featuredParty.meta.subtitle}` : ''}
+                  </p>
+
+                  {featuredParty.lobby_track && !isLive ? (
+                    <div className={wp.musicTicker}>
+                      <span>♪</span>
+                      <span>
+                        Lobby music: {featuredParty.lobby_track.title}
+                        {featuredParty.lobby_track.artist
+                          ? ` — ${featuredParty.lobby_track.artist}`
+                          : ''}
+                      </span>
+                    </div>
+                  ) : null}
+
+                  <div className={wp.cardActions} style={{ marginTop: 6 }}>
+                    {isLive ? (
+                      <>
+                        <button
+                          type="button"
+                          className={`${wp.glassBtn} ${wp.glassBtnPrimary}`}
+                          onClick={() => void jumpIntoLiveParty(featuredParty)}
+                          data-nav
+                        >
+                          <PlayIcon />
+                          Jump Straight In ({clock(featuredParty.live_position)})
+                        </button>
+                        <button
+                          type="button"
+                          className={wp.glassBtn}
+                          onClick={() => setActivePartyId(featuredParty.id)}
+                          data-nav
+                        >
+                          Open Lounge &amp; Chat
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        className={`${wp.glassBtn} ${wp.glassBtnPrimary}`}
+                        onClick={() => setActivePartyId(featuredParty.id)}
+                        data-nav
+                      >
+                        <PlayIcon />
+                        {featuredParty.status === 'scheduled'
+                          ? featuredParty.is_member
+                            ? 'Open Theater Room'
+                            : 'RSVP & Enter Lobby'
+                          : 'Enter Theater Lobby'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </article>
+            );
+          })()}
+
+          {extraParties.length ? (
+            <div className={wp.cinemaGrid}>
+              {extraParties.map((p) => (
+                <WatchPartyCard
+                  key={p.id}
+                  party={p}
+                  nowSec={nowSec}
+                  onOpen={(id) => setActivePartyId(id)}
+                />
+              ))}
+            </div>
+          ) : null}
+        </section>
+      ) : (
+        <section className={wp.loungeBanner} aria-label="Theater Lounge">
+          <div className={wp.loungeBannerText}>
+            <span className={wp.loungeBannerKicker}>★ SoulSync Theater Lounge</span>
+            <h2 className={wp.loungeBannerTitle}>Watch movies &amp; shows together in sync</h2>
+            <p className={wp.loungeBannerSub}>
+              Open a waiting room with music from your library, unfurl the velvet curtains when
+              everyone is ready, and react live with floating emojis, chat, and pee-break pauses.
+            </p>
+          </div>
+          <button
+            type="button"
+            className={wp.startPartyBtn}
+            onClick={() => setCreateSeed(null)}
+            data-nav
+          >
+            🍿 Open a Theater Room
+          </button>
+        </section>
+      )}
+
+      {/* Section 2: On Air Right Now (Live Screens) */}
+      <section className={k.rail} aria-label="On air right now">
         <div className={k.railHead}>
-          <h2 className={k.sectionTitle}>Right now</h2>
+          <h2 className={k.sectionTitle}>On air right now</h2>
           {sessions.length ? (
             <span className={k.railMore}>
               {sessions.length} {sessions.length === 1 ? 'screen' : 'screens'}
@@ -1458,24 +1673,25 @@ function WatchingPage() {
               <CinemaNowCard
                 key={`${x.profile_id}:${x.item_type}:${x.item_id}:${x.started}`}
                 x={x}
+                onStartParty={(seed) => setCreateSeed(seed)}
               />
             ))}
           </div>
         ) : (
-          <Empty title="Nobody else is playing anything">
-            When someone on this server watches or listens, it shows up here, live.
+          <Empty title="All screens are quiet">
+            When someone on this server watches or listens, their live screen appears here.
           </Empty>
         )}
       </section>
 
-      {/* Section 3: Watching the Same Thing (Poster-First Grid) */}
+      {/* Section 3: Finish Together (60-Day Shared Watch History) */}
       {together.data?.length ? (
-        <section className={k.rail} aria-label="Watching the same thing">
+        <section className={k.rail} aria-label="Finish together">
           <div className={k.railHead}>
-            <h2 className={k.sectionTitle}>Watching the same thing</h2>
-            <span className={k.railMore}>the last two months</span>
+            <h2 className={k.sectionTitle}>Finish together</h2>
+            <span className={k.railMore}>Shared watch history · last 60 days</span>
           </div>
-          <div className={wp.sharedGrid}>
+          <div className={wp.sharedStrip}>
             {together.data.map((t) => (
               <SharedTitleCard key={t.key} t={t} onStartParty={(seed) => setCreateSeed(seed)} />
             ))}

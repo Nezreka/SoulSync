@@ -962,3 +962,139 @@
   opacity: 0.4;
   cursor: not-allowed;
 }
+
+/* ── Cinema Lounge Hero Spotlight & Redesigned Watching Now ── */
+
+.theaterHero {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  min-height: calc(var(--u) * 20.5);
+  padding: calc(var(--u) * 1.8) calc(var(--u) * 2);
+  margin-bottom: calc(var(--u) * 1.4);
+  overflow: hidden;
+  border: 1px solid rgba(var(--accent-rgb), 0.32);
+  border-radius: var(--radius-xl);
+  background: var(--pl-0d121d);
+  box-shadow: 0 24px 60px rgba(var(--black-rgb), 0.52);
+}
+
+.theaterHeroBg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.52;
+  transition: transform 0.7s var(--pl-ease);
+}
+
+.theaterHero:hover .theaterHeroBg {
+  transform: scale(1.025);
+}
+
+.theaterHeroScrim {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    rgba(var(--pl-070a10-rgb), 0.96) 0%,
+    rgba(var(--pl-070a10-rgb), 0.78) 54%,
+    rgba(var(--pl-070a10-rgb), 0.28) 100%
+  );
+}
+
+.theaterHeroContent {
+  position: relative;
+  z-index: 2;
+  max-width: 640px;
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 0.65);
+}
+
+.theaterHeroEyebrow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: calc(var(--u) * 0.55);
+}
+
+.theaterHeroTitle {
+  margin: 0;
+  color: var(--pl-text);
+  font-size: clamp(1.5rem, 2.8vw, 2.3rem);
+  font-weight: 900;
+  letter-spacing: -0.02em;
+  line-height: 1.12;
+}
+
+.theaterHeroSub {
+  margin: 0;
+  color: var(--pl-text-2);
+  font-size: calc(var(--u) * 0.92);
+  line-height: 1.45;
+}
+
+.loungeBanner {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--u) * 1.2);
+  padding: calc(var(--u) * 1.6) calc(var(--u) * 1.9);
+  margin-bottom: calc(var(--u) * 1.4);
+  overflow: hidden;
+  border: 1px solid var(--white-a12);
+  border-radius: var(--radius-xl);
+  background: linear-gradient(
+    135deg,
+    rgba(var(--accent-rgb), 0.14) 0%,
+    rgba(var(--pl-0d121d-rgb), 0.95) 55%,
+    rgba(var(--pl-070a10-rgb), 0.98) 100%
+  );
+}
+
+.loungeBannerText {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 0.35);
+  max-width: 560px;
+}
+
+.loungeBannerKicker {
+  color: var(--accent-light);
+  font-size: calc(var(--u) * 0.72);
+  font-weight: 850;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.loungeBannerTitle {
+  margin: 0;
+  color: var(--pl-text);
+  font-size: calc(var(--u) * 1.35);
+  font-weight: 850;
+  letter-spacing: -0.01em;
+}
+
+.loungeBannerSub {
+  margin: 0;
+  color: var(--pl-text-2);
+  font-size: calc(var(--u) * 0.88);
+  line-height: 1.45;
+}
+
+.sharedStrip {
+  display: flex;
+  gap: calc(var(--u) * 1);
+  overflow-x: auto;
+  padding-bottom: calc(var(--u) * 0.4);
+  scrollbar-width: thin;
+}
+
+.sharedStrip > * {
+  flex: 0 0 min(330px, 82vw);
+}

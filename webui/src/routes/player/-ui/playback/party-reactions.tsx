@@ -83,10 +83,21 @@ interface FloatingBubble {
   swayPx: number;
 }
 
+interface ChatToast {
+  uid: string;
+  sender: string;
+  body: string;
+}
+
 export function PartyReactionsOverlay({ hudVisible }: { hudVisible: boolean }) {
   const partyId = useActiveWatchPartyId();
   const [party, setParty] = useState<WatchParty | null>(null);
   const [bubbles, setBubbles] = useState<FloatingBubble[]>([]);
+  const [chatToasts, setChatToasts] = useState<ChatToast[]>([]);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatInput, setChatInput] = useState('');
+  const [unreadChat, setUnreadChat] = useState(0);
+  const [videoEnded, setVideoEnded] = useState(false);
   const [muted, setMuted] = useState(false);
   const [rateLimitedUntil, setRateLimitedUntil] = useState<number>(0);
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -101,6 +112,15 @@ export function PartyReactionsOverlay({ hudVisible }: { hudVisible: boolean }) {
   const serverOffsetSecRef = useRef<number>(0);
   const lastLocalActionAtRef = useRef<number>(0);
   const reactionTimestampsRef = useRef<number[]>([]);
+  const chatOpenRef = useRef(false);
+  chatOpenRef.current = chatOpen;
+
+  const spawnChatToast = useCallback((uid: string, sender: string, body: string) => {
+    setChatToasts((prev) => [...prev.slice(-2), { uid, sender, body }]);
+    window.setTimeout(() => {
+      setChatToasts((prev) => prev.filter((t) => t.uid !== uid));
+    }, 5500);
+  }, []);
 
   const showToast = useCallback((msg: string) => {
     setToastMsg(msg);
@@ -129,10 +149,25 @@ export function PartyReactionsOverlay({ hudVisible }: { hudVisible: boolean }) {
     }
   }, [partyId]);
 
-  // 200ms local clock ticker for smooth 5-second resume countdown & pee break timer
+  // 200ms local clock ticker for smooth 5-second resume countdown, pee break timer & post-credits check
   useEffect(() => {
-    if (!partyId) return;
-    const id = window.setInterval(() => setNowMs(Date.now()), 200);
+    if (!partyId) {
+      setVideoEnded(false);
+      setChatOpen(false);
+      setUnreadChat(0);
+      return;
+    }
+    const id = window.setInterval(() => {
+      setNowMs(Date.now());
+      const st = getEngine().getState();
+      if (st.kind === 'video' && st.duration > 30) {
+        const atEnd =
+          st.status === 'ended' || (st.status === 'paused' && st.position >= st.duration - 1.5);
+        setVideoEnded(atEnd);
+      } else {
+        setVideoEnded(false);
+      }
+    }, 200);
     return () => window.clearInterval(id);
   }, [partyId]);
 
@@ -214,6 +249,13 @@ export function PartyReactionsOverlay({ hudVisible }: { hudVisible: boolean }) {
             emoji.startsWith('🚽');
           if (isReaction && !muted) {
             spawnBubble(`srv-${m.id}`, emoji, m.profile?.name ?? '', m.id);
+          } else if (m.kind === 'chat' && emoji) {
+            if (!muted && !chatOpenRef.current) {
+              spawnChatToast(`chat-${m.id}`, m.profile?.name ?? 'Someone', emoji);
+            }
+            if (!chatOpenRef.current) {
+              setUnreadChat((c) => c + 1);
+            }
           }
         }
       } catch {
@@ -226,7 +268,7 @@ export function PartyReactionsOverlay({ hudVisible }: { hudVisible: boolean }) {
       alive = false;
       window.clearInterval(timer);
     };
-  }, [partyId, muted, applyPartySync, spawnBubble]);
+  }, [partyId, muted, applyPartySync, spawnBubble, spawnChatToast]);
 
   const estServerNow = nowMs / 1000 + serverOffsetSecRef.current;
   const resumeRemainingSec =
@@ -672,6 +714,347 @@ export function PartyReactionsOverlay({ hudVisible }: { hudVisible: boolean }) {
           </div>
         ))}
 
+      {/* 4b. Top-Right "Who's Here" Presence Strip (when HUD is visible) */}
+      {hudVisible && party && (
+        <div
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            position: 'absolute',
+            top: 22,
+            right: 24,
+            zIndex: 31,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            padding: '6px 12px',
+            borderRadius: 999,
+            background: 'rgba(10, 13, 22, 0.78)',
+            border: '1px solid rgba(255,255,255,0.16)',
+            backdropFilter: 'blur(16px)',
+            boxShadow: '0 10px 28px rgba(0,0,0,0.45)',
+          }}
+        >
+          <span
+            style={{
+              width: 8,
+              height: 8,
+              borderRadius: '50%',
+              background: party.status === 'playing' ? '#22c55e' : '#f59e0b',
+              boxShadow:
+                party.status === 'playing'
+                  ? '0 0 10px rgba(34,197,94,0.85)'
+                  : '0 0 10px rgba(245,158,11,0.85)',
+            }}
+          />
+          <span style={{ fontSize: 11.5, fontWeight: 800, color: '#fff', letterSpacing: '0.02em' }}>
+            {party.member_count} {party.member_count === 1 ? 'watching' : 'watching'}
+          </span>
+          <div style={{ display: 'flex', alignItems: 'center', marginLeft: 2 }}>
+            {(party.members ?? []).slice(0, 5).map((m, idx) => {
+              const onBreak = peeBreak?.profile_id === m.profile_id;
+              return (
+                <span
+                  key={m.profile_id}
+                  title={`${m.profile?.name ?? 'Member'}${onBreak ? ' (Pee break)' : m.is_host ? ' (Host)' : ''}`}
+                  style={{
+                    width: 24,
+                    height: 24,
+                    borderRadius: '50%',
+                    marginLeft: idx === 0 ? 0 : -6,
+                    background: onBreak ? '#f59e0b' : 'rgba(99, 102, 241, 0.85)',
+                    border: `2px solid ${onBreak ? '#fef3c7' : '#0b0f19'}`,
+                    color: onBreak ? '#111' : '#fff',
+                    fontSize: 10.5,
+                    fontWeight: 850,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    overflow: 'hidden',
+                  }}
+                >
+                  {onBreak ? '🚽' : (m.profile?.name ?? '?').slice(0, 1).toUpperCase()}
+                </span>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* 4c. Auto-Fading Live Chat Toasts (bottom-left, non-intrusive) */}
+      {!muted && !chatOpen && chatToasts.length > 0 && (
+        <div
+          aria-live="polite"
+          style={{
+            position: 'absolute',
+            left: 24,
+            bottom: hudVisible ? 154 : 36,
+            zIndex: 28,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 6,
+            maxWidth: 'min(360px, 72vw)',
+            pointerEvents: 'none',
+            transition: 'bottom 200ms ease',
+          }}
+        >
+          {chatToasts.map((t) => (
+            <div
+              key={t.uid}
+              style={{
+                padding: '7px 12px',
+                borderRadius: 12,
+                background: 'rgba(10, 13, 22, 0.78)',
+                border: '1px solid rgba(255,255,255,0.14)',
+                backdropFilter: 'blur(14px)',
+                color: '#fff',
+                fontSize: 12.5,
+                lineHeight: 1.35,
+                boxShadow: '0 8px 24px rgba(0,0,0,0.45)',
+              }}
+            >
+              <strong style={{ color: '#a5b4fc', marginRight: 6 }}>{t.sender}</strong>
+              <span>{t.body}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* 4d. Slide-Over In-Player Chat Drawer */}
+      {chatOpen && party && (
+        <div
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            position: 'absolute',
+            top: 72,
+            right: 24,
+            bottom: 152,
+            width: 'min(330px, 86vw)',
+            zIndex: 36,
+            display: 'flex',
+            flexDirection: 'column',
+            borderRadius: 18,
+            background: 'rgba(10, 13, 22, 0.9)',
+            border: '1px solid rgba(255,255,255,0.16)',
+            backdropFilter: 'blur(20px)',
+            boxShadow: '0 22px 60px rgba(0,0,0,0.75)',
+            overflow: 'hidden',
+          }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '11px 14px',
+              borderBottom: '1px solid rgba(255,255,255,0.1)',
+            }}
+          >
+            <span
+              style={{
+                fontSize: 12,
+                fontWeight: 850,
+                letterSpacing: '0.08em',
+                textTransform: 'uppercase',
+                color: '#c7d2fe',
+              }}
+            >
+              Party Chat · {party.member_count} live
+            </span>
+            <button
+              type="button"
+              onClick={() => setChatOpen(false)}
+              style={{
+                border: 'none',
+                background: 'rgba(255,255,255,0.1)',
+                color: '#fff',
+                borderRadius: 999,
+                width: 24,
+                height: 24,
+                cursor: 'pointer',
+                fontSize: 12,
+                fontWeight: 800,
+              }}
+            >
+              ✕
+            </button>
+          </div>
+          <div
+            style={{
+              flex: 1,
+              overflowY: 'auto',
+              padding: '10px 14px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 8,
+            }}
+          >
+            {(party.messages ?? [])
+              .filter((m) => m.kind !== 'reaction')
+              .slice(-40)
+              .map((m) =>
+                m.kind === 'system' ? (
+                  <div
+                    key={m.id}
+                    style={{ fontSize: 11.5, color: 'rgba(255,255,255,0.52)', fontStyle: 'italic' }}
+                  >
+                    {m.profile?.name ?? 'Someone'} {m.body.toLowerCase()}
+                  </div>
+                ) : (
+                  <div key={m.id} style={{ fontSize: 12.5, color: '#fff', lineHeight: 1.38 }}>
+                    <strong style={{ color: '#a5b4fc', marginRight: 6 }}>
+                      {m.profile?.name ?? 'Someone'}
+                    </strong>
+                    <span>{m.body}</span>
+                  </div>
+                ),
+              )}
+          </div>
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault();
+              const txt = chatInput.trim();
+              if (!txt) return;
+              setChatInput('');
+              try {
+                const res = await watchPartyApi.chat(party.id, 'chat', txt);
+                if (res?.id) seenIdsRef.current.add(res.id);
+                const fresh = await watchPartyApi.get(party.id);
+                if (fresh) setParty(fresh);
+              } catch {
+                /* ignore */
+              }
+            }}
+            style={{
+              display: 'flex',
+              gap: 6,
+              padding: 10,
+              borderTop: '1px solid rgba(255,255,255,0.1)',
+            }}
+          >
+            <input
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              placeholder="Message the room…"
+              style={{
+                flex: 1,
+                borderRadius: 999,
+                border: '1px solid rgba(255,255,255,0.16)',
+                background: 'rgba(255,255,255,0.08)',
+                color: '#fff',
+                fontSize: 12.5,
+                padding: '7px 12px',
+                outline: 'none',
+              }}
+            />
+            <button
+              type="submit"
+              style={{
+                borderRadius: 999,
+                border: 'none',
+                background: '#6366f1',
+                color: '#fff',
+                fontSize: 12,
+                fontWeight: 800,
+                padding: '7px 14px',
+                cursor: 'pointer',
+              }}
+            >
+              Send
+            </button>
+          </form>
+        </div>
+      )}
+
+      {/* 4e. Post-Credits Lounge Overlay when Movie Ends */}
+      {videoEnded && party && (
+        <div
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            position: 'absolute',
+            inset: 0,
+            zIndex: 40,
+            display: 'grid',
+            placeItems: 'center',
+            background: 'rgba(6, 9, 16, 0.72)',
+            backdropFilter: 'blur(12px)',
+          }}
+        >
+          <div
+            style={{
+              padding: '28px 36px',
+              borderRadius: 22,
+              background: 'rgba(13, 17, 29, 0.94)',
+              border: '1.5px solid rgba(255, 255, 255, 0.16)',
+              boxShadow: '0 28px 80px rgba(0,0,0,0.8)',
+              textAlign: 'center',
+              maxWidth: 440,
+            }}
+          >
+            <div
+              style={{
+                fontSize: 11,
+                fontWeight: 850,
+                letterSpacing: '0.2em',
+                textTransform: 'uppercase',
+                color: '#a5b4fc',
+                marginBottom: 8,
+              }}
+            >
+              ★ Credits Rolled ★
+            </div>
+            <div style={{ fontSize: 22, fontWeight: 900, color: '#fff', marginBottom: 6 }}>
+              {party.title}
+            </div>
+            <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.72)', marginBottom: 20 }}>
+              Hope everyone enjoyed the show! Head back to the theater lounge or leave the party.
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                onClick={() => {
+                  const pid = party.id;
+                  setActiveWatchPartyId(null);
+                  getEngine().stop();
+                  window.location.href = `/player/watching?party=${encodeURIComponent(pid)}`;
+                }}
+                style={{
+                  padding: '9px 18px',
+                  borderRadius: 999,
+                  border: 'none',
+                  background: '#fff',
+                  color: '#0b0f19',
+                  fontSize: 13,
+                  fontWeight: 850,
+                  cursor: 'pointer',
+                }}
+              >
+                Return to Lounge
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  void watchPartyApi.leave(party.id).catch(() => undefined);
+                  setActiveWatchPartyId(null);
+                  getEngine().stop();
+                }}
+                style={{
+                  padding: '9px 18px',
+                  borderRadius: 999,
+                  border: '1px solid rgba(244,63,94,0.45)',
+                  background: 'rgba(244,63,94,0.18)',
+                  color: '#fda4af',
+                  fontSize: 13,
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                }}
+              >
+                Leave Party
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Toast alert for cooldowns */}
       {toastMsg && (
         <div
@@ -813,6 +1196,31 @@ export function PartyReactionsOverlay({ hudVisible }: { hudVisible: boolean }) {
               {emoji}
             </button>
           ))}
+
+          <button
+            type="button"
+            onClick={() => {
+              setChatOpen((o) => {
+                if (!o) setUnreadChat(0);
+                return !o;
+              });
+            }}
+            title="Toggle Party Chat"
+            style={{
+              marginLeft: 2,
+              padding: '4px 10px',
+              borderRadius: 999,
+              border: '1px solid rgba(165, 180, 252, 0.35)',
+              background: chatOpen ? 'rgba(99, 102, 241, 0.35)' : 'rgba(255,255,255,0.08)',
+              color: '#fff',
+              fontSize: 10.5,
+              fontWeight: 800,
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            💬 Chat{unreadChat > 0 && !chatOpen ? ` (${unreadChat})` : ''}
+          </button>
 
           <button
             type="button"

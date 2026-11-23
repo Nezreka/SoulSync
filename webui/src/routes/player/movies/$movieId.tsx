@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { createFileRoute } from '@tanstack/react-router';
+import { Link, createFileRoute } from '@tanstack/react-router';
 import { useState } from 'react';
 
 import { runtime, shortDate } from '../-lib/format';
@@ -132,6 +132,22 @@ function MoviePage() {
                 primary={false}
                 onPlay={() => playItems([movieItem(m, playFile)], 0, { startAt: 0 })}
               />
+            ) : null}
+            {best ? (
+              <Link
+                to="/player/watching"
+                search={{
+                  start: `movie:${id}`,
+                  title: m.title,
+                  artwork: m.has_poster ? `/api/video/poster/movie/${id}` : undefined,
+                  backdrop: m.has_backdrop ? `/api/video/backdrop/movie/${id}` : undefined,
+                }}
+                className={s.btn}
+                title="Start a Watch Party for this movie"
+                data-nav
+              >
+                🍿 Watch Party
+              </Link>
             ) : null}
             <WatchlistButton kind="movie" id={id} />
             <TrailerButton kind="movie" id={id} />
