@@ -139,10 +139,21 @@ export function WeekView({
               {dayMovies.map((m) => (
                 <a
                   key={`m${m.tmdb_id}${m.type}`}
-                  href={playerLinks ? (m.movie_id ? `/player/movies/${m.movie_id}` : '#') : movieHref(m)}
+                  href={playerLinks ? undefined : movieHref(m)}
+                  role={playerLinks ? 'button' : undefined}
+                  tabIndex={playerLinks ? 0 : undefined}
+                  style={playerLinks ? { cursor: 'pointer' } : undefined}
                   className={clsx(styles.tile, styles.tileMovie)}
                   data-state={m.acq}
-                  onClick={(e) => clickOpen(e, () => (onOpenMovie ? onOpenMovie(m) : openMovieDetail(m)))}
+                  onClick={(e) => {
+                    if (playerLinks) {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      onOpenMovie?.(m);
+                    } else {
+                      clickOpen(e, () => (onOpenMovie ? onOpenMovie(m) : openMovieDetail(m)));
+                    }
+                  }}
                   title={`${m.title}${m.year ? ` (${m.year})` : ''} · ${MOVIE_TYPE[m.type]}`}
                 >
                   <span className={styles.tileShow}>🎬 {m.title}</span>
@@ -164,11 +175,24 @@ export function WeekView({
                   <div key={g.key} className={styles.tileWrap}>
                     {label && <div className={styles.band}>{label}</div>}
                     <a
-                      href={playerLinks ? (g.lead.show_id ? `/player/tv/${g.lead.show_id}` : '#') : showHref(g.lead)}
+                      href={playerLinks ? undefined : showHref(g.lead)}
+                      role={playerLinks ? 'button' : undefined}
+                      tabIndex={playerLinks ? 0 : undefined}
                       className={styles.tile}
                       data-state={g.acq}
-                      style={{ '--vcal-h': showHue(g.lead.show_title) } as CSSProperties}
-                      onClick={(e) => clickOpen(e, () => onOpen(g.lead))}
+                      style={{
+                        '--vcal-h': showHue(g.lead.show_title),
+                        ...(playerLinks ? { cursor: 'pointer' } : {}),
+                      } as CSSProperties}
+                      onClick={(e) => {
+                        if (playerLinks) {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          onOpen(g.lead);
+                        } else {
+                          clickOpen(e, () => onOpen(g.lead));
+                        }
+                      }}
                       title={`${g.lead.show_title} · ${episodeCode(g)}${g.lead.title && g.eps.length === 1 ? ` · ${g.lead.title}` : ''} · ${whyLine(g.lead, { autoOn })}`}
                       data-cal-ep={String(g.lead.id)}
                     >
@@ -275,9 +299,20 @@ export function AgendaView({
             {dayMovies.map((m) => (
               <a
                 key={`m${m.tmdb_id}${m.type}`}
-                href={playerLinks ? (m.movie_id ? `/player/movies/${m.movie_id}` : '#') : movieHref(m)}
+                href={playerLinks ? undefined : movieHref(m)}
+                role={playerLinks ? 'button' : undefined}
+                tabIndex={playerLinks ? 0 : undefined}
+                style={playerLinks ? { cursor: 'pointer' } : undefined}
                 className={styles.row}
-                onClick={(e) => clickOpen(e, () => (onOpenMovie ? onOpenMovie(m) : openMovieDetail(m)))}
+                onClick={(e) => {
+                  if (playerLinks) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onOpenMovie?.(m);
+                  } else {
+                    clickOpen(e, () => (onOpenMovie ? onOpenMovie(m) : openMovieDetail(m)));
+                  }
+                }}
               >
                 <span className={clsx(styles.rowTime, styles.rowTimeNone)}>All day</span>
                 <span className={clsx(styles.thumb, styles.thumbPoster)}>
@@ -311,9 +346,20 @@ export function AgendaView({
               return (
                 <a
                   key={g.key}
-                  href={playerLinks ? (ep.show_id ? `/player/tv/${ep.show_id}` : '#') : showHref(ep)}
+                  href={playerLinks ? undefined : showHref(ep)}
+                  role={playerLinks ? 'button' : undefined}
+                  tabIndex={playerLinks ? 0 : undefined}
+                  style={playerLinks ? { cursor: 'pointer' } : undefined}
                   className={styles.row}
-                  onClick={(e) => clickOpen(e, () => onOpen(ep))}
+                  onClick={(e) => {
+                    if (playerLinks) {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      onOpen(ep);
+                    } else {
+                      clickOpen(e, () => onOpen(ep));
+                    }
+                  }}
                   data-cal-ep={String(ep.id)}
                 >
                   <span className={clsx(styles.rowTime, !time && styles.rowTimeNone)}>
