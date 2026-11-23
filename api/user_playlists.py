@@ -13,6 +13,7 @@ never land it in someone else's playlist.
 import os
 
 from flask import Blueprint, jsonify, request, send_file
+from core.connect.device_access import device_playback
 
 from core.playlists import auto_identify
 from core.playlists import user_playlists as up
@@ -115,6 +116,7 @@ def create_user_playlist():
 
 
 @bp.route('/api/user-playlists/<int:playlist_id>/tracks', methods=['POST'])
+@device_playback
 @requires("music.access")
 def add_user_playlist_tracks(playlist_id):
     data = request.get_json(silent=True) or {}
@@ -145,6 +147,7 @@ def _tracks_arg(data):
 
 
 @bp.route('/api/user-playlists/<int:playlist_id>/tracks/remove', methods=['POST'])
+@device_playback
 @requires("music.access")
 def remove_matching_user_playlist_tracks(playlist_id):
     """the picker's untick: drop these songs wherever they are in the list."""
@@ -187,6 +190,7 @@ def user_playlist_membership():
 
 
 @bp.route('/api/user-playlists/liked', methods=['POST'])
+@device_playback
 @requires("music.access")
 def like_songs():
     data = request.get_json(silent=True) or {}
@@ -206,6 +210,7 @@ def like_songs():
 
 
 @bp.route('/api/user-playlists/liked/remove', methods=['POST'])
+@device_playback
 @requires("music.access")
 def unlike_songs():
     data = request.get_json(silent=True) or {}
