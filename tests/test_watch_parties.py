@@ -52,18 +52,25 @@ def test_lobby_lifecycle_sync_and_chat(tmp_path):
     assert p["lobby_track"]["title"] == "Midnight City"
     assert p["ready_count"] == 1
 
-    # Second profile joins and marks ready
-    p2 = parties.join_party(db, p["id"], profile_id=2, ready=True, now=t0 + 10)
-    assert p2["member_count"] == 2
-    assert p2["ready_count"] == 2
-    assert p2["can_control"] is False
+    # Second profile joins and marks ready (not ready first, then marks ready for majority start)
+    p2_unready = parties.join_party(db, p["id"], profile_id=2, ready=False, now=t0 + 10)
+    assert p2_unready["member_count"] == 2
+    assert p2_unready["ready_count"] == 1
+    assert p2_unready["majority_ready"] is False
+    assert p2_unready["can_control"] is False
 
-    # Guest cannot control in host-only mode
+    # Guest cannot start when majority is not ready in host-only mode
     with pytest.raises(parties.PartyError):
-        parties.update_state(db, p["id"], profile_id=2, body={"action": "start"}, now=t0 + 15)
+        parties.update_state(db, p["id"], profile_id=2, body={"action": "start"}, now=t0 + 12)
 
-    # Host starts playback
-    started = parties.update_state(db, p["id"], profile_id=1, body={"action": "start"}, now=t0 + 20)
+    # Second profile marks ready -> majority ready (2/2)!
+    p2 = parties.join_party(db, p["id"], profile_id=2, ready=True, now=t0 + 14)
+    assert p2["ready_count"] == 2
+    assert p2["majority_ready"] is True
+    assert p2["can_control"] is True
+
+    # Guest CAN start playback when majority is ready!
+    started = parties.update_state(db, p["id"], profile_id=2, body={"action": "start"}, now=t0 + 20)
     assert started["status"] == "playing"
     assert started["live_position"] == 0.0
 
@@ -71,8 +78,8 @@ def test_lobby_lifecycle_sync_and_chat(tmp_path):
     fetched = parties.get_party(db, p["id"], viewer_id=2, now=t0 + 55)
     assert fetched["live_position"] == pytest.approx(35.0, abs=0.1)
 
-    # Host pauses at 35s
-    paused = parties.update_state(db, p["id"], profile_id=1, body={"action": "pause"}, now=t0 + 55)
+    # Any guest can pause at 35s
+    paused = parties.update_state(db, p["id"], profile_id=2, body={"action": "pause"}, now=t0 + 55)
     assert paused["status"] == "paused"
     assert paused["live_position"] == pytest.approx(35.0, abs=0.1)
 
@@ -80,14 +87,39 @@ def test_lobby_lifecycle_sync_and_chat(tmp_path):
     still_paused = parties.get_party(db, p["id"], viewer_id=2, now=t0 + 155)
     assert still_paused["live_position"] == pytest.approx(35.0, abs=0.1)
 
-    # Chat & reaction
-    msg = parties.post_message(db, p["id"], profile_id=2, body={"kind": "reaction", "body": "🍿"}, now=t0 + 160)
-    assert msg["kind"] == "reaction"
-    assert msg["body"] == "🍿"
+    # Guest triggers a 5-minute pee break at t0 + 158
+    pee = parties.update_state(db, p["id"], profile_id=2, body={"action": "pee_break"}, now=t0 + 158)
+    assert pee["status"] == "paused"
+    assert pee["pee_break"] is not None
+    assert pee["pee_break"]["profile_id"] == 2
+    assert pee["pee_break"]["ends_at"] == pytest.approx(t0 + 158 + 300.0, abs=0.1)
+
+    # Same guest cannot call another pee break within 10 minutes
+    with pytest.raises(parties.PartyError):
+        parties.update_state(db, p["id"], profile_id=2, body={"action": "pee_break"}, now=t0 + 200)
+
+    # Guest returns from pee break and clicks resume -> 5-second countdown before position advances
+    resumed = parties.update_state(db, p["id"], profile_id=2, body={"action": "resume"}, now=t0 + 220)
+    assert resumed["status"] == "playing"
+    assert resumed["pee_break"] is None
+    assert resumed["resume_at"] == pytest.approx(t0 + 225.0, abs=0.1)
+    # During countdown (t0 + 223), live_position holds at 35.0s
+    during_countdown = parties.get_party(db, p["id"], viewer_id=1, now=t0 + 223)
+    assert during_countdown["live_position"] == pytest.approx(35.0, abs=0.1)
+    # 10 seconds after countdown finishes (t0 + 235), live_position is 45.0s
+    after_countdown = parties.get_party(db, p["id"], viewer_id=1, now=t0 + 235)
+    assert after_countdown["live_position"] == pytest.approx(45.0, abs=0.1)
+
+    # Chat & reaction + burst rate limiting (max 5 reactions per 4 seconds)
+    for i in range(5):
+        msg = parties.post_message(db, p["id"], profile_id=2, body={"kind": "reaction", "body": "🍿"}, now=t0 + 240 + i * 0.2)
+        assert msg["kind"] == "reaction"
+    with pytest.raises(parties.PartyError):
+        parties.post_message(db, p["id"], profile_id=2, body={"kind": "reaction", "body": "🔥"}, now=t0 + 241.5)
 
     # End party
     assert parties.delete_party(db, p["id"], profile_id=1) is True
-    assert parties.list_parties(db, viewer_id=1, now=t0 + 170) == []
+    assert parties.list_parties(db, viewer_id=1, now=t0 + 300) == []
 
 
 def test_scheduled_party_auto_opens_lobby_and_everyone_control(tmp_path):

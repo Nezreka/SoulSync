@@ -31,7 +31,11 @@ import {
   VolumeControl,
 } from './controls';
 import { EndScreen } from './end-screen';
-import { PartyReactionsOverlay, setActiveWatchPartyId } from './party-reactions';
+import {
+  handleWatchPartyPlayerToggle,
+  PartyReactionsOverlay,
+  setActiveWatchPartyId,
+} from './party-reactions';
 import { EpisodesPanel } from './episodes-panel';
 import { FindSubtitles } from './find-subtitles';
 import {
@@ -138,9 +142,12 @@ function FullPlayer({ state, onLeave }: { state: PlayerState; onLeave: () => voi
       // a menu is open: its own keys (escape closes it, and only it)
       if (document.querySelector('[role="menu"]')) return;
       const v = engine.getState();
+      const togglePlayOrParty = () => {
+        if (!handleWatchPartyPlayerToggle()) engine.toggle();
+      };
       const act: Record<string, () => void> = {
-        ' ': () => engine.toggle(),
-        k: () => engine.toggle(),
+        ' ': togglePlayOrParty,
+        k: togglePlayOrParty,
         j: () => engine.skip(-10),
         l: () => engine.skip(10),
         ArrowLeft: () => engine.skip(-10),
@@ -195,7 +202,9 @@ function FullPlayer({ state, onLeave }: { state: PlayerState; onLeave: () => voi
       <div
         ref={frame}
         className={s.fullFrame}
-        onClick={() => engine.toggle()}
+        onClick={() => {
+          if (!handleWatchPartyPlayerToggle()) engine.toggle();
+        }}
         onDoubleClick={toggleFullscreen}
       />
       <Dimmer brightness={brightness} />
@@ -247,7 +256,10 @@ function FullPlayer({ state, onLeave }: { state: PlayerState; onLeave: () => voi
           type="button"
           className={s.ctl}
           aria-label="Stop and close"
-          onClick={() => engine.stop()}
+          onClick={() => {
+            setActiveWatchPartyId(null);
+            engine.stop();
+          }}
           data-nav
         >
           <CloseIcon />
@@ -281,7 +293,9 @@ function FullPlayer({ state, onLeave }: { state: PlayerState; onLeave: () => voi
               type="button"
               className={s.playBtn}
               aria-label={playing ? 'Pause' : 'Play'}
-              onClick={() => engine.toggle()}
+              onClick={() => {
+                if (!handleWatchPartyPlayerToggle()) engine.toggle();
+              }}
               data-nav
             >
               {playing ? <PauseIcon /> : <PlayIcon />}

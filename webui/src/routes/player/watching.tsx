@@ -679,6 +679,15 @@ function CreatePartyModal({
 
 // ── Watch Party Room Modal (Theater Waiting Room + Synced Lobby Music + Chat)
 
+interface RoomFloatingBubble {
+  uid: string;
+  emoji: string;
+  sender: string;
+  side: 'left' | 'right';
+  edgePx: number;
+  swayPx: number;
+}
+
 function WatchPartyRoomModal({
   partyId,
   onClose,
@@ -691,60 +700,77 @@ function WatchPartyRoomModal({
   const party = roomQ.data;
   const [chatText, setChatText] = useState('');
   const [lobbyMuted, setLobbyMuted] = useState(false);
-  const [countdown, setCountdown] = useState<number | null>(null);
-  const [curtainsOpen, setCurtainsOpen] = useState(false);
-  const [floatingEmojis, setFloatingEmojis] = useState<{ id: number; emoji: string; leftPct: number }[]>([]);
+  const [starting, setStarting] = useState(false);
+  const [floatingBubbles, setFloatingBubbles] = useState<RoomFloatingBubble[]>([]);
+  const [rateLimitedUntil, setRateLimitedUntil] = useState(0);
+  const [roomError, setRoomError] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const autoJoined = useRef(false);
-  const lastMsgCount = useRef(0);
+  const seenMsgIds = useRef<Set<number>>(new Set());
+  const msgInitialized = useRef(false);
+  const prevStatusRef = useRef<string | null>(null);
+  const reactionTimestampsRef = useRef<number[]>([]);
 
-  // Keep curtain state synced with party status (unfurl smoothly on showtime!)
-  useEffect(() => {
-    if (!party) return;
-    if (party.status === 'playing' || party.status === 'paused') {
-      setCurtainsOpen(true);
-    } else if (countdown === null) {
-      setCurtainsOpen(false);
-    }
-  }, [party?.status, countdown, party]);
+  const spawnRoomBubble = (uid: string, emoji: string, sender: string, seed: number) => {
+    const side: 'left' | 'right' = seed % 2 === 0 ? 'left' : 'right';
+    const edgePx = 10 + ((seed * 19) % 44);
+    const swayPx = (seed % 3 === 0 ? 1 : -1) * (10 + (seed % 14));
+    const bubble: RoomFloatingBubble = { uid, emoji, sender, side, edgePx, swayPx };
+    setFloatingBubbles((prev) => [...prev.slice(-16), bubble]);
+    window.setTimeout(() => {
+      setFloatingBubbles((prev) => prev.filter((x) => x.uid !== uid));
+    }, 2800);
+  };
 
-  // Float quick-reaction emojis up across the cinema stage when new reactions arrive
+  // Float incoming emoji reactions up both the left and right sides of the room modal
   useEffect(() => {
     const msgs = party?.messages ?? [];
-    if (msgs.length > lastMsgCount.current) {
-      const added = msgs.slice(lastMsgCount.current);
-      const bursts = added
-        .filter((m) => QUICK_EMOJIS.includes(m.body.trim()))
-        .map((m, idx) => ({
-          id: Date.now() + idx,
-          emoji: m.body.trim(),
-          leftPct: 16 + ((m.id * 19 + idx * 17) % 68),
-        }));
-      if (bursts.length) {
-        setFloatingEmojis((prev) => [...prev.slice(-10), ...bursts]);
-        window.setTimeout(() => {
-          const ids = new Set(bursts.map((b) => b.id));
-          setFloatingEmojis((prev) => prev.filter((x) => !ids.has(x.id)));
-        }, 2300);
+    if (!msgInitialized.current && msgs.length > 0) {
+      msgInitialized.current = true;
+      seenMsgIds.current = new Set(msgs.map((m) => m.id));
+      return;
+    }
+    for (const m of msgs) {
+      if (seenMsgIds.current.has(m.id)) continue;
+      seenMsgIds.current.add(m.id);
+      const em = m.body.trim();
+      if (m.kind === 'reaction' || QUICK_EMOJIS.includes(em) || em.startsWith('🚽')) {
+        spawnRoomBubble(`room-srv-${m.id}`, em, m.profile?.name ?? '', m.id);
       }
     }
-    lastMsgCount.current = msgs.length;
   }, [party?.messages]);
 
-  const startShowtimeWithCurtain = async (p: WatchParty) => {
-    if (countdown !== null) return;
-    setCountdown(3);
-    await new Promise((r) => window.setTimeout(r, 850));
-    setCountdown(2);
-    await new Promise((r) => window.setTimeout(r, 850));
-    setCountdown(1);
-    await new Promise((r) => window.setTimeout(r, 850));
-    setCountdown(null);
-    setCurtainsOpen(true);
-    const updated = await watchPartyApi.state(p.id, { action: 'start' });
-    refresh();
-    // Let the velvet curtains glide apart before opening the full synced video player!
-    window.setTimeout(() => launchSyncedVideo(updated), 1450);
+  const launchSyncedVideo = (p: WatchParty, opts?: { withCurtain?: boolean }) => {
+    const item = itemOf(p.item_type, p.item_id, p.meta);
+    if (!item) return;
+    if (audioRef.current) audioRef.current.pause();
+    setActiveWatchPartyId(p.id, { triggerCurtain: opts?.withCurtain ?? true });
+    playItems([item], 0, { startAt: p.live_position });
+    onClose();
+  };
+
+  // When the party transitions from lobby/scheduled -> playing, auto-launch everyone into the fullscreen video player with the full-screen velvet curtain unfurl!
+  useEffect(() => {
+    if (!party) return;
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = party.status;
+    if ((prev === 'lobby' || prev === 'scheduled') && party.status === 'playing' && !starting) {
+      launchSyncedVideo(party, { withCurtain: true });
+    }
+  }, [party?.status, party, starting]);
+
+  const startShowtime = async (p: WatchParty) => {
+    if (starting) return;
+    setStarting(true);
+    setRoomError(null);
+    try {
+      const updated = await watchPartyApi.state(p.id, { action: 'start' });
+      refresh();
+      launchSyncedVideo(updated, { withCurtain: true });
+    } catch (e) {
+      setRoomError(e instanceof Error ? e.message : 'Could not start stream');
+      setStarting(false);
+    }
   };
 
   // Auto-join room on open
@@ -789,14 +815,6 @@ function WatchPartyRoomModal({
     void qc.invalidateQueries({ queryKey: ['player', 'parties'] });
   };
 
-  const launchSyncedVideo = (p: WatchParty) => {
-    const item = itemOf(p.item_type, p.item_id, p.meta);
-    if (!item) return;
-    if (audioRef.current) audioRef.current.pause();
-    setActiveWatchPartyId(p.id);
-    playItems([item], 0, { startAt: p.live_position });
-  };
-
   if (!party) {
     return (
       <div className={wp.backdrop} onClick={onClose}>
@@ -808,12 +826,82 @@ function WatchPartyRoomModal({
   }
 
   const me = party.members.find((m) => m.you);
-  const bg = remoteImage(party.meta.backdrop) ?? remoteImage(party.meta.artwork);
+  const poster = remoteImage(party.meta.artwork) ?? remoteImage(party.meta.backdrop);
+  const bg = remoteImage(party.meta.backdrop) ?? poster;
+  const majorityReady =
+    party.majority_ready ??
+    (party.member_count > 0 && party.ready_count * 2 > party.member_count);
+  const canStartFromLobby = party.is_host || (party.member_count > 1 && majorityReady) || party.can_control;
+  const isRateLimited = Date.now() < rateLimitedUntil;
+  const peeBreak = party.pee_break ?? null;
+  const isMyPeeBreak = !!peeBreak && me?.profile_id === peeBreak.profile_id;
+  const peeCooldownSec = party.pee_cooldown_remaining ?? 0;
+
+  const handleSendRoomReaction = async (em: string) => {
+    const now = Date.now();
+    const recent = reactionTimestampsRef.current.filter((t) => now - t < 4000);
+    if (recent.length >= 5) {
+      setRateLimitedUntil(now + 2800);
+      setRoomError('Emoji cooldown (max 5 reactions per 4s)…');
+      window.setTimeout(() => setRoomError(null), 2600);
+      return;
+    }
+    recent.push(now);
+    reactionTimestampsRef.current = recent;
+    if (recent.length >= 5) {
+      setRateLimitedUntil(now + 2500);
+    }
+    const seed = now + recent.length * 13;
+    spawnRoomBubble(`room-local-${now}-${Math.random()}`, em, 'You', seed);
+    try {
+      const msg = await watchPartyApi.chat(party.id, 'reaction', em);
+      if (msg?.id) seenMsgIds.current.add(msg.id);
+      refresh();
+    } catch (e) {
+      setRoomError(e instanceof Error ? e.message : 'Slow down on emoji reactions!');
+    }
+  };
 
   return (
     <div className={wp.backdrop} onClick={onClose}>
       <audio ref={audioRef} loop />
       <div className={wp.modal} onClick={(e) => e.stopPropagation()}>
+        {/* Dual-Side (Left + Right) Floating Emoji Reaction Lanes inside the Room Modal */}
+        <div className={wp.roomSideLaneLeft} aria-hidden="true">
+          {floatingBubbles
+            .filter((b) => b.side === 'left')
+            .map((b) => (
+              <div
+                key={b.uid}
+                className={wp.roomFloatingBubble}
+                style={{
+                  left: b.edgePx,
+                  ['--sway-px' as string]: `${b.swayPx}px`,
+                }}
+              >
+                <span className={wp.roomFloatingEmoji}>{b.emoji}</span>
+                {b.sender ? <span className={wp.roomFloatingSender}>{b.sender}</span> : null}
+              </div>
+            ))}
+        </div>
+        <div className={wp.roomSideLaneRight} aria-hidden="true">
+          {floatingBubbles
+            .filter((b) => b.side === 'right')
+            .map((b) => (
+              <div
+                key={b.uid}
+                className={wp.roomFloatingBubble}
+                style={{
+                  right: b.edgePx,
+                  ['--sway-px' as string]: `${b.swayPx}px`,
+                }}
+              >
+                <span className={wp.roomFloatingEmoji}>{b.emoji}</span>
+                {b.sender ? <span className={wp.roomFloatingSender}>{b.sender}</span> : null}
+              </div>
+            ))}
+        </div>
+
         <div className={wp.modalHero}>
           {bg ? <img className={wp.modalHeroBg} src={bg} alt="" /> : null}
           <div className={wp.modalHeroInner}>
@@ -825,7 +913,9 @@ function WatchPartyRoomModal({
                 {party.status === 'playing'
                   ? `PLAYING · ${clock(party.live_position)}`
                   : party.status === 'paused'
-                    ? `PAUSED · ${clock(party.live_position)}`
+                    ? peeBreak
+                      ? `🚽 PEE BREAK · ${clock(party.live_position)}`
+                      : `PAUSED · ${clock(party.live_position)}`
                     : party.status === 'scheduled'
                       ? `SCHEDULED · ${countdownText(party.scheduled_for, Date.now() / 1000)}`
                       : 'THEATER WAITING ROOM'}
@@ -859,52 +949,86 @@ function WatchPartyRoomModal({
 
         <div className={wp.roomGrid}>
           <div className={wp.roomMain}>
-            {/* 16:9 Cinema Proscenium Stage with Pleated Velvet Curtains */}
-            <div className={wp.theaterStage} data-open={curtainsOpen ? 'true' : 'false'}>
-              {bg ? <img className={wp.stageScreen} src={bg} alt="" /> : null}
-              <div className={wp.stageGlow} />
-              <div className={wp.curtainValance} />
-              <div className={wp.curtainLeft} />
-              <div className={wp.curtainRight} />
-
-              <div className={wp.stageCenterOverlay}>
-                {countdown !== null ? (
-                  <div className={wp.countdownRing}>{countdown}</div>
-                ) : !curtainsOpen ? (
-                  <div className={wp.stageMarquee}>
-                    <div className={wp.stageEyebrow}>
-                      {party.status === 'scheduled'
-                        ? `PREMIERE · ${countdownText(party.scheduled_for, Date.now() / 1000)}`
-                        : 'FEATURE PRESENTATION'}
-                    </div>
-                    <h3 className={wp.stageTitle}>{party.title}</h3>
-                    <div className={wp.stageSub}>
-                      {party.members.filter((m) => m.ready).length} of {party.members.length} seats ready
-                      {party.meta.subtitle ? ` · ${party.meta.subtitle}` : ''}
-                    </div>
-                  </div>
+            {/* Sleek Cinema Feature Presentation Showcase Card (Velvet curtains now unfurl full-screen over the video player!) */}
+            <div className={wp.lobbyShowcase}>
+              {bg ? <img className={wp.lobbyShowcaseBg} src={bg} alt="" /> : null}
+              <div className={wp.lobbyShowcaseScrim} />
+              <div className={wp.lobbyPosterCard}>
+                {poster ? (
+                  <img src={poster} alt="" />
                 ) : (
-                  <div className={wp.stageMarquee} style={{ opacity: 0.92 }}>
-                    <div className={wp.stageEyebrow}>
-                      {party.status === 'playing' ? '● NOW SCREENING' : '❚❚ SCREENING PAUSED'}
-                    </div>
-                    <h3 className={wp.stageTitle}>{party.title}</h3>
-                    <div className={wp.stageSub}>Synced at {clock(party.live_position)}</div>
+                  <div className={wp.pickerFallback}>
+                    {(party.title || '?').slice(0, 1).toUpperCase()}
                   </div>
                 )}
               </div>
-
-              {floatingEmojis.map((fe) => (
-                <span
-                  key={fe.id}
-                  className={wp.floatingReaction}
-                  style={{ left: `${fe.leftPct}%` }}
-                  aria-hidden="true"
+              <div className={wp.lobbyShowcaseInfo}>
+                <div
+                  style={{
+                    fontSize: 10.5,
+                    fontWeight: 850,
+                    letterSpacing: '0.16em',
+                    textTransform: 'uppercase',
+                    color: '#f6c978',
+                  }}
                 >
-                  {fe.emoji}
-                </span>
-              ))}
+                  {party.status === 'playing'
+                    ? `● NOW SCREENING · ${clock(party.live_position)}`
+                    : party.status === 'paused'
+                      ? `❚❚ PAUSED AT ${clock(party.live_position)}`
+                      : '★ FEATURE PRESENTATION'}
+                </div>
+                <div style={{ fontSize: 19, fontWeight: 900, color: '#fff', lineHeight: 1.18 }}>
+                  {party.title}
+                </div>
+                {party.meta.subtitle ? (
+                  <div style={{ fontSize: 12.5, color: 'rgba(255,255,255,0.72)' }}>
+                    {party.meta.subtitle}
+                  </div>
+                ) : null}
+                <div style={{ marginTop: 4 }}>
+                  {majorityReady ? (
+                    <span className={wp.majorityPill}>
+                      ✓ {party.ready_count} of {party.member_count} Ready · Majority Ready to Start!
+                    </span>
+                  ) : (
+                    <span className={wp.waitingMajorityPill}>
+                      {party.ready_count} of {party.member_count} Ready · Majority or Host starts stream
+                    </span>
+                  )}
+                </div>
+              </div>
             </div>
+
+            {/* Active 🚽 5-Minute Pee Break Intermission Banner */}
+            {peeBreak ? (
+              <div className={wp.peeBreakBanner}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span style={{ fontSize: 24 }}>🚽</span>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 850, color: '#fef3c7' }}>
+                      {peeBreak.profile?.name ?? 'Someone'} called a 5-minute pee break!
+                    </div>
+                    <div style={{ fontSize: 11.5, color: '#fcd34d' }}>
+                      Stream is paused for everyone until they return and click Resume (5s countdown).
+                    </div>
+                  </div>
+                </div>
+                {isMyPeeBreak || party.is_host ? (
+                  <button
+                    type="button"
+                    className={`${wp.glassBtn} ${wp.glassBtnPrimary}`}
+                    onClick={async () => {
+                      const updated = await watchPartyApi.state(party.id, { action: 'resume' });
+                      refresh();
+                      launchSyncedVideo(updated, { withCurtain: false });
+                    }}
+                  >
+                    ✓ I'm Back & Resume (5s)
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
 
             {/* Curved Theater Seating Row */}
             {party.members.length > 0 ? (
@@ -913,7 +1037,10 @@ function WatchPartyRoomModal({
                   <div key={m.profile_id} className={`${wp.seat} ${m.ready ? wp.seatReady : ''}`}>
                     <Avatar profile={m.profile} />
                     <span className={wp.seatName}>{m.profile.name}</span>
-                    <span className={wp.seatTag} style={!m.ready ? { color: 'rgba(255,255,255,0.45)' } : undefined}>
+                    <span
+                      className={wp.seatTag}
+                      style={!m.ready ? { color: 'rgba(255,255,255,0.45)' } : undefined}
+                    >
                       {m.is_host ? '★ Host' : m.ready ? '✓ Ready' : 'Seated'}
                     </span>
                   </div>
@@ -975,21 +1102,28 @@ function WatchPartyRoomModal({
               </div>
             ) : null}
 
+            {roomError ? (
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#fbbf24' }}>{roomError}</div>
+            ) : null}
+
             {/* Primary Room Controls */}
             <div className={wp.cardActions} style={{ marginTop: 0 }}>
               {party.status === 'lobby' || party.status === 'scheduled' ? (
                 <>
-                  {party.can_control ? (
-                    <button
-                      type="button"
-                      className={wp.startPartyBtn}
-                      disabled={countdown !== null}
-                      onClick={() => void startShowtimeWithCurtain(party)}
-                    >
-                      <PlayIcon />
-                      {countdown !== null ? `Starting in ${countdown}…` : 'Unfurl Curtains & Start'}
-                    </button>
-                  ) : null}
+                  <button
+                    type="button"
+                    className={wp.startPartyBtn}
+                    disabled={!canStartFromLobby || starting}
+                    title={
+                      canStartFromLobby
+                        ? 'Launch fullscreen player & unfurl velvet theater curtains for everyone'
+                        : 'Waiting for majority ready or host to start'
+                    }
+                    onClick={() => void startShowtime(party)}
+                  >
+                    <PlayIcon />
+                    {starting ? 'Unfurling Curtains…' : 'Start Feature Presentation'}
+                  </button>
                   <button
                     type="button"
                     className={wp.glassBtn}
@@ -1006,26 +1140,51 @@ function WatchPartyRoomModal({
                   <button
                     type="button"
                     className={wp.startPartyBtn}
-                    onClick={() => launchSyncedVideo(party)}
+                    onClick={() => launchSyncedVideo(party, { withCurtain: true })}
                   >
                     <PlayIcon />
                     Watch & Sync ({clock(party.live_position)})
                   </button>
-                  {party.can_control ? (
-                    <button
-                      type="button"
-                      className={wp.glassBtn}
-                      onClick={async () => {
-                        await watchPartyApi.state(party.id, {
-                          action: party.status === 'playing' ? 'pause' : 'play',
-                        });
+                  {/* Anyone in the party can pause; anyone (or pee-break caller/host) can resume with 5s countdown */}
+                  <button
+                    type="button"
+                    className={wp.glassBtn}
+                    disabled={!!peeBreak && !isMyPeeBreak && !party.is_host}
+                    onClick={async () => {
+                      const action = party.status === 'playing' ? 'pause' : 'resume';
+                      const updated = await watchPartyApi.state(party.id, { action });
+                      refresh();
+                      if (action === 'resume') {
+                        launchSyncedVideo(updated, { withCurtain: false });
+                      }
+                    }}
+                  >
+                    {party.status === 'playing' ? '⏸ Pause Everyone' : '▶ Resume (5s Countdown)'}
+                  </button>
+                  <button
+                    type="button"
+                    className={wp.glassBtn}
+                    disabled={peeCooldownSec > 0 || !!peeBreak}
+                    title={
+                      peeCooldownSec > 0
+                        ? `On cooldown (${Math.ceil(peeCooldownSec / 60)}m remaining — once every 10m)`
+                        : 'Pause stream for 5 minutes so you can take a pee break'
+                    }
+                    onClick={async () => {
+                      try {
+                        await watchPartyApi.state(party.id, { action: 'pee_break' });
+                        void handleSendRoomReaction('🚽💨');
                         refresh();
-                      }}
-                    >
-                      {party.status === 'playing' ? 'Pause Everyone' : 'Resume Everyone'}
-                    </button>
-                  ) : null}
-                  {party.can_control ? (
+                      } catch (e) {
+                        setRoomError(e instanceof Error ? e.message : 'Pee break on cooldown');
+                      }
+                    }}
+                  >
+                    {peeCooldownSec > 0
+                      ? `🚽 Pee Break (${Math.ceil(peeCooldownSec / 60)}m)`
+                      : '🚽 Pee Break (5m)'}
+                  </button>
+                  {party.is_host ? (
                     <button
                       type="button"
                       className={wp.glassBtn}
@@ -1052,7 +1211,8 @@ function WatchPartyRoomModal({
                   marginBottom: 8,
                 }}
               >
-                IN THE ROOM ({party.ready_count}/{party.member_count} READY)
+                IN THE ROOM ({party.ready_count}/{party.member_count} READY
+                {majorityReady ? ' · MAJORITY READY' : ''})
               </div>
               <div className={wp.memberList}>
                 {party.members.map((m) => (
@@ -1077,13 +1237,19 @@ function WatchPartyRoomModal({
           <div className={wp.chatPane}>
             <div
               style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
                 fontSize: 11,
                 fontWeight: 800,
                 letterSpacing: '0.08em',
                 color: 'var(--pl-text-3)',
               }}
             >
-              LOUNGE CHAT
+              <span>LOUNGE CHAT</span>
+              {isRateLimited ? (
+                <span style={{ color: '#fbbf24', fontSize: 10 }}>EMOJI COOLDOWN…</span>
+              ) : null}
             </div>
             <div className={wp.chatLog}>
               {party.messages.map((msg) =>
@@ -1105,11 +1271,10 @@ function WatchPartyRoomModal({
                 <button
                   key={em}
                   type="button"
+                  disabled={isRateLimited}
                   className={wp.emojiBtn}
-                  onClick={async () => {
-                    await watchPartyApi.chat(party.id, 'reaction', em);
-                    refresh();
-                  }}
+                  title={isRateLimited ? 'Cooling down…' : `Send ${em} to room`}
+                  onClick={() => void handleSendRoomReaction(em)}
                 >
                   {em}
                 </button>

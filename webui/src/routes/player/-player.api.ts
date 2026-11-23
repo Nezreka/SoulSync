@@ -488,6 +488,13 @@ export interface WatchPartyMessage {
   you: boolean;
 }
 
+export interface WatchPartyPeeBreak {
+  profile_id: number;
+  profile?: WatchingSession['profile'];
+  started_at: number;
+  ends_at: number;
+}
+
 export interface WatchParty {
   id: string;
   host_profile_id: number;
@@ -495,10 +502,14 @@ export interface WatchParty {
   is_host: boolean;
   is_member: boolean;
   can_control: boolean;
+  majority_ready?: boolean;
   title: string;
   item_type: 'movie' | 'episode' | 'youtube';
   item_id: string;
   meta: ProgressMeta;
+  pee_break?: WatchPartyPeeBreak | null;
+  resume_at?: number | null;
+  pee_cooldown_remaining?: number;
   show_id: number | null;
   status: 'scheduled' | 'lobby' | 'playing' | 'paused' | 'ended';
   scheduled_for: number | null;
@@ -558,7 +569,7 @@ export const watchPartyApi = {
   state: async (
     partyId: string,
     payload: {
-      action?: 'start' | 'play' | 'pause' | 'seek' | 'lobby' | 'end';
+      action?: 'start' | 'play' | 'resume' | 'pause' | 'pee_break' | 'seek' | 'lobby' | 'end';
       position?: number;
       shuffle_lobby_music?: boolean;
       control_mode?: 'host' | 'everyone';

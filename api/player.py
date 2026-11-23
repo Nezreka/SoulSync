@@ -1340,6 +1340,9 @@ def _hydrate_party_profiles(party: dict, who: dict) -> dict:
         m["profile"] = who.get(m["profile_id"], {"name": "Someone"})
     for msg in party.get("messages", []):
         msg["profile"] = who.get(msg["profile_id"], {"name": "Someone"})
+    pee = party.get("pee_break")
+    if isinstance(pee, dict) and pee.get("profile_id") is not None:
+        pee["profile"] = who.get(int(pee["profile_id"]), {"name": "Someone"})
     return party
 
 
