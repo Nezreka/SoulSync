@@ -425,6 +425,7 @@ def register_routes(bp):
         return jsonify(d)
 
     @bp.route("/episode/<int:tmdb_id>/<int:season>/<int:episode>", methods=["GET"])
+    @device_playback
     def video_episode_extra(tmdb_id, season, episode):
         """Episode expand: guest stars + bigger still (by the SHOW's tmdb id)."""
         from . import get_video_db

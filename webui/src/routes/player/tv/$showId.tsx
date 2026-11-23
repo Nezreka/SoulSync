@@ -1,15 +1,16 @@
 import { useQuery } from '@tanstack/react-query';
-import { createFileRoute, useNavigate } from '@tanstack/react-router';
+import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
 import { useMemo, useState } from 'react';
 
 import type { DetailEpisode, VideoFile } from '../-player.types';
 
 import { remaining, runtime, shortDate } from '../-lib/format';
-import { backdropSet, stillSet, WIDE_SIZES } from '../-lib/images';
+import { backdropSet, remoteImage, stillSet, WIDE_SIZES } from '../-lib/images';
 import { episodeItems } from '../-lib/play-items';
 import { backdropUrl, fraction, moreLikeThis, posterUrl, proxiedImage } from '../-lib/rails';
 import { rankVersions, resolutionLabel } from '../-lib/video';
 import {
+  episodeExtraQuery,
   extrasQuery,
   progressLookupQuery,
   showDetailQuery,
@@ -25,6 +26,7 @@ import {
   Keywords,
   MoreLikeThis,
   ownedByTmdb,
+  RelatedDiscoveryRails,
   Section,
 } from '../-ui/detail';
 import { Art, Badge, Hero, HScroll, PlayButton, VerdictBadge, styles as s } from '../-ui/kit';
@@ -35,6 +37,7 @@ import { useSections } from '../-ui/sections';
 import { BackgroundTrailer, TrailerButton } from '../-ui/trailer';
 import {
   Facts,
+  fileLanguages,
   LanguageSummary,
   languageName,
   languageNames,
@@ -42,6 +45,7 @@ import {
   Ratings,
 } from '../-ui/video-facts';
 import { CastRow, VersionPicker } from '../-ui/video-parts';
+import { ReportIssueButton } from '../-ui/report-issue';
 import { WatchlistButton } from '../-ui/watchlist';
 
 export const Route = createFileRoute('/player/tv/$showId')({
@@ -54,6 +58,9 @@ export const Route = createFileRoute('/player/tv/$showId')({
 
 function EpisodeRow({
   showId,
+  showTitle,
+  showTmdbId,
+  seasonNumber,
   episode,
   files,
   position,
@@ -62,6 +69,9 @@ function EpisodeRow({
   filesKnown = true,
 }: {
   showId: number;
+  showTitle: string;
+  showTmdbId?: number | null;
+  seasonNumber: number;
   episode: DetailEpisode;
   files: VideoFile[];
   position?: number;
@@ -73,14 +83,29 @@ function EpisodeRow({
 }) {
   const [open, setOpen] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const epExtra = useQuery({
+    ...episodeExtraQuery(showTmdbId ?? 0, seasonNumber, episode.episode_number),
+    enabled: expanded && !!showTmdbId && showTmdbId > 0,
+  });
   // the show says what you own; the file list (versions, quality) only adds
   // detail. an episode is never greyed out just because that list is late
   const owned =
     episode.owned === true || (episode.owned !== false && (files.length > 0 || !filesKnown));
   const best = rankVersions(files)[0];
   const seconds =
-    best?.runtime_seconds ?? (episode.runtime_minutes ? episode.runtime_minutes * 60 : null);
+    best?.runtime_seconds ??
+    (episode.runtime_minutes
+      ? episode.runtime_minutes * 60
+      : epExtra.data?.runtime_minutes
+        ? epExtra.data.runtime_minutes * 60
+        : null);
   const done = position !== undefined ? fraction(position, duration ?? seconds) : undefined;
+  const overview = episode.overview || epExtra.data?.overview || null;
+  const langs = fileLanguages(best);
+  const guestStars = epExtra.data?.guest_stars ?? [];
+  const epCrew = epExtra.data?.crew ?? [];
+  const epCode = `S${String(seasonNumber).padStart(2, '0')}E${String(episode.episode_number).padStart(2, '0')}`;
+  const epIssueTitle = `${showTitle} · ${epCode}${episode.title ? ` — ${episode.title}` : ''}`;
   return (
     <div>
       <div
@@ -164,20 +189,132 @@ function EpisodeRow({
         </div>
       </div>
       {expanded ? (
-        <div className={s.rowMore} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {episode.overview ? (
-            <p style={{ margin: 0, color: 'var(--pl-text-2)', fontSize: '0.92rem', lineHeight: 1.55 }}>
-              {episode.overview}
+        <div
+          className={s.rowMore}
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 14,
+            padding: '16px 18px',
+            borderRadius: 14,
+            background: 'rgba(255, 255, 255, 0.03)',
+            border: '1px solid var(--pl-line, rgba(255,255,255,0.08))',
+            marginTop: 6,
+          }}
+        >
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
+            <Badge>{epCode}</Badge>
+            {best?.resolution ? <Badge>{resolutionLabel(best.resolution)}</Badge> : null}
+            {best?.dynamic_range ? <Badge>{best.dynamic_range}</Badge> : null}
+            {best?.atmos ? <Badge>Atmos</Badge> : null}
+            {episode.rating || epExtra.data?.rating ? (
+              <Badge>★ {(episode.rating ?? epExtra.data?.rating ?? 0).toFixed(1)}</Badge>
+            ) : null}
+            {langs.audio.length ? (
+              <span style={{ fontSize: '0.8rem', color: 'var(--pl-text-2)' }}>
+                Audio: <LanguageSummary names={langs.audio} />
+              </span>
+            ) : null}
+            {langs.subs.length ? (
+              <span style={{ fontSize: '0.8rem', color: 'var(--pl-text-2)' }}>
+                · Subtitles: <LanguageSummary names={langs.subs} />
+              </span>
+            ) : null}
+          </div>
+
+          {overview ? (
+            <p style={{ margin: 0, color: 'var(--pl-text-2)', fontSize: '0.93rem', lineHeight: 1.6 }}>
+              {overview}
             </p>
           ) : null}
-          {owned ? (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10 }}>
+            {owned ? (
               <PlayButton
                 label={position && done !== undefined && done < 1 ? 'Resume episode' : 'Play episode'}
                 onPlay={() => onPlay?.()}
               />
+            ) : null}
+            <ReportIssueButton
+              entityType="episode"
+              entityId={episode.id}
+              title={epIssueTitle}
+              compact
+            />
+          </div>
+
+          {epCrew.length > 0 ? (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px 18px', fontSize: '0.84rem' }}>
+              {epCrew.map((c, idx) => (
+                <span key={`${c.job}-${c.name}-${idx}`} style={{ color: 'var(--pl-text-2)' }}>
+                  <strong style={{ color: 'var(--pl-text-3, #8f98ab)', fontWeight: 600 }}>
+                    {c.job}:{' '}
+                  </strong>
+                  {c.tmdb_id ? (
+                    <Link
+                      to="/player/person/$personId"
+                      params={{ personId: String(c.tmdb_id) }}
+                      style={{ color: 'var(--pl-text)', textDecoration: 'none', fontWeight: 500 }}
+                      data-nav
+                    >
+                      {c.name}
+                    </Link>
+                  ) : (
+                    <span style={{ color: 'var(--pl-text)' }}>{c.name}</span>
+                  )}
+                </span>
+              ))}
             </div>
           ) : null}
+
+          {guestStars.length > 0 ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <span
+                style={{
+                  fontSize: '0.76rem',
+                  fontWeight: 700,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.07em',
+                  color: 'var(--pl-text-2)',
+                }}
+              >
+                Guest stars & cast
+              </span>
+              <HScroll className={s.people}>
+                {guestStars.map((g, idx) => {
+                  const content = (
+                    <>
+                      <span className={s.personArt}>
+                        <Art src={remoteImage(g.photo)} alt={g.name} />
+                      </span>
+                      <span className={s.personName}>{g.name}</span>
+                      {g.character ? <span className={s.personRole}>{g.character}</span> : null}
+                    </>
+                  );
+                  return g.tmdb_id ? (
+                    <Link
+                      key={`${g.tmdb_id}-${idx}`}
+                      to="/player/person/$personId"
+                      params={{ personId: String(g.tmdb_id) }}
+                      className={s.person}
+                      data-nav
+                    >
+                      {content}
+                    </Link>
+                  ) : (
+                    <div key={`${g.name}-${idx}`} className={s.person}>
+                      {content}
+                    </div>
+                  );
+                })}
+              </HScroll>
+            </div>
+          ) : epExtra.isLoading && showTmdbId ? (
+            <span style={{ fontSize: '0.82rem', color: 'var(--pl-text-2)' }}>
+              Loading episode cast & details…
+            </span>
+          ) : null}
+
           {files.length > 1 ? (
             <VersionPicker files={files} onChange={(fileId) => onPlay?.(fileId)} />
           ) : null}
@@ -327,6 +464,7 @@ function ShowPage() {
             />
             <WatchlistButton kind="show" id={id} />
             <TrailerButton kind="show" id={id} />
+            <ReportIssueButton entityType="show" entityId={id} title={show.title} />
             {next?.title ? <span className={s.notYet}>Up next: {next.title}</span> : null}
           </>
         }
@@ -399,6 +537,9 @@ function ShowPage() {
                       <EpisodeRow
                         key={episode.id}
                         showId={id}
+                        showTitle={show.title}
+                        showTmdbId={tmdbId}
+                        seasonNumber={current?.season_number ?? 1}
                         episode={episode}
                         files={filesByEpisode.get(episode.id) ?? []}
                         position={
@@ -418,6 +559,14 @@ function ShowPage() {
             </Section>
             <ExtrasVideos videos={extras.data?.videos} />
             <CastRow cast={show.cast} />
+            <RelatedDiscoveryRails
+              kind="show"
+              selfId={id}
+              cast={show.cast}
+              leadCrew={creators}
+              studioOrNetwork={show.network}
+              catalog={catalog.data}
+            />
             <MoreLikeThis
               extras={extras.data}
               owned={owned}

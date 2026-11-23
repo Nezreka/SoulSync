@@ -24,6 +24,7 @@ import {
   Keywords,
   MoreLikeThis,
   ownedByTmdb,
+  RelatedDiscoveryRails,
   Section,
 } from '../-ui/detail';
 import { Badge, Hero, PlayButton, VerdictBadge, styles as s } from '../-ui/kit';
@@ -43,6 +44,7 @@ import {
   Ratings,
 } from '../-ui/video-facts';
 import { CastRow, VersionPicker } from '../-ui/video-parts';
+import { ReportIssueButton } from '../-ui/report-issue';
 import { WatchlistButton } from '../-ui/watchlist';
 
 export const Route = createFileRoute('/player/movies/$movieId')({
@@ -132,6 +134,7 @@ function MoviePage() {
             ) : null}
             <WatchlistButton kind="movie" id={id} />
             <TrailerButton kind="movie" id={id} />
+            <ReportIssueButton entityType="movie" entityId={id} title={m.title} />
             {ends ? (
               <span className={s.notYet}>
                 Ends at {ends.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
@@ -153,6 +156,15 @@ function MoviePage() {
             <ExtrasVideos videos={extras.data?.videos} />
             <CastRow cast={m.cast} />
             <CollectionRail collection={extras.data?.collection} owned={owned} selfTmdb={tmdbId} />
+            <RelatedDiscoveryRails
+              kind="movie"
+              selfId={id}
+              cast={m.cast}
+              leadCrew={director}
+              studioOrNetwork={m.studio}
+              catalog={catalog.data}
+              franchiseCollectionName={extras.data?.collection?.name}
+            />
             <MoreLikeThis
               extras={extras.data}
               owned={owned}

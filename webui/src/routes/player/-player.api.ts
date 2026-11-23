@@ -1010,6 +1010,59 @@ export const videoPrefsQuery = () =>
     retry: false,
   });
 
+export interface EpisodeExtra {
+  guest_stars?: {
+    name: string;
+    character?: string | null;
+    tmdb_id?: number | null;
+    photo?: string | null;
+  }[];
+  crew?: {
+    name: string;
+    job: string;
+    tmdb_id?: number | null;
+    photo?: string | null;
+  }[];
+  still_url?: string | null;
+  rating?: number | null;
+  overview?: string | null;
+  runtime_minutes?: number | null;
+  air_date?: string | null;
+}
+
+export const episodeExtraQuery = (tmdbId: number, season: number, episode: number) =>
+  queryOptions({
+    queryKey: ['player', 'episode-extra', tmdbId, season, episode],
+    queryFn: () =>
+      readJson<EpisodeExtra>(apiClient.get(`video/episode/${tmdbId}/${season}/${episode}`)),
+    staleTime: 30 * MINUTE,
+    retry: false,
+  });
+
+export type VideoIssueEntityType = 'movie' | 'show' | 'episode';
+
+export async function submitVideoIssue(body: {
+  entity_type: VideoIssueEntityType;
+  entity_id: number;
+  category: string;
+  title: string;
+  description?: string;
+}): Promise<{ success: boolean; issue?: { id: number }; error?: string }> {
+  const res = await apiClient.post('video/issues', {
+    json: body,
+    throwHttpErrors: false,
+  });
+  const data = (await res.json().catch(() => ({}))) as {
+    success?: boolean;
+    issue?: { id: number };
+    error?: string;
+  };
+  if (!res.ok || data.success === false) {
+    throw new Error(data.error || `Failed to submit issue (${res.status})`);
+  }
+  return { success: true, issue: data.issue };
+}
+
 export const personQuery = (tmdbId: number) =>
   queryOptions({
     queryKey: ['player', 'person', tmdbId],
