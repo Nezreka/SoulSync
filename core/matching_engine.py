@@ -155,8 +155,13 @@ class MusicMatchingEngine:
             for c in text
         )
         if has_cjk:
-            # CJK detected — just lowercase, don't transliterate
-            text = text.lower()
+            # CJK detected: keep the CJK characters, but transliterate the text
+            # around them, so a Cyrillic title in a CJK folder path is not stripped
+            text = re.sub(
+                r'[^\u2e80-\u9fff\u3040-\u30ff\uff00-\uffef\uac00-\ud7af]+',
+                lambda m: unidecode(m.group()),
+                text,
+            ).lower()
         else:
             text = unidecode(text)
             text = text.lower()
