@@ -282,7 +282,9 @@ export function autoChannels(
     blurb: 'films and shows scored 8 or better',
     pool: [...movies.filter(scored).map(movieItem), ...shows.filter(scored).flatMap(episodeItems)],
   });
-  const monthAgo = Date.now() - 30 * 86_400_000;
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const monthAgo = todayStart.getTime() - 30 * 86_400_000;
   const fresh = (x: { added_at: string | null }) => {
     const t = x.added_at
       ? Date.parse(x.added_at.includes('T') ? x.added_at : `${x.added_at.replace(' ', 'T')}Z`)

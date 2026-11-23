@@ -334,27 +334,21 @@ function GuidePage() {
   const seenKey = String(watched.dataUpdatedAt);
   const channels = useMemo(() => {
     const visible = lined.filter((c) => !c.hidden);
-    // new episodes and films premiere on their home channel, in the evening
-    const premieres = premieresFor(cat, visible, today);
     return numberChannels(visible).map((c) => {
       if (c.music) return c;
-      const mine = premieres.get(c.id);
       return {
         ...c,
-        // cable-style show rotation (no back-to-back same show), films in the evening, unseen first
+        // Shared broadcast schedule across all devices (Desktop, Android, TV):
+        // deterministic from (channelId, day, pool) with cable-style show rotation & evening films
         schedule: {
-          seen,
-          seenKey,
           daypart: true,
           blocks: 1,
           rotateShows: true,
           today: startOfLocalDay(today),
-          premieres: mine,
-          premiereKey: mine?.map((p) => `${p.item.key}@${p.at}`).join(','),
         },
       };
     });
-  }, [lined, seen, seenKey, today, cat]);
+  }, [lined, today]);
   const numbers = useMemo(() => new Map(channels.map((c) => [c.id, c.number])), [channels]);
 
   // channel up / down follow the guide's numbers, from anywhere in the player

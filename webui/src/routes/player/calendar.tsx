@@ -3,7 +3,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { createFileRoute, Link } from '@tanstack/react-router';
 import clsx from 'clsx';
 import { useEffect, useMemo, useState } from 'react';
-import { createPortal } from 'react-dom';
 
 import { appURL } from '@/platform/url-base';
 
@@ -668,13 +667,15 @@ function PlayerEpisodeModal({
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  return createPortal(
+  return (
     <div
       className={styles.modalViewport}
       style={{
+        position: 'fixed',
+        inset: 0,
         zIndex: 99999,
-        background: 'rgba(0, 0, 0, 0.74)',
-        backdropFilter: 'blur(9px)',
+        background: 'rgba(0, 0, 0, 0.76)',
+        backdropFilter: 'blur(10px)',
       }}
       role="dialog"
       aria-modal="true"
@@ -778,8 +779,7 @@ function PlayerEpisodeModal({
           )}
         </div>
       </div>
-    </div>,
-    document.body,
+    </div>
   );
 }
 
@@ -822,13 +822,15 @@ function PlayerMovieModal({
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  return createPortal(
+  return (
     <div
       className={styles.modalViewport}
       style={{
+        position: 'fixed',
+        inset: 0,
         zIndex: 99999,
-        background: 'rgba(0, 0, 0, 0.74)',
-        backdropFilter: 'blur(9px)',
+        background: 'rgba(0, 0, 0, 0.76)',
+        backdropFilter: 'blur(10px)',
       }}
       role="dialog"
       aria-modal="true"
@@ -904,7 +906,6 @@ function PlayerMovieModal({
           )}
         </div>
       </div>
-    </div>,
-    document.body,
+    </div>
   );
 }
