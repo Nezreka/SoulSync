@@ -926,13 +926,30 @@ function WatchPartyRoomModal({
                 {party.meta.subtitle ? ` · ${party.meta.subtitle}` : ''}
               </p>
             </div>
-            <div style={{ display: 'flex', gap: 6 }}>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {party.is_member ? (
+                <button
+                  type="button"
+                  className={wp.glassBtn}
+                  title="Leave this Watch Party room"
+                  onClick={async () => {
+                    await watchPartyApi.leave(party.id);
+                    setActiveWatchPartyId(null);
+                    refresh();
+                    onClose();
+                  }}
+                >
+                  Leave Party
+                </button>
+              ) : null}
               {party.is_host ? (
                 <button
                   type="button"
                   className={wp.glassBtn}
+                  title="End this Watch Party for everyone"
                   onClick={async () => {
                     await watchPartyApi.remove(party.id);
+                    setActiveWatchPartyId(null);
                     refresh();
                     onClose();
                   }}

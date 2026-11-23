@@ -117,6 +117,11 @@ def test_lobby_lifecycle_sync_and_chat(tmp_path):
     with pytest.raises(parties.PartyError):
         parties.post_message(db, p["id"], profile_id=2, body={"kind": "reaction", "body": "🔥"}, now=t0 + 241.5)
 
+    # Guest can leave party at any time
+    assert parties.leave_party(db, p["id"], profile_id=2, now=t0 + 250) is True
+    after_guest_left = parties.get_party(db, p["id"], viewer_id=1, now=t0 + 251)
+    assert after_guest_left["member_count"] == 1
+
     # End party
     assert parties.delete_party(db, p["id"], profile_id=1) is True
     assert parties.list_parties(db, viewer_id=1, now=t0 + 300) == []

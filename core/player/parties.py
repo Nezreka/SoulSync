@@ -469,7 +469,28 @@ def leave_party(db: Any, party_id: str, profile_id: int, *, now: Optional[float]
                 "VALUES (?, ?, 'system', 'Left the room', ?)",
                 (str(party_id), int(profile_id), t),
             )
-            conn.execute(f"UPDATE {PARTIES_TABLE} SET updated_at = ? WHERE id = ?", (t, str(party_id)))
+            remaining = conn.execute(
+                f"SELECT profile_id FROM {MEMBERS_TABLE} WHERE party_id = ? ORDER BY joined_at ASC",
+                (str(party_id),),
+            ).fetchall()
+            if not remaining:
+                conn.execute(
+                    f"UPDATE {PARTIES_TABLE} SET status = 'ended', updated_at = ? WHERE id = ?",
+                    (t, str(party_id)),
+                )
+            else:
+                p_row = conn.execute(
+                    f"SELECT host_profile_id FROM {PARTIES_TABLE} WHERE id = ?",
+                    (str(party_id),),
+                ).fetchone()
+                if p_row and int(p_row[0]) == int(profile_id):
+                    new_host_id = int(remaining[0][0])
+                    conn.execute(
+                        f"UPDATE {PARTIES_TABLE} SET host_profile_id = ?, updated_at = ? WHERE id = ?",
+                        (new_host_id, t, str(party_id)),
+                    )
+                else:
+                    conn.execute(f"UPDATE {PARTIES_TABLE} SET updated_at = ? WHERE id = ?", (t, str(party_id)))
         conn.commit()
         return cur.rowcount > 0
 

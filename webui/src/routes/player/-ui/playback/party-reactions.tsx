@@ -823,6 +823,31 @@ export function PartyReactionsOverlay({ hudVisible }: { hudVisible: boolean }) {
           >
             {muted ? 'Off' : 'Live'}
           </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              if (partyId) {
+                void watchPartyApi.leave(partyId).catch(() => undefined);
+              }
+              setActiveWatchPartyId(null);
+            }}
+            title="Leave Watch Party"
+            style={{
+              marginLeft: 2,
+              padding: '4px 10px',
+              borderRadius: 999,
+              border: '1px solid rgba(244, 63, 94, 0.42)',
+              background: 'rgba(244, 63, 94, 0.18)',
+              color: '#fda4af',
+              fontSize: 10.5,
+              fontWeight: 800,
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            Leave Party
+          </button>
         </div>
       )}
     </>
