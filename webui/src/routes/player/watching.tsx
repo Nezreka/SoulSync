@@ -100,18 +100,7 @@ function place(p: {
 
 // ── Cinema-Grade Watching Now Card ──────────────────────────────────────────
 
-function CinemaNowCard({
-  x,
-  onStartParty,
-}: {
-  x: WatchingSession;
-  onStartParty: (seed: {
-    item_type: 'movie' | 'episode' | 'youtube';
-    item_id: string;
-    title: string;
-    meta: ProgressMeta;
-  }) => void;
-}) {
+function CinemaNowCard({ x }: { x: WatchingSession }) {
   const item = itemOf(x.item_type, x.item_id, x.meta);
   const art = remoteImage(x.meta.backdrop) ?? remoteImage(x.meta.artwork);
   const part = x.duration ? Math.min(1, x.position / x.duration) : null;
@@ -119,7 +108,17 @@ function CinemaNowCard({
     if (x.live && x.channel && channelByIdTune(x.channel.id)) return;
     if (item) playItems([item], 0, { startAt: x.position });
   };
-  const canParty = x.item_type === 'movie' || x.item_type === 'episode' || x.item_type === 'youtube';
+  const detailsHref =
+    x.meta.href ||
+    (x.item_type === 'movie'
+      ? `/player/movies/${x.item_id}`
+      : x.item_type === 'episode' && x.meta.parent_id
+        ? `/player/tv/${x.meta.parent_id}`
+        : x.item_type === 'audiobook'
+          ? `/player/audiobooks/${x.item_id}`
+          : x.item_type === 'youtube'
+            ? '/player/youtube'
+            : null);
 
   return (
     <article className={wp.cinemaCard}>
@@ -172,25 +171,8 @@ function CinemaNowCard({
               {x.live && x.channel ? 'Tune in' : `Join at ${clock(x.position)}`}
             </button>
           ) : null}
-          {canParty ? (
-            <button
-              type="button"
-              className={wp.glassBtn}
-              onClick={() =>
-                onStartParty({
-                  item_type: x.item_type as 'movie' | 'episode' | 'youtube',
-                  item_id: x.item_id,
-                  title: x.meta.title ?? 'Watch Party',
-                  meta: x.meta,
-                })
-              }
-              data-nav
-            >
-              🍿 Watch Together
-            </button>
-          ) : null}
-          {x.meta.href ? (
-            <PlayerLink href={x.meta.href} className={wp.glassBtn} data-nav>
+          {detailsHref ? (
+            <PlayerLink href={detailsHref} className={wp.glassBtn} data-nav>
               Details
             </PlayerLink>
           ) : null}
@@ -378,6 +360,7 @@ function CreatePartyModal({
 }) {
   const catalog = useQuery(videoCatalogQuery());
   const [search, setSearch] = useState('');
+  const [kindFilter, setKindFilter] = useState<'all' | 'movie' | 'episode'>('all');
   const [picked, setPicked] = useState<PartySeed | null>(initialSeed);
   const [roomTitle, setRoomTitle] = useState(initialSeed?.title ?? '');
   const [mode, setMode] = useState<'now' | 'schedule'>('now');
@@ -396,48 +379,52 @@ function CreatePartyModal({
     const q = search.trim().toLowerCase();
     const out: PartySeed[] = [];
 
-    for (const m of cat.movies) {
-      if (q && !m.title.toLowerCase().includes(q)) continue;
-      out.push({
-        item_type: 'movie',
-        item_id: String(m.id),
-        title: m.title,
-        meta: {
+    if (kindFilter === 'all' || kindFilter === 'movie') {
+      for (const m of cat.movies) {
+        if (q && !m.title.toLowerCase().includes(q)) continue;
+        out.push({
+          item_type: 'movie',
+          item_id: String(m.id),
           title: m.title,
-          subtitle: m.year ? String(m.year) : undefined,
-          artwork: m.has_poster ? `/api/video/artwork/movie/${m.id}/poster` : undefined,
-          backdrop: m.has_backdrop ? `/api/video/artwork/movie/${m.id}/backdrop` : undefined,
-          href: `/player/movies/${m.id}`,
-        },
-      });
-      if (out.length >= 24) break;
+          meta: {
+            title: m.title,
+            subtitle: [m.year, m.content_rating, m.genres?.[0]].filter(Boolean).join(' · ') || 'Movie',
+            artwork: m.has_poster ? `/api/video/poster/movie/${m.id}?w=342` : undefined,
+            backdrop: m.has_backdrop ? `/api/video/backdrop/movie/${m.id}?w=1280` : undefined,
+            href: `/player/movies/${m.id}`,
+          },
+        });
+        if (out.length >= (kindFilter === 'movie' ? 36 : 20)) break;
+      }
     }
 
-    for (const sh of cat.shows) {
-      if (q && !sh.title.toLowerCase().includes(q)) continue;
-      const latest = sh.episodes?.[sh.episodes.length - 1];
-      if (!latest) continue;
-      const [epId, season, epNum, , epTitle] = latest;
-      out.push({
-        item_type: 'episode',
-        item_id: String(epId),
-        show_id: sh.id,
-        title: `${sh.title} · S${season} E${epNum}`,
-        meta: {
-          title: sh.title,
-          subtitle: `S${season} E${epNum}${epTitle ? ` · ${epTitle}` : ''}`,
-          artwork: sh.has_poster ? `/api/video/artwork/show/${sh.id}/poster` : undefined,
-          backdrop: sh.has_backdrop ? `/api/video/artwork/show/${sh.id}/backdrop` : undefined,
-          href: `/player/tv/${sh.id}`,
-          parent_id: String(sh.id),
-          parent_title: sh.title,
-        },
-      });
-      if (out.length >= 44) break;
+    if (kindFilter === 'all' || kindFilter === 'episode') {
+      for (const sh of cat.shows) {
+        if (q && !sh.title.toLowerCase().includes(q)) continue;
+        const latest = sh.episodes?.[sh.episodes.length - 1];
+        if (!latest) continue;
+        const [epId, season, epNum, , epTitle] = latest;
+        out.push({
+          item_type: 'episode',
+          item_id: String(epId),
+          show_id: sh.id,
+          title: `${sh.title} · S${season} E${epNum}`,
+          meta: {
+            title: sh.title,
+            subtitle: `S${season} E${epNum}${epTitle ? ` · ${epTitle}` : ''}`,
+            artwork: sh.has_poster ? `/api/video/poster/show/${sh.id}?w=342` : undefined,
+            backdrop: sh.has_backdrop ? `/api/video/backdrop/show/${sh.id}?w=1280` : undefined,
+            href: `/player/tv/${sh.id}`,
+            parent_id: String(sh.id),
+            parent_title: sh.title,
+          },
+        });
+        if (out.length >= 40) break;
+      }
     }
 
     return out;
-  }, [catalog.data, search]);
+  }, [catalog.data, search, kindFilter]);
 
   const createMut = useMutation({
     mutationFn: () => {
@@ -463,16 +450,45 @@ function CreatePartyModal({
     onError: (err: Error) => setError(err.message || 'Could not create watch party'),
   });
 
+  const pickedArt = remoteImage(picked?.meta.backdrop) ?? remoteImage(picked?.meta.artwork);
+  const pickedPoster = remoteImage(picked?.meta.artwork);
+
   return (
     <div className={wp.backdrop} onClick={onClose}>
-      <div className={wp.modal} style={{ maxWidth: 680 }} onClick={(e) => e.stopPropagation()}>
+      <div className={wp.modal} style={{ maxWidth: 760 }} onClick={(e) => e.stopPropagation()}>
         <div className={wp.modalHero}>
+          {pickedArt ? <img className={wp.modalHeroBg} src={pickedArt} alt="" /> : null}
           <div className={wp.modalHeroInner}>
-            <div>
-              <h2 className={wp.modalTitle}>Start a Watch Party</h2>
-              <p className={wp.modalSub}>
-                Open a theater lobby with SoulSync library music or schedule a premiere.
-              </p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16, minWidth: 0 }}>
+              {pickedPoster ? (
+                <img
+                  src={pickedPoster}
+                  alt=""
+                  style={{
+                    width: 56,
+                    height: 82,
+                    borderRadius: 10,
+                    objectFit: 'cover',
+                    border: '1px solid rgba(255,255,255,0.18)',
+                    boxShadow: '0 12px 28px rgba(0,0,0,0.55)',
+                    flexShrink: 0,
+                  }}
+                />
+              ) : null}
+              <div style={{ minWidth: 0 }}>
+                <span className={wp.livePill} style={{ marginBottom: 6 }}>
+                  <span className={`${wp.liveDot} ${wp.liveDotLobby}`} />
+                  THEATER PREMIERE SETUP
+                </span>
+                <h2 className={wp.modalTitle}>
+                  {picked ? picked.meta.title ?? picked.title : 'Start a Watch Party'}
+                </h2>
+                <p className={wp.modalSub}>
+                  {picked
+                    ? `${picked.item_type === 'movie' ? 'Movie' : 'TV Episode'}${picked.meta.subtitle ? ` · ${picked.meta.subtitle}` : ''}`
+                    : 'Choose a movie or show to open a synchronized theater lobby with library music.'}
+                </p>
+              </div>
             </div>
             <button type="button" className={wp.glassBtn} onClick={onClose}>
               Close
@@ -480,14 +496,33 @@ function CreatePartyModal({
           </div>
         </div>
 
-        <div className={wp.roomMain} style={{ borderRight: 'none' }}>
-          <div>
+        <div className={wp.roomMain} style={{ borderRight: 'none', gap: 14 }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
             <input
               className={wp.input}
-              placeholder="Search your movies & shows (shows auto-pick latest episode)…"
+              style={{ flex: '1 1 260px' }}
+              placeholder="Search your movies & shows…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
+            <div className={wp.pillToggleRow}>
+              {(
+                [
+                  ['all', 'All'],
+                  ['movie', 'Movies'],
+                  ['episode', 'TV Shows'],
+                ] as const
+              ).map(([k, label]) => (
+                <button
+                  key={k}
+                  type="button"
+                  className={`${wp.pillToggle} ${kindFilter === k ? wp.pillToggleOn : ''}`}
+                  onClick={() => setKindFilter(k)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
 
           <div className={wp.pickerList}>
@@ -504,21 +539,31 @@ function CreatePartyModal({
                     setRoomTitle(c.title);
                   }}
                 >
-                  {thumb ? <img className={wp.pickerThumb} src={thumb} alt="" /> : null}
-                  <div style={{ minWidth: 0 }}>
-                    <div
-                      style={{
-                        fontSize: 12.5,
-                        fontWeight: 750,
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {c.title}
-                    </div>
-                    <div style={{ fontSize: 11, color: 'var(--pl-text-3)' }}>
-                      {c.item_type === 'movie' ? 'Movie' : 'Latest Episode'}
+                  <div className={wp.pickerPosterWrap}>
+                    {thumb ? (
+                      <img
+                        className={wp.pickerThumb}
+                        src={thumb}
+                        alt=""
+                        loading="lazy"
+                        onError={(e) => {
+                          e.currentTarget.style.display = 'none';
+                        }}
+                      />
+                    ) : (
+                      <div className={wp.pickerFallback}>
+                        {c.title.charAt(0).toUpperCase()}
+                      </div>
+                    )}
+                    <span className={wp.pickerBadge}>
+                      {c.item_type === 'movie' ? 'FILM' : 'TV'}
+                    </span>
+                    {selected ? <span className={wp.pickerCheck}>✓</span> : null}
+                  </div>
+                  <div className={wp.pickerMeta}>
+                    <div className={wp.pickerTitle}>{c.meta.title ?? c.title}</div>
+                    <div className={wp.pickerSub}>
+                      {c.meta.subtitle ?? (c.item_type === 'movie' ? 'Movie' : 'Latest Episode')}
                     </div>
                   </div>
                 </button>
@@ -526,30 +571,39 @@ function CreatePartyModal({
             })}
           </div>
 
-          <div>
-            <input
-              className={wp.input}
-              placeholder="Party name (e.g. Friday Night Dune)"
-              value={roomTitle}
-              onChange={(e) => setRoomTitle(e.target.value)}
-            />
-          </div>
-
-          <div className={wp.pillToggleRow}>
-            <button
-              type="button"
-              className={`${wp.pillToggle} ${mode === 'now' ? wp.pillToggleOn : ''}`}
-              onClick={() => setMode('now')}
-            >
-              🍿 Open Lobby Now
-            </button>
-            <button
-              type="button"
-              className={`${wp.pillToggle} ${mode === 'schedule' ? wp.pillToggleOn : ''}`}
-              onClick={() => setMode('schedule')}
-            >
-              🗓 Schedule Premiere
-            </button>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 10 }}>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.07em', color: 'var(--pl-text-3)', marginBottom: 6 }}>
+                ROOM TITLE
+              </div>
+              <input
+                className={wp.input}
+                placeholder="Party name (e.g. Friday Night Movie)"
+                value={roomTitle}
+                onChange={(e) => setRoomTitle(e.target.value)}
+              />
+            </div>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.07em', color: 'var(--pl-text-3)', marginBottom: 6 }}>
+                SHOWTIME
+              </div>
+              <div className={wp.pillToggleRow}>
+                <button
+                  type="button"
+                  className={`${wp.pillToggle} ${mode === 'now' ? wp.pillToggleOn : ''}`}
+                  onClick={() => setMode('now')}
+                >
+                  🍿 Open Lobby Now
+                </button>
+                <button
+                  type="button"
+                  className={`${wp.pillToggle} ${mode === 'schedule' ? wp.pillToggleOn : ''}`}
+                  onClick={() => setMode('schedule')}
+                >
+                  🗓 Schedule Premiere
+                </button>
+              </div>
+            </div>
           </div>
 
           {mode === 'schedule' ? (
@@ -561,51 +615,61 @@ function CreatePartyModal({
             />
           ) : null}
 
-          <div className={wp.pillToggleRow}>
-            <button
-              type="button"
-              className={`${wp.pillToggle} ${controlMode === 'host' ? wp.pillToggleOn : ''}`}
-              onClick={() => setControlMode('host')}
-            >
-              Host controls playback
-            </button>
-            <button
-              type="button"
-              className={`${wp.pillToggle} ${controlMode === 'everyone' ? wp.pillToggleOn : ''}`}
-              onClick={() => setControlMode('everyone')}
-            >
-              Anyone can pause / seek
-            </button>
-            <button
-              type="button"
-              className={`${wp.pillToggle} ${lobbyMusic ? wp.pillToggleOn : ''}`}
-              onClick={() => setLobbyMusic((v) => !v)}
-            >
-              ♪ Lobby music: {lobbyMusic ? 'On' : 'Off'}
-            </button>
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.07em', color: 'var(--pl-text-3)', marginBottom: 6 }}>
+              THEATER OPTIONS
+            </div>
+            <div className={wp.pillToggleRow}>
+              <button
+                type="button"
+                className={`${wp.pillToggle} ${controlMode === 'host' ? wp.pillToggleOn : ''}`}
+                onClick={() => setControlMode('host')}
+              >
+                ★ Host controls playback
+              </button>
+              <button
+                type="button"
+                className={`${wp.pillToggle} ${controlMode === 'everyone' ? wp.pillToggleOn : ''}`}
+                onClick={() => setControlMode('everyone')}
+              >
+                Everyone can pause / seek
+              </button>
+              <button
+                type="button"
+                className={`${wp.pillToggle} ${lobbyMusic ? wp.pillToggleOn : ''}`}
+                onClick={() => setLobbyMusic((v) => !v)}
+              >
+                ♪ Lobby music: {lobbyMusic ? 'On' : 'Off'}
+              </button>
+            </div>
           </div>
 
           {error ? <p style={{ color: '#f87171', fontSize: 12.5, margin: 0 }}>{error}</p> : null}
 
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-            <button type="button" className={wp.glassBtn} onClick={onClose}>
-              Cancel
-            </button>
-            <button
-              type="button"
-              className={wp.startPartyBtn}
-              disabled={!picked || createMut.isPending}
-              onClick={() => {
-                setError(null);
-                createMut.mutate();
-              }}
-            >
-              {createMut.isPending
-                ? 'Creating…'
-                : mode === 'schedule'
-                  ? 'Schedule Watch Party'
-                  : 'Open Theater Lobby'}
-            </button>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, paddingTop: 4 }}>
+            <span style={{ fontSize: 12, color: 'var(--pl-text-3)' }}>
+              {picked ? `Selected: ${picked.title}` : 'Select a movie or show above to continue'}
+            </span>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button type="button" className={wp.glassBtn} onClick={onClose}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className={wp.startPartyBtn}
+                disabled={!picked || createMut.isPending}
+                onClick={() => {
+                  setError(null);
+                  createMut.mutate();
+                }}
+              >
+                {createMut.isPending
+                  ? 'Creating…'
+                  : mode === 'schedule'
+                    ? 'Schedule Watch Party'
+                    : 'Open Theater Lobby'}
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -1173,7 +1237,6 @@ function WatchingPage() {
               <CinemaNowCard
                 key={`${x.profile_id}:${x.item_type}:${x.item_id}:${x.started}`}
                 x={x}
-                onStartParty={(seed) => setCreateSeed(seed)}
               />
             ))}
           </div>

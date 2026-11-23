@@ -546,47 +546,141 @@
 
 .input {
   width: 100%;
-  padding: 9px 12px;
-  border: 1px solid var(--white-a14);
-  border-radius: 10px;
-  background: var(--white-a06);
+  padding: 10px 14px;
+  border: 1px solid var(--white-a16);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.05);
   color: #fff;
-  font-size: 13px;
+  font-size: 13.5px;
+  outline: none;
+  transition:
+    border-color var(--dur-fast) ease,
+    background var(--dur-fast) ease,
+    box-shadow var(--dur-fast) ease;
+}
+
+.input:focus {
+  border-color: rgba(var(--accent-rgb), 0.7);
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.18);
 }
 
 .pickerList {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-  gap: 8px;
-  max-height: 230px;
+  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+  gap: 12px;
+  max-height: 292px;
   overflow-y: auto;
+  padding: 4px 2px;
 }
 
 .pickerItem {
   display: flex;
-  align-items: center;
-  gap: 9px;
-  padding: 7px;
-  border: 1px solid var(--white-a10);
-  border-radius: 10px;
-  background: var(--white-a04);
+  flex-direction: column;
+  gap: 6px;
+  padding: 0;
+  border: none;
+  border-radius: 12px;
+  background: transparent;
   color: #fff;
   text-align: left;
   cursor: pointer;
+  transition: transform var(--dur-fast) ease;
 }
 
-.pickerItemActive {
+.pickerItem:hover {
+  transform: translateY(-2px);
+}
+
+.pickerPosterWrap {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  border-radius: 11px;
+  overflow: hidden;
+  border: 1.5px solid var(--white-a12);
+  background: linear-gradient(145deg, #1b2236, #0f1320);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
+  transition:
+    border-color var(--dur-fast) ease,
+    box-shadow var(--dur-fast) ease;
+}
+
+.pickerItemActive .pickerPosterWrap {
   border-color: var(--accent-light);
-  background: rgba(var(--accent-rgb), 0.16);
+  box-shadow:
+    0 0 0 2px rgba(var(--accent-rgb), 0.4),
+    0 12px 26px rgba(0, 0, 0, 0.6);
 }
 
 .pickerThumb {
-  width: 36px;
-  height: 50px;
-  border-radius: 6px;
+  width: 100%;
+  height: 100%;
   object-fit: cover;
-  background: var(--white-a08);
-  flex: none;
+  display: block;
+}
+
+.pickerFallback {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  font-size: 28px;
+  font-weight: 900;
+  color: rgba(255, 255, 255, 0.35);
+}
+
+.pickerBadge {
+  position: absolute;
+  top: 7px;
+  left: 7px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(8, 10, 18, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  backdrop-filter: blur(8px);
+  color: #e2e8f0;
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+
+.pickerCheck {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--pl-bg);
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 900;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+
+.pickerMeta {
+  min-width: 0;
+  padding: 0 2px;
+}
+
+.pickerTitle {
+  font-size: 12.5px;
+  font-weight: 750;
+  color: #f8fafc;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pickerSub {
+  font-size: 11px;
+  color: var(--pl-text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .pillToggleRow {

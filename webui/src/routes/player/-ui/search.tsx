@@ -655,25 +655,31 @@ export function Search() {
         <img
           className={big ? s.searchTopThumb : s.searchThumb}
           data-round={hit.round ? 'true' : undefined}
+          data-poster={hit.type.startsWith('Movie') || hit.type.startsWith('TV') || hit.type === 'Audiobook' ? 'true' : undefined}
           src={hit.art.startsWith('/') ? appURL(hit.art) : hit.art}
           alt=""
           loading="lazy"
-          // no cover: the empty tile, never a broken image
           onError={(e) => {
-            e.currentTarget.style.visibility = 'hidden';
+            e.currentTarget.style.display = 'none';
           }}
         />
       ) : (
         <span
           className={big ? s.searchTopThumb : s.searchThumb}
           data-round={hit.round ? 'true' : undefined}
-        />
+          data-poster={hit.type.startsWith('Movie') || hit.type.startsWith('TV') || hit.type === 'Audiobook' ? 'true' : undefined}
+        >
+          {hit.title.charAt(0).toUpperCase()}
+        </span>
       )}
       <span className={s.searchHitText}>
-        {big ? <div className={s.searchTopType}>{hit.type}</div> : null}
+        {big ? (
+          <div className={s.searchTopType}>{hit.type}</div>
+        ) : null}
         <div className={big ? s.searchTopTitle : s.searchHitTitle}>{hit.title}</div>
         {hit.sub ? <div className={s.searchHitSub}>{hit.sub}</div> : null}
       </span>
+      {!big ? <span className={s.searchTypePill}>{hit.type.split(' · ')[0]}</span> : null}
     </PlayerLink>
   );
 
