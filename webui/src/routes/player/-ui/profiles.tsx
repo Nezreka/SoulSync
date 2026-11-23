@@ -326,14 +326,13 @@ export function ProfileChip({
         className={s.chipButton}
         aria-haspopup="menu"
         aria-expanded={open}
+        aria-label={me?.name ?? 'Profile'}
+        title={me?.name ?? 'Profile'}
         onClick={() => setOpen((v) => !v)}
         data-nav
+        style={{ padding: 3 }}
       >
         {me ? <Avatar profile={me} /> : <span className={s.avatar} />}
-        <span className={s.chipName}>{me?.name ?? 'Profile'}</span>
-        <span className={s.chipCaret} aria-hidden="true">
-          <ChevronDownIcon />
-        </span>
       </button>
       {open ? (
         <div className={s.profileMenu} role="menu" aria-label="Profile">
