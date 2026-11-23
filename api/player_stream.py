@@ -270,7 +270,7 @@ def _probe_cast_media(source) -> tuple[str, str, float | None]:
                     "-of", "json",
                     source.path,
                 ],
-                text=True,
+                text=True, errors="replace",
                 timeout=8,
             )
             data = _json.loads(out)
