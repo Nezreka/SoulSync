@@ -246,24 +246,25 @@ export function TrackList({
               setOver(null);
             }}
             onContextMenu={(e) => {
-              if (!playable) return;
               e.preventDefault();
               openContextMenu({
                 x: e.clientX,
                 y: e.clientY,
                 kind: 'track',
-                id: row.trackId !== null ? String(row.trackId) : null,
+                owned: playable,
+                id: playable && row.trackId !== null ? String(row.trackId) : null,
                 title: row.title,
                 subtitle: row.artist ?? row.song?.artist ?? null,
                 artwork: row.art ?? null,
                 href: row.albumHref ?? row.artistHref ?? null,
-                onPlay: () => onPlay(index),
-                onQueue: row.trackId !== null ? () => addToQueue(row) : undefined,
-                liked,
-                onToggleLike: row.song ? () => void toggleLike(row) : undefined,
-                song: row.song ?? null,
-                downloadType: row.trackId !== null ? 'track' : null,
-                downloadId: row.trackId !== null ? String(row.trackId) : null,
+                onPlay: playable ? () => onPlay(index) : undefined,
+                onQueue: playable && row.trackId !== null ? () => addToQueue(row) : undefined,
+                liked: playable ? liked : false,
+                onToggleLike: playable && row.song ? () => void toggleLike(row) : undefined,
+                song: playable ? (row.song ?? null) : null,
+                downloadType: playable && row.trackId !== null ? 'track' : null,
+                downloadId: playable && row.trackId !== null ? String(row.trackId) : null,
+                onRequest: !playable ? (row.onMissingAction ?? row.onRequest) : undefined,
                 extraActions: onRemove
                   ? [{ label: 'Remove from playlist', onSelect: () => onRemove(index), danger: true }]
                   : undefined,

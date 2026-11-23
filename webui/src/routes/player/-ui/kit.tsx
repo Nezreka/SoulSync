@@ -247,12 +247,14 @@ export function Card({
       ref={menuRef}
       onContextMenu={(e) => {
         e.preventDefault();
-        openContextMenu(
-          inferContextTargetFromCard(e, card, {
-            onOpen: onOpen ? () => onOpen(card) : undefined,
+        const isOwned = !card.muted && !/\/tmdb\//.test(card.href ?? '');
+        openContextMenu({
+          ...inferContextTargetFromCard(e, card, {
+            onOpen: isOwned && onOpen ? () => onOpen(card) : undefined,
             extraActions: actions?.map((a) => ({ label: a.label, onSelect: a.onSelect })),
           }),
-        );
+          owned: isOwned,
+        });
       }}
     >
       {onOpen ? (

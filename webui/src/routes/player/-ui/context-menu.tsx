@@ -60,6 +60,10 @@ export interface ContextMenuTarget {
   /** Optional Download itemType override */
   downloadType?: DownloadItemType | null;
   downloadId?: string | null;
+  /** Whether the user actually owns/has this item locally (default true) */
+  owned?: boolean;
+  /** Optional request action for missing/unowned items */
+  onRequest?: () => void;
   /** Extra card-specific actions (e.g. Remove from Continue Watching) */
   extraActions?: ContextMenuExtraAction[];
 }
@@ -372,18 +376,22 @@ export function ContextMenuHost() {
     }
   };
 
+  const isOwned = target.owned !== false;
+
   const canPlayDirect =
-    !!target.onPlay ||
-    target.kind === 'movie' ||
-    target.kind === 'show' ||
-    target.kind === 'album' ||
-    target.kind === 'audiobook';
+    isOwned &&
+    (!!target.onPlay ||
+      target.kind === 'movie' ||
+      target.kind === 'show' ||
+      target.kind === 'album' ||
+      target.kind === 'audiobook');
 
   const canQueue =
-    !!target.onQueue ||
-    target.kind === 'album' ||
-    target.kind === 'movie' ||
-    target.kind === 'audiobook';
+    isOwned &&
+    (!!target.onQueue ||
+      target.kind === 'album' ||
+      target.kind === 'movie' ||
+      target.kind === 'audiobook');
 
   const itemStyle: React.CSSProperties = {
     display: 'flex',
@@ -494,7 +502,7 @@ export function ContextMenuHost() {
             </button>
           )}
 
-          {target.kind === 'album' && (
+          {isOwned && target.kind === 'album' && (
             <button
               type="button"
               role="menuitem"
@@ -522,7 +530,7 @@ export function ContextMenuHost() {
             </button>
           )}
 
-          {target.onToggleLike && (
+          {isOwned && target.onToggleLike && (
             <button
               type="button"
               role="menuitem"
@@ -539,7 +547,7 @@ export function ContextMenuHost() {
             </button>
           )}
 
-          {(target.song || target.kind === 'album') && (
+          {isOwned && (target.song || target.kind === 'album') && (
             <button
               type="button"
               role="menuitem"
@@ -561,7 +569,25 @@ export function ContextMenuHost() {
             </button>
           )}
 
-          {(target.kind === 'movie' || target.kind === 'show') && target.id && (
+          {!isOwned && target.onRequest && (
+            <button
+              type="button"
+              role="menuitem"
+              style={{ ...itemStyle, color: '#a5b4fc', fontWeight: 600 }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(129,140,248,0.16)')}
+              onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+              onClick={() => {
+                const fn = target.onRequest;
+                closeContextMenu();
+                fn?.();
+              }}
+            >
+              <span>＋</span>
+              <span>Request {KIND_LABELS[target.kind].toLowerCase()}</span>
+            </button>
+          )}
+
+          {(target.kind === 'movie' || target.kind === 'show') && target.id && isOwned && (
             <>
               <button
                 type="button"
@@ -588,7 +614,7 @@ export function ContextMenuHost() {
             </>
           )}
 
-          {target.downloadType && target.downloadId && (
+          {isOwned && target.downloadType && target.downloadId && (
             <button
               type="button"
               role="menuitem"
