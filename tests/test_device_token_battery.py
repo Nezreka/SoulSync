@@ -115,6 +115,8 @@ OPTED_IN = {
     "lib2_get_artist": A.PLAYBACK,
     "lib2_get_album": A.PLAYBACK,
     "lib2_artwork": A.PLAYBACK,
+    "discover_routes.image_proxy": A.PLAYBACK,
+    "discover_routes.serve_cached_image": A.PLAYBACK,
     "podcasts_api.show_detail": A.PLAYBACK,
     "podcasts_api.podcasts_watchlist_list": A.PLAYBACK,
     "audiobooks_api.library": A.PLAYBACK,

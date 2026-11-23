@@ -32,6 +32,7 @@ from api.source_playlists import (
     _get_metadata_fallback_source,
     _save_source_bubble_snapshot,
 )
+from core.connect.device_access import device_playback
 from core.discovery.hero import get_discover_hero as _discover_hero_get
 from core.discovery.blocked import (  # noqa: E402
     ARTISTS, GRAPH, NAMES, WORKS, hide_blocked_in_response as _hide_blocked,
@@ -3533,6 +3534,7 @@ def get_your_artist_info(artist_id):
 
 @bp.route('/api/image-proxy', methods=['GET'])
 @signed_in
+@device_playback
 def image_proxy():
     """Proxy external images to avoid CORS issues for canvas rendering.
 
@@ -3635,6 +3637,7 @@ def image_cache_prune():
 
 @bp.route('/api/image-cache/<cache_key>', methods=['GET'])
 @signed_in
+@device_playback
 def serve_cached_image(cache_key):
     """Serve a registered image URL from SoulSync's disk cache."""
     if not re.fullmatch(r'[a-f0-9]{64}', cache_key or ''):
