@@ -86,7 +86,7 @@ function episodeCardArt(ep: CalendarEpisode, w = 600): string | null {
 }
 
 function movieCardArt(m: CalendarMovie, w = 780): string | null {
-  const libId = m.library_id ?? m.movie_id;
+  const libId = m.library_id;
   if (libId) return appURL(`/api/video/backdrop/movie/${libId}?w=${w}`);
   return m.poster_url || null;
 }
@@ -111,7 +111,7 @@ function PlayerCalendarPage() {
   const params = { start: win.start, days: win.days, scope, specials: false };
 
   const modeQuery = useQuery(requestOptionsQuery());
-  const requestMode = modeQuery.data?.modes?.show ?? modeQuery.data?.modes?.movie ?? 'none';
+  const requestMode = modeQuery.data?.show ?? modeQuery.data?.movie ?? 'none';
   const canRequest = requestMode === 'download' || requestMode === 'ask';
   const reqVerb = requestMode === 'download' ? 'Get' : 'Request';
 
@@ -359,8 +359,6 @@ function PlayerCalendarPage() {
           today={today}
           episodes={visibleEps}
           movies={visibleMovies}
-          autoOn={autoOn}
-          onOpen={(ep) => setOpenEp(ep)}
           onPickDay={(d) => {
             setAnchor(d);
             setView('cards');
@@ -399,7 +397,7 @@ function PlayerCalendarPage() {
                     const reqState = requestedKeys[reqKey];
                     const showReq = canRequest && isMovieRequestable(m) && reqState !== 'done';
                     const mArt = movieCardArt(m, 780);
-                    const mLibId = m.library_id ?? m.movie_id;
+                    const mLibId = m.library_id;
                     return (
                       <div
                         key={`m-${m.tmdb_id}-${m.type}`}
@@ -460,7 +458,8 @@ function PlayerCalendarPage() {
                           >
                             {mLibId && m.acq === 'owned' && (
                               <Link
-                                to={`/player/movies/${mLibId}`}
+                                to="/player/movies/$movieId"
+                                params={{ movieId: String(mLibId) }}
                                 className={s.btn}
                                 onClick={(e) => e.stopPropagation()}
                               >
@@ -586,7 +585,11 @@ function PlayerCalendarPage() {
                             }}
                           >
                             {ep.show_id && !ep.not_in_library && (
-                              <Link to={`/player/tv/${ep.show_id}`} className={s.btn}>
+                              <Link
+                                to="/player/tv/$showId"
+                                params={{ showId: String(ep.show_id) }}
+                                className={s.btn}
+                              >
                                 Open show
                               </Link>
                             )}
@@ -834,9 +837,11 @@ function PlayerEpisodeModal({
               ✓ {requestMode === 'download' ? 'On your wishlist' : 'Requested'}
             </span>
           )}
-          {inLibrary && (
+          {inLibrary && ep.show_id != null && (
             <Link
-              to={`/player/tv/${ep.show_id}?season=${ep.season_number}&episode=${ep.episode_number}`}
+              to="/player/tv/$showId"
+              params={{ showId: String(ep.show_id) }}
+              search={{ season: ep.season_number, episode: ep.episode_number }}
               className={
                 canRequest && requestState !== 'done' ? styles.btnGhost : styles.btnPrimary
               }
@@ -872,7 +877,7 @@ function PlayerMovieModal({
   onRequest: () => void;
   onClose: () => void;
 }) {
-  const libId = movie.library_id ?? movie.movie_id;
+  const libId = movie.library_id;
   const backdrop = movieCardArt(movie, 1000);
   const effectiveAcq: AcqState = requestState === 'done' ? 'wanted' : movie.acq;
   const eyebrow = [
@@ -967,7 +972,8 @@ function PlayerMovieModal({
           )}
           {libId && (
             <Link
-              to={`/player/movies/${libId}`}
+              to="/player/movies/$movieId"
+              params={{ movieId: String(libId) }}
               className={
                 canRequest && requestState !== 'done' ? styles.btnGhost : styles.btnPrimary
               }
