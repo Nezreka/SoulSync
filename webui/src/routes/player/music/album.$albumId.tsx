@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { createFileRoute } from '@tanstack/react-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import type { RailCard } from '../-lib/rails';
 import type { LibTrack } from '../-player.types';
@@ -22,6 +22,10 @@ import { getEngine, playItems } from '../-ui/playback/use-player';
 import { useSections } from '../-ui/sections';
 
 export const Route = createFileRoute('/player/music/album/$albumId')({
+  validateSearch: (search: Record<string, unknown>): { track?: number } => {
+    const n = Number(search.track);
+    return Number.isInteger(n) && n > 0 ? { track: n } : {};
+  },
   component: AlbumPage,
 });
 
@@ -46,7 +50,17 @@ function qualityBadgeClass(label: string): string {
 function AlbumPage() {
   const sections = useSections();
   const id = Number(Route.useParams().albumId);
+  const { track: highlightTrack } = Route.useSearch();
   const album = useQuery({ ...albumQuery(id), enabled: sections.music && Number.isFinite(id) });
+
+  useEffect(() => {
+    if (!highlightTrack || !album.data) return;
+    const t = window.setTimeout(() => {
+      const el = document.querySelector(`[data-track-id="${highlightTrack}"]`);
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 140);
+    return () => window.clearTimeout(t);
+  }, [highlightTrack, album.data]);
   const primaryArtistId = album.data?.primary_artist?.id;
   const artistDetail = useQuery({
     ...artistQuery(primaryArtistId ?? 0),

@@ -208,6 +208,7 @@ export function TrackList({
             key={row.key}
             role="listitem"
             className={s.track}
+            data-track-id={row.trackId ?? undefined}
             data-playing={playing ? 'true' : undefined}
             data-off={playable ? undefined : 'true'}
             data-drag={drag === index ? 'true' : undefined}

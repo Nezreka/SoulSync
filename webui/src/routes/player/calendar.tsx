@@ -164,13 +164,17 @@ function PlayerCalendarPage() {
   const goToday = () => setAnchor(clientToday);
 
   const isEpisodeRequestable = (ep: CalendarEpisode) => {
-    const aired = ep.air_date <= today;
-    return aired && ep.acq === 'missing' && !!ep.show_tmdb_id;
+    return (
+      (ep.acq === 'missing' || ep.acq === 'failed' || ep.acq === 'unaired') &&
+      !!ep.show_tmdb_id
+    );
   };
 
   const isMovieRequestable = (m: CalendarMovie) => {
-    const aired = m.date <= today;
-    return aired && m.acq === 'missing' && !!m.tmdb_id;
+    return (
+      (m.acq === 'missing' || m.acq === 'failed' || m.acq === 'unaired') &&
+      !!m.tmdb_id
+    );
   };
 
   const handleOpenMovie = (m: CalendarMovie) => {
@@ -180,8 +184,7 @@ function PlayerCalendarPage() {
   const modalEp = openEp ? (episodes.find((e) => e.id === openEp.id) ?? openEp) : null;
 
   return (
-    <div style={{ maxWidth: 1440, margin: '0 auto', padding: '16px 24px 64px' }}>
-      <div className={styles.page}>
+    <div className={styles.page} style={{ padding: '8px 0 64px', width: '100%' }}>
         {/* Manager-grade Top Header */}
         <header className={styles.top}>
           <div>
@@ -403,7 +406,7 @@ function PlayerCalendarPage() {
                               />
                             )}
                             <div style={{ position: 'absolute', top: 10, right: 10 }}>
-                              <StatePill state={reqState === 'done' ? 'wishlist' : m.acq} />
+                              <StatePill state={reqState === 'done' ? 'wanted' : m.acq} />
                             </div>
                           </div>
                           <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 6, flex: 1 }}>
@@ -511,7 +514,7 @@ function PlayerCalendarPage() {
                               {episodeCode(g)}
                             </div>
                             <div style={{ position: 'absolute', top: 10, right: 10 }}>
-                              <StatePill state={reqState === 'done' ? 'wishlist' : g.acq} />
+                              <StatePill state={reqState === 'done' ? 'wanted' : g.acq} />
                             </div>
                           </div>
                           <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 4, flex: 1 }}>
@@ -565,7 +568,6 @@ function PlayerCalendarPage() {
             })}
           </div>
         )}
-      </div>
 
       {/* Manager-Style Episode Detail Modal (Player-native navigation & Request) */}
       {modalEp && (
@@ -655,7 +657,7 @@ function PlayerEpisodeModal({
     .join('  ·  ');
   const showOverview =
     detail.data?.overview && detail.data.overview !== ep.overview ? detail.data.overview : null;
-  const effectiveAcq = requestState === 'done' ? 'wishlist' : ep.acq;
+  const effectiveAcq: AcqState = requestState === 'done' ? 'wanted' : ep.acq;
   const inLibrary = Boolean(ep.show_id && !ep.not_in_library);
 
   useEffect(() => {
@@ -669,7 +671,11 @@ function PlayerEpisodeModal({
   return createPortal(
     <div
       className={styles.modalViewport}
-      style={{ zIndex: 99999 }}
+      style={{
+        zIndex: 99999,
+        background: 'rgba(0, 0, 0, 0.74)',
+        backdropFilter: 'blur(9px)',
+      }}
       role="dialog"
       aria-modal="true"
       aria-label={`${ep.show_title} S${ep.season_number}E${ep.episode_number}`}
@@ -677,7 +683,13 @@ function PlayerEpisodeModal({
     >
       <div
         className={styles.modal}
-        style={{ '--vcal-h': showHue(ep.show_title) } as CSSProperties}
+        style={
+          {
+            '--vcal-h': showHue(ep.show_title),
+            background: 'var(--bg-primary, #131520)',
+            color: 'var(--text-bright, #f8fafc)',
+          } as CSSProperties
+        }
         onClick={(e) => e.stopPropagation()}
       >
         <button type="button" className={styles.modalClose} aria-label="Close" onClick={onClose}>
@@ -757,7 +769,7 @@ function PlayerEpisodeModal({
           )}
           {inLibrary && (
             <Link
-              to={`/player/tv/${ep.show_id}`}
+              to={`/player/tv/${ep.show_id}?season=${ep.season_number}&episode=${ep.episode_number}`}
               className={canRequest && requestState !== 'done' ? styles.btnGhost : styles.btnPrimary}
               onClick={onClose}
             >
@@ -794,7 +806,7 @@ function PlayerMovieModal({
 }) {
   const libId = movie.library_id ?? movie.movie_id;
   const backdrop = movieCardArt(movie, 1000);
-  const effectiveAcq = requestState === 'done' ? 'wishlist' : movie.acq;
+  const effectiveAcq: AcqState = requestState === 'done' ? 'wanted' : movie.acq;
   const eyebrow = [
     movie.type === 'cinema' ? 'In cinemas' : 'Home release',
     movie.year ? String(movie.year) : null,
@@ -813,7 +825,11 @@ function PlayerMovieModal({
   return createPortal(
     <div
       className={styles.modalViewport}
-      style={{ zIndex: 99999 }}
+      style={{
+        zIndex: 99999,
+        background: 'rgba(0, 0, 0, 0.74)',
+        backdropFilter: 'blur(9px)',
+      }}
       role="dialog"
       aria-modal="true"
       aria-label={movie.title}
@@ -821,7 +837,13 @@ function PlayerMovieModal({
     >
       <div
         className={styles.modal}
-        style={{ '--vcal-h': showHue(movie.title) } as CSSProperties}
+        style={
+          {
+            '--vcal-h': showHue(movie.title),
+            background: 'var(--bg-primary, #131520)',
+            color: 'var(--text-bright, #f8fafc)',
+          } as CSSProperties
+        }
         onClick={(e) => e.stopPropagation()}
       >
         <button type="button" className={styles.modalClose} aria-label="Close" onClick={onClose}>

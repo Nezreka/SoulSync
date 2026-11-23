@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import type { DetailEpisode, VideoFile } from '../-player.types';
 
@@ -54,9 +54,13 @@ import { ReportIssueButton } from '../-ui/report-issue';
 import { WatchlistButton } from '../-ui/watchlist';
 
 export const Route = createFileRoute('/player/tv/$showId')({
-  validateSearch: (search: Record<string, unknown>): { season?: number } => {
-    const n = Number(search.season);
-    return Number.isInteger(n) && n >= 0 ? { season: n } : {};
+  validateSearch: (search: Record<string, unknown>): { season?: number; episode?: number } => {
+    const sNum = Number(search.season);
+    const eNum = Number(search.episode);
+    return {
+      ...(Number.isInteger(sNum) && sNum >= 0 ? { season: sNum } : {}),
+      ...(Number.isInteger(eNum) && eNum >= 0 ? { episode: eNum } : {}),
+    };
   },
   component: ShowPage,
 });
@@ -73,6 +77,7 @@ function EpisodeRow({
   onPlay,
   filesKnown = true,
   requestMode = 'none',
+  autoExpand = false,
 }: {
   showId: number;
   showTitle: string;
@@ -88,9 +93,19 @@ function EpisodeRow({
   filesKnown?: boolean;
   /** profile's show request permission ('download' | 'ask' | 'none') */
   requestMode?: RequestMode;
+  autoExpand?: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(autoExpand);
+  const rowRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!autoExpand) return;
+    setExpanded(true);
+    const t = window.setTimeout(() => {
+      rowRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 120);
+    return () => window.clearTimeout(t);
+  }, [autoExpand]);
   const [reqBusy, setReqBusy] = useState(false);
   const [reqResult, setReqResult] = useState<RequestResult | null>(null);
   const epExtra = useQuery({
@@ -157,7 +172,16 @@ function EpisodeRow({
     reqResult?.state === 'owned';
   return (
     <div
+      ref={rowRef}
       className={s.episodeCard}
+      style={
+        autoExpand
+          ? {
+              boxShadow: '0 0 0 1.5px rgba(var(--accent-rgb, 129, 140, 248), 0.7)',
+              borderRadius: 14,
+            }
+          : undefined
+      }
       data-expanded={expanded ? 'true' : undefined}
       data-watched={episode.watched ? 'true' : undefined}
       data-missing={owned ? undefined : 'true'}
@@ -432,7 +456,7 @@ function EpisodeRow({
 function ShowPage() {
   const sections = useSections();
   const id = Number(Route.useParams().showId);
-  const { season: wanted } = Route.useSearch();
+  const { season: wanted, episode: targetEpisode } = Route.useSearch();
   const navigate = useNavigate({ from: '/player/tv/$showId' });
   const ok = sections.tv && Number.isFinite(id);
   const detail = useQuery({ ...showDetailQuery(id), enabled: ok, retry: false });
@@ -658,6 +682,7 @@ function ShowPage() {
                         showTmdbId={tmdbId}
                         seasonNumber={current?.season_number ?? 1}
                         episode={episode}
+                        autoExpand={targetEpisode === episode.episode_number}
                         files={filesByEpisode.get(episode.id) ?? []}
                         position={
                           row && !row.finished
