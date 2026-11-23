@@ -1,5 +1,5 @@
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
-import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
+import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
 
 import { apiClient } from '@/app/api-client';
@@ -20,6 +20,7 @@ import {
   Empty,
   PageTitle,
   PlayButton,
+  Rail,
   Tabs,
   useViewMode,
   ViewToggle,
@@ -227,67 +228,99 @@ function MusicBrowse() {
 
       {tab === 'foryou' ? (
         <>
-          {/* Quick Mixes & Radio Stations (Plexamp-grade 1-click listening) */}
-          <section className={s.rail} aria-label="Stations and mixes">
-            <div className={s.railHead}>
-              <h2 className={s.sectionTitle}>Stations &amp; Instant Mixes</h2>
-            </div>
-            <div className={m.radioStrip}>
-              <button
-                type="button"
-                className={m.radioCard}
-                data-tone="accent"
-                onClick={playLibraryShuffle}
-                data-nav
-              >
-                <span className={m.radioKicker}>Instant Radio</span>
-                <div>
-                  <div className={m.radioName}>Library Shuffle</div>
-                  <div className={m.radioMeta}>
-                    {songs.data?.total
-                      ? `${songs.data.total.toLocaleString()} songs`
-                      : 'Shuffle your music'}
-                  </div>
+          {/* Plexamp-style Artist Mixes & Vibes (similar artist clusters + 2x2 album mosaic) */}
+          <Rail title="Stations & Artist Mixes">
+            <button
+              type="button"
+              className={m.mixCard}
+              data-tone="accent"
+              onClick={playLibraryShuffle}
+              data-nav
+            >
+              <div className={m.mixCover}>
+                <div className={m.mixMosaic}>
+                  {(albums.data?.items ?? []).slice(0, 4).map((al) => {
+                    const art = libraryThumb(al.image_url) ?? remoteImage(al.remote_image_url);
+                    return art ? <img key={al.id} src={art} alt="" loading="lazy" /> : <span key={al.id} />;
+                  })}
                 </div>
-                <span className={m.radioOrb} aria-hidden="true">
+                <div className={m.mixVignette} aria-hidden="true" />
+                <span className={m.mixBadge}>Library Radio</span>
+                <span className={m.mixPlayOrb} aria-hidden="true">
                   ▶
                 </span>
-              </button>
-              {(musicStations.data ?? []).slice(0, 7).map((st) => (
+              </div>
+              <div className={m.mixTitle}>Library Shuffle</div>
+              <div className={m.mixSub}>
+                {songs.data?.total
+                  ? `${songs.data.total.toLocaleString()} songs · all vibes`
+                  : 'Shuffle your whole library'}
+              </div>
+            </button>
+            {(musicStations.data ?? []).slice(0, 12).map((st) => {
+              const distinctArtists: string[] = [];
+              const seenArtists = new Set<string>();
+              const mosaicUrls: string[] = [];
+              const seenAlbums = new Set<number>();
+              for (const [, , artist, , albumId] of st.tracks) {
+                const aName = artist?.trim();
+                if (aName && !seenArtists.has(aName.toLowerCase()) && distinctArtists.length < 3) {
+                  seenArtists.add(aName.toLowerCase());
+                  distinctArtists.push(aName);
+                }
+                if (albumId && !seenAlbums.has(albumId) && mosaicUrls.length < 4) {
+                  seenAlbums.add(albumId);
+                  const artUrl = albumArtwork(albumId);
+                  if (artUrl) mosaicUrls.push(artUrl);
+                }
+                if (distinctArtists.length >= 3 && mosaicUrls.length >= 4) break;
+              }
+              const artistHeadline =
+                distinctArtists.length >= 2
+                  ? `${distinctArtists.slice(0, 2).join(', ')} & More`
+                  : st.name;
+              return (
                 <button
                   key={st.id}
                   type="button"
-                  className={m.radioCard}
+                  className={m.mixCard}
                   data-tone={st.kind === 'vibe' ? 'vibe' : undefined}
                   onClick={() => playStation(st)}
                   data-nav
                 >
-                  <span className={m.radioKicker}>
-                    {st.kind === 'vibe' ? 'Mood Radio' : 'Genre Radio'}
-                  </span>
-                  <div>
-                    <div className={m.radioName}>{st.name}</div>
-                    <div className={m.radioMeta}>{st.count.toLocaleString()} songs</div>
+                  <div className={m.mixCover}>
+                    {mosaicUrls.length >= 4 ? (
+                      <div className={m.mixMosaic}>
+                        {mosaicUrls.map((u, idx) => (
+                          <img key={idx} src={u} alt="" loading="lazy" />
+                        ))}
+                      </div>
+                    ) : mosaicUrls[0] ? (
+                      <img src={mosaicUrls[0]} alt="" className={m.mixSingleImg} loading="lazy" />
+                    ) : null}
+                    <div className={m.mixVignette} aria-hidden="true" />
+                    <span className={m.mixBadge}>
+                      {st.kind === 'vibe' ? `${st.name} Vibe` : `${st.name} Mix`}
+                    </span>
+                    <span className={m.mixPlayOrb} aria-hidden="true">
+                      ▶
+                    </span>
                   </div>
-                  <span className={m.radioOrb} aria-hidden="true">
-                    ▶
-                  </span>
+                  <div className={m.mixTitle}>{artistHeadline}</div>
+                  <div className={m.mixSub}>
+                    {st.name} · {st.count.toLocaleString()} songs
+                  </div>
                 </button>
-              ))}
-            </div>
-          </section>
+              );
+            })}
+          </Rail>
 
           {discoverList.length > 0 ? (
-            <section className={s.rail} aria-label="Made for you">
-              <div className={s.railHead}>
-                <h2 className={s.sectionTitle}>Made for you</h2>
-              </div>
-              <div className={s.cards}>
-                {discoverList.slice(0, 12).map((pl) => (
-                  <DiscoverCard key={pl.key} card={pl} />
-                ))}
-              </div>
-            </section>
+            <Rail title="Made for you">
+              {discoverList.slice(0, 12).map((pl) => (
+                <DiscoverCard key={pl.key} card={pl} />
+              ))}
+            </Rail>
           ) : null}
 
           <CardRail
@@ -304,19 +337,14 @@ function MusicBrowse() {
           />
 
           {allPlaylists.length > 0 ? (
-            <section className={s.rail} aria-label="Your playlists">
-              <div className={s.railHead}>
-                <h2 className={s.sectionTitle}>Your playlists</h2>
-                <Link to="/player/music/playlists" className={s.railMore} data-nav>
-                  All playlists
-                </Link>
-              </div>
-              <div className={s.cards}>
-                {allPlaylists.slice(0, 12).map((pl) => (
-                  <PlaylistCard key={pl.id} playlist={pl} />
-                ))}
-              </div>
-            </section>
+            <Rail
+              title="Your playlists"
+              more={{ to: '/player/music/playlists', label: 'All playlists' }}
+            >
+              {allPlaylists.slice(0, 14).map((pl) => (
+                <PlaylistCard key={pl.id} playlist={pl} />
+              ))}
+            </Rail>
           ) : null}
         </>
       ) : null}

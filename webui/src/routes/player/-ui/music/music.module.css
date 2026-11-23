@@ -44,8 +44,28 @@
   background: rgba(var(--accent-rgb), 0.1);
 }
 
-.track[data-off='true'] {
-  opacity: 0.42;
+.track[data-off='true'] .trackHit {
+  opacity: 0.44;
+  cursor: default;
+}
+
+.track[data-off='true'] .trackEnd {
+  opacity: 0.44;
+}
+
+.missingTag {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: var(--pl-text-3);
+  font-size: calc(var(--u) * 0.64);
+  font-weight: 750;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  flex: none;
 }
 
 .track[data-drag='true'] {
@@ -899,89 +919,142 @@
 
 /* ── Premier Plexamp-grade Music Hub, Artist & Album surfaces ────────── */
 
-.radioStrip {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(calc(var(--u) * 13.5), 1fr));
-  gap: calc(var(--u) * 0.85);
-}
-
-.radioCard {
+.mixCard {
   position: relative;
+  flex: none;
+  width: calc(var(--u) * 14.5);
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
-  gap: calc(var(--u) * 0.65);
-  min-height: calc(var(--u) * 7.2);
-  padding: calc(var(--u) * 1.05) calc(var(--u) * 1.15);
+  gap: calc(var(--u) * 0.55);
+  padding: calc(var(--u) * 0.65);
   border-radius: 16px;
   border: 1px solid var(--white-a10);
-  background: linear-gradient(135deg, rgba(28, 31, 46, 0.92), rgba(16, 18, 28, 0.88));
+  background: linear-gradient(180deg, rgba(24, 27, 40, 0.88), rgba(15, 17, 26, 0.85));
   color: var(--pl-text);
   text-align: left;
   cursor: pointer;
-  overflow: hidden;
   transition:
     transform 180ms var(--pl-ease),
     border-color 180ms ease,
     box-shadow 180ms ease;
 }
 
-.radioCard:hover {
-  transform: translateY(-2px);
+.mixCard:hover {
+  transform: translateY(-3px);
   border-color: rgba(var(--accent-rgb), 0.55);
-  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.36);
+  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.42);
 }
 
-.radioCard[data-tone='accent'] {
-  background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.32), rgba(20, 22, 34, 0.92));
+.mixCard[data-tone='accent'] {
+  background: linear-gradient(180deg, rgba(var(--accent-rgb), 0.28), rgba(16, 18, 28, 0.92));
   border-color: rgba(var(--accent-rgb), 0.42);
 }
 
-.radioCard[data-tone='vibe'] {
-  background: linear-gradient(135deg, rgba(168, 85, 247, 0.24), rgba(18, 20, 32, 0.92));
-  border-color: rgba(168, 85, 247, 0.32);
+.mixCard[data-tone='vibe'] {
+  background: linear-gradient(180deg, rgba(168, 85, 247, 0.22), rgba(16, 18, 28, 0.92));
+  border-color: rgba(168, 85, 247, 0.34);
 }
 
-.radioKicker {
-  font-size: calc(var(--u) * 0.68);
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: var(--accent-light, #a78bfa);
+.mixCover {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: 11px;
+  overflow: hidden;
+  background: rgba(12, 14, 22, 0.9);
+  border: 1px solid var(--white-a08);
 }
 
-.radioName {
-  font-size: calc(var(--u) * 1.12);
-  font-weight: 750;
-  letter-spacing: -0.015em;
-  line-height: 1.2;
+.mixMosaic {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  width: 100%;
+  height: 100%;
 }
 
-.radioMeta {
-  font-size: calc(var(--u) * 0.78);
-  color: var(--pl-text-3);
+.mixMosaic img,
+.mixSingleImg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 
-.radioOrb {
+.mixVignette {
   position: absolute;
-  right: 12px;
-  bottom: 12px;
-  width: 34px;
-  height: 34px;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.15) 0%, transparent 45%, rgba(0, 0, 0, 0.72) 100%);
+  pointer-events: none;
+}
+
+.mixBadge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  padding: 3px 8px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(0, 0, 0, 0.74);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #fff;
+  font-size: calc(var(--u) * 0.64);
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.mixCard[data-tone='vibe'] .mixBadge {
+  color: #e9d5ff;
+  border-color: rgba(168, 85, 247, 0.45);
+}
+
+.mixCard[data-tone='accent'] .mixBadge {
+  color: var(--accent-light, #a78bfa);
+  border-color: rgba(var(--accent-rgb), 0.45);
+}
+
+.mixPlayOrb {
+  position: absolute;
+  right: 9px;
+  bottom: 9px;
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(6px);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  color: #fff;
   display: grid;
   place-items: center;
   font-size: 13px;
   transition: background 150ms ease, color 150ms ease, transform 150ms var(--pl-ease);
 }
 
-.radioCard:hover .radioOrb {
+.mixCard:hover .mixPlayOrb {
   background: var(--accent);
   border-color: var(--accent);
   color: #090b10;
   transform: scale(1.08);
+}
+
+.mixTitle {
+  font-size: calc(var(--u) * 0.92);
+  font-weight: 700;
+  line-height: 1.25;
+  color: var(--pl-text);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.mixSub {
+  font-size: calc(var(--u) * 0.76);
+  color: var(--pl-text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .latestCard {

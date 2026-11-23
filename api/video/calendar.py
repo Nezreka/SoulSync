@@ -17,6 +17,7 @@ from datetime import date, datetime, timedelta
 
 from flask import Response, jsonify, request
 
+from core.connect.device_access import device_playback
 from utils.logging_config import get_logger
 
 logger = get_logger("video.calendar")
@@ -154,6 +155,7 @@ def _followed_rows(db, pid, start, end, today, *, specials):
 
 def register_routes(bp):
     @bp.route("/calendar", methods=["GET"])
+    @device_playback
     def video_calendar():
         from . import get_video_db
         try:
@@ -217,6 +219,7 @@ def register_routes(bp):
             return jsonify({"error": "calendar failed"}), 500
 
     @bp.route("/calendar/followed", methods=["GET"])
+    @device_playback
     def video_calendar_followed():
         """Episodes in the window for shows the profile follows but doesn't own.
 

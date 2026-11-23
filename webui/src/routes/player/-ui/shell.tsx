@@ -33,6 +33,7 @@ const TOP_LEVEL_PATHS = new Set([
   '/player',
   '/player/',
   '/player/guide',
+  '/player/calendar',
   '/player/movies',
   '/player/tv',
   '/player/music',

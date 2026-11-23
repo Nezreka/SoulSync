@@ -100,6 +100,8 @@ OPTED_IN = {
     "video_api.video_person_detail": A.PLAYBACK,
     "video_api.video_detail_extras": A.PLAYBACK,
     "video_api.video_episode_extra": A.PLAYBACK,
+    "video_api.video_calendar": A.PLAYBACK,
+    "video_api.video_calendar_followed": A.PLAYBACK,
     "video_api.video_issues_list": A.PLAYBACK,
     "video_api.video_issues_create": A.PLAYBACK,
     "lib2_list_albums": A.PLAYBACK,

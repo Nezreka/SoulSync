@@ -303,6 +303,7 @@ export function TrackList({
                       E
                     </span>
                   ) : null}
+                  {!playable ? <span className={s.missingTag}>Missing</span> : null}
                 </span>
                 {row.artist ? (
                   <span className={s.trackSub}>
@@ -339,7 +340,7 @@ export function TrackList({
               className={s.trackActions}
               style={liked || justQueued || (!playable && row.onMissingAction) ? { opacity: 1 } : undefined}
             >
-              {row.song ? (
+              {playable && row.song ? (
                 <button
                   type="button"
                   className={s.trackBtn}
@@ -372,7 +373,7 @@ export function TrackList({
                   {justQueued ? '✓' : <QueueAddIcon />}
                 </button>
               ) : null}
-              {row.song ? (
+              {playable && row.song ? (
                 <button
                   type="button"
                   className={s.trackBtn}
