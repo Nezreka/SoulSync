@@ -242,44 +242,59 @@ def _add_cast_cors(resp):
 
 
 _CAST_NATIVE_VIDEO_MIMES = {"video/mp4"}
-_CAST_CODEC_CACHE: dict[str, tuple[str, str]] = {}
+_CAST_PROBE_CACHE: dict[str, tuple[str, str, float | None]] = {}
 
 
-def _probe_cast_codecs(source) -> tuple[str, str]:
-    """Return (video_codec, audio_codec) lowercase via ffprobe, cached per file path."""
+def _probe_cast_media(source) -> tuple[str, str, float | None]:
+    """Return (video_codec, audio_codec, duration_seconds) via ffprobe, cached per file path."""
     if source.mode != "file" or not source.path:
         v = str((source.private or {}).get("video_codec") or (source.verdict or {}).get("video") or "").lower()
         a = str((source.private or {}).get("audio_codec") or (source.verdict or {}).get("audio") or "").lower()
-        return v, a
-    hit = _CAST_CODEC_CACHE.get(source.path)
+        return v, a, source.duration
+    hit = _CAST_PROBE_CACHE.get(source.path)
     if hit is not None:
         return hit
     v_codec, a_codec = "", ""
+    dur: float | None = source.duration
     try:
+        import json as _json
         import subprocess
         from core.player import transcode as T
         ff = T.ffmpeg_path()
         fp = T.ffprobe_for(ff) if ff else None
         if fp:
             out = subprocess.check_output(
-                [fp, "-v", "error", "-show_entries", "stream=codec_type,codec_name", "-of", "csv=p=0", source.path],
+                [
+                    fp, "-v", "error",
+                    "-show_entries", "format=duration:stream=codec_type,codec_name",
+                    "-of", "json",
+                    source.path,
+                ],
                 text=True,
                 timeout=8,
             )
-            for line in out.splitlines():
-                parts = [p.strip().lower() for p in line.split(",")]
-                if len(parts) >= 2:
-                    cname, ctype = parts[0], parts[1]
-                    if ctype == "video" and not v_codec:
-                        v_codec = cname
-                    elif ctype == "audio" and not a_codec:
-                        a_codec = cname
+            data = _json.loads(out)
+            raw_dur = (data.get("format") or {}).get("duration")
+            if raw_dur is not None:
+                try:
+                    d = float(raw_dur)
+                    if d > 0:
+                        dur = d
+                except (TypeError, ValueError):
+                    pass
+            for st in data.get("streams") or []:
+                ctype = str(st.get("codec_type") or "").lower()
+                cname = str(st.get("codec_name") or "").lower()
+                if ctype == "video" and not v_codec:
+                    v_codec = cname
+                elif ctype == "audio" and not a_codec:
+                    a_codec = cname
     except Exception:  # noqa: BLE001
         pass
-    if len(_CAST_CODEC_CACHE) > 500:
-        _CAST_CODEC_CACHE.clear()
-    _CAST_CODEC_CACHE[source.path] = (v_codec, a_codec)
-    return v_codec, a_codec
+    if len(_CAST_PROBE_CACHE) > 500:
+        _CAST_PROBE_CACHE.clear()
+    _CAST_PROBE_CACHE[source.path] = (v_codec, a_codec, dur)
+    return v_codec, a_codec, dur
 
 
 def _cast_needs_transcode(item_type: str, source) -> bool:
@@ -288,7 +303,7 @@ def _cast_needs_transcode(item_type: str, source) -> bool:
     mime = (source.mime or "").lower()
     if mime not in _CAST_NATIVE_VIDEO_MIMES:
         return True
-    v_codec, a_codec = _probe_cast_codecs(source)
+    v_codec, a_codec, _ = _probe_cast_media(source)
     # Most Chromecasts only decode H.264 + AAC/MP3 reliably in MP4; AV1/HEVC/Opus cause black screen or silence
     if v_codec != "h264":
         return True
@@ -339,6 +354,7 @@ def create_cast_token():
     ct = _sign_cast_token(pid, item_type, item_id, part_str)
     stream_path = f"/api/player/cast-stream/{item_type}/{quote(item_id, safe='')}?ct={quote(ct, safe='')}"
     lan_origin = _cast_lan_http_origin()
+    _, _, dur_sec = _probe_cast_media(source)
     needs_tx = _cast_needs_transcode(item_type, source)
     return jsonify({
         "success": True,
@@ -347,6 +363,8 @@ def create_cast_token():
         "stream_url": f"{lan_origin}{stream_path}" if lan_origin else None,
         "artwork_base_url": lan_origin,
         "content_type": "video/mp4" if needs_tx else (source.mime or "application/octet-stream"),
+        "duration_ms": int(dur_sec * 1000) if dur_sec and dur_sec > 0 else 0,
+        "transcoded": needs_tx,
         "expires_in": _CAST_TOKEN_TTL,
     })
 
@@ -382,7 +400,11 @@ def cast_stream(item_type, item_id):
         from core.player import transcode as T
         ffmpeg = T.ffmpeg_path()
         if ffmpeg:
-            v_codec, a_codec = _probe_cast_codecs(source)
+            try:
+                start_sec = max(0.0, float(request.args.get("t") or 0))
+            except ValueError:
+                start_sec = 0.0
+            v_codec, a_codec, _ = _probe_cast_media(source)
             p = T.Plan(
                 copy_video=(v_codec == "h264"),
                 copy_audio=(a_codec in ("aac", "mp3")),
@@ -391,7 +413,7 @@ def cast_stream(item_type, item_id):
                 tonemap=False,
             )
             origin = source.path if source.mode == "file" else source.url
-            cmd = T.command(ffmpeg, origin, p, 0.0, T.encoder(ffmpeg), T.has_filter(ffmpeg, "zscale"))
+            cmd = T.command(ffmpeg, origin, p, start_sec, T.encoder(ffmpeg), T.has_filter(ffmpeg, "zscale"))
             try:
                 body = T.stream(cmd, owner=f"cast-{pid}")
                 resp = Response(
