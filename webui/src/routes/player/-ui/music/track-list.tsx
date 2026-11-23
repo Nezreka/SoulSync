@@ -14,6 +14,7 @@ import type { SongRef } from '../../-player.api';
 import { clock } from '../../-engine/timeline';
 import { playlistEdits, playlistQuery, playlistsQuery } from '../../-player.api';
 import { DownloadIcon, GripIcon, HeartIcon, PlayIcon, PlusIcon, XIcon } from '../icons';
+import { openContextMenu } from '../context-menu';
 import { PlayerLink } from '../kit';
 import { DownloadMediaButton } from '../download-button';
 import { getEngine, usePlayer } from '../playback/use-player';
@@ -243,6 +244,30 @@ export function TrackList({
               if (drag !== null && drag !== index) onMove?.(drag, index);
               setDrag(null);
               setOver(null);
+            }}
+            onContextMenu={(e) => {
+              if (!playable) return;
+              e.preventDefault();
+              openContextMenu({
+                x: e.clientX,
+                y: e.clientY,
+                kind: 'track',
+                id: row.trackId !== null ? String(row.trackId) : null,
+                title: row.title,
+                subtitle: row.artist ?? row.song?.artist ?? null,
+                artwork: row.art ?? null,
+                href: row.albumHref ?? row.artistHref ?? null,
+                onPlay: () => onPlay(index),
+                onQueue: row.trackId !== null ? () => addToQueue(row) : undefined,
+                liked,
+                onToggleLike: row.song ? () => void toggleLike(row) : undefined,
+                song: row.song ?? null,
+                downloadType: row.trackId !== null ? 'track' : null,
+                downloadId: row.trackId !== null ? String(row.trackId) : null,
+                extraActions: onRemove
+                  ? [{ label: 'Remove from playlist', onSelect: () => onRemove(index), danger: true }]
+                  : undefined,
+              });
             }}
           >
             <div

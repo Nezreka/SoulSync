@@ -15,6 +15,7 @@ import { appURL } from '@/platform/url-base';
 import { profilesQuery, watchingNowQuery } from '../-player.api';
 import { BackIcon, ChevronIcon, ExitIcon, GearIcon, MoreIcon } from './icons';
 import { AddToPlaylistHost } from './music/add-to-playlist';
+import { ContextMenuHost } from './context-menu';
 import { useNowPlaying } from './now-playing';
 import { MusicView } from './playback/music-view';
 import { usePlayerSync } from './playback/presence';
@@ -437,6 +438,7 @@ export function PlayerShell({ profileId }: { profileId: number | null }) {
       <ChannelBanner />
       <ReminderBell />
       <AddToPlaylistHost />
+      <ContextMenuHost />
       {gate && profiles ? (
         <WhoGate profiles={profiles} currentId={profileId} onDone={() => setGate(false)} />
       ) : null}

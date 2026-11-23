@@ -13,6 +13,7 @@ import type { PlayVerdict } from '../-player.types';
 
 import { canRetryArt, retryArt } from '../-lib/images';
 import { playerSettingsQuery } from '../-player.api';
+import { inferContextTargetFromCard, openContextMenu } from './context-menu';
 import { BackIcon, CheckIcon, ChevronIcon, GridIcon, ListIcon, MoreIcon, PlayIcon } from './icons';
 import { usePlayCard } from './playback/play-card';
 import s from './player.module.css';
@@ -244,6 +245,15 @@ export function Card({
       data-shape={card.shape}
       data-round={round ? 'true' : undefined}
       ref={menuRef}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        openContextMenu(
+          inferContextTargetFromCard(e, card, {
+            onOpen: onOpen ? () => onOpen(card) : undefined,
+            extraActions: actions?.map((a) => ({ label: a.label, onSelect: a.onSelect })),
+          }),
+        );
+      }}
     >
       {onOpen ? (
         <div
