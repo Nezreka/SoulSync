@@ -239,19 +239,26 @@
 .glassBtn {
   display: inline-flex;
   align-items: center;
-  gap: calc(var(--u) * 0.35);
-  height: calc(var(--u) * 2.2);
-  padding: 0 calc(var(--u) * 0.85);
+  gap: calc(var(--u) * 0.4);
+  height: calc(var(--u) * 2.25);
+  padding: 0 calc(var(--u) * 0.95);
   border: 1px solid var(--white-a16);
   border-radius: var(--radius-pill);
   background: rgba(255, 255, 255, 0.08);
   color: #fff;
   font-size: calc(var(--u) * 0.8);
   font-weight: 700;
+  white-space: nowrap;
   text-decoration: none;
   cursor: pointer;
   backdrop-filter: blur(10px);
   transition: background var(--dur-fast) ease;
+}
+
+.glassBtn svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
 }
 
 .glassBtn:hover {
