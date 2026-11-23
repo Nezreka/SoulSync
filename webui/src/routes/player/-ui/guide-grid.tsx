@@ -452,148 +452,451 @@ export function GuideDetail({
   const startQueue = channelQueue(channelPrograms, block ? block.items[0] : program);
   const viewers = useChannelViewers().get(channel.id);
 
+  const artSrc = (block ? airing : program).art;
+  const elapsedMin = live ? Math.max(1, Math.round((now - start) / 60000)) : 0;
+  const remainMin = live ? Math.max(1, Math.round((end - now) / 60000)) : 0;
+  const pct = live ? Math.min(100, Math.max(0, ((now - start) / (end - start)) * 100)) : 0;
+
   return (
-    <section className={s.guideDetail} aria-label="Program">
-      <button
-        type="button"
-        className={s.guideDetailClose}
-        aria-label="Close"
-        title="Close (Esc)"
-        onClick={onClose}
-        data-nav
+    <section
+      aria-label="Program"
+      style={{
+        position: 'relative',
+        width: 'min(640px, 94vw)',
+        borderRadius: 20,
+        overflow: 'hidden',
+        background: '#121420',
+        border: '1px solid rgba(255,255,255,0.12)',
+        boxShadow: '0 32px 84px rgba(0,0,0,0.72), 0 0 0 1px rgba(255,255,255,0.04) inset',
+        color: '#f8fafc',
+      }}
+    >
+      {/* Cinema Backdrop Hero */}
+      <div
+        style={{
+          position: 'relative',
+          padding: '22px 24px 20px',
+          overflow: 'hidden',
+          background: 'linear-gradient(135deg, #1b1e32 0%, #10121d 100%)',
+        }}
       >
-        <CloseIcon />
-      </button>
-      <div className={s.guideDetailArt}>
-        <Art src={(block ? airing : program).art} alt={program.title} />
-      </div>
-      <div className={s.guideDetailBody}>
-        <span className={s.heroKicker}>
-          {channel.number} · {channel.name} · {clock(start)} – {clock(end)}
-          {live ? ' · on now' : ''}
-        </span>
-        <span className={s.guideDetailTitle}>
-          {program.premiere ? <span className={s.guideNew}>New</span> : null}
-          {block ? `${channel.name} mix` : program.title}
-        </span>
-        <span className={s.rowSub}>
-          {block
-            ? `${block.items.length} songs · ${blockArtists(block, 4)}`
-            : [program.subtitle, runtime(program.seconds)].filter(Boolean).join(' · ')}
-        </span>
-        {live ? (
-          <span className={s.onNowBar}>
-            <span
-              className={s.progressFill}
-              style={{ width: `${((now - start) / (end - start)) * 100}%` }}
-            />
-          </span>
-        ) : null}
-        <div className={s.heroActions}>
-          {live && liveQueue.length ? (
-            <PlayButton
-              label="Join live"
-              onPlay={() => {
-                // in at the minute it's on, through the tuner: channel up and down work from here
-                tuneIn(channel);
-                onClose();
-              }}
-            />
-          ) : null}
-          <PlayButton
-            label={block ? 'Play this set' : 'Watch from the start'}
-            primary={!live}
-            onPlay={
-              startQueue.length
-                ? () => {
-                    playItems(startQueue);
-                    onClose();
-                  }
-                : undefined
-            }
+        {artSrc ? (
+          <div
+            aria-hidden="true"
+            style={{
+              position: 'absolute',
+              inset: -24,
+              backgroundImage: `url("${artSrc}")`,
+              backgroundSize: 'cover',
+              backgroundPosition: 'center',
+              filter: 'blur(26px) saturate(1.25)',
+              opacity: 0.34,
+              transform: 'scale(1.08)',
+            }}
           />
-          {!block && program.href ? (
-            <PlayerLink href={program.href} className={s.btn} data-nav>
-              Details
-            </PlayerLink>
-          ) : null}
+        ) : null}
+        <div
+          aria-hidden="true"
+          style={{
+            position: 'absolute',
+            inset: 0,
+            background:
+              'linear-gradient(180deg, rgba(14,16,26,0.45) 0%, rgba(18,20,32,0.88) 72%, #121420 100%)',
+          }}
+        />
+
+        <button
+          type="button"
+          aria-label="Close"
+          title="Close (Esc)"
+          onClick={onClose}
+          data-nav
+          style={{
+            position: 'absolute',
+            top: 14,
+            right: 14,
+            zIndex: 3,
+            width: 34,
+            height: 34,
+            borderRadius: '50%',
+            border: '1px solid rgba(255,255,255,0.18)',
+            background: 'rgba(0,0,0,0.52)',
+            backdropFilter: 'blur(10px)',
+            color: '#fff',
+            display: 'grid',
+            placeItems: 'center',
+            cursor: 'pointer',
+          }}
+        >
+          <CloseIcon />
+        </button>
+
+        <div
+          style={{
+            position: 'relative',
+            zIndex: 2,
+            display: 'flex',
+            gap: 18,
+            alignItems: 'center',
+          }}
+        >
+          {/* Poster / Art Frame */}
+          <div
+            style={{
+              width: 102,
+              aspectRatio: block ? '1 / 1' : '2 / 3',
+              borderRadius: 12,
+              overflow: 'hidden',
+              flexShrink: 0,
+              background: 'rgba(255,255,255,0.06)',
+              border: '1px solid rgba(255,255,255,0.16)',
+              boxShadow: '0 14px 36px rgba(0,0,0,0.55)',
+            }}
+          >
+            <Art src={artSrc} alt={program.title} />
+          </div>
+
+          {/* Info & Live Progress */}
+          <div style={{ flex: 1, minWidth: 0, paddingRight: 28, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '3px 9px',
+                  borderRadius: 999,
+                  background: 'rgba(255,255,255,0.1)',
+                  border: '1px solid rgba(255,255,255,0.14)',
+                  fontSize: 11,
+                  fontWeight: 700,
+                  letterSpacing: '0.05em',
+                  textTransform: 'uppercase',
+                  color: '#e2e8f0',
+                }}
+              >
+                {channel.number} · {channel.name}
+              </span>
+              {live ? (
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 5,
+                    padding: '3px 9px',
+                    borderRadius: 999,
+                    background: 'rgba(239,68,68,0.18)',
+                    border: '1px solid rgba(239,68,68,0.45)',
+                    color: '#fca5a5',
+                    fontSize: 10.5,
+                    fontWeight: 800,
+                    letterSpacing: '0.06em',
+                  }}
+                >
+                  <span
+                    style={{
+                      width: 6,
+                      height: 6,
+                      borderRadius: '50%',
+                      background: '#ef4444',
+                      boxShadow: '0 0 8px #ef4444',
+                    }}
+                  />
+                  ON NOW
+                </span>
+              ) : null}
+              <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.62)', fontWeight: 500 }}>
+                {clock(start)} – {clock(end)}
+              </span>
+            </div>
+
+            <div
+              style={{
+                fontSize: 22,
+                fontWeight: 800,
+                lineHeight: 1.18,
+                letterSpacing: '-0.02em',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                flexWrap: 'wrap',
+              }}
+            >
+              {program.premiere ? <span className={s.guideNew}>New</span> : null}
+              <span>{block ? `${channel.name} mix` : program.title}</span>
+            </div>
+
+            <div style={{ fontSize: 13.5, color: 'rgba(255,255,255,0.74)' }}>
+              {block
+                ? `${block.items.length} songs · ${blockArtists(block, 4)}`
+                : [program.subtitle, runtime(program.seconds)].filter(Boolean).join(' · ')}
+            </div>
+
+            {live ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginTop: 2 }}>
+                <div
+                  style={{
+                    height: 4,
+                    borderRadius: 999,
+                    background: 'rgba(255,255,255,0.14)',
+                    overflow: 'hidden',
+                  }}
+                >
+                  <div
+                    style={{
+                      width: `${pct}%`,
+                      height: '100%',
+                      borderRadius: 999,
+                      background: 'linear-gradient(90deg, var(--accent, #6366f1), #a5b4fc)',
+                    }}
+                  />
+                </div>
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    fontSize: 11,
+                    color: 'rgba(255,255,255,0.52)',
+                    fontWeight: 600,
+                  }}
+                >
+                  <span>{elapsedMin}m in</span>
+                  <span>{remainMin}m left</span>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </div>
+
+      {/* Single-Row Balanced Action Bar */}
+      <div
+        style={{
+          padding: '4px 24px 18px',
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          gap: 8,
+        }}
+      >
+        {live && liveQueue.length ? (
           <button
             type="button"
-            className={s.btn}
-            aria-pressed={favorite}
-            aria-label={
-              favorite
-                ? `Remove ${channel.name} from favorites`
-                : `Add ${channel.name} to favorites`
-            }
-            title={favorite ? 'A favorite channel' : 'Add to favorites'}
-            onClick={() => onFavorite(channel)}
             data-nav
+            onClick={() => {
+              tuneIn(channel);
+              onClose();
+            }}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 7,
+              height: 38,
+              padding: '0 18px',
+              borderRadius: 999,
+              border: 'none',
+              background: '#fff',
+              color: '#090a0f',
+              fontSize: 13.5,
+              fontWeight: 700,
+              cursor: 'pointer',
+            }}
           >
-            {favorite ? '★' : '☆'}
+            <span>▶</span>
+            <span>Join live</span>
           </button>
-          {start > now ? (
-            <RemindButton
-              channel={channel}
-              program={block ? block.items[0] : program}
-              start={start}
-            />
-          ) : null}
-          {onEditRule ? (
-            <button type="button" className={s.btn} onClick={onEditRule} data-nav>
-              Change channel
-            </button>
-          ) : null}
-          {onRemoveRule ? (
-            <button type="button" className={s.btn} onClick={onRemoveRule} data-nav>
-              Remove channel
-            </button>
-          ) : null}
-        </div>
-        <ViewersHere
-          channel={channel}
-          sessions={viewers}
-          programs={channelPrograms}
-          onDone={onClose}
-        />
-      </div>
-      <div className={s.guideDetailSide}>
-        {block ? (
-          <>
-            <div className={s.pickerLabel}>In this set</div>
-            <ol className={s.trackList}>
-              {block.items.map((t) => (
-                <li
-                  key={`${t.key}-${t.start}`}
-                  className={s.trackItem}
-                  data-now={t.start <= now && t.end > now ? 'true' : undefined}
-                >
-                  <span className={s.trackTime}>{clock(t.start)}</span>
-                  <span className={s.trackText}>
-                    {t.title}
-                    {t.subtitle ? <span className={s.rowSub}> · {t.subtitle}</span> : null}
-                  </span>
-                </li>
-              ))}
-            </ol>
-          </>
-        ) : later.length ? (
-          <>
-            <div className={s.pickerLabel}>Up next on {channel.name}</div>
-            <ol className={s.trackList}>
-              {later.map((t) => (
-                <li key={`${t.key}-${t.start}`} className={s.trackItem}>
-                  <span className={s.trackTime}>{clock(t.start)}</span>
-                  <span className={s.trackText}>
-                    {t.title}
-                    {t.subtitle ? <span className={s.rowSub}> · {t.subtitle}</span> : null}
-                  </span>
-                </li>
-              ))}
-            </ol>
-          </>
+        ) : null}
+
+        {startQueue.length ? (
+          <button
+            type="button"
+            data-nav
+            onClick={() => {
+              playItems(startQueue);
+              onClose();
+            }}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 7,
+              height: 38,
+              padding: '0 16px',
+              borderRadius: 999,
+              border: live ? '1px solid rgba(255,255,255,0.16)' : 'none',
+              background: live ? 'rgba(255,255,255,0.08)' : '#fff',
+              color: live ? '#f8fafc' : '#090a0f',
+              fontSize: 13,
+              fontWeight: 700,
+              cursor: 'pointer',
+            }}
+          >
+            <span>{block ? '▶' : '↺'}</span>
+            <span>{block ? 'Play set' : 'From start'}</span>
+          </button>
+        ) : null}
+
+        {!block && program.href ? (
+          <PlayerLink
+            href={program.href}
+            data-nav
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              height: 38,
+              padding: '0 15px',
+              borderRadius: 999,
+              border: '1px solid rgba(255,255,255,0.14)',
+              background: 'rgba(255,255,255,0.05)',
+              color: '#e2e8f0',
+              fontSize: 13,
+              fontWeight: 600,
+              textDecoration: 'none',
+            }}
+          >
+            Details
+          </PlayerLink>
+        ) : null}
+
+        <button
+          type="button"
+          aria-pressed={favorite}
+          aria-label={
+            favorite
+              ? `Remove ${channel.name} from favorites`
+              : `Add ${channel.name} to favorites`
+          }
+          title={favorite ? 'Favorite channel' : 'Favorite channel'}
+          onClick={() => onFavorite(channel)}
+          data-nav
+          style={{
+            width: 38,
+            height: 38,
+            borderRadius: '50%',
+            border: favorite
+              ? '1px solid rgba(251,191,36,0.5)'
+              : '1px solid rgba(255,255,255,0.14)',
+            background: favorite ? 'rgba(251,191,36,0.16)' : 'rgba(255,255,255,0.05)',
+            color: favorite ? '#fbbf24' : 'rgba(255,255,255,0.75)',
+            fontSize: 16,
+            display: 'grid',
+            placeItems: 'center',
+            cursor: 'pointer',
+          }}
+        >
+          {favorite ? '★' : '☆'}
+        </button>
+
+        {start > now ? (
+          <RemindButton
+            channel={channel}
+            program={block ? block.items[0] : program}
+            start={start}
+          />
+        ) : null}
+
+        {onEditRule ? (
+          <button type="button" className={s.btn} onClick={onEditRule} data-nav>
+            Edit channel
+          </button>
+        ) : null}
+        {onRemoveRule ? (
+          <button type="button" className={s.btn} onClick={onRemoveRule} data-nav>
+            Remove
+          </button>
         ) : null}
       </div>
+
+      <ViewersHere
+        channel={channel}
+        sessions={viewers}
+        programs={channelPrograms}
+        onDone={onClose}
+      />
+
+      {/* Up Next / In This Set Timeline */}
+      {(block || later.length > 0) ? (
+        <div
+          style={{
+            padding: '14px 24px 20px',
+            borderTop: '1px solid rgba(255,255,255,0.08)',
+            background: 'rgba(0,0,0,0.22)',
+          }}
+        >
+          <div
+            style={{
+              fontSize: 11,
+              fontWeight: 700,
+              letterSpacing: '0.08em',
+              textTransform: 'uppercase',
+              color: 'rgba(255,255,255,0.48)',
+              marginBottom: 10,
+            }}
+          >
+            {block ? 'In this set' : `Up next on ${channel.name}`}
+          </div>
+          <ol
+            style={{
+              listStyle: 'none',
+              margin: 0,
+              padding: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 6,
+            }}
+          >
+            {(block ? block.items : later).map((t) => {
+              const isNow = block && t.start <= now && t.end > now;
+              return (
+                <li
+                  key={`${t.key}-${t.start}`}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 12,
+                    padding: '7px 10px',
+                    borderRadius: 10,
+                    background: isNow ? 'rgba(99,102,241,0.16)' : 'rgba(255,255,255,0.03)',
+                    border: isNow
+                      ? '1px solid rgba(129,140,248,0.38)'
+                      : '1px solid rgba(255,255,255,0.05)',
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: 11.5,
+                      fontWeight: 700,
+                      color: isNow ? '#a5b4fc' : 'rgba(255,255,255,0.55)',
+                      fontVariantNumeric: 'tabular-nums',
+                      minWidth: 62,
+                    }}
+                  >
+                    {clock(t.start)}
+                  </span>
+                  <span
+                    style={{
+                      flex: 1,
+                      minWidth: 0,
+                      fontSize: 13.5,
+                      fontWeight: 600,
+                      color: '#f1f5f9',
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                    }}
+                  >
+                    {t.title}
+                    {t.subtitle ? (
+                      <span style={{ color: 'rgba(255,255,255,0.55)', fontWeight: 400 }}>
+                        {' '}· {t.subtitle}
+                      </span>
+                    ) : null}
+                  </span>
+                </li>
+              );
+            })}
+          </ol>
+        </div>
+      ) : null}
     </section>
   );
 }
