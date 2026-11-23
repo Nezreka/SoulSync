@@ -783,25 +783,6 @@
   background: var(--white-a10);
 }
 
-.chipName {
-  max-width: calc(var(--u) * 9);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.chipCaret {
-  display: inline-flex;
-  width: calc(var(--u) * 1);
-  height: calc(var(--u) * 1);
-  color: var(--pl-text-3);
-}
-
-.chipCaret svg {
-  width: 100%;
-  height: 100%;
-}
-
 .profileMenu {
   width: calc(var(--u) * 21);
   padding: calc(var(--u) * 0.4);
@@ -885,36 +866,10 @@
   height: 100%;
 }
 
-.menuToggle {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: calc(var(--u) * 0.8);
-  width: 100%;
-  padding: calc(var(--u) * 0.55) calc(var(--u) * 0.6);
-  border: none;
-  border-radius: var(--radius-lg);
-  background: transparent;
-  color: var(--pl-text);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.menuToggle:hover {
-  background: var(--white-a06);
-}
-
 .menuToggleTitle {
   display: block;
   font-size: calc(var(--u) * 0.9);
   font-weight: 600;
-}
-
-.menuToggleSub {
-  display: block;
-  color: var(--pl-text-3);
-  font-size: calc(var(--u) * 0.75);
 }
 
 .menuRow {
@@ -925,35 +880,6 @@
 }
 
 /* an on/off switch drawn from tokens */
-.switch {
-  position: relative;
-  flex: none;
-  width: calc(var(--u) * 2.4);
-  height: calc(var(--u) * 1.4);
-  border-radius: var(--radius-pill);
-  background: var(--white-a20);
-  transition: background var(--dur-fast) ease;
-}
-
-.switch::after {
-  content: '';
-  position: absolute;
-  top: calc(var(--u) * 0.15);
-  left: calc(var(--u) * 0.15);
-  width: calc(var(--u) * 1.1);
-  height: calc(var(--u) * 1.1);
-  border-radius: var(--radius-circle);
-  background: var(--pl-text);
-  transition: transform var(--dur-base) var(--pl-ease);
-}
-
-.switch[data-on='true'] {
-  background: var(--accent);
-}
-
-.switch[data-on='true']::after {
-  transform: translateX(calc(var(--u) * 1));
-}
 
 .avatar,
 .gateAvatar {
@@ -2022,12 +1948,6 @@
   padding: calc(var(--u) * 0.75);
 }
 
-.rowNum {
-  color: var(--pl-text-3);
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-}
-
 .rowMain {
   display: flex;
   flex-direction: column;
@@ -2064,10 +1984,6 @@
   color: var(--pl-text-3);
   font-size: calc(var(--u) * 0.85);
   font-variant-numeric: tabular-nums;
-}
-
-.rowMore {
-  padding: 0 calc(var(--u) * 0.75) calc(var(--u) * 1);
 }
 
 .rowArt {
@@ -2636,126 +2552,9 @@
   background: var(--accent);
 }
 
-.guideDetail {
-  position: relative;
-  display: grid;
-  grid-template-columns: calc(var(--u) * 7.5) minmax(0, 1fr);
-  gap: calc(var(--u) * 1) calc(var(--u) * 1.1);
-  align-items: start;
-  padding: calc(var(--u) * 1.1);
-}
-
-.guideDetailArt {
-  position: relative;
-  overflow: hidden;
-  aspect-ratio: 2 / 3;
-  border-radius: var(--radius-md);
-  background: var(--white-a05);
-  box-shadow: 0 calc(var(--u) * 0.6) calc(var(--u) * 1.6) var(--black-a40);
-}
-
-.guideDetailBody {
-  display: flex;
-  flex-direction: column;
-  gap: calc(var(--u) * 0.5);
-  min-width: 0;
-  padding-right: calc(var(--u) * 1.6);
-}
-
-.guideDetailTitle {
-  font-size: calc(var(--u) * 1.3);
-  font-weight: 700;
-  line-height: 1.15;
-  letter-spacing: -0.02em;
-}
-
 /* the card's actions wrap in its width; the first one leads */
-.guideDetailBody .heroActions {
-  flex-wrap: wrap;
-  gap: calc(var(--u) * 0.45);
-  margin-top: calc(var(--u) * 0.3);
-}
-
-.guideDetailBody .heroActions > * {
-  min-height: calc(var(--u) * 2.3);
-  padding: 0 calc(var(--u) * 0.95);
-  font-size: calc(var(--u) * 0.82);
-}
-
-.guideDetailClose {
-  position: absolute;
-  z-index: 1;
-  top: calc(var(--u) * 0.6);
-  right: calc(var(--u) * 0.6);
-  display: grid;
-  place-items: center;
-  width: calc(var(--u) * 2);
-  height: calc(var(--u) * 2);
-  border: none;
-  border-radius: var(--radius-circle);
-  background: var(--white-a06);
-  color: var(--pl-text-2);
-  cursor: pointer;
-}
-
-.guideDetailClose:hover,
-.guideDetailClose:focus-visible {
-  background: var(--white-a12);
-  color: var(--pl-text);
-}
-
-.guideDetailClose svg {
-  width: 55%;
-  height: 55%;
-}
 
 /* up next, under the rest, across the card */
-.guideDetailSide {
-  grid-column: 1 / -1;
-  min-width: 0;
-  padding-top: calc(var(--u) * 0.8);
-  border-top: 1px solid var(--pl-line);
-}
-
-.guideDetailSide:empty {
-  display: none;
-}
-
-.trackList {
-  display: flex;
-  flex-direction: column;
-  gap: calc(var(--u) * 0.15);
-  max-height: calc(var(--u) * 14);
-  margin: calc(var(--u) * 0.4) 0 0;
-  padding: 0;
-  overflow-y: auto;
-  list-style: none;
-}
-
-.trackItem {
-  display: flex;
-  gap: calc(var(--u) * 0.7);
-  padding: calc(var(--u) * 0.3) calc(var(--u) * 0.5);
-  border-radius: var(--radius-md);
-  font-size: calc(var(--u) * 0.85);
-}
-
-.trackItem[data-now='true'] {
-  background: rgba(var(--accent-rgb), 0.14);
-}
-
-.trackTime {
-  flex: none;
-  color: var(--pl-text-3);
-  font-variant-numeric: tabular-nums;
-}
-
-.trackText {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
 .guideBar {
   display: flex;
@@ -2928,15 +2727,6 @@
   flex-wrap: wrap;
   align-items: flex-end;
   gap: calc(var(--u) * 0.9);
-}
-
-.check {
-  display: inline-flex;
-  align-items: center;
-  gap: calc(var(--u) * 0.4);
-  height: calc(var(--u) * 2.5);
-  color: var(--pl-text-2);
-  font-size: calc(var(--u) * 0.9);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -3430,43 +3220,6 @@
 }
 
 /* a show's seasons: one scrolling row of pills, never wrapping into the panel */
-.seasonPicker {
-  display: flex;
-  gap: calc(var(--u) * 0.4);
-  padding: calc(var(--u) * 0.2) 0 calc(var(--u) * 0.6);
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.seasonPill {
-  flex: none;
-  height: calc(var(--u) * 2.3);
-  padding: 0 calc(var(--u) * 1);
-  border: 1px solid var(--pl-line);
-  border-radius: var(--radius-pill);
-  background: transparent;
-  color: var(--pl-text-2);
-  font: inherit;
-  font-size: calc(var(--u) * 0.88);
-  font-weight: 600;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.seasonPill:hover {
-  background: var(--white-a06);
-  color: var(--pl-text);
-}
-
-.seasonPill[data-empty='true'] {
-  color: var(--pl-text-3);
-}
-
-.seasonPill[aria-pressed='true'] {
-  border-color: transparent;
-  background: var(--pl-text);
-  color: var(--pl-bg);
-}
 
 .seasonHead {
   display: flex;
@@ -4785,8 +4538,7 @@ a.crewRow:hover {
 }
 
 /* the row that's playing right now (a track, an episode) */
-.row[data-playing='true'] .rowTitle,
-.row[data-playing='true'] .rowNum {
+.row[data-playing='true'] .rowTitle {
   color: var(--accent-light);
 }
 
