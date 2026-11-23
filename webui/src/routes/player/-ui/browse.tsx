@@ -131,8 +131,33 @@ export function VideoForYou({
   const moreLike = useQuery(discoverMoreLikeQuery());
   const owned = useMemo(() => ownedByTmdb([...movies, ...shows]), [movies, shows]);
   const items: (CatalogMovie | CatalogShow)[] = kind === 'movie' ? movies : shows;
+  const itemById = useMemo(() => new Map(items.map((x) => [x.id, x])), [items]);
   const card = (x: CatalogMovie | CatalogShow) =>
     kind === 'movie' ? movieCard(x as CatalogMovie) : showCard(x as CatalogShow);
+
+  const recommended = useMemo(() => {
+    const matching = (forYou.data ?? []).filter((t) => t.kind === kind);
+    const inLibrary: RailCard[] = [];
+    const toAdd: RailCard[] = [];
+    const seenOwned = new Set<number>();
+    const seenAdd = new Set<number>();
+    for (const t of matching) {
+      const libId = t.library_id ?? owned.get(t.tmdb_id);
+      if (libId) {
+        if (seenOwned.has(libId)) continue;
+        seenOwned.add(libId);
+        const local = itemById.get(libId);
+        inLibrary.push(local ? card(local) : extraCard(t, owned));
+      } else {
+        if (seenAdd.has(t.tmdb_id)) continue;
+        seenAdd.add(t.tmdb_id);
+        toAdd.push(extraCard(t, owned));
+      }
+    }
+    return { inLibrary: inLibrary.slice(0, 30), toAdd: toAdd.slice(0, 30) };
+    // card is a pure function of kind
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [forYou.data, kind, owned, itemById]);
 
   const mine = useMemo(() => {
     const byAdded = items
@@ -180,11 +205,15 @@ export function VideoForYou({
     <>
       <CardRail title="Continue watching" cards={continuing} />
       {kind === 'show' ? <CardRail title="New episodes" cards={episodes} /> : null}
-      <TmdbRail title="Recommended for you" items={forYou.data} owned={owned} kind={kind} />
+      <CardRail title="Recommended for you" cards={recommended.inLibrary} />
       <CardRail
         title="Recently added"
         cards={mine.recent}
         more={{ to: `/player/${kind === 'movie' ? 'movies' : 'tv'}?tab=library` }}
+      />
+      <CardRail
+        title={kind === 'movie' ? 'Recommended movies to add' : 'Recommended shows to add'}
+        cards={recommended.toAdd}
       />
       {(moreLike.data ?? []).map((rail) => (
         <TmdbRail
