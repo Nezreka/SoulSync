@@ -315,7 +315,13 @@ def cast_stream(item_type, item_id):
     if verified is None:
         return _add_cast_cors(jsonify({"success": False, "error": "invalid_cast_token"})), 401
     pid, part = verified
+    from core import permission_store
+    from database.music_database import get_database
+    ctx = permission_store.context_for(get_database(), pid)
     g.profile_id = pid
+    g.is_admin = bool(ctx.get("is_admin", False))
+    g.perms = ctx.get("perms")
+    g.perms_source = ctx.get("source", "none")
     from core.player.playable import Refused, resolve
     from core.player.relay import relay
     try:
