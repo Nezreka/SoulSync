@@ -241,14 +241,60 @@ def _add_cast_cors(resp):
     return resp
 
 
-_CAST_NATIVE_VIDEO_MIMES = {"video/mp4", "video/webm"}
+_CAST_NATIVE_VIDEO_MIMES = {"video/mp4"}
+_CAST_CODEC_CACHE: dict[str, tuple[str, str]] = {}
+
+
+def _probe_cast_codecs(source) -> tuple[str, str]:
+    """Return (video_codec, audio_codec) lowercase via ffprobe, cached per file path."""
+    if source.mode != "file" or not source.path:
+        v = str((source.private or {}).get("video_codec") or (source.verdict or {}).get("video") or "").lower()
+        a = str((source.private or {}).get("audio_codec") or (source.verdict or {}).get("audio") or "").lower()
+        return v, a
+    hit = _CAST_CODEC_CACHE.get(source.path)
+    if hit is not None:
+        return hit
+    v_codec, a_codec = "", ""
+    try:
+        import subprocess
+        from core.player import transcode as T
+        ff = T.ffmpeg_path()
+        fp = T.ffprobe_for(ff) if ff else None
+        if fp:
+            out = subprocess.check_output(
+                [fp, "-v", "error", "-show_entries", "stream=codec_type,codec_name", "-of", "csv=p=0", source.path],
+                text=True,
+                timeout=8,
+            )
+            for line in out.splitlines():
+                parts = [p.strip().lower() for p in line.split(",")]
+                if len(parts) >= 2:
+                    cname, ctype = parts[0], parts[1]
+                    if ctype == "video" and not v_codec:
+                        v_codec = cname
+                    elif ctype == "audio" and not a_codec:
+                        a_codec = cname
+    except Exception:  # noqa: BLE001
+        pass
+    if len(_CAST_CODEC_CACHE) > 500:
+        _CAST_CODEC_CACHE.clear()
+    _CAST_CODEC_CACHE[source.path] = (v_codec, a_codec)
+    return v_codec, a_codec
 
 
 def _cast_needs_transcode(item_type: str, source) -> bool:
     if item_type not in VIDEO_TYPES:
         return False
     mime = (source.mime or "").lower()
-    return mime not in _CAST_NATIVE_VIDEO_MIMES
+    if mime not in _CAST_NATIVE_VIDEO_MIMES:
+        return True
+    v_codec, a_codec = _probe_cast_codecs(source)
+    # Most Chromecasts only decode H.264 + AAC/MP3 reliably in MP4; AV1/HEVC/Opus cause black screen or silence
+    if v_codec != "h264":
+        return True
+    if a_codec and a_codec not in ("aac", "mp3"):
+        return True
+    return False
 
 
 def _cast_lan_http_origin() -> str | None:
@@ -336,7 +382,14 @@ def cast_stream(item_type, item_id):
         from core.player import transcode as T
         ffmpeg = T.ffmpeg_path()
         if ffmpeg:
-            p = _plan_for(source, "original", 0, None, 0)
+            v_codec, a_codec = _probe_cast_codecs(source)
+            p = T.Plan(
+                copy_video=(v_codec == "h264"),
+                copy_audio=(a_codec in ("aac", "mp3")),
+                reasons=["chromecast"],
+                quality="1080p",
+                tonemap=False,
+            )
             origin = source.path if source.mode == "file" else source.url
             cmd = T.command(ffmpeg, origin, p, 0.0, T.encoder(ffmpeg), T.has_filter(ffmpeg, "zscale"))
             try:
