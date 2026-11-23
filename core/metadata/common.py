@@ -159,7 +159,25 @@ def _raw_audio_save(audio_file: Any, symbols: Any, target: Any = None) -> None:
         kwargs = {'v2_version': 4} if isinstance(audio_file, (AIFF, WAVE)) else {'v1': 0, 'v2_version': 4}
         audio_file.save(**kwargs) if target is None else audio_file.save(target, **kwargs)
     elif isinstance(audio_file, symbols.FLAC):
-        audio_file.save(deleteid3=True) if target is None else audio_file.save(target, deleteid3=True)
+        # Mutagen removes the last 128 bytes when deleteid3=True
+        # and they begin with TAG. This can conflict with atomic
+        # audio integrity verification and may truncate audio if
+        # the signature occurs naturally in the stream.
+        path = target if target is not None else audio_file.filename
+        deleteid3 = True
+        try:
+            with open(path, "rb") as f:
+                f.seek(-128, 2)
+                if f.read(3) == b"TAG":
+                    deleteid3 = False
+        except (OSError, TypeError, ValueError):
+            # If we cannot inspect the footer, avoid deleting it.
+            deleteid3 = False
+
+        if target is None:
+            audio_file.save(deleteid3=deleteid3)
+        else:
+            audio_file.save(target, deleteid3=deleteid3)
     else:
         audio_file.save() if target is None else audio_file.save(target)
 
