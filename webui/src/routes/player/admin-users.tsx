@@ -11,6 +11,7 @@ import {
 import { PeopleIcon } from './-ui/icons';
 import { PageTitle } from './-ui/kit';
 import s from './-ui/social.module.css';
+import { MyDownloadsPanel } from './downloads';
 
 export const Route = createFileRoute('/player/admin-users')({
   component: AdminUsersDownloadsPage,
@@ -46,6 +47,7 @@ function DownloadCloudIcon() {
 
 function AdminUsersDownloadsPage() {
   const qc = useQueryClient();
+  const [tab, setTab] = useState<'admin' | 'mine'>('admin');
   const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
   const [typeFilter, setTypeFilter] = useState<'' | DownloadItemType>('');
   const [statusFilter, setStatusFilter] = useState<'' | 'downloaded' | 'removed'>('');
@@ -85,12 +87,64 @@ function AdminUsersDownloadsPage() {
 
   return (
     <div style={{ maxWidth: 1120, margin: '0 auto', padding: '12px 24px 64px' }}>
-      <PageTitle
-        title="Users & Downloads"
-        subtitle="Manage per-user offline download permissions and audit active & removed device downloads."
-      />
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'flex-end',
+          justifyContent: 'space-between',
+          gap: 16,
+          flexWrap: 'wrap',
+          marginBottom: 16,
+        }}
+      >
+        <PageTitle
+          title="Users & Downloads"
+          subtitle="Manage your offline downloads, per-user download permissions, and device activity."
+        />
+        <div
+          style={{
+            display: 'inline-flex',
+            padding: 4,
+            borderRadius: 999,
+            background: 'rgba(255,255,255,0.05)',
+            border: '1px solid rgba(255,255,255,0.1)',
+          }}
+        >
+          {(
+            [
+              ['admin', 'Users & Devices'],
+              ['mine', 'My Downloads'],
+            ] as const
+          ).map(([id, label]) => {
+            const on = tab === id;
+            return (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setTab(id)}
+                style={{
+                  padding: '7px 16px',
+                  borderRadius: 999,
+                  border: 'none',
+                  background: on
+                    ? 'rgba(var(--accent-rgb, 129,140,248), 0.28)'
+                    : 'transparent',
+                  color: on ? '#fff' : 'rgba(255,255,255,0.68)',
+                  fontSize: 13,
+                  fontWeight: on ? 700 : 500,
+                  cursor: 'pointer',
+                }}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
 
-      {query.isError ? (
+      {tab === 'mine' ? (
+        <MyDownloadsPanel />
+      ) : query.isError ? (
         <div
           style={{
             padding: '16px 20px',

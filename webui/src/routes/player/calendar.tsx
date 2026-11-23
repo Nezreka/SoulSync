@@ -1,14 +1,19 @@
+import type { CSSProperties } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
+import { createFileRoute, Link } from '@tanstack/react-router';
 import clsx from 'clsx';
 import { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
+
+import { appURL } from '@/platform/url-base';
 
 import type { AcqState, CalendarEpisode, CalendarMovie, CalendarScope, CalendarView } from '../calendar/-calendar.types';
 
-import { calendarQueryOptions, followedQueryOptions } from '../calendar/-calendar.api';
+import { calendarQueryOptions, followedQueryOptions, showDetailQueryOptions } from '../calendar/-calendar.api';
 import { backdropOf, stillOf } from '../calendar/-calendar.art';
 import {
   MO,
+  MO_FULL,
   WD_FULL,
   addDays,
   airMins,
@@ -24,10 +29,12 @@ import {
   stateLabel,
   stepAnchor,
   weekStart,
+  whyLine,
   windowFor,
   windowRange,
   windowTitle,
 } from '../calendar/-calendar.model';
+import { Art } from '../calendar/-ui/art';
 import { CalendarHero } from '../calendar/-ui/calendar-hero';
 import { AgendaView, MonthView, WeekView } from '../calendar/-ui/calendar-views';
 import styles from '../calendar/-ui/calendar.module.css';
@@ -51,8 +58,28 @@ function useNow(ms = 60_000): number {
   return now;
 }
 
+function fullDate(iso: string): string {
+  const d = parseISO(iso);
+  return `${WD_FULL[d.getDay()]}, ${MO_FULL[d.getMonth()]} ${d.getDate()}`;
+}
+
+function episodeCardArt(ep: CalendarEpisode, w = 600): string | null {
+  return (
+    stillOf(ep, w) ||
+    backdropOf(ep, Math.max(w, 780)) ||
+    (ep.show_id && !ep.not_in_library ? appURL(`/api/video/poster/show/${ep.show_id}?w=${w}`) : null) ||
+    ep.still_url ||
+    null
+  );
+}
+
+function movieCardArt(m: CalendarMovie, w = 780): string | null {
+  const libId = m.library_id ?? m.movie_id;
+  if (libId) return appURL(`/api/video/backdrop/movie/${libId}?w=${w}`);
+  return m.poster_url || null;
+}
+
 function PlayerCalendarPage() {
-  const navigate = useNavigate();
   const qc = useQueryClient();
   const now = useNow();
   const clientToday = isoOf(new Date(now));
@@ -147,11 +174,7 @@ function PlayerCalendarPage() {
   };
 
   const handleOpenMovie = (m: CalendarMovie) => {
-    if (m.movie_id) {
-      void navigate({ to: `/player/movies/${m.movie_id}` });
-    } else {
-      setOpenMovie(m);
-    }
+    setOpenMovie(m);
   };
 
   const modalEp = openEp ? (episodes.find((e) => e.id === openEp.id) ?? openEp) : null;
@@ -341,6 +364,8 @@ function PlayerCalendarPage() {
                       const reqKey = `movie:${m.tmdb_id}`;
                       const reqState = requestedKeys[reqKey];
                       const showReq = canRequest && isMovieRequestable(m) && reqState !== 'done';
+                      const mArt = movieCardArt(m, 780);
+                      const mLibId = m.library_id ?? m.movie_id;
                       return (
                         <div
                           key={`m-${m.tmdb_id}-${m.type}`}
@@ -351,24 +376,30 @@ function PlayerCalendarPage() {
                             border: '1px solid rgba(255,255,255,0.09)',
                             display: 'flex',
                             flexDirection: 'column',
+                            cursor: 'pointer',
                           }}
+                          onClick={() => setOpenMovie(m)}
                         >
                           <div
                             style={{
                               position: 'relative',
                               aspectRatio: '16/9',
-                              background: '#14151f',
-                              cursor: m.movie_id ? 'pointer' : 'default',
-                            }}
-                            onClick={() => {
-                              if (m.movie_id) void navigate({ to: `/player/movies/${m.movie_id}` });
+                              background: 'linear-gradient(135deg, hsla(245, 50%, 24%, 0.7), #12131c)',
                             }}
                           >
-                            {m.poster_url && (
+                            {mArt && (
                               <img
-                                src={m.poster_url}
+                                src={mArt}
                                 alt=""
                                 style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                onError={(e) => {
+                                  const img = e.currentTarget;
+                                  if (m.poster_url && img.src !== m.poster_url) {
+                                    img.src = m.poster_url;
+                                  } else {
+                                    img.style.display = 'none';
+                                  }
+                                }}
                               />
                             )}
                             <div style={{ position: 'absolute', top: 10, right: 10 }}>
@@ -382,8 +413,12 @@ function PlayerCalendarPage() {
                               {m.year ? ` · ${m.year}` : ''}
                             </div>
                             <div style={{ marginTop: 'auto', paddingTop: 8, display: 'flex', gap: 8 }}>
-                              {m.movie_id && m.acq === 'owned' && (
-                                <Link to={`/player/movies/${m.movie_id}`} className={s.btn}>
+                              {mLibId && m.acq === 'owned' && (
+                                <Link
+                                  to={`/player/movies/${mLibId}`}
+                                  className={s.btn}
+                                  onClick={(e) => e.stopPropagation()}
+                                >
                                   Open movie
                                 </Link>
                               )}
@@ -392,15 +427,16 @@ function PlayerCalendarPage() {
                                   type="button"
                                   className={s.btnPrimary}
                                   disabled={requestMutation.isPending}
-                                  onClick={() =>
+                                  onClick={(e) => {
+                                    e.stopPropagation();
                                     requestMutation.mutate({
                                       key: reqKey,
                                       kind: 'movie',
                                       tmdbId: m.tmdb_id,
                                       title: m.title,
                                       year: m.year,
-                                    })
-                                  }
+                                    });
+                                  }}
                                 >
                                   {reqVerb} movie
                                 </button>
@@ -413,7 +449,11 @@ function PlayerCalendarPage() {
 
                     {groups.map((g) => {
                       const ep = g.lead;
-                      const art = stillOf(ep, 500) || backdropOf(ep, 780);
+                      const art = episodeCardArt(ep, 600);
+                      const fallbackPoster =
+                        ep.show_id && !ep.not_in_library
+                          ? appURL(`/api/video/poster/show/${ep.show_id}?w=500`)
+                          : null;
                       const time = fmtMins(airMins(ep.airs_time));
                       const reqKey = `ep:${ep.show_tmdb_id}:${ep.season_number}:${ep.episode_number}`;
                       const reqState = requestedKeys[reqKey];
@@ -428,23 +468,31 @@ function PlayerCalendarPage() {
                             border: '1px solid rgba(255,255,255,0.09)',
                             display: 'flex',
                             flexDirection: 'column',
+                            cursor: 'pointer',
                             ['--vcal-h' as string]: showHue(ep.show_title),
                           }}
+                          onClick={() => setOpenEp(ep)}
                         >
                           <div
                             style={{
                               position: 'relative',
                               aspectRatio: '16/9',
                               background: 'linear-gradient(135deg, hsla(var(--vcal-h), 55%, 24%, 0.7), #12131c)',
-                              cursor: 'pointer',
                             }}
-                            onClick={() => setOpenEp(ep)}
                           >
                             {art && (
                               <img
                                 src={art}
                                 alt=""
                                 style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                onError={(e) => {
+                                  const img = e.currentTarget;
+                                  if (fallbackPoster && img.src !== fallbackPoster) {
+                                    img.src = fallbackPoster;
+                                  } else {
+                                    img.style.display = 'none';
+                                  }
+                                }}
                               />
                             )}
                             <div
@@ -519,202 +567,322 @@ function PlayerCalendarPage() {
         )}
       </div>
 
-      {/* Player-Native Episode Detail Modal (for Week / Agenda / Month / Hero clicks) */}
+      {/* Manager-Style Episode Detail Modal (Player-native navigation & Request) */}
       {modalEp && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            zIndex: 80,
-            background: 'rgba(0,0,0,0.72)',
-            backdropFilter: 'blur(8px)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: 20,
-          }}
-          onClick={() => setOpenEp(null)}
-        >
-          <div
-            style={{
-              width: '100%',
-              maxWidth: 520,
-              borderRadius: 18,
-              overflow: 'hidden',
-              background: '#14151f',
-              border: '1px solid rgba(255,255,255,0.12)',
-              boxShadow: '0 24px 64px rgba(0,0,0,0.6)',
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div style={{ position: 'relative', aspectRatio: '16/9', background: '#0e0f17' }}>
-              {(stillOf(modalEp, 780) || backdropOf(modalEp, 1280)) && (
-                <img
-                  src={(stillOf(modalEp, 780) || backdropOf(modalEp, 1280))!}
-                  alt=""
-                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                />
-              )}
-              <button
-                type="button"
-                onClick={() => setOpenEp(null)}
-                aria-label="Close"
-                style={{
-                  position: 'absolute',
-                  top: 12,
-                  right: 12,
-                  width: 34,
-                  height: 34,
-                  borderRadius: '50%',
-                  border: '1px solid rgba(255,255,255,0.2)',
-                  background: 'rgba(0,0,0,0.65)',
-                  color: '#fff',
-                  cursor: 'pointer',
-                  fontSize: 16,
-                }}
-              >
-                ✕
-              </button>
-            </div>
-            <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-                <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>{modalEp.show_title}</h2>
-                <StatePill state={modalEp.acq} large />
-              </div>
-              <div style={{ fontSize: 14, opacity: 0.85 }}>
-                S{modalEp.season_number} E{modalEp.episode_number}
-                {modalEp.title ? ` · ${modalEp.title}` : ''}
-              </div>
-              <div style={{ fontSize: 12.5, opacity: 0.65 }}>
-                {[modalEp.air_date, fmtMins(airMins(modalEp.airs_time)), modalEp.network]
-                  .filter(Boolean)
-                  .join(' · ')}
-              </div>
-              {modalEp.overview && (
-                <p style={{ margin: '4px 0 0', fontSize: 13.5, lineHeight: 1.5, opacity: 0.8 }}>
-                  {modalEp.overview}
-                </p>
-              )}
-              <div style={{ display: 'flex', gap: 10, marginTop: 10, flexWrap: 'wrap' }}>
-                {modalEp.show_id && !modalEp.not_in_library && (
-                  <Link to={`/player/tv/${modalEp.show_id}`} className={s.btnPrimary}>
-                    Open in Player
-                  </Link>
-                )}
-                {canRequest && isEpisodeRequestable(modalEp) && (() => {
-                  const key = `ep:${modalEp.show_tmdb_id}:${modalEp.season_number}:${modalEp.episode_number}`;
-                  const st = requestedKeys[key];
-                  return st === 'done' ? (
-                    <span style={{ alignSelf: 'center', fontSize: 13, color: '#6ee7b7', fontWeight: 600 }}>
-                      ✓ {requestMode === 'download' ? 'Added to wishlist' : 'Requested'}
-                    </span>
-                  ) : (
-                    <button
-                      type="button"
-                      className={s.btnPrimary}
-                      disabled={requestMutation.isPending}
-                      onClick={() =>
-                        requestMutation.mutate({
-                          key,
-                          kind: 'episode',
-                          tmdbId: modalEp.show_tmdb_id!,
-                          title: `${modalEp.show_title} · S${modalEp.season_number}E${modalEp.episode_number}`,
-                          seasonNumber: modalEp.season_number,
-                          episodeNumber: modalEp.episode_number,
-                        })
-                      }
-                    >
-                      {reqVerb} episode
-                    </button>
-                  );
-                })()}
-                <button type="button" className={s.btn} onClick={() => setOpenEp(null)}>
-                  Close
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <PlayerEpisodeModal
+          ep={modalEp}
+          today={today}
+          autoOn={autoOn}
+          canRequest={canRequest && isEpisodeRequestable(modalEp)}
+          reqVerb={reqVerb}
+          requestMode={requestMode}
+          requestState={requestedKeys[`ep:${modalEp.show_tmdb_id}:${modalEp.season_number}:${modalEp.episode_number}`]}
+          requestPending={requestMutation.isPending}
+          onRequest={() =>
+            requestMutation.mutate({
+              key: `ep:${modalEp.show_tmdb_id}:${modalEp.season_number}:${modalEp.episode_number}`,
+              kind: 'episode',
+              tmdbId: modalEp.show_tmdb_id!,
+              title: `${modalEp.show_title} · S${modalEp.season_number}E${modalEp.episode_number}`,
+              seasonNumber: modalEp.season_number,
+              episodeNumber: modalEp.episode_number,
+            })
+          }
+          onClose={() => setOpenEp(null)}
+        />
       )}
-      {/* Player-Native Movie Modal (for unowned/missing movies — never opens Manager!) */}
+
+      {/* Manager-Style Movie Detail Modal (Player-native navigation & Request) */}
       {openMovie && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            zIndex: 80,
-            background: 'rgba(0,0,0,0.72)',
-            backdropFilter: 'blur(8px)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: 20,
-          }}
-          onClick={() => setOpenMovie(null)}
-        >
-          <div
-            style={{
-              width: '100%',
-              maxWidth: 460,
-              borderRadius: 18,
-              overflow: 'hidden',
-              background: '#14151f',
-              border: '1px solid rgba(255,255,255,0.12)',
-              boxShadow: '0 24px 64px rgba(0,0,0,0.6)',
-              padding: 22,
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 12,
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-              <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>🎬 {openMovie.title}</h2>
-              <StatePill state={openMovie.acq} large />
-            </div>
-            <div style={{ fontSize: 13, opacity: 0.72 }}>
-              {[
-                openMovie.type === 'cinema' ? 'In cinemas' : 'Home release',
-                openMovie.date,
-                openMovie.year ? String(openMovie.year) : null,
-              ]
-                .filter(Boolean)
-                .join(' · ')}
-            </div>
-            <div style={{ display: 'flex', gap: 10, marginTop: 8 }}>
-              {canRequest && isMovieRequestable(openMovie) && (() => {
-                const key = `movie:${openMovie.tmdb_id}`;
-                const st = requestedKeys[key];
-                return st === 'done' ? (
-                  <span style={{ alignSelf: 'center', fontSize: 13, color: '#6ee7b7', fontWeight: 600 }}>
-                    ✓ {requestMode === 'download' ? 'Added to wishlist' : 'Requested'}
-                  </span>
-                ) : (
-                  <button
-                    type="button"
-                    className={s.btnPrimary}
-                    disabled={requestMutation.isPending}
-                    onClick={() =>
-                      requestMutation.mutate({
-                        key,
-                        kind: 'movie',
-                        tmdbId: openMovie.tmdb_id,
-                        title: openMovie.title,
-                        year: openMovie.year,
-                      })
-                    }
-                  >
-                    {reqVerb} movie
-                  </button>
-                );
-              })()}
-              <button type="button" className={s.btn} onClick={() => setOpenMovie(null)}>
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
+        <PlayerMovieModal
+          movie={openMovie}
+          today={today}
+          canRequest={canRequest && isMovieRequestable(openMovie)}
+          reqVerb={reqVerb}
+          requestMode={requestMode}
+          requestState={requestedKeys[`movie:${openMovie.tmdb_id}`]}
+          requestPending={requestMutation.isPending}
+          onRequest={() =>
+            requestMutation.mutate({
+              key: `movie:${openMovie.tmdb_id}`,
+              kind: 'movie',
+              tmdbId: openMovie.tmdb_id,
+              title: openMovie.title,
+              year: openMovie.year,
+            })
+          }
+          onClose={() => setOpenMovie(null)}
+        />
       )}
     </div>
+  );
+}
+
+function PlayerEpisodeModal({
+  ep,
+  today,
+  autoOn,
+  canRequest,
+  reqVerb,
+  requestMode,
+  requestState,
+  requestPending,
+  onRequest,
+  onClose,
+}: {
+  ep: CalendarEpisode;
+  today: string;
+  autoOn: boolean;
+  canRequest: boolean;
+  reqVerb: string;
+  requestMode: string;
+  requestState?: 'done' | 'error';
+  requestPending: boolean;
+  onRequest: () => void;
+  onClose: () => void;
+}) {
+  const detail = useQuery(showDetailQueryOptions(ep.not_in_library ? null : ep.show_id));
+  const time = fmtMins(airMins(ep.airs_time));
+  const backdrop = backdropOf(ep, 1000) || episodeCardArt(ep, 1000);
+  const still = episodeCardArt(ep, 600);
+  const eyebrow = [
+    detail.data?.network ?? ep.network,
+    detail.data?.year ?? ep.show_year,
+    detail.data?.status ?? ep.show_status,
+    detail.data?.content_rating,
+  ]
+    .filter(Boolean)
+    .join('  ·  ');
+  const showOverview =
+    detail.data?.overview && detail.data.overview !== ep.overview ? detail.data.overview : null;
+  const effectiveAcq = requestState === 'done' ? 'wishlist' : ep.acq;
+  const inLibrary = Boolean(ep.show_id && !ep.not_in_library);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return createPortal(
+    <div
+      className={styles.modalViewport}
+      style={{ zIndex: 99999 }}
+      role="dialog"
+      aria-modal="true"
+      aria-label={`${ep.show_title} S${ep.season_number}E${ep.episode_number}`}
+      onClick={onClose}
+    >
+      <div
+        className={styles.modal}
+        style={{ '--vcal-h': showHue(ep.show_title) } as CSSProperties}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <button type="button" className={styles.modalClose} aria-label="Close" onClick={onClose}>
+          ×
+        </button>
+        <div className={styles.modalHero}>
+          {backdrop && (
+            <div className={styles.modalHeroBg} style={{ backgroundImage: `url("${backdrop}")` }} />
+          )}
+          <div className={styles.modalHeroScrim} />
+          <div className={styles.modalHeroContent}>
+            {eyebrow && <div className={styles.modalEyebrow}>{eyebrow}</div>}
+            <h2 className={styles.modalShow}>{ep.show_title}</h2>
+            {!!detail.data?.genres?.length && (
+              <div className={styles.modalGenres}>
+                {detail.data.genres.slice(0, 4).map((g) => (
+                  <span key={g}>{g}</span>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+        <div className={styles.modalBody}>
+          <div className={styles.modalEp}>
+            <div className={styles.modalStill}>{still && <Art src={still} lazy={false} />}</div>
+            <div className={styles.modalEpMain}>
+              <div className={styles.modalSe}>
+                S{ep.season_number} · E{ep.episode_number}
+              </div>
+              <h3 className={styles.modalEpTitle}>{ep.title || `Episode ${ep.episode_number}`}</h3>
+              <div className={styles.modalWhen}>
+                {fullDate(ep.air_date)} · {time || 'Anytime'}
+                {ep.air_date === today ? ' · today' : ''}
+              </div>
+              <div className={styles.modalState}>
+                <StatePill
+                  state={effectiveAcq}
+                  large
+                  label={
+                    effectiveAcq === 'downloading' ? `Downloading · ${ep.progress ?? 0}%` : undefined
+                  }
+                />
+                <span className={styles.why}>{whyLine({ ...ep, acq: effectiveAcq }, { autoOn })}</span>
+              </div>
+              <div className={styles.modalTags}>
+                {ep.runtime_minutes ? <span>{ep.runtime_minutes} min</span> : null}
+                {ep.rating ? <span>★ {Math.round(ep.rating * 10) / 10}</span> : null}
+                {ep.not_in_library ? <span>Not in your library</span> : null}
+              </div>
+              <p className={ep.overview ? styles.modalOv : styles.modalOvNone}>
+                {ep.overview || 'No episode synopsis yet.'}
+              </p>
+            </div>
+          </div>
+          {showOverview && (
+            <div className={styles.modalAbout}>
+              <h4>About the show</h4>
+              <p>{showOverview}</p>
+            </div>
+          )}
+        </div>
+        <div className={styles.modalActions}>
+          {canRequest && requestState !== 'done' && (
+            <button
+              type="button"
+              className={styles.btnPrimary}
+              disabled={requestPending}
+              onClick={onRequest}
+            >
+              {requestPending ? 'Requesting…' : `＋ ${reqVerb} episode`}
+            </button>
+          )}
+          {requestState === 'done' && (
+            <span className={styles.doneNote}>
+              ✓ {requestMode === 'download' ? 'On your wishlist' : 'Requested'}
+            </span>
+          )}
+          {inLibrary && (
+            <Link
+              to={`/player/tv/${ep.show_id}`}
+              className={canRequest && requestState !== 'done' ? styles.btnGhost : styles.btnPrimary}
+              onClick={onClose}
+            >
+              {ep.acq === 'owned' ? 'Go to episode →' : 'Open show in Player →'}
+            </Link>
+          )}
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+function PlayerMovieModal({
+  movie,
+  today,
+  canRequest,
+  reqVerb,
+  requestMode,
+  requestState,
+  requestPending,
+  onRequest,
+  onClose,
+}: {
+  movie: CalendarMovie;
+  today: string;
+  canRequest: boolean;
+  reqVerb: string;
+  requestMode: string;
+  requestState?: 'done' | 'error';
+  requestPending: boolean;
+  onRequest: () => void;
+  onClose: () => void;
+}) {
+  const libId = movie.library_id ?? movie.movie_id;
+  const backdrop = movieCardArt(movie, 1000);
+  const effectiveAcq = requestState === 'done' ? 'wishlist' : movie.acq;
+  const eyebrow = [
+    movie.type === 'cinema' ? 'In cinemas' : 'Home release',
+    movie.year ? String(movie.year) : null,
+  ]
+    .filter(Boolean)
+    .join('  ·  ');
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return createPortal(
+    <div
+      className={styles.modalViewport}
+      style={{ zIndex: 99999 }}
+      role="dialog"
+      aria-modal="true"
+      aria-label={movie.title}
+      onClick={onClose}
+    >
+      <div
+        className={styles.modal}
+        style={{ '--vcal-h': showHue(movie.title) } as CSSProperties}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <button type="button" className={styles.modalClose} aria-label="Close" onClick={onClose}>
+          ×
+        </button>
+        <div className={styles.modalHero}>
+          {backdrop && (
+            <div className={styles.modalHeroBg} style={{ backgroundImage: `url("${backdrop}")` }} />
+          )}
+          <div className={styles.modalHeroScrim} />
+          <div className={styles.modalHeroContent}>
+            {eyebrow && <div className={styles.modalEyebrow}>{eyebrow}</div>}
+            <h2 className={styles.modalShow}>{movie.title}</h2>
+          </div>
+        </div>
+        <div className={styles.modalBody}>
+          <div className={styles.modalEp}>
+            <div className={styles.modalStill}>
+              {(movie.poster_url || backdrop) && <Art src={(movie.poster_url || backdrop)!} lazy={false} />}
+            </div>
+            <div className={styles.modalEpMain}>
+              <div className={styles.modalSe}>MOVIE</div>
+              <h3 className={styles.modalEpTitle}>{movie.title}</h3>
+              <div className={styles.modalWhen}>
+                {movie.date ? fullDate(movie.date) : 'TBA'}
+                {movie.date === today ? ' · today' : ''}
+              </div>
+              <div className={styles.modalState}>
+                <StatePill state={effectiveAcq} large />
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className={styles.modalActions}>
+          {canRequest && requestState !== 'done' && (
+            <button
+              type="button"
+              className={styles.btnPrimary}
+              disabled={requestPending}
+              onClick={onRequest}
+            >
+              {requestPending ? 'Requesting…' : `＋ ${reqVerb} movie`}
+            </button>
+          )}
+          {requestState === 'done' && (
+            <span className={styles.doneNote}>
+              ✓ {requestMode === 'download' ? 'On your wishlist' : 'Requested'}
+            </span>
+          )}
+          {libId && (
+            <Link
+              to={`/player/movies/${libId}`}
+              className={canRequest && requestState !== 'done' ? styles.btnGhost : styles.btnPrimary}
+              onClick={onClose}
+            >
+              Open movie in Player →
+            </Link>
+          )}
+        </div>
+      </div>
+    </div>,
+    document.body,
   );
 }

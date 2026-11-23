@@ -93,11 +93,15 @@ export function fraction(
 
 export function continueCard(row: ProgressRow): RailCard {
   const meta = row.meta ?? {};
+  const art =
+    row.item_type === 'youtube'
+      ? youtubeThumb(meta.artwork ?? meta.backdrop, 'card', row.item_id)
+      : remoteImage(meta.artwork ?? meta.backdrop);
   return {
     key: `${row.item_type}:${row.item_id}`,
     title: meta.title || 'Untitled',
     subtitle: meta.subtitle,
-    art: remoteImage(meta.artwork ?? meta.backdrop),
+    art,
     href: meta.href,
     shape: SHAPE_BY_TYPE[row.item_type] ?? 'square',
     progress: fraction(row.position_seconds, row.duration_seconds),
