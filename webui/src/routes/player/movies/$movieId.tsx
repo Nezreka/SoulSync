@@ -122,13 +122,13 @@ function MoviePage() {
         actions={
           <>
             <PlayButton
-              label={resuming ? `Resume from ${runtime(resume.position_seconds)}` : 'Play'}
+              label={resuming ? `Resume · ${runtime(resume.position_seconds)}` : 'Play'}
               onPlay={best ? () => playItems([movieItem(m, playFile)]) : undefined}
               why="There's no file for this yet."
             />
             {resuming && best ? (
               <PlayButton
-                label="From the start"
+                label="Restart"
                 primary={false}
                 onPlay={() => playItems([movieItem(m, playFile)], 0, { startAt: 0 })}
               />

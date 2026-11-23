@@ -1850,8 +1850,38 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: calc(var(--u) * 0.7);
-  margin-top: calc(var(--u) * 0.4);
+  gap: calc(var(--u) * 0.55);
+  margin-top: calc(var(--u) * 0.45);
+}
+
+.heroActions .btnPrimary {
+  height: calc(var(--u) * 2.45);
+  padding: 0 calc(var(--u) * 1.25);
+  font-size: calc(var(--u) * 0.88);
+  font-weight: 700;
+  box-shadow: 0 6px 20px var(--black-a40);
+}
+
+.heroActions .btn {
+  gap: calc(var(--u) * 0.4);
+  height: calc(var(--u) * 2.35);
+  padding: 0 calc(var(--u) * 0.95);
+  border: 1px solid var(--white-a12);
+  background: var(--white-a08);
+  font-size: calc(var(--u) * 0.82);
+  font-weight: 600;
+  backdrop-filter: blur(calc(var(--u) * 0.6));
+}
+
+.heroActions .btn:hover {
+  border-color: var(--white-a24);
+  background: var(--white-a16);
+}
+
+.heroActions .btn svg,
+.heroActions .btnPrimary svg {
+  width: calc(var(--u) * 0.98);
+  height: calc(var(--u) * 0.98);
 }
 
 @media (max-width: 768px) {
@@ -2994,36 +3024,45 @@
   }
 }
 
-/* you have it: brightness says so; a small check shows on hover or focus */
-.cardHave {
+/* always-visible top-right library status badge: emerald check (owned) vs amber plus (not in library) */
+.cardHave,
+.cardMissing {
   position: absolute;
-  top: calc(var(--u) * 0.4);
-  left: calc(var(--u) * 0.4);
-  z-index: 1;
+  top: calc(var(--u) * 0.45);
+  right: calc(var(--u) * 0.45);
+  z-index: 2;
   display: grid;
   place-items: center;
-  width: calc(var(--u) * 1.05);
-  height: calc(var(--u) * 1.05);
-  opacity: 0;
-  transform: scale(0.7);
-  transition:
-    opacity var(--dur-fast) ease,
-    transform var(--dur-fast) var(--pl-ease);
+  width: calc(var(--u) * 1.35);
+  height: calc(var(--u) * 1.35);
   border-radius: var(--radius-circle);
-  background: var(--accent);
   color: var(--pl-bg);
-  box-shadow: 0 0 0 calc(var(--u) * 0.12) var(--black-a40);
+  box-shadow:
+    0 2px 8px var(--black-a60),
+    0 0 0 1.5px var(--black-a40);
+  transition: transform var(--dur-fast) var(--pl-ease);
 }
 
-.cardHave svg {
-  width: 72%;
-  height: 72%;
+.cardHave {
+  background: var(--success-strong);
+}
+
+.cardMissing {
+  background: var(--warning-strong);
+}
+
+.cardHave svg,
+.cardMissing svg {
+  width: 68%;
+  height: 68%;
+  stroke-width: 2.5;
 }
 
 .cardWrap:hover .cardHave,
-.cardWrap:focus-within .cardHave {
-  opacity: 1;
-  transform: none;
+.cardWrap:focus-within .cardHave,
+.cardWrap:hover .cardMissing,
+.cardWrap:focus-within .cardMissing {
+  transform: scale(1.08);
 }
 
 /* not yours: slightly darker until you point at it */

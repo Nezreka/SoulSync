@@ -14,7 +14,16 @@ import type { PlayVerdict } from '../-player.types';
 import { canRetryArt, retryArt } from '../-lib/images';
 import { playerSettingsQuery } from '../-player.api';
 import { inferContextTargetFromCard, openContextMenu } from './context-menu';
-import { BackIcon, CheckIcon, ChevronIcon, GridIcon, ListIcon, MoreIcon, PlayIcon } from './icons';
+import {
+  BackIcon,
+  CheckIcon,
+  ChevronIcon,
+  GridIcon,
+  ListIcon,
+  MoreIcon,
+  PlayIcon,
+  PlusIcon,
+} from './icons';
 import { usePlayCard } from './playback/play-card';
 import s from './player.module.css';
 import { usePreview } from './preview';
@@ -212,6 +221,10 @@ export function Card({
         {card.have ? (
           <span className={s.cardHave} title={card.have} aria-label={card.have}>
             <CheckIcon />
+          </span>
+        ) : card.muted ? (
+          <span className={s.cardMissing} title={card.muted} aria-label={card.muted}>
+            <PlusIcon />
           </span>
         ) : null}
         {visibleBadge ? <span className={s.cardBadge}>{visibleBadge}</span> : null}

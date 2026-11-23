@@ -251,6 +251,7 @@ export function movieCard(m: CatalogMovie): RailCard {
     ...(m.has_poster ? posterArt('movie', m.id) : { art: null }),
     href: `/player/movies/${m.id}`,
     shape: 'poster',
+    have: 'In your library',
     badge: m.rating ? `★ ${m.rating.toFixed(1)}` : undefined,
     preview: { kind: 'movie', id: m.id },
   };
@@ -264,6 +265,7 @@ export function showCard(x: CatalogShow): RailCard {
     ...(x.has_poster ? posterArt('show', x.id) : { art: null }),
     href: `/player/tv/${x.id}`,
     shape: 'poster',
+    have: 'In your library',
     badge: `${x.episode_count} ep`,
     preview: { kind: 'show', id: x.id },
   };
