@@ -1324,6 +1324,7 @@ export interface StudioCollection {
   media_type: 'movie' | 'show';
   summary?: string | null;
   poster?: string | null;
+  member_posters?: string[];
   pinned?: boolean;
   /** library ids of the members this profile can see */
   members: number[];

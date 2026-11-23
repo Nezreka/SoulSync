@@ -90,12 +90,28 @@ def norm_track(t: Dict[str, Any]) -> Dict[str, Any]:
     cover = (_first_url(album.get("images")) if isinstance(album, dict) else None)
     if not cover and isinstance(t.get("album"), dict):
         cover = _first_url(t["album"].get("images"))
+    if not cover:
+        cover = (
+            t.get("album_cover_url")
+            or t.get("image_url")
+            or t.get("cover_url")
+            or td.get("album_cover_url")
+            or td.get("image_url")
+            or td.get("cover_url")
+        )
+    if not cover:
+        aid = t.get("album_id") or td.get("album_id")
+        try:
+            if aid and int(aid) > 0:
+                cover = f"/api/library/v2/artwork/album/{int(aid)}?size=thumb"
+        except (TypeError, ValueError):
+            pass
     return {
         "title": td.get("name") or td.get("track_name") or td.get("title") or t.get("track_name") or t.get("name") or "",
         "artist": a0_name or td.get("artist_name") or t.get("artist_name")
                   or (td.get("artist") if isinstance(td.get("artist"), str) else "") or "",
         "album": album_name or td.get("album_name") or t.get("album_name") or "",
-        "image_url": cover or t.get("album_cover_url") or None,
+        "image_url": cover or None,
         "duration_ms": int(td.get("duration_ms") or t.get("duration_ms") or 0),
     }
 

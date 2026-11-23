@@ -49,13 +49,14 @@ _SQUARE = ["standard", "large"]
 # the rows, in their default order: (id, label, hint, styles, default style, on by default)
 ROWS = [
     ("continue", "Continue watching", "What you started, here and on your media server", _WIDE, "wide", True),
-    ("watchlist", "Your watchlist", "What you saved to watch later", _POSTER, "standard", True),
     ("new-episodes", "New episodes", "The latest episodes to land", _WIDE, "wide", True),
+    ("collections", "Collections", "Curated movie & TV collections built in SoulSync", _POSTER, "standard", True),
     ("top-movies", "Top 10 movies today", "Today's most watched films that you have", _POSTER, "ranked", True),
     ("recent-movies", "Recently added movies", "Newest films first", _POSTER, "standard", True),
     ("because", "Because you have…", "Titles you own like ones you own", _POSTER, "standard", True),
     ("top-shows", "Top 10 shows today", "Today's most watched shows that you have", _POSTER, "ranked", True),
     ("recent-shows", "Recently added shows", "Shows that just arrived", _POSTER, "standard", False),
+    ("discovery-playlists", "SoulSync Discovery Playlists", "Made for you, daily mixes, moods & curated playlists", _SQUARE, "standard", True),
     ("recent-music", "Recently added music", "Newest albums", _SQUARE, "standard", True),
     ("youtube", "New on YouTube", "Fresh from the channels you follow", _WIDE, "wide", True),
     ("genre-picks", "Today's picks", "A new handful from your top genre every day", _POSTER, "standard", True),

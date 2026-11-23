@@ -103,7 +103,7 @@ function MusicBrowse() {
   const songs = usePaged<LibSong>('songs', 'title', needSongs);
   const discover = useQuery({
     ...discoverPlaylistsQuery(),
-    enabled: sections.music && tab === 'foryou',
+    enabled: sections.music && (tab === 'foryou' || tab === 'playlists'),
   });
   const musicStations = useQuery({
     ...musicChannelsQuery(),
@@ -313,8 +313,11 @@ function MusicBrowse() {
           </Rail>
 
           {discoverList.length > 0 ? (
-            <Rail title="Made for you">
-              {discoverList.slice(0, 12).map((pl) => (
+            <Rail
+              title="Made for you · SoulSync Discovery"
+              more={{ to: '/player/music?tab=playlists', label: `All ${discoverList.length}` }}
+            >
+              {discoverList.slice(0, 24).map((pl) => (
                 <DiscoverCard key={pl.key} card={pl} />
               ))}
             </Rail>
@@ -409,14 +412,37 @@ function MusicBrowse() {
       ) : null}
 
       {tab === 'playlists' ? (
-        playlists.isLoading ? (
+        playlists.isLoading && discover.isLoading ? (
           <div className={s.skeleton} style={{ height: '36vh' }} />
-        ) : allPlaylists.length ? (
-          <div className={s.grid} style={{ marginTop: 12 }}>
-            {allPlaylists.map((pl) => (
-              <PlaylistCard key={pl.id} playlist={pl} />
+        ) : allPlaylists.length || discoverList.length ? (
+          <>
+            {(discover.data ?? []).map((sec) => (
+              <section key={sec.id} className={s.rail} aria-label={sec.label}>
+                <div className={s.railHead}>
+                  <h2 className={s.sectionTitle}>{sec.label}</h2>
+                  <span className={s.railMore}>{sec.playlists.length} playlists</span>
+                </div>
+                <div className={s.grid}>
+                  {sec.playlists.map((pl) => (
+                    <DiscoverCard key={pl.key} card={pl} />
+                  ))}
+                </div>
+              </section>
             ))}
-          </div>
+            {allPlaylists.length ? (
+              <section className={s.rail} aria-label="Your playlists">
+                <div className={s.railHead}>
+                  <h2 className={s.sectionTitle}>Your playlists &amp; mirrored</h2>
+                  <span className={s.railMore}>{allPlaylists.length} playlists</span>
+                </div>
+                <div className={s.grid}>
+                  {allPlaylists.map((pl) => (
+                    <PlaylistCard key={pl.id} playlist={pl} />
+                  ))}
+                </div>
+              </section>
+            ) : null}
+          </>
         ) : (
           <Empty title="No playlists yet">
             Playlists you create or mirror in SoulSync show up here.

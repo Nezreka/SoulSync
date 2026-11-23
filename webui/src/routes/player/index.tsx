@@ -27,6 +27,7 @@ import {
   continueQuery,
   discoverListQuery,
   discoverMoreLikeQuery,
+  discoverPlaylistsQuery,
   finishProgress,
   homeLayoutQuery,
   podcastSubsQuery,
@@ -34,14 +35,15 @@ import {
   resetHomeLayout,
   saveHomeLayout,
   serverResumeQuery,
+  studioCollectionsQuery,
   videoCatalogQuery,
 } from './-player.api';
 import { Billboard, type Slide } from './-ui/billboard';
 import { HomeEditor } from './-ui/home-editor';
-import { CardRail, Empty, SkeletonRail, styles as s, type CardAction } from './-ui/kit';
+import { CardRail, Empty, Rail, SkeletonRail, styles as s, type CardAction } from './-ui/kit';
+import { DiscoverCard } from './-ui/music/discover-card';
 import { useSections } from './-ui/sections';
 import { RankedRail } from './-ui/top10';
-import { useWatchlist, watchlistCard } from './-ui/watchlist';
 
 export const Route = createFileRoute('/player/')({
   validateSearch: (search: Record<string, unknown>): { customize?: boolean } =>
@@ -53,9 +55,10 @@ export const Route = createFileRoute('/player/')({
 
 const FALLBACK_ROWS = [
   'continue',
-  'watchlist',
   'new-episodes',
+  'collections',
   'recent-movies',
+  'discovery-playlists',
   'recent-music',
   'youtube',
   'top-rated',
@@ -154,6 +157,16 @@ function PlayerHome() {
   const progress = useQuery(continueQuery());
   const resume = useQuery({ ...serverResumeQuery(), enabled: sections.video });
   const catalog = useQuery({ ...videoCatalogQuery(), enabled: sections.video });
+  const collections = useQuery({
+    ...studioCollectionsQuery(),
+    enabled: sections.video,
+    retry: false,
+  });
+  const discoverPlaylists = useQuery({
+    ...discoverPlaylistsQuery(),
+    enabled: sections.music,
+    retry: false,
+  });
   const albums = useQuery({
     ...albumsQuery({ sort: 'added', limit: 20 }),
     enabled: sections.music,
@@ -200,15 +213,32 @@ function PlayerHome() {
   const topMovies = useTopToday('movie', movies, isOn('top-movies'));
   const topShows = useTopToday('show', shows, isOn('top-shows'));
   const because = useBecause(movies, shows, isOn('because'));
-  const watchlist = useWatchlist();
-  const watchlistCards = useMemo(() => {
-    const byMovie = new Map((movies ?? []).map((m) => [m.id, m]));
-    const byShow = new Map((shows ?? []).map((x) => [x.id, x]));
-    return watchlist.items
-      .map((item) => watchlistCard(item, byMovie, byShow))
-      .filter((c): c is RailCard => !!c)
-      .slice(0, 24);
-  }, [watchlist.items, movies, shows]);
+  const collectionCards = useMemo<RailCard[]>(() => {
+    const movieSet = new Set((movies ?? []).map((m) => m.id));
+    const showSet = new Set((shows ?? []).map((x) => x.id));
+    const out: RailCard[] = [];
+    for (const c of collections.data ?? []) {
+      const visible = c.members.filter((id) =>
+        c.media_type === 'movie' ? movieSet.has(id) : showSet.has(id),
+      );
+      if (!visible.length) continue;
+      const fallbackPoster = `/api/video/poster/${c.media_type === 'movie' ? 'movie' : 'show'}/${visible[0]}?w=342`;
+      out.push({
+        key: `studio-col:${c.id}`,
+        title: c.name,
+        subtitle: `${visible.length} ${visible.length === 1 ? 'title' : 'titles'}`,
+        art: remoteImage(c.poster ?? c.member_posters?.[0] ?? fallbackPoster),
+        href: `/player/collections/${c.id}`,
+        shape: 'poster',
+        badge: c.pinned ? 'Pinned' : undefined,
+      });
+    }
+    return out;
+  }, [collections.data, movies, shows]);
+  const discoverCards = useMemo(
+    () => (discoverPlaylists.data ?? []).flatMap((sec) => sec.playlists),
+    [discoverPlaylists.data],
+  );
   const watching = useMemo(
     () => continueRails(progress.data ?? [], resume.data ?? []),
     [progress.data, resume.data],
@@ -221,13 +251,13 @@ function PlayerHome() {
       out[id] = [{ title, cards, more: more ? { to: more } : undefined }];
     };
     out.continue = watching.map((r) => ({ title: r.label, cards: r.cards }));
-    one('watchlist', 'Your watchlist', watchlistCards, '/player/watchlist');
     one(
       'new-episodes',
       'New episodes',
       cat && shows ? recentEpisodeCards(cat.recent_episodes) : [],
       '/player/tv',
     );
+    one('collections', 'Collections', collectionCards, '/player/movies?tab=collections');
     one('top-movies', 'Top 10 movies today', topMovies);
     one(
       'recent-movies',
@@ -330,7 +360,7 @@ function PlayerHome() {
     return out;
   }, [
     watching,
-    watchlistCards,
+    collectionCards,
     cat,
     movies,
     shows,
@@ -372,7 +402,23 @@ function PlayerHome() {
   const loading = progress.isLoading || catalog.isLoading || albums.isLoading;
   const drawn: ReactNode[] = [];
   for (const r of layout.rows) {
-    if (!r.on) continue;
+    if (!r.on || r.id === 'watchlist') continue;
+    if (r.id === 'discovery-playlists') {
+      if (discoverCards.length > 0) {
+        drawn.push(
+          <Rail
+            key="discovery-playlists"
+            title="SoulSync Discovery Playlists"
+            more={{ to: '/player/music?tab=playlists', label: `All ${discoverCards.length}` }}
+          >
+            {discoverCards.slice(0, 24).map((pl) => (
+              <DiscoverCard key={pl.key} card={pl} />
+            ))}
+          </Rail>,
+        );
+      }
+      continue;
+    }
     for (const [i, row] of (rows[r.id] ?? []).entries())
       drawn.push(
         <StyledRow
@@ -385,7 +431,10 @@ function PlayerHome() {
         />,
       );
   }
-  const nothing = !loading && !Object.values(rows).some((list) => list.some((x) => x.cards.length));
+  const nothing =
+    !loading &&
+    discoverCards.length === 0 &&
+    !Object.values(rows).some((list) => list.some((x) => x.cards.length));
   const billboard = layout.billboard && slides.length > 0;
 
   const close = useCallback(() => {

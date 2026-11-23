@@ -47,14 +47,19 @@ def read(db, budget_s: float = BUDGET_SECONDS) -> Dict[str, Any]:
             continue
         if not res.ok or not res.owned:
             continue
+        members = [m["id"] for m in res.owned if m.get("id") is not None]
+        poster_kind = "movie" if res.media_type == "movie" else "show"
+        member_posters = [f"/api/video/poster/{poster_kind}/{mid}?w=342" for mid in members[:4]]
+        poster = row.get("poster_url") or (member_posters[0] if member_posters else None)
         out.append({
             "id": row["id"],
             "name": row.get("name") or "Untitled collection",
             "media_type": res.media_type,
             "summary": row.get("summary"),
-            "poster": row.get("poster_url"),
+            "poster": poster,
+            "member_posters": member_posters,
             "pinned": bool(row.get("pinned")),
-            "members": [m["id"] for m in res.owned if m.get("id") is not None],
+            "members": members,
             "missing": len(res.missing or []),
         })
     out.sort(key=lambda c: (not c["pinned"], -len(c["members"]), c["name"].lower()))
