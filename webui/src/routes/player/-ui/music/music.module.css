@@ -57,9 +57,9 @@
   display: inline-flex;
   align-items: center;
   padding: 1px 7px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: var(--radius-pill);
+  background: var(--white-a08);
+  border: 1px solid var(--white-a14);
   color: var(--pl-text-3);
   font-size: calc(var(--u) * 0.64);
   font-weight: 750;
@@ -94,10 +94,6 @@
   border-radius: var(--radius-lg);
   color: var(--pl-text);
   cursor: pointer;
-}
-
-.track[data-off='true'] .trackHit {
-  cursor: default;
 }
 
 .trackHit:focus-visible {
@@ -927,9 +923,13 @@
   flex-direction: column;
   gap: calc(var(--u) * 0.55);
   padding: calc(var(--u) * 0.65);
-  border-radius: 16px;
+  border-radius: var(--radius-xl);
   border: 1px solid var(--white-a10);
-  background: linear-gradient(180deg, rgba(24, 27, 40, 0.88), rgba(15, 17, 26, 0.85));
+  background: linear-gradient(
+    180deg,
+    rgba(var(--pl-181b28-rgb), 0.88),
+    rgba(var(--pl-0f111a-rgb), 0.85)
+  );
   color: var(--pl-text);
   text-align: left;
   cursor: pointer;
@@ -942,26 +942,34 @@
 .mixCard:hover {
   transform: translateY(-3px);
   border-color: rgba(var(--accent-rgb), 0.55);
-  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.42);
+  box-shadow: 0 14px 32px rgba(var(--black-rgb), 0.42);
 }
 
 .mixCard[data-tone='accent'] {
-  background: linear-gradient(180deg, rgba(var(--accent-rgb), 0.28), rgba(16, 18, 28, 0.92));
+  background: linear-gradient(
+    180deg,
+    rgba(var(--accent-rgb), 0.28),
+    rgba(var(--pl-10121c-rgb), 0.92)
+  );
   border-color: rgba(var(--accent-rgb), 0.42);
 }
 
 .mixCard[data-tone='vibe'] {
-  background: linear-gradient(180deg, rgba(168, 85, 247, 0.22), rgba(16, 18, 28, 0.92));
-  border-color: rgba(168, 85, 247, 0.34);
+  background: linear-gradient(
+    180deg,
+    rgba(var(--pl-a855f7-rgb), 0.22),
+    rgba(var(--pl-10121c-rgb), 0.92)
+  );
+  border-color: rgba(var(--pl-a855f7-rgb), 0.34);
 }
 
 .mixCover {
   position: relative;
   width: 100%;
   aspect-ratio: 1;
-  border-radius: 11px;
+  border-radius: var(--radius-lg);
   overflow: hidden;
-  background: rgba(12, 14, 22, 0.9);
+  background: rgba(var(--pl-0c0e16-rgb), 0.9);
   border: 1px solid var(--white-a08);
 }
 
@@ -986,9 +994,9 @@
   inset: 0;
   background: linear-gradient(
     180deg,
-    rgba(0, 0, 0, 0.15) 0%,
+    var(--black-a15) 0%,
     transparent 45%,
-    rgba(0, 0, 0, 0.72) 100%
+    rgba(var(--black-rgb), 0.72) 100%
   );
   pointer-events: none;
 }
@@ -998,11 +1006,11 @@
   top: 8px;
   left: 8px;
   padding: 3px 8px;
-  border-radius: 999px;
-  background: rgba(0, 0, 0, 0.74);
+  border-radius: var(--radius-pill);
+  background: rgba(var(--black-rgb), 0.74);
   backdrop-filter: blur(8px);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  color: #fff;
+  border: 1px solid var(--white-a14);
+  color: var(--text-1);
   font-size: calc(var(--u) * 0.64);
   font-weight: 800;
   letter-spacing: 0.08em;
@@ -1010,12 +1018,12 @@
 }
 
 .mixCard[data-tone='vibe'] .mixBadge {
-  color: #e9d5ff;
-  border-color: rgba(168, 85, 247, 0.45);
+  color: var(--pl-e9d5ff);
+  border-color: rgba(var(--pl-a855f7-rgb), 0.45);
 }
 
 .mixCard[data-tone='accent'] .mixBadge {
-  color: var(--accent-light, #a78bfa);
+  color: var(--accent-light, var(--pl-a78bfa));
   border-color: rgba(var(--accent-rgb), 0.45);
 }
 
@@ -1025,11 +1033,11 @@
   bottom: 9px;
   width: 36px;
   height: 36px;
-  border-radius: 999px;
-  background: rgba(0, 0, 0, 0.72);
+  border-radius: var(--radius-pill);
+  background: rgba(var(--black-rgb), 0.72);
   backdrop-filter: blur(6px);
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  color: #fff;
+  border: 1px solid rgba(var(--white-rgb), 0.22);
+  color: var(--text-1);
   display: grid;
   place-items: center;
   font-size: 13px;
@@ -1042,7 +1050,7 @@
 .mixCard:hover .mixPlayOrb {
   background: var(--accent);
   border-color: var(--accent);
-  color: #090b10;
+  color: var(--pl-090b10);
   transform: scale(1.08);
 }
 
@@ -1070,10 +1078,14 @@
   align-items: center;
   gap: calc(var(--u) * 1.35);
   padding: calc(var(--u) * 1.1);
-  border-radius: 18px;
+  border-radius: var(--radius-sheet);
   border: 1px solid var(--white-a10);
-  background: linear-gradient(135deg, rgba(26, 29, 43, 0.88), rgba(15, 17, 26, 0.82));
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.3);
+  background: linear-gradient(
+    135deg,
+    rgba(var(--pl-1a1d2b-rgb), 0.88),
+    rgba(var(--pl-0f111a-rgb), 0.82)
+  );
+  box-shadow: 0 12px 32px var(--black-a30);
   margin-top: calc(var(--u) * 1.4);
 }
 
@@ -1088,11 +1100,11 @@
   width: calc(var(--u) * 8.5);
   height: calc(var(--u) * 8.5);
   flex: none;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   overflow: hidden;
   background: var(--white-a06);
   border: 1px solid var(--white-a10);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 8px 24px var(--black-a45);
 }
 
 .latestArt img {
@@ -1114,7 +1126,7 @@
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  color: var(--accent-light, #a78bfa);
+  color: var(--accent-light, var(--pl-a78bfa));
 }
 
 .latestTitle {
@@ -1148,7 +1160,7 @@
   align-items: center;
   gap: 5px;
   padding: 3px 10px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   font-size: calc(var(--u) * 0.74);
   font-weight: 750;
   letter-spacing: 0.04em;
@@ -1156,38 +1168,46 @@
 }
 
 .qualityHiRes {
-  background: rgba(245, 197, 24, 0.16);
-  border: 1px solid rgba(245, 197, 24, 0.42);
-  color: #f5c518;
+  background: rgba(var(--pl-f5c518-rgb), 0.16);
+  border: 1px solid rgba(var(--pl-f5c518-rgb), 0.42);
+  color: var(--pl-f5c518);
 }
 
 .qualityLossless {
   background: rgba(var(--accent-rgb), 0.18);
   border: 1px solid rgba(var(--accent-rgb), 0.45);
-  color: var(--accent-light, #a78bfa);
+  color: var(--accent-light, var(--pl-a78bfa));
 }
 
 .qualityBadge {
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: var(--white-a08);
+  border: 1px solid var(--white-a14);
   color: var(--pl-text-2);
 }
 
 .albumTrackCard {
   margin-top: calc(var(--u) * 1.2);
   padding: calc(var(--u) * 0.65) calc(var(--u) * 0.75);
-  border-radius: 18px;
+  border-radius: var(--radius-sheet);
   border: 1px solid var(--white-a08);
-  background: linear-gradient(180deg, rgba(20, 22, 33, 0.78), rgba(14, 16, 24, 0.72));
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.25);
+  background: linear-gradient(
+    180deg,
+    rgba(var(--pl-141621-rgb), 0.78),
+    rgba(var(--pl-0e1018-rgb), 0.72)
+  );
+  box-shadow: 0 12px 32px var(--black-a25);
 }
 
 .bioCard {
   margin-top: calc(var(--u) * 1.8);
   padding: calc(var(--u) * 1.35) calc(var(--u) * 1.5);
-  border-radius: 18px;
+  border-radius: var(--radius-sheet);
   border: 1px solid var(--white-a08);
-  background: linear-gradient(180deg, rgba(22, 24, 36, 0.8), rgba(15, 17, 26, 0.72));
+  background: linear-gradient(
+    180deg,
+    rgba(var(--pl-161824-rgb), 0.8),
+    rgba(var(--pl-0f111a-rgb), 0.72)
+  );
   display: flex;
   flex-direction: column;
   gap: calc(var(--u) * 0.8);
@@ -1209,8 +1229,8 @@
 
 .tagPill {
   padding: 4px 11px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.05);
+  border-radius: var(--radius-pill);
+  background: var(--white-a05);
   border: 1px solid var(--white-a10);
   color: var(--pl-text-2);
   font-size: calc(var(--u) * 0.78);
