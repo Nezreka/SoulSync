@@ -117,10 +117,12 @@ function AdminUsersDownloadsPage() {
           marginBottom: 16,
         }}
       >
-        <PageTitle
-          title="Users & Downloads"
-          subtitle="Manage your offline downloads, per-user download permissions, and device activity."
-        />
+        <div>
+          <PageTitle>Users & Downloads</PageTitle>
+          <p style={{ margin: '4px 0 0', fontSize: 14, lineHeight: 1.45, opacity: 0.55 }}>
+            Manage your offline downloads, per-user download permissions, and device activity.
+          </p>
+        </div>
         <div
           style={{
             display: 'inline-flex',

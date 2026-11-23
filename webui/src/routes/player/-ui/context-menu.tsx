@@ -92,7 +92,7 @@ export function inferContextTargetFromCard(
     href?: string;
     source?: { itemType: string; itemId: string };
     preview?: { kind: 'movie' | 'show'; id: number };
-    play?: { kind: string; id: number | string };
+    play?: { kind: string; id?: number | string };
   },
   opts?: {
     onOpen?: () => void;

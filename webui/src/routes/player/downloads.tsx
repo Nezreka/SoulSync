@@ -308,9 +308,9 @@ export function MyDownloadsPanel() {
                     color: 'rgba(255,255,255,0.55)',
                   }}
                 >
-                  {row.artwork_url ? (
+                  {row.artwork ? (
                     <img
-                      src={row.artwork_url}
+                      src={row.artwork}
                       alt=""
                       style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                     />
@@ -396,10 +396,11 @@ export function MyDownloadsPanel() {
 function PlayerDownloadsPage() {
   return (
     <div style={{ maxWidth: 1120, margin: '0 auto', padding: '12px 24px 64px' }}>
-      <PageTitle
-        title="Downloads"
-        subtitle="Manage movies, TV episodes, music, YouTube, podcasts, and audiobooks saved across your devices."
-      />
+      <PageTitle>Downloads</PageTitle>
+      <p style={{ margin: '4px 0 0', fontSize: 14, lineHeight: 1.45, opacity: 0.55 }}>
+        Manage movies, TV episodes, music, YouTube, podcasts, and audiobooks saved across your
+        devices.
+      </p>
       <MyDownloadsPanel />
     </div>
   );

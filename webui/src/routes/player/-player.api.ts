@@ -550,6 +550,12 @@ export const watchPartyQuery = (partyId: string) =>
   });
 
 export const watchPartyApi = {
+  get: async (partyId: string): Promise<WatchParty> =>
+    (
+      await apiClient
+        .get(`player/parties/${encodeURIComponent(partyId)}`)
+        .json<{ party: WatchParty }>()
+    ).party,
   create: async (payload: {
     title?: string;
     item_type: 'movie' | 'episode' | 'youtube';

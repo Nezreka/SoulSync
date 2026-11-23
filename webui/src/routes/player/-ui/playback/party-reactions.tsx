@@ -174,7 +174,7 @@ export function PartyReactionsOverlay({ hudVisible }: { hudVisible: boolean }) {
         if (Math.abs(st.position - p.live_position) > 2.5) {
           engine.seek(p.live_position);
         }
-        engine.play();
+        engine.resume();
       } else if (
         st.status === 'playing' &&
         Math.abs(st.position - p.live_position) > 4.5 &&
@@ -245,7 +245,7 @@ export function PartyReactionsOverlay({ hudVisible }: { hudVisible: boolean }) {
       const engine = getEngine();
       const st = engine.getState();
       if (st.kind === 'video' && st.status === 'paused') {
-        engine.play();
+        engine.resume();
       }
     }
     prevResumeRemainingRef.current = resumeRemainingSec;
