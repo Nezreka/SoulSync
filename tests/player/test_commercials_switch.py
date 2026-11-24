@@ -83,3 +83,44 @@ def test_all_null_is_nothing_to_change(monkeypatch):
     from core.player import settings as S
     with pytest.raises(S.SettingsError):
         _put(monkeypatch, {"enabled": None, "era": None, "mode": None})
+
+
+# a fetch fills the 500 MB cache (to FILL_BYTES), not a fixed handful per era
+def _clip(cid, era, mb, archive_id=None):
+    return commercials.CommercialClip(id=cid, title=cid, era=era, duration_seconds=30, path="/x",
+                                      source="archive", archive_id=archive_id or cid,
+                                      size_bytes=mb * 1024 * 1024, added_at=0)
+
+
+def test_a_full_cache_fetches_nothing_and_says_so(monkeypatch):
+    share_mb = commercials.FILL_BYTES // 3 // (1024 * 1024) + 1
+    cache = {f"{e}": _clip(e, e, share_mb) for e in ("80s", "90s", "mix")}
+    monkeypatch.setattr(commercials, "_clips_cache", cache)
+    monkeypatch.setattr(commercials, "_load_locked", lambda: None)
+    assert commercials.warm_async("auto", enabled=True) is False
+    # one era short: it fetches
+    cache.pop("90s")
+    calls = []
+    monkeypatch.setattr(commercials, "_download_archive_era", lambda *a, **k: calls.append((a, k)))
+    assert commercials.warm_async("auto", enabled=True) is True
+    _settle()
+    assert calls == [(("90s",), {"fill_bytes": commercials.FILL_BYTES // 3})]
+
+
+def test_it_pages_past_what_it_has_until_the_era_is_full(monkeypatch):
+    cache = {"a": _clip("a", "80s", 1, "have-1")}
+    monkeypatch.setattr(commercials, "_clips_cache", cache)
+    pages = {1: [{"identifier": "have-1"}, {"identifier": "n1"}], 2: [{"identifier": "n2"}],
+             3: [{"identifier": "n3"}], 4: []}
+    asked, got = [], []
+    monkeypatch.setattr(commercials, "_search_docs", lambda era, page: (asked.append(page), pages.get(page, []))[1])
+
+    def download(era, docs, needed, fill_bytes=0):
+        for d in docs:
+            got.append(d["identifier"])
+            cache[d["identifier"]] = _clip(d["identifier"], era, 1)
+        return len(docs)
+
+    monkeypatch.setattr(commercials, "_download_docs", download)
+    assert commercials._download_archive_era("80s", fill_bytes=3 * 1024 * 1024) == 2
+    assert got == ["n1", "n2"] and asked == [1, 2]        # stopped once 3 MB was there

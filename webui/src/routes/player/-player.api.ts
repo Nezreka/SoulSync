@@ -473,6 +473,8 @@ export interface CommercialsStatus {
   warming: boolean;
   eras: Record<string, number>;
   error?: string | null;
+  /** the fetch button's answer: false when the cache is already full */
+  started?: boolean;
 }
 
 export const commercialsStatusQuery = () =>

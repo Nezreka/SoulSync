@@ -38,7 +38,11 @@ MAX_CACHE_BYTES = 500 * 1024 * 1024
 MAX_CLIP_BYTES = 16 * 1024 * 1024
 MIN_CLIP_SEC = 10
 MAX_CLIP_SEC = 95
-TARGET_CLIPS_PER_ERA = 14
+# a fetch fills the cache to here, split across the eras it fetches: most of
+# the 500 MB, leaving room so the oldest spots aren't pruned as new ones land
+FILL_BYTES = int(MAX_CACHE_BYTES * 0.9)
+# archive.org search pages read per era, deepest first only when needed
+SEARCH_PAGES = 6
 HTTP_TIMEOUT = 15
 
 _ARCHIVE_QUERIES: Dict[str, str] = {
@@ -270,24 +274,51 @@ def _parse_duration_sec(raw: Any) -> Optional[int]:
         return None
 
 
-def _download_archive_era(era: str, needed: int = TARGET_CLIPS_PER_ERA) -> int:
+def _era_bytes(era: str) -> int:
+    with _lock:
+        return sum(c.size_bytes for c in _clips_cache.values() if c.era == era and c.source == "archive")
+
+
+def _search_docs(era: str, page: int) -> list:
     query = _ARCHIVE_QUERIES.get(era, _ARCHIVE_QUERIES["mix"])
     params = urllib.parse.urlencode({
         "q": query,
         "fl[]": ["identifier", "title"],
-        "rows": "35",
-        "page": "1",
+        "rows": "100",
+        "page": str(page),
         "output": "json",
     }, doseq=True)
     data = _http_json(f"https://archive.org/advancedsearch.php?{params}")
-    docs = (data or {}).get("response", {}).get("docs", [])
+    return (data or {}).get("response", {}).get("docs", []) or []
+
+
+def _download_archive_era(era: str, needed: int = 0, *, fill_bytes: int = 0) -> int:
+    """fetch new spots for one era: ``needed`` more of them, or with
+    ``fill_bytes`` until the era's spots reach that size. pages through the
+    search, skipping archive items already cached. returns how many it added"""
+    added = 0
+    for page in range(1, SEARCH_PAGES + 1):
+        if (needed and added >= needed) or (fill_bytes and _era_bytes(era) >= fill_bytes):
+            break
+        docs = _search_docs(era, page)
+        if not docs:
+            break
+        with _lock:
+            have = {c.archive_id for c in _clips_cache.values()}
+        docs = [d for d in docs if str(d.get("identifier") or "").strip() not in have]
+        random.shuffle(docs)
+        want = (needed - added) if needed else 10_000
+        added += _download_docs(era, docs, want, fill_bytes)
+    return added
+
+
+def _download_docs(era: str, docs: list, needed: int, fill_bytes: int = 0) -> int:
     if not docs:
         return 0
-    random.shuffle(docs)
     added = 0
     dest_dir = cache_dir()
     for doc in docs:
-        if added >= needed:
+        if added >= needed or (fill_bytes and _era_bytes(era) >= fill_bytes):
             break
         ident = str(doc.get("identifier") or "").strip()
         if not ident:
@@ -380,9 +411,16 @@ def warm_async(era: str = "mix", *, enabled: Optional[bool] = None) -> bool:
     global _warming, _last_error
     if not (enabled if enabled is not None else _server_enabled()):
         return False
+    targets = [era] if era in _ARCHIVE_QUERIES and era != "mix" else ["80s", "90s", "mix"]
     with _lock:
         _load_locked()
         if _warming:
+            return False
+        # the cache is already as full as a fetch fills it: nothing to do,
+        # so say so instead of flashing "fetching" for a job that ends at once
+        share = FILL_BYTES // len(targets)
+        if all(sum(c.size_bytes for c in _clips_cache.values()
+                   if c.era == t and c.source == "archive") >= share for t in targets):
             return False
         _warming = True
         _last_error = None
@@ -390,12 +428,10 @@ def warm_async(era: str = "mix", *, enabled: Optional[bool] = None) -> bool:
     def _run():
         global _warming, _last_error
         try:
-            targets = [era] if era in _ARCHIVE_QUERIES and era != "mix" else ["80s", "90s", "mix"]
+            share = FILL_BYTES // len(targets)
             for target_era in targets:
-                with _lock:
-                    have = sum(1 for c in _clips_cache.values() if c.era == target_era)
-                if have < TARGET_CLIPS_PER_ERA:
-                    _download_archive_era(target_era, needed=TARGET_CLIPS_PER_ERA - have)
+                if _era_bytes(target_era) < share:
+                    _download_archive_era(target_era, fill_bytes=share)
         except Exception as exc:  # noqa: BLE001
             _last_error = str(exc)
             logger.warning("commercials warm failed: %s", exc)

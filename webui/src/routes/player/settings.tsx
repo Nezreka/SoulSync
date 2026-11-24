@@ -47,7 +47,7 @@ import {
   TvIcon,
 } from './-ui/icons';
 import { PageTitle } from './-ui/kit';
-import { notifyError } from './-ui/notice';
+import { notify, notifyError } from './-ui/notice';
 import { QUALITY_LABELS } from './-ui/playback/controls';
 import {
   BRIGHTNESS_STEPS,
@@ -425,16 +425,21 @@ function SettingsPage() {
                       onClick={() => {
                         setWarmingComm(true);
                         void warmCommercials(commConfig.data?.era ?? 'mix')
-                          .then(() =>
-                            Promise.all([
+                          .then((st) => {
+                            if (st.started === false && !st.warming) {
+                              notify(
+                                `Your commercial space is full: ${st.total_count} spots. Clear it to fetch a fresh set.`,
+                              );
+                            }
+                            return Promise.all([
                               queryClient.invalidateQueries({
                                 queryKey: ['player', 'commercials-status'],
                               }),
                               queryClient.invalidateQueries({
                                 queryKey: ['player', 'commercials-config'],
                               }),
-                            ]),
-                          )
+                            ]);
+                          })
                           .catch(notifyError("Couldn't fetch spots right now"))
                           .finally(() => setWarmingComm(false));
                       }}
