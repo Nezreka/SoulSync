@@ -89,7 +89,7 @@ def register_routes(bp):
                 cached = _cached_file(path)
                 if cached is not None:
                     resp = send_file(cached.path, mimetype=cached.mime_type, conditional=True)
-                    resp.headers["Cache-Control"] = "public, max-age=86400"
+                    resp.headers["Cache-Control"] = "public, max-age=60, must-revalidate"
                     resp.headers["X-SoulSync-Image-Cache"] = cached.status
                     return resp
                 upstream = requests.get(path, timeout=15, stream=True)
@@ -97,7 +97,7 @@ def register_routes(bp):
                     abort(404)
                 resp = Response(upstream.iter_content(8192),
                                 content_type=upstream.headers.get("Content-Type", "image/jpeg"))
-                resp.headers["Cache-Control"] = "public, max-age=86400"
+                resp.headers["Cache-Control"] = "public, max-age=60, must-revalidate"
                 return resp
             # Art is served from the VIDEO side's effective connection (its own
             # creds, or inherited from music) — that's where the item was scanned.
@@ -158,7 +158,7 @@ def register_routes(bp):
             cached = _cached_file(full_url)
             if cached is not None:
                 resp = send_file(cached.path, mimetype=cached.mime_type, conditional=True)
-                resp.headers["Cache-Control"] = "public, max-age=86400"
+                resp.headers["Cache-Control"] = "public, max-age=60, must-revalidate"
                 resp.headers["X-SoulSync-Image-Cache"] = cached.status
                 return resp
 
@@ -169,7 +169,7 @@ def register_routes(bp):
                 abort(404)
             ctype = upstream.headers.get("Content-Type", "image/jpeg")
             resp = Response(upstream.iter_content(8192), content_type=ctype)
-            resp.headers["Cache-Control"] = "public, max-age=86400"
+            resp.headers["Cache-Control"] = "public, max-age=60, must-revalidate"
             return resp
         except Exception:
             logger.exception("video %s proxy failed for %s/%s", art, kind, item_id)
