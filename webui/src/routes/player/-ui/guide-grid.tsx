@@ -203,8 +203,25 @@ export function GuideGrid({
                 {clock(t)}
               </div>
             ))}
+            {nowVisible ? (
+              <div
+                className={s.guideNowPill}
+                style={{ left: x(now) }}
+                aria-label={`Current time ${clock(now)}`}
+              >
+                {clock(now)}
+              </div>
+            ) : null}
           </div>
         </div>
+        {marks.map((t) => (
+          <div
+            key={`line-${t}`}
+            className={s.guideGridLine}
+            style={{ left: `calc(var(--g-chan) + ${x(t)}px)` }}
+            aria-hidden="true"
+          />
+        ))}
         {visibleGroups.map((group) => (
           <div key={group.kind} role="rowgroup" aria-label={group.label}>
             <div className={s.guideGroup}>{group.label}</div>
@@ -258,8 +275,16 @@ export function GuideGrid({
                       const left = Math.max(0, x(cell.start));
                       const right = Math.min(width, x(cell.end));
                       if (right <= left) return null;
+                      const clippedLeft = cell.start < from;
                       const live = cell.start <= now && cell.end > now;
-                      const done = live ? (now - cell.start) / (cell.end - cell.start) : 0;
+                      const visibleW = Math.max(1, right - left);
+                      // Progress bar tracks the visible slice so it terminates at the exact NOW needle
+                      const done = live
+                        ? Math.max(0, Math.min(1, (x(now) - left) / visibleW))
+                        : 0;
+                      const timeText = clippedLeft
+                        ? `Started ${clock(cell.start)}`
+                        : clock(cell.start);
                       return (
                         <button
                           key={cell.key}
@@ -269,6 +294,7 @@ export function GuideGrid({
                           data-now={live ? 'true' : undefined}
                           data-past={cell.end <= now ? 'true' : undefined}
                           data-premiere={cell.premiere ? 'true' : undefined}
+                          data-clipped-left={clippedLeft ? 'true' : undefined}
                           style={{ left: left + 2, width: Math.max(8, right - left - 4) }}
                           title={`${cell.premiere ? 'New: ' : ''}${cell.title}${cell.sub ? ` · ${cell.sub}` : ''}\n${clock(cell.start)} – ${clock(cell.end)}`}
                           onClick={(e) => onPick(cell.picked, e.currentTarget)}
@@ -277,13 +303,18 @@ export function GuideGrid({
                           data-nav
                         >
                           <span className={s.guideProgramTitle}>
+                            {clippedLeft ? (
+                              <span className={s.guideClipped} aria-hidden="true">
+                                ◀
+                              </span>
+                            ) : null}
                             {cell.premiere ? <span className={s.guideNew}>New</span> : null}
                             {cell.title}
                           </span>
                           {right - left > 110 ? (
                             <span className={s.guideProgramSub}>
                               {cell.sub ? `${cell.sub} · ` : ''}
-                              {clock(cell.start)}
+                              {timeText}
                             </span>
                           ) : null}
                           {live ? (

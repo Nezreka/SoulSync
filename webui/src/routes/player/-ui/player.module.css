@@ -2346,7 +2346,7 @@
 .guideTimes {
   position: sticky;
   top: 0;
-  z-index: 3;
+  z-index: 4;
   display: flex;
   height: var(--g-head);
   background: var(--pl-panel-solid);
@@ -2356,7 +2356,7 @@
 .guideCorner {
   position: sticky;
   left: 0;
-  z-index: 4;
+  z-index: 5;
   flex: none;
   width: var(--g-chan);
   background: var(--pl-panel-solid);
@@ -2404,7 +2404,7 @@
 .guideChannel {
   position: sticky;
   left: 0;
-  z-index: 2;
+  z-index: 3;
   display: flex;
   flex: none;
   align-items: center;
@@ -2567,11 +2567,47 @@
   white-space: nowrap;
 }
 
+.guideGridLine {
+  position: absolute;
+  top: var(--g-head);
+  bottom: 0;
+  z-index: 0;
+  width: 1px;
+  background: var(--white-a06);
+  pointer-events: none;
+}
+
+.guideNowPill {
+  position: absolute;
+  top: 50%;
+  z-index: 4;
+  padding: calc(var(--u) * 0.14) calc(var(--u) * 0.48);
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  color: var(--pl-090b10);
+  font-size: calc(var(--u) * 0.7);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  line-height: 1.2;
+  white-space: nowrap;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 2px 10px rgba(var(--accent-rgb), 0.45);
+  pointer-events: none;
+}
+
+.guideClipped {
+  margin-right: calc(var(--u) * 0.32);
+  color: var(--accent-light);
+  font-size: 0.72em;
+  opacity: 0.85;
+}
+
 .guideNow {
   position: absolute;
-  top: 0;
+  top: var(--g-head);
   bottom: 0;
-  z-index: 1;
+  z-index: 2;
   width: 2px;
   background: var(--accent);
   box-shadow: 0 0 calc(var(--u) * 0.6) rgba(var(--accent-rgb), 0.7);
