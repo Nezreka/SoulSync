@@ -244,6 +244,20 @@ export function ProwlarrPanel({
           onChange={(value) => set('api_key', value)}
         />
       </SheetField>
+      <SheetField
+        label="FlareSolverr URL"
+        htmlFor="flaresolverr-url"
+        help="For the sites behind a browser check: EXT.to (Fresh Releases and its search) and Beatport when it blocks."
+        more="FlareSolverr, or a compatible solver such as Byparr, opens those pages in a real browser. Often the same one your Prowlarr uses for its Cloudflare-protected indexers."
+      >
+        <TextField
+          full
+          id="flaresolverr-url"
+          placeholder="http://localhost:8191"
+          value={str((settings.flaresolverr as Record<string, unknown> | undefined)?.url)}
+          onChange={(event) => store.set('flaresolverr', 'url', event.target.value)}
+        />
+      </SheetField>
 
       <SheetGroup title="Indexers" />
       <ActionRow label="Indexers" help="Tests the connection, then lists what Prowlarr searches.">

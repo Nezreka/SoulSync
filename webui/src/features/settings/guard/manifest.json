@@ -1540,6 +1540,23 @@
       "asked": "http://guard.example:4321",
       "shows": ["prowlarr.url"]
     },
+    "#flaresolverr-url": {
+      "sel": "#flaresolverr-url",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "http://guard.example:4321",
+      "saves": {
+        "settings": {
+          "flaresolverr": {
+            "url": "http://guard.example:4321"
+          }
+        }
+      },
+      "asked": "http://guard.example:4321",
+      "shows": ["flaresolverr.url"]
+    },
     "#prowlarr-api-key": {
       "sel": "#prowlarr-api-key",
       "kind": "text",
@@ -15204,6 +15221,7 @@
       "video-redownload-failed",
       "prowlarr-url",
       "prowlarr-api-key",
+      "flaresolverr-url",
       "prowlarr-indexer-ids",
       "prowlarr-search-min-gap",
       "prowlarr-max-searches-per-minute",

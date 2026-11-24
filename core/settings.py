@@ -753,6 +753,12 @@ class ConfigManager:
                 # download_timeout.
                 "stall_timeout": 1800,
             },
+            # FlareSolverr (or a compatible solver) for the sites behind a
+            # browser check: EXT.to (video Fresh Releases, its search) and the
+            # Beatport scraper when blocked. core.flaresolverr reads it.
+            "flaresolverr": {
+                "url": "http://localhost:8191",
+            },
             # Prowlarr — indexer aggregator. Feeds the torrent / usenet
             # download plugins. Not a standalone source.
             "prowlarr": {
