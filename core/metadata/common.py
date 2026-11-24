@@ -342,14 +342,20 @@ def save_audio_file(audio_file: Any, symbols: Any) -> bool:
         shutil.copy2(path, tmp)               # snapshot original (audio + tags)
         _raw_audio_save(audio_file, symbols, target=tmp)  # write new tags into the copy
 
-        check = symbols.File(tmp)             # 1) still a parseable audio file?
+        # The staging filename ends in .sstmp, which can cause
+        # Mutagen's format detection to misidentify valid FLAC files.
+        # Reuse the known FLAC parser without changing the staging suffix.
+        flac_cls = getattr(symbols, "FLAC", None)
+        if flac_cls is not None and isinstance(audio_file, flac_cls):
+            check = flac_cls(tmp)
+        else:
+            check = symbols.File(tmp)
         if check is None:
             raise _AudioIntegrityError("temp is not a parseable audio file")
 
         # 2) audio stream intact? FLAC → exact frame byte-compare (definitive,
         #    and robust to legit unknown-length STREAMINFO); other formats →
         #    structural signature + duration vs the ORIGINAL.
-        flac_cls = getattr(symbols, "FLAC", None)
         if flac_cls is not None and isinstance(audio_file, flac_cls):
             identical = _flac_audio_identical(path, tmp)
             if identical is False:
