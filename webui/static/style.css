@@ -14515,8 +14515,12 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     top: 18px;
     right: 18px;
     z-index: 2;
-    width: 34px;
-    height: 34px;
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+    min-height: 36px;
+    padding: 0;
+    box-sizing: border-box;
     border-radius: var(--radius-circle);
     display: flex;
     align-items: center;

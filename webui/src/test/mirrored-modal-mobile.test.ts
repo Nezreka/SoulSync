@@ -230,6 +230,23 @@ describe('the modal takes more of the phone', () => {
     expect(modal.indexOf('100vh')).toBeLessThan(modal.indexOf('100dvh'));
   });
 
+  // #2282: the hero pinned and the list scrolled in the strip under it,
+  // so on a phone the tracks were cut off. the panel scrolls as one page
+  it('scrolls the whole panel, not just the list', () => {
+    expect(finalValue('.mirrored-modal', 'overflow-y')).toBe('auto');
+    expect(finalValue('.mm-as-page .mirrored-modal', 'overflow-y')).toBe('auto');
+    expect(finalValue('.mm-list', 'overflow-y')).toBe('visible');
+    expect(finalValue('.mm-list', 'flex')).toBe('0 0 auto');
+    expect(finalValue('.mm-actions', 'position')).toBe('sticky');
+  });
+
+  // #2282: the 38px touch floor stretched the 36px close button into an oval
+  it('keeps the close button out of the touch floor', () => {
+    const floor = MOBILE.match(/button(?::not\([^)]*\))+\s*\{\s*min-height:\s*38px/);
+    expect(floor).not.toBeNull();
+    expect(floor![0]).toContain(':not(.mm-close)');
+  });
+
   it('returns the hero info width only where the hero is stacked', () => {
     // at 641-768px the hero is still a row and the base 44px
     // padding-right is the close button's clearance

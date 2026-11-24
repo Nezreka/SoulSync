@@ -21,7 +21,7 @@
   position: absolute;
   width: min(440px, 85vw);
   height: min(440px, 85vw);
-  border-radius: var(--radius-full);
+  border-radius: var(--radius-circle);
   filter: blur(56px);
   pointer-events: none;
   will-change: transform, opacity;
@@ -122,7 +122,7 @@
 .hairline {
   width: 48px;
   height: 2px;
-  border-radius: var(--radius-full);
+  border-radius: var(--radius-pill);
   background: linear-gradient(
     90deg,
     transparent,

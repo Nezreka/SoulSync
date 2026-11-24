@@ -22,7 +22,7 @@
   gap: calc(var(--u) * 0.42);
   height: calc(var(--u) * 2.35);
   padding: 0 calc(var(--u) * 1.15);
-  border: 1px solid var(--white-a22);
+  border: 1px solid var(--white-a20);
   border-radius: var(--radius-pill);
   background: var(--pl-text);
   color: var(--pl-bg);
@@ -1136,6 +1136,6 @@
 }
 
 .premierIconBtn:hover {
-  border-color: var(--white-a28);
+  border-color: var(--white-a30);
   background: var(--white-a14);
 }
