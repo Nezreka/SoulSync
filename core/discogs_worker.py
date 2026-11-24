@@ -470,7 +470,9 @@ class DiscogsWorker:
             # for why we accept both `type_ == 'track'` and empty `type_`
             # (kettui's PR #374 review — narrower filter undercounted).
             set_expected_track_count(
-                conn, album_id, count_discogs_real_tracks(data.get('tracklist')))
+                conn, album_id, count_discogs_real_tracks(data.get('tracklist')),
+                source='discogs', provider_id=discogs_id,
+            )
 
             record_attempt(conn, entity_type='album', entity_id=album_id,
                            service='discogs', status='matched')
