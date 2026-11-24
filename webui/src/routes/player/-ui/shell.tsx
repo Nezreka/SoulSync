@@ -27,6 +27,7 @@ const ACCENT_PALETTE: Record<PlayerAccentColor, { rgb: string; lightRgb: string 
   rose: { rgb: '244, 63, 94', lightRgb: '251, 113, 133' },
   crimson: { rgb: '239, 68, 68', lightRgb: '248, 113, 113' },
 };
+import { PlayerBootOverlay } from './boot-loader';
 import { ContextMenuHost } from './context-menu';
 import { BackIcon, ChevronIcon, ExitIcon, GearIcon, MoreIcon } from './icons';
 import { AddToPlaylistHost } from './music/add-to-playlist';
@@ -468,6 +469,7 @@ export function PlayerShell({ profileId }: { profileId: number | null }) {
       {gate && profiles ? (
         <WhoGate profiles={profiles} currentId={profileId} onDone={() => setGate(false)} />
       ) : null}
+      <PlayerBootOverlay ready={!!playerSettings} />
     </div>,
     document.body,
   );

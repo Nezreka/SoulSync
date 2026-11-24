@@ -1,0 +1,90 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: grid;
+  place-items: center;
+  background: black;
+  opacity: 1;
+  transition: opacity 380ms ease-out;
+  pointer-events: auto;
+}
+
+.overlay[data-fading='true'] {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.loader {
+  position: relative;
+  width: min(220px, 46vw);
+  height: min(220px, 46vw);
+  animation: breathe 2.8s ease-in-out infinite;
+  will-change: transform, filter;
+}
+
+.loader img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.sheen {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    115deg,
+    transparent 35%,
+    color-mix(in srgb, white 55%, transparent) 50%,
+    transparent 65%
+  );
+  background-size: 250% 250%;
+  mix-blend-mode: screen;
+  -webkit-mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-size: contain;
+  mask-repeat: no-repeat;
+  mask-position: center;
+  animation: sheen 2.8s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes breathe {
+  0%,
+  100% {
+    transform: scale(1);
+    filter: drop-shadow(0 0 0 transparent);
+  }
+
+  50% {
+    transform: scale(1.03);
+    filter: drop-shadow(0 0 18px rgba(var(--accent-light-rgb), 0.28));
+  }
+}
+
+@keyframes sheen {
+  0%,
+  100% {
+    background-position: 150% 0%;
+    opacity: 0;
+  }
+
+  15%,
+  85% {
+    opacity: 1;
+  }
+
+  95% {
+    background-position: -50% 0%;
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loader,
+  .sheen {
+    animation: none;
+  }
+}
