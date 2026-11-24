@@ -701,10 +701,10 @@ export function MusicImport({ store }: { store: SettingsStore }) {
         help="On by default. Off if your music library folder is only a drop area, not your real library."
         more={
           <>
-            Off, a Deep Scan never moves files it doesn&apos;t recognize out to the import folder:
-            it leaves them where they are and reports them. Even with this off, a Deep Scan refuses
-            to move files when the database looks badly out of step with the disk, so a library is
-            never wiped (#904).
+            On, a Deep Scan never moves files out: one it doesn&apos;t recognize is added to the
+            library where it sits. Off, a Deep Scan moves those files to the import folder to be
+            matched and filed. Even with this off, a Deep Scan refuses to move files when the
+            database looks badly out of step with the disk, so a library is never wiped (#904).
           </>
         }
       >
