@@ -223,6 +223,7 @@ def shape_video_catalog(raw, sees_movies, sees_shows, sees_youtube, cap):
 
 _CACHE_STALE_SECONDS = 600
 _cache_refreshing: set = set()
+_cache_key_locks: dict = {}
 
 
 def _refresh_catalog_bg(key, sees_movies, sees_shows, sees_youtube):
@@ -258,7 +259,6 @@ def _read_catalog(sees_movies, sees_shows, sees_youtube, *, force: bool = False)
             if age < _CACHE_STALE_SECONDS:
                 if key not in _cache_refreshing:
                     _cache_refreshing.add(key)
-                    import threading
                     threading.Thread(
                         target=_refresh_catalog_bg,
                         args=(key, sees_movies, sees_shows, sees_youtube),
@@ -266,12 +266,23 @@ def _read_catalog(sees_movies, sees_shows, sees_youtube, *, force: bool = False)
                         name="player-catalog-swr",
                     ).start()
                 return hit[1]
+        key_lock = _cache_key_locks.setdefault(key, threading.Lock())
+    # the read runs outside _cache_lock: a cold read of one view used to hold
+    # every catalog request (every view) and the background refreshes behind
+    # it. the same view asking twice still reads once (single flight)
+    with key_lock:
+        with _cache_lock:
+            hit = _cache.get(key)
+            if hit and not force and time.monotonic() - hit[0] < _CACHE_SECONDS:
+                return hit[1]
+        started = time.monotonic()
         conn = get_video_db()._get_connection()
         try:
             raw = catalog.read_all(conn, sees_movies, sees_shows, sees_youtube)
         finally:
             conn.close()
-        _cache[key] = (time.monotonic(), raw)
+        with _cache_lock:
+            _cache[key] = (started, raw)
         return raw
 
 
