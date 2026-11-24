@@ -1899,6 +1899,7 @@ def player_issues_list():
 @self_only
 def player_issues_create():
     """Report a playback, audio, subtitle, quality, or metadata issue on any media item."""
+    from flask import g
     from core.player import issues as player_issues
     pid = _profile()
     if pid is None:

@@ -138,6 +138,19 @@ OPTED_IN = {
     "player.update_watch_party_state": A.PLAYBACK,
     "player.post_watch_party_chat": A.PLAYBACK,
     "player.delete_watch_party": A.PLAYBACK,
+    "player.collection_poster": A.PLAYBACK,
+    "player.get_commercials_config": A.PLAYBACK,
+    "player.put_commercials_config": A.PLAYBACK,
+    "player.get_commercials_status": A.PLAYBACK,
+    "player.warm_commercials": A.PLAYBACK,
+    "player.get_commercial_break": A.PLAYBACK,
+    "player.schedule_commercial_breaks": A.PLAYBACK,
+    "player.clear_commercials_cache": A.PLAYBACK,
+    "player.player_issues_list": A.PLAYBACK,
+    "player.player_issues_create": A.PLAYBACK,
+    "player.player_issues_update": A.PLAYBACK,
+    "player.player_issues_delete": A.PLAYBACK,
+    "video_api.video_img_proxy": A.PLAYBACK,
 }
 
 IGNORED = {"HEAD", "OPTIONS"}

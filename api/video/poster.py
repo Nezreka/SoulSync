@@ -186,6 +186,7 @@ def register_routes(bp):
         return _stream_art(kind, item_id, "backdrop")
 
     @bp.route("/img", methods=["GET"])
+    @device_playback
     def video_img_proxy():
         """Same-origin image proxy (SSRF-safe allowlist). TMDB for accent-sampling,
         YouTube CDN (avatars/banners/thumbnails) so channel art loads reliably
