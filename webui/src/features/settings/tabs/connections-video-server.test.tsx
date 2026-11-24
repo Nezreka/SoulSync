@@ -107,7 +107,7 @@ describe('the video media server', () => {
     // one heading: the old group's own "Server Connection" heading went
     expect(container.querySelectorAll('h3')).toHaveLength(0);
     const radios = [...container.querySelectorAll('[role="radio"]')];
-    expect(radios.map((r) => r.textContent)).toEqual(['Plex', 'Jellyfin']);
+    expect(radios.map((r) => r.textContent)).toEqual(['Plex', 'Jellyfin', 'Standalone']);
     expect(q('[data-video-server-toggle="jellyfin"]').getAttribute('aria-checked')).toBe('true');
     fireEvent.click(
       [...container.querySelectorAll('button')].find(
@@ -176,6 +176,34 @@ describe('the video media server', () => {
     await waitFor(() => expect(posts('/api/video/server')).toEqual([{ server: 'plex' }]));
     await waitFor(() =>
       expect(shell.showToast).toHaveBeenCalledWith('Video server set to Plex', 'success'),
+    );
+  });
+
+  it('Standalone: no server to test or configure, no libraries to pick, and it says what it does', async () => {
+    const { container } = render(<VideoServerConnection />);
+    await shown();
+    fireEvent.click(q('[data-video-server-toggle="soulsync"]'));
+    await waitFor(() => expect(posts('/api/video/server')).toEqual([{ server: 'soulsync' }]));
+    expect(q('[data-video-server-toggle="soulsync"]').getAttribute('aria-checked')).toBe('true');
+    expect(shell.showToast).toHaveBeenCalledWith(
+      'Video library set to Standalone: SoulSync scans your folders',
+      'success',
+    );
+    expect(document.querySelector('[data-video-lib-select]')).toBeNull();
+    expect(q<HTMLElement>('[data-video-standalone]').textContent).toMatch(
+      /scans your Movies and TV folders/,
+    );
+    const btn = (label: string) =>
+      [...container.querySelectorAll('button')].find((b) => b.textContent === label)!;
+    expect(btn('Test server').disabled).toBe(true);
+    expect(btn('View configuration').disabled).toBe(true);
+    expect(document.querySelector('[data-testid="state"]')!.textContent).toBe(
+      'ok: no media server',
+    );
+    // and back: the libraries return
+    fireEvent.click(q('[data-video-server-toggle="plex"]'));
+    await waitFor(() =>
+      expect(document.querySelector('[data-video-lib-select="tv"]')).not.toBeNull(),
     );
   });
 

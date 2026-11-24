@@ -25330,6 +25330,16 @@ try:
 except Exception:
     logger.warning("could not start the video import folder worker", exc_info=True)
 
+# the video folders, watched (core/video/folder_watch.py): with soulsync's own
+# folder scan as the library, a file dropped in shows up within a minute. it
+# watches nothing while plex or jellyfin is the video source.
+try:
+    from core.video.folder_watch import ensure_started as _ensure_video_folder_watch
+    from api.video import get_video_db as _get_video_db_for_watch
+    _ensure_video_folder_watch(_get_video_db_for_watch)
+except Exception:
+    logger.warning("could not start the video folder watch", exc_info=True)
+
 # Library Manager v2 — the UI-facing API mounted on /api/library/v2/*.
 # NOT opt-in: the cutover happened, lib2_* is the maintained catalogue, and
 # zero runtime SQL touches the legacy tables (enforced by

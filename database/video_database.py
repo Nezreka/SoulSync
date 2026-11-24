@@ -135,6 +135,20 @@ _initialized_paths: set[str] = set()
 _ARTICLE_RE = re.compile(r"^(the|a|an)\s+", re.IGNORECASE)
 
 
+# a library file soulsync has yet to read with ffprobe: its languages aren't
+# known, or its resolution isn't (a folder scan reads only the name, and
+# 'Movie (1999).mkv' says nothing) and no probe has recorded the file's facts
+_UNPROBED = (
+    "f.video_id IS NULL AND f.size_bytes > 0 AND (f.audio_languages IS NULL OR ("
+    "COALESCE(f.resolution, '') = '' AND NOT EXISTS ("
+    "SELECT 1 FROM video_file_probes p WHERE p.size_bytes = f.size_bytes AND p.facts = 1 "
+    "AND f.relative_path LIKE '%' || p.file_name)))")
+
+# an episode's metadata and watch state, as a scan writes them
+_EP_META = ("title", "overview", "air_date", "runtime_minutes", "still_url", "rating", "tvdb_id",
+            "play_count", "last_viewed_at", "view_offset_ms")
+
+
 def _added_stamp() -> str:
     """when a file landed, the way the scans write a server's add date"""
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -159,11 +173,13 @@ _ENRICH = {
 # Whitelist of metadata columns enrichment may write per table (guards against
 # arbitrary keys; backfill semantics applied by the caller).
 _ENRICH_META_COLS = {
-    "movies": {"overview", "backdrop_url", "logo_url", "release_date", "status", "content_rating",
+    # poster_url: only ever fills a blank one (a title soulsync itself owns
+    # has no server poster); a server's poster is never replaced
+    "movies": {"overview", "poster_url", "backdrop_url", "logo_url", "release_date", "status", "content_rating",
                "runtime_minutes", "studio", "tagline", "rating", "rating_critic",
                "tmdb_collection_id", "tmdb_collection_name",
                "imdb_id", "tmdb_id"},
-    "shows": {"overview", "backdrop_url", "logo_url", "status", "network", "content_rating",
+    "shows": {"overview", "poster_url", "backdrop_url", "logo_url", "status", "network", "content_rating",
               "tagline", "rating", "first_air_date", "last_air_date", "airs_time",
               "imdb_id", "tmdb_id", "tvdb_id"},
 }
@@ -475,6 +491,20 @@ _COLUMN_MIGRATIONS = [
     ("shows", "mediastinger_status", "TEXT"), ("shows", "mediastinger_attempted", "TEXT"),
     # Aspect ratio (from the media file / server), for the Aspect overlay badge
     ("media_files", "aspect", "TEXT"),
+    # a version's edition ("Director's Cut", plex's {edition-...} tag), read
+    # off the file name by soulsync's own folder scan (core/video/disk_source.py)
+    ("media_files", "edition", "TEXT"),
+    # everything ffprobe reads off a file, not only its languages: a file whose
+    # name says nothing still shows its real resolution, codecs and HDR.
+    # facts=1 marks a probe that recorded them (older probes kept languages only)
+    ("video_file_probes", "resolution", "TEXT"),
+    ("video_file_probes", "video_codec", "TEXT"),
+    ("video_file_probes", "audio_codec", "TEXT"),
+    ("video_file_probes", "dynamic_range", "TEXT"),
+    ("video_file_probes", "atmos", "INTEGER"),
+    ("video_file_probes", "runtime_seconds", "INTEGER"),
+    ("video_file_probes", "aspect", "TEXT"),
+    ("video_file_probes", "facts", "INTEGER NOT NULL DEFAULT 0"),
     # Awards (OMDb Awards string → oscar/winner flag) for the Awards overlay badge
     ("movies", "awards", "TEXT"),
     ("movies", "awards_status", "TEXT"), ("movies", "awards_attempted", "TEXT"),
@@ -1025,6 +1055,8 @@ class VideoDatabase:
     # _ensure_columns (the schema executescript runs first, before the ALTERs, so
     # these would fail with "no such column" on an upgraded DB if placed there).
     _POST_INDEXES = (
+        # the media info job asks "has this file's size a full probe?" per file
+        "CREATE INDEX IF NOT EXISTS idx_video_file_probes_size ON video_file_probes(size_bytes)",
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_video_wishlist_video "
         "ON video_wishlist(profile_id, source_id) WHERE kind = 'video'",
         "CREATE INDEX IF NOT EXISTS idx_video_wishlist_channel "
@@ -5497,9 +5529,24 @@ class VideoDatabase:
         the date it was added. the rows are rewritten, but a page that holds
         a file's id (its menu, an open preview, an undo) still points at that
         file after a scan or a refresh of the title."""
-        kept = {r[1]: (r[0], r[2]) for r in conn.execute(
-            f"SELECT id, relative_path, added_at FROM media_files WHERE {owner_col} = ?",
-            (owner_id,))}
+        was = conn.execute(
+            f"SELECT id, relative_path, added_at, size_bytes FROM media_files WHERE {owner_col} = ?",
+            (owner_id,)).fetchall()
+        kept = {r[1]: (r[0], r[2]) for r in was}
+        # a file renamed in place is the same file: a row whose path is gone
+        # hands its id and add date to the new path of the same size, when
+        # that is the only candidate either way
+        if files:
+            flist = [files] if isinstance(files, dict) else [f for f in files if f]
+            new_paths = {(f.get("relative_path") or f.get("path") or "") for f in flist}
+            gone = [r for r in was if r[1] not in new_paths]
+            fresh = [f for f in flist if (f.get("relative_path") or f.get("path") or "") not in kept]
+            for f in fresh:
+                same = [r for r in gone if r[3] and r[3] == f.get("size_bytes")]
+                twins = [x for x in fresh if x.get("size_bytes") == f.get("size_bytes")]
+                if len(same) == 1 and len(twins) == 1:
+                    kept[f.get("relative_path") or f.get("path") or ""] = (same[0][0], same[0][2])
+                    gone.remove(same[0])
         # a new file is numbered past every row there was, so it never takes
         # the id of a file this same rewrite just dropped
         next_id = (conn.execute("SELECT MAX(id) FROM media_files").fetchone()[0] or 0) + 1
@@ -5516,14 +5563,23 @@ class VideoDatabase:
             audio_langs = format_languages(file.get("audio_languages"))
             sub_langs = format_languages(file.get("subtitle_languages"))
             channels = file.get("audio_channels")
-            if audio_langs is None:
-                # the server sent no stream data (plex's listing never does):
-                # what soulsync probed off this file, if it has
-                probed = VideoDatabase._file_probe(conn, path, file.get("size_bytes"))
-                if probed:
+            # what soulsync probed off this file, if it has: the languages
+            # when the server sent no stream data (plex's listing never does),
+            # and any fact the source didn't state (a folder scan reads only
+            # the file's name). what the source did say is never replaced
+            probed = VideoDatabase._file_probe(conn, path, file.get("size_bytes"))
+            if probed:
+                if audio_langs is None:
                     audio_langs = probed["audio_languages"]
                     sub_langs = probed["subtitle_languages"] if sub_langs is None else sub_langs
-                    channels = channels or probed["audio_channels"]
+                channels = channels or probed["audio_channels"]
+                file = dict(file)
+                for k in ("resolution", "video_codec", "audio_codec", "dynamic_range",
+                          "runtime_seconds", "aspect"):
+                    if not file.get(k) and probed.get(k):
+                        file[k] = probed[k]
+                if not file.get("atmos") and probed.get("atmos"):
+                    file["atmos"] = True
             # two copies reported at one path would both claim the id: the first keeps it
             old_id, old_added = kept.pop(path, (None, None))
             if old_id is None:
@@ -5531,14 +5587,15 @@ class VideoDatabase:
             conn.execute(
                 f"INSERT INTO media_files (id, added_at, {owner_col}, relative_path, size_bytes, resolution, "
                 "video_codec, audio_codec, release_source, quality, runtime_seconds, aspect, "
-                "audio_channels, dynamic_range, atmos, audio_languages, subtitle_languages) "
-                "VALUES (?, COALESCE(?, CURRENT_TIMESTAMP), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "audio_channels, dynamic_range, atmos, audio_languages, subtitle_languages, edition) "
+                "VALUES (?, COALESCE(?, CURRENT_TIMESTAMP), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (old_id, old_added, owner_id, path,
                  file.get("size_bytes"), file.get("resolution"), file.get("video_codec"),
                  file.get("audio_codec"), file.get("release_source"), file.get("quality"),
                  file.get("runtime_seconds"), canonical_aspect(file.get("aspect")),
                  channels, file.get("dynamic_range"),
-                 1 if file.get("atmos") else 0, audio_langs, sub_langs),
+                 1 if file.get("atmos") else 0, audio_langs, sub_langs,
+                 (str(file.get("edition")).strip() or None) if file.get("edition") else None),
             )
 
     @staticmethod
@@ -5554,7 +5611,8 @@ class VideoDatabase:
             return None
         try:
             row = conn.execute(
-                "SELECT audio_languages, subtitle_languages, audio_channels "
+                "SELECT audio_languages, subtitle_languages, audio_channels, resolution, "
+                "video_codec, audio_codec, dynamic_range, atmos, runtime_seconds, aspect "
                 "FROM video_file_probes WHERE file_name=? AND size_bytes=?",
                 (name, int(size_bytes))).fetchone()
         except (sqlite3.Error, ValueError, TypeError):
@@ -5562,11 +5620,15 @@ class VideoDatabase:
         if not row:
             return None
         return {"audio_languages": row[0], "subtitle_languages": row[1],
-                "audio_channels": row[2]}
+                "audio_channels": row[2], "resolution": row[3], "video_codec": row[4],
+                "audio_codec": row[5], "dynamic_range": row[6], "atmos": bool(row[7]),
+                "runtime_seconds": row[8], "aspect": row[9]}
 
     def record_file_probe(self, path, size_bytes, info) -> bool:
-        """keep what ffprobe read off a file (languages, channels), and fill it
-        into the library rows for that file now. never raises."""
+        """keep what ffprobe read off a file (its languages and channels, and
+        its real resolution, codecs, HDR and runtime), and fill it into the
+        library rows for that file now. a fact a row already has (the media
+        server's, or the file name's) is never replaced. never raises."""
         name = self._file_name(path)
         if not name or not size_bytes or not isinstance(info, dict):
             return False
@@ -5574,18 +5636,29 @@ class VideoDatabase:
         audio = format_languages(info.get("audio_languages") or [])
         subs = format_languages(info.get("subtitle_languages") or [])
         channels = info.get("audio_channels") or None
+        try:
+            runtime = int(float(info["duration_sec"])) if info.get("duration_sec") else None
+        except (TypeError, ValueError):
+            runtime = None
+        facts = (info.get("resolution") or None, info.get("video_codec") or None,
+                 info.get("audio_codec") or None, info.get("dynamic_range") or None,
+                 1 if info.get("atmos") else 0, runtime, info.get("aspect") or None)
         conn = self._get_connection()
         try:
             conn.execute(
                 "INSERT INTO video_file_probes (file_name, size_bytes, audio_languages, "
-                "subtitle_languages, audio_channels, probed_at) "
-                "VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP) "
+                "subtitle_languages, audio_channels, resolution, video_codec, audio_codec, "
+                "dynamic_range, atmos, runtime_seconds, aspect, facts, probed_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP) "
                 "ON CONFLICT(file_name, size_bytes) DO UPDATE SET "
                 "audio_languages=excluded.audio_languages, "
                 "subtitle_languages=excluded.subtitle_languages, "
                 "audio_channels=COALESCE(excluded.audio_channels, video_file_probes.audio_channels), "
-                "probed_at=CURRENT_TIMESTAMP",
-                (name, int(size_bytes), audio, subs, channels))
+                "resolution=excluded.resolution, video_codec=excluded.video_codec, "
+                "audio_codec=excluded.audio_codec, dynamic_range=excluded.dynamic_range, "
+                "atmos=excluded.atmos, runtime_seconds=excluded.runtime_seconds, "
+                "aspect=excluded.aspect, facts=1, probed_at=CURRENT_TIMESTAMP",
+                (name, int(size_bytes), audio, subs, channels, *facts))
             # the library rows for this file, on whatever path the server sees it
             for row in conn.execute(
                     "SELECT id, relative_path FROM media_files WHERE size_bytes=?",
@@ -5593,8 +5666,15 @@ class VideoDatabase:
                 if self._file_name(row[1]) == name:
                     conn.execute(
                         "UPDATE media_files SET audio_languages=?, subtitle_languages=?, "
-                        "audio_channels=COALESCE(audio_channels, ?) WHERE id=?",
-                        (audio, subs, channels, row[0]))
+                        "audio_channels=COALESCE(audio_channels, ?), "
+                        "resolution=COALESCE(NULLIF(resolution, ''), ?), "
+                        "video_codec=COALESCE(NULLIF(video_codec, ''), ?), "
+                        "audio_codec=COALESCE(NULLIF(audio_codec, ''), ?), "
+                        "dynamic_range=COALESCE(NULLIF(dynamic_range, ''), ?), "
+                        "atmos=CASE WHEN COALESCE(atmos, 0)=1 THEN 1 ELSE ? END, "
+                        "runtime_seconds=COALESCE(runtime_seconds, ?), "
+                        "aspect=COALESCE(NULLIF(aspect, ''), ?) WHERE id=?",
+                        (audio, subs, channels, *facts, row[0]))
             conn.commit()
             return True
         except (sqlite3.Error, ValueError, TypeError) as e:
@@ -5821,8 +5901,14 @@ class VideoDatabase:
             if item.get("server_added_at"):
                 base["server_added_at"] = item["server_added_at"]
             self._claim_owned(conn, "movies", server_source, item)
-            self._resilient_upsert(conn, "movies", base,
-                                   {"tmdb_id": item.get("tmdb_id"), "imdb_id": item.get("imdb_id")},
+            self._rehome_owned(conn, "movies", server_source, item)
+            ids = {"tmdb_id": item.get("tmdb_id"), "imdb_id": item.get("imdb_id")}
+            sparse = server_source == "soulsync"
+            if sparse:
+                # soulsync's folder scan knows the files, not the metadata:
+                # what it has no value for stays as enrichment wrote it
+                base, ids = self._known_only(base), self._known_only(ids)
+            self._resilient_upsert(conn, "movies", base, ids,
                                    preserve_enrichment=preserve_enrichment)
             movie_id = conn.execute(
                 "SELECT id FROM movies WHERE server_source=? AND server_id=?",
@@ -5831,6 +5917,11 @@ class VideoDatabase:
             self._adopt_title_profile(conn, "movie", movie_id)
             self._set_media_file(conn, "movie_id", movie_id,
                                  item.get("files") or item.get("file"))
+            if item.get("_review"):
+                self._mark_review(conn, "movies", movie_id)
+            if sparse and "genres" not in item:
+                conn.commit()
+                return movie_id
             if "genres" not in self._locked_fields_set(conn, "movies", movie_id):
                 self._set_genres(conn, "movie_genres", "movie_id", movie_id, item.get("genres"))
             if "studio" not in self._locked_fields_set(conn, "movies", movie_id):
@@ -5862,7 +5953,10 @@ class VideoDatabase:
                 _fad = str(item.get("first_air_date") or "")[:4]
                 _year = int(_fad) if _fad.isdigit() else None
             self._claim_owned(conn, "shows", server_source, item)
-            self._resilient_upsert(conn, "shows", {
+            self._rehome_owned(conn, "shows", server_source, item)
+            sparse = server_source == "soulsync"
+            keep = self._known_only if sparse else (lambda d: d)
+            self._resilient_upsert(conn, "shows", keep({
                 "server_source": server_source, "server_id": item["server_id"],
                 "title": item.get("title"), "sort_title": _sort_title(item.get("title")),
                 "year": _year, "overview": item.get("overview"),
@@ -5876,16 +5970,21 @@ class VideoDatabase:
                 # their shows anime); only written when the source says, so a
                 # re-key lookup that doesn't know keeps the scanned value
                 **({"library_name": item["library"]} if item.get("library") else {}),
-            }, {"tvdb_id": item.get("tvdb_id"), "tmdb_id": item.get("tmdb_id"), "imdb_id": item.get("imdb_id")},
+            }), keep({"tvdb_id": item.get("tvdb_id"), "tmdb_id": item.get("tmdb_id"),
+                      "imdb_id": item.get("imdb_id")}),
                 preserve_enrichment=preserve_enrichment)
             show_id = conn.execute(
                 "SELECT id FROM shows WHERE server_source=? AND server_id=?",
                 (server_source, item["server_id"]),
             ).fetchone()["id"]
             self._adopt_title_profile(conn, "show", show_id)
-            if "genres" not in self._locked_fields_set(conn, "shows", show_id):
+            if item.get("_review"):
+                self._mark_review(conn, "shows", show_id)
+            if not (sparse and "genres" not in item) and \
+                    "genres" not in self._locked_fields_set(conn, "shows", show_id):
                 self._set_genres(conn, "show_genres", "show_id", show_id, item.get("genres"))
-            if "network" not in self._locked_fields_set(conn, "shows", show_id):
+            if not (sparse and "network" not in item and "networks" not in item) and \
+                    "network" not in self._locked_fields_set(conn, "shows", show_id):
                 networks = item.get("networks") or ([item["network"]] if item.get("network") else [])
                 self._set_named_links(conn, "show_networks", "show_id", "networks", "network_id",
                                       show_id, networks)
@@ -5899,8 +5998,12 @@ class VideoDatabase:
                     "INSERT INTO seasons (show_id, server_id, season_number, title, overview, poster_url) "
                     "VALUES (?, ?, ?, ?, ?, ?) "
                     "ON CONFLICT(show_id, season_number) DO UPDATE SET "
-                    "server_id=excluded.server_id, title=excluded.title, "
-                    "overview=excluded.overview, poster_url=excluded.poster_url",
+                    + ("server_id=COALESCE(excluded.server_id, seasons.server_id), "
+                       "title=COALESCE(excluded.title, seasons.title), "
+                       "overview=COALESCE(excluded.overview, seasons.overview), "
+                       "poster_url=COALESCE(excluded.poster_url, seasons.poster_url)" if sparse else
+                       "server_id=excluded.server_id, title=excluded.title, "
+                       "overview=excluded.overview, poster_url=excluded.poster_url"),
                     (show_id, season.get("server_id"), snum, season.get("title"),
                      season.get("overview"), season.get("poster_url")),
                 )
@@ -5924,16 +6027,19 @@ class VideoDatabase:
                         "COALESCE((SELECT monitored FROM seasons WHERE id=?), 1)) "
                         "ON CONFLICT(show_id, season_number, episode_number) DO UPDATE SET "
                         "season_id=excluded.season_id, server_source=excluded.server_source, "
-                        "server_id=excluded.server_id, title=excluded.title, "
-                        "overview=excluded.overview, air_date=excluded.air_date, "
-                        "runtime_minutes=excluded.runtime_minutes, still_url=excluded.still_url, "
-                        "rating=excluded.rating, tvdb_id=excluded.tvdb_id, has_file=excluded.has_file, "
+                        "server_id=excluded.server_id, has_file=excluded.has_file, "
                         # keep the earliest known add-date: don't clobber it with a NULL from a
                         # source that didn't report one.
                         "added_at=COALESCE(episodes.added_at, excluded.added_at), "
-                        # watch state is server truth — always take the fresh values
-                        "play_count=excluded.play_count, last_viewed_at=excluded.last_viewed_at, "
-                        "view_offset_ms=excluded.view_offset_ms",
+                        + (
+                            # soulsync's folder scan knows the file, not the
+                            # episode: its title, air date, still and watch
+                            # state stay as enrichment and the player wrote them
+                            ", ".join(f"{c}=COALESCE(excluded.{c}, episodes.{c})" for c in _EP_META)
+                            if sparse else
+                            # a server's metadata and watch state are its truth:
+                            # always the fresh values
+                            ", ".join(f"{c}=excluded.{c}" for c in _EP_META)),
                         (show_id, season_id, server_source, ep.get("server_id"), snum, enum,
                          ep.get("title"), ep.get("overview"), ep.get("air_date"),
                          ep.get("runtime_minutes"), ep.get("still_url"), ep.get("rating"),
@@ -6067,6 +6173,23 @@ class VideoDatabase:
 
     # ── what soulsync itself put in the library (core/video/owned_ids.py) ────
     @staticmethod
+    def _known_only(cols: dict) -> dict:
+        """a soulsync row's upsert writes only what the folder scan knows"""
+        return {k: v for k, v in cols.items()
+                if v is not None or k in ("server_source", "server_id", "has_file")}
+
+    @staticmethod
+    def _mark_review(conn, table: str, row_id: int) -> None:
+        """the folder scan couldn't say for sure what this title is: it waits
+        for the person ('review' is a status enrichment never picks up, so it
+        is never guessed) and the Tools page lists it as unmatched"""
+        conn.execute(f"UPDATE {table} SET tmdb_match_status='review' "
+                     "WHERE id=? AND tmdb_id IS NULL AND tmdb_match_status IS NULL", (row_id,))
+        if table == "shows":
+            conn.execute("UPDATE shows SET tvdb_match_status='review' "
+                         "WHERE id=? AND tvdb_id IS NULL AND tvdb_match_status IS NULL", (row_id,))
+
+    @staticmethod
     def _owned_files_there(conn, where: str, args) -> bool:
         """does any file of an owned row still sit on disk? an owned row's
         paths are soulsync's own, so they're checked as they are"""
@@ -6107,6 +6230,61 @@ class VideoDatabase:
                 logger.info("video scan: %s took over soulsync's %s row %s",
                             server_source, table[:-1], row["id"])
                 return
+
+    @classmethod
+    def _rehome_owned(cls, conn, table: str, server_source: str, item: dict) -> None:
+        """a title folder soulsync scans was renamed or moved: its id (made
+        from its place on disk) is new, but it is the same title. the row
+        whose own files are all gone from disk, and that is the same title
+        (by id) or holds the very files now seen here (by name and size),
+        moves to the new id, keeping its row id, history and the person's
+        choices. a second copy in another folder is not a move: the first
+        copy's files are still where they were."""
+        if server_source != "soulsync":
+            return
+        sid = str(item.get("server_id") or "")
+        if not sid or conn.execute(f"SELECT 1 FROM {table} WHERE server_source=? AND server_id=?",
+                                   (server_source, sid)).fetchone():
+            return
+        owner = ("movie_id=?" if table == "movies" else
+                 "episode_id IN (SELECT id FROM episodes WHERE show_id=?)")
+        files = item.get("files") or ([item["file"]] if item.get("file") else [])
+        if table == "shows":
+            files = [f for se in item.get("seasons") or [] for ep in se.get("episodes") or []
+                     for f in ep.get("files") or []]
+        seen = {(cls._file_name(f.get("relative_path")), f.get("size_bytes")) for f in files if f}
+        cands = []
+        for col in ("tmdb_id", "tvdb_id", "imdb_id"):
+            if col == "tvdb_id" and table != "shows":
+                continue
+            if item.get(col):
+                cands += [r["id"] for r in conn.execute(
+                    f"SELECT id FROM {table} WHERE server_source=? AND {col}=?",
+                    (server_source, item[col]))]
+        if not cands and seen:
+            sizes = [sz for _n, sz in seen if sz][:50]
+            marks = ",".join("?" * len(sizes))
+            join = ("movie_id" if table == "movies" else
+                    "(SELECT show_id FROM episodes WHERE id=f.episode_id)")
+            if sizes:
+                cands = [r[0] for r in conn.execute(
+                    f"SELECT DISTINCT {join} FROM media_files f WHERE f.size_bytes IN ({marks})",
+                    sizes) if r[0] is not None]
+        for rid in dict.fromkeys(cands):
+            row = conn.execute(f"SELECT id FROM {table} WHERE id=? AND server_source=? "
+                               "AND server_id LIKE 'ss:%'", (rid, server_source)).fetchone()
+            if not row or cls._owned_files_there(conn, owner, (rid,)):
+                continue
+            had = {(cls._file_name(r[0]), r[1]) for r in conn.execute(
+                f"SELECT relative_path, size_bytes FROM media_files f WHERE {owner}", (rid,))}
+            by_id = any(item.get(c) for c in ("tmdb_id", "tvdb_id", "imdb_id"))
+            # an unidentified title is the same one only when it holds the
+            # same files: by size, since a tidy-up renames files too
+            if not had or (not by_id and not ({z for _n, z in had} & {z for _n, z in seen})):
+                continue
+            conn.execute(f"UPDATE {table} SET server_id=? WHERE id=?", (sid, rid))
+            logger.info("video scan: %s row %s followed its folder to a new place", table[:-1], rid)
+            return
 
     @staticmethod
     def _merge_media_file(conn, owner_col: str, owner_id: int, file: dict, drop=()) -> None:
@@ -6858,7 +7036,18 @@ class VideoDatabase:
 
     def poster_set_target(self, kind: str, item_id: int) -> dict | None:
         """Server id + on-disk folder for a movie/show, so a new poster can be pushed
-        to the media server and (best-effort) written into the item's folder."""
+        to the media server and (best-effort) written into the item's folder.
+
+        a row soulsync itself made (an ``ss:`` id, core/video/owned_ids.py) is
+        not on a media server yet: its server_id reads as None, so a poster,
+        an edit or a watched tick stays local instead of being sent to a
+        server that has no such item."""
+        target = self._poster_set_target(kind, item_id)
+        if target and str(target.get("server_id") or "").startswith("ss:"):
+            target["server_id"] = None
+        return target
+
+    def _poster_set_target(self, kind: str, item_id: int) -> dict | None:
         kind = str(kind).lower()
         conn = self._get_connection()
         try:
@@ -10067,8 +10256,7 @@ class VideoDatabase:
                 "LEFT JOIN movies m ON m.id = f.movie_id "
                 "LEFT JOIN episodes e ON e.id = f.episode_id "
                 "LEFT JOIN shows s ON s.id = e.show_id "
-                "WHERE f.audio_languages IS NULL AND f.video_id IS NULL "
-                "AND f.size_bytes > 0 "
+                "WHERE " + _UNPROBED + " "
                 "ORDER BY f.size_bytes DESC LIMIT ?", (int(limit),)).fetchall()
             return [dict(r) for r in rows]
         finally:
@@ -10078,8 +10266,7 @@ class VideoDatabase:
         conn = self._get_connection()
         try:
             return int(conn.execute(
-                "SELECT COUNT(*) FROM media_files WHERE audio_languages IS NULL "
-                "AND video_id IS NULL AND size_bytes > 0").fetchone()[0])
+                "SELECT COUNT(*) FROM media_files f WHERE " + _UNPROBED).fetchone()[0])
         finally:
             conn.close()
 

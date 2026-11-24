@@ -31,6 +31,8 @@ export interface LibraryFile {
   audio_channels: number | null;
   dynamic_range: string | null;
   atmos: boolean;
+  /** "Director's Cut", "Extended": read off the file name by soulsync's folder scan */
+  edition?: string | null;
   /** the file's audio languages ('ja', 'en'); null until soulsync has read them */
   audio_languages?: string[] | null;
   /** its embedded subtitle tracks' languages, same shape */

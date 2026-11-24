@@ -1870,9 +1870,13 @@ button.chip:hover:not(:disabled) {
   letter-spacing: 0.12em;
 }
 
-/* the video side's two servers: the same tiles, not stretched over five places */
+/* the video side's servers: the same tiles, not stretched over five places */
 .servers[data-count='2'] {
   grid-template-columns: repeat(2, minmax(0, 200px));
+}
+
+.servers[data-count='3'] {
+  grid-template-columns: repeat(3, minmax(0, 200px));
 }
 
 /* rows under something else in a card (the video libraries under the servers) */

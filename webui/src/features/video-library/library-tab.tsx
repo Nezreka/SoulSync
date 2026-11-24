@@ -420,6 +420,11 @@ function FileCard({
             <span className={s.fileTitle}>
               {named || [codec, f.resolution_label].filter(Boolean).join(' ') || 'File'}
             </span>
+            {f.edition ? (
+              <span className={s.extra} data-edition="">
+                {f.edition}
+              </span>
+            ) : null}
             {f.best ? <span className={s.best}>Best copy</span> : null}
             {extra && !f.best ? <span className={s.extra}>Extra copy</span> : null}
           </div>

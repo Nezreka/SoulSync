@@ -58,7 +58,7 @@ A handful of pages are **shared** across both sides — **Chat**, **Issues**, an
             id: 'vid-server',
             needs: 'admin',
             title: 'Connecting a Media Server',
-            lede: 'Point the video side at Plex or Jellyfin, pick your libraries, and scan them in.',
+            lede: 'Point the video side at Plex or Jellyfin, or let SoulSync scan your own folders, and scan them in.',
             body: `
 The video side reads your libraries from **Plex** or **Jellyfin**. Configure the connection under **Video → Settings**, pick which libraries to include, then run a scan to import them.
 
@@ -70,6 +70,38 @@ SoulSync stores a lightweight copy of every movie/show/episode row and enriches 
 |--------|--------------------|------|
 | **Plex** | Movie & TV libraries, watch state, collections, incremental delta via \`addedAt\` | URL + Token |
 | **Jellyfin** | Movie & TV libraries, watch state, BoxSets, incremental delta via \`MinDateLastSaved\` | URL + API Key (+ user for watch state) |
+
+## Standalone: no media server
+
+You don't need Plex or Jellyfin. Pick **Standalone** in the server row and SoulSync scans your own **Movies** and **TV** folders (the ones set under Settings → Library) and keeps the library itself. An install with folders set and no server connected uses it automatically.
+
+How SoulSync works out what each folder is, in order:
+
+1. What it already knows about that folder (so a scan never asks twice, and a match you fixed stays yours).
+2. An id in a \`.nfo\` file in the folder (\`movie.nfo\`, \`tvshow.nfo\`).
+3. An id tag in the folder name: \`The Matrix (1999) {tmdb-603}\`, \`[imdbid-tt0133093]\`, \`{tvdb-121361}\`.
+4. The folder's name and year searched on TMDB, used only when the title and year clearly match.
+
+If the folder's name says nothing, the main file's own name is tried, then the file's fingerprint (an OpenSubtitles lookup, when the subtitles side has its API key). A title it still isn't sure of is added under its folder name and listed on the **Tools** page as unmatched for you to pick. It is never guessed.
+
+What the scan understands:
+
+- **Episodes** by \`S01E02\`, by air date for daily shows, and by absolute number for anime (\`Show - 127\`). The last two are placed once the show's episode list has been fetched; until then those files wait. A \`Season 1\` folder supplies the season when the name has none.
+- **Two folders of one show** (\`9-1-1 Nashville\` and \`9-1-1 - Nashville\`) are one show. A folder nothing identifies joins the show in your library with exactly its title.
+- **Editions**: a \`{edition-Director's Cut}\` tag or words like Extended, Unrated, Theatrical and IMAX in the file name show as a badge on that version.
+- **Extras**: trailers, featurettes and \`-trailer\` style files are not counted as versions of the movie.
+- **Your artwork**: a \`poster.jpg\` in the title's folder is its poster until you choose another.
+- **Renames and moves**: a renamed folder or file keeps its library entry, history and your choices.
+- **Real file facts**: the Media Info job reads each file's actual resolution, codecs, HDR and Atmos, so a file named just \`Movie (1999).mkv\` still shows them.
+
+New files are noticed on their own: a file dropped into a library folder shows up about half a minute after it finishes copying. A network share that can't be watched is checked every 15 minutes.
+
+> [!NOTE]
+> If a library folder can't be reached (a drive or network share that is offline), the scan stops and removes nothing.
+
+## Downloads appear at once
+
+With any source, a movie or episode SoulSync downloads is in the library the moment it lands: it doesn't wait for your media server to scan the file in. When Plex or Jellyfin later scans it, the server takes over that same entry, so nothing is listed twice.
 
 ## Scan types
 

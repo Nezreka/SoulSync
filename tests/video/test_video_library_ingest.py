@@ -268,13 +268,15 @@ def test_ids_are_the_place_on_disk():
     assert owned_ids.movie_id("/m/A (1999)/a.mkv") == owned_ids.movie_id("/m/A (1999)/b.mkv")
     # a loose movie in the root is its own title
     assert owned_ids.movie_id("/m/a.mkv", ["/m"]) != owned_ids.movie_id("/m/b.mkv", ["/m"])
-    assert owned_ids.show_folder("/tv/Silo/Season 01/e.mkv") == "/tv/Silo"
-    assert owned_ids.show_folder("/tv/Silo/Specials/e.mkv") == "/tv/Silo"
-    assert owned_ids.show_folder("/tv/Silo/Season 01/e.mkv", ["/tv"]) == "/tv/Silo"
-    assert owned_ids.show_folder("/tv/Silo/e.mkv", ["/tv"]) == "/tv/Silo"
+    # (compared as ids: the folder's spelling is the platform's own)
+    silo = owned_ids.of_path("/tv/Silo")
+    assert owned_ids.show_id("/tv/Silo/Season 01/e.mkv") == silo
+    assert owned_ids.show_id("/tv/Silo/Specials/e.mkv") == silo
+    assert owned_ids.show_id("/tv/Silo/Season 01/e.mkv", ["/tv"]) == silo
+    assert owned_ids.show_id("/tv/Silo/e.mkv", ["/tv"]) == silo
     # a show whose name starts like a season folder is still the show
-    assert owned_ids.show_folder("/x/Series of Unfortunate Events/e.mkv") == \
-        "/x/Series of Unfortunate Events"
+    assert owned_ids.show_id("/x/Series of Unfortunate Events/e.mkv") == \
+        owned_ids.of_path("/x/Series of Unfortunate Events")
     assert owned_ids.of_path("/a/b/") == owned_ids.of_path("/a/b")
 
 
@@ -349,3 +351,26 @@ def test_plex_never_asks_for_an_owned_id_as_a_key():
     src._scan_sections = lambda kind, name: []
     assert src.movie_item("ss:abc", title="The Matrix", tmdb_id=603) is None
     assert src.show_tree("ss:abc", title="Silo", tmdb_id=1399) is None
+
+
+def test_nothing_is_pushed_to_a_server_that_doesnt_have_the_title_yet(env):
+    db, tmp = env
+    mid = li.ingest_landed(db, _movie_dl(), _file(tmp, "Movies/The Matrix (1999)/m.mkv"))["id"]
+    assert db.poster_set_target("movie", mid)["server_id"] is None
+
+    class _Plex:
+        server_name = "plex"
+
+        def set_watched(self, *a, **k):
+            raise AssertionError("pushed a watched tick for a title plex doesn't have")
+
+        def edit_item_metadata(self, *a, **k):
+            raise AssertionError("pushed an edit for a title plex doesn't have")
+
+    from core.video import metadata as med
+    assert med.set_watched(db, "movie", mid, True, source=_Plex()) == \
+        {"ok": True, "watched": True, "pushed": False}
+    assert med.edit_item(db, "movie", mid, {"tagline": "Free your mind"}, source=_Plex())["pushed"] is False
+    # once plex has it, pushes go to plex's id
+    db.upsert_movie("plex", _plex_movie())
+    assert db.poster_set_target("movie", mid)["server_id"] == "501"
