@@ -442,6 +442,51 @@ def clear_cache() -> Dict[str, Any]:
     return out
 
 
+def list_clips_sorted() -> List[Dict[str, Any]]:
+    """Deterministic sorted list of all ready commercial clips (shared across all clients)."""
+    with _lock:
+        _load_locked()
+        _scan_local_locked()
+        valid = [c for c in _clips_cache.values() if Path(c.path).is_file()]
+    valid.sort(key=lambda c: c.id)
+    return [c.public() for c in valid]
+
+
+def get_server_config(db: Any) -> Dict[str, Any]:
+    """Read server-wide Live Guide commercial settings (stored under profile_id=0)."""
+    from core.player import settings as S
+    raw = S.get(db, 0)
+    return {
+        "enabled": bool(raw.get("commercials_enabled", False)),
+        "era": str(raw.get("commercials_era") or "auto"),
+        "mode": str(raw.get("commercials_mode") or "cable"),
+    }
+
+
+def put_server_config(db: Any, body: Any) -> Dict[str, Any]:
+    """Update server-wide Live Guide commercial settings (admin-only)."""
+    from core.player import settings as S
+    if not isinstance(body, dict):
+        raise S.SettingsError("expected object")
+    changes: Dict[str, Any] = {}
+    if "enabled" in body:
+        changes["commercials_enabled"] = bool(body["enabled"])
+    if "era" in body:
+        changes["commercials_era"] = str(body["era"]).strip().lower()
+    if "mode" in body:
+        changes["commercials_mode"] = str(body["mode"]).strip().lower()
+    if not changes:
+        raise S.SettingsError("nothing to change")
+    out = S.put(db, 0, changes)
+    if out.get("commercials_enabled"):
+        warm_async(out.get("commercials_era") or "mix")
+    return {
+        "enabled": bool(out.get("commercials_enabled", False)),
+        "era": str(out.get("commercials_era") or "auto"),
+        "mode": str(out.get("commercials_mode") or "cable"),
+    }
+
+
 def get_clip(clip_id: str) -> Optional[CommercialClip]:
     with _lock:
         _load_locked()

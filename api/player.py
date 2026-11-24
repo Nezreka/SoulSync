@@ -960,6 +960,55 @@ def put_player_settings():
     return jsonify({"success": True, "settings": out})
 
 
+@bp.route("/api/player/commercials/config", methods=["GET"])
+@device_playback
+@self_only
+def get_commercials_config():
+    """Return server-wide Live Guide commercial broadcast config + deterministic clip catalog."""
+    from core.player import commercials
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    cfg = commercials.get_server_config(player_db())
+    clips = commercials.list_clips_sorted() if cfg["enabled"] else []
+    return jsonify({
+        "success": True,
+        **cfg,
+        "clips": clips,
+        "status": commercials.status(),
+    })
+
+
+@bp.route("/api/player/commercials/config", methods=["PUT"])
+@device_playback
+@self_only
+def put_commercials_config():
+    """Admin-only: update server-wide Live Guide commercial broadcast settings."""
+    from core.player import commercials, settings
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    if not getattr(g, "is_admin", False):
+        return jsonify({
+            "success": False,
+            "error": "admin_required",
+            "message": "Only an admin can change server-wide commercial settings.",
+        }), 403
+    try:
+        cfg = commercials.put_server_config(player_db(), request.get_json(silent=True))
+    except settings.SettingsError as e:
+        return _bad(e)
+    except Exception:  # noqa: BLE001
+        return _failed("commercials config save", "Couldn't save commercial settings.")
+    clips = commercials.list_clips_sorted() if cfg["enabled"] else []
+    return jsonify({
+        "success": True,
+        **cfg,
+        "clips": clips,
+        "status": commercials.status(),
+    })
+
+
 @bp.route("/api/player/commercials/status", methods=["GET"])
 @device_playback
 @self_only

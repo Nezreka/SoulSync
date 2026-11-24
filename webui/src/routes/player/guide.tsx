@@ -42,6 +42,7 @@ import {
   type GuideProgram,
 } from './-lib/schedule';
 import {
+  commercialsConfigQuery,
   favoritesQuery,
   guideChannelsQuery,
   guideWatchedQuery,
@@ -175,6 +176,7 @@ function GuidePage() {
   const favorites = useFavorites();
   const made = useQuery(guideChannelsQuery());
   const lineupQ = useQuery(lineupQuery());
+  const commConfigQ = useQuery(commercialsConfigQuery());
   const queryClient = useQueryClient();
   const [making, setMaking] = useState<SavedChannel | 'new' | null>(null);
   const [editingLineup, setEditingLineup] = useState(false);
@@ -342,6 +344,13 @@ function GuidePage() {
     return out;
   }, [watched.data]);
   const seenKey = String(watched.dataUpdatedAt);
+  const sharedCommercials = useMemo(() => {
+    const cfg = commConfigQ.data;
+    if (!cfg?.enabled || !cfg.clips?.length) return undefined;
+    const key = `1:${cfg.era}:${cfg.mode}:${cfg.clips.length}:${cfg.clips[0]?.id ?? ''}:${cfg.clips[cfg.clips.length - 1]?.id ?? ''}`;
+    return { enabled: true, era: cfg.era, mode: cfg.mode, clips: cfg.clips, key };
+  }, [commConfigQ.data]);
+
   const channels = useMemo(() => {
     const visible = lined.filter((c) => !c.hidden);
     return numberChannels(visible).map((c) => {
@@ -349,16 +358,17 @@ function GuidePage() {
       return {
         ...c,
         // Shared broadcast schedule across all devices (Desktop, Android, TV):
-        // deterministic from (channelId, day, pool) with cable-style show rotation & evening films
+        // deterministic from (channelId, day, pool, sharedCommercials)
         schedule: {
           daypart: true,
           blocks: 1,
           rotateShows: true,
           today: startOfLocalDay(today),
+          commercials: sharedCommercials,
         },
       };
     });
-  }, [lined, today]);
+  }, [lined, today, sharedCommercials]);
   const numbers = useMemo(() => new Map(channels.map((c) => [c.id, c.number])), [channels]);
 
   // channel up / down follow the guide's numbers, from anywhere in the player

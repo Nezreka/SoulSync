@@ -403,9 +403,31 @@ export interface CommercialClip {
   id: string;
   title: string;
   era: string;
+  year?: number | null;
   duration_seconds: number;
   source: string;
   stream_path: string;
+}
+
+export interface CommercialsConfig {
+  enabled: boolean;
+  era: CommercialEra;
+  mode: CommercialMode;
+  clips: CommercialClip[];
+  status?: CommercialsStatus;
+}
+
+export const commercialsConfigQuery = () =>
+  queryOptions({
+    queryKey: ['player', 'commercials-config'],
+    queryFn: () => apiClient.get('player/commercials/config').json<CommercialsConfig>(),
+    staleTime: 30_000,
+  });
+
+export async function saveCommercialsConfig(
+  changes: Partial<Pick<CommercialsConfig, 'enabled' | 'era' | 'mode'>>,
+): Promise<CommercialsConfig> {
+  return apiClient.put('player/commercials/config', { json: changes }).json<CommercialsConfig>();
 }
 
 export interface CommercialsStatus {

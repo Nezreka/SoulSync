@@ -17,11 +17,10 @@ import type { Channel } from '../../-lib/channels';
 
 import { runtime } from '../../-lib/format';
 import { stepTuning, tuneAt, type Tuning } from '../../-lib/tuner';
-import { fetchCommercialSchedule, fetchPlayerSettings } from '../../-player.api';
 import { inPlayer } from '../trailer';
 import { ChannelDownIcon, ChannelUpIcon, LastChannelIcon, StartOverIcon } from './icons';
 import s from './playback.module.css';
-import { getEngine, playItems, usePlayer } from './use-player';
+import { playItems, usePlayer } from './use-player';
 
 interface Tuned {
   lineup: Channel[];
@@ -56,64 +55,8 @@ export function setLineup(channels: Channel[]) {
   emit({ lineup: channels });
 }
 
-function spliceCommercialsIfEnabled(t: Tuning) {
-  if (t.channel.music || t.queue.length < 2) return;
-  void fetchPlayerSettings()
-    .then(async (prefs) => {
-      if (!prefs?.commercials_enabled) return;
-      const specItems = t.queue.slice(0, 16).map((q) => {
-        const ym = /\b(19[5-9]\d|20[0-2]\d)\b/.exec(`${q.subtitle ?? ''} ${q.title ?? ''}`);
-        return {
-          id: q.id,
-          title: q.title,
-          year: ym ? Number(ym[1]) : null,
-          duration_seconds: q.duration ?? 1800,
-        };
-      });
-      const breaks = await fetchCommercialSchedule({
-        items: specItems,
-        era: prefs.commercials_era,
-        mode: prefs.commercials_mode ?? 'cable',
-        channelId: t.channel.id,
-        channelName: t.channel.name,
-        minGapSeconds: 300,
-      });
-      if (!Object.keys(breaks).length) return;
-      const eng = getEngine();
-      const st = eng.getState();
-      if (!st.live || st.item?.id !== t.queue[0]?.id) return;
-      // Rebuild the upcoming queue with continuous commercial breaks interleaved between every show
-      const interleaved: typeof t.queue = [];
-      t.queue.forEach((showItem, idx) => {
-        if (idx > 0) interleaved.push(showItem);
-        const clips = breaks[String(idx)];
-        if (clips?.length) {
-          for (const c of clips) {
-            interleaved.push({
-              type: 'commercial',
-              id: c.id,
-              title: c.title,
-              subtitle: `Commercial Break · CH ${t.channel.number ?? ''} ${t.channel.name}`.trim(),
-              duration: c.duration_seconds,
-            });
-          }
-        }
-      });
-      if (interleaved.length) {
-        // Replace everything after the currently playing item with the interleaved continuous schedule
-        const upcomingCount = st.queue.items.length - st.queue.index - 1;
-        for (let i = 0; i < upcomingCount; i++) {
-          eng.remove(st.queue.index + 1);
-        }
-        eng.playNext(interleaved);
-      }
-    })
-    .catch(() => undefined);
-}
-
 function play(t: Tuning) {
   playItems(t.queue, 0, { startAt: t.startAt, live: true });
-  spliceCommercialsIfEnabled(t);
   const before = tuned.current?.channel;
   emit({
     current: t,

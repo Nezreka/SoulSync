@@ -181,7 +181,13 @@ export function artistItems(rows: readonly ArtistQueueRow[]): PlayItem[] {
   }));
 }
 
-const GUIDE_TYPES: ReadonlySet<string> = new Set(['movie', 'episode', 'youtube', 'track']);
+const GUIDE_TYPES: ReadonlySet<string> = new Set([
+  'movie',
+  'episode',
+  'youtube',
+  'track',
+  'commercial',
+]);
 
 /** a guide program as a queue item (its key is "type:id"); null for one that can't play */
 export function guideItem(p: GuideProgram): PlayItem | null {

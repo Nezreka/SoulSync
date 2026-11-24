@@ -140,6 +140,23 @@ function airableUncached(items: readonly GuideItem[]): GuideItem[] {
     .map((item) => (item.seconds > MAX_SECONDS ? { ...item, seconds: MAX_SECONDS } : item));
 }
 
+export interface CommercialSpot {
+  id: string;
+  title: string;
+  era: string;
+  year?: number | null;
+  duration_seconds: number;
+}
+
+export interface CommercialScheduleConfig {
+  enabled: boolean;
+  era: string;
+  mode: string;
+  clips: readonly CommercialSpot[];
+  /** stable cache key (e.g. "1:auto:cable:18:arc-...") */
+  key: string;
+}
+
 export interface ScheduleOptions {
   /**
    * keep the pool's own order instead of shuffling (a show channel airs its
@@ -177,6 +194,8 @@ export interface ScheduleOptions {
   /** what's new on this channel and when it airs; premiereKey names them */
   premieres?: readonly Premiere[];
   premiereKey?: string;
+  /** server-wide shared deterministic retro commercial breaks */
+  commercials?: CommercialScheduleConfig;
 }
 
 /** evening, film time: 6pm to 2am */
@@ -203,7 +222,7 @@ export function scheduleDay(
     options.daypart ? 1 : 0
   }|${options.seenKey ?? ''}|${options.today ?? ''}|${options.blocks ?? 1}|${
     options.rotateShows ? 1 : 0
-  }|${options.premiereKey ?? ''}`;
+  }|${options.premiereKey ?? ''}|${options.commercials?.key ?? ''}`;
   let days = dayCache.get(pool);
   if (!days) {
     days = new Map();
@@ -227,7 +246,91 @@ function scheduleDayUncached(
   if (!items.length) return [];
   const dayStart = startOfLocalDay(day.getTime());
   const dayEnd = dayStart + 24 * 60 * 60 * 1000;
-  const seed = hashSeed(`${channelId}|${dayKey(new Date(dayStart))}`);
+  const dayStamp = dayKey(new Date(dayStart));
+  const seed = hashSeed(`${channelId}|${dayStamp}`);
+
+  const comm = options.commercials;
+  const commClips = comm?.enabled && comm.clips.length ? comm.clips : null;
+  let contentSinceBreakSec = 0;
+  let lastBreakIds = new Set<string>();
+
+  const inferChannelEra = (cid: string): string => {
+    const low = cid.toLowerCase();
+    if (low.includes('1970') || low.includes('70s')) return '70s';
+    if (low.includes('1980') || low.includes('80s')) return '80s';
+    if (low.includes('1990') || low.includes('90s')) return '90s';
+    if (low.includes('2000') || low.includes('00s')) return '2000s';
+    if (low.includes('kid') || low.includes('animat') || low.includes('family')) return 'kids';
+    if (low.includes('horror') || low.includes('late') || low.includes('thriller')) return 'horror';
+    return 'mix';
+  };
+  const eraForYear = (y: number | null): string | null => {
+    if (y == null) return null;
+    if (y >= 1970 && y <= 1979) return '70s';
+    if (y >= 1980 && y <= 1989) return '80s';
+    if (y >= 1990 && y <= 1999) return '90s';
+    if (y >= 2000 && y <= 2011) return '2000s';
+    return null;
+  };
+  const placeCommercialBreak = (afterItem: GuideItem) => {
+    if (!commClips || !comm || cursor >= dayEnd) return;
+    const ym = /\b(19[5-9]\d|20[0-2]\d)\b/.exec(`${afterItem.subtitle ?? ''} ${afterItem.title}`);
+    const itemYear = ym ? Number(ym[1]) : null;
+    const yearEra = comm.era === 'auto' ? eraForYear(itemYear) : null;
+    const targetEra = yearEra ?? (comm.era === 'auto' ? inferChannelEra(channelId) : comm.era);
+    const brkSeed = hashSeed(`${channelId}|${dayStamp}|brk|${cursor}`);
+
+    const closeYear =
+      comm.era === 'auto' && itemYear != null && yearEra != null
+        ? commClips.filter((c) => c.year != null && Math.abs(c.year - itemYear) <= 4)
+        : [];
+    const exactEra = commClips.filter((c) => c.era === targetEra);
+
+    const tiers = [closeYear, exactEra, commClips];
+    const ordered: CommercialSpot[] = [];
+    const seenIds = new Set<string>();
+    for (let ti = 0; ti < tiers.length; ti++) {
+      const shuf = seededShuffle(tiers[ti], (brkSeed + ti * 7919) >>> 0);
+      for (const c of shuf) {
+        if (!seenIds.has(c.id)) {
+          seenIds.add(c.id);
+          ordered.push(c);
+        }
+      }
+    }
+    const freshFirst = [
+      ...ordered.filter((c) => !lastBreakIds.has(c.id)),
+      ...ordered.filter((c) => lastBreakIds.has(c.id)),
+    ];
+    const targetCount = comm.mode === 'short' ? 2 : 3;
+    const budget = comm.mode === 'short' ? 65 : 120;
+    const chosen: CommercialSpot[] = [];
+    let usedSec = 0;
+    for (const c of freshFirst) {
+      if (chosen.length >= targetCount) break;
+      const dur = Math.max(10, Math.min(95, c.duration_seconds || 30));
+      if (chosen.length > 0 && usedSec + dur > budget) continue;
+      chosen.push(c);
+      usedSec += dur;
+    }
+    if (!chosen.length) return;
+    lastBreakIds = new Set(chosen.map((c) => c.id));
+    for (const c of chosen) {
+      if (cursor >= dayEnd) break;
+      const dur = Math.max(10, Math.min(95, c.duration_seconds || 30));
+      const cEnd = cursor + dur * 1000;
+      out.push({
+        key: `commercial:${c.id}`,
+        kind: 'commercial',
+        title: c.title,
+        subtitle: 'Commercial Break',
+        seconds: dur,
+        start: cursor,
+        end: cEnd,
+      });
+      cursor = cEnd;
+    }
+  };
 
   const out: GuideProgram[] = [];
   let cursor = dayStart;
@@ -252,7 +355,15 @@ function scheduleDayUncached(
     const due = premieres[nextPremiere];
     if (due && due.at < end) end = due.at; // cut at the premiere
     if (end - cursor >= MIN_SECONDS * 1000) out.push({ ...item, start: cursor, end });
+    const airedSec = Math.max(0, Math.round((end - cursor) / 1000));
     cursor = Math.max(cursor, end);
+    if (commClips && airedSec > 0) {
+      contentSinceBreakSec += airedSec;
+      if (contentSinceBreakSec >= 300) {
+        placeCommercialBreak(item);
+        contentSinceBreakSec = 0;
+      }
+    }
     premiereNow();
   };
   // episodes run in blocks of this many, in order (the pool keeps each show's sample in airing order)

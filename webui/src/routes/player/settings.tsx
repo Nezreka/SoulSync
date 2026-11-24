@@ -28,8 +28,10 @@ import {
 import { QUALITIES, type Quality } from './-engine/engine';
 import {
   clearCommercialsCache,
+  commercialsConfigQuery,
   commercialsStatusQuery,
   playerSettingsQuery,
+  saveCommercialsConfig,
   savePlayerSettings,
   warmCommercials,
 } from './-player.api';
@@ -162,9 +164,19 @@ function SettingsPage() {
   const isAdmin = !!shell.profile?.isAdmin;
   const queryClient = useQueryClient();
   const settings = useQuery(playerSettingsQuery());
+  const commConfig = useQuery(commercialsConfigQuery());
   const commStatus = useQuery({
     ...commercialsStatusQuery(),
     refetchInterval: (q) => (q.state.data?.warming ? 3000 : false),
+  });
+  const saveComm = useMutation({
+    mutationFn: (changes: { enabled?: boolean; era?: CommercialEra; mode?: CommercialMode }) =>
+      saveCommercialsConfig(changes),
+    onSuccess: (next) => {
+      queryClient.setQueryData(commercialsConfigQuery().queryKey, next);
+      void queryClient.invalidateQueries({ queryKey: ['player', 'commercials-status'] });
+      flashSaved();
+    },
   });
   const [warmingComm, setWarmingComm] = useState(false);
   const [clearingComm, setClearingComm] = useState(false);
@@ -293,33 +305,33 @@ function SettingsPage() {
         <Group
           icon={<MovieIcon />}
           title="Retro commercial breaks"
-          badge="All screens"
-          note="Optional vintage TV spots from Archive.org (auto-cached in the background, zero manual downloading) or your local commercials folder between Live Guide shows."
+          badge="Server-wide"
+          note="Shared broadcast commercial breaks built directly into the Live Guide clock so every viewer watches the exact same commercials and returns to the next show in sync."
         >
           <Row
-            label="Play retro commercials between shows"
+            label="Include retro commercials in Live Guide"
             help={
               commStatus.data?.warming
                 ? 'Fetching retro spots from Archive.org in the background…'
                 : commStatus.data?.total_count
-                  ? `${commStatus.data.total_count} retro spots ready (${commStatus.data.cache_mb} / ${commStatus.data.max_cache_mb ?? 500} MB cached).`
-                  : 'Off by default. Turn on to automatically cache vintage 15–60s spots (max 500 MB).'
+                  ? `${commStatus.data.total_count} retro spots ready (${commStatus.data.cache_mb} / ${commStatus.data.max_cache_mb ?? 500} MB cached).${isAdmin ? '' : ' Managed by server admin.'}`
+                  : `Off by default. Auto-caches vintage 15–60s spots (max 500 MB).${isAdmin ? '' : ' Managed by server admin.'}`
             }
           >
             <Switch
-              label="Play retro commercials between shows"
-              on={mine?.commercials_enabled ?? false}
-              busy={!mine || busy}
-              onChange={(v) => save.mutate({ commercials_enabled: v })}
+              label="Include retro commercials in Live Guide"
+              on={commConfig.data?.enabled ?? false}
+              busy={!isAdmin || !commConfig.data || saveComm.isPending}
+              onChange={(v) => saveComm.mutate({ enabled: v })}
             />
           </Row>
 
-          {mine?.commercials_enabled ? (
+          {commConfig.data?.enabled ? (
             <>
               <Row
                 stacked
                 label="Commercial era"
-                help="Auto matches each channel's decade or vibe (e.g. 90s channels get 90s spots)."
+                help="Auto matches each show's release year (±4 years) or channel vibe."
               >
                 <div className={s.segGroup} role="radiogroup" aria-label="Commercial era">
                   {(
@@ -333,7 +345,7 @@ function SettingsPage() {
                       ['mix', 'Mix'],
                     ] as [CommercialEra, string][]
                   ).map(([val, lbl]) => {
-                    const on = (mine?.commercials_era ?? 'auto') === val;
+                    const on = (commConfig.data?.era ?? 'auto') === val;
                     return (
                       <button
                         key={val}
@@ -342,8 +354,8 @@ function SettingsPage() {
                         aria-checked={on}
                         className={s.segBtn}
                         data-on={on ? 'true' : undefined}
-                        disabled={!mine || busy}
-                        onClick={() => save.mutate({ commercials_era: val })}
+                        disabled={!isAdmin || saveComm.isPending}
+                        onClick={() => saveComm.mutate({ era: val })}
                         data-nav
                       >
                         {lbl}
@@ -365,7 +377,7 @@ function SettingsPage() {
                       ['short', 'Short (1–2 spots)'],
                     ] as [CommercialMode, string][]
                   ).map(([val, lbl]) => {
-                    const on = (mine?.commercials_mode ?? 'cable') === val;
+                    const on = (commConfig.data?.mode ?? 'cable') === val;
                     return (
                       <button
                         key={val}
@@ -374,8 +386,8 @@ function SettingsPage() {
                         aria-checked={on}
                         className={s.segBtn}
                         data-on={on ? 'true' : undefined}
-                        disabled={!mine || busy}
-                        onClick={() => save.mutate({ commercials_mode: val })}
+                        disabled={!isAdmin || saveComm.isPending}
+                        onClick={() => saveComm.mutate({ mode: val })}
                         data-nav
                       >
                         {lbl}
@@ -385,28 +397,31 @@ function SettingsPage() {
                 </div>
               </Row>
 
-              <Row
-                label="Commercial cache"
-                help="Fetch fresh vintage spots from Internet Archive (capped at 500 MB) or clear the server cache."
-              >
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  <button
-                    type="button"
-                    className={s.segBtn}
-                    disabled={warmingComm || commStatus.data?.warming}
-                    onClick={() => {
-                      setWarmingComm(true);
-                      void warmCommercials(mine?.commercials_era ?? 'mix')
-                        .then(() =>
-                          queryClient.invalidateQueries({ queryKey: ['player', 'commercials-status'] }),
-                        )
-                        .finally(() => setWarmingComm(false));
-                    }}
-                    data-nav
-                  >
-                    {warmingComm || commStatus.data?.warming ? 'Fetching…' : 'Fetch spots now'}
-                  </button>
-                  {isAdmin ? (
+              {isAdmin ? (
+                <Row
+                  label="Commercial cache"
+                  help="Fetch fresh vintage spots from Internet Archive (capped at 500 MB) or clear the server cache."
+                >
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      className={s.segBtn}
+                      disabled={warmingComm || commStatus.data?.warming}
+                      onClick={() => {
+                        setWarmingComm(true);
+                        void warmCommercials(commConfig.data?.era ?? 'mix')
+                          .then(() =>
+                            Promise.all([
+                              queryClient.invalidateQueries({ queryKey: ['player', 'commercials-status'] }),
+                              queryClient.invalidateQueries({ queryKey: ['player', 'commercials-config'] }),
+                            ]),
+                          )
+                          .finally(() => setWarmingComm(false));
+                      }}
+                      data-nav
+                    >
+                      {warmingComm || commStatus.data?.warming ? 'Fetching…' : 'Fetch spots now'}
+                    </button>
                     <button
                       type="button"
                       className={s.segBtn}
@@ -415,7 +430,10 @@ function SettingsPage() {
                         setClearingComm(true);
                         void clearCommercialsCache()
                           .then(() =>
-                            queryClient.invalidateQueries({ queryKey: ['player', 'commercials-status'] }),
+                            Promise.all([
+                              queryClient.invalidateQueries({ queryKey: ['player', 'commercials-status'] }),
+                              queryClient.invalidateQueries({ queryKey: ['player', 'commercials-config'] }),
+                            ]),
                           )
                           .finally(() => setClearingComm(false));
                       }}
@@ -423,9 +441,9 @@ function SettingsPage() {
                     >
                       {clearingComm ? 'Clearing…' : 'Clear cache'}
                     </button>
-                  ) : null}
-                </div>
-              </Row>
+                  </div>
+                </Row>
+              ) : null}
             </>
           ) : null}
         </Group>
