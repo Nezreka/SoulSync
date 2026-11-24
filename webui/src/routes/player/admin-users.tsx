@@ -10,6 +10,7 @@ import {
 } from './-lib/downloads';
 import { PeopleIcon } from './-ui/icons';
 import { PageTitle } from './-ui/kit';
+import { notifyError } from './-ui/notice';
 import s from './-ui/social.module.css';
 import { MyDownloadsPanel } from './downloads';
 
@@ -87,6 +88,7 @@ function AdminUsersDownloadsPage() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['player', 'admin', 'users'] });
     },
+    onError: notifyError("Couldn't change their downloads"),
   });
 
   const data = query.data;
@@ -175,7 +177,9 @@ function AdminUsersDownloadsPage() {
             fontSize: 13.5,
           }}
         >
-          Admin privileges are required to view this page.
+          {(query.error as { response?: { status?: number } } | null)?.response?.status === 403
+            ? 'Admin privileges are required to view this page.'
+            : "Couldn't load your users. Check the connection and try again."}
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>

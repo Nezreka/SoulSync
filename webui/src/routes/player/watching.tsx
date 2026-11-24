@@ -394,6 +394,31 @@ interface PartySeed {
   show_id?: number | null;
 }
 
+/**
+ * a modal's manners, as the player's Sheet has them: focus goes in, escape
+ * closes it, focus comes back where it was
+ */
+function useDialog(onClose: () => void) {
+  const ref = useRef<HTMLDivElement>(null);
+  const close = useRef(onClose);
+  close.current = onClose;
+  useEffect(() => {
+    const before = document.activeElement as HTMLElement | null;
+    ref.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.stopPropagation();
+      close.current();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      before?.focus?.();
+    };
+  }, []);
+  return ref;
+}
+
 function CreatePartyModal({
   initialSeed,
   onClose,
@@ -403,6 +428,7 @@ function CreatePartyModal({
   onClose: () => void;
   onCreated: (party: WatchParty) => void;
 }) {
+  const dialogRef = useDialog(onClose);
   const catalog = useQuery(videoCatalogQuery());
   const [search, setSearch] = useState('');
   const [kindFilter, setKindFilter] = useState<'all' | 'movie' | 'episode'>('all');
@@ -501,7 +527,16 @@ function CreatePartyModal({
 
   return (
     <div className={wp.backdrop} onClick={onClose}>
-      <div className={wp.modal} style={{ maxWidth: 760 }} onClick={(e) => e.stopPropagation()}>
+      <div
+        ref={dialogRef}
+        className={wp.modal}
+        style={{ maxWidth: 760 }}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Start a watch party"
+        tabIndex={-1}
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className={wp.modalHero}>
           {pickedArt ? <img className={wp.modalHeroBg} src={pickedArt} alt="" /> : null}
           <div className={wp.modalHeroInner}>
@@ -771,6 +806,7 @@ interface RoomFloatingBubble {
 }
 
 function WatchPartyRoomModal({ partyId, onClose }: { partyId: string; onClose: () => void }) {
+  const dialogRef = useDialog(onClose);
   const qc = useQueryClient();
   const roomQ = useQuery(watchPartyQuery(partyId));
   const party = roomQ.data;
@@ -800,8 +836,11 @@ function WatchPartyRoomModal({ partyId, onClose }: { partyId: string; onClose: (
 
   // Float incoming emoji reactions up both the left and right sides of the room modal
   useEffect(() => {
-    const msgs = party?.messages ?? [];
-    if (!msgInitialized.current && msgs.length > 0) {
+    if (!party) return;
+    const msgs = party.messages ?? [];
+    // the room as it was when it opened is history; anything after floats.
+    // an empty room counts as opened too, or its first reaction never showed
+    if (!msgInitialized.current) {
       msgInitialized.current = true;
       seenMsgIds.current = new Set(msgs.map((m) => m.id));
       return;
@@ -814,7 +853,7 @@ function WatchPartyRoomModal({ partyId, onClose }: { partyId: string; onClose: (
         spawnRoomBubble(`room-srv-${m.id}`, em, m.profile?.name ?? '', m.id);
       }
     }
-  }, [party?.messages]);
+  }, [party, party?.messages]);
 
   const launchSyncedVideo = (p: WatchParty, opts?: { withCurtain?: boolean }) => {
     const item = itemOf(p.item_type, p.item_id, p.meta);
@@ -871,7 +910,10 @@ function WatchPartyRoomModal({ partyId, onClose }: { partyId: string; onClose: (
     if (!party.is_member) {
       void watchPartyApi
         .join(partyId, { rsvp: party.status === 'scheduled' })
-        .then(() => qc.invalidateQueries({ queryKey: ['player', 'party', partyId] }));
+        .then(() => qc.invalidateQueries({ queryKey: ['player', 'party', partyId] }))
+        .catch((e: unknown) =>
+          setRoomError(e instanceof Error && e.message ? e.message : "Couldn't join this party"),
+        );
     }
   }, [party, partyId, qc]);
 
@@ -892,8 +934,14 @@ function WatchPartyRoomModal({ partyId, onClose }: { partyId: string; onClose: (
       .catch(() => setAudioBlocked(true));
   };
 
+  // the poll hands back a new lobby_track object every 2.5s: the effect keys
+  // on the song itself, or it re-ran play() (and reset the blocked state) each poll
+  const lobbyKey = lobbyTrack ? `${lobbyTrack.track_id}:${lobbyTrack.started_at}` : null;
+  const lobbyTrackRef = useRef(lobbyTrack);
+  lobbyTrackRef.current = lobbyTrack;
   useEffect(() => {
     const el = audioRef.current;
+    const lobbyTrack = lobbyTrackRef.current;
     if (!el) return;
     if (!playLobbyAudio || !lobbyTrack) {
       el.pause();
@@ -917,7 +965,7 @@ function WatchPartyRoomModal({ partyId, onClose }: { partyId: string; onClose: (
       .catch(() => {
         setAudioBlocked(true);
       });
-  }, [playLobbyAudio, lobbyTrack]);
+  }, [playLobbyAudio, lobbyKey]);
 
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: ['player', 'party', partyId] });
@@ -925,10 +973,28 @@ function WatchPartyRoomModal({ partyId, onClose }: { partyId: string; onClose: (
   };
 
   if (!party) {
+    // a dead or mistyped invite link: say so, don't spin forever
+    const gone = roomQ.isError;
     return (
       <div className={wp.backdrop} onClick={onClose}>
-        <div className={wp.modal} style={{ padding: 32, textAlign: 'center' }}>
-          Loading theater room…
+        <div
+          className={wp.modal}
+          style={{ padding: 32, textAlign: 'center' }}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Watch party"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {gone ? (
+            <>
+              <p>This watch party has ended, or the link isn't right.</p>
+              <button type="button" className={wp.glassBtn} onClick={onClose}>
+                Close
+              </button>
+            </>
+          ) : (
+            'Loading theater room…'
+          )}
         </div>
       </div>
     );
@@ -945,6 +1011,19 @@ function WatchPartyRoomModal({ partyId, onClose }: { partyId: string; onClose: (
   const peeBreak = party.pee_break ?? null;
   const isMyPeeBreak = !!peeBreak && me?.profile_id === peeBreak.profile_id;
   const peeCooldownSec = party.pee_cooldown_remaining ?? 0;
+  // what the server lets this viewer do: anyone in the room pauses; play,
+  // resume, seek and the lobby music are the host's, or everyone's in
+  // "everyone" mode (core/player/parties.py update_state)
+  const canSteer = party.is_host || party.control_mode === 'everyone';
+  /** a room action: a refusal or a dropped request says so, never an unhandled rejection */
+  const act = async (fn: () => Promise<unknown>, fallback: string) => {
+    setRoomError(null);
+    try {
+      await fn();
+    } catch (e) {
+      setRoomError(e instanceof Error && e.message ? e.message : fallback);
+    }
+  };
 
   const handleSendRoomReaction = async (em: string) => {
     const now = Date.now();
@@ -974,7 +1053,15 @@ function WatchPartyRoomModal({ partyId, onClose }: { partyId: string; onClose: (
   return (
     <div className={wp.backdrop} onClick={onClose}>
       <audio ref={audioRef} loop />
-      <div className={wp.modal} onClick={(e) => e.stopPropagation()}>
+      <div
+        ref={dialogRef}
+        className={wp.modal}
+        role="dialog"
+        aria-modal="true"
+        aria-label={party.title}
+        tabIndex={-1}
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Dual-Side (Left + Right) Floating Emoji Reaction Lanes inside the Room Modal */}
         <div className={wp.roomSideLaneLeft} aria-hidden="true">
           {floatingBubbles
@@ -1040,10 +1127,23 @@ function WatchPartyRoomModal({ partyId, onClose }: { partyId: string; onClose: (
                 type="button"
                 className={wp.glassBtn}
                 onClick={() => {
-                  const link = `${window.location.origin}/player/watching?party=${encodeURIComponent(party.id)}`;
-                  void navigator.clipboard?.writeText(link).catch(() => undefined);
-                  setCopiedLink(true);
-                  window.setTimeout(() => setCopiedLink(false), 2000);
+                  // behind a reverse proxy the app lives under a base path: appURL keeps it
+                  const link = new URL(
+                    appURL(`/player/watching?party=${encodeURIComponent(party.id)}`),
+                    window.location.origin,
+                  ).href;
+                  // "copied" only when it was (no clipboard on plain-http lan)
+                  if (!navigator.clipboard) {
+                    window.prompt('Copy this invite link', link);
+                    return;
+                  }
+                  void navigator.clipboard
+                    .writeText(link)
+                    .then(() => {
+                      setCopiedLink(true);
+                      window.setTimeout(() => setCopiedLink(false), 2000);
+                    })
+                    .catch(() => window.prompt('Copy this invite link', link));
                 }}
                 title="Copy direct invite link to this Watch Party"
               >
@@ -1054,12 +1154,14 @@ function WatchPartyRoomModal({ partyId, onClose }: { partyId: string; onClose: (
                   type="button"
                   className={wp.glassBtn}
                   title="Leave this Watch Party room"
-                  onClick={async () => {
-                    await watchPartyApi.leave(party.id);
-                    setActiveWatchPartyId(null);
-                    refresh();
-                    onClose();
-                  }}
+                  onClick={() =>
+                    void act(async () => {
+                      await watchPartyApi.leave(party.id);
+                      setActiveWatchPartyId(null);
+                      refresh();
+                      onClose();
+                    }, "Couldn't leave the party")
+                  }
                 >
                   Leave Party
                 </button>
@@ -1069,12 +1171,14 @@ function WatchPartyRoomModal({ partyId, onClose }: { partyId: string; onClose: (
                   type="button"
                   className={wp.glassBtn}
                   title="End this Watch Party for everyone"
-                  onClick={async () => {
-                    await watchPartyApi.remove(party.id);
-                    setActiveWatchPartyId(null);
-                    refresh();
-                    onClose();
-                  }}
+                  onClick={() =>
+                    void act(async () => {
+                      await watchPartyApi.remove(party.id);
+                      setActiveWatchPartyId(null);
+                      refresh();
+                      onClose();
+                    }, "Couldn't end the party")
+                  }
                 >
                   End Party
                 </button>
@@ -1159,11 +1263,13 @@ function WatchPartyRoomModal({ partyId, onClose }: { partyId: string; onClose: (
                   <button
                     type="button"
                     className={`${wp.glassBtn} ${wp.glassBtnPrimary}`}
-                    onClick={async () => {
-                      const updated = await watchPartyApi.state(party.id, { action: 'resume' });
-                      refresh();
-                      launchSyncedVideo(updated, { withCurtain: false });
-                    }}
+                    onClick={() =>
+                      void act(async () => {
+                        const updated = await watchPartyApi.state(party.id, { action: 'resume' });
+                        refresh();
+                        launchSyncedVideo(updated, { withCurtain: false });
+                      }, "Couldn't resume")
+                    }
                   >
                     ✓ I'm Back & Resume (5s)
                   </button>
@@ -1234,14 +1340,16 @@ function WatchPartyRoomModal({ partyId, onClose }: { partyId: string; onClose: (
                 >
                   {audioBlocked ? '🔊 Play Music' : lobbyMuted ? 'Unmute' : 'Mute'}
                 </button>
-                {party.can_control ? (
+                {canSteer ? (
                   <button
                     type="button"
                     className={wp.glassBtn}
-                    onClick={async () => {
-                      await watchPartyApi.state(party.id, { shuffle_lobby_music: true });
-                      refresh();
-                    }}
+                    onClick={() =>
+                      void act(async () => {
+                        await watchPartyApi.state(party.id, { shuffle_lobby_music: true });
+                        refresh();
+                      }, "Couldn't change the music")
+                    }
                   >
                     Shuffle
                   </button>
@@ -1274,10 +1382,12 @@ function WatchPartyRoomModal({ partyId, onClose }: { partyId: string; onClose: (
                   <button
                     type="button"
                     className={`${wp.glassBtn} ${me?.ready ? wp.premierReadyActive : ''}`}
-                    onClick={async () => {
-                      await watchPartyApi.join(party.id, { ready: !(me?.ready ?? false) });
-                      refresh();
-                    }}
+                    onClick={() =>
+                      void act(async () => {
+                        await watchPartyApi.join(party.id, { ready: !(me?.ready ?? false) });
+                        refresh();
+                      }, "Couldn't mark you ready")
+                    }
                   >
                     {me?.ready ? '✓ Ready' : 'Mark Ready'}
                   </button>
@@ -1292,22 +1402,30 @@ function WatchPartyRoomModal({ partyId, onClose }: { partyId: string; onClose: (
                     <PlayIcon />
                     Watch & Sync ({clock(party.live_position)})
                   </button>
-                  {/* Anyone in the party can pause; anyone (or pee-break caller/host) can resume with 5s countdown */}
-                  <button
-                    type="button"
-                    className={wp.glassBtn}
-                    disabled={!!peeBreak && !isMyPeeBreak && !party.is_host}
-                    onClick={async () => {
-                      const action = party.status === 'playing' ? 'pause' : 'resume';
-                      const updated = await watchPartyApi.state(party.id, { action });
-                      refresh();
-                      if (action === 'resume') {
-                        launchSyncedVideo(updated, { withCurtain: false });
+                  {/* anyone in the room pauses; resume is whoever may steer (or the pee break's caller) */}
+                  {party.status === 'playing' || canSteer || isMyPeeBreak ? (
+                    <button
+                      type="button"
+                      className={wp.glassBtn}
+                      disabled={!!peeBreak && !isMyPeeBreak && !party.is_host}
+                      onClick={() =>
+                        void act(async () => {
+                          const action = party.status === 'playing' ? 'pause' : 'resume';
+                          const updated = await watchPartyApi.state(party.id, { action });
+                          refresh();
+                          if (action === 'resume') {
+                            launchSyncedVideo(updated, { withCurtain: false });
+                          }
+                        }, "Couldn't change playback")
                       }
-                    }}
-                  >
-                    {party.status === 'playing' ? '⏸ Pause Everyone' : '▶ Resume (5s Countdown)'}
-                  </button>
+                    >
+                      {party.status === 'playing' ? '⏸ Pause Everyone' : '▶ Resume (5s Countdown)'}
+                    </button>
+                  ) : (
+                    <span className={wp.glassBtn} aria-live="polite">
+                      Paused · the host resumes
+                    </span>
+                  )}
                   <button
                     type="button"
                     className={wp.glassBtn}
@@ -1335,10 +1453,12 @@ function WatchPartyRoomModal({ partyId, onClose }: { partyId: string; onClose: (
                     <button
                       type="button"
                       className={wp.glassBtn}
-                      onClick={async () => {
-                        await watchPartyApi.state(party.id, { action: 'lobby' });
-                        refresh();
-                      }}
+                      onClick={() =>
+                        void act(async () => {
+                          await watchPartyApi.state(party.id, { action: 'lobby' });
+                          refresh();
+                        }, "Couldn't go back to the lobby")
+                      }
                     >
                       Back to Lobby
                     </button>
@@ -1435,8 +1555,16 @@ function WatchPartyRoomModal({ partyId, onClose }: { partyId: string; onClose: (
                 const txt = chatText.trim();
                 if (!txt) return;
                 setChatText('');
-                await watchPartyApi.chat(party.id, 'chat', txt);
-                refresh();
+                try {
+                  await watchPartyApi.chat(party.id, 'chat', txt);
+                  refresh();
+                } catch (err) {
+                  // the message stays, to send again
+                  setChatText(txt);
+                  setRoomError(
+                    err instanceof Error && err.message ? err.message : "Couldn't send that",
+                  );
+                }
               }}
             >
               <input

@@ -40,7 +40,7 @@ import { SearchIcon } from './icons';
 import { PlayerLink } from './kit';
 import { playItems } from './playback/use-player';
 import s from './player.module.css';
-import { useSections } from './sections';
+import { NAV, useSections } from './sections';
 
 interface Hit {
   key: string;
@@ -630,7 +630,15 @@ export function Search() {
     else void navigate({ to: hit.href as '/player' });
   };
 
-  const hitRow = (hit: Hit, index: number, big = false) => (
+  // where to go instead of typing: the player's own sections this profile has
+  const browse = NAV.filter((n) => n.group !== 'main' && n.visible(sections));
+
+  const close = () => {
+    setOpen(false);
+    input.current?.blur();
+  };
+
+  const hitRow = (hit: Hit, index: number, big = false, showType = true) => (
     <PlayerLink
       key={`${big ? 'top-' : ''}${hit.key}`}
       id={`${listId}-${index}`}
@@ -685,15 +693,17 @@ export function Search() {
         <div className={big ? s.searchTopTitle : s.searchHitTitle}>{hit.title}</div>
         {hit.sub ? <div className={s.searchHitSub}>{hit.sub}</div> : null}
       </span>
-      {!big ? <span className={s.searchTypePill}>{hit.type.split(' · ')[0]}</span> : null}
+      {!big && showType ? (
+        <span className={s.searchTypePill}>{hit.type.split(' · ')[0]}</span>
+      ) : null}
     </PlayerLink>
   );
 
   let index = 0;
-  const showRecent = open && !searching && recent.length > 0;
+  const showStart = open && !searching && (recent.length > 0 || browse.length > 0);
 
   return (
-    <div className={s.search} ref={ref} role="search">
+    <div className={s.search} ref={ref} role="search" data-open={open ? 'true' : undefined}>
       <span className={s.searchIcon}>
         <SearchIcon />
       </span>
@@ -701,7 +711,7 @@ export function Search() {
         ref={input}
         className={s.searchInput}
         type="search"
-        placeholder="Search movies, shows, music, people…"
+        placeholder="Search everything"
         aria-label="Search"
         role="combobox"
         aria-expanded={open && searching}
@@ -740,37 +750,78 @@ export function Search() {
           /
         </kbd>
       ) : null}
+      {/* phones: search is its own screen, and this leaves it */}
+      <button
+        type="button"
+        className={s.searchCancel}
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => {
+          setText('');
+          close();
+        }}
+      >
+        Cancel
+      </button>
 
-      {showRecent ? (
+      {showStart ? (
         <div className={s.searchPanel}>
-          <div className={s.searchGroupHead}>
-            <span className={s.searchGroupLabel}>Recent searches</span>
-            <button
-              type="button"
-              className={s.searchMore}
-              onClick={() => {
-                setRecent([]);
-                writeRecent([]);
-              }}
-            >
-              Clear
-            </button>
-          </div>
-          {recent.map((r) => (
-            <button
-              key={r}
-              type="button"
-              className={s.searchRecent}
-              onClick={() => {
-                setText(r);
-                input.current?.focus();
-              }}
-              data-nav
-            >
-              <SearchIcon />
-              {r}
-            </button>
-          ))}
+          {recent.length ? (
+            <div className={s.searchGroup}>
+              <div className={s.searchGroupHead}>
+                <span className={s.searchGroupLabel}>Recent searches</span>
+                <button
+                  type="button"
+                  className={s.searchMore}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => {
+                    setRecent([]);
+                    writeRecent([]);
+                  }}
+                >
+                  Clear
+                </button>
+              </div>
+              {recent.map((r) => (
+                <button
+                  key={r}
+                  type="button"
+                  className={s.searchRecent}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => {
+                    setText(r);
+                    input.current?.focus();
+                  }}
+                  data-nav
+                >
+                  <SearchIcon />
+                  <span className={s.searchRecentText}>{r}</span>
+                </button>
+              ))}
+            </div>
+          ) : null}
+          {browse.length ? (
+            <div className={s.searchGroup}>
+              <div className={s.searchGroupHead}>
+                <span className={s.searchGroupLabel}>Browse</span>
+              </div>
+              <div className={s.searchBrowse}>
+                {browse.map((n) => (
+                  <PlayerLink
+                    key={n.to}
+                    href={n.to}
+                    className={s.searchBrowseTile}
+                    onClick={() => close()}
+                    data-nav
+                  >
+                    <span className={s.searchBrowseIcon} aria-hidden="true">
+                      {n.icon}
+                    </span>
+                    {n.label}
+                  </PlayerLink>
+                ))}
+              </div>
+            </div>
+          ) : null}
         </div>
       ) : null}
 
@@ -824,7 +875,16 @@ export function Search() {
                   </button>
                 ) : null}
               </div>
-              {group.hits.map((hit) => hitRow(hit, index++))}
+              {/* a group of one kind says what it is once, in its label: the
+                  rows only name their kind where the group mixes them */}
+              {group.hits.map((hit) =>
+                hitRow(
+                  hit,
+                  index++,
+                  false,
+                  new Set(group.hits.map((h) => h.type.split(' · ')[0])).size > 1,
+                ),
+              )}
             </div>
           ))}
 

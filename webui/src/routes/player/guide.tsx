@@ -32,20 +32,18 @@ import {
   PX_PER_MINUTE,
   saveRules,
 } from './-lib/guide';
+import { guideScheduleOptions, sharedCommercials } from './-lib/guide-schedule';
 import { albumArtwork } from './-lib/images';
 import {
   hashSeed,
   mergeIntoBlocks,
   programsInWindow,
-  startOfLocalDay,
   type GuideItem,
   type GuideProgram,
 } from './-lib/schedule';
 import {
-  commercialsConfigQuery,
   favoritesQuery,
   guideChannelsQuery,
-  guideWatchedQuery,
   personTitlesQuery,
   guideEdits,
   lineupQuery,
@@ -56,7 +54,8 @@ import {
   songsQuery,
   playlistsQuery,
   studioCollectionsQuery,
-  videoCatalogQuery,
+  guideCatalogQuery,
+  guideCommercialsQuery,
 } from './-player.api';
 import { ChannelForm } from './-ui/guide-form';
 import { GuideDetail, GuideGrid, OnNow, type Picked } from './-ui/guide-grid';
@@ -64,6 +63,7 @@ import { GuidePop, GuideStrip } from './-ui/guide-pop';
 import { SearchIcon } from './-ui/icons';
 import { Empty, PageTitle, Tabs, styles as s } from './-ui/kit';
 import { LineupEditor } from './-ui/lineup-editor';
+import { notifyError } from './-ui/notice';
 import { setLineup } from './-ui/playback/tuner';
 import { useSections } from './-ui/sections';
 import { ConfirmSheet } from './-ui/sheet';
@@ -135,8 +135,9 @@ function useFavorites() {
       queryClient.setQueryData(favoritesQuery().queryKey, next);
       return { before };
     },
-    onError: (_e, _next, ctx) => {
+    onError: (e, _next, ctx) => {
       if (ctx?.before) queryClient.setQueryData(favoritesQuery().queryKey, ctx.before);
+      notifyError("Couldn't save your favorites")(e);
     },
   });
   const list = favorites.data ?? [];
@@ -156,7 +157,8 @@ function GuidePage() {
   const navigate = useNavigate({ from: '/player/guide' });
   const now = useNow();
   const [offset, setOffset] = useState(0);
-  const catalog = useQuery({ ...videoCatalogQuery(), enabled: sections.video });
+  // the day's frozen pool: the same one every device schedules from
+  const catalog = useQuery({ ...guideCatalogQuery(), enabled: sections.video });
   const studioCols = useQuery({
     ...studioCollectionsQuery(),
     enabled: sections.video,
@@ -176,7 +178,7 @@ function GuidePage() {
   const favorites = useFavorites();
   const made = useQuery(guideChannelsQuery());
   const lineupQ = useQuery(lineupQuery());
-  const commConfigQ = useQuery(commercialsConfigQuery());
+  const commConfigQ = useQuery(guideCommercialsQuery());
   const queryClient = useQueryClient();
   const [making, setMaking] = useState<SavedChannel | 'new' | null>(null);
   const [editingLineup, setEditingLineup] = useState(false);
@@ -194,10 +196,20 @@ function GuidePage() {
     const local = loadRules(profileId);
     moved.current = true;
     if (!local.length) return;
+    // only the ones the server took leave this browser: a failure (server
+    // down, a rule it refuses) keeps them here for the next visit to try
     void Promise.all(
-      local.map((r) => guideEdits.add('mine', specFromRule(r)).catch(() => null)),
-    ).then(() => {
-      saveRules(profileId, []);
+      local.map((r) =>
+        guideEdits.add('mine', specFromRule(r)).then(
+          () => true,
+          () => false,
+        ),
+      ),
+    ).then((done) => {
+      saveRules(
+        profileId,
+        local.filter((_, i) => !done[i]),
+      );
       void refreshMade();
     });
   }, [made.data, profileId]);
@@ -335,21 +347,9 @@ function GuidePage() {
     () => applyLineup(allChannels, lineupQ.data ?? []),
     [allChannels, lineupQ.data],
   );
-  // what this profile has seen: channels air the unseen first, a marathon starts at your next episode
-  const watched = useQuery({ ...guideWatchedQuery(), enabled: sections.video });
-  const seen = useMemo(() => {
-    const out = new Set<string>();
-    for (const id of watched.data?.movies ?? []) out.add(`movie:${id}`);
-    for (const id of watched.data?.episodes ?? []) out.add(`episode:${id}`);
-    return out;
-  }, [watched.data]);
-  const seenKey = String(watched.dataUpdatedAt);
-  const sharedCommercials = useMemo(() => {
-    const cfg = commConfigQ.data;
-    if (!cfg?.enabled || !cfg.clips?.length) return undefined;
-    const key = `1:${cfg.era}:${cfg.mode}:${cfg.clips.length}:${cfg.clips[0]?.id ?? ''}:${cfg.clips[cfg.clips.length - 1]?.id ?? ''}`;
-    return { enabled: true, era: cfg.era, mode: cfg.mode, clips: cfg.clips, key };
-  }, [commConfigQ.data]);
+  // no "air the unseen first" here: a channel is one shared timeline, the same
+  // on every device and every profile, so what one profile has seen can't shape it
+  const commercials = useMemo(() => sharedCommercials(commConfigQ.data), [commConfigQ.data]);
 
   const channels = useMemo(() => {
     const visible = lined.filter((c) => !c.hidden);
@@ -359,16 +359,10 @@ function GuidePage() {
         ...c,
         // Shared broadcast schedule across all devices (Desktop, Android, TV):
         // deterministic from (channelId, day, pool, sharedCommercials)
-        schedule: {
-          daypart: true,
-          blocks: 1,
-          rotateShows: true,
-          today: startOfLocalDay(today),
-          commercials: sharedCommercials,
-        },
+        schedule: guideScheduleOptions(today, commercials),
       };
     });
-  }, [lined, today, sharedCommercials]);
+  }, [lined, today, commercials]);
   const numbers = useMemo(() => new Map(channels.map((c) => [c.id, c.number])), [channels]);
 
   // channel up / down follow the guide's numbers, from anywhere in the player
@@ -613,11 +607,17 @@ function GuidePage() {
           danger
           onClose={() => setRemoving(null)}
           onConfirm={() => {
-            void guideEdits.remove(removing.id).then(() => {
-              setRemoving(null);
-              setPicked(null);
-              void refreshMade();
-            });
+            void guideEdits
+              .remove(removing.id)
+              .then(() => {
+                setRemoving(null);
+                setPicked(null);
+                void refreshMade();
+              })
+              .catch((e: unknown) => {
+                setRemoving(null);
+                notifyError("Couldn't remove that channel")(e);
+              });
           }}
         >
           {removing.scope === 'server'

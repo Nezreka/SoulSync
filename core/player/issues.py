@@ -67,12 +67,25 @@ def _ensure(db) -> None:
 
 
 def _resolve_file_path(item_type: str, item_id: str) -> str:
+    """where the admin should look: the file on disk, or which kind of source.
+    a relayed or external url is never stored: a media server's carries its
+    token (?api_key=, ?X-Plex-Token=), and this row goes back to the reporter."""
     try:
         from core.player.playable import resolve
         src = resolve(item_type, item_id, None)
-        return str(src.path or src.url or "")[:1000]
+        if src.mode == "file" and src.path:
+            return str(src.path)[:1000]
+        return f"({src.mode} stream)" if src.mode else ""
     except Exception:  # noqa: BLE001
         return ""
+
+
+def _safe_file_path(value: Any) -> str:
+    """rows stored before the fix may hold a token url: show only that it was one"""
+    text = str(value or "")
+    if "://" in text:
+        return "(relay stream)"
+    return text
 
 
 def _row_to_dict(row) -> Dict[str, Any]:
@@ -84,7 +97,7 @@ def _row_to_dict(row) -> Dict[str, Any]:
         "item_id": row[4] or "",
         "title": row[5] or "",
         "subtitle": row[6] or "",
-        "file_path": row[7] or "",
+        "file_path": _safe_file_path(row[7]),
         "category": row[8] or "playback",
         "note": row[9] or "",
         "position_sec": int(row[10] or 0),

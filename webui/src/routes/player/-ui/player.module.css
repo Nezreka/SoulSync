@@ -459,8 +459,8 @@
   padding: calc(var(--u) * 0.75);
   border: 1px solid var(--white-a14);
   border-radius: var(--radius-sheet);
-  background: rgba(var(--pl-0d101a-rgb), 0.96);
-  backdrop-filter: blur(24px) saturate(1.4);
+  /* opaque: at 0.96 a bright hero behind it showed through the results */
+  background: rgba(var(--pl-0d101a-rgb), 1);
   box-shadow:
     0 28px 72px rgba(var(--black-rgb), 0.72),
     0 0 0 1px var(--white-a04) inset;
@@ -637,6 +637,8 @@
   overflow-x: auto;
   background: var(--pl-panel-solid);
   scrollbar-width: none;
+  /* more filters than fit: they fade out at the edge instead of hitting it */
+  mask-image: linear-gradient(90deg, black calc(100% - var(--u) * 2.5), transparent);
 }
 
 .searchFilter {
@@ -756,6 +758,200 @@
   padding: calc(var(--u) * 1.2);
   color: var(--pl-text-3);
   text-align: center;
+}
+
+.searchRecentText {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* before typing: the player's own sections, a tap away */
+.searchBrowse {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(calc(var(--u) * 9.5), 1fr));
+  gap: calc(var(--u) * 0.5);
+  padding: calc(var(--u) * 0.35) calc(var(--u) * 0.4) calc(var(--u) * 0.2);
+}
+
+.searchBrowseTile {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 0.7);
+  min-height: calc(var(--u) * 3.2);
+  padding: 0 calc(var(--u) * 0.85);
+  border: 1px solid var(--white-a08);
+  border-radius: var(--radius-lg);
+  background: linear-gradient(135deg, var(--white-a06), var(--white-a02));
+  color: var(--pl-text);
+  font-size: calc(var(--u) * 0.9);
+  font-weight: 650;
+  text-decoration: none;
+  transition:
+    background var(--dur-fast) ease,
+    border-color var(--dur-fast) ease;
+}
+
+.searchBrowseTile:hover,
+.searchBrowseTile:focus-visible {
+  border-color: rgba(var(--accent-rgb), 0.45);
+  background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.16), var(--white-a04));
+}
+
+.searchBrowseIcon {
+  display: grid;
+  place-items: center;
+  width: calc(var(--u) * 1.9);
+  height: calc(var(--u) * 1.9);
+  flex: none;
+  border-radius: var(--radius-md);
+  background: rgba(var(--accent-rgb), 0.16);
+  color: var(--accent-light);
+}
+
+.searchBrowseIcon svg {
+  width: calc(var(--u) * 1.05);
+  height: calc(var(--u) * 1.05);
+}
+
+/* "Cancel" leaves the phone's search screen; a desktop has no such screen */
+.searchCancel {
+  display: none;
+}
+
+/* a touch screen has no "/" to press */
+@media (hover: none) {
+  .searchKey {
+    display: none;
+  }
+}
+
+/* phones: search is its own screen, like every phone's search. the field
+   at the top with Cancel beside it, the filters pinned under it, the
+   results filling the rest, nothing of the page behind showing through */
+@media (max-width: 768px) {
+  .search[data-open='true'] {
+    position: fixed;
+    inset: 0;
+    z-index: var(--z-dialog);
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: auto minmax(0, 1fr);
+    align-content: start;
+    column-gap: calc(var(--u) * 0.6);
+    max-width: none;
+    padding: calc(env(safe-area-inset-top, 0px) + var(--u) * 0.75) var(--pl-gutter) 0;
+    background: var(--pl-bg);
+  }
+
+  .search[data-open='true'] .searchIcon {
+    top: calc(env(safe-area-inset-top, 0px) + var(--u) * 0.75 + var(--u) * 1.5);
+    left: calc(var(--pl-gutter) + var(--u) * 0.95);
+  }
+
+  .search[data-open='true'] .searchInput {
+    grid-column: 1;
+    grid-row: 1;
+    height: calc(var(--u) * 3);
+    font-size: 16px; /* under 16px iOS zooms the page on focus */
+  }
+
+  .search[data-open='true'] .searchCancel {
+    display: block;
+    grid-column: 2;
+    grid-row: 1;
+    align-self: center;
+    min-height: calc(var(--u) * 3);
+    padding: 0 calc(var(--u) * 0.25);
+    border: 0;
+    background: transparent;
+    color: var(--accent-light);
+    font: inherit;
+    font-size: calc(var(--u) * 1.05);
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .search[data-open='true'] .searchKey {
+    display: none;
+  }
+
+  .search[data-open='true'] .searchPanel {
+    position: static;
+    grid-column: 1 / -1;
+    grid-row: 2;
+    width: auto;
+    max-height: none;
+    margin: calc(var(--u) * 0.6) calc(var(--pl-gutter) * -1) 0;
+    padding: 0 var(--pl-gutter) calc(env(safe-area-inset-bottom, 0px) + var(--u) * 2);
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    overscroll-behavior: contain;
+  }
+
+  /* only one panel shows at a time; the other isn't rendered */
+  .search[data-open='true'] .searchFilters {
+    top: 0;
+    margin: 0 calc(var(--pl-gutter) * -1);
+    padding: calc(var(--u) * 0.2) var(--pl-gutter) calc(var(--u) * 0.6);
+    background: var(--pl-bg);
+    box-shadow: 0 1px 0 var(--pl-line);
+  }
+
+  .search[data-open='true'] .searchFilter {
+    height: calc(var(--u) * 2.3);
+    padding: 0 calc(var(--u) * 1);
+    font-size: calc(var(--u) * 0.88);
+  }
+
+  .search[data-open='true'] .searchGroup {
+    padding: calc(var(--u) * 0.7) 0;
+  }
+
+  .search[data-open='true'] .searchGroupLabel {
+    padding-left: 0;
+  }
+
+  .search[data-open='true'] .searchHit {
+    min-height: calc(var(--u) * 4);
+    padding: calc(var(--u) * 0.45) 0;
+    border-radius: 0;
+  }
+
+  .search[data-open='true'] .searchThumb {
+    width: calc(var(--u) * 3.2);
+    height: calc(var(--u) * 3.2);
+  }
+
+  .search[data-open='true'] .searchThumb[data-poster='true'] {
+    width: calc(var(--u) * 2.75);
+    height: calc(var(--u) * 4);
+  }
+
+  .search[data-open='true'] .searchHitTitle {
+    font-size: calc(var(--u) * 1.02);
+  }
+
+  .search[data-open='true'] .searchTop {
+    margin: 0;
+  }
+
+  .search[data-open='true'] .searchRecent {
+    min-height: calc(var(--u) * 3.4);
+    padding: 0;
+    font-size: calc(var(--u) * 1.02);
+  }
+
+  .search[data-open='true'] .searchBrowse {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding: calc(var(--u) * 0.35) 0 0;
+  }
+
+  .search[data-open='true'] .searchHint {
+    display: none;
+  }
 }
 
 /* ── profile chip + menu ─────────────────────────────────────────────── */

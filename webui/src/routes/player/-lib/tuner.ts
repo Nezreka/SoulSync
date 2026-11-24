@@ -54,3 +54,32 @@ export function stepTuning(
   }
   return null;
 }
+
+/** what the player is doing on a tuned channel, as the clock keeper sees it */
+export interface OnAir {
+  /** `${type}:${id}` of what's playing, or null */
+  itemKey: string | null;
+  status: 'idle' | 'loading' | 'playing' | 'paused' | 'buffering' | 'ended' | 'error';
+  /** "start over": behind the clock on purpose until that program ends */
+  offClock: boolean;
+}
+
+/**
+ * a channel is a shared clock: every device shows the same thing at the
+ * same moment. a queue plays whole files back to back, and the guide cuts
+ * programs short (a premiere, the day's end, a commercial's slot), so the
+ * player drifts. this says when to tune back in at the minute it's on:
+ * - it ended or failed (a queue run out, a commercial gone from the cache)
+ * - what's playing isn't what's airing now (a file that ran past its slot)
+ * paused, loading, or deliberately behind (start over) is left alone, until
+ * it ends or fails. null: nothing to do.
+ */
+export function retuneIfDrifted(channel: Channel, on: OnAir, now: number): Tuning | null {
+  if (on.status === 'paused' || on.status === 'loading' || on.status === 'idle') return null;
+  const broken = on.status === 'ended' || on.status === 'error';
+  if (!broken && on.offClock) return null;
+  const t = tuneAt(channel, now);
+  if (!t) return null;
+  if (!broken && on.itemKey === t.program.key) return null;
+  return t;
+}

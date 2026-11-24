@@ -8,6 +8,8 @@
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 
+import { appURL } from '@/platform/url-base';
+
 import { clock } from '../../-engine/timeline';
 import { type WatchParty, watchPartyApi } from '../../-player.api';
 import { getEngine } from './use-player';
@@ -19,6 +21,28 @@ const REACTION_BURST_WINDOW_MS = 4000;
 let currentPartyId: string | null = null;
 let pendingCurtainUnfurl = false;
 const partyListeners = new Set<() => void>();
+
+// when this viewer last steered (pause, play, seek): for a moment after, the
+// poll doesn't undo it with the state it fetched before the change landed.
+// module wide so the player's own keys and buttons count too, not only the
+// overlay's buttons
+let lastLocalActionAt = 0;
+function markLocalAction() {
+  lastLocalActionAt = Date.now();
+}
+// a seek the sync itself made, so the seek watcher doesn't send it back
+let applyingSyncUntil = 0;
+function syncSeek(to: number) {
+  applyingSyncUntil = Date.now() + 1000;
+  getEngine().seek(to);
+}
+
+// what the room refused ("only the host can control playback"), for the overlay to say
+const noticeListeners = new Set<(msg: string) => void>();
+function partyNotice(error: unknown, fallback: string) {
+  const msg = error instanceof Error && error.message ? error.message : fallback;
+  for (const fn of noticeListeners) fn(msg);
+}
 
 export function setActiveWatchPartyId(id: string | null, opts?: { triggerCurtain?: boolean }) {
   if (opts?.triggerCurtain && id) {
@@ -47,16 +71,17 @@ export function handleWatchPartyPlayerToggle(): boolean {
   const engine = getEngine();
   const st = engine.getState();
   const isPlaying = st.status === 'playing' || st.status === 'buffering';
+  markLocalAction();
   if (isPlaying) {
     engine.pause();
     void watchPartyApi
       .state(pid, { action: 'pause', position: st.position })
-      .catch(() => undefined);
+      .catch((e: unknown) => partyNotice(e, "Couldn't pause the room"));
   } else {
     // Keep local video paused while the 5-second server resume countdown runs!
     void watchPartyApi
       .state(pid, { action: 'resume', position: st.position })
-      .catch(() => undefined);
+      .catch((e: unknown) => partyNotice(e, "Couldn't resume the room"));
   }
   return true;
 }
@@ -110,7 +135,6 @@ export function PartyReactionsOverlay({ hudVisible }: { hudVisible: boolean }) {
   const seenIdsRef = useRef<Set<number>>(new Set());
   const initializedRef = useRef<string | null>(null);
   const serverOffsetSecRef = useRef<number>(0);
-  const lastLocalActionAtRef = useRef<number>(0);
   const reactionTimestampsRef = useRef<number[]>([]);
   const chatOpenRef = useRef(false);
   chatOpenRef.current = chatOpen;
@@ -128,6 +152,41 @@ export function PartyReactionsOverlay({ hudVisible }: { hudVisible: boolean }) {
       setToastMsg((prev) => (prev === msg ? null : prev));
     }, 3200);
   }, []);
+
+  // the player's own keys and buttons report what the room refused, here
+  useEffect(() => {
+    noticeListeners.add(showToast);
+    return () => {
+      noticeListeners.delete(showToast);
+    };
+  }, [showToast]);
+
+  // a seek this viewer made (keys, the seek bar, chapters) goes to the room:
+  // otherwise the next poll snapped a host back to where the room was
+  useEffect(() => {
+    if (!partyId) return;
+    const engine = getEngine();
+    let last = engine.getState();
+    let lastAt = Date.now();
+    return engine.subscribe(() => {
+      const st = engine.getState();
+      const now = Date.now();
+      const expected =
+        last.position + (last.status === 'playing' ? ((now - lastAt) / 1000) * (st.rate || 1) : 0);
+      const jumped =
+        st.kind === 'video' &&
+        st.item?.id === last.item?.id &&
+        st.status !== 'loading' &&
+        Math.abs(st.position - expected) > 2.5;
+      last = st;
+      lastAt = now;
+      if (!jumped || now < applyingSyncUntil) return;
+      markLocalAction();
+      void watchPartyApi
+        .state(partyId, { action: 'seek', position: st.position })
+        .catch((e: unknown) => partyNotice(e, "Couldn't move the room there"));
+    });
+  }, [partyId]);
 
   // Trigger full-screen velvet curtain unfurl when entering Watch Party video
   useEffect(() => {
@@ -192,8 +251,13 @@ export function PartyReactionsOverlay({ hudVisible }: { hudVisible: boolean }) {
     const engine = getEngine();
     const st = engine.getState();
     if (st.kind !== 'video') return;
+    // the player moved on to something else (next episode, another title):
+    // the room's clock isn't this item's
+    if (!st.item || String(st.item.id) !== String(p.item_id)) return;
 
-    const recentlyActed = Date.now() - lastLocalActionAtRef.current < 1500;
+    // one poll cycle (1.8s) plus the request: a poll that left before this
+    // viewer's change landed must not undo it
+    const recentlyActed = Date.now() - lastLocalActionAt < 3000;
     const inResumeCountdown = typeof p.resume_at === 'number' && p.resume_at > estServerNow;
 
     if (p.status === 'paused' || inResumeCountdown) {
@@ -202,12 +266,12 @@ export function PartyReactionsOverlay({ hudVisible }: { hudVisible: boolean }) {
       }
       const targetPos = p.position ?? p.live_position ?? 0;
       if (Math.abs(st.position - targetPos) > 2.5 && !recentlyActed) {
-        engine.seek(targetPos);
+        syncSeek(targetPos);
       }
     } else if (p.status === 'playing' && !inResumeCountdown) {
       if (st.status === 'paused' && !recentlyActed) {
         if (Math.abs(st.position - p.live_position) > 2.5) {
-          engine.seek(p.live_position);
+          syncSeek(p.live_position);
         }
         engine.resume();
       } else if (
@@ -215,7 +279,7 @@ export function PartyReactionsOverlay({ hudVisible }: { hudVisible: boolean }) {
         Math.abs(st.position - p.live_position) > 4.5 &&
         !recentlyActed
       ) {
-        engine.seek(p.live_position);
+        syncSeek(p.live_position);
       }
     }
   }, []);
@@ -325,7 +389,7 @@ export function PartyReactionsOverlay({ hudVisible }: { hudVisible: boolean }) {
     if (!party) return;
     const engine = getEngine();
     const pos = engine.getState().position;
-    lastLocalActionAtRef.current = Date.now();
+    markLocalAction();
     try {
       if (party.status === 'playing' && !resumeRemainingSec) {
         engine.pause();
@@ -344,7 +408,7 @@ export function PartyReactionsOverlay({ hudVisible }: { hudVisible: boolean }) {
     if (!party) return;
     const engine = getEngine();
     const pos = engine.getState().position;
-    lastLocalActionAtRef.current = Date.now();
+    markLocalAction();
     try {
       engine.pause();
       const updated = await watchPartyApi.state(party.id, { action: 'pee_break', position: pos });
@@ -1015,7 +1079,9 @@ export function PartyReactionsOverlay({ hudVisible }: { hudVisible: boolean }) {
                   const pid = party.id;
                   setActiveWatchPartyId(null);
                   getEngine().stop();
-                  window.location.href = `/player/watching?party=${encodeURIComponent(pid)}`;
+                  window.location.href = appURL(
+                    `/player/watching?party=${encodeURIComponent(pid)}`,
+                  );
                 }}
                 style={{
                   padding: '9px 18px',

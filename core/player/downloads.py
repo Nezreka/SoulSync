@@ -41,6 +41,10 @@ CREATE TABLE IF NOT EXISTS player_download_permissions (
 """
 
 
+class DownloadLimitReached(ValueError):
+    """the profile is at the admin's download cap"""
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -99,7 +103,11 @@ def log_download(
     device_name: str = "Web Browser",
     quality: str = "original",
     size_bytes: int = 0,
+    max_items: int = 0,
 ) -> Dict[str, Any]:
+    """log one download. ``max_items`` (the admin's cap, 0 = none) counts
+    what's still downloaded across the profile's devices; a new item past it
+    is a DownloadLimitReached, a re-download of one already there is not."""
     itype = str(item_type or "").strip().lower()
     if itype not in VALID_TYPES:
         raise ValueError(f"Unsupported item_type: {item_type}")
@@ -110,7 +118,10 @@ def log_download(
     dev_id = str(device_id or "web").strip()[:80] or "web"
     dev_name = str(device_name or "Web Browser").strip()[:120] or "Web Browser"
     qual = str(quality or "original").strip()[:32] or "original"
-    size = max(0, int(size_bytes or 0))
+    try:
+        size = max(0, int(size_bytes or 0))
+    except (TypeError, ValueError):
+        size = 0
     now = _now_iso()
 
     with db._get_connection() as conn:
@@ -135,6 +146,15 @@ def log_download(
             )
             row_id = int(existing["id"])
         else:
+            if max_items and max_items > 0:
+                held = conn.execute(
+                    "SELECT COUNT(*) FROM player_downloads WHERE profile_id = ? AND status = 'downloaded'",
+                    (int(profile_id),),
+                ).fetchone()[0]
+                if held >= max_items:
+                    raise DownloadLimitReached(
+                        f"You can keep {max_items} downloads. Remove one to make room."
+                    )
             cur = conn.execute(
                 """
                 INSERT INTO player_downloads (

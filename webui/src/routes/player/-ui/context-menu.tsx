@@ -84,7 +84,7 @@ export function closeContextMenu() {
 
 /** Infer a ContextMenuTarget from any RailCard */
 export function inferContextTargetFromCard(
-  e: React.MouseEvent,
+  e: Pick<React.MouseEvent, 'clientX' | 'clientY'>,
   card: {
     title: string;
     subtitle?: string;
@@ -157,10 +157,8 @@ export function inferContextTargetFromCard(
   ) {
     kind = 'podcast';
     id = id ?? href.match(/\/player\/podcasts\/([^/?#]+)/)?.[1] ?? null;
-    if (card.source?.itemType === 'podcast_episode' && id) {
-      downloadType = 'podcast';
-      downloadId = id;
-    }
+    // no download: a card carries no enclosure url, and the player has no
+    // podcast stream to fetch (it logged a download and saved an error page)
   } else if (card.source?.itemType === 'youtube') {
     kind = 'youtube';
     if (id) {
@@ -291,7 +289,11 @@ export function ContextMenuHost() {
       if (target.href) {
         closeContextMenu();
         void navigate({ to: target.href as '/player' });
+        return;
       }
+      // nothing to play (a show with no episodes yet) and nowhere to go
+      setBusyMsg(null);
+      setStatusNote('Nothing to play here yet');
     } catch {
       setBusyMsg(null);
       setStatusNote('Could not start playback');

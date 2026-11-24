@@ -224,6 +224,10 @@ export class PlayerEngine {
   private readonly media: Partial<Record<MediaKind, HTMLMediaElement>> = {};
   private loadToken = 0;
   private partIndex = 0;
+  /** the load whose src the elements hold: events from an older src are ignored */
+  private armedToken = 0;
+  /** bumped per part load, so of two quick seeks on a converted stream the last one wins */
+  private partSeq = 0;
   private playable: Playable | null = null;
   private saveTimer: unknown = null;
   private lastSaved = -1;
@@ -393,6 +397,8 @@ export class PlayerEngine {
   seek(to: number) {
     const el = this.active();
     if (!el || !this.state.item) return;
+    // still loading: there's no source yet, and the element holds the last item's
+    if (!this.playable || this.state.status === 'loading') return;
     const target = Math.max(0, Math.min(to, this.state.duration || to));
     const { index, offset } = locate(this.state.parts, target);
     if (this.playable?.transcode) {
@@ -566,9 +572,11 @@ export class PlayerEngine {
   }
 
   /** everything off: save where it was, empty the queue */
-  stop() {
-    this.saveNow();
+  stop(options: { save?: boolean } = {}) {
+    if (options.save !== false) this.saveNow();
     this.loadToken++;
+    this.cancelCrossfade?.();
+    this.cancelCrossfade = null;
     for (const el of Object.values(this.media)) {
       if (!el) continue;
       el.pause();
@@ -627,11 +635,14 @@ export class PlayerEngine {
       return;
     }
     const kind = MEDIA_KIND[item.type];
-    // the other element stops: one thing plays at a time
-    for (const [k, el] of Object.entries(this.media))
-      if (el && k !== kind) {
-        el.pause();
-      }
+    // the item that was playing keeps where it got to
+    if (!options.keepTracks) this.saveNow();
+    this.stopSaving();
+    // everything stops while the next one loads: one thing plays at a time,
+    // and the old file must not keep playing (and ending, and saving) under
+    // the new item's name. a crossfade's tail plays on its own clone
+    for (const el of Object.values(this.media)) el?.pause();
+    this.playable = null;
     this.lastSaved = -1;
     this.set({
       item,
@@ -652,6 +663,8 @@ export class PlayerEngine {
         ? {}
         : { tracks: null, audioTrack: 0, subtitle: null, cues: [], subtitleLoading: false }),
       rate: this.isLongForm(item) ? this.rateFor(item.type) : 1,
+      // a new play of the same title can count as watched again
+      ...(options.keepTracks ? {} : { watchedKey: null }),
     });
     this.setPhase('locating');
     const key = `${item.type}:${item.id}:${item.part ?? ''}`;
@@ -758,6 +771,7 @@ export class PlayerEngine {
     const el = this.element(this.state.kind);
     this.partIndex = index;
     const multi = (playable.parts?.length ?? 0) > 1;
+    const seq = ++this.partSeq;
     this.applyVolume(el, this.state.volume);
     el.muted = this.state.muted;
     if (playable.transcode) {
@@ -771,12 +785,14 @@ export class PlayerEngine {
         } catch {
           /* unanswered: start where asked; the clock may be off by a keyframe */
         }
-        if (token !== this.loadToken) return;
+        if (token !== this.loadToken || seq !== this.partSeq) return;
       }
+      this.armedToken = token;
       this.streamOffset = start;
       this.pendingSeek = null;
       el.src = withParam(playable.url, 't', seek > 0 ? seek.toFixed(2) : null);
     } else {
+      this.armedToken = token;
       this.streamOffset = 0;
       const src = multi ? withPart(playable.url, index) : playable.url;
       if (el.getAttribute('src') !== src) {
@@ -799,7 +815,8 @@ export class PlayerEngine {
   // ── the element's own events ─────────────────────────────────────────
 
   private bind(el: HTMLMediaElement, kind: MediaKind) {
-    const mine = () => this.state.kind === kind;
+    // this element's kind is playing, and its src is the current load's
+    const mine = () => this.state.kind === kind && this.armedToken === this.loadToken;
     el.addEventListener('loadedmetadata', () => {
       if (!mine()) return;
       if (this.pendingSeek !== null) {
@@ -906,6 +923,9 @@ export class PlayerEngine {
   /** a person picked what plays next: the count starts over, any question is answered */
   private chosen() {
     this.autoRun = 0;
+    // a person picked something: an old song still fading out stops
+    this.cancelCrossfade?.();
+    this.cancelCrossfade = null;
     if (this.state.stillWatching) this.set({ stillWatching: false });
   }
 
@@ -972,6 +992,8 @@ export class PlayerEngine {
   private checkCrossfadeAndPrefetch(el: HTMLMediaElement, position: number) {
     const item = this.state.item;
     if (!item || item.type !== 'track' || this.state.status !== 'playing') return;
+    // sleep at the end of this one: it ends, nothing fades into the next
+    const sleepAtEnd = !!this.state.sleep && 'endOfItem' in this.state.sleep;
     const qKey = `${this.state.queue.index}:${item.id}:${this.state.queue.items.length}`;
     if (this.lastPrefetchKey !== qKey) {
       this.lastPrefetchKey = qKey;
@@ -979,7 +1001,7 @@ export class PlayerEngine {
     }
     const dur = this.state.duration || (Number.isFinite(el.duration) ? el.duration : 0);
     const cfSec = getCrossfadeSeconds();
-    if (cfSec <= 0 || dur <= cfSec + 2) return;
+    if (sleepAtEnd || cfSec <= 0 || dur <= cfSec + 2) return;
     const remaining = dur - position;
     if (remaining > cfSec || remaining <= 0.35) return;
     const fadeKey = `${this.state.queue.index}:${item.id}`;
@@ -1030,7 +1052,8 @@ export class PlayerEngine {
     if (!item || live || !this.isLongForm(item)) return;
     // nothing new since the last save
     if (!finished && Math.abs(position - this.lastSaved) < 1) return;
-    if (!finished && position < 1) return;
+    // the very start is only news when it moved back there (a restart)
+    if (!finished && position < 1 && this.lastSaved < 1) return;
     this.lastSaved = position;
     this.deps.save(item, position, duration || null, finished);
   }

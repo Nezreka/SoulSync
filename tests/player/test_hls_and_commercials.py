@@ -54,3 +54,61 @@ def test_commercial_year_extraction_and_era():
     assert commercials.era_for_year(2004) == "2000s"
     assert commercials.era_for_year(2024) is None
     assert commercials.MAX_CACHE_BYTES == 500 * 1024 * 1024
+
+
+# ── cast sessions are cleaned up (a stopped cast never asks again) ───────────
+
+class _FakeProc:
+    def __init__(self):
+        self.killed = False
+        self.returncode = None
+
+    def poll(self):
+        return -9 if self.killed else None
+
+    def kill(self):
+        self.killed = True
+
+    def wait(self, timeout=None):
+        return -9
+
+
+def _session(tmp_path, key, *, last_access, highest=0):
+    out = tmp_path / key
+    out.mkdir()
+    for i in range(highest + 1):
+        (out / f"seg_{i}.ts").write_bytes(b"x")
+    s = hls_cast._HlsSession(key=key, start_seg=0, out_dir=str(out), proc=_FakeProc(),
+                             err_path=out / "ffmpeg.log", last_access=last_access,
+                             highest_written=highest)
+    return s
+
+
+def test_an_idle_cast_is_stopped_and_its_folder_removed(tmp_path, monkeypatch):
+    monkeypatch.setattr(hls_cast, "_sessions", {})
+    idle = _session(tmp_path, "idle", last_access=0.0)
+    live = _session(tmp_path, "live", last_access=1000.0)
+    hls_cast._sessions.update({"idle": idle, "live": live})
+    hls_cast.reap_once(now=1000.0 + 1)
+    assert list(hls_cast._sessions) == ["live"]
+    assert idle.proc.killed and not (tmp_path / "idle").exists()
+    assert not live.proc.killed
+
+
+def test_a_running_cast_keeps_only_segments_near_where_it_plays(tmp_path, monkeypatch):
+    monkeypatch.setattr(hls_cast, "_sessions", {})
+    s = _session(tmp_path, "movie", last_access=1000.0, highest=100)
+    hls_cast._sessions["movie"] = s
+    hls_cast.reap_once(now=1000.0)
+    left = sorted(int(p.stem.split("_")[1]) for p in (tmp_path / "movie").glob("seg_*.ts"))
+    assert left[0] == 100 - hls_cast.KEEP_BEHIND_SEGMENTS
+    assert left[-1] == 100
+
+
+def test_reusing_a_session_does_not_evict_other_casts(tmp_path, monkeypatch):
+    monkeypatch.setattr(hls_cast, "_sessions", {})
+    for k in ("a", "b", "c"):
+        hls_cast._sessions[k] = _session(tmp_path, k, last_access=1000.0, highest=2)
+    with hls_cast._lock:
+        hls_cast._prune_locked(1001.0)
+    assert sorted(hls_cast._sessions) == ["a", "b", "c"]

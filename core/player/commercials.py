@@ -5,7 +5,7 @@ Sources short (12s-95s) retro TV commercials from:
 2. Internet Archive (`archive.org`) public collections (`classic_tv_commercials`,
    `television_commercials`, `prelinger`) via their public JSON search & metadata
    APIs — cached lazily in a bounded local rolling cache
-   (`database/player-cache/commercials/`, max 120 MB) so breaks play instantly
+   (`database/player-cache/commercials/`, max 500 MB) so breaks play instantly
    and direct-play on Chromecast without CORS or SSL issues.
 
 SoulSync never bundles or redistributes third-party commercial files in the repo;
@@ -361,9 +361,25 @@ def _download_archive_era(era: str, needed: int = TARGET_CLIPS_PER_ERA) -> int:
     return added
 
 
-def warm_async(era: str = "mix") -> bool:
-    """Kick off a non-blocking background fill of retro commercials from Archive.org."""
+def _server_enabled() -> bool:
+    """the admin's switch. off (or unreadable): nothing downloads"""
+    try:
+        from database.player_database import get_player_database
+        return bool(get_server_config(get_player_database())["enabled"])
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("commercials: couldn't read the server switch: %s", exc)
+        return False
+
+
+def warm_async(era: str = "mix", *, enabled: Optional[bool] = None) -> bool:
+    """Kick off a non-blocking background fill of retro commercials from Archive.org.
+
+    only while the admin has commercials on: any profile (or paired phone)
+    asking for a break must not make the server download from archive.org
+    when they're off. ``enabled`` skips the lookup when the caller knows."""
     global _warming, _last_error
+    if not (enabled if enabled is not None else _server_enabled()):
+        return False
     with _lock:
         _load_locked()
         if _warming:
@@ -479,7 +495,7 @@ def put_server_config(db: Any, body: Any) -> Dict[str, Any]:
         raise S.SettingsError("nothing to change")
     out = S.put(db, 0, changes)
     if out.get("commercials_enabled"):
-        warm_async(out.get("commercials_era") or "mix")
+        warm_async(out.get("commercials_era") or "mix", enabled=True)
     return {
         "enabled": bool(out.get("commercials_enabled", False)),
         "era": str(out.get("commercials_era") or "auto"),

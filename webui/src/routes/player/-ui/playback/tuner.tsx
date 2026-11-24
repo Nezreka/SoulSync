@@ -16,11 +16,11 @@ import type { PlayerState } from '../../-engine/engine';
 import type { Channel } from '../../-lib/channels';
 
 import { runtime } from '../../-lib/format';
-import { stepTuning, tuneAt, type Tuning } from '../../-lib/tuner';
+import { retuneIfDrifted, stepTuning, tuneAt, type Tuning } from '../../-lib/tuner';
 import { inPlayer } from '../trailer';
 import { ChannelDownIcon, ChannelUpIcon, LastChannelIcon, StartOverIcon } from './icons';
 import s from './playback.module.css';
-import { playItems, usePlayer } from './use-player';
+import { getEngine, playItems, usePlayer } from './use-player';
 
 interface Tuned {
   lineup: Channel[];
@@ -30,9 +30,18 @@ interface Tuned {
   at: number;
   /** a channel number being typed */
   typing: string;
+  /** start over: behind the clock on purpose until that program is done */
+  offClock: boolean;
 }
 
-let tuned: Tuned = { lineup: [], current: null, previous: null, at: 0, typing: '' };
+let tuned: Tuned = {
+  lineup: [],
+  current: null,
+  previous: null,
+  at: 0,
+  typing: '',
+  offClock: false,
+};
 const listeners = new Set<() => void>();
 function emit(next: Partial<Tuned>) {
   tuned = { ...tuned, ...next };
@@ -55,14 +64,70 @@ export function setLineup(channels: Channel[]) {
   emit({ lineup: channels });
 }
 
-function play(t: Tuning) {
+function play(t: Tuning, banner = true) {
   playItems(t.queue, 0, { startAt: t.startAt, live: true });
   const before = tuned.current?.channel;
   emit({
     current: t,
-    at: Date.now(),
+    ...(banner ? { at: Date.now() } : {}),
+    offClock: false,
     previous: before && before.id !== t.channel.id ? before : tuned.previous,
   });
+  keepTheClock();
+}
+
+// ── the clock keeper ─────────────────────────────────────────────────────
+// a tuned channel stays on the shared timeline: when what's playing isn't
+// what's airing (a file ran past its slot), or the queue ran out or a clip
+// failed, it tunes back in at the minute it's on. see retuneIfDrifted.
+
+const KEEP_EVERY_MS = 5_000;
+const MIN_RETUNE_GAP_MS = 3_000;
+let keeper: { timer: number; unsubscribe: () => void } | null = null;
+let lastRetune = 0;
+
+function checkTheClock() {
+  const t = tuned.current;
+  const state = getEngine().getState();
+  if (!t || !state.live) {
+    stopKeeping();
+    return;
+  }
+  const itemKey = state.item ? `${state.item.type}:${state.item.id}` : null;
+  // start over is done once its program is: back on the clock
+  if (tuned.offClock && itemKey !== t.program.key && state.status !== 'loading') {
+    tuned = { ...tuned, offClock: false };
+  }
+  const now = Date.now();
+  if (now - lastRetune < MIN_RETUNE_GAP_MS) return;
+  const fresh = tuned.lineup.find((c) => c.id === t.channel.id) ?? t.channel;
+  const again = retuneIfDrifted(
+    fresh,
+    { itemKey, status: state.status, offClock: tuned.offClock },
+    now,
+  );
+  if (!again) return;
+  lastRetune = now;
+  play(again, false);
+}
+
+function keepTheClock() {
+  if (keeper || typeof window === 'undefined') return;
+  let lastStatus = getEngine().getState().status;
+  const unsubscribe = getEngine().subscribe(() => {
+    const status = getEngine().getState().status;
+    if (status === lastStatus) return;
+    lastStatus = status;
+    if (status === 'ended' || status === 'error') checkTheClock();
+  });
+  keeper = { timer: window.setInterval(checkTheClock, KEEP_EVERY_MS), unsubscribe };
+}
+
+function stopKeeping() {
+  if (!keeper) return;
+  window.clearInterval(keeper.timer);
+  keeper.unsubscribe();
+  keeper = null;
 }
 
 /** back to the channel before this one */
@@ -80,7 +145,8 @@ export function startOver(): boolean {
   const again = tuneAt(t.channel, t.program.start);
   if (!again) return false;
   playItems(again.queue, 0, { startAt: 0, live: true });
-  emit({ current: again, at: Date.now() });
+  emit({ current: again, at: Date.now(), offClock: true });
+  keepTheClock();
   return true;
 }
 

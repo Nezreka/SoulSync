@@ -130,7 +130,7 @@ def finish_progress():
     except Exception:  # noqa: BLE001
         return _failed("finish")
     return jsonify({"success": True, "progress": row,
-                    "watched": watched.mark(body.get("item_type"), body.get("item_id"))})
+                    "watched": _mark_if_allowed(body.get("item_type"), body.get("item_id"))})
 
 
 @bp.route("/api/player/watched", methods=["POST"])
@@ -143,7 +143,15 @@ def mark_watched():
     if pid is None:
         return _signed_out()
     body = request.get_json(silent=True) or {}
-    return jsonify({"success": True, "watched": watched.mark(body.get("item_type"), body.get("item_id"))})
+    return jsonify({"success": True, "watched": _mark_if_allowed(body.get("item_type"), body.get("item_id"))})
+
+
+def _mark_if_allowed(item_type, item_id):
+    """watched goes to the media server account too: only for a title this
+    profile may see (a kids profile marking any movie id watched pushed it)"""
+    if item_type in ("movie", "episode") and not _may_see_title(str(item_type), str(item_id or "")):
+        return False
+    return watched.mark(item_type, item_id)
 
 
 @bp.route("/api/player/progress", methods=["DELETE"])
@@ -223,6 +231,7 @@ def shape_video_catalog(raw, sees_movies, sees_shows, sees_youtube, cap):
 
 _CACHE_STALE_SECONDS = 600
 _cache_refreshing: set = set()
+_cache_key_locks: dict = {}
 
 
 def _refresh_catalog_bg(key, sees_movies, sees_shows, sees_youtube):
@@ -258,7 +267,6 @@ def _read_catalog(sees_movies, sees_shows, sees_youtube, *, force: bool = False)
             if age < _CACHE_STALE_SECONDS:
                 if key not in _cache_refreshing:
                     _cache_refreshing.add(key)
-                    import threading
                     threading.Thread(
                         target=_refresh_catalog_bg,
                         args=(key, sees_movies, sees_shows, sees_youtube),
@@ -266,12 +274,23 @@ def _read_catalog(sees_movies, sees_shows, sees_youtube, *, force: bool = False)
                         name="player-catalog-swr",
                     ).start()
                 return hit[1]
+        key_lock = _cache_key_locks.setdefault(key, threading.Lock())
+    # the read runs outside _cache_lock: a cold read of one view used to hold
+    # every catalog request (every view) and the background refreshes behind
+    # it. the same view asking twice still reads once (single flight)
+    with key_lock:
+        with _cache_lock:
+            hit = _cache.get(key)
+            if hit and not force and time.monotonic() - hit[0] < _CACHE_SECONDS:
+                return hit[1]
+        started = time.monotonic()
         conn = get_video_db()._get_connection()
         try:
             raw = catalog.read_all(conn, sees_movies, sees_shows, sees_youtube)
         finally:
             conn.close()
-        _cache[key] = (time.monotonic(), raw)
+        with _cache_lock:
+            _cache[key] = (started, raw)
         return raw
 
 
@@ -285,8 +304,22 @@ def video_catalog():
     try:
         sees_movies, sees_shows, sees_youtube, cap = _video_view()
         force = str(request.args.get("refresh") or "").strip().lower() in ("1", "true", "yes")
-        raw = _read_catalog(sees_movies, sees_shows, sees_youtube, force=force)
-        return jsonify({"success": True, **shape_video_catalog(raw, sees_movies, sees_shows, sees_youtube, cap)})
+
+        def shaped():
+            raw = _read_catalog(sees_movies, sees_shows, sees_youtube, force=force)
+            return shape_video_catalog(raw, sees_movies, sees_shows, sees_youtube, cap)
+
+        if str(request.args.get("guide") or "") == "1":
+            # the guide's pool: frozen for the day, so the shared timeline
+            # doesn't re-seed when the library changes (core/player/guide_day.py)
+            from core.player import guide_day
+            view = f"catalog:{int(bool(sees_movies))}{int(bool(sees_shows))}{int(bool(sees_youtube))}:{cap}"
+            day = guide_day.frozen(
+                player_db(), view, shaped,
+                keep=lambda c: bool(c.get("movies") or c.get("shows") or c.get("youtube")),
+            )
+            return jsonify({"success": True, **day, "frozen": True})
+        return jsonify({"success": True, **shaped()})
     except Exception:  # noqa: BLE001
         logger.exception("player video catalog failed")
         return jsonify({"success": False, "error": "Could not read the video library"}), 500
@@ -955,8 +988,8 @@ def put_player_settings():
         try:
             from core.player import commercials
             commercials.warm_async(out.get("commercials_era") or "mix")
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as e:  # noqa: BLE001
+            logger.debug("commercials warm after a settings save failed: %s", e)
     return jsonify({"success": True, "settings": out})
 
 
@@ -971,6 +1004,11 @@ def get_commercials_config():
         return _signed_out()
     cfg = commercials.get_server_config(player_db())
     clips = commercials.list_clips_sorted() if cfg["enabled"] else []
+    if cfg["enabled"] and str(request.args.get("guide") or "") == "1":
+        # the clips the day's breaks are scheduled from: frozen like the pool,
+        # or each clip the cache fetched re-seeded everyone's day
+        from core.player import guide_day
+        clips = guide_day.frozen(player_db(), f"clips:{cfg['era']}:{cfg['mode']}", lambda: clips)
     return jsonify({
         "success": True,
         **cfg,
@@ -1144,8 +1182,8 @@ def _viewer_may_see(s) -> bool:
             return True
         if s.item_type == "movie":
             return library_title_allowed(get_video_db(), "movie", int(s.item_id), cap)
-        show = (s.meta or {}).get("parent_id")
-        return bool(show) and library_title_allowed(get_video_db(), "show", int(show), cap)
+        # the episode's real show, never the parent_id the client sent
+        return _may_see_title("episode", str(s.item_id))
     except Exception:  # noqa: BLE001 - can't tell: don't show it
         return False
 
@@ -1362,7 +1400,11 @@ def _is_admin() -> bool:
 
 
 def _is_player_admin() -> bool:
-    """True for browser admins AND paired mobile devices signed into an admin profile."""
+    """True for browser admins AND paired mobile devices signed into an admin profile.
+
+    every admin check in the player uses this one: a phone on an admin
+    profile runs the same player as that admin's browser (Users & Downloads,
+    server guide channels, party overrides), as the mobile app's README says."""
     from flask import g
     return bool(getattr(g, "is_admin", False) or getattr(g, "perms_source", None) == "admin")
 
@@ -1380,7 +1422,7 @@ def guide_channels():
         out = lineup.list_channels(player_db(), pid)
     except Exception:  # noqa: BLE001
         return _failed("channels read", "Couldn't load the channels.")
-    return jsonify({"success": True, **out, "can_edit_server": _is_admin()})
+    return jsonify({"success": True, **out, "can_edit_server": _is_player_admin()})
 
 
 @bp.route("/api/player/guide/channels", methods=["POST"])
@@ -1394,7 +1436,7 @@ def add_guide_channel():
         return _signed_out()
     body = request.get_json(silent=True) or {}
     server = body.get("scope") == "server"
-    if server and not _is_admin():
+    if server and not _is_player_admin():
         return jsonify({"success": False, "error": "not_allowed",
                         "message": "Only an admin makes channels for everyone."}), 403
     try:
@@ -1416,7 +1458,7 @@ def edit_guide_channel(channel_id):
         return _signed_out()
     try:
         ch = lineup.edit_channel(player_db(), pid, channel_id, (request.get_json(silent=True) or {}).get("spec"),
-                                 admin=_is_admin())
+                                 admin=_is_player_admin())
     except lineup.LineupError as e:
         return _bad(e)
     if ch is None:
@@ -1432,7 +1474,7 @@ def remove_guide_channel(channel_id):
     pid = _profile()
     if pid is None:
         return _signed_out()
-    if not lineup.remove_channel(player_db(), pid, channel_id, admin=_is_admin()):
+    if not lineup.remove_channel(player_db(), pid, channel_id, admin=_is_player_admin()):
         return jsonify({"success": False, "error": "not_found", "message": "No such channel of yours."}), 404
     return jsonify({"success": True})
 
@@ -1575,14 +1617,22 @@ def _pick_default_lobby_track() -> dict | None:
         from database.music_database import get_database
         db = get_database()
         with db._get_connection() as conn:
-            row = conn.execute(
-                "SELECT t.id, t.title, COALESCE(NULLIF(t.track_artist, ''), ar.name, '') AS artist, t.album_id, t.duration "
-                "FROM lib2_tracks t "
+            # a random point in the id range, then the first owned track from
+            # there (wrapping): ORDER BY RANDOM() read every owned track
+            import random
+            top = conn.execute("SELECT MAX(id) FROM lib2_tracks").fetchone()
+            if not top or not top[0]:
+                return None
+            pivot = random.randint(1, int(top[0]))  # noqa: S311 - not security
+            pick = (
+                "SELECT t.id, t.title, COALESCE(NULLIF(t.track_artist, ''), ar.name, '') AS artist, "
+                "t.album_id, t.duration FROM lib2_tracks t "
                 "JOIN lib2_albums al ON al.id = t.album_id "
                 "LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id "
-                f"WHERE {owned_sql('track', 't')} "
-                "ORDER BY RANDOM() LIMIT 1"
-            ).fetchone()
+                f"WHERE {owned_sql('track', 't')} AND t.id {{}} ? ORDER BY t.id {{}} LIMIT 1"
+            )
+            row = (conn.execute(pick.format(">=", "ASC"), (pivot,)).fetchone()
+                   or conn.execute(pick.format("<", "DESC"), (pivot,)).fetchone())
             if not row:
                 return None
             tid, title, artist, album_id, duration = row
@@ -1702,8 +1752,13 @@ def update_watch_party_state(party_id):
     body = request.get_json(silent=True) or {}
     if body.get("shuffle_lobby_music"):
         body = {**body, "lobby_track": _pick_default_lobby_track()}
+    if body.get("item_type") and body.get("item_id") and not _party_may_see(
+        str(body["item_type"]), str(body["item_id"])
+    ):
+        return jsonify({"success": False, "error": "not_allowed",
+                        "message": "That title isn't available to this profile."}), 403
     try:
-        party = parties.update_state(player_db(), party_id, pid, body, is_admin=_is_admin())
+        party = parties.update_state(player_db(), party_id, pid, body, is_admin=_is_player_admin())
     except parties.PartyError as e:
         return _bad(e)
     who = _profiles_by_id()
@@ -1737,7 +1792,7 @@ def delete_watch_party(party_id):
     if pid is None:
         return _signed_out()
     try:
-        deleted = parties.delete_party(player_db(), party_id, pid, is_admin=_is_admin())
+        deleted = parties.delete_party(player_db(), party_id, pid, is_admin=_is_player_admin())
     except parties.PartyError as e:
         return _bad(e)
     return jsonify({"success": True, "deleted": deleted})
@@ -1762,7 +1817,7 @@ def player_downloads_list():
         "success": True,
         "allow_downloads": perm["allow_downloads"],
         "max_items": perm["max_items"],
-        "is_admin": _is_admin(),
+        "is_admin": _is_player_admin(),
         "downloads": items,
     })
 
@@ -1777,7 +1832,7 @@ def player_downloads_log():
     if pid is None:
         return _signed_out()
     perm = downloads.get_permission(player_db(), pid)
-    if not perm["allow_downloads"] and not _is_admin():
+    if not perm["allow_downloads"] and not _is_player_admin():
         return jsonify({
             "success": False,
             "error": "downloads_disabled",
@@ -1796,8 +1851,12 @@ def player_downloads_log():
             device_id=body.get("device_id") or "web",
             device_name=body.get("device_name") or "Web Browser",
             quality=body.get("quality") or "original",
-            size_bytes=int(body.get("size_bytes") or 0),
+            size_bytes=body.get("size_bytes") or 0,
+            # the admin's cap; an admin keeps what they like
+            max_items=0 if _is_player_admin() else int(perm.get("max_items") or 0),
         )
+    except downloads.DownloadLimitReached as e:
+        return jsonify({"success": False, "error": "download_limit", "message": str(e)}), 403
     except ValueError as e:
         return _bad(e)
     return jsonify({"success": True, "download": row})
@@ -1817,7 +1876,7 @@ def player_downloads_removed():
     updated = downloads.mark_removed(
         player_db(),
         pid,
-        download_id=int(dl_id) if dl_id is not None else None,
+        download_id=int(dl_id) if isinstance(dl_id, int) or str(dl_id or "").isdigit() else None,
         item_type=body.get("item_type"),
         item_id=str(body.get("item_id")) if body.get("item_id") is not None else None,
         device_id=body.get("device_id"),
@@ -1834,7 +1893,7 @@ def player_admin_users():
     pid = _profile()
     if pid is None:
         return _signed_out()
-    if not _is_admin():
+    if not _is_player_admin():
         return jsonify({"success": False, "error": "forbidden", "message": "Admin access required."}), 403
     profiles = get_database().get_all_profiles() or []
     filter_pid = request.args.get("profile_id")
@@ -1857,11 +1916,14 @@ def player_admin_user_downloads(target_profile_id: int):
     pid = _profile()
     if pid is None:
         return _signed_out()
-    if not _is_admin():
+    if not _is_player_admin():
         return jsonify({"success": False, "error": "forbidden", "message": "Admin access required."}), 403
     body = request.get_json(silent=True) or {}
     allow = bool(body.get("allow_downloads", True))
-    max_items = int(body.get("max_items") or 0)
+    try:
+        max_items = max(0, int(body.get("max_items") or 0))
+    except (TypeError, ValueError):
+        return _bad("max_items must be a number")
     perm = downloads.set_permission(player_db(), target_profile_id, allow, max_items)
     return jsonify({"success": True, "profile_id": target_profile_id, **perm})
 
@@ -1891,6 +1953,10 @@ def player_issues_list():
         status=status,
         limit=limit,
     )
+    if not can_manage:
+        # where a file lives is the admin's business, not the reporter's
+        for issue in data.get("issues") or []:
+            issue.pop("file_path", None)
     return jsonify({"success": True, "can_manage": can_manage, **data})
 
 
@@ -1926,6 +1992,8 @@ def player_issues_create():
         return _bad(e)
     except Exception:  # noqa: BLE001
         return _failed("player issue create", "Couldn't submit issue report.")
+    if not _is_player_admin():
+        issue.pop("file_path", None)
     return jsonify({"success": True, "issue": issue}), 201
 
 

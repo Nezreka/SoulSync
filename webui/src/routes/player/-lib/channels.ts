@@ -153,6 +153,10 @@ function hasEnough(pool: GuideItem[], need = MIN_POOL): boolean {
 }
 
 function add(out: Channel[], channel: Channel) {
+  // two names can make one id ("Disney+" and "Disney" both slug to
+  // network-disney): the first keeps it, as the android app does, so the
+  // lineup and channel numbers match on every device
+  if (out.some((c) => c.id === channel.id)) return;
   const playable = channel.pool.filter((item) => item.seconds >= 60);
   if (hasEnough(playable)) out.push({ ...channel, pool: playable });
 }

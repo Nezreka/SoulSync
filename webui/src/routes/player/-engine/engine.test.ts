@@ -62,6 +62,8 @@ class FakeMedia {
 
 function setup(opts: {
   playable?: (item: PlayItem, q?: string, pick?: TrackPick) => Playable;
+  /** a lookup that answers when the test says so (a sleeping drive) */
+  slowPlayable?: (item: PlayItem) => Promise<Playable> | null;
   saved?: SavedPosition | null;
   tracks?: Tracks;
 }) {
@@ -73,6 +75,7 @@ function setup(opts: {
   const deps: EngineDeps = {
     createMedia: (kind) => (media[kind] = new FakeMedia(kind)) as unknown as HTMLMediaElement,
     playable: async (item, q, pick) =>
+      (await opts.slowPlayable?.(item)) ??
       opts.playable?.(item, q, pick) ?? { url: `/s/${item.type}/${item.id}`, duration: 100 },
     progress: async () => opts.saved ?? null,
     tracks: async () => opts.tracks ?? { audio: [], subtitles: [] },
@@ -688,5 +691,113 @@ describe("the profile's playback settings", () => {
     }
     expect(t.engine.getState().stillWatching).toBe(false);
     expect(t.engine.getState().queue.index).toBe(5);
+  });
+});
+
+/** a promise the test resolves by hand */
+function deferred<T>() {
+  let resolve!: (v: T) => void;
+  const promise = new Promise<T>((r) => (resolve = r));
+  return { promise, resolve };
+}
+
+describe('while the next item loads', () => {
+  it('the old file stops, and its clock never lands on the new item', async () => {
+    const gate = deferred<Playable>();
+    const t = setup({
+      slowPlayable: (item) => (item.id === 'e2' ? gate.promise : null),
+    });
+    t.engine.playItems([movie('m1')]);
+    await t.flush();
+    const el = t.media.video!;
+    el.duration = 7000;
+    el.tick(6000);
+    t.engine.playItems([{ type: 'episode', id: 'e2', title: 'e2', duration: 1400 }]);
+    await t.flush();
+    // the movie kept where it got to, and stopped
+    expect(t.saves).toContainEqual({ id: 'm1', position: 6000, finished: false });
+    expect(el.paused).toBe(true);
+    // a stray tick from the old src: not the episode's position, not watched
+    el.tick(6001);
+    t.every10s();
+    expect(t.engine.getState().position).toBe(0);
+    expect(t.engine.getState().watchedKey).toBeNull();
+    expect(t.saves.some((x) => x.id === 'e2')).toBe(false);
+    gate.resolve({ url: '/s/episode/e2', duration: 1400 });
+    await t.flush();
+    expect(el.src).toBe('/s/episode/e2');
+  });
+
+  it('the old file ending does not skip the next item', async () => {
+    const gate = deferred<Playable>();
+    const t = setup({ slowPlayable: (item) => (item.id === 'b' ? gate.promise : null) });
+    t.engine.playItems([track('a'), track('b'), track('c')]);
+    await t.flush();
+    t.engine.next();
+    await t.flush();
+    t.media.audio!.finish(); // 'a' running out under the load
+    await t.flush();
+    expect(t.engine.getState().item?.id).toBe('b');
+    gate.resolve({ url: '/s/track/b', duration: 100 });
+    await t.flush();
+    expect(t.engine.getState().item?.id).toBe('b');
+    expect(t.media.audio!.src).toBe('/s/track/b');
+  });
+
+  it("a seek before the next item's source is known does nothing", async () => {
+    const gate = deferred<Playable>();
+    const t = setup({ slowPlayable: (item) => (item.id === 'b' ? gate.promise : null) });
+    t.engine.playItems([movie('a'), movie('b')]);
+    await t.flush();
+    t.engine.next();
+    await t.flush();
+    t.engine.seek(500);
+    expect(t.media.video!.src).toBe('/s/movie/a');
+    gate.resolve({ url: '/s/movie/b', duration: 100 });
+    await t.flush();
+    expect(t.media.video!.src).toBe('/s/movie/b');
+  });
+});
+
+describe('two quick seeks on a converted stream', () => {
+  it('the last one wins even when its answer comes first', async () => {
+    const answers: Record<
+      number,
+      ReturnType<typeof deferred<{ start: number; seek: number }>>
+    > = {};
+    const t = setup({
+      playable: () => ({
+        url: '/t/1',
+        duration: 5000,
+        transcode: { video: 'copy', audio: 'aac', reasons: [] },
+      }),
+    });
+    t.engine.playItems([movie('1')]);
+    await t.flush();
+    // swap the keyframe lookup for one the test answers by hand
+    const deps = (t.engine as unknown as { deps: EngineDeps }).deps;
+    deps.transcodeStart = (_url, at) => (answers[at] = deferred()).promise;
+    t.engine.seek(1000);
+    t.engine.seek(3000);
+    answers[3000].resolve({ start: 3000, seek: 3000 });
+    await t.flush();
+    answers[1000].resolve({ start: 1000, seek: 1000 });
+    await t.flush();
+    expect(t.media.video!.src).toBe('/t/1?t=3000.00');
+    expect(t.engine.getState().position).toBe(3000);
+  });
+});
+
+describe('saving the start', () => {
+  it('a restart to the very beginning is saved', async () => {
+    const t = setup({});
+    t.engine.playItems([movie('1')]);
+    await t.flush();
+    const el = t.media.video!;
+    el.tick(50);
+    t.engine.saveNow();
+    el.tick(0);
+    t.engine.saveNow();
+    expect(t.saves.at(-1)).toEqual({ id: '1', position: 0, finished: false });
   });
 });

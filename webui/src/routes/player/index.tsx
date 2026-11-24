@@ -7,6 +7,7 @@ import type { CatalogMovie, CatalogShow, ExtraTitle } from './-player.types';
 
 import { autoChannels, numberChannels } from './-lib/channels';
 import { deviceId } from './-lib/device';
+import { guideScheduleOptions, sharedCommercials } from './-lib/guide-schedule';
 import { parseGenreRow, type HomeLayout, type RowStyle } from './-lib/home-layout';
 import { backdropSet, remoteImage, WIDE_SIZES } from './-lib/images';
 import {
@@ -20,11 +21,13 @@ import {
   recentYoutubeCards,
   showCard,
 } from './-lib/rails';
-import { hashSeed, programsInWindow, seededShuffle, startOfLocalDay } from './-lib/schedule';
+import { hashSeed, programsInWindow, seededShuffle } from './-lib/schedule';
 import { genresOf } from './-lib/video';
 import {
   albumsQuery,
   booksQuery,
+  guideCatalogQuery,
+  guideCommercialsQuery,
   continueQuery,
   discoverListQuery,
   discoverMoreLikeQuery,
@@ -43,6 +46,7 @@ import { Billboard, type Slide } from './-ui/billboard';
 import { HomeEditor } from './-ui/home-editor';
 import { CardRail, Empty, Rail, SkeletonRail, styles as s, type CardAction } from './-ui/kit';
 import { DiscoverCard } from './-ui/music/discover-card';
+import { notifyError } from './-ui/notice';
 import { useSections } from './-ui/sections';
 import { RankedRail } from './-ui/top10';
 
@@ -201,10 +205,12 @@ function PlayerHome() {
   const remove = useMutation({
     mutationFn: (card: RailCard) => removeProgress(card.source!.itemType, card.source!.itemId),
     onSettled: refresh,
+    onError: notifyError("Couldn't remove it from the row"),
   });
   const finish = useMutation({
     mutationFn: (card: RailCard) => finishProgress(card.source!.itemType, card.source!.itemId),
     onSettled: refresh,
+    onError: notifyError("Couldn't mark it finished"),
   });
   const continueActions = (card: RailCard): CardAction[] =>
     card.source
@@ -250,19 +256,21 @@ function PlayerHome() {
     () => (discoverPlaylists.data ?? []).flatMap((sec) => sec.playlists),
     [discoverPlaylists.data],
   );
+  // the live rail shows what the guide shows: its frozen pool and clips
+  const guideCat = useQuery({ ...guideCatalogQuery(), enabled: sections.video });
+  const commConfig = useQuery(guideCommercialsQuery());
+  const commercials = useMemo(() => sharedCommercials(commConfig.data), [commConfig.data]);
   // Live TV right now: top 8 deterministic Guide channels with what's airing at this exact moment
   const liveGuideCards = useMemo<RailCard[]>(() => {
-    if (!cat) return [];
+    const pool = guideCat.data;
+    if (!pool) return [];
     const now = Date.now();
-    const todayStart = startOfLocalDay(now);
-    const chans = numberChannels(autoChannels(cat, [])).slice(0, 10);
+    const chans = numberChannels(autoChannels(pool, [])).slice(0, 10);
     const out: RailCard[] = [];
     for (const ch of chans) {
+      // the guide's own options, commercials included: the same thing is on here as there
       const progs = programsInWindow(ch.id, ch.pool, now - 120_000, now + 3_600_000, {
-        daypart: true,
-        blocks: 1,
-        rotateShows: true,
-        today: todayStart,
+        ...guideScheduleOptions(now, commercials),
         ordered: ch.ordered,
       });
       const airing = progs.find((p) => p.start <= now && p.end > now) ?? progs[0];
@@ -281,7 +289,7 @@ function PlayerHome() {
       });
     }
     return out;
-  }, [cat]);
+  }, [guideCat.data, commercials]);
 
   // Seasonal spotlight: timely holiday/seasonal picks based on the current month
   const seasonalInfo = useMemo(() => {

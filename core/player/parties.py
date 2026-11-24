@@ -114,6 +114,27 @@ def _clean_item(item_type: Any, item_id: Any) -> tuple:
     return kind, ident
 
 
+def _lobby_art(value: Any) -> Optional[str]:
+    """the lobby song's cover: our own artwork route, or an https image. it's
+    shown to every member, so nothing else (no http on the lan, no data:)"""
+    text = str(value or "").strip()[:300]
+    if text.startswith("/api/") or text.startswith("https://"):
+        return text
+    return None
+
+
+def _forget_old(now: float) -> None:
+    """the pee break and reaction memories only matter for a while: without
+    this they grew by a key per party and person forever"""
+    if len(_pee_cooldowns) > 500:
+        for k in [k for k, ts in _pee_cooldowns.items() if now - ts > PEE_BREAK_COOLDOWN_SEC]:
+            _pee_cooldowns.pop(k, None)
+    if len(_reaction_timestamps) > 500:
+        for k in [k for k, v in _reaction_timestamps.items()
+                  if not v or now - v[-1] > REACTION_BURST_WINDOW_SEC]:
+            _reaction_timestamps.pop(k, None)
+
+
 def _clean_lobby_track(raw: Any, now: float) -> Optional[Dict[str, Any]]:
     if not isinstance(raw, dict):
         return None
@@ -129,7 +150,7 @@ def _clean_lobby_track(raw: Any, now: float) -> Optional[Dict[str, Any]]:
         "title": str(raw.get("title") or "Lobby Music")[:160],
         "artist": str(raw.get("artist") or "")[:120],
         "album_id": aid,
-        "artwork": str(raw.get("artwork") or "")[:300] or None,
+        "artwork": _lobby_art(raw.get("artwork")),
         "duration_ms": dur_ms,
         "started_at": float(raw.get("started_at") or now),
     }
@@ -519,6 +540,9 @@ def update_state(
             raise PartyError("Watch party not found")
         host_id = int(row[1])
         cur_status = row[7]
+        if cur_status == "ended":
+            # an ended party stays ended: no "start" or "lobby" brings it back
+            raise PartyError("This watch party has ended")
         control_mode = row[9]
         cur_pos = float(row[10])
         cur_pos_at = float(row[11])
@@ -538,6 +562,9 @@ def update_state(
         cur_pee = existing_meta.get("pee_break") if isinstance(existing_meta.get("pee_break"), dict) else None
 
         is_host_or_admin = (int(profile_id) == host_id) or is_admin
+        # the room is for the people in it: knowing its id isn't enough
+        if not is_host_or_admin and int(profile_id) not in {int(m[0]) for m in members_rows}:
+            raise PartyError("Join the watch party first")
         # Rules:
         # - Anyone in the party can pause or call a pee_break
         # - Majority ready (when >1 member) or host can start from lobby
@@ -564,14 +591,14 @@ def update_state(
 
         if action == "start":
             new_status = "playing"
-            new_pos = float(body.get("position") or 0.0)
+            new_pos = _position(body.get("position") or 0.0)
             existing_meta.pop("pee_break", None)
             existing_meta.pop("resume_at", None)
             sys_note = "Started the feature presentation!"
         elif action in ("play", "resume"):
             new_status = "playing"
             if body.get("position") is not None:
-                new_pos = max(0.0, float(body["position"]))
+                new_pos = max(0.0, _position(body["position"]))
             # When resuming from a pause or pee break, use a 5-second synchronized countdown
             countdown = RESUME_COUNTDOWN_SEC if (cur_status == "paused" or cur_pee is not None) else 0.0
             new_pos_at = t + countdown
@@ -587,7 +614,7 @@ def update_state(
         elif action == "pause":
             new_status = "paused"
             if body.get("position") is not None:
-                new_pos = max(0.0, float(body["position"]))
+                new_pos = max(0.0, _position(body["position"]))
             existing_meta.pop("resume_at", None)
             sys_note = "Paused playback"
         elif action == "pee_break":
@@ -597,9 +624,10 @@ def update_state(
                 rem_min = max(1, int(round((PEE_BREAK_COOLDOWN_SEC - (t - last_pee)) / 60.0)))
                 raise PartyError(f"Pee break is on cooldown ({rem_min}m remaining)")
             _pee_cooldowns[ck] = t
+            _forget_old(t)
             new_status = "paused"
             if body.get("position") is not None:
-                new_pos = max(0.0, float(body["position"]))
+                new_pos = max(0.0, _position(body["position"]))
             existing_meta.pop("resume_at", None)
             existing_meta["pee_break"] = {
                 "profile_id": int(profile_id),
@@ -610,7 +638,7 @@ def update_state(
         elif action == "seek":
             if body.get("position") is None:
                 raise PartyError("seek requires position")
-            new_pos = max(0.0, float(body["position"]))
+            new_pos = max(0.0, _position(body["position"]))
             existing_meta.pop("resume_at", None)
         elif action == "lobby":
             new_status = "lobby"
@@ -633,6 +661,9 @@ def update_state(
                 sys_note = f"Queued lobby music: {lt['title']}"
 
         if body.get("item_type") and body.get("item_id"):
+            # what the room watches is the host's call, in any control mode
+            if not is_host_or_admin:
+                raise PartyError("Only the host can change what the room is watching")
             new_item_type, new_item_id = _clean_item(body["item_type"], body["item_id"])
             cleaned = clean_meta(body.get("meta")) or {}
             existing_meta.update(cleaned)
@@ -672,6 +703,16 @@ def update_state(
         return _hydrate_party(conn, full, int(profile_id), t, include_messages=True)
 
 
+def _position(value: Any) -> float:
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        raise PartyError("position must be a number") from None
+    if out != out or out in (float("inf"), float("-inf")):
+        raise PartyError("position must be a number")
+    return out
+
+
 def post_message(
     db: Any,
     party_id: str,
@@ -697,10 +738,19 @@ def post_message(
             raise PartyError("Slow down on the emoji reactions!")
         recent.append(t)
         _reaction_timestamps[rk] = recent
+        _forget_old(t)
     with db._get_connection() as conn:
-        row = conn.execute(f"SELECT status FROM {PARTIES_TABLE} WHERE id = ?", (str(party_id),)).fetchone()
+        row = conn.execute(
+            f"SELECT status, host_profile_id FROM {PARTIES_TABLE} WHERE id = ?", (str(party_id),)
+        ).fetchone()
         if not row or row[0] == "ended":
             raise PartyError("Watch party not found or ended")
+        member = conn.execute(
+            f"SELECT 1 FROM {MEMBERS_TABLE} WHERE party_id = ? AND profile_id = ?",
+            (str(party_id), int(profile_id)),
+        ).fetchone()
+        if not member and int(row[1]) != int(profile_id):
+            raise PartyError("Join the watch party first")
         cur = conn.execute(
             f"INSERT INTO {MESSAGES_TABLE} (party_id, profile_id, kind, body, created_at) "
             "VALUES (?, ?, ?, ?, ?)",
