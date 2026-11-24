@@ -1782,7 +1782,7 @@ class JellyfinVideoSource:
                     return True
                 try:
                     r = requests.get(base + "/Shows/" + str(sid) + "/Episodes", headers=headers,
-                                     timeout=10, params={"season": int(sn)})
+                                     timeout=10, params={"season": int(sn), "IsMissing": "false"})
                     eps = (r.json() or {}).get("Items", []) if r.ok else []
                     if any(int(e.get("IndexNumber") or -1) == int(en) for e in eps):
                         return True
@@ -2016,8 +2016,10 @@ class JellyfinVideoSource:
         series_id = str(it["Id"])
         seasons = []
         try:
+            # an api-key request gets jellyfin's virtual (missing) episodes too,
+            # each with a media source but no file. they are not owned
             eps_resp = self._req(f"/Shows/{series_id}/Episodes", {
-                "UserId": self.uid, "Fields": _JF_EP_FIELDS}) or {}
+                "UserId": self.uid, "IsMissing": "false", "Fields": _JF_EP_FIELDS}) or {}
             by_season: dict[int, list] = {}
             for ep in eps_resp.get("Items", []):
                 enum = ep.get("IndexNumber")
