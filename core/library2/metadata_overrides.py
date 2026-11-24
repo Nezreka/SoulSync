@@ -501,8 +501,13 @@ def effective_artist_names(conn: Any, artist_ids: Any) -> Dict[int, str]:
         return {}
     marks = ",".join("?" for _ in ids)
     rows = conn.execute(
-        f"SELECT id, name FROM lib2_artists WHERE id IN ({marks})", ids).fetchall()
-    provider = {int(row[0]): {"name": row[1]} for row in rows}
+        f"SELECT a.id, COALESCE(c.id, a.id) AS eff_id, COALESCE(c.name, a.name) AS eff_name "
+        f"FROM lib2_artists a LEFT JOIN lib2_artists c ON c.id = a.canonical_artist_id "
+        f"WHERE a.id IN ({marks})", ids).fetchall()
+    # Follow canonical_artist_id (#2257) so merged aliases (e.g. "Maître Gims" -> "GIMS",
+    # "16 Bit Lolita's" -> "16BL") always project the current canonical artist name.
+    id_to_eff = {int(row[0]): int(row[1]) for row in rows}
+    provider = {int(row[1]): {"name": row[2]} for row in rows}
     try:
         projected = project_metadata_many(
             conn, entity_type="artist", provider_fields=provider)
@@ -510,10 +515,10 @@ def effective_artist_names(conn: Any, artist_ids: Any) -> Dict[int, str]:
         from utils.logging_config import get_logger
         get_logger("library2.metadata_overrides").debug(
             "artist name projection skipped: %s", exc)
-        return {entity_id: fields["name"] for entity_id, fields in provider.items()}
+        return {aid: provider[eff_id]["name"] for aid, eff_id in id_to_eff.items()}
     return {
-        entity_id: (effective.get("name") or provider[entity_id]["name"])
-        for entity_id, (effective, _overrides) in projected.items()
+        aid: ((projected.get(eff_id, ({}, None))[0].get("name")) or provider[eff_id]["name"])
+        for aid, eff_id in id_to_eff.items()
     }
 
 

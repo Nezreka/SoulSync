@@ -109,8 +109,10 @@ def credit_tags(credits, album=False, expected_names=None):
     other tags (ARTISTS, the MusicBrainz ids) keep the full credit; without
     ``expected_names`` behavior is unchanged from before."""
     entries = [c for c in credits or [] if isinstance(c, dict)]
-    names = [c.get("name") or c.get("artist", {}).get("name") for c in entries]
-    ids = [c.get("artist", {}).get("id") for c in entries]
+    # Prefer the artist entity's current canonical name on MusicBrainz over the
+    # historical printed credit on older releases (#2257: e.g. 16BL vs 16 Bit Lolita's).
+    names = [(c.get("artist") or {}).get("name") or c.get("name") for c in entries]
+    ids = [(c.get("artist") or {}).get("id") for c in entries]
     if expected_names:
         from core.text.fold import fold_title
         expected = {fold_title(n, drop_brackets=False) for n in expected_names if n}

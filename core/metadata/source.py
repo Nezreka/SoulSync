@@ -621,6 +621,23 @@ def _process_musicbrainz_source(pp: dict, metadata: dict, cfg, runtime, track_ti
 
     if pp["release_mbid"] and release_detail:
         from core.metadata.musicbrainz_tags import release_tags, credit_tags
+        # #2259: When a release has an explicit release-level artist-credit (e.g.
+        # "12th Planet" on an EP where track 2 is by "DJ Evol"), ensure album_artist
+        # reflects the release artist rather than leaking the track artist into
+        # ALBUMARTIST.
+        _rel_ac = [c for c in (release_detail.get("artist-credit") or []) if isinstance(c, dict)]
+        if _rel_ac:
+            _rel_parts = []
+            for _c in _rel_ac:
+                _cname = (_c.get("artist") or {}).get("name") or _c.get("name") or ""
+                if _cname:
+                    _rel_parts.append(_cname + (_c.get("joinphrase") or ""))
+            _rel_artist = "".join(_rel_parts).strip()
+            _cur_aa = (metadata.get("album_artist") or "").strip()
+            _cur_tr = (metadata.get("artist") or "").strip()
+            if _rel_artist and _rel_artist.casefold() != "various artists":
+                if not _cur_aa or (_cur_tr and _cur_aa.casefold() == _cur_tr.casefold() and _rel_artist.casefold() != _cur_tr.casefold()):
+                    metadata["album_artist"] = _rel_artist
         # #1510: ALBUMARTISTSORT names the sort names of the album artist(s)
         # the primary source settled on (album_artist, plus the full list when
         # the album context names more than one) — or is left out entirely
@@ -1729,7 +1746,11 @@ def _write_embedded_metadata(audio_file, metadata: dict, pp: dict, cfg, symbols)
             from core.genre_filter import filter_genres as _filter_genres
             from core.genre_filter import _normalize_for_match
 
-            enrichment_genres = _filter_genres(enrichment_genres, cfg)
+            enrichment_genres = _filter_genres(
+                enrichment_genres,
+                cfg,
+                artist_names=[metadata.get("artist"), metadata.get("album_artist")],
+            )
             source_genres = [g.strip() for g in str(metadata.get("genre", "")).split(",") if g.strip()]
             seen = set()
             merged = []
@@ -2828,7 +2849,11 @@ def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> di
     if genres:
         from core.genre_filter import filter_genres
 
-        filtered = filter_genres(list(genres[:2]), cfg)
+        filtered = filter_genres(
+            list(genres[:2]),
+            cfg,
+            artist_names=[metadata.get("artist"), metadata.get("album_artist")],
+        )
         if filtered:
             metadata["genre"] = ", ".join(filtered)
 

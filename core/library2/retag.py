@@ -511,7 +511,11 @@ def _db_data_for_row(conn, row: Any) -> Dict[str, Any]:
         # strict off is a no-op; a genre the user set by hand is theirs
         from core.genre_filter import filter_genres
         from core.metadata.common import get_config_manager
-        data["genres"] = filter_genres(list(data["genres"]), get_config_manager())
+        data["genres"] = filter_genres(
+            list(data["genres"]),
+            get_config_manager(),
+            artist_names=[data.get("artist_name"), data.get("track_artist")],
+        )
     data["_manual_fields"] = manual
     # ``build_tag_diff`` renders its Cover Art row from ``thumb_url``. Without
     # it the preview claimed "Cover Art: None → None, unchanged" for every lib2
