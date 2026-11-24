@@ -736,11 +736,22 @@ class ConfigManager:
                 # the album in its own root folder, so a copy in the library
                 # would be a duplicate; empty = the shared transfer folder.
                 "transfer_path": "",
+                # Lidarr imports every download into its root folder, whatever
+                # the source: SoulSync's files wait in transfer_path (which
+                # Lidarr must read at the same path) and Lidarr takes them at
+                # the end of the batch. Needs transfer_path; off = SoulSync
+                # imports other sources' downloads itself.
+                "import_through_lidarr": False,
                 # Where the Lidarr source copies a track out of Lidarr's import;
                 # empty = soulseek.download_path.
                 "download_path": "",
                 # Seconds to wait for a grabbed album to finish importing.
                 "download_timeout": 21600,
+                # Seconds a grabbed album may sit in Lidarr's queue without a
+                # byte arriving before it is given up (removed from the client,
+                # blocklisted) and the next source tried; 0 = wait out
+                # download_timeout.
+                "stall_timeout": 1800,
             },
             # Prowlarr — indexer aggregator. Feeds the torrent / usenet
             # download plugins. Not a standalone source.

@@ -18,6 +18,7 @@ import time
 import uuid
 import shutil
 import threading
+from datetime import datetime, timezone
 from difflib import SequenceMatcher
 from typing import List, Optional, Dict, Any, Tuple
 from pathlib import Path
@@ -35,6 +36,18 @@ logger = get_logger("lidarr_client")
 
 
 from core.download_plugins.base import DownloadSourcePlugin
+
+
+def _parse_time(value) -> Optional[datetime]:
+    """A Lidarr timestamp, to the second (Lidarr stores a file's dateAdded to
+    the second, a command's start to the millisecond), or None."""
+    try:
+        parsed = datetime.fromisoformat(str(value).replace('Z', '+00:00'))
+    except (TypeError, ValueError):
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.replace(microsecond=0)
 
 
 class LidarrDownloadClient(DownloadSourcePlugin):
@@ -77,11 +90,19 @@ class LidarrDownloadClient(DownloadSourcePlugin):
         self._api_key = config_manager.get('lidarr_download.api_key', '') or ''
         self._root_folder = config_manager.get('lidarr_download.root_folder', '') or ''
         self._quality_profile = config_manager.get('lidarr_download.quality_profile', 'Any') or 'Any'
-        self._cleanup = config_manager.get('lidarr_download.cleanup_after_import', True)
+        # Lidarr owns the library when it imports every download: removing
+        # its album after staging would make it forget the files it keeps
+        self._owns_library = config_manager.get('lidarr_download.import_through_lidarr', False) is True
+        self._cleanup = (config_manager.get('lidarr_download.cleanup_after_import', True)
+                         and not self._owns_library)
         try:
             self._download_timeout = int(config_manager.get('lidarr_download.download_timeout', 21600) or 21600)
         except (TypeError, ValueError):
             self._download_timeout = 21600
+        try:
+            self._stall_timeout = int(config_manager.get('lidarr_download.stall_timeout', 1800) or 0)
+        except (TypeError, ValueError):
+            self._stall_timeout = 1800
 
     @staticmethod
     def own_download_path() -> str:
@@ -454,6 +475,7 @@ class LidarrDownloadClient(DownloadSourcePlugin):
         'not_grabbed': 'Lidarr found no release to grab',
         'failed': 'Lidarr download failed',
         'timeout': 'Download timed out',
+        'stalled': "Lidarr's download made no progress",
         'gone': 'Album was removed from Lidarr',
         'import_failed': "Lidarr could not import the album (see Activity in Lidarr)",
         'shutdown': 'Server shutting down',
@@ -521,6 +543,8 @@ class LidarrDownloadClient(DownloadSourcePlugin):
                 on_progress=lambda pct: _emit('downloading', release=release, progress=round(pct, 1)),
             )
             if outcome != 'complete':
+                if fallback and outcome not in ('shutdown', 'cancelled', 'gone'):
+                    self._release_album(lidarr_album_id, foreign_album_id, outcome)
                 return _fail(self._WAIT_ERRORS.get(outcome, outcome))
 
             _emit('staging', release=release)
@@ -767,9 +791,12 @@ class LidarrDownloadClient(DownloadSourcePlugin):
         with self._album_locks_guard:
             return self._album_locks.setdefault(foreign_album_id or '', threading.Lock())
 
-    def _album_in_use(self, foreign_album_id: str, exclude_download_id: str = '') -> bool:
+    def _album_in_use(self, foreign_album_id: str, exclude_download_id: str = '',
+                      own_waits: int = 0) -> bool:
+        """Whether a download or an album-bundle run still needs this album.
+        ``own_waits``: bundle runs of the caller's own to leave out."""
         with self._download_lock:
-            if self._bundle_waits.get(foreign_album_id):
+            if self._bundle_waits.get(foreign_album_id, 0) > own_waits:
                 return True
             return any(
                 dl.get('album_foreign_id') == foreign_album_id
@@ -818,6 +845,54 @@ class LidarrDownloadClient(DownloadSourcePlugin):
             return found[0]
         return None
 
+    def _ensure_album(self, album: Dict[str, Any], monitored: bool
+                      ) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+        """Lidarr's record of this album, adding the artist and the album when
+        missing. ``monitored`` True also monitors an album Lidarr already has
+        (an album found by the artist refresh is unmonitored, and Lidarr's
+        later RSS grabs and upgrades skip it); False leaves an existing album
+        as it is and adds a missing one unmonitored. Call under the album's
+        lock. Returns (album record, error).
+        """
+        foreign_album_id = album.get('foreignAlbumId', '')
+        existing = self._existing_album(foreign_album_id)
+        if not existing:
+            artist_id = self._ensure_artist(album.get('artist') or {})
+            if not artist_id:
+                return None, 'Failed to add artist to Lidarr'
+            # Adding the artist makes Lidarr refresh it, and that refresh
+            # may create the album on its own; a POST then fails as a
+            # duplicate. Give the refresh a moment, then add if still missing.
+            for _ in range(10):
+                existing = self._existing_album(foreign_album_id)
+                if existing:
+                    break
+                time.sleep(1)
+            if not existing:
+                existing = self._api_post('album', data={
+                    'foreignAlbumId': foreign_album_id,
+                    'title': album.get('title', ''),
+                    'artistId': artist_id,
+                    'qualityProfileId': self._get_quality_profile_id(),
+                    'rootFolderPath': self._get_root_folder(),
+                    'monitored': monitored,
+                    'addOptions': {'searchForNewAlbum': False},
+                }) or self._existing_album(foreign_album_id)
+            if not existing or not existing.get('id'):
+                return None, 'Failed to add album to Lidarr'
+
+        if monitored and not existing.get('monitored'):
+            self._set_monitored(existing['id'], True)
+        return existing, None
+
+    def _set_monitored(self, lidarr_album_id: int, monitored: bool) -> None:
+        try:
+            url = f"{self._url}/api/v1/album/monitor"
+            http_requests.put(url, headers={'X-Api-Key': self._api_key},
+                              json={'albumIds': [lidarr_album_id], 'monitored': monitored}, timeout=15)
+        except Exception as e:
+            logger.debug(f"Lidarr album monitor failed: {e}")
+
     def _ensure_album_searched(self, album: Dict[str, Any]) -> Tuple[Optional[int], Optional[str]]:
         """Make sure Lidarr has this album, monitored, with a search running.
 
@@ -828,42 +903,10 @@ class LidarrDownloadClient(DownloadSourcePlugin):
         if not foreign_album_id:
             return None, 'Album has no MusicBrainz id'
         with self._album_lock(foreign_album_id):
-            existing = self._existing_album(foreign_album_id)
+            existing, error = self._ensure_album(album, monitored=True)
             if not existing:
-                artist_id = self._ensure_artist(album.get('artist') or {})
-                if not artist_id:
-                    return None, 'Failed to add artist to Lidarr'
-                # Adding the artist makes Lidarr refresh it, and that refresh
-                # may create the album on its own; a POST then fails as a
-                # duplicate. Give the refresh a moment, then add if still missing.
-                for _ in range(10):
-                    existing = self._existing_album(foreign_album_id)
-                    if existing:
-                        break
-                    time.sleep(1)
-                if not existing:
-                    existing = self._api_post('album', data={
-                        'foreignAlbumId': foreign_album_id,
-                        'title': album.get('title', ''),
-                        'artistId': artist_id,
-                        'qualityProfileId': self._get_quality_profile_id(),
-                        'rootFolderPath': self._get_root_folder(),
-                        'monitored': True,
-                        'addOptions': {'searchForNewAlbum': False},
-                    }) or self._existing_album(foreign_album_id)
-                if not existing or not existing.get('id'):
-                    return None, 'Failed to add album to Lidarr'
-
+                return None, error
             lidarr_album_id = existing['id']
-            if not existing.get('monitored'):
-                # an album found by the artist refresh is unmonitored, and
-                # Lidarr's later RSS grabs and upgrades skip it
-                try:
-                    url = f"{self._url}/api/v1/album/monitor"
-                    http_requests.put(url, headers={'X-Api-Key': self._api_key},
-                                      json={'albumIds': [lidarr_album_id], 'monitored': True}, timeout=15)
-                except Exception as e:
-                    logger.debug(f"Lidarr album monitor failed: {e}")
 
             has_files = ((existing.get('statistics') or {}).get('trackFileCount') or 0) > 0
             last = self._album_searched_at.get(foreign_album_id)
@@ -888,22 +931,43 @@ class LidarrDownloadClient(DownloadSourcePlugin):
         """Poll Lidarr until the album is imported.
 
         Returns 'complete', 'not_grabbed' (nothing reached the queue within
-        the grab window), 'failed', 'timeout', 'gone', 'shutdown' or
-        'cancelled'. The overall deadline is long because a real download
-        (a slow torrent, a Soulseek queue) can take hours; the short grab
-        window is what catches "Lidarr found nothing".
+        the grab window), 'stalled' (what Lidarr grabbed has not moved for
+        ``lidarr_download.stall_timeout`` seconds: a torrent with no seeders
+        sits in the queue until the deadline otherwise), 'failed', 'timeout',
+        'gone', 'shutdown' or 'cancelled'. The overall deadline is long
+        because a real download (a slow torrent, a Soulseek queue) can take
+        hours; the grab window and the stall timeout are what catch "Lidarr
+        found nothing" and "Lidarr found something dead".
         """
         start = time.monotonic()
         seen_in_queue = False
         album_misses = 0
+        # queue record id -> bytes left at the last poll; any change (a new
+        # grab, bytes arriving, a record leaving) counts as progress
+        left_by_record: Dict[Any, int] = {}
+        last_progress = start
         while True:
             if self.shutdown_check and self.shutdown_check():
                 return 'shutdown'
             if cancelled and cancelled():
                 return 'cancelled'
-            elapsed = time.monotonic() - start
+            now = time.monotonic()
+            elapsed = now - start
             try:
                 records = self._queue_records(foreign_album_id)
+                if records is not None:
+                    current = {r.get('id'): r.get('sizeleft', 0) or 0 for r in records}
+                    if current != left_by_record:
+                        left_by_record = current
+                        last_progress = now
+                    # only a download still fetching can stall. Judged by its
+                    # state, not its bytes: a magnet that never got metadata
+                    # reports size 0 and 0 bytes left, just like a finished
+                    # download waiting on its import (the import states below
+                    # judge that one)
+                    if (any(self._still_fetching(r) for r in records) and self._stall_timeout > 0
+                            and now - last_progress > self._stall_timeout):
+                        return 'stalled'
                 for item in records or []:
                     seen_in_queue = True
                     status = (item.get('status') or '').lower()
@@ -935,6 +999,192 @@ class LidarrDownloadClient(DownloadSourcePlugin):
             if elapsed > self._download_timeout:
                 return 'timeout'
             time.sleep(poll_seconds)
+
+    # queue states where Lidarr is not waiting on the download client: the
+    # download is done and the import runs, or a delay profile holds the
+    # release on purpose
+    _NOT_FETCHING_STATES = frozenset(('importpending', 'importing', 'imported'))
+    _NOT_FETCHING_STATUSES = frozenset(('completed', 'delay'))
+
+    @classmethod
+    def _still_fetching(cls, record: Dict[str, Any]) -> bool:
+        return ((record.get('status') or '').lower() not in cls._NOT_FETCHING_STATUSES
+                and (record.get('trackedDownloadState') or '').lower() not in cls._NOT_FETCHING_STATES)
+
+    def _release_album(self, lidarr_album_id: int, foreign_album_id: str, outcome: str) -> None:
+        """Take Lidarr off an album the batch hands to the next source.
+
+        Left alone, both deliver it: a stalled torrent can still finish, and a
+        monitored album is grabbed again on Lidarr's next RSS sync. The grab
+        that stalled or ran out of time is removed from the client and
+        blocklisted, so Lidarr's next search picks another release. With
+        ``import_through_lidarr`` the album stays monitored: the next source's
+        files go to Lidarr too, and Lidarr keeps one copy of each track.
+        Otherwise it is unmonitored, and SoulSync's copy is the only one.
+
+        Skipped while another run or download still needs this album. Called
+        from inside the caller's own bundle wait, which is left out.
+        """
+        if self._album_in_use(foreign_album_id, own_waits=1):
+            return
+        removed = 0
+        if outcome in ('stalled', 'timeout'):
+            for record in self._queue_records(foreign_album_id) or []:
+                if record.get('id') is not None and self._api_delete(
+                        f"queue/{record['id']}",
+                        params={'removeFromClient': 'true', 'blocklist': 'true'}):
+                    removed += 1
+        if not self._owns_library:
+            self._set_monitored(lidarr_album_id, False)
+        logger.info("[Lidarr album] released album %s to the next source (%s): "
+                    "%d grab(s) removed, %s", lidarr_album_id, outcome, removed,
+                    'still monitored' if self._owns_library else 'unmonitored')
+
+    def import_into_library(self, paths: List[str], album_name: str, artist_name: str,
+                            release_group_id: str = '', release_year: str = '',
+                            release_type: str = '', monitored: bool = False) -> Dict[str, Any]:
+        """Have Lidarr import files another source downloaded.
+
+        For ``import_through_lidarr``: Lidarr is the only writer of its root
+        folder, so a file SoulSync got elsewhere reaches the library through
+        Lidarr's Manual Import, with Lidarr's naming and its rules on what an
+        upgrade is. Lidarr identifies each file itself; a file it rejects (not
+        an upgrade of the track it has, no close-enough match) stays where it
+        is. Copies, so SoulSync's own file and its database rows stay valid.
+        The album is added when Lidarr does not have it, monitored only when
+        ``monitored`` (a whole album; a playlist's one track must not make
+        Lidarr fetch the rest of its album).
+
+        ``paths`` must be readable by Lidarr at the same path. Returns
+        ``{'imported': n, 'rejected': {path: reason}, 'error': str or None}``.
+        """
+        result: Dict[str, Any] = {'imported': 0, 'rejected': {}, 'error': None}
+        wanted = {os.path.normpath(p) for p in paths or [] if p}
+        if not wanted:
+            return result
+        if not self.is_configured():
+            result['error'] = 'Lidarr is not configured'
+            return result
+        album = self._find_album(album_name, artist_name, release_group_id, release_year,
+                                 release_type=release_type)
+        if not album or not album.get('foreignAlbumId'):
+            result['error'] = f"Lidarr has no album '{album_name}' by '{artist_name}'"
+            return result
+        with self._album_lock(album['foreignAlbumId']):
+            record, error = self._ensure_album(album, monitored=monitored)
+        if not record:
+            result['error'] = error
+            return result
+        artist_id = record.get('artistId') or (record.get('artist') or {}).get('id')
+        return self.import_files(wanted, artist_id=artist_id, result=result)
+
+    # how long a Manual Import may run before its outcome is read anyway
+    _IMPORT_WAIT_SECONDS = 1800
+    _COMMAND_DONE = frozenset(('completed', 'failed', 'aborted', 'cancelled', 'orphaned'))
+
+    def import_files(self, paths, artist_id: Optional[int] = None,
+                     result: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Manual Import ``paths`` as Lidarr identifies them, and read back
+        what landed.
+
+        Manual Import lists a folder, so the paths are grouped by folder; the
+        files Lidarr matched without a rejection are sent in one command, and
+        once it has run every sent file is checked track by track: its tracks
+        must have a file Lidarr added during the command (Lidarr can still
+        turn one down while importing, and the command reports success all
+        the same). Copies; the caller decides what happens to the source.
+
+        Returns ``{'imported': n, 'paths': {source: path in Lidarr},
+        'rejected': {source: reason}, 'error': str or None}``.
+        """
+        result = result if result is not None else {'imported': 0, 'rejected': {}, 'error': None}
+        result.setdefault('paths', {})
+        wanted = {os.path.normpath(p) for p in paths or [] if p}
+        files, listed, sent = [], set(), {}
+        for folder in sorted({os.path.dirname(p) for p in wanted}):
+            params = {'folder': folder, 'filterExistingFiles': 'false'}
+            if artist_id:
+                params['artistId'] = artist_id
+            items = self._api_get('manualimport', params=params)
+            if not isinstance(items, list):
+                result['error'] = f'Lidarr could not read {folder}'
+                continue
+            for item in items:
+                path = os.path.normpath(item.get('path') or '')
+                if path not in wanted:
+                    continue
+                listed.add(path)
+                reasons = [r.get('reason') for r in item.get('rejections') or [] if r.get('reason')]
+                album_id = (item.get('album') or {}).get('id')
+                track_ids = [t['id'] for t in item.get('tracks') or [] if t.get('id')]
+                if not reasons and not (album_id and track_ids and item.get('albumReleaseId')):
+                    reasons = ['Lidarr could not match it to a track']
+                if reasons:
+                    result['rejected'][path] = '; '.join(reasons)
+                    continue
+                sent[path] = (album_id, track_ids)
+                files.append({
+                    'path': item['path'],
+                    'artistId': (item.get('artist') or {}).get('id') or artist_id,
+                    'albumId': album_id,
+                    'albumReleaseId': item['albumReleaseId'],
+                    'trackIds': track_ids,
+                    'quality': item.get('quality'),
+                    'indexerFlags': item.get('indexerFlags') or 0,
+                    'disableReleaseSwitching': False,
+                })
+        for path in wanted - listed:
+            result['rejected'].setdefault(path, 'Lidarr did not list the file')
+        if not files:
+            return result
+
+        command = self._api_post('command', data={
+            'name': 'ManualImport', 'files': files,
+            'importMode': 'copy', 'replaceExistingFiles': False,
+        })
+        if not isinstance(command, dict) or not command.get('id'):
+            result['error'] = 'Lidarr refused the import'
+            return result
+        done = self._wait_for_command(command['id'])
+        if not done or done.get('status') != 'completed':
+            # read back all the same: part of it may have landed
+            result['error'] = f"Lidarr's import ended {(done or {}).get('status') or 'without an answer'}"
+        since = _parse_time((done or command).get('started') or command.get('queued'))
+        landed = self._landed_files({album_id for album_id, _ in sent.values()}, since)
+        for path, (_album_id, track_ids) in sent.items():
+            finals = [landed.get(track_id) for track_id in track_ids]
+            if all(finals):
+                result['paths'][path] = finals[0]
+            else:
+                result['rejected'][path] = 'Lidarr did not import it (see History in Lidarr)'
+        result['imported'] = len(result['paths'])
+        return result
+
+    def _wait_for_command(self, command_id) -> Optional[Dict[str, Any]]:
+        deadline = time.monotonic() + self._IMPORT_WAIT_SECONDS
+        while time.monotonic() < deadline:
+            if self.shutdown_check and self.shutdown_check():
+                return None
+            state = self._api_get(f'command/{command_id}')
+            if isinstance(state, dict) and (state.get('status') or '').lower() in self._COMMAND_DONE:
+                return state
+            time.sleep(3)
+        return None
+
+    def _landed_files(self, album_ids, since) -> Dict[int, str]:
+        """track id -> path of its file, for files Lidarr added at or after
+        ``since`` (a time on Lidarr's own clock; None accepts any file)."""
+        landed: Dict[int, str] = {}
+        for album_id in album_ids:
+            files = {tf.get('id'): tf for tf in self._api_get('trackfile', params={'albumId': album_id}) or []}
+            for track in self._api_get('track', params={'albumId': album_id}) or []:
+                track_file = files.get(track.get('trackFileId'))
+                if not track_file or not track_file.get('path'):
+                    continue
+                added = _parse_time(track_file.get('dateAdded'))
+                if since is None or (added is not None and added >= since):
+                    landed[track.get('id')] = track_file['path']
+        return landed
 
     def _set_error(self, download_id: str, error: str):
         with self._download_lock:

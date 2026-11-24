@@ -1359,6 +1359,23 @@
       "asked": "guard-probe",
       "shows": ["lidarr_download.transfer_path"]
     },
+    "#lidarr-import-through-lidarr": {
+      "sel": "#lidarr-import-through-lidarr",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": false,
+      "to": true,
+      "saves": {
+        "settings": {
+          "lidarr_download": {
+            "import_through_lidarr": true
+          }
+        }
+      },
+      "asked": true,
+      "shows": ["lidarr_download.import_through_lidarr"]
+    },
     "#lidarr-download-path": {
       "sel": "#lidarr-download-path",
       "kind": "text",
