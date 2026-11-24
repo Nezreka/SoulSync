@@ -876,15 +876,28 @@ function WatchPartyRoomModal({ partyId, onClose }: { partyId: string; onClose: (
   }, [party, partyId, qc]);
 
   // Synced SoulSync library lobby music while in the waiting room
+  const [audioBlocked, setAudioBlocked] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
   const lobbyTrack = party?.lobby_track ?? null;
   const playLobbyAudio =
     !lobbyMuted && !!lobbyTrack && (party?.status === 'lobby' || party?.status === 'scheduled');
+
+  const tryPlayLobbyAudio = () => {
+    const el = audioRef.current;
+    if (!el || !playLobbyAudio || !lobbyTrack) return;
+    el.volume = 0.55;
+    void el
+      .play()
+      .then(() => setAudioBlocked(false))
+      .catch(() => setAudioBlocked(true));
+  };
 
   useEffect(() => {
     const el = audioRef.current;
     if (!el) return;
     if (!playLobbyAudio || !lobbyTrack) {
       el.pause();
+      setAudioBlocked(false);
       return;
     }
     const url = appURL(`/api/player/stream/track/${encodeURIComponent(lobbyTrack.track_id)}`);
@@ -897,9 +910,13 @@ function WatchPartyRoomModal({ partyId, onClose }: { partyId: string; onClose: (
     ) {
       el.currentTime = lobbyTrack.live_position;
     }
-    void el.play().catch(() => {
-      /* browser autoplay policy: user clicks Unmute */
-    });
+    el.volume = 0.55;
+    void el
+      .play()
+      .then(() => setAudioBlocked(false))
+      .catch(() => {
+        setAudioBlocked(true);
+      });
   }, [playLobbyAudio, lobbyTrack]);
 
   const refresh = () => {
@@ -1018,18 +1035,19 @@ function WatchPartyRoomModal({ partyId, onClose }: { partyId: string; onClose: (
                 {party.meta.subtitle ? ` · ${party.meta.subtitle}` : ''}
               </p>
             </div>
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            <div className={wp.premierBar}>
               <button
                 type="button"
                 className={wp.glassBtn}
                 onClick={() => {
                   const link = `${window.location.origin}/player/watching?party=${encodeURIComponent(party.id)}`;
                   void navigator.clipboard?.writeText(link).catch(() => undefined);
-                  setRoomError(null);
+                  setCopiedLink(true);
+                  window.setTimeout(() => setCopiedLink(false), 2000);
                 }}
                 title="Copy direct invite link to this Watch Party"
               >
-                🔗 Share Link
+                {copiedLink ? '✓ Copied' : 'Share'}
               </button>
               {party.is_member ? (
                 <button
@@ -1206,9 +1224,15 @@ function WatchPartyRoomModal({ partyId, onClose }: { partyId: string; onClose: (
                 <button
                   type="button"
                   className={wp.glassBtn}
-                  onClick={() => setLobbyMuted((m) => !m)}
+                  onClick={() => {
+                    if (audioBlocked) {
+                      tryPlayLobbyAudio();
+                    } else {
+                      setLobbyMuted((m) => !m);
+                    }
+                  }}
                 >
-                  {lobbyMuted ? 'Unmute' : 'Mute'}
+                  {audioBlocked ? '🔊 Play Music' : lobbyMuted ? 'Unmute' : 'Mute'}
                 </button>
                 {party.can_control ? (
                   <button
@@ -1230,7 +1254,7 @@ function WatchPartyRoomModal({ partyId, onClose }: { partyId: string; onClose: (
             ) : null}
 
             {/* Primary Room Controls */}
-            <div className={wp.cardActions} style={{ marginTop: 0 }}>
+            <div className={wp.premierBar}>
               {party.status === 'lobby' || party.status === 'scheduled' ? (
                 <>
                   <button
@@ -1245,17 +1269,17 @@ function WatchPartyRoomModal({ partyId, onClose }: { partyId: string; onClose: (
                     onClick={() => void startShowtime(party)}
                   >
                     <PlayIcon />
-                    {starting ? 'Unfurling Curtains…' : 'Start Feature Presentation'}
+                    {starting ? 'Starting…' : 'Start Screening'}
                   </button>
                   <button
                     type="button"
-                    className={wp.glassBtn}
+                    className={`${wp.glassBtn} ${me?.ready ? wp.premierReadyActive : ''}`}
                     onClick={async () => {
                       await watchPartyApi.join(party.id, { ready: !(me?.ready ?? false) });
                       refresh();
                     }}
                   >
-                    {me?.ready ? '✓ Ready!' : 'Mark Ready'}
+                    {me?.ready ? '✓ Ready' : 'Mark Ready'}
                   </button>
                 </>
               ) : (

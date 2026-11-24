@@ -19,18 +19,19 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: calc(var(--u) * 0.45);
-  height: calc(var(--u) * 2.65);
-  padding: 0 calc(var(--u) * 1.25);
-  border: 1px solid rgba(var(--accent-rgb), 0.55);
+  gap: calc(var(--u) * 0.42);
+  height: calc(var(--u) * 2.35);
+  padding: 0 calc(var(--u) * 1.15);
+  border: 1px solid var(--white-a22);
   border-radius: var(--radius-pill);
-  background: linear-gradient(135deg, var(--accent), var(--accent-light));
+  background: var(--pl-text);
   color: var(--pl-bg);
-  font-size: calc(var(--u) * 0.88);
+  font-size: calc(var(--u) * 0.84);
   font-weight: 800;
+  letter-spacing: -0.01em;
   white-space: nowrap;
   cursor: pointer;
-  box-shadow: 0 6px 22px rgba(var(--accent-rgb), 0.28);
+  box-shadow: 0 8px 24px rgba(var(--black-rgb), 0.35);
   transition:
     transform var(--dur-fast) ease,
     box-shadow var(--dur-fast) ease,
@@ -38,18 +39,18 @@
 }
 
 .startPartyBtn svg {
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
   flex-shrink: 0;
 }
 
 .startPartyBtn:hover:not(:disabled) {
   transform: translateY(-1px);
-  box-shadow: 0 10px 28px rgba(var(--accent-rgb), 0.38);
+  box-shadow: 0 12px 28px rgba(var(--black-rgb), 0.45);
 }
 
 .startPartyBtn:disabled {
-  opacity: 0.55;
+  opacity: 0.45;
   cursor: not-allowed;
 }
 
@@ -1097,4 +1098,44 @@
 
 .sharedStrip > * {
   flex: 0 0 min(330px, 82vw);
+}
+
+/* ── Premier Screening Room Controls ── */
+
+.premierBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: calc(var(--u) * 0.5);
+}
+
+.premierReadyActive {
+  border-color: rgba(var(--pl-34d399-rgb), 0.55);
+  background: rgba(var(--pl-34d399-rgb), 0.16);
+  color: var(--pl-6ee7b7);
+}
+
+.premierIconBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: calc(var(--u) * 2.15);
+  height: calc(var(--u) * 2.15);
+  padding: 0;
+  border: 1px solid var(--white-a14);
+  border-radius: var(--radius-circle);
+  background: var(--white-a08);
+  color: var(--pl-text);
+  font-size: calc(var(--u) * 0.85);
+  font-weight: 700;
+  cursor: pointer;
+  backdrop-filter: blur(12px);
+  transition:
+    background var(--dur-fast) ease,
+    border-color var(--dur-fast) ease;
+}
+
+.premierIconBtn:hover {
+  border-color: var(--white-a28);
+  background: var(--white-a14);
 }

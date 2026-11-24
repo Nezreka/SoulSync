@@ -223,11 +223,15 @@ function PlayerHome() {
       );
       if (!visible.length) continue;
       const fallbackPoster = `/api/video/poster/${c.media_type === 'movie' ? 'movie' : 'show'}/${visible[0]}?w=342`;
+      const rawPoster =
+        c.poster && c.poster.startsWith('/api/video/collections/')
+          ? `/api/player/collections/${c.poster.slice('/api/video/collections/'.length)}`
+          : c.poster;
       out.push({
         key: `studio-col:${c.id}`,
         title: c.name,
         subtitle: `${visible.length} ${visible.length === 1 ? 'title' : 'titles'}`,
-        art: remoteImage(c.poster ?? c.member_posters?.[0] ?? fallbackPoster),
+        art: remoteImage(rawPoster ?? c.member_posters?.[0] ?? fallbackPoster),
         href: `/player/collections/${c.id}`,
         shape: 'poster',
         badge: c.pinned ? 'Pinned' : undefined,

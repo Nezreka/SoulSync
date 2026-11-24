@@ -89,7 +89,9 @@ export const videoCatalogQuery = () =>
     queryKey: ['player', 'video-catalog'],
     queryFn: async (): Promise<VideoCatalog> =>
       decodeCatalog(await apiClient.get('player/video-catalog').json<CatalogWire>()),
-    staleTime: 5 * MINUTE,
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+    refetchOnWindowFocus: true,
   });
 
 // ── music (library v2) ─────────────────────────────────────────────────

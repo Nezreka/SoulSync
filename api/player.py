@@ -196,7 +196,7 @@ def _video_view():
 
 
 RATING = 4  # content_rating's place in a movie or show row (catalog.MOVIE_FIELDS)
-_CACHE_SECONDS = 120
+_CACHE_SECONDS = 30
 _cache: dict = {}
 _cache_lock = threading.Lock()
 
@@ -221,15 +221,14 @@ def shape_video_catalog(raw, sees_movies, sees_shows, sees_youtube, cap):
     }
 
 
-def _read_catalog(sees_movies, sees_shows, sees_youtube):
-    """the unfiltered read, shared for a couple of minutes: on a big library
-    it is a few seconds of table scans, and every screen opening the player
-    asks for it."""
+def _read_catalog(sees_movies, sees_shows, sees_youtube, *, force: bool = False):
+    """the unfiltered read, shared briefly: on a big library it is a quick
+    table scan, and every screen opening the player asks for it."""
     key = (sees_movies, sees_shows, sees_youtube)
     now = time.monotonic()
     with _cache_lock:
         hit = _cache.get(key)
-        if hit and now - hit[0] < _CACHE_SECONDS:
+        if not force and hit and now - hit[0] < _CACHE_SECONDS:
             return hit[1]
         conn = get_video_db()._get_connection()
         try:
@@ -249,11 +248,30 @@ def video_catalog():
     schedules and the home rails show. read only."""
     try:
         sees_movies, sees_shows, sees_youtube, cap = _video_view()
-        raw = _read_catalog(sees_movies, sees_shows, sees_youtube)
+        force = str(request.args.get("refresh") or "").strip().lower() in ("1", "true", "yes")
+        raw = _read_catalog(sees_movies, sees_shows, sees_youtube, force=force)
         return jsonify({"success": True, **shape_video_catalog(raw, sees_movies, sees_shows, sees_youtube, cap)})
     except Exception:  # noqa: BLE001
         logger.exception("player video catalog failed")
         return jsonify({"success": False, "error": "Could not read the video library"}), 500
+
+
+@bp.route("/api/player/collections/<int:collection_id>/poster", methods=["GET"])
+@device_playback
+@requires_any("movies.access", "tv.access")
+def collection_poster(collection_id: int):
+    """Serve a Collection Studio generated poster to any player profile or mobile device."""
+    from flask import Response
+    from core.video.collections import poster_gen
+
+    data = poster_gen.read_poster(collection_id)
+    if not data:
+        return jsonify({"success": False, "error": "Poster not found"}), 404
+    return Response(
+        data,
+        mimetype="image/jpeg",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
 
 
 _collections_cache: dict = {}
