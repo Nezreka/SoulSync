@@ -1330,6 +1330,15 @@ Upload years show as pills above the videos, and search, sort and the Downloaded
 
 A channel without a banner uses a blurred version of its most-viewed video as the page backdrop. The first six playlists are listed under the videos, with **Show all** for the rest.
 
+### Your library on the channel page
+
+For an admin, a channel you've downloaded from is a library you manage, the same as a show:
+
+- **The line under the title** says how many videos are on disk, their total size, the quality mix when it's known, and what the channel's retention keeps. **Quality, retention and download settings** opens the channel's settings
+- **Needs attention** lists what's wrong: files gone from disk (**Get them again** downloads them fresh), wished videos that keep failing or were removed from YouTube, videos retention removes next (**Clean now** removes them without waiting for the nightly clean), and new uploads switched off
+- **Your files** shows each downloaded video with its thumbnail, upload date, file name and size, newest first. **Find a video** searches them. Pick some, or use **Delete all**: **Delete** moves the files to the recycle bin and SoulSync remembers the videos so it never downloads them again; **Delete and get again** lets them download again. Every delete offers **Undo** for a little while
+- **Where it lives** shows the channel's folder, with **Copy path**
+
 ## Per-channel settings
 
 Each followed channel (or playlist) has its own settings, under **More → Channel settings** on the channel's page (or the cog on the watchlist):

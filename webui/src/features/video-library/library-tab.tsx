@@ -114,11 +114,11 @@ export function refreshPage(): void {
   (b.refreshPage ?? b.reloadPage)?.();
 }
 
-function toast(message: string, type: 'success' | 'error' | 'info' | 'warning' = 'success') {
+export function toast(message: string, type: 'success' | 'error' | 'info' | 'warning' = 'success') {
   window.showToast?.(message, type);
 }
 
-async function confirm(options: {
+export async function confirm(options: {
   title: string;
   message: string;
   confirmText: string;
@@ -132,7 +132,7 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? o
 
 /* ── small pieces ─────────────────────────────────────────────────────────── */
 
-function ResBadge({ label, size = 'md' }: { label: string; size?: 'md' | 'lg' }) {
+export function ResBadge({ label, size = 'md' }: { label: string; size?: 'md' | 'lg' }) {
   return (
     <span className={s.res} data-tone={resolutionTone(label)} data-size={size}>
       {label || '—'}
@@ -140,7 +140,7 @@ function ResBadge({ label, size = 'md' }: { label: string; size?: 'md' | 'lg' })
   );
 }
 
-function Chip({
+export function Chip({
   tone = 'muted',
   children,
   title,
@@ -180,7 +180,7 @@ function MenuButton({ label, items }: { label: string; items: ActionMenuItem[] }
   );
 }
 
-async function copyText(text: string) {
+export async function copyText(text: string) {
   try {
     await navigator.clipboard.writeText(text);
     toast('Path copied');
@@ -205,7 +205,7 @@ function folderName(path: string | null | undefined): string {
 
 /* ── what needs attention ─────────────────────────────────────────────────── */
 
-interface Issue {
+export interface Issue {
   key: string;
   tone: 'warn' | 'info';
   title: string;
@@ -213,7 +213,7 @@ interface Issue {
   action?: { label: string; onClick: () => void; busy?: boolean };
 }
 
-function Attention({ issues }: { issues: Issue[] }) {
+export function Attention({ issues }: { issues: Issue[] }) {
   // a healthy title shows no section at all: the page is just the page
   if (!issues.length) return null;
   return (

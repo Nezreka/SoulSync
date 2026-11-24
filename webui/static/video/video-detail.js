@@ -2172,24 +2172,33 @@
     }
     // the name is from when this drew two tabs; it now turns the one-page
     // library parts on for a title you own and off for a preview or a channel
+    // a followed youtube channel is a library too: its files, what needs
+    // attention, deletes. it's built from the download ledger, not
+    // media_files (src/features/video-library/channel-library.tsx)
+    function channelLibrary() {
+        return !!(data && data.source === 'youtube' && data.kind === 'channel' && data.id);
+    }
     function renderTabs() {
         var body = q('.vd-body'), panel = q('[data-vd-library-panel]');
         if (!body || !panel) return;
         var one = onePage();
+        var chan = !one && channelLibrary();
         body.classList.toggle('vd-body--one', one);
-        panel.hidden = !one;
-        if (one) mountLibraryTab();
+        panel.hidden = !(one || chan);
+        if (one || chan) mountLibraryTab();
     }
     function mountLibraryTab() {
         var panel = q('[data-vd-library-panel]');
-        if (!panel || !onePage()) return;
+        var chan = !onePage() && channelLibrary();
+        if (!panel || !(onePage() || chan)) return;
         if (!window.VideoLibraryTab) {
             // main.tsx is a deferred module: on a cold deep link the page can get
             // here first. it announces itself when it lands.
             document.addEventListener('soulsync:video-library-tab-ready', mountLibraryTab, { once: true });
             return;
         }
-        window.VideoLibraryTab.mount(panel, { kind: data.kind, id: data.id,
+        window.VideoLibraryTab.mount(panel, { kind: chan ? 'channel' : data.kind, id: data.id,
+            title: data.title,
             slots: { hero: q('[data-vd-libline]'), foot: q('[data-vd-libfoot]') } });
         _libMounted = panel;
     }

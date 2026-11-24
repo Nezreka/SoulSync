@@ -2780,6 +2780,7 @@ Video downloads, active rows first then newest (the latest 100). `status` filter
 - `POST /api/video/downloads/cancel`: an admin any download, a member only one they started (`403` otherwise). An automatic grab has no owner, so it's the admin's.
 - `POST /downloads/clear`, `/downloads/remove`, `/downloads/recycle/restore`, `/downloads/recycle/purge`, `/downloads/history/clear`, `DELETE /downloads/history/{id}`, `POST /scan/request`, `/scan/stop`, `/scan/server`, and writes to `/discover/languages` and `/discover/providers-pref`: admin only.
 - `POST /youtube/follow`, `/youtube/playlist/follow`, `/youtube/subscriptions/import` and `/youtube/channel/{id}/settings`: need download rights.
+- `GET /youtube/library/{channel_id}`: a channel's downloaded files (size, folder, quality), totals, retention, and what needs attention. `POST /youtube/library/{channel_id}/delete` `{video_ids: [...] | all: true, forget?: bool}` deletes through the recycle bin (kept known, or forgotten so it downloads again) and returns undo items; `POST .../undo` `{undo: [...]}` puts them back; `POST .../clean` applies the channel's retention now. All admin only.
 - A kids profile's rating cap holds on requests, wishlist and watchlist adds, manual search and grab, and the title reads (acquisition, history, title status, posters).
 - The video request limit counts every ask made in its window, so withdrawing or clearing one doesn't hand it back.
 

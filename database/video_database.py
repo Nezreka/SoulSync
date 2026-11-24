@@ -3822,6 +3822,48 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def youtube_channel_files(self, channel_id) -> list:
+        """A channel's downloaded, still-on-disk videos for its library panel:
+        the retention rows plus what the grab knew of the file (quality,
+        resolution). Newest upload first."""
+        if not channel_id:
+            return []
+        conn = self._get_connection()
+        try:
+            return [dict(r) for r in conn.execute(
+                "SELECT id, media_id, title, dest_path, filename, published_at, completed_at, "
+                "size_bytes, quality_label, resolution "
+                "FROM video_download_history WHERE source='youtube' AND outcome='completed' "
+                "AND channel_id=? AND pruned_at IS NULL ORDER BY published_at DESC, completed_at DESC",
+                (str(channel_id),))]
+        finally:
+            conn.close()
+
+    def youtube_channel_wished_ids(self, channel_id, profile_id: int = 1) -> list:
+        """The channel's wished videos (youtube ids) for one profile."""
+        if not channel_id:
+            return []
+        conn = self._get_connection()
+        try:
+            return [r["source_id"] for r in conn.execute(
+                "SELECT source_id FROM video_wishlist WHERE profile_id=? AND kind='video' "
+                "AND parent_source_id=? AND source_id IS NOT NULL", (int(profile_id), str(channel_id)))]
+        finally:
+            conn.close()
+
+    def unprune_download(self, history_id) -> bool:
+        """Undo a prune: the file is back (restored from the recycle bin)."""
+        conn = self._get_connection()
+        try:
+            cur = conn.execute("UPDATE video_download_history SET pruned_at=NULL WHERE id=?",
+                               (int(history_id),))
+            conn.commit()
+            return cur.rowcount > 0
+        except (sqlite3.Error, TypeError, ValueError):
+            return False
+        finally:
+            conn.close()
+
     def mark_download_pruned(self, history_id, when) -> bool:
         """Flag a history row as retention-pruned (file deleted) — kept so the scan's dedup
         still excludes it (no re-download). Returns True if a row was updated."""
