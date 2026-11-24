@@ -20,6 +20,7 @@ Implementation:
 
 from __future__ import annotations
 
+import atexit
 import math
 import os
 import shutil
@@ -134,6 +135,8 @@ class _HlsSession:
     err_file: object = None
     last_access: float = field(default_factory=time.monotonic)
     highest_written: int = -1
+    # segments below this were deleted by the reaper
+    trimmed_to: int = 0
 
     def seg_path(self, idx: int) -> Path:
         return Path(self.out_dir) / f"seg_{idx}.ts"
@@ -153,15 +156,15 @@ class _HlsSession:
                 try:
                     self.proc.wait(timeout=2)
                 except subprocess.TimeoutExpired:
-                    pass
-        except Exception:  # noqa: BLE001
-            pass
+                    logger.debug("cast-hls ffmpeg for %s didn't stop in 2s", self.key)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("cast-hls stopping ffmpeg for %s: %s", self.key, exc)
         try:
             if self.err_file is not None:
                 self.err_file.close()
                 self.err_file = None
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("cast-hls closing the log for %s: %s", self.key, exc)
         shutil.rmtree(self.out_dir, ignore_errors=True)
 
 
@@ -169,13 +172,79 @@ _lock = threading.Lock()
 _sessions: Dict[str, _HlsSession] = {}
 
 
+# segments this far behind the newest one written are gone from disk: a cast
+# seeking back that far starts a new session there anyway
+KEEP_BEHIND_SEGMENTS = 30
+REAP_EVERY_SEC = 30.0
+_reaper: Optional[threading.Thread] = None
+
+
 def _prune_locked(now: float) -> None:
+    """idle sessions stop: ffmpeg killed, temp folder gone"""
     stale = [k for k, s in _sessions.items() if now - s.last_access > IDLE_TIMEOUT_SEC]
     for k in stale:
         _sessions.pop(k).close()
+
+
+def _make_room_locked() -> None:
+    """a new session needs a slot: the longest idle one gives it up"""
     while len(_sessions) >= MAX_SESSIONS:
         oldest_key = min(_sessions, key=lambda k: _sessions[k].last_access)
         _sessions.pop(oldest_key).close()
+
+
+def _trim_locked() -> None:
+    """a running cast keeps only the segments near where it's playing:
+    a whole movie of .ts files would otherwise pile up in the temp folder"""
+    for sess in _sessions.values():
+        floor = sess.highest_written - KEEP_BEHIND_SEGMENTS
+        if floor <= sess.start_seg:
+            continue
+        for idx in range(max(sess.start_seg, sess.trimmed_to), floor):
+            try:
+                sess.seg_path(idx).unlink()
+            except OSError:
+                pass
+        sess.trimmed_to = floor
+
+
+def reap_once(now: Optional[float] = None) -> None:
+    with _lock:
+        _prune_locked(time.monotonic() if now is None else now)
+        _trim_locked()
+
+
+def _reap_loop() -> None:
+    """a cast someone stopped never asks for another segment, so nothing
+    would ever prune it: ffmpeg kept transcoding the whole title to disk"""
+    global _reaper
+    while True:
+        time.sleep(REAP_EVERY_SEC)
+        try:
+            reap_once()
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("cast-hls reaper: %s", exc)
+        with _lock:
+            if not _sessions:
+                _reaper = None
+                return
+
+
+def _ensure_reaper_locked() -> None:
+    global _reaper
+    if _reaper is None or not _reaper.is_alive():
+        _reaper = threading.Thread(target=_reap_loop, name="cast-hls-reaper", daemon=True)
+        _reaper.start()
+
+
+def close_all() -> None:
+    with _lock:
+        for k in list(_sessions):
+            _sessions.pop(k).close()
+
+
+# the server stopping: no ffmpeg left transcoding into a temp folder
+atexit.register(close_all)
 
 
 def get_segment_bytes(
@@ -210,6 +279,7 @@ def get_segment_bytes(
             old = _sessions.pop(session_key, None)
             if old is not None:
                 old.close()
+            _make_room_locked()
             out_dir = tempfile.mkdtemp(prefix="ss_cast_hls_")
             cmd = hls_command(
                 ffmpeg, source_origin, plan, seg_idx, out_dir,
@@ -219,11 +289,16 @@ def get_segment_bytes(
             # Windows pipes have a 4 KB buffer and deadlock ffmpeg on noisy files.
             err_path = Path(out_dir) / "ffmpeg.log"
             err_file = open(err_path, "wb")
-            proc = subprocess.Popen(
-                cmd,
-                stdout=subprocess.DEVNULL,
-                stderr=err_file,
-            )
+            try:
+                proc = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.DEVNULL,
+                    stderr=err_file,
+                )
+            except Exception:
+                err_file.close()
+                shutil.rmtree(out_dir, ignore_errors=True)
+                raise
             sess = _HlsSession(
                 key=session_key,
                 start_seg=seg_idx,
@@ -235,6 +310,7 @@ def get_segment_bytes(
                 highest_written=seg_idx - 1,
             )
             _sessions[session_key] = sess
+            _ensure_reaper_locked()
 
     assert sess is not None
     target = sess.seg_path(seg_idx)
