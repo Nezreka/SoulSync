@@ -513,7 +513,7 @@ function GuidePage() {
           {(
             [
               ['all', 'All'],
-              ['favorites', `Favorites${favorites.list.length ? ` ${favorites.list.length}` : ''}`],
+              ['favorites', 'Favorites'],
               ['video', 'Movies & TV'],
               ['music', 'Music'],
               ['kids', 'Kids'],
