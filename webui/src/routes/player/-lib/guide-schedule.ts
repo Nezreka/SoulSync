@@ -5,8 +5,14 @@
  * guide another.
  */
 
-import type { CommercialScheduleConfig, CommercialSpot, ScheduleOptions } from './schedule';
+import type {
+  CommercialScheduleConfig,
+  CommercialSpot,
+  Premiere,
+  ScheduleOptions,
+} from './schedule';
 
+import { premiereOptions } from './premieres';
 import { startOfLocalDay } from './schedule';
 
 export interface CommercialsShape {
@@ -26,10 +32,15 @@ export function sharedCommercials(
   return { enabled: true, era: cfg.era, mode: cfg.mode, clips, key };
 }
 
-/** a video channel's shared broadcast options for the day ``today`` is in */
+/**
+ * a video channel's shared broadcast options for the day ``today`` is in.
+ * ``premieres`` are this channel's own (premieresFor): what's new, in the
+ * slot the server gave it.
+ */
 export function guideScheduleOptions(
   today: number,
   commercials: CommercialScheduleConfig | undefined,
+  premieres?: readonly Premiere[],
 ): ScheduleOptions {
   return {
     daypart: true,
@@ -37,5 +48,6 @@ export function guideScheduleOptions(
     rotateShows: true,
     today: startOfLocalDay(today),
     commercials,
+    ...premiereOptions(premieres),
   };
 }

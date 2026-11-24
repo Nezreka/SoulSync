@@ -325,6 +325,38 @@ def video_catalog():
         return jsonify({"success": False, "error": "Could not read the video library"}), 500
 
 
+@bp.route("/api/player/guide/premieres", methods=["GET"])
+@device_playback
+@requires_any("movies.access", "tv.access")
+def guide_premieres():
+    """what's new and when it airs (core/player/premieres.py): the same slots
+    and the same channels for every device and profile. a profile only gets
+    the kinds and ratings it may see; that never moves anyone else's slot."""
+    from api.video.kids import kind_allows
+    from core.player import premieres
+    try:
+        sees_movies, sees_shows, _yt, cap = _video_view()
+        conn = get_video_db()._get_connection()
+        try:
+            found = premieres.listing(player_db(), conn)
+        finally:
+            conn.close()
+        out = []
+        for p in found:
+            kind = "movie" if p["kind"] == "movie" else "show"
+            if not (sees_movies if kind == "movie" else sees_shows):
+                continue
+            if cap is not None and not kind_allows(cap, kind, p.get("rating")):
+                continue
+            out.append({k: v for k, v in p.items() if k != "rating"})
+        import time as _time
+        return jsonify({"success": True, "now": int(_time.time() * 1000), "premieres": out})
+    except Exception:  # noqa: BLE001
+        logger.exception("guide premieres failed")
+        # no premieres is a guide without them, never a broken guide
+        return jsonify({"success": True, "now": 0, "premieres": []})
+
+
 @bp.route("/api/player/collections/<int:collection_id>/poster", methods=["GET"])
 @device_playback
 @requires_any("movies.access", "tv.access")

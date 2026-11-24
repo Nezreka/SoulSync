@@ -1,140 +1,117 @@
 /**
  * premieres: something new airs like it would on real tv. a new episode
  * goes on its show's home channel at 8pm the evening it arrived, a new film
- * at 9pm. a few new episodes of one show air back to back (three a night,
- * the rest the next evenings, in order). worked out from when each arrived
- * and the lineup, so every screen shows the same slot.
+ * at 9pm.
+ *
+ * nothing here is worked out on this device. the server gives each premiere
+ * its slot (once, and keeps it), the item to air, and the channels it could
+ * go on, best first (core/player/premieres.py). this only puts each one on
+ * the first of those channels this guide has, so every screen shows the same
+ * thing in the same slot.
  */
 
-import type { CatalogMovie, CatalogRecentEpisode, VideoCatalog } from '../-player.types';
 import type { Channel } from './channels';
 import type { GuideItem, Premiere } from './schedule';
 
-import { premiereAt } from './schedule';
+import { posterUrl } from './rails';
 
-/** how long after it arrives something still counts as new */
-export const NEW_FOR_DAYS = 3;
-/** a show's new episodes a night */
-export const PER_NIGHT = 3;
-const DAY_MS = 86_400_000;
-
-/** home channel, best first: where tv would put it */
-const EPISODE_HOME = ['network', 'rule', 'server', 'genre', 'kids', 'type'];
-const MOVIE_HOME = ['collection', 'studio', 'rule', 'server', 'genre', 'kids', 'type'];
-
-export function addedMs(at: string | null | undefined): number | null {
-  if (!at) return null;
-  const t = Date.parse(at.includes('T') ? at : `${at.replace(' ', 'T')}Z`);
-  return Number.isFinite(t) ? t : null;
-}
-
-interface Arrival {
-  item: GuideItem;
+/** a premiere as the server sends it (GET /api/player/guide/premieres) */
+export interface ServerPremiere {
+  key: string;
   kind: 'episode' | 'movie';
+  id: number;
+  show_id: number | null;
+  title: string;
+  subtitle: string | null;
+  seconds: number;
+  /** when it airs, epoch ms */
   at: number;
+  /** channel ids it could air on, best first */
+  homes: string[];
+  has_poster: boolean;
 }
 
-function homeOf(arrival: Arrival, channels: readonly Channel[]): Channel | null {
-  const order = arrival.kind === 'episode' ? EPISODE_HOME : MOVIE_HOME;
-  const fits = (c: Channel) =>
-    arrival.kind === 'episode'
-      ? c.pool.some((p) => p.href === arrival.item.href)
-      : c.pool.some((p) => p.key === arrival.item.key);
-  for (const kind of order) {
-    const home = channels.find((c) => c.kind === kind && !c.music && !c.ordered && fits(c));
-    if (home) return home;
-  }
-  return null;
+export function premiereItem(p: ServerPremiere): GuideItem {
+  const show = p.kind === 'episode';
+  const owner = show ? (p.show_id ?? p.id) : p.id;
+  return {
+    key: p.key,
+    title: p.title,
+    subtitle: p.subtitle ?? undefined,
+    seconds: p.seconds,
+    href: show ? `/player/tv/${owner}` : `/player/movies/${owner}`,
+    art: p.has_poster ? posterUrl(show ? 'show' : 'movie', owner) : null,
+    kind: show ? 'episode' : 'movie',
+  };
 }
 
-/** a show's usual episode length, from the episodes the guide already knows */
-function usualLength(href: string, channels: readonly Channel[]): number {
-  for (const c of channels) {
-    const lengths = c.pool.filter((p) => p.href === href).map((p) => p.seconds);
-    if (lengths.length) return lengths.sort((a, b) => a - b)[Math.floor(lengths.length / 2)];
-  }
-  return 0;
-}
+/** a channel a premiere can air on: video, and not a marathon that runs in order */
+const canHost = (c: Channel) => !c.music && !c.ordered;
 
-function episodeArrivals(
-  recent: readonly CatalogRecentEpisode[],
+/**
+ * each channel's premieres, by channel id. one home channel each (the first
+ * the server named that this guide has), so a new episode isn't on five
+ * channels at once. one no channel here can host airs nowhere.
+ */
+export function premieresFor(
+  list: readonly ServerPremiere[] | null | undefined,
   channels: readonly Channel[],
-  since: number,
-): Arrival[] {
-  const byShow = new Map<number, CatalogRecentEpisode[]>();
-  for (const e of recent) {
-    const t = addedMs(e.added_at);
-    if (t === null || t < since) continue;
-    const list = byShow.get(e.show_id);
-    if (list) list.push(e);
-    else byShow.set(e.show_id, [e]);
-  }
-  const out: Arrival[] = [];
-  for (const [showId, list] of byShow) {
-    const href = `/player/tv/${showId}`;
-    const art = channels.flatMap((c) => c.pool).find((p) => p.href === href)?.art ?? null;
-    const usual = usualLength(href, channels);
-    // in airing order; the first arrival sets the night, the rest follow PER_NIGHT a night
-    list.sort((a, b) => a.season_number - b.season_number || a.episode_number - b.episode_number);
-    const first = Math.min(...list.map((e) => addedMs(e.added_at)!));
-    list.forEach((e, i) => {
-      const seconds = e.runtime_seconds || usual;
-      if (!seconds) return;
-      out.push({
-        kind: 'episode',
-        at: premiereAt(first, 'episode') + Math.floor(i / PER_NIGHT) * DAY_MS,
-        item: {
-          key: `episode:${e.id}`,
-          title: e.show_title,
-          subtitle: `S${e.season_number} E${e.episode_number}${e.title ? ` · ${e.title}` : ''}`,
-          seconds,
-          href,
-          art,
-          kind: 'episode',
-        },
-      });
-    });
+): Map<string, Premiere[]> {
+  const out = new Map<string, Premiere[]>();
+  if (!list?.length) return out;
+  const hosts = new Set(channels.filter(canHost).map((c) => c.id));
+  for (const p of list) {
+    const home = p.homes.find((id) => hosts.has(id));
+    if (!home || !(p.seconds > 0) || !Number.isFinite(p.at)) continue;
+    const mine = out.get(home);
+    const premiere = { item: premiereItem(p), at: p.at };
+    if (mine) mine.push(premiere);
+    else out.set(home, [premiere]);
   }
   return out;
 }
 
-function movieArrivals(
-  movies: readonly CatalogMovie[],
-  channels: readonly Channel[],
-  since: number,
-): Arrival[] {
-  const out: Arrival[] = [];
-  for (const m of movies) {
-    const t = addedMs(m.added_at);
-    if (t === null || t < since || !m.runtime_seconds) continue;
-    const item = channels.flatMap((c) => c.pool).find((p) => p.key === `movie:${m.id}`);
-    if (item) out.push({ kind: 'movie', at: premiereAt(t, 'movie'), item });
-  }
-  return out;
+/** the part of a channel's schedule options that carries its premieres */
+export function premiereOptions(mine: readonly Premiere[] | undefined) {
+  if (!mine?.length) return {};
+  return { premieres: mine, premiereKey: mine.map((p) => `${p.item.key}@${p.at}`).join(',') };
+}
+
+/** a premiere still to come (or on now), with the channel it airs on */
+export interface UpcomingPremiere {
+  premiere: ServerPremiere;
+  channel: Channel;
 }
 
 /**
- * each channel's premieres. one home channel each, so a new episode isn't on
- * five channels at once.
+ * tonight's premieres for the home row: the ones on now or still to air in
+ * the next day, soonest first, each with its home channel. homed among
+ * ``channels`` exactly as the guide homes them.
  */
-export function premieresFor(
-  catalog: Pick<VideoCatalog, 'movies' | 'recent_episodes'>,
+export function upcomingPremieres(
+  list: readonly ServerPremiere[] | null | undefined,
   channels: readonly Channel[],
   now: number,
-): Map<string, Premiere[]> {
-  const since = now - NEW_FOR_DAYS * DAY_MS;
-  const out = new Map<string, Premiere[]>();
-  const arrivals = [
-    ...episodeArrivals(catalog.recent_episodes ?? [], channels, since),
-    ...movieArrivals(catalog.movies, channels, since),
-  ];
-  for (const a of arrivals) {
-    const home = homeOf(a, channels);
-    if (!home) continue;
-    const list = out.get(home.id);
-    const p = { item: a.item, at: a.at };
-    if (list) list.push(p);
-    else out.set(home.id, [p]);
+  horizonMs = 24 * 3_600_000,
+): UpcomingPremiere[] {
+  if (!list?.length) return [];
+  const hosts = new Map(channels.filter(canHost).map((c) => [c.id, c]));
+  const out: UpcomingPremiere[] = [];
+  for (const p of list) {
+    const home = p.homes.find((id) => hosts.has(id));
+    if (!home || !(p.seconds > 0)) continue;
+    if (p.at + p.seconds * 1000 <= now || p.at > now + horizonMs) continue;
+    out.push({ premiere: p, channel: hosts.get(home)! });
   }
-  return out;
+  return out.sort((a, b) => a.premiere.at - b.premiere.at);
+}
+
+/** "Tonight 8:00 PM", "On now", "Tomorrow 9:00 PM" */
+export function premiereWhen(at: number, now: number): string {
+  if (at <= now) return 'On now';
+  const d = new Date(at);
+  const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  const sameDay = new Date(now).toDateString() === d.toDateString();
+  if (sameDay) return `${d.getHours() >= 17 ? 'Tonight' : 'Today'} ${time}`;
+  return `Tomorrow ${time}`;
 }
