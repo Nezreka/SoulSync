@@ -1005,12 +1005,17 @@ def get_commercial_break():
         max_sec = int(request.args.get("max_seconds") or 0) or None
     except ValueError:
         max_sec = None
+    try:
+        item_year = int(request.args.get("year") or 0) or None
+    except ValueError:
+        item_year = None
     clips = commercials.pick_break(
         era=era,
         channel_id=channel_id,
         channel_name=channel_name,
         mode=mode,
         max_seconds=max_sec,
+        item_year=item_year,
     )
     return jsonify({"success": True, "clips": clips})
 

@@ -446,6 +446,7 @@ export async function fetchCommercialBreak(opts: {
   mode?: CommercialMode;
   channelId?: string;
   channelName?: string;
+  year?: number | null;
 }): Promise<CommercialClip[]> {
   try {
     const res = await apiClient
@@ -455,6 +456,7 @@ export async function fetchCommercialBreak(opts: {
           ...(opts.mode ? { mode: opts.mode } : {}),
           ...(opts.channelId ? { channel_id: opts.channelId } : {}),
           ...(opts.channelName ? { channel_name: opts.channelName } : {}),
+          ...(opts.year ? { year: String(opts.year) } : {}),
         },
         timeout: 2500,
       })

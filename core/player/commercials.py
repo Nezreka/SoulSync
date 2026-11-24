@@ -18,6 +18,7 @@ import hashlib
 import json
 import os
 import random
+import re
 import threading
 import time
 import urllib.parse
@@ -51,6 +52,36 @@ _ARCHIVE_QUERIES: Dict[str, str] = {
 }
 
 
+_YEAR_RE = re.compile(r"\b(19[5-9]\d|20[0-2]\d)\b")
+
+
+def extract_year(*texts: Any) -> Optional[int]:
+    """Extract a plausible broadcast year (1950-2029) from Archive.org metadata or titles."""
+    for raw in texts:
+        if raw is None:
+            continue
+        m = _YEAR_RE.search(str(raw))
+        if m:
+            y = int(m.group(1))
+            if 1950 <= y <= 2029:
+                return y
+    return None
+
+
+def era_for_year(year: Optional[int]) -> Optional[str]:
+    if year is None:
+        return None
+    if 1970 <= year <= 1979:
+        return "70s"
+    if 1980 <= year <= 1989:
+        return "80s"
+    if 1990 <= year <= 1999:
+        return "90s"
+    if 2000 <= year <= 2011:
+        return "2000s"
+    return None
+
+
 @dataclass
 class CommercialClip:
     id: str
@@ -60,6 +91,7 @@ class CommercialClip:
     path: str
     source: str = "archive"  # "archive" | "local"
     archive_id: str = ""
+    year: Optional[int] = None
     size_bytes: int = 0
     added_at: float = 0.0
 
@@ -68,6 +100,7 @@ class CommercialClip:
             "id": self.id,
             "title": self.title,
             "era": self.era,
+            "year": self.year,
             "duration_seconds": self.duration_seconds,
             "source": self.source,
             "stream_path": f"/api/player/stream/commercial/{self.id}",
@@ -131,14 +164,19 @@ def _load_locked() -> None:
             for row in raw if isinstance(raw, list) else []:
                 p = Path(row.get("path", ""))
                 if p.is_file() and p.stat().st_size > 1024:
+                    title_s = str(row.get("title") or "Retro Commercial")
+                    clip_year = row.get("year")
+                    if clip_year is None:
+                        clip_year = extract_year(title_s, row.get("archive_id"))
                     clip = CommercialClip(
                         id=str(row["id"]),
-                        title=str(row.get("title") or "Retro Commercial"),
+                        title=title_s,
                         era=str(row.get("era") or "mix"),
                         duration_seconds=int(row.get("duration_seconds") or 30),
                         path=str(p),
                         source=str(row.get("source") or "archive"),
                         archive_id=str(row.get("archive_id") or ""),
+                        year=int(clip_year) if clip_year else None,
                         size_bytes=int(p.stat().st_size),
                         added_at=float(row.get("added_at") or 0.0),
                     )
@@ -167,6 +205,7 @@ def _scan_local_locked() -> None:
             duration_seconds=30,
             path=str(entry),
             source="local",
+            year=extract_year(entry.stem, entry.parent.name),
             size_bytes=entry.stat().st_size,
             added_at=entry.stat().st_mtime,
         )
@@ -293,6 +332,8 @@ def _download_archive_era(era: str, needed: int = TARGET_CLIPS_PER_ERA) -> int:
                             raise ValueError("clip exceeded size cap")
                         fh.write(chunk)
                 tmp_path.replace(out_path)
+                md = meta.get("metadata") or {}
+                clip_year = extract_year(md.get("year"), md.get("date"), item_title, name, ident)
                 clip_title = item_title[:64].strip() or "Retro Commercial"
                 clip = CommercialClip(
                     id=cid,
@@ -302,6 +343,7 @@ def _download_archive_era(era: str, needed: int = TARGET_CLIPS_PER_ERA) -> int:
                     path=str(out_path),
                     source="archive",
                     archive_id=ident,
+                    year=clip_year,
                     size_bytes=out_path.stat().st_size,
                     added_at=time.time(),
                 )
@@ -391,29 +433,53 @@ def pick_break(
     channel_name: str = "",
     mode: str = "short",
     max_seconds: Optional[int] = None,
+    item_year: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
-    """Return 1-3 retro commercials for a break between Live Guide programs."""
-    resolved_era = infer_era(channel_id, channel_name) if era == "auto" else era
+    """Return 1-3 retro commercials for a break between Live Guide programs.
+
+    In ``era="auto"`` mode, if ``item_year`` is known (e.g. a 1985 movie or 1994
+    episode), prioritizes commercials within ±4 years of ``item_year``, then
+    same decade, then channel vibe / random mix.
+    """
+    year_era = era_for_year(item_year) if era == "auto" else None
+    resolved_era = year_era or (infer_era(channel_id, channel_name) if era == "auto" else era)
     with _lock:
         _load_locked()
         _scan_local_locked()
-        exact = [c for c in _clips_cache.values() if c.era == resolved_era and Path(c.path).is_file()]
-        fallback = [c for c in _clips_cache.values() if Path(c.path).is_file()]
+        all_valid = [c for c in _clips_cache.values() if Path(c.path).is_file()]
 
-    pool = exact if len(exact) >= 2 else fallback
-    if not pool:
+    if not all_valid:
         warm_async(resolved_era)
         return []
-    if len(exact) < 2:
+
+    # Tier 1: within ±4 years of the playing title when era is auto & year is vintage
+    close_year: List[CommercialClip] = []
+    if era == "auto" and item_year and year_era is not None:
+        close_year = [c for c in all_valid if c.year is not None and abs(c.year - item_year) <= 4]
+
+    # Tier 2: matching decade / era
+    exact_era = [c for c in all_valid if c.era == resolved_era]
+    if len(exact_era) < 2:
         warm_async(resolved_era)
 
     target_count = 3 if mode == "cable" else 2
     budget = max_seconds if max_seconds and max_seconds > 0 else (120 if mode == "cable" else 65)
-    shuffled = list(pool)
-    random.shuffle(shuffled)
+
+    # Build tiered candidate order (shuffled within each tier for freshness)
+    tiers = [close_year, exact_era, all_valid]
+    ordered_pool: List[CommercialClip] = []
+    seen_ids: set[str] = set()
+    for tier in tiers:
+        shuffled = list(tier)
+        random.shuffle(shuffled)
+        for clip in shuffled:
+            if clip.id not in seen_ids:
+                seen_ids.add(clip.id)
+                ordered_pool.append(clip)
+
     picked: List[CommercialClip] = []
     used_sec = 0
-    for clip in shuffled:
+    for clip in ordered_pool:
         if len(picked) >= target_count:
             break
         if picked and used_sec + clip.duration_seconds > budget:

@@ -42,3 +42,14 @@ def test_cast_hls_bypasses_session_gate():
     assert no_profile_request_is_blocked('/api/player/cast-hls/youtube/abc123/index.m3u8', 'GET') is False
     assert no_profile_request_is_blocked('/api/player/cast-hls/youtube/abc123/seg/0.ts', 'GET') is False
     assert no_profile_request_is_blocked('/api/player/cast-hls/youtube/abc123/index.m3u8', 'OPTIONS') is False
+
+
+def test_commercial_year_extraction_and_era():
+    assert commercials.extract_year("1986 Nintendo NES Commercial") == 1986
+    assert commercials.extract_year("1994-05-12") == 1994
+    assert commercials.extract_year("No year here") is None
+    assert commercials.era_for_year(1977) == "70s"
+    assert commercials.era_for_year(1985) == "80s"
+    assert commercials.era_for_year(1996) == "90s"
+    assert commercials.era_for_year(2004) == "2000s"
+    assert commercials.era_for_year(2024) is None

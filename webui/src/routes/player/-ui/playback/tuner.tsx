@@ -61,11 +61,16 @@ function spliceCommercialsIfEnabled(t: Tuning) {
   void fetchPlayerSettings()
     .then(async (prefs) => {
       if (!prefs?.commercials_enabled) return;
+      const yearMatch = /\b(19[5-9]\d|20[0-2]\d)\b/.exec(
+        `${t.program.subtitle ?? ''} ${t.program.title ?? ''}`,
+      );
+      const itemYear = yearMatch ? Number(yearMatch[1]) : null;
       const clips = await fetchCommercialBreak({
         era: prefs.commercials_era,
         mode: prefs.commercials_mode,
         channelId: t.channel.id,
         channelName: t.channel.name,
+        year: itemYear,
       });
       if (!clips.length) return;
       const eng = getEngine();
