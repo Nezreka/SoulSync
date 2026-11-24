@@ -1005,6 +1005,12 @@ def get_commercials_config():
     cfg = commercials.get_server_config(player_db())
     clips = commercials.list_clips_sorted() if cfg["enabled"] else []
     if cfg["enabled"] and str(request.args.get("guide") or "") == "1":
+        # the guide asks once a day: the weekly fresh set rides on it. the
+        # day's breaks are frozen below, so a rotation shows from tomorrow
+        try:
+            commercials.maybe_rotate(cfg["era"])
+        except Exception:  # noqa: BLE001 - a rotation never fails the guide
+            logger.debug("commercials rotation check failed", exc_info=True)
         # the clips the day's breaks are scheduled from: frozen like the pool,
         # or each clip the cache fetched re-seeded everyone's day
         from core.player import guide_day

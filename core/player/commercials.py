@@ -14,6 +14,7 @@ the feature is 100% opt-in per profile (`commercials_enabled: False` by default)
 
 from __future__ import annotations
 
+import datetime as _dt
 import hashlib
 import json
 import os
@@ -43,6 +44,12 @@ MAX_CLIP_SEC = 95
 FILL_BYTES = int(MAX_CACHE_BYTES * 0.9)
 # archive.org search pages read per era, deepest first only when needed
 SEARCH_PAGES = 6
+# once a week a tenth of the space is fetched in spots never had before, and
+# the next day the oldest go to make room, so the breaks don't stay the same
+# set forever. a tenth keeps the cache under 500 MB in between (450 + 45)
+ROTATE_EVERY_SEC = 7 * 86400
+ROTATE_SHARE = 0.1
+ROTATE_PAGES = 20
 HTTP_TIMEOUT = 15
 
 _ARCHIVE_QUERIES: Dict[str, str] = {
@@ -292,19 +299,21 @@ def _search_docs(era: str, page: int) -> list:
     return (data or {}).get("response", {}).get("docs", []) or []
 
 
-def _download_archive_era(era: str, needed: int = 0, *, fill_bytes: int = 0) -> int:
+def _download_archive_era(era: str, needed: int = 0, *, fill_bytes: int = 0,
+                          pages: int = SEARCH_PAGES, skip: Optional[set] = None) -> int:
     """fetch new spots for one era: ``needed`` more of them, or with
     ``fill_bytes`` until the era's spots reach that size. pages through the
-    search, skipping archive items already cached. returns how many it added"""
+    search, skipping archive items already cached (and ``skip``: ones had
+    before). returns how many it added"""
     added = 0
-    for page in range(1, SEARCH_PAGES + 1):
+    for page in range(1, pages + 1):
         if (needed and added >= needed) or (fill_bytes and _era_bytes(era) >= fill_bytes):
             break
         docs = _search_docs(era, page)
         if not docs:
             break
         with _lock:
-            have = {c.archive_id for c in _clips_cache.values()}
+            have = {c.archive_id for c in _clips_cache.values()} | (skip or set())
         docs = [d for d in docs if str(d.get("identifier") or "").strip() not in have]
         random.shuffle(docs)
         want = (needed - added) if needed else 10_000
@@ -392,6 +401,116 @@ def _download_docs(era: str, docs: list, needed: int, fill_bytes: int = 0) -> in
     return added
 
 
+def _rotation_path() -> Path:
+    return cache_dir() / "rotation.json"
+
+
+def _rotation() -> Dict[str, Any]:
+    """{last: when the set last rotated, seen: every archive item ever fetched}"""
+    try:
+        raw = json.loads(_rotation_path().read_text(encoding="utf-8"))
+        if isinstance(raw, dict):
+            return {"last": float(raw.get("last") or 0), "seen": set(raw.get("seen") or []),
+                    "trim_after": raw.get("trim_after") or None}
+    except (OSError, ValueError, TypeError):
+        pass
+    return {"last": 0.0, "seen": set(), "trim_after": None}
+
+
+def _save_rotation(state: Dict[str, Any]) -> None:
+    try:
+        tmp = _rotation_path().with_suffix(".tmp")
+        tmp.write_text(json.dumps({"last": state["last"], "seen": sorted(state["seen"])[-5000:],
+                                   "trim_after": state.get("trim_after")}), encoding="utf-8")
+        tmp.replace(_rotation_path())
+    except OSError:
+        logger.debug("could not save the commercials rotation", exc_info=True)
+
+
+def _targets(era: str) -> List[str]:
+    return [era] if era in _ARCHIVE_QUERIES and era != "mix" else ["80s", "90s", "mix"]
+
+
+def _trim_era(era: str, keep_bytes: int) -> int:
+    """drop an era's oldest fetched spots until it fits ``keep_bytes``"""
+    removed = 0
+    with _lock:
+        arch = sorted([c for c in _clips_cache.values() if c.era == era and c.source == "archive"],
+                      key=lambda c: c.added_at)
+        total = sum(c.size_bytes for c in arch)
+        while total > keep_bytes and len(arch) > 4:
+            victim = arch.pop(0)
+            _clips_cache.pop(victim.id, None)
+            total -= victim.size_bytes
+            removed += 1
+            try:
+                Path(victim.path).unlink(missing_ok=True)
+            except OSError:
+                pass
+        if removed:
+            _save_manifest_locked()
+    return removed
+
+
+def maybe_rotate(era: str = "mix", *, now: Optional[float] = None) -> bool:
+    """once a week: fetch a tenth of the space in spots never had before; the
+    next day, drop the oldest to make room. the guide reads the config at the
+    start of each day, before it freezes the day's breaks, and that calls
+    this, so a spot a frozen day plays is never deleted under it. True when a
+    rotation started"""
+    global _warming
+    now = time.time() if now is None else now
+    if not _server_enabled():
+        return False
+    state = _rotation()
+    today = _dt.date.fromtimestamp(now).isoformat()
+    if state.get("trim_after") and today > state["trim_after"]:
+        for t in _targets(era):
+            _trim_era(t, FILL_BYTES // len(_targets(era)))
+        state["trim_after"] = None
+        _save_rotation(state)
+    if not state["last"]:
+        # the clock starts with the first fill, not on its first day
+        state["last"] = now
+        _save_rotation(state)
+        return False
+    if now - state["last"] < ROTATE_EVERY_SEC:
+        return False
+    targets = _targets(era)
+    share = FILL_BYTES // len(targets)
+    with _lock:
+        _load_locked()
+        if _warming:
+            return False
+        _warming = True
+    state["last"] = now
+    _save_rotation(state)
+
+    def _run():
+        global _warming, _last_error
+        try:
+            with _lock:
+                seen = state["seen"] | {c.archive_id for c in _clips_cache.values()}
+            for t in targets:
+                fresh = int(share * ROTATE_SHARE)
+                _download_archive_era(t, fill_bytes=_era_bytes(t) + fresh, pages=ROTATE_PAGES, skip=seen)
+            with _lock:
+                state["seen"] = seen | {c.archive_id for c in _clips_cache.values()}
+            # the old ones go tomorrow, before tomorrow's breaks are made
+            state["trim_after"] = today
+            _save_rotation(state)
+            logger.info("commercials: rotated in a fresh set of spots")
+        except Exception as exc:  # noqa: BLE001
+            _last_error = str(exc)
+            logger.warning("commercials rotation failed: %s", exc)
+        finally:
+            with _lock:
+                _warming = False
+
+    threading.Thread(target=_run, name="commercials-rotate", daemon=True).start()
+    return True
+
+
 def _server_enabled() -> bool:
     """the admin's switch. off (or unreadable): nothing downloads"""
     try:
@@ -411,7 +530,7 @@ def warm_async(era: str = "mix", *, enabled: Optional[bool] = None) -> bool:
     global _warming, _last_error
     if not (enabled if enabled is not None else _server_enabled()):
         return False
-    targets = [era] if era in _ARCHIVE_QUERIES and era != "mix" else ["80s", "90s", "mix"]
+    targets = _targets(era)
     with _lock:
         _load_locked()
         if _warming:

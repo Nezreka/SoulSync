@@ -124,3 +124,51 @@ def test_it_pages_past_what_it_has_until_the_era_is_full(monkeypatch):
     monkeypatch.setattr(commercials, "_download_docs", download)
     assert commercials._download_archive_era("80s", fill_bytes=3 * 1024 * 1024) == 2
     assert got == ["n1", "n2"] and asked == [1, 2]        # stopped once 3 MB was there
+
+
+# a weekly fresh set: new spots one day, the oldest go the next morning
+def test_the_set_rotates_weekly_and_never_deletes_a_spot_the_same_day(monkeypatch, tmp_path):
+    import datetime as dt
+    monkeypatch.setattr(commercials, "cache_dir", lambda: tmp_path)
+    monkeypatch.setattr(commercials, "_server_enabled", lambda: True)
+    monkeypatch.setattr(commercials, "_load_locked", lambda: None)
+    monkeypatch.setattr(commercials, "_save_manifest_locked", lambda: None)
+    share_mb = commercials.FILL_BYTES // 3 // (1024 * 1024)
+    cache = {}
+    for e in ("80s", "90s", "mix"):
+        for i in range(share_mb // 10):
+            cache[f"{e}{i}"] = _clip(f"{e}{i}", e, 10)
+            cache[f"{e}{i}"].added_at = i
+    monkeypatch.setattr(commercials, "_clips_cache", cache)
+    fetched = []
+
+    def fetch(era, needed=0, *, fill_bytes=0, pages=0, skip=None):
+        fetched.append((era, pages, set(skip or ())))
+        for i in range(3):
+            cache[f"new-{era}{i}"] = _clip(f"new-{era}{i}", era, 10)
+            cache[f"new-{era}{i}"].added_at = 1000 + i
+        return 3
+
+    monkeypatch.setattr(commercials, "_download_archive_era", fetch)
+    day0 = dt.datetime(2026, 11, 1, 6).timestamp()
+    assert commercials.maybe_rotate("auto", now=day0) is False          # the clock starts
+    assert commercials.maybe_rotate("auto", now=day0 + 3 * 86400) is False
+    week = day0 + 7 * 86400
+    assert commercials.maybe_rotate("auto", now=week) is True
+    _settle()
+    assert [f[0] for f in fetched] == ["80s", "90s", "mix"]
+    assert fetched[0][1] == commercials.ROTATE_PAGES and "80s0" in fetched[0][2]   # never had before
+    total = len(cache)
+    # the same day: nothing deleted (today's breaks may play any of them)
+    assert commercials.maybe_rotate("auto", now=week + 3600) is False
+    assert len(cache) == total
+    # the next morning, before the day's breaks: the oldest make room
+    commercials.maybe_rotate("auto", now=week + 86400)
+    assert len(cache) < total and "80s0" not in cache and "new-80s0" in cache
+
+
+def test_rotation_is_off_with_commercials_off(monkeypatch, tmp_path):
+    monkeypatch.setattr(commercials, "cache_dir", lambda: tmp_path)
+    monkeypatch.setattr(commercials, "_server_enabled", lambda: False)
+    assert commercials.maybe_rotate("auto", now=1e9) is False
+    assert not (tmp_path / "rotation.json").exists()
