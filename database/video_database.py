@@ -135,6 +135,11 @@ _initialized_paths: set[str] = set()
 _ARTICLE_RE = re.compile(r"^(the|a|an)\s+", re.IGNORECASE)
 
 
+def _added_stamp() -> str:
+    """when a file landed, the way the scans write a server's add date"""
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
 def _sort_title(title) -> str:
     return _ARTICLE_RE.sub("", (title or "").strip()).lower()
 
@@ -5815,6 +5820,7 @@ class VideoDatabase:
             # carry it never blanks a stored date
             if item.get("server_added_at"):
                 base["server_added_at"] = item["server_added_at"]
+            self._claim_owned(conn, "movies", server_source, item)
             self._resilient_upsert(conn, "movies", base,
                                    {"tmdb_id": item.get("tmdb_id"), "imdb_id": item.get("imdb_id")},
                                    preserve_enrichment=preserve_enrichment)
@@ -5855,6 +5861,7 @@ class VideoDatabase:
             if _year is None:
                 _fad = str(item.get("first_air_date") or "")[:4]
                 _year = int(_fad) if _fad.isdigit() else None
+            self._claim_owned(conn, "shows", server_source, item)
             self._resilient_upsert(conn, "shows", {
                 "server_source": server_source, "server_id": item["server_id"],
                 "title": item.get("title"), "sort_title": _sort_title(item.get("title")),
@@ -5956,10 +5963,15 @@ class VideoDatabase:
             # DEMOTED back to a missing row — files cleared, server_id NULL —
             # and only identity-less server junk is actually deleted.
             for row in conn.execute(
-                "SELECT id, season_number, episode_number, air_date, tvdb_id FROM episodes "
+                "SELECT id, season_number, episode_number, air_date, tvdb_id, server_id FROM episodes "
                 "WHERE show_id=? AND server_id IS NOT NULL", (show_id,)
             ).fetchall():
                 if (row["season_number"], row["episode_number"]) not in seen_eps:
+                    # an episode soulsync placed that the server hasn't scanned
+                    # in yet: it stays while its file is on disk
+                    if str(row["server_id"]).startswith("ss:") and self._owned_files_there(
+                            conn, "episode_id=?", (row["id"],)):
+                        continue
                     if row["air_date"] or row["tvdb_id"]:
                         conn.execute("DELETE FROM media_files WHERE episode_id=?", (row["id"],))
                         conn.execute(
@@ -6032,6 +6044,14 @@ class VideoDatabase:
                 f"SELECT server_id FROM {table} WHERE server_source=?", (server_source,)
             ).fetchall()]
             stale = [sid for sid in existing if str(sid) not in seen]
+            # a title soulsync placed that the server hasn't scanned in yet
+            # stays while a file of it is on disk
+            owner = ("movie_id IN (SELECT id FROM movies WHERE server_source=? AND server_id=?)"
+                     if table == "movies" else
+                     "episode_id IN (SELECT e.id FROM episodes e JOIN shows s ON s.id=e.show_id "
+                     "WHERE s.server_source=? AND s.server_id=?)")
+            stale = [sid for sid in stale if not (
+                str(sid).startswith("ss:") and self._owned_files_there(conn, owner, (server_source, sid)))]
             if len(stale) > len(existing) * 0.5 and len(existing) > 100:
                 logger.warning(
                     "Video deep scan: %d/%d %s stale (>50%%) — skipping removal (likely a "
@@ -6042,6 +6062,179 @@ class VideoDatabase:
                              (server_source, sid))
             conn.commit()
             return len(stale)
+        finally:
+            conn.close()
+
+    # ── what soulsync itself put in the library (core/video/owned_ids.py) ────
+    @staticmethod
+    def _owned_files_there(conn, where: str, args) -> bool:
+        """does any file of an owned row still sit on disk? an owned row's
+        paths are soulsync's own, so they're checked as they are"""
+        for (path,) in conn.execute(f"SELECT relative_path FROM media_files WHERE {where}", args):
+            try:
+                if path and os.path.isfile(path):
+                    return True
+            except (OSError, ValueError):
+                continue
+        return False
+
+    @staticmethod
+    def _claim_owned(conn, table: str, server_source: str, item: dict) -> None:
+        """a media server reports a title soulsync already owns (a download it
+        placed, a file its folder scan found): the server takes that row over,
+        keeping its id, history and choices, instead of adding a second one.
+        only rows with an ``ss:`` id are claimed, from this server's label or
+        from soulsync's own (a library that had no server before this one)."""
+        if server_source == "soulsync":
+            return
+        sid = str(item.get("server_id") or "")
+        if not sid or conn.execute(f"SELECT 1 FROM {table} WHERE server_source=? AND server_id=?",
+                                   (server_source, sid)).fetchone():
+            return
+        keys = [("tmdb_id", item.get("tmdb_id")), ("imdb_id", item.get("imdb_id"))]
+        if table == "shows":
+            keys.insert(0, ("tvdb_id", item.get("tvdb_id")))
+        for col, val in keys:
+            if val in (None, "", 0):
+                continue
+            row = conn.execute(
+                f"SELECT id FROM {table} WHERE {col}=? AND server_id LIKE 'ss:%' "
+                "AND server_source IN (?, 'soulsync') ORDER BY id LIMIT 1",
+                (val, server_source)).fetchone()
+            if row:
+                conn.execute(f"UPDATE {table} SET server_source=?, server_id=? WHERE id=?",
+                             (server_source, sid, row["id"]))
+                logger.info("video scan: %s took over soulsync's %s row %s",
+                            server_source, table[:-1], row["id"])
+                return
+
+    @staticmethod
+    def _merge_media_file(conn, owner_col: str, owner_id: int, file: dict, drop=()) -> None:
+        """add one file beside the owner's others (a second version stays);
+        the same path is rewritten, and ``drop`` (the copy an upgrade
+        replaced) goes"""
+        new_path = file.get("relative_path") or ""
+        gone = {os.path.normcase(str(p)) for p in [new_path, *drop] if p}
+        keep = [dict(r) for r in conn.execute(
+            f"SELECT * FROM media_files WHERE {owner_col}=?", (owner_id,)).fetchall()
+            if os.path.normcase(str(r["relative_path"] or "")) not in gone]
+        VideoDatabase._set_media_file(conn, owner_col, owner_id, keep + [file])
+
+    def _owned_row(self, conn, table: str, label: str, *, row_id=None, tmdb_id=None,
+                   library_id=None):
+        """the library row a landed file belongs to: the row the download was
+        for, else this label's row for the tmdb id, in the file's library when
+        the title sits in more than one"""
+        if row_id:
+            r = conn.execute(f"SELECT id FROM {table} WHERE id=?", (row_id,)).fetchone()
+            if r:
+                return r["id"]
+        if not tmdb_id:
+            return None
+        rows = conn.execute(
+            f"SELECT id, video_library_id FROM {table} WHERE tmdb_id=? AND server_source=? "
+            "ORDER BY has_file DESC, id" if table == "movies" else
+            f"SELECT id, video_library_id FROM {table} WHERE tmdb_id=? AND server_source=? ORDER BY id",
+            (tmdb_id, label)).fetchall()
+        if not rows:
+            return None
+        if library_id is not None:
+            same = [r for r in rows if r["video_library_id"] == library_id]
+            if same:
+                return same[0]["id"]
+            # the title is owned in other libraries only: this file is a new copy
+            if all(r["video_library_id"] is not None for r in rows):
+                return None
+        return rows[0]["id"]
+
+    def own_landed_movie(self, label: str, *, owned_id: str, file: dict, tmdb_id=None,
+                         row_id=None, title=None, year=None, poster_url=None, imdb_id=None,
+                         library_id=None, replaced=None) -> int:
+        """a movie soulsync just placed is in the library now, not when the
+        media server next scans: its row (made when the library had none)
+        owns the file. returns the movie row id."""
+        conn = self._get_connection()
+        try:
+            mid = self._owned_row(conn, "movies", label, row_id=row_id, tmdb_id=tmdb_id,
+                                  library_id=library_id)
+            if mid is None:
+                existing = conn.execute("SELECT id FROM movies WHERE server_source=? AND server_id=?",
+                                        (label, owned_id)).fetchone()
+                if existing:
+                    mid = existing["id"]
+                else:
+                    conn.execute(
+                        "INSERT INTO movies (server_source, server_id, tmdb_id, imdb_id, title, "
+                        "sort_title, year, poster_url, has_file, video_library_id, server_added_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
+                        (label, owned_id, tmdb_id, imdb_id, title or "Unknown", _sort_title(title),
+                         year, poster_url, library_id, _added_stamp()))
+                    mid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+                    self._adopt_title_profile(conn, "movie", mid)
+            self._merge_media_file(conn, "movie_id", mid, file, drop=[replaced] if replaced else [])
+            conn.execute("UPDATE movies SET has_file=1, updated_at=CURRENT_TIMESTAMP WHERE id=?", (mid,))
+            conn.commit()
+            return mid
+        finally:
+            conn.close()
+
+    def own_landed_episode(self, label: str, *, show_owned_id: str, file: dict, season: int,
+                           episode: int, tmdb_id=None, show_row_id=None, show_title=None,
+                           year=None, poster_url=None, episode_title=None, air_date=None,
+                           library_id=None, replaced=None) -> tuple:
+        """an episode soulsync just placed is in the library now: its show
+        (made when the library had none), season and episode rows own the
+        file. returns (show id, episode id)."""
+        conn = self._get_connection()
+        try:
+            show_id = self._owned_row(conn, "shows", label, row_id=show_row_id, tmdb_id=tmdb_id,
+                                      library_id=library_id)
+            if show_id is None:
+                existing = conn.execute("SELECT id FROM shows WHERE server_source=? AND server_id=?",
+                                        (label, show_owned_id)).fetchone()
+                if existing:
+                    show_id = existing["id"]
+                else:
+                    conn.execute(
+                        "INSERT INTO shows (server_source, server_id, tmdb_id, title, sort_title, year, "
+                        "poster_url, video_library_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        (label, show_owned_id, tmdb_id, show_title or "Unknown",
+                         _sort_title(show_title), year, poster_url, library_id))
+                    show_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+                    self._adopt_title_profile(conn, "show", show_id)
+            conn.execute("INSERT OR IGNORE INTO seasons (show_id, season_number, monitored) "
+                         "VALUES (?, ?, COALESCE((SELECT monitored FROM shows WHERE id=?), 1))",
+                         (show_id, season, show_id))
+            season_id = conn.execute("SELECT id FROM seasons WHERE show_id=? AND season_number=?",
+                                     (show_id, season)).fetchone()["id"]
+            # the episode is filed under its show's label (a download for a
+            # show of another server's library stays that server's)
+            label = conn.execute("SELECT server_source FROM shows WHERE id=?",
+                                 (show_id,)).fetchone()[0] or label
+            ep = conn.execute("SELECT id, server_id FROM episodes WHERE show_id=? AND season_number=? "
+                              "AND episode_number=?", (show_id, season, episode)).fetchone()
+            from_path = file.get("relative_path")
+            from core.video.owned_ids import of_path
+            if ep is None:
+                conn.execute(
+                    "INSERT INTO episodes (show_id, season_id, server_source, server_id, season_number, "
+                    "episode_number, title, air_date, has_file, added_at, monitored) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, "
+                    "COALESCE((SELECT monitored FROM seasons WHERE id=?), 1))",
+                    (show_id, season_id, label, of_path(from_path), season, episode,
+                     episode_title, air_date, _added_stamp(), season_id))
+                ep_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+            else:
+                ep_id = ep["id"]
+                # a missing episode (no server id) becomes soulsync's own, so a
+                # scan keeps it while its file is there; a server's stays the server's
+                conn.execute(
+                    "UPDATE episodes SET has_file=1, server_source=COALESCE(server_source, ?), "
+                    "server_id=COALESCE(server_id, ?), added_at=COALESCE(added_at, ?) WHERE id=?",
+                    (label, of_path(from_path), _added_stamp(), ep_id))
+            self._merge_media_file(conn, "episode_id", ep_id, file, drop=[replaced] if replaced else [])
+            conn.commit()
+            return show_id, ep_id
         finally:
             conn.close()
 

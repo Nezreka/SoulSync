@@ -660,7 +660,10 @@ def run_import(dl: dict, src_path: str, *, fs: Any, prober: Callable | None = No
              "quality_label": plan.get("quality_label") or dl.get("quality_label"),
              # transient (underscore = stripped by update_video_download): lets the
              # monitor fire the 'Quality Upgrade Landed' event trigger
-             "_upgraded": plan["action"] == "upgrade"}
+             "_upgraded": plan["action"] == "upgrade",
+             # transient too: the copy an upgrade replaced, so the library drops
+             # its file row as the new one is written (core/video/library_ingest.py)
+             "_replaced": plan.get("replace_path") if plan["action"] == "upgrade" else None}
     # Copy mode reclaims the download copy UNLESS it's a torrent (keep seeding);
     # move mode already relocated it. Deferred: the caller removes the source only
     # AFTER the completed row is persisted (see docstring).

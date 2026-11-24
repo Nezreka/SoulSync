@@ -633,8 +633,10 @@ class PlexVideoSource:
         raise so a hiccup never deletes local state. Plex ids can be re-keyed,
         so fall back to title/TMDB search before giving up."""
         from plexapi.exceptions import NotFound
+        from core.video.owned_ids import is_owned
         try:
-            item = self._server.fetchItem(int(server_id))
+            # a row soulsync made has no plex key yet: straight to the search
+            item = None if is_owned(server_id) else self._server.fetchItem(int(server_id))
         except NotFound:
             item = None
         if item is not None and getattr(item, "type", "") == "movie":
@@ -702,8 +704,9 @@ class PlexVideoSource:
         from the search carries the NEW server_id; the caller heals the row).
         Any other failure raises, so a server hiccup can't delete anything."""
         from plexapi.exceptions import NotFound
+        from core.video.owned_ids import is_owned
         try:
-            item = self._server.fetchItem(int(server_id))
+            item = None if is_owned(server_id) else self._server.fetchItem(int(server_id))
         except NotFound:
             item = None
         if item is not None and getattr(item, "type", "") == "show":

@@ -132,6 +132,12 @@ def sync_show(db, show_id: int, *, remove_when_gone: bool = True,
     tree = source.show_tree(row["server_id"], title=row["title"],
                             tmdb_id=row["tmdb_id"])   # raises on server errors
 
+    from core.video.movie_sync import _waiting_for_server
+    if tree is None and _waiting_for_server(db, source, row, "show"):
+        # soulsync placed it and the server hasn't scanned it in yet: it stays
+        return {"status": "ok", "title": row["title"], "show_removed": False, "gone": False,
+                "waiting": True, "episodes_added": 0, "episodes_removed": 0,
+                "files_added": 0, "files_removed": 0}
     if tree is None and not remove_when_gone:
         return {"status": "ok", "title": row["title"], "show_removed": False, "gone": True,
                 "episodes_added": 0, "episodes_removed": 0, "files_added": 0, "files_removed": 0}
