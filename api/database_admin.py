@@ -424,6 +424,104 @@ def _known_library_files(db):
     return known
 
 
+def _other_music_folders(db, main_folder):
+    """``(folders, excluded)``: the music library's other folders, the ones
+    beside the main music folder: the extra music folders in Settings and each
+    profile's own library folder, as the folder watch lists them
+    (core/library/folder_watch.configured_folders). a library on more than
+    one drive is one library: a scan reads all of it, whether or not the
+    watch is on. a folder inside the main one is read with the main one."""
+    try:
+        from core.library.folder_watch import configured_folders, is_under, norm
+        folders, _import, excluded = configured_folders(config_manager, db)
+        main = norm(docker_resolve_path(main_folder))
+        mains = {main, norm(main_folder), norm(os.path.realpath(main_folder))}
+        out = [f for f in folders if f not in mains and not any(is_under(f, m) for m in mains)]
+        return out, list(excluded)
+    except Exception as exc:  # noqa: BLE001 - the main folder is still scanned
+        logger.warning("could not list the other music folders: %s", exc)
+        return [], []
+
+
+def _scan_other_music_folders(db, main_folder, *, known=None, new_only=False):
+    """read the music folders beside the main one, the way the folder watch
+    reads a changed folder (core/library2/folder_rescan.py): files the
+    library doesn't know are indexed in place, and unless ``new_only``, moved
+    files are followed, known ones re-read and missing ones recorded. a folder
+    that can't be reached is skipped and said, never read as empty.
+    returns ``{folders, added, missing, moved, unreachable: [folders]}``."""
+    out = {"folders": 0, "added": 0, "missing": 0, "moved": 0, "unreachable": []}
+    folders, excluded = _other_music_folders(db, main_folder)
+    if not folders:
+        return out
+    from core.library2 import folder_rescan
+    for folder in folders:
+        _db_update_phase_callback(f'Reading {folder}...')
+        try:
+            if new_only:
+                if not folder_rescan._reachable(folder):
+                    out["unreachable"].append(folder)
+                    continue
+                known = known if known is not None else _known_library_files(db)
+                fresh = sorted(p for p in folder_rescan._audio_under(folder, True, excluded)
+                               if _file_key(p) not in known)
+                out["added"] += len(folder_rescan._adopt(db, fresh)) if fresh else 0
+            else:
+                res = folder_rescan.process_changes(db, folder, [(folder, True)], excluded=excluded,
+                                                    config_manager=config_manager)
+                if res.get("outage"):
+                    out["unreachable"].append(folder)
+                    continue
+                for key in ("added", "missing", "moved"):
+                    out[key] += int(res.get(key) or 0)
+            out["folders"] += 1
+        except Exception as exc:  # noqa: BLE001 - one folder never stops the scan
+            logger.error("[SoulSync scan] could not read %s: %s", folder, exc)
+            out["unreachable"].append(folder)
+    if out["unreachable"]:
+        logger.warning("[SoulSync scan] not reachable, skipped: %s", ", ".join(out["unreachable"]))
+    return out
+
+
+def _other_folders_words(other) -> str:
+    """what the other music folders added to a scan, for its summary"""
+    words = ""
+    if other.get("folders"):
+        bits = [f"{other['added']} new"] if other.get("added") else []
+        if other.get("moved"):
+            bits.append(f"{other['moved']} moved")
+        if other.get("missing"):
+            bits.append(f"{other['missing']} missing")
+        n = other["folders"]
+        words += f"; {n} other music folder{'s' if n != 1 else ''} read" + \
+                 (f" ({', '.join(bits)})" if bits else "")
+    if other.get("unreachable"):
+        words += f"; {len(other['unreachable'])} music folder(s) not reachable, skipped"
+    return words
+
+
+def _index_untracked_in_place(db, paths, label):
+    """index files the library doesn't know, where they sit, through the
+    native import writer. returns (new file ids, failed)."""
+    from core.library2.autolink import link_download_into_library_v2
+    new_ids, failed = [], 0
+    for index, file_path in enumerate(paths, 1):
+        try:
+            file_id = link_download_into_library_v2(
+                {'_final_processed_path': file_path, '_download_username': 'standalone_refresh',
+                 'username': 'standalone_refresh'},
+                raise_on_error=True)
+            if file_id is None:
+                raise RuntimeError("native import returned no file row")
+            new_ids.append(int(file_id))
+        except Exception as exc:  # noqa: BLE001 - one bad file never stops the scan
+            failed += 1
+            logger.error("[%s] Could not import %s: %s", label, file_path, exc)
+        if index % 50 == 0:
+            _db_update_phase_callback(f'Indexing new files... {index}/{len(paths)}')
+    return new_ids, failed
+
+
 def _skip_hidden_dirs(dirs) -> None:
     """keep an os.walk out of hidden folders, in place. an album still
     downloading sits in <music folder>/.soulsync_atomic_staging until it is
@@ -518,11 +616,13 @@ def _run_soulsync_full_refresh(incremental=False):
                     label, kept, reactivated, successful - kept - reactivated)
 
         if incremental:
+            other = _scan_other_music_folders(db, transfer_path, known=known, new_only=True)
             artist_count, album_count = _artist_album_counts(db, new_file_ids)
             summary = (f"Incremental update complete: {len(new_file_ids)} new local tracks indexed, "
                        f"{kept + reactivated} already in the library")
             if failed > 0:
                 summary += f" ({failed} failed)"
+            summary += _other_folders_words(other)
             logger.info("[%s] %s", label, summary)
             add_activity_item("", label, summary, "Now")
             _db_update_finished_callback(artist_count, album_count, len(new_file_ids),
@@ -558,11 +658,13 @@ def _run_soulsync_full_refresh(incremental=False):
             from core.library2.scan import rescan_files
             rescan_files(db, file_ids=scoped_file_ids)
 
+        other = _scan_other_music_folders(db, transfer_path)
         artist_count, album_count = _artist_album_counts(db, scoped_file_ids)
         summary = (f"Full refresh complete: {successful} local tracks indexed "
                    f"from {album_count} albums by {artist_count} artists")
         if failed > 0:
             summary += f" ({failed} failed)"
+        summary += _other_folders_words(other)
         logger.info(f"[SoulSync Full Refresh] {summary}")
         add_activity_item("", "SoulSync Full Refresh", summary, "Now")
         _db_update_finished_callback(artist_count, album_count, total, successful, failed)
@@ -682,18 +784,29 @@ def _run_soulsync_deep_scan():
         # Phase 4: Move untracked files to Staging for auto-import — unless guarded.
         moved_count = 0
         blocked_count = 0
-        if untracked and move_blocked:
+        indexed_count = index_failed = 0
+        if untracked and move_blocked and block_reason == BLOCK_TRANSFER_PERMANENT:
+            # the music folder is the library, so a file in it the library
+            # doesn't know is not something to move away: it is something a
+            # scan missed. it is indexed where it sits, by the same test and
+            # the same writer the incremental update uses. (this used to warn
+            # "nothing was moved" and leave the files out of the library, on a
+            # scan whose whole point is to catch what was missed.)
+            _db_update_phase_callback('indexing_untracked')
+            known = _known_library_files(db)
+            fresh = sorted(p for p in untracked if _file_key(p) not in known)
+            new_ids, index_failed = _index_untracked_in_place(db, fresh, "SoulSync Deep Scan")
+            indexed_count = len(new_ids)
+        elif untracked and move_blocked:
+            # BLOCK_DESYNC: the folder is not marked permanent, so untracked
+            # files would be MOVED, and far too many are untracked to believe
             blocked_count = len(untracked)
-            if block_reason == BLOCK_TRANSFER_PERMANENT:
-                warn = (f"Deep scan: {blocked_count} file(s) in your Music Library aren't in the database, "
-                        f"but it's marked your permanent library — nothing was moved.")
-            else:  # BLOCK_DESYNC
-                pct = round(100 * blocked_count / max(1, len(transfer_files)))
-                warn = (f"Deep scan STOPPED to protect your library: {blocked_count} of "
-                        f"{len(transfer_files)} files in your Music Library ({pct}%) aren't in the database. "
-                        f"That usually means the database is out of sync with disk, not that you "
-                        f"have {blocked_count} new files — so NOTHING was moved. Re-sync/import "
-                        f"before scanning, or enable 'Music Library is my permanent library'.")
+            pct = round(100 * blocked_count / max(1, len(transfer_files)))
+            warn = (f"Deep scan STOPPED to protect your library: {blocked_count} of "
+                    f"{len(transfer_files)} files in your Music Library ({pct}%) aren't in the database. "
+                    f"That usually means the database is out of sync with disk, not that you "
+                    f"have {blocked_count} new files — so NOTHING was moved. Re-sync/import "
+                    f"before scanning, or enable 'Music Library is my permanent library'.")
             logger.warning(f"[SoulSync Deep Scan] {warn}")
             add_activity_item("", "SoulSync Deep Scan — move blocked", warn, "Now")
         elif untracked and os.path.isdir(staging_path):
@@ -764,19 +877,29 @@ def _run_soulsync_deep_scan():
                 stale_count = 0
                 logger.error(f"[SoulSync Deep Scan] Error observing missing records: {e}")
 
+        # the library's other folders (more than one music drive is one library)
+        other = _scan_other_music_folders(db, transfer_path)
+
         summary = f"Deep scan complete: {len(transfer_files)} files scanned"
+        if indexed_count > 0:
+            summary += f", {indexed_count} new files added"
+        if index_failed > 0:
+            summary += f", {index_failed} could not be added"
         if moved_count > 0:
             summary += f", {moved_count} untracked files moved to Staging"
         if blocked_count > 0:
             summary += f", {blocked_count} untracked files LEFT IN PLACE (move blocked — see warning)"
         if stale_count > 0:
             summary += f", {stale_count} missing files recorded for repair"
-        if moved_count == 0 and blocked_count == 0 and stale_count == 0:
+        if moved_count == 0 and blocked_count == 0 and stale_count == 0 and indexed_count == 0 \
+                and index_failed == 0 and not (other["added"] or other["missing"] or other["unreachable"]):
             summary += " — library is clean"
+        summary += _other_folders_words(other)
 
         logger.info(f"[SoulSync Deep Scan] {summary}")
         add_activity_item("", "SoulSync Deep Scan", summary, "Now")
-        _db_update_finished_callback(0, 0, len(transfer_files), moved_count + stale_count, 0)
+        _db_update_finished_callback(0, 0, len(transfer_files),
+                                     moved_count + stale_count + indexed_count, index_failed)
 
     except Exception as e:
         logger.error(f"[SoulSync Deep Scan] {e}")

@@ -54,7 +54,7 @@ def register_routes(bp):
     # ── Server-side scan (distinct from the SoulSync-reads-server scan above) ──
     # This tells the media server (Plex/Jellyfin) to rescan its OWN folders so
     # newly-downloaded files get indexed — the manual twin of the post-download
-    # 'Scan Video Server' automation. media_type scopes it to Movies / TV / both.
+    # 'Index New Video Files' automation. media_type scopes it to Movies / TV / both.
     @bp.route("/scan/server", methods=["POST"])
     def video_scan_server():
         from core.video.sources import refresh_video_server_sections

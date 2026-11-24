@@ -8,11 +8,12 @@ from database.music_database import MusicDatabase
 _db_holder = {}
 
 
-def _configure_paths(monkeypatch, web_server, transfer, staging):
+def _configure_paths(monkeypatch, web_server, transfer, staging, **more):
     values = {
         "soulseek.transfer_path": str(transfer),
         "import.staging_path": str(staging),
         "import.transfer_is_permanent": False,
+        **{k.replace("__", "."): v for k, v in more.items()},
     }
     monkeypatch.setattr(
         web_server.config_manager,
@@ -289,3 +290,128 @@ def test_a_deep_scan_never_moves_an_album_that_is_still_downloading(tmp_path, mo
     assert partial.is_file()                                    # left where the download put it
     assert (staging / "Artist" / "Album" / "new.flac").is_file()   # a real untracked file still moves
     assert not any(p.name == "02.flac" for p in staging.rglob("*"))
+
+
+# ── deep scan adds what was missed; every scan reads every music folder ──────
+
+def _standalone(tmp_path, monkeypatch, **settings):
+    import web_server
+    from api import database_admin as db_admin
+
+    transfer = tmp_path / "Transfer"
+    staging = tmp_path / "Staging"
+    transfer.mkdir()
+    staging.mkdir()
+    db = MusicDatabase(str(tmp_path / "music.db"))
+    _db_holder["db"] = db
+    _configure_paths(monkeypatch, web_server, transfer, staging, **settings)
+    monkeypatch.setattr(web_server, "get_database", lambda: db)
+    said = {"errors": [], "summary": [], "finished": []}
+    monkeypatch.setattr(db_admin, "_db_update_phase_callback", lambda *_: None)
+    monkeypatch.setattr(db_admin, "add_activity_item", lambda *a: said["summary"].append(a[2]))
+    monkeypatch.setattr(db_admin, "_db_update_finished_callback", lambda *a: said["finished"].append(a))
+    monkeypatch.setattr(db_admin, "_db_update_error_callback", lambda e: said["errors"].append(e))
+    monkeypatch.setattr("core.library2.scan.rescan_files", lambda database, **k: {})
+    imports = []
+    monkeypatch.setattr(
+        "core.library2.autolink.link_download_into_library_v2",
+        lambda context, *, raise_on_error=False: imports.append(context["_final_processed_path"]) or len(imports),
+    )
+    return db_admin, db, transfer, staging, said, imports
+
+
+def _known_file(db, path):
+    with db._get_connection() as conn:
+        artist = conn.execute("INSERT INTO lib2_artists(name,name_key) VALUES('A','a')").lastrowid
+        album = conn.execute("INSERT INTO lib2_albums(primary_artist_id,title,origin) "
+                             "VALUES(?,'Album','library')", (artist,)).lastrowid
+        track = conn.execute("INSERT INTO lib2_tracks(album_id,title) VALUES(?,'Song')", (album,)).lastrowid
+        conn.execute("INSERT INTO lib2_track_files(track_id,path,is_primary,file_state) "
+                     "VALUES(?,?,1,'active')", (track, str(path)))
+        conn.commit()
+
+
+def test_a_deep_scan_adds_the_files_it_finds_in_a_permanent_library(tmp_path, monkeypatch):
+    """the music folder is the library (the default): a file in it the
+    library doesn't know is one a scan missed. the deep scan used to warn
+    "nothing was moved" and leave it out of the library."""
+    import os
+    db_admin, db, transfer, staging, said, imports = _standalone(
+        tmp_path, monkeypatch, import__transfer_is_permanent=True)
+    (transfer / "Artist" / "Album").mkdir(parents=True)
+    known = transfer / "Artist" / "Album" / "01.flac"
+    missed = transfer / "Artist" / "Album" / "02.flac"
+    known.write_bytes(b"fLaC")
+    missed.write_bytes(b"fLaC")
+    _known_file(db, known)
+
+    db_admin._run_soulsync_deep_scan()
+
+    assert said["errors"] == []
+    assert imports == [os.path.realpath(str(missed))]          # the known one isn't imported again
+    assert missed.is_file() and not any(staging.rglob("*.flac"))   # indexed where it sits, never moved
+    assert "1 new files added" in said["summary"][-1] and "moved" not in said["summary"][-1]
+    assert said["finished"][-1][3] == 1
+
+
+def test_every_scan_reads_every_music_folder(tmp_path, monkeypatch):
+    """a library on more than one drive is one library. the scans read only
+    the main music folder; the others were only read by the folder watch,
+    which is off by default."""
+    from core.library2 import folder_rescan
+    second = tmp_path / "Drive2"
+    nested_root = tmp_path / "Transfer" / "Inside"
+    gone = tmp_path / "Unplugged"
+    db_admin, db, transfer, staging, said, imports = _standalone(
+        tmp_path, monkeypatch, import__transfer_is_permanent=True,
+        library__music_paths=[str(second), str(nested_root), str(gone)])
+    (second / "B" / "Album").mkdir(parents=True)
+    (second / ".hidden").mkdir()
+    new = second / "B" / "Album" / "new.flac"
+    old = second / "B" / "Album" / "old.flac"
+    new.write_bytes(b"fLaC")
+    old.write_bytes(b"fLaC")
+    (second / ".hidden" / "partial.flac").write_bytes(b"fLaC")
+    nested_root.mkdir(parents=True)
+    _known_file(db, old)
+
+    adopted, reconciled = [], []
+    monkeypatch.setattr(folder_rescan, "_adopt", lambda database, paths: adopted.append(list(paths)) or [1] * len(paths))
+    real = folder_rescan.process_changes
+
+    def process(database, root, units, moves=None, **kw):
+        if root == str(gone) or not __import__("os").path.isdir(root):
+            return real(database, root, units, moves, **kw)       # the real outage answer
+        reconciled.append((root, units))
+        return {"added": 2, "missing": 1, "moved": 0}
+
+    monkeypatch.setattr(folder_rescan, "process_changes", process)
+
+    # incremental: only what the library doesn't know, hidden folders left alone
+    db_admin._run_soulsync_full_refresh(incremental=True)
+    assert adopted == [[str(new)]] and reconciled == []
+    assert "1 other music folder read (1 new)" in said["summary"][-1]
+    assert "1 music folder(s) not reachable, skipped" in said["summary"][-1]
+
+    # full and deep: the whole folder, the way the folder watch reads one
+    db_admin._run_soulsync_full_refresh()
+    db_admin._run_soulsync_deep_scan()
+    assert reconciled == [(str(second), [(str(second), True)])] * 2
+    assert "1 other music folder read (2 new, 1 missing)" in said["summary"][-1]
+    # a folder inside the main one is read with it, never twice; the unplugged
+    # one is skipped and said, and nothing failed
+    assert said["errors"] == []
+    assert all("Inside" not in root for root, _ in reconciled)
+
+
+def test_one_music_folder_scans_as_before(tmp_path, monkeypatch):
+    from core.library2 import folder_rescan
+    db_admin, db, transfer, staging, said, imports = _standalone(tmp_path, monkeypatch)
+    (transfer / "a.flac").write_bytes(b"fLaC")
+    monkeypatch.setattr(folder_rescan, "process_changes",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("no other folder to read")))
+    monkeypatch.setattr(folder_rescan, "_adopt",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("no other folder to read")))
+    db_admin._run_soulsync_full_refresh(incremental=True)
+    db_admin._run_soulsync_full_refresh()
+    assert said["errors"] == [] and "other music folder" not in said["summary"][-1]
