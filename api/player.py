@@ -974,6 +974,7 @@ def get_commercials_config():
     return jsonify({
         "success": True,
         **cfg,
+        "can_edit": _is_player_admin(),
         "clips": clips,
         "status": commercials.status(),
     })
@@ -988,7 +989,7 @@ def put_commercials_config():
     pid = _profile()
     if pid is None:
         return _signed_out()
-    if not getattr(g, "is_admin", False):
+    if not _is_player_admin():
         return jsonify({
             "success": False,
             "error": "admin_required",
@@ -1004,6 +1005,7 @@ def put_commercials_config():
     return jsonify({
         "success": True,
         **cfg,
+        "can_edit": True,
         "clips": clips,
         "status": commercials.status(),
     })
@@ -1109,7 +1111,7 @@ def clear_commercials_cache():
     pid = _profile()
     if pid is None:
         return _signed_out()
-    if not getattr(g, "is_admin", False):
+    if not _is_player_admin():
         return jsonify({"success": False, "error": "admin_required", "message": "Only an admin can clear the commercial cache."}), 403
     return jsonify({"success": True, **commercials.clear_cache()})
 
@@ -1357,6 +1359,12 @@ def delete_note(note_id):
 def _is_admin() -> bool:
     from flask import g
     return bool(getattr(g, "is_admin", False))
+
+
+def _is_player_admin() -> bool:
+    """True for browser admins AND paired mobile devices signed into an admin profile."""
+    from flask import g
+    return bool(getattr(g, "is_admin", False) or getattr(g, "perms_source", None) == "admin")
 
 
 @bp.route("/api/player/guide/channels", methods=["GET"])
@@ -1856,3 +1864,106 @@ def player_admin_user_downloads(target_profile_id: int):
     max_items = int(body.get("max_items") or 0)
     perm = downloads.set_permission(player_db(), target_profile_id, allow, max_items)
     return jsonify({"success": True, "profile_id": target_profile_id, **perm})
+
+
+# ── player media issue reports (all media types: movie/episode/youtube/track/podcast/audiobook) ──
+
+
+@bp.route("/api/player/issues", methods=["GET"])
+@device_playback
+@self_only
+def player_issues_list():
+    """List reported media issues. Admins see all; members see their own reports."""
+    from core.player import issues as player_issues
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    can_manage = _is_player_admin()
+    status = request.args.get("status") or None
+    try:
+        limit = int(request.args.get("limit") or 100)
+    except (TypeError, ValueError):
+        limit = 100
+    data = player_issues.list_issues(
+        player_db(),
+        profile_id=pid,
+        is_admin=can_manage,
+        status=status,
+        limit=limit,
+    )
+    return jsonify({"success": True, "can_manage": can_manage, **data})
+
+
+@bp.route("/api/player/issues", methods=["POST"])
+@device_playback
+@self_only
+def player_issues_create():
+    """Report a playback, audio, subtitle, quality, or metadata issue on any media item."""
+    from core.player import issues as player_issues
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    body = request.get_json(silent=True) or {}
+    try:
+        pos = int(body.get("position_sec") or 0)
+    except (TypeError, ValueError):
+        pos = 0
+    try:
+        issue = player_issues.create_issue(
+            player_db(),
+            profile_id=pid,
+            profile_name=str(getattr(g, "profile_name", "") or f"Profile {pid}"),
+            item_type=body.get("item_type") or "",
+            item_id=body.get("item_id") or "",
+            title=body.get("title") or "",
+            subtitle=body.get("subtitle") or "",
+            category=body.get("category") or "playback",
+            note=body.get("note") or "",
+            position_sec=pos,
+        )
+    except ValueError as e:
+        return _bad(e)
+    except Exception:  # noqa: BLE001
+        return _failed("player issue create", "Couldn't submit issue report.")
+    return jsonify({"success": True, "issue": issue}), 201
+
+
+@bp.route("/api/player/issues/<int:issue_id>", methods=["PUT"])
+@device_playback
+@self_only
+def player_issues_update(issue_id: int):
+    """Admin-only: resolve, dismiss, or reopen a reported media issue."""
+    from core.player import issues as player_issues
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    if not _is_player_admin():
+        return jsonify({"success": False, "error": "admin_required", "message": "Admin access required."}), 403
+    body = request.get_json(silent=True) or {}
+    try:
+        updated = player_issues.update_issue(
+            player_db(),
+            issue_id,
+            status=body.get("status"),
+            admin_note=body.get("admin_note"),
+        )
+    except ValueError as e:
+        return _bad(e)
+    if updated is None:
+        return jsonify({"success": False, "error": "not_found", "message": "Issue not found."}), 404
+    return jsonify({"success": True, "issue": updated})
+
+
+@bp.route("/api/player/issues/<int:issue_id>", methods=["DELETE"])
+@device_playback
+@self_only
+def player_issues_delete(issue_id: int):
+    """Delete a reported media issue (admin or original reporter)."""
+    from core.player import issues as player_issues
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    ok = player_issues.delete_issue(player_db(), issue_id, profile_id=pid, is_admin=_is_player_admin())
+    if not ok:
+        return jsonify({"success": False, "error": "not_found", "message": "Issue not found."}), 404
+    return jsonify({"success": True})

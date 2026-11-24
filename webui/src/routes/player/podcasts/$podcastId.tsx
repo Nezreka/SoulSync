@@ -10,6 +10,7 @@ import { podcastShowQuery, podcastSubsQuery, progressLookupQuery } from '../-pla
 import { Art, Badge, Hero, PlayButton, styles as s } from '../-ui/kit';
 import { NotFound, NotPartOfProfile } from '../-ui/not-part';
 import { playItems, usePlayer } from '../-ui/playback/use-player';
+import { ReportIssueButton } from '../-ui/report-issue';
 import { useSections } from '../-ui/sections';
 
 export const Route = createFileRoute('/player/podcasts/$podcastId')({
@@ -147,8 +148,15 @@ function PodcastPage() {
                   <span className={s.rowText}>{plainText(episode.description)}</span>
                 ) : null}
               </div>
-              <div className={s.rowEnd}>
+              <div className={s.rowEnd} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 {episode.downloaded ? <Badge tone="yes">Downloaded</Badge> : null}
+                <ReportIssueButton
+                  entityType="podcast"
+                  entityId={episodeKey(episode)}
+                  title={episode.title}
+                  subtitle={sub.title}
+                  iconOnly
+                />
               </div>
             </div>
           );

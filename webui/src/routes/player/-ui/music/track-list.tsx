@@ -15,6 +15,7 @@ import { clock } from '../../-engine/timeline';
 import { playlistEdits, playlistQuery, playlistsQuery } from '../../-player.api';
 import { openContextMenu } from '../context-menu';
 import { DownloadMediaButton } from '../download-button';
+import { ReportIssueButton } from '../report-issue';
 import { DownloadIcon, GripIcon, HeartIcon, PlayIcon, PlusIcon, XIcon } from '../icons';
 import { PlayerLink } from '../kit';
 import { getEngine, usePlayer } from '../playback/use-player';
@@ -427,14 +428,24 @@ export function TrackList({
                     <PlusIcon />
                   </button>
                   {row.trackId !== null ? (
-                    <DownloadMediaButton
-                      itemType="track"
-                      itemId={String(row.trackId)}
-                      title={row.title}
-                      subtitle={row.artist ?? row.song?.artist ?? undefined}
-                      artwork={row.art ?? undefined}
-                      compact
-                    />
+                    <>
+                      <DownloadMediaButton
+                        itemType="track"
+                        itemId={String(row.trackId)}
+                        title={row.title}
+                        subtitle={row.artist ?? row.song?.artist ?? undefined}
+                        artwork={row.art ?? undefined}
+                        compact
+                      />
+                      <ReportIssueButton
+                        entityType="track"
+                        entityId={String(row.trackId)}
+                        title={row.title}
+                        subtitle={row.artist ?? row.song?.artist ?? undefined}
+                        iconOnly
+                        className={s.trackBtn}
+                      />
+                    </>
                   ) : null}
                 </>
               ) : null}

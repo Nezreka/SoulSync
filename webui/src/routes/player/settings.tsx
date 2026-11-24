@@ -30,9 +30,11 @@ import {
   clearCommercialsCache,
   commercialsConfigQuery,
   commercialsStatusQuery,
+  playerIssuesQuery,
   playerSettingsQuery,
   saveCommercialsConfig,
   savePlayerSettings,
+  updatePlayerIssue,
   warmCommercials,
 } from './-player.api';
 import {
@@ -161,10 +163,19 @@ const ORDERED_BRIGHTNESS = [...BRIGHTNESS_STEPS].reverse();
 
 function SettingsPage() {
   const { shell } = useRouteContext({ from: '/player' });
-  const isAdmin = !!shell.profile?.isAdmin;
   const queryClient = useQueryClient();
   const settings = useQuery(playerSettingsQuery());
   const commConfig = useQuery(commercialsConfigQuery());
+  const isAdmin = Boolean(commConfig.data?.can_edit ?? shell.profile?.isAdmin);
+  const issuesQ = useQuery(playerIssuesQuery());
+  const resolveIssue = useMutation({
+    mutationFn: ({ id, status }: { id: number; status: 'resolved' | 'dismissed' | 'open' }) =>
+      updatePlayerIssue(id, { status }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['player', 'issues'] });
+      flashSaved();
+    },
+  });
   const commStatus = useQuery({
     ...commercialsStatusQuery(),
     refetchInterval: (q) => (q.state.data?.warming ? 3000 : false),
@@ -795,6 +806,104 @@ function SettingsPage() {
               <ChevronIcon />
             </Link>
           </Row>
+        </Group>
+
+        <Group
+          icon={<MovieIcon />}
+          title="Reported media issues"
+          badge={
+            issuesQ.data?.open_count
+              ? `${issuesQ.data.open_count} open`
+              : issuesQ.data?.can_manage
+                ? 'Admin queue'
+                : 'My reports'
+          }
+          note="Broken files, sync issues, or bad metadata flagged from movies, episodes, YouTube, music, podcasts, and audiobooks."
+        >
+          {issuesQ.data?.issues.length ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {issuesQ.data.issues.slice(0, 20).map((iss) => (
+                <div
+                  key={iss.id}
+                  style={{
+                    padding: '12px 14px',
+                    borderRadius: 12,
+                    border: '1px solid var(--pl-line, rgba(255,255,255,0.1))',
+                    background: 'rgba(255,255,255,0.03)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 6,
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      <strong style={{ fontSize: '0.92rem' }}>{iss.title}</strong>
+                      <span
+                        style={{
+                          fontSize: '0.72rem',
+                          textTransform: 'uppercase',
+                          padding: '2px 7px',
+                          borderRadius: 999,
+                          background: 'rgba(124,92,255,0.2)',
+                          color: '#d4c8ff',
+                        }}
+                      >
+                        {iss.item_type} · {iss.category}
+                      </span>
+                      <span
+                        style={{
+                          fontSize: '0.72rem',
+                          textTransform: 'uppercase',
+                          padding: '2px 7px',
+                          borderRadius: 999,
+                          background:
+                            iss.status === 'open'
+                              ? 'rgba(255,165,0,0.18)'
+                              : 'rgba(46,204,113,0.16)',
+                          color: iss.status === 'open' ? '#ffd180' : '#8ff0b3',
+                        }}
+                      >
+                        {iss.status}
+                      </span>
+                    </div>
+                    {issuesQ.data?.can_manage && iss.status === 'open' ? (
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button
+                          type="button"
+                          className={s.segBtn}
+                          disabled={resolveIssue.isPending}
+                          onClick={() => resolveIssue.mutate({ id: iss.id, status: 'resolved' })}
+                        >
+                          Resolve
+                        </button>
+                        <button
+                          type="button"
+                          className={s.segBtn}
+                          disabled={resolveIssue.isPending}
+                          onClick={() => resolveIssue.mutate({ id: iss.id, status: 'dismissed' })}
+                        >
+                          Dismiss
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                  {iss.note ? (
+                    <div style={{ fontSize: '0.84rem', color: 'var(--pl-text-2, #b8c0d0)' }}>
+                      {iss.note}
+                    </div>
+                  ) : null}
+                  <div style={{ fontSize: '0.75rem', color: 'var(--pl-text-3, #8792a6)', wordBreak: 'break-all' }}>
+                    {iss.profile_name ? `Reported by ${iss.profile_name}` : ''}
+                    {iss.file_path ? ` · ${iss.file_path}` : ''}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div style={{ fontSize: '0.86rem', color: 'var(--pl-text-2, #a8b0c0)', padding: '6px 0' }}>
+              No reported media issues yet. Use the flag button on any movie, episode, YouTube video, track, podcast, or audiobook to report a broken file.
+            </div>
+          )}
         </Group>
       </div>
     </>

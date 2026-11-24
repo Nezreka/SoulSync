@@ -20,6 +20,7 @@ import { converting } from '../../-engine/describe';
 import { current, nextIndex } from '../../-engine/queue';
 import { clock } from '../../-engine/timeline';
 import { NextIcon, PauseIcon, PlayIcon } from '../icons';
+import { ReportIssueButton } from '../report-issue';
 import { inPlayer } from '../trailer';
 import {
   AudioMenu,
@@ -252,6 +253,15 @@ function FullPlayer({ state, onLeave }: { state: PlayerState; onLeave: () => voi
               : ''}
           </span>
         ) : null}
+        <ReportIssueButton
+          entityType={item.type}
+          entityId={item.id}
+          title={item.title}
+          subtitle={item.subtitle}
+          positionSec={state.position}
+          iconOnly
+          className={s.ctl}
+        />
         <button
           type="button"
           className={s.ctl}

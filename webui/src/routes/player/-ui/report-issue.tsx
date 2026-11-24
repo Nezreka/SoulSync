@@ -1,46 +1,108 @@
 import { useEffect, useState } from 'react';
 
-import { submitVideoIssue, type VideoIssueEntityType } from '../-player.api';
+import {
+  reportPlayerIssue,
+  submitVideoIssue,
+  type PlayerIssueCategory,
+  type PlayerIssueItemType,
+  type VideoIssueEntityType,
+} from '../-player.api';
 import { styles as s } from './kit';
 import { inPlayer } from './trailer';
 
+export type ReportableEntityType = VideoIssueEntityType | PlayerIssueItemType;
+
 interface IssueCategory {
   id: string;
+  playerCat: PlayerIssueCategory;
   label: string;
-  for: readonly VideoIssueEntityType[];
+  for: readonly ReportableEntityType[];
 }
 
+const ALL_VIDEO: readonly ReportableEntityType[] = [
+  'movie',
+  'episode',
+  'youtube',
+  'music_video',
+  'commercial',
+];
+const ALL_AUDIO: readonly ReportableEntityType[] = [
+  'track',
+  'podcast',
+  'podcast_episode',
+  'audiobook',
+];
+const ALL_TYPES: readonly ReportableEntityType[] = [...ALL_VIDEO, ...ALL_AUDIO, 'show'];
+
 export const VIDEO_ISSUE_CATEGORIES: readonly IssueCategory[] = [
-  { id: 'playback_issue', label: "Won't play / buffers / stutters", for: ['movie', 'episode'] },
+  {
+    id: 'playback_issue',
+    playerCat: 'playback',
+    label: "Won't play / corrupted / freezes",
+    for: [...ALL_VIDEO, ...ALL_AUDIO],
+  },
   {
     id: 'audio_issue',
-    label: 'Audio problem (sync, language, missing)',
-    for: ['movie', 'episode'],
+    playerCat: 'audio',
+    label: 'Audio problem (sync, silence, wrong track)',
+    for: [...ALL_VIDEO, ...ALL_AUDIO],
   },
-  { id: 'subtitle_issue', label: 'Subtitle problem', for: ['movie', 'episode'] },
-  { id: 'bad_quality', label: 'Poor video quality', for: ['movie', 'episode'] },
-  { id: 'missing_content', label: 'Missing episodes or seasons', for: ['show'] },
-  { id: 'wrong_match', label: 'Matched to the wrong title', for: ['movie', 'show'] },
+  {
+    id: 'subtitle_issue',
+    playerCat: 'subtitles',
+    label: 'Subtitles missing or out of sync',
+    for: ALL_VIDEO,
+  },
+  {
+    id: 'bad_quality',
+    playerCat: 'quality',
+    label: 'Poor video or audio quality',
+    for: [...ALL_VIDEO, ...ALL_AUDIO],
+  },
+  {
+    id: 'missing_content',
+    playerCat: 'other',
+    label: 'Missing episodes or seasons',
+    for: ['show'],
+  },
+  {
+    id: 'wrong_match',
+    playerCat: 'metadata',
+    label: 'Wrong media / mismatched file',
+    for: ALL_TYPES,
+  },
   {
     id: 'wrong_metadata',
-    label: 'Wrong details (year, summary, genres…)',
-    for: ['movie', 'show', 'episode'],
+    playerCat: 'metadata',
+    label: 'Wrong details or artwork',
+    for: ALL_TYPES,
   },
-  { id: 'wrong_poster', label: 'Wrong poster / artwork', for: ['movie', 'show'] },
-  { id: 'duplicate', label: 'Duplicate copies', for: ['movie', 'show'] },
-  { id: 'other', label: 'Something else', for: ['movie', 'show', 'episode'] },
+  {
+    id: 'other',
+    playerCat: 'other',
+    label: 'Something else',
+    for: ALL_TYPES,
+  },
 ];
 
 export function ReportIssueButton({
   entityType,
   entityId,
   title,
+  subtitle,
+  positionSec = 0,
   compact = false,
+  iconOnly = false,
+  className,
 }: {
-  entityType: VideoIssueEntityType;
-  entityId: number;
+  entityType: ReportableEntityType;
+  entityId: number | string;
   title: string;
+  subtitle?: string;
+  positionSec?: number;
   compact?: boolean;
+  iconOnly?: boolean;
+  className?: string;
 }) {
   const [open, setOpen] = useState(false);
   const categories = VIDEO_ISSUE_CATEGORIES.filter((c) => c.for.includes(entityType));
@@ -75,13 +137,35 @@ export function ReportIssueButton({
     setSubmitting(true);
     setError(null);
     try {
-      await submitVideoIssue({
-        entity_type: entityType,
-        entity_id: entityId,
-        category,
-        title,
-        description: description.trim() || undefined,
-      });
+      const picked = categories.find((c) => c.id === category);
+      if (entityType === 'show') {
+        await submitVideoIssue({
+          entity_type: 'show',
+          entity_id: Number(entityId),
+          category,
+          title,
+          description: description.trim() || undefined,
+        });
+      } else {
+        await reportPlayerIssue({
+          item_type: entityType,
+          item_id: String(entityId),
+          title,
+          subtitle: subtitle || undefined,
+          category: picked?.playerCat ?? 'other',
+          note: description.trim() || undefined,
+          position_sec: Math.max(0, Math.floor(positionSec || 0)),
+        });
+        if (entityType === 'movie' || entityType === 'episode') {
+          void submitVideoIssue({
+            entity_type: entityType,
+            entity_id: Number(entityId),
+            category,
+            title,
+            description: description.trim() || undefined,
+          }).catch(() => {});
+        }
+      }
       setDone(true);
       window.setTimeout(() => setOpen(false), 1100);
     } catch (err) {
@@ -95,14 +179,20 @@ export function ReportIssueButton({
     <>
       <button
         type="button"
-        className={s.btn}
+        className={className ?? s.btn}
+        title="Report an issue"
+        aria-label={`Report an issue with ${title}`}
         onClick={(e) => {
           e.stopPropagation();
           handleOpen();
         }}
         data-nav
         style={
-          compact ? { height: 36, padding: '0 14px', fontSize: '0.82rem', gap: 6 } : { gap: 7 }
+          iconOnly
+            ? { height: 32, width: 32, padding: 0, justifyContent: 'center', borderRadius: 999 }
+            : compact
+              ? { height: 36, padding: '0 14px', fontSize: '0.82rem', gap: 6 }
+              : { gap: 7 }
         }
       >
         <svg
@@ -119,7 +209,7 @@ export function ReportIssueButton({
           <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" />
           <line x1="4" y1="22" x2="4" y2="15" />
         </svg>
-        Report issue
+        {iconOnly ? null : 'Report issue'}
       </button>
       {open
         ? inPlayer(

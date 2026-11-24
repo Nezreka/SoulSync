@@ -413,6 +413,7 @@ export interface CommercialsConfig {
   enabled: boolean;
   era: CommercialEra;
   mode: CommercialMode;
+  can_edit?: boolean;
   clips: CommercialClip[];
   status?: CommercialsStatus;
 }
@@ -1637,3 +1638,82 @@ export const playableQuery = (itemType: string, itemId: string) =>
     staleTime: 10 * MINUTE,
     retry: false,
   });
+
+// ── player media issue reports (all media types) ───────────────────────
+
+export type PlayerIssueItemType =
+  | 'movie'
+  | 'episode'
+  | 'youtube'
+  | 'track'
+  | 'podcast'
+  | 'podcast_episode'
+  | 'audiobook'
+  | 'music_video'
+  | 'commercial';
+
+export type PlayerIssueCategory =
+  | 'playback'
+  | 'audio'
+  | 'subtitles'
+  | 'metadata'
+  | 'quality'
+  | 'other';
+
+export interface PlayerIssue {
+  id: number;
+  profile_id: number;
+  profile_name: string;
+  item_type: PlayerIssueItemType;
+  item_id: string;
+  title: string;
+  subtitle: string;
+  file_path: string;
+  category: PlayerIssueCategory;
+  note: string;
+  position_sec: number;
+  status: 'open' | 'resolved' | 'dismissed';
+  admin_note: string;
+  created_at: number;
+  resolved_at?: number | null;
+}
+
+export interface PlayerIssuesResponse {
+  success: boolean;
+  can_manage: boolean;
+  open_count: number;
+  issues: PlayerIssue[];
+}
+
+export const playerIssuesQuery = (status?: string) =>
+  queryOptions({
+    queryKey: ['player', 'issues', status ?? 'all'],
+    queryFn: () =>
+      apiClient
+        .get('player/issues', { searchParams: status ? { status } : {} })
+        .json<PlayerIssuesResponse>(),
+    staleTime: 30_000,
+  });
+
+export async function reportPlayerIssue(payload: {
+  item_type: PlayerIssueItemType;
+  item_id: string;
+  title: string;
+  subtitle?: string;
+  category: PlayerIssueCategory;
+  note?: string;
+  position_sec?: number;
+}): Promise<{ success: boolean; issue: PlayerIssue }> {
+  return apiClient.post('player/issues', { json: payload }).json();
+}
+
+export async function updatePlayerIssue(
+  issueId: number,
+  changes: { status?: 'open' | 'resolved' | 'dismissed'; admin_note?: string },
+): Promise<{ success: boolean; issue: PlayerIssue }> {
+  return apiClient.put(`player/issues/${issueId}`, { json: changes }).json();
+}
+
+export async function deletePlayerIssue(issueId: number): Promise<{ success: boolean }> {
+  return apiClient.delete(`player/issues/${issueId}`).json();
+}
