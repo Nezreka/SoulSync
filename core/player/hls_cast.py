@@ -130,11 +130,21 @@ class _HlsSession:
     start_seg: int
     out_dir: str
     proc: subprocess.Popen
+    err_path: Path
+    err_file: object = None
     last_access: float = field(default_factory=time.monotonic)
     highest_written: int = -1
 
     def seg_path(self, idx: int) -> Path:
         return Path(self.out_dir) / f"seg_{idx}.ts"
+
+    def read_stderr_tail(self, max_chars: int = 300) -> str:
+        try:
+            if self.err_path.exists():
+                return self.err_path.read_text(encoding="utf-8", errors="replace").strip()[-max_chars:]
+        except OSError:
+            pass
+        return ""
 
     def close(self) -> None:
         try:
@@ -144,6 +154,12 @@ class _HlsSession:
                     self.proc.wait(timeout=2)
                 except subprocess.TimeoutExpired:
                     pass
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            if self.err_file is not None:
+                self.err_file.close()
+                self.err_file = None
         except Exception:  # noqa: BLE001
             pass
         shutil.rmtree(self.out_dir, ignore_errors=True)
@@ -199,16 +215,22 @@ def get_segment_bytes(
                 ffmpeg, source_origin, plan, seg_idx, out_dir,
                 enc=enc, can_tonemap=can_tonemap,
             )
+            # Log stderr to a temp file inside out_dir rather than subprocess.PIPE:
+            # Windows pipes have a 4 KB buffer and deadlock ffmpeg on noisy files.
+            err_path = Path(out_dir) / "ffmpeg.log"
+            err_file = open(err_path, "wb")
             proc = subprocess.Popen(
                 cmd,
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
+                stderr=err_file,
             )
             sess = _HlsSession(
                 key=session_key,
                 start_seg=seg_idx,
                 out_dir=out_dir,
                 proc=proc,
+                err_path=err_path,
+                err_file=err_file,
                 last_access=now,
                 highest_written=seg_idx - 1,
             )
@@ -236,13 +258,10 @@ def get_segment_bytes(
                     return target.read_bytes()
                 except OSError:
                     return None
-            try:
-                err = sess.proc.stderr.read().decode("utf-8", "replace").strip() if sess.proc.stderr else ""
-                if err:
-                    logger.warning("cast-hls ffmpeg exited (%s) for %s seg %d: %s",
-                                   sess.proc.returncode, session_key, seg_idx, err[-300:])
-            except Exception:  # noqa: BLE001
-                pass
+            err = sess.read_stderr_tail()
+            if err:
+                logger.warning("cast-hls ffmpeg exited (%s) for %s seg %d: %s",
+                               sess.proc.returncode, session_key, seg_idx, err)
             return None
         time.sleep(0.08)
     return None
