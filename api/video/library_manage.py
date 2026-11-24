@@ -101,6 +101,35 @@ def _stop_hunting(db, episodes: dict) -> int:
 
 
 def register_routes(bp):
+    @bp.route("/detail/<kind>/<int:item_id>/extras/<key>", methods=["GET"])
+    def video_title_extra(kind, item_id, key):
+        """play one of a title's extras (a trailer, a featurette). the key is
+        the listing's own (core/video/extras.py): only a file that listing
+        found in the title's folder can be asked for."""
+        from flask import send_file
+        from . import get_video_db
+        from .kids import rating_allowed, restricted_response, video_cap
+        from core.video import extras
+        from core.video.direct_play import mime_for
+        if kind not in _KINDS:
+            return jsonify({"error": "kind must be movie|show"}), 400
+        db = get_video_db()
+        ident = db.title_identity(kind, item_id)
+        if not ident:
+            return jsonify({"error": "not found"}), 404
+        cap = video_cap()
+        if cap is not None and not rating_allowed(cap, kind, ident.get("content_rating")):
+            return restricted_response(kind)
+        extra = extras.find(db, kind, item_id, key)
+        if not extra:
+            return jsonify({"error": "That extra isn't in the title's folder any more"}), 404
+        try:
+            return send_file(extra["path"], mimetype=mime_for(extra["path"]),
+                             conditional=True, as_attachment=False)
+        except OSError:
+            logger.exception("extra stream failed to open %s", extra["path"])
+            return jsonify({"error": "That file could not be opened for playback"}), 404
+
     @bp.route("/detail/<kind>/<int:item_id>/library", methods=["GET"])
     def video_title_library(kind, item_id):
         from . import get_video_db
