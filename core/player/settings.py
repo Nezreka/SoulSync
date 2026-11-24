@@ -84,8 +84,8 @@ SETTINGS: Dict[str, Tuple[Any, Callable[[Any], Any], str]] = {
                             "play optional retro commercial breaks between Live Guide programs"),
     "commercials_era": ("auto", _commercial_era,
                         "decade or vibe for retro commercials (auto matches each channel)"),
-    "commercials_mode": ("short", _commercial_mode,
-                         "short 1-2 spot break or classic cable multi-spot break"),
+    "commercials_mode": ("cable", _commercial_mode,
+                         "classic cable continuous breaks or short 1-2 spot breaks"),
 }
 
 

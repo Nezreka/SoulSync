@@ -1020,6 +1020,37 @@ def get_commercial_break():
     return jsonify({"success": True, "clips": clips})
 
 
+@bp.route("/api/player/commercials/schedule", methods=["POST"])
+@device_playback
+@self_only
+def schedule_commercial_breaks():
+    """Plan continuous commercial breaks between every show in a Live Guide queue (5-min cooldown)."""
+    from core.player import commercials, settings
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    prefs = settings.get(player_db(), pid)
+    body = request.get_json(silent=True) or {}
+    items = body.get("items") if isinstance(body.get("items"), list) else []
+    era = str(body.get("era") or prefs.get("commercials_era") or "auto").strip().lower()
+    mode = str(body.get("mode") or prefs.get("commercials_mode") or "cable").strip().lower()
+    channel_id = str(body.get("channel_id") or "")
+    channel_name = str(body.get("channel_name") or "")
+    try:
+        min_gap = max(60, int(body.get("min_gap_seconds") or 300))
+    except (TypeError, ValueError):
+        min_gap = 300
+    breaks = commercials.pick_breaks_for_queue(
+        items=items[:20],
+        era=era,
+        channel_id=channel_id,
+        channel_name=channel_name,
+        mode=mode,
+        min_gap_seconds=min_gap,
+    )
+    return jsonify({"success": True, "breaks": breaks})
+
+
 @bp.route("/api/player/commercials/cache", methods=["DELETE"])
 @device_playback
 @self_only

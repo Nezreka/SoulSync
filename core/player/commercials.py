@@ -511,3 +511,50 @@ def pick_break(
         picked.append(clip)
         used_sec += clip.duration_seconds
     return [c.public() for c in picked]
+
+
+def pick_breaks_for_queue(
+    items: List[Dict[str, Any]],
+    era: str = "auto",
+    channel_id: str = "",
+    channel_name: str = "",
+    mode: str = "cable",
+    min_gap_seconds: int = 300,
+) -> Dict[str, List[Dict[str, Any]]]:
+    """Plan continuous, non-repeating commercial breaks across an entire Live Guide queue.
+
+    Inserts a year-matched break after each show once at least ``min_gap_seconds``
+    (default 5 minutes) of content has aired since the previous break, so short
+    back-to-back clips never trigger consecutive ad breaks.
+    """
+    if not items:
+        return {}
+    breaks: Dict[str, List[Dict[str, Any]]] = {}
+    recently_used: set[str] = set()
+    content_since_break = 0
+    for idx, item in enumerate(items[:-1]):  # no break needed after the last item
+        dur = int(item.get("duration_seconds") or 0)
+        content_since_break += dur if dur > 0 else 1800
+        if content_since_break < min_gap_seconds:
+            continue
+        item_year = item.get("year")
+        try:
+            year_int = int(item_year) if item_year else None
+        except (TypeError, ValueError):
+            year_int = None
+        clips = pick_break(
+            era=era,
+            channel_id=channel_id,
+            channel_name=channel_name,
+            mode=mode,
+            item_year=year_int,
+        )
+        if not clips:
+            continue
+        # Prefer clips not just played in the previous break when enough pool exists
+        fresh = [c for c in clips if c["id"] not in recently_used]
+        chosen = fresh if fresh else clips
+        breaks[str(idx)] = chosen
+        recently_used = {c["id"] for c in chosen}
+        content_since_break = 0
+    return breaks

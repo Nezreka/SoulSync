@@ -356,16 +356,16 @@ function SettingsPage() {
               <Row
                 stacked
                 label="Break style"
-                help="Short inserts 1–2 quick spots (~30–60s); Classic cable plays a fuller 2–3 spot block."
+                help="Classic cable (default) plays 2–3 spots between every show (with a 5-min cooldown); Short plays 1–2 quick spots."
               >
                 <div className={s.segGroup} role="radiogroup" aria-label="Break style">
                   {(
                     [
-                      ['short', 'Short (1–2 spots)'],
                       ['cable', 'Classic cable'],
+                      ['short', 'Short (1–2 spots)'],
                     ] as [CommercialMode, string][]
                   ).map(([val, lbl]) => {
-                    const on = (mine?.commercials_mode ?? 'short') === val;
+                    const on = (mine?.commercials_mode ?? 'cable') === val;
                     return (
                       <button
                         key={val}

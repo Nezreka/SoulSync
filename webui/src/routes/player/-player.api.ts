@@ -446,6 +446,34 @@ export async function fetchPlayerSettings(): Promise<PlayerSettings | null> {
   }
 }
 
+export async function fetchCommercialSchedule(opts: {
+  items: { id: string; title?: string; year?: number | null; duration_seconds?: number | null }[];
+  era?: CommercialEra;
+  mode?: CommercialMode;
+  channelId?: string;
+  channelName?: string;
+  minGapSeconds?: number;
+}): Promise<Record<string, CommercialClip[]>> {
+  try {
+    const res = await apiClient
+      .post('player/commercials/schedule', {
+        json: {
+          items: opts.items,
+          era: opts.era,
+          mode: opts.mode,
+          channel_id: opts.channelId,
+          channel_name: opts.channelName,
+          min_gap_seconds: opts.minGapSeconds ?? 300,
+        },
+        timeout: 3000,
+      })
+      .json<{ breaks?: Record<string, CommercialClip[]> }>();
+    return res.breaks ?? {};
+  } catch {
+    return {};
+  }
+}
+
 export async function fetchCommercialBreak(opts: {
   era?: CommercialEra;
   mode?: CommercialMode;

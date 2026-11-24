@@ -32,7 +32,7 @@ def test_commercial_settings_defaults_and_validation():
     defs = settings.defaults()
     assert defs["commercials_enabled"] is False
     assert defs["commercials_era"] == "auto"
-    assert defs["commercials_mode"] == "short"
+    assert defs["commercials_mode"] == "cable"
     assert settings._commercial_era("90S") == "90s"
     assert settings._commercial_mode("CABLE") == "cable"
 

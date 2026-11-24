@@ -275,7 +275,7 @@ def test_every_player_route_declares_its_access():
     discover = [r for r in rules if "/discover-playlists" in r.rule]
     playlists = [r for r in rules if r not in discover and ("/playlists" in r.rule or r.rule.endswith("/top") or r.rule.endswith("/request-track"))]
     library = [r for r in rules if r not in own and r not in music and r not in playlists and r not in discover]
-    assert len(own) == 51 and len(library) == 11 and len(music) == 1 and len(playlists) == 4
+    assert len(own) == 52 and len(library) == 11 and len(music) == 1 and len(playlists) == 4
     # soulsync's discovery playlists: the manager's discover gate, the same as its discover page
     assert len(discover) == 3
     for rule in discover:
