@@ -286,3 +286,55 @@ def test_a_namespace_that_never_resolves_stops_probing(tmp_path, monkeypatch):
     # another namespace still gets its own budget
     server_paths.local_path_for('/other/A/B/x.flac', config)
     assert len(calls) == 31
+
+
+# ---------------------------------------------- a linux path on a windows host
+def _as_windows(monkeypatch, windows=True):
+    from core.library import path_mappings
+    monkeypatch.setattr(path_mappings, "foreign_rooted",
+                        lambda p, nt=None: path_mappings.__dict__["_real_foreign"](p, nt=windows))
+
+
+def test_a_stray_folder_on_the_current_drive_is_not_the_servers_library(tmp_path, monkeypatch):
+    """Plex on linux says /mnt/musicBackup. on Windows that reads as
+    E:\\mnt\\musicBackup, and a stray folder there (17 files) was taken for the
+    library: the folder check said 0% of 311,000 tracks could be read, and a
+    file lookup could land on the stray copy. the folder check's own 'same'
+    step was guarded; this lookup, asked right after it, was not."""
+    stray = tmp_path / "mnt" / "musicBackup" / "Kendrick Lamar"
+    stray.mkdir(parents=True)
+    (stray / "song.flac").write_bytes(b"x")
+    # a path that "exists here" the way /mnt/musicBackup did on that E: drive
+    folder = str(tmp_path / "mnt" / "musicBackup").replace("\\", "/")
+    if not folder.startswith("/"):
+        folder = "/" + folder.split(":", 1)[-1].lstrip("/")
+        monkeypatch.chdir(tmp_path.anchor)
+    file = folder + "/Kendrick Lamar/song.flac"
+    import os
+    assert os.path.isdir(folder) and os.path.exists(file)       # the trap is set
+    monkeypatch.setattr(server_paths, "_from_override", lambda *a, **k: None)
+    monkeypatch.setattr("core.library.path_resolver.resolve_library_file_path", lambda *a, **k: None)
+    # on linux it IS the same place
+    _as_windows(monkeypatch, windows=False)
+    assert server_paths.local_folder_for(folder) == os.path.abspath(folder)
+    assert server_paths.local_path_for(file) == os.path.abspath(file)
+    # on windows it is never taken as is
+    _as_windows(monkeypatch)
+    assert server_paths.local_folder_for(folder) is None
+    assert server_paths.local_path_for(file) is None
+
+
+def test_the_folder_check_finds_the_real_folder_past_the_stray_one(monkeypatch):
+    """the whole case: the stray folder exists, the catalogue knows the files
+    under H:/Music. the check must say H:/Music, learned from the files."""
+    from core.library import coverage
+    _as_windows(monkeypatch)
+    pairs = [(f"H:/Music/Artist {i}/Album/0{i}.flac", f"/mnt/musicBackup/Artist {i}/Album/0{i}.flac")
+             for i in range(5)]
+    monkeypatch.setattr("core.library2.scan_paths.server_pairs", lambda conn, kind, limit=2000: pairs)
+    exists = {"H:/Music", "/mnt/musicBackup", "E:\\mnt\\musicBackup"}
+    monkeypatch.setattr(server_paths.os.path, "isdir", lambda p: p in exists)
+    env = coverage.Env(library_dirs=["H:/Music"], isdir=lambda p: p in exists,
+                       listdir=lambda p: [], learned=server_paths.local_folder_for)
+    local, how, _broken = coverage.locate_folder(None, "plex", "/mnt/musicBackup", env, [])
+    assert (local, how) == ("H:/Music", "learned")
