@@ -94,6 +94,26 @@ export const videoCatalogQuery = () =>
     refetchOnWindowFocus: true,
   });
 
+/**
+ * the Live Guide's pool: the catalog as it was the first time anyone asked
+ * today (core/player/guide_day.py). every device (this, the android app)
+ * schedules channels from it, so a download mid-day doesn't re-seed the
+ * shared timeline. browsing and the home rails keep videoCatalogQuery
+ */
+export const guideCatalogQuery = () =>
+  queryOptions({
+    queryKey: ['player', 'video-catalog', 'guide'],
+    queryFn: async (): Promise<VideoCatalog> =>
+      decodeCatalog(
+        await apiClient
+          .get('player/video-catalog', { searchParams: { guide: '1' } })
+          .json<CatalogWire>(),
+      ),
+    // it only changes once a day; a check now and then catches the new day
+    staleTime: 10 * 60_000,
+    refetchInterval: 15 * 60_000,
+  });
+
 // ── music (library v2) ─────────────────────────────────────────────────
 
 export const artistsQuery = (opts: {
@@ -423,6 +443,18 @@ export const commercialsConfigQuery = () =>
     queryKey: ['player', 'commercials-config'],
     queryFn: () => apiClient.get('player/commercials/config').json<CommercialsConfig>(),
     staleTime: 30_000,
+  });
+
+/** the clips the day's breaks are scheduled from, frozen for the day like the pool */
+export const guideCommercialsQuery = () =>
+  queryOptions({
+    queryKey: ['player', 'commercials-config', 'guide'],
+    queryFn: () =>
+      apiClient
+        .get('player/commercials/config', { searchParams: { guide: '1' } })
+        .json<CommercialsConfig>(),
+    staleTime: 10 * 60_000,
+    refetchInterval: 15 * 60_000,
   });
 
 export async function saveCommercialsConfig(

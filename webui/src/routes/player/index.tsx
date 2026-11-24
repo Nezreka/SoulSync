@@ -26,7 +26,8 @@ import { genresOf } from './-lib/video';
 import {
   albumsQuery,
   booksQuery,
-  commercialsConfigQuery,
+  guideCatalogQuery,
+  guideCommercialsQuery,
   continueQuery,
   discoverListQuery,
   discoverMoreLikeQuery,
@@ -255,13 +256,16 @@ function PlayerHome() {
     () => (discoverPlaylists.data ?? []).flatMap((sec) => sec.playlists),
     [discoverPlaylists.data],
   );
-  const commConfig = useQuery(commercialsConfigQuery());
+  // the live rail shows what the guide shows: its frozen pool and clips
+  const guideCat = useQuery({ ...guideCatalogQuery(), enabled: sections.video });
+  const commConfig = useQuery(guideCommercialsQuery());
   const commercials = useMemo(() => sharedCommercials(commConfig.data), [commConfig.data]);
   // Live TV right now: top 8 deterministic Guide channels with what's airing at this exact moment
   const liveGuideCards = useMemo<RailCard[]>(() => {
-    if (!cat) return [];
+    const pool = guideCat.data;
+    if (!pool) return [];
     const now = Date.now();
-    const chans = numberChannels(autoChannels(cat, [])).slice(0, 10);
+    const chans = numberChannels(autoChannels(pool, [])).slice(0, 10);
     const out: RailCard[] = [];
     for (const ch of chans) {
       // the guide's own options, commercials included: the same thing is on here as there
@@ -285,7 +289,7 @@ function PlayerHome() {
       });
     }
     return out;
-  }, [cat, commercials]);
+  }, [guideCat.data, commercials]);
 
   // Seasonal spotlight: timely holiday/seasonal picks based on the current month
   const seasonalInfo = useMemo(() => {

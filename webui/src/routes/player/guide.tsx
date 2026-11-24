@@ -42,10 +42,8 @@ import {
   type GuideProgram,
 } from './-lib/schedule';
 import {
-  commercialsConfigQuery,
   favoritesQuery,
   guideChannelsQuery,
-  guideWatchedQuery,
   personTitlesQuery,
   guideEdits,
   lineupQuery,
@@ -56,7 +54,8 @@ import {
   songsQuery,
   playlistsQuery,
   studioCollectionsQuery,
-  videoCatalogQuery,
+  guideCatalogQuery,
+  guideCommercialsQuery,
 } from './-player.api';
 import { ChannelForm } from './-ui/guide-form';
 import { GuideDetail, GuideGrid, OnNow, type Picked } from './-ui/guide-grid';
@@ -158,7 +157,8 @@ function GuidePage() {
   const navigate = useNavigate({ from: '/player/guide' });
   const now = useNow();
   const [offset, setOffset] = useState(0);
-  const catalog = useQuery({ ...videoCatalogQuery(), enabled: sections.video });
+  // the day's frozen pool: the same one every device schedules from
+  const catalog = useQuery({ ...guideCatalogQuery(), enabled: sections.video });
   const studioCols = useQuery({
     ...studioCollectionsQuery(),
     enabled: sections.video,
@@ -178,7 +178,7 @@ function GuidePage() {
   const favorites = useFavorites();
   const made = useQuery(guideChannelsQuery());
   const lineupQ = useQuery(lineupQuery());
-  const commConfigQ = useQuery(commercialsConfigQuery());
+  const commConfigQ = useQuery(guideCommercialsQuery());
   const queryClient = useQueryClient();
   const [making, setMaking] = useState<SavedChannel | 'new' | null>(null);
   const [editingLineup, setEditingLineup] = useState(false);
@@ -347,15 +347,8 @@ function GuidePage() {
     () => applyLineup(allChannels, lineupQ.data ?? []),
     [allChannels, lineupQ.data],
   );
-  // what this profile has seen: channels air the unseen first, a marathon starts at your next episode
-  const watched = useQuery({ ...guideWatchedQuery(), enabled: sections.video });
-  const seen = useMemo(() => {
-    const out = new Set<string>();
-    for (const id of watched.data?.movies ?? []) out.add(`movie:${id}`);
-    for (const id of watched.data?.episodes ?? []) out.add(`episode:${id}`);
-    return out;
-  }, [watched.data]);
-  const seenKey = String(watched.dataUpdatedAt);
+  // no "air the unseen first" here: a channel is one shared timeline, the same
+  // on every device and every profile, so what one profile has seen can't shape it
   const commercials = useMemo(() => sharedCommercials(commConfigQ.data), [commConfigQ.data]);
 
   const channels = useMemo(() => {
