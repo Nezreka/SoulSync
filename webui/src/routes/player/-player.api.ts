@@ -490,69 +490,6 @@ export async function clearCommercialsCache(): Promise<CommercialsStatus> {
   return apiClient.delete('player/commercials/cache').json<CommercialsStatus>();
 }
 
-export async function fetchPlayerSettings(): Promise<PlayerSettings | null> {
-  try {
-    const res = await apiClient.get('player/settings').json<{ settings?: PlayerSettings }>();
-    return res.settings ?? null;
-  } catch {
-    return null;
-  }
-}
-
-export async function fetchCommercialSchedule(opts: {
-  items: { id: string; title?: string; year?: number | null; duration_seconds?: number | null }[];
-  era?: CommercialEra;
-  mode?: CommercialMode;
-  channelId?: string;
-  channelName?: string;
-  minGapSeconds?: number;
-}): Promise<Record<string, CommercialClip[]>> {
-  try {
-    const res = await apiClient
-      .post('player/commercials/schedule', {
-        json: {
-          items: opts.items,
-          era: opts.era,
-          mode: opts.mode,
-          channel_id: opts.channelId,
-          channel_name: opts.channelName,
-          min_gap_seconds: opts.minGapSeconds ?? 300,
-        },
-        timeout: 3000,
-      })
-      .json<{ breaks?: Record<string, CommercialClip[]> }>();
-    return res.breaks ?? {};
-  } catch {
-    return {};
-  }
-}
-
-export async function fetchCommercialBreak(opts: {
-  era?: CommercialEra;
-  mode?: CommercialMode;
-  channelId?: string;
-  channelName?: string;
-  year?: number | null;
-}): Promise<CommercialClip[]> {
-  try {
-    const res = await apiClient
-      .get('player/commercials/break', {
-        searchParams: {
-          ...(opts.era ? { era: opts.era } : {}),
-          ...(opts.mode ? { mode: opts.mode } : {}),
-          ...(opts.channelId ? { channel_id: opts.channelId } : {}),
-          ...(opts.channelName ? { channel_name: opts.channelName } : {}),
-          ...(opts.year ? { year: String(opts.year) } : {}),
-        },
-        timeout: 2500,
-      })
-      .json<{ clips?: CommercialClip[] }>();
-    return res.clips ?? [];
-  } catch {
-    return [];
-  }
-}
-
 export const playerSettingsQuery = () =>
   queryOptions({
     queryKey: ['player', 'settings'],
@@ -892,14 +829,6 @@ export const guideEdits = {
 
 // ── what the guide knows beyond its catalog ───────────────────────────
 
-export const guideWatchedQuery = () =>
-  queryOptions({
-    queryKey: ['player', 'guide', 'watched'],
-    queryFn: async () =>
-      apiClient.get('player/guide/watched').json<{ movies: number[]; episodes: number[] }>(),
-    staleTime: 10 * MINUTE,
-  });
-
 export interface GuidePerson {
   id: number;
   name: string;
@@ -1029,18 +958,6 @@ export interface FollowedChannel {
   video_count?: number;
   owned_count?: number;
 }
-
-export const followedChannelsQuery = () =>
-  queryOptions({
-    queryKey: ['player', 'yt-channels'],
-    queryFn: async () =>
-      (
-        await apiClient
-          .get('video/library', { searchParams: { kind: 'channels', limit: 200 } })
-          .json<{ items?: FollowedChannel[] }>()
-      ).items ?? [],
-    staleTime: 5 * MINUTE,
-  });
 
 // ── podcasts + audiobooks ──────────────────────────────────────────────
 
@@ -1744,8 +1661,4 @@ export async function updatePlayerIssue(
   changes: { status?: 'open' | 'resolved' | 'dismissed'; admin_note?: string },
 ): Promise<{ success: boolean; issue: PlayerIssue }> {
   return apiClient.put(`player/issues/${issueId}`, { json: changes }).json();
-}
-
-export async function deletePlayerIssue(issueId: number): Promise<{ success: boolean }> {
-  return apiClient.delete(`player/issues/${issueId}`).json();
 }

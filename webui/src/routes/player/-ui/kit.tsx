@@ -835,10 +835,6 @@ export function PlayButton({
   );
 }
 
-export function NotYetNote({ children }: { children?: ReactNode }) {
-  return <span className={s.notYet}>{children ?? 'Playback comes in the next stage'}</span>;
-}
-
 // ── badges ─────────────────────────────────────────────────────────────
 
 export function Badge({ children, tone }: { children: ReactNode; tone?: PlayVerdict }) {

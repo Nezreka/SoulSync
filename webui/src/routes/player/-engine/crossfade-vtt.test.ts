@@ -64,7 +64,7 @@ describe('fetching songs ahead', () => {
 
   it('nothing ahead when the browser is saving data', async () => {
     stubFetch(() => 1024);
-    vi.stubGlobal('navigator', { ...navigator, connection: { saveData: true } });
+    vi.stubGlobal('navigator', { userAgent: navigator.userAgent, connection: { saveData: true } });
     setPrefetchCount(3);
     prefetchUpcomingTracks(tracks(['now', 'x']), 0);
     await settle();

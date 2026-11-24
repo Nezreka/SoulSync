@@ -19,7 +19,7 @@ import { channelQueue } from '../-lib/play-items';
 import { blockArtists, mergeIntoBlocks } from '../-lib/schedule';
 import { useChannelViewers, ViewerFaces, ViewerPins, ViewersHere } from './channel-viewers';
 import { PlayIcon } from './icons';
-import { Art, PlayButton, PlayerLink, styles as s, useProgressive } from './kit';
+import { Art, PlayerLink, styles as s, useProgressive } from './kit';
 import { CloseIcon } from './playback/icons';
 import { useReminder } from './playback/reminders';
 import { tuneIn } from './playback/tuner';

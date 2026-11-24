@@ -5,7 +5,6 @@
  */
 
 import { Link } from '@tanstack/react-router';
-import { Fragment } from 'react';
 
 import { remoteImage } from '../-lib/images';
 import { Art, styles as s } from './kit';
@@ -72,31 +71,6 @@ export function NetworkLink({ network }: { network: string }) {
     <Link to="/player/tv/network/$name" params={{ name: network }} className={s.metaLink} data-nav>
       {network}
     </Link>
-  );
-}
-
-/** "Jane Doe, John Roe" with each name opening their page when TMDB knows them */
-export function PeopleLinks({ people }: { people: { name: string; tmdb_id?: number | null }[] }) {
-  return (
-    <>
-      {people.map((p, i) => (
-        <Fragment key={`${p.name}-${i}`}>
-          {i ? ', ' : null}
-          {p.tmdb_id ? (
-            <Link
-              to="/player/person/$personId"
-              params={{ personId: String(p.tmdb_id) }}
-              className={s.metaLink}
-              data-nav
-            >
-              {p.name}
-            </Link>
-          ) : (
-            p.name
-          )}
-        </Fragment>
-      ))}
-    </>
   );
 }
 
