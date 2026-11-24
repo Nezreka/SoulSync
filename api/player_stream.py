@@ -417,7 +417,7 @@ def cast_hls_playlist(item_type, item_id):
     ct = request.args.get("ct", "")
     body = render_vod_playlist(dur_sec, query_string=f"ct={quote(ct, safe='')}")
     resp = make_response(body, 200)
-    resp.headers["Content-Type"] = "application/vnd.apple.mpegurl"
+    resp.headers["Content-Type"] = "application/x-mpegURL"
     resp.headers["Cache-Control"] = "no-store"
     return _add_cast_cors(resp)
 

@@ -101,7 +101,7 @@ def hls_command(
         "-sn", "-dn",
     ]
     if plan.copy_video:
-        cmd += ["-c:v", "copy"]
+        cmd += ["-c:v", "copy", "-bsf:v", "h264_mp4toannexb"]
     else:
         cmd += T._video_args(enc, plan, plan.tonemap and can_tonemap)
     if plan.copy_audio and not plan.delay_ms:
