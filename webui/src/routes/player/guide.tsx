@@ -194,10 +194,20 @@ function GuidePage() {
     const local = loadRules(profileId);
     moved.current = true;
     if (!local.length) return;
+    // only the ones the server took leave this browser: a failure (server
+    // down, a rule it refuses) keeps them here for the next visit to try
     void Promise.all(
-      local.map((r) => guideEdits.add('mine', specFromRule(r)).catch(() => null)),
-    ).then(() => {
-      saveRules(profileId, []);
+      local.map((r) =>
+        guideEdits.add('mine', specFromRule(r)).then(
+          () => true,
+          () => false,
+        ),
+      ),
+    ).then((done) => {
+      saveRules(
+        profileId,
+        local.filter((_, i) => !done[i]),
+      );
       void refreshMade();
     });
   }, [made.data, profileId]);
