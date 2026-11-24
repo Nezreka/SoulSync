@@ -32,12 +32,12 @@ import {
   PX_PER_MINUTE,
   saveRules,
 } from './-lib/guide';
+import { guideScheduleOptions, sharedCommercials } from './-lib/guide-schedule';
 import { albumArtwork } from './-lib/images';
 import {
   hashSeed,
   mergeIntoBlocks,
   programsInWindow,
-  startOfLocalDay,
   type GuideItem,
   type GuideProgram,
 } from './-lib/schedule';
@@ -344,12 +344,7 @@ function GuidePage() {
     return out;
   }, [watched.data]);
   const seenKey = String(watched.dataUpdatedAt);
-  const sharedCommercials = useMemo(() => {
-    const cfg = commConfigQ.data;
-    if (!cfg?.enabled || !cfg.clips?.length) return undefined;
-    const key = `1:${cfg.era}:${cfg.mode}:${cfg.clips.length}:${cfg.clips[0]?.id ?? ''}:${cfg.clips[cfg.clips.length - 1]?.id ?? ''}`;
-    return { enabled: true, era: cfg.era, mode: cfg.mode, clips: cfg.clips, key };
-  }, [commConfigQ.data]);
+  const commercials = useMemo(() => sharedCommercials(commConfigQ.data), [commConfigQ.data]);
 
   const channels = useMemo(() => {
     const visible = lined.filter((c) => !c.hidden);
@@ -359,16 +354,10 @@ function GuidePage() {
         ...c,
         // Shared broadcast schedule across all devices (Desktop, Android, TV):
         // deterministic from (channelId, day, pool, sharedCommercials)
-        schedule: {
-          daypart: true,
-          blocks: 1,
-          rotateShows: true,
-          today: startOfLocalDay(today),
-          commercials: sharedCommercials,
-        },
+        schedule: guideScheduleOptions(today, commercials),
       };
     });
-  }, [lined, today, sharedCommercials]);
+  }, [lined, today, commercials]);
   const numbers = useMemo(() => new Map(channels.map((c) => [c.id, c.number])), [channels]);
 
   // channel up / down follow the guide's numbers, from anywhere in the player

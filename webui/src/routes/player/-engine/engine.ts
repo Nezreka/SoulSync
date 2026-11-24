@@ -572,8 +572,8 @@ export class PlayerEngine {
   }
 
   /** everything off: save where it was, empty the queue */
-  stop() {
-    this.saveNow();
+  stop(options: { save?: boolean } = {}) {
+    if (options.save !== false) this.saveNow();
     this.loadToken++;
     this.cancelCrossfade?.();
     this.cancelCrossfade = null;

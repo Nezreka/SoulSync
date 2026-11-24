@@ -139,6 +139,9 @@ export async function triggerBrowserDownload(opts: {
   artwork?: string | null;
   directUrl?: string;
 }): Promise<{ ok: boolean; error?: string }> {
+  // a podcast episode has no player stream: only its own enclosure url can be saved
+  if (opts.itemType === 'podcast' && !opts.directUrl)
+    return { ok: false, error: "This episode can't be downloaded from here." };
   try {
     const res = await apiClient.post('player/downloads', {
       json: {

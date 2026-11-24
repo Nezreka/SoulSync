@@ -117,9 +117,12 @@ async function subtitle(item: PlayItem, id: string): Promise<string> {
 /** where a converted stream (copied video) really starts if asked for ``t`` */
 async function transcodeStart(url: string, t: number): Promise<{ start: number; seek: number }> {
   const [path, query] = url.split('?');
+  // a probe that never answers would leave the player on "resuming" for good
   const res = await fetch(`${path}/start?${query ? `${query}&` : ''}t=${t}`, {
     credentials: 'same-origin',
+    signal: AbortSignal.timeout(10_000),
   });
+  if (!res.ok) throw new Error(`start probe ${res.status}`);
   const body = (await res.json()) as { start?: number; seek?: number };
   return { start: body.start ?? t, seek: body.seek ?? t };
 }

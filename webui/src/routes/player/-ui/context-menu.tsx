@@ -157,10 +157,8 @@ export function inferContextTargetFromCard(
   ) {
     kind = 'podcast';
     id = id ?? href.match(/\/player\/podcasts\/([^/?#]+)/)?.[1] ?? null;
-    if (card.source?.itemType === 'podcast_episode' && id) {
-      downloadType = 'podcast';
-      downloadId = id;
-    }
+    // no download: a card carries no enclosure url, and the player has no
+    // podcast stream to fetch (it logged a download and saved an error page)
   } else if (card.source?.itemType === 'youtube') {
     kind = 'youtube';
     if (id) {

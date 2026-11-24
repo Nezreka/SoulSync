@@ -16,7 +16,8 @@ import { appURL } from '@/platform/url-base';
 import type { PlayerProfile } from '../-player.types';
 
 import { currentProfileQuery, profilesQuery, selectProfile } from '../-player.api';
-import { ChevronDownIcon, ExitIcon, GearIcon, LockIcon } from './icons';
+import { ExitIcon, GearIcon, LockIcon } from './icons';
+import { getEngine } from './playback/use-player';
 import s from './player.module.css';
 import { inPlayer } from './trailer';
 
@@ -107,10 +108,15 @@ function usePicker(currentId: number | null, onStay: () => void) {
     }
     setBusy(true);
     setError('');
+    // what's playing is this profile's: save it now, while the session is
+    // still theirs. the reload after the switch saved it into the new one
+    getEngine().saveNow();
     const result = await selectProfile(profile.id, secret);
     setBusy(false);
     if (result.ok) {
       markGatePassed(profile.id);
+      // nothing more of the old profile's playback may save as the new one
+      getEngine().stop({ save: false });
       window.location.reload();
       return;
     }
