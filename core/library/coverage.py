@@ -444,13 +444,24 @@ def run_check(conn: Any, server_kind: str, client: Any, env: Env, *,
         source = "inferred"
         reported = [{"library": "", "folder": f} for f in infer_folders(conn, server_kind, rng)]
     folders: List[dict] = []
+    unused: List[dict] = []
     relative_paths = False
     for item in reported:
         if not item["folder"]:
             relative_paths = True
             continue
-        folders.append(check_folder(conn, server_kind, item["folder"], env,
-                                    library=item["library"], n=n, rng=rng))
+        checked = check_folder(conn, server_kind, item["folder"], env,
+                               library=item["library"], n=n, rng=rng)
+        # a folder SoulSync holds no track from, in a library that has tracks
+        # elsewhere, belongs to a server library SoulSync doesn't read music
+        # from (plex files audiobooks and podcasts as "music" too). there is
+        # nothing in it to read, so "mount this drive" would be a false alarm.
+        # before the first scan (no tracks at all) every folder is still shown:
+        # that is when the mount advice is wanted.
+        if total and not checked["tracks"]:
+            unused.append({"library": checked["library"], "folder": checked["server_folder"]})
+            continue
+        folders.append(checked)
     reachable = sum(f["reachable_tracks"] for f in folders)
     counted = sum(f["tracks"] for f in folders)
     return {
@@ -465,6 +476,7 @@ def run_check(conn: Any, server_kind: str, client: Any, env: Env, *,
         "library_dirs": env.library_dirs,
         "docker": env.docker,
         "folders": folders,
+        "unused_folders": unused,
         "checked_at": int(time.time()),
     }
 

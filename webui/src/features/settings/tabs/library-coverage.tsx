@@ -48,12 +48,23 @@ export type CoverageFolder = {
   reachable_tracks: number;
 };
 
+/** "an Audiobook library", "Audiobook and Podcasts libraries", "3 other folders" */
+export function unusedWords(list: { library: string; folder: string }[]): string {
+  const names = [...new Set(list.map((u) => u.library).filter(Boolean))];
+  if (!names.length || names.length > 3)
+    return `${list.length} other folder${list.length === 1 ? '' : 's'}`;
+  if (names.length === 1) return `${/^[aeiou]/i.test(names[0]) ? 'an' : 'a'} ${names[0]} library`;
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]} libraries`;
+}
+
 export type CoverageResult = {
   success?: boolean;
   server: string;
   message?: string;
   folders_from?: 'server' | 'inferred';
   relative_paths?: boolean;
+  /** server folders SoulSync holds no track from: other libraries, left out of the list */
+  unused_folders?: { library: string; folder: string }[];
   total_tracks: number;
   outside_folders?: number;
   reachable_tracks?: number;
@@ -492,6 +503,12 @@ export function ServerFoldersSection({
           {data.outside_folders ? (
             <p className="setting-help-text">
               {n(data.outside_folders)} tracks sit outside every folder {name} lists.
+            </p>
+          ) : null}
+          {data.unused_folders?.length ? (
+            <p className="setting-help-text" data-coverage-unused="">
+              {name} also has {unusedWords(data.unused_folders)}. SoulSync holds no music from{' '}
+              {data.unused_folders.length === 1 ? 'it' : 'them'}, so there is nothing there to read.
             </p>
           ) : null}
           <ul className={styles.folders}>
