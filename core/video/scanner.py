@@ -338,6 +338,15 @@ class VideoLibraryScanner:
             except Exception:   # noqa: BLE001 - never fails the scan itself
                 logger.exception("video scan: library attribution failed")
 
+            # plex and jellyfin as one library (core/video/server_links.py):
+            # the other server is read on its own thread once this scan's rows
+            # are in. off unless linking is switched on.
+            try:
+                from core.video import server_links
+                server_links.run_async(self.db, incremental=incremental, since=since)
+            except Exception:   # noqa: BLE001 - never fails the scan itself
+                logger.debug("video scan: server link pass not started", exc_info=True)
+
             self._set(state="done", phase="complete", finished_at=time.time(),
                       movies=movies, shows=shows, episodes=episodes, percent=100,
                       removed=removed_m + removed_s)
