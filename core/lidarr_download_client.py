@@ -805,6 +805,19 @@ class LidarrDownloadClient(DownloadSourcePlugin):
                 for dl_id, dl in self.active_downloads.items()
             )
 
+    def _artist_resource(self, artist_data: Dict[str, Any]) -> Dict[str, Any]:
+        """The artist as Lidarr's add endpoints take it: added unmonitored,
+        with SoulSync's quality and metadata profiles and root folder."""
+        return {
+            'foreignArtistId': artist_data.get('foreignArtistId', ''),
+            'artistName': artist_data.get('artistName', ''),
+            'qualityProfileId': self._get_quality_profile_id(),
+            'metadataProfileId': self._get_metadata_profile_id(),
+            'rootFolderPath': self._get_root_folder(),
+            'monitored': False,
+            'addOptions': {'monitor': 'none', 'searchForMissingAlbums': False},
+        }
+
     def _ensure_artist(self, artist_data: Dict[str, Any]) -> Optional[int]:
         """Lidarr id of the album's artist, adding the artist when missing."""
         if artist_data.get('id'):
@@ -823,15 +836,7 @@ class LidarrDownloadClient(DownloadSourcePlugin):
         if artist_id:
             return artist_id
         try:
-            added = self._api_post('artist', data={
-                'foreignArtistId': foreign_artist_id,
-                'artistName': artist_data.get('artistName', ''),
-                'qualityProfileId': self._get_quality_profile_id(),
-                'metadataProfileId': self._get_metadata_profile_id(),
-                'rootFolderPath': self._get_root_folder(),
-                'monitored': False,
-                'addOptions': {'monitor': 'none', 'searchForMissingAlbums': False},
-            })
+            added = self._api_post('artist', data=self._artist_resource(artist_data))
         except Exception as e:
             logger.warning(f"Failed to add artist to Lidarr: {e}")
             added = None
@@ -869,12 +874,14 @@ class LidarrDownloadClient(DownloadSourcePlugin):
                     break
                 time.sleep(1)
             if not existing:
+                # Lidarr's album add validates and reads the artist resource
+                # (MusicBrainz id, profiles, root folder): with artistId alone
+                # it answers 400 "'Artist' must not be empty".
                 existing = self._api_post('album', data={
                     'foreignAlbumId': foreign_album_id,
                     'title': album.get('title', ''),
                     'artistId': artist_id,
-                    'qualityProfileId': self._get_quality_profile_id(),
-                    'rootFolderPath': self._get_root_folder(),
+                    'artist': self._artist_resource(album.get('artist') or {}),
                     'monitored': monitored,
                     'addOptions': {'searchForNewAlbum': False},
                 }) or self._existing_album(foreign_album_id)

@@ -47,6 +47,7 @@ class FakeLidarr:
         self.commands = []
         self.posts = []
         self.deleted = []
+        self.refused_albums = []        # album adds Lidarr's validation refused
         self.lock = threading.Lock()
         self.library = []               # albums already in Lidarr, with artist ids
         self.queue = []                 # queue records
@@ -106,6 +107,14 @@ class FakeLidarr:
             if endpoint == 'album':
                 if data['foreignAlbumId'] in self.albums:
                     return None  # duplicate album
+                # Lidarr's AlbumController post validation: 400 otherwise
+                artist = data.get('artist')
+                if not artist or not artist.get('foreignArtistId') \
+                        or artist.get('qualityProfileId') != 1 \
+                        or artist.get('metadataProfileId') != 1 \
+                        or artist.get('rootFolderPath') != '/music':
+                    self.refused_albums.append(data)
+                    return None
                 rec = {'id': len(self.albums) + 100, 'foreignAlbumId': data['foreignAlbumId'],
                        'artistId': data['artistId'], 'monitored': data['monitored'],
                        'statistics': {'trackFileCount': 0, 'trackCount': 2}}
