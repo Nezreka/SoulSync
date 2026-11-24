@@ -1579,14 +1579,22 @@ def _pick_default_lobby_track() -> dict | None:
         from database.music_database import get_database
         db = get_database()
         with db._get_connection() as conn:
-            row = conn.execute(
-                "SELECT t.id, t.title, COALESCE(NULLIF(t.track_artist, ''), ar.name, '') AS artist, t.album_id, t.duration "
-                "FROM lib2_tracks t "
+            # a random point in the id range, then the first owned track from
+            # there (wrapping): ORDER BY RANDOM() read every owned track
+            import random
+            top = conn.execute("SELECT MAX(id) FROM lib2_tracks").fetchone()
+            if not top or not top[0]:
+                return None
+            pivot = random.randint(1, int(top[0]))  # noqa: S311 - not security
+            pick = (
+                "SELECT t.id, t.title, COALESCE(NULLIF(t.track_artist, ''), ar.name, '') AS artist, "
+                "t.album_id, t.duration FROM lib2_tracks t "
                 "JOIN lib2_albums al ON al.id = t.album_id "
                 "LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id "
-                f"WHERE {owned_sql('track', 't')} "
-                "ORDER BY RANDOM() LIMIT 1"
-            ).fetchone()
+                f"WHERE {owned_sql('track', 't')} AND t.id {{}} ? ORDER BY t.id {{}} LIMIT 1"
+            )
+            row = (conn.execute(pick.format(">=", "ASC"), (pivot,)).fetchone()
+                   or conn.execute(pick.format("<", "DESC"), (pivot,)).fetchone())
             if not row:
                 return None
             tid, title, artist, album_id, duration = row
