@@ -126,6 +126,11 @@ def auto_refresh_mirrored(config: Dict[str, Any], deps: AutomationDeps) -> Dict[
                 {'source_skipped': meta_extra['source_skipped']}
                 if 'source_skipped' in meta_extra else {}
             )
+            # #2279: the source's current poster. a custom cover on the row
+            # stays put (the upsert keeps it), the original behind it updates
+            meta_image = getattr(detail.meta, 'image_url', None)
+            if meta_image:
+                mirror_kwargs['source_image_url'] = meta_image
             refreshed += _commit_refresh(
                 pl, source, source_id, tracks, db, deps, auto_id, mirror_kwargs,
                 identify=not skip_discovery,
@@ -322,7 +327,7 @@ def _commit_refresh(
         profile_id=pl.get('profile_id', 1),
         description=pl.get('description'),
         owner=pl.get('owner'),
-        image_url=pl.get('image_url'),
+        image_url=(mirror_kwargs or {}).get('source_image_url') or pl.get('image_url'),
         **(mirror_kwargs or {}),
     )
     if identify and saved_id:

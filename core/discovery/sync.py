@@ -514,9 +514,34 @@ def _sync_mirror_row(playlist_id, profile_id):
 
 def _sync_cover_is_users(playlist_id, profile_id) -> bool:
     """the cover is the user's own pick, so it pushes every sync: a user
-    playlist's, or a mirror's generated cover (custom_cover)."""
+    playlist's, a custom cover on any playlist (custom_cover), or a cover the
+    user just changed or restored that the server hasn't had yet (#2281)."""
     row = _sync_mirror_row(playlist_id, profile_id)
-    return bool(row) and (row.get('source') == 'soulsync' or bool(row.get('custom_cover')))
+    return bool(row) and (row.get('source') == 'soulsync' or bool(row.get('custom_cover'))
+                          or bool(row.get('cover_push_pending')))
+
+
+def _sync_cover_row_image(playlist_id, profile_id, passed):
+    """the cover to push. a caller can hand over the source's poster even when
+    the user put their own on (or restored it), so the row wins when there is one."""
+    row = _sync_mirror_row(playlist_id, profile_id)
+    if row and (row.get('source') == 'soulsync' or row.get('custom_cover')
+                or row.get('cover_push_pending')):
+        return row.get('image_url') or passed
+    return passed
+
+
+def _sync_cover_pushed(playlist_id) -> None:
+    mirror_id = _mirror_id_from_sync_id(playlist_id)
+    if mirror_id is None:
+        return
+    try:
+        from database.music_database import get_database
+        clear = getattr(get_database(), 'clear_mirrored_playlist_cover_push_pending', None)
+        if clear:
+            clear(mirror_id)
+    except Exception as e:
+        logger.debug("[PLAYLIST IMAGE] couldn't clear the push flag for %s: %s", mirror_id, e)
 
 
 def run_sync_task(*args, **kwargs):
@@ -784,6 +809,7 @@ def _run_sync_task(
         # one) so the check and the upload always agree, and default to "pre-existed"
         # on any error so an unverifiable case never stomps an existing cover.
         _playlist_preexisted = True
+        playlist_image_url = _sync_cover_row_image(playlist_id, profile_id, playlist_image_url)
         # Only probe when a cover might actually be pushed below (there IS a source
         # cover, and the mode isn't one that always preserves the existing image) —
         # otherwise the extra playlist-list call is wasted.
@@ -931,6 +957,7 @@ def _run_sync_task(
         elif playlist_image_url and _synced > 0 and _playlist_preexisted and not _cover_is_users:
             logger.info("[PLAYLIST IMAGE] playlist already existed — leaving its current cover untouched (#993)")
         elif playlist_image_url and _synced > 0:
+            ok = False
             try:
                 active_server = deps.config_manager.get_active_media_server()
                 logger.info(f"[PLAYLIST IMAGE] active_server={active_server}")
@@ -956,6 +983,8 @@ def _run_sync_task(
                     logger.info(f"[PLAYLIST IMAGE] Navidrome upload result: {ok}")
             except Exception as img_err:
                 logger.error(f"[PLAYLIST IMAGE] Exception: {img_err}")
+            if ok:
+                _sync_cover_pushed(playlist_id)
 
         # Record sync history completion with per-track data
         try:

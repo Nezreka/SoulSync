@@ -525,8 +525,11 @@ export interface MirroredPlaylistDetail {
   description?: string;
   owner?: string;
   image_url?: string;
-  /** the cover is one the user generated: refreshes keep it, and it can be undone */
+  /** the cover is one the user picked (uploaded, linked, a track's, generated):
+   * refreshes keep it, and restore goes back to the original (#2280, #2281) */
   custom_cover?: boolean;
+  /** the source's own artwork, kept for restore even under a custom cover */
+  source_image_url?: string | null;
   updated_at?: string;
   mirrored_at?: string;
   /** what the source never handed over when it was mirrored (#1613). */

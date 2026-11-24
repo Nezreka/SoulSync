@@ -50,6 +50,12 @@ def _own_user_playlist(database, playlist_id):
     return playlist if up.is_user_playlist(playlist) else None
 
 
+def _own_playlist_for_cover(database, playlist_id):
+    """any playlist of the active profile: a cover can go on a mirror or a
+    request list too, not just a user playlist (#2280)."""
+    return database.get_mirrored_playlist(playlist_id, profile_id=get_current_profile_id())
+
+
 def _cover_base_dir():
     base = getattr(config_manager, "base_dir", None) if config_manager else None
     return str(base) if base else None
@@ -338,7 +344,7 @@ def upload_user_playlist_cover(playlist_id):
         return jsonify({"error": "No image"}), 400
     try:
         database = get_database()
-        playlist = _own_user_playlist(database, playlist_id)
+        playlist = _own_playlist_for_cover(database, playlist_id)
         if not playlist:
             return _not_found()
         image_url = up.set_cover_upload(
@@ -359,7 +365,7 @@ def set_user_playlist_cover(playlist_id):
     data = request.get_json(silent=True) or {}
     try:
         database = get_database()
-        playlist = _own_user_playlist(database, playlist_id)
+        playlist = _own_playlist_for_cover(database, playlist_id)
         if not playlist:
             return _not_found()
         if 'image_url' in data:
@@ -381,7 +387,7 @@ def set_user_playlist_cover(playlist_id):
 def clear_user_playlist_cover(playlist_id):
     try:
         database = get_database()
-        playlist = _own_user_playlist(database, playlist_id)
+        playlist = _own_playlist_for_cover(database, playlist_id)
         if not playlist:
             return _not_found()
         up.clear_cover(database, playlist, base_dir=_cover_base_dir())

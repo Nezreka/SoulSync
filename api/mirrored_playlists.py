@@ -185,8 +185,8 @@ def mirrored_playlists_overview_endpoint():
                         auto_by_pl[int(pid)] = dict(row)
                     except (TypeError, ValueError):
                         pass
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("couldn't read the playlist automations: %s", e)
 
         items = []
         active_server = config_manager.get('active_media_server', 'plex') or 'plex'
@@ -679,8 +679,8 @@ def restore_mirrored_cover_art(playlist_id):
         cover_art.discard_preview(playlist_id, _cover_base_dir())
         if request.args.get('preview_only') == '1':
             return jsonify({"success": True})
-        if _up.is_user_playlist(playlist) or not playlist.get('custom_cover'):
-            return jsonify({"error": "No generated cover to undo"}), 400
+        if not playlist.get('custom_cover'):
+            return jsonify({"error": "This playlist already has its original cover"}), 400
         cover_art.restore_original(database, playlist, base_dir=_cover_base_dir())
         return jsonify({"success": True})
     except Exception as e:
@@ -860,6 +860,12 @@ def copy_to_request_list_endpoint(playlist_id):
             return jsonify({"error": "Failed to copy playlist to request list"}), 500
 
         created = _owned_mirrored_playlist(database, new_id) or {}
+        if created:
+            try:
+                _up.carry_cover_file(database, playlist_id, created, base_dir=_cover_base_dir())
+                created = _owned_mirrored_playlist(database, new_id) or created
+            except Exception as e:
+                logger.warning(f"Couldn't copy the cover to request list {new_id}: {e}")
         return jsonify({"success": True, "new_playlist_id": new_id, "playlist": created})
     except Exception as e:
         logger.error(f"Error copying playlist {playlist_id} to request list: {e}")

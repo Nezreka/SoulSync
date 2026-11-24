@@ -3417,7 +3417,9 @@ def parse_spotify_public_endpoint():
             'url': result['url'],
             'url_hash': url_hash,
             'track_count': len(spotify_tracks),
-            'tracks': spotify_tracks
+            'tracks': spotify_tracks,
+            # #2279: the playlist's own artwork (og:image), for its cover
+            'image_url': result.get('image_url') or '',
         }
 
         # Store playlist data in state for discovery (if not already there)

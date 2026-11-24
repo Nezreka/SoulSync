@@ -78,6 +78,7 @@ class TidalPlaylistSource(PlaylistSource):
             name=playlist.name,
             owner=owner_name,
             description=getattr(playlist, "description", "") or None,
+            image_url=getattr(playlist, "image_url", None) or None,
             track_count=len(tracks_raw),
             extra={
                 "public": bool(getattr(playlist, "public", True)),

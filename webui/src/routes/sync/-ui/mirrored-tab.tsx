@@ -95,6 +95,7 @@ import { fetchRotationPreview, rotationConfirmMessage } from '../-sync.rotation'
 import { SYNC_SOURCES } from '../-sync.sources';
 import { asString } from '../-sync.url-tabs';
 import { useExportJobs } from '../-sync.use-export';
+import { restoreOriginalCover } from '../../../features/playlists/cover-art';
 import { playPlaylist } from '../../../features/playlists/play-playlist';
 import {
   copyMirrorToUserPlaylist,
@@ -1727,6 +1728,19 @@ export function MirroredTab({
             setEditingRef(settingsRow);
           }}
           onGenerateCover={() => setCoverArtFor(settingsRow)}
+          onRestoreCover={() => {
+            restoreOriginalCover(settingsRow.id)
+              .then(() => {
+                window.showToast?.('Cover restored', 'success');
+                reload();
+              })
+              .catch((err: unknown) =>
+                window.showToast?.(
+                  err instanceof Error ? err.message : 'Could not restore the cover',
+                  'error',
+                ),
+              );
+          }}
           onClear={
             (settingsRow.discovered_count || 0) > 0 && !isUserPlaylist(settingsRow)
               ? () => {

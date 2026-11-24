@@ -198,6 +198,7 @@ Bring a playlist in from anywhere, keep a mirror of it, and keep your media serv
 - **Organize by playlist**: optionally download a playlist into its own folder.
 - **Bootlegs, edits and unofficial remixes**: turn on *Find uncatalogued tracks* in a playlist's Settings and the tracks no catalog has are searched for by the playlist's own artist and title on every sync. A file is only taken when its name says it is that exact version, so the original never stands in for a remix of it, and it is tagged from the playlist.
 - **Rotating playlists**: turn on *Rotating* in a playlist's Settings and a song it downloaded is removed once it leaves the playlist. Anything you played, favourited, rated or still have in another playlist is kept, and removals wait for your approval until you turn dry run off.
+- **Playlist covers**: playlists keep their source's own artwork, and any playlist (mirrored, yours, or a request list) can take your own cover: upload one, use a song's artwork, or paste a link. *Restore original cover* puts the source's back. Your cover survives refreshes and syncs to Plex, Jellyfin or Navidrome.
 - **Cover art**: *Generate cover art* in any playlist's ⋯ menu paints a cover from its genres, mood and era with [Pollinations](https://pollinations.ai). Preview it with or without the playlist's name across the top, try another style, keep the one you like. It survives refreshes and syncs to your server. Free with no key (one image every 45s, small Pollinations mark), or add a key in Settings to lift both.
 
 </details>
