@@ -803,6 +803,44 @@ export function channelArt(channel: Pick<Channel, 'pool'>, n = 4): string[] {
   return out;
 }
 
+/** Build 24/7 live channels from SoulSync Collection Studio collections (1:1 parity with Android). */
+export function studioCollectionChannels(
+  collections: readonly {
+    id: number;
+    name: string;
+    media_type: 'movie' | 'show';
+    members: number[];
+    pinned?: boolean;
+  }[],
+  catalog: VideoCatalog,
+): Channel[] {
+  const movieById = new Map(catalog.movies.map((m) => [m.id, m]));
+  const showById = new Map(catalog.shows.map((x) => [x.id, x]));
+  const out: Channel[] = [];
+  for (const col of collections) {
+    const pool: GuideItem[] = [];
+    if (col.media_type === 'movie') {
+      for (const id of col.members) {
+        const m = movieById.get(id);
+        if (m) pool.push(movieItem(m));
+      }
+    } else {
+      for (const id of col.members) {
+        const x = showById.get(id);
+        if (x) pool.push(...episodeItems(x));
+      }
+    }
+    add(out, {
+      id: `studio-col-${col.id}`,
+      name: col.name,
+      kind: 'collection',
+      blurb: `${col.members.length} ${col.media_type === 'movie' ? 'films' : 'shows'} · SoulSync Collection`,
+      pool,
+    });
+  }
+  return out;
+}
+
 /** a channel that fits what's typed in the guide's search: its name, what it's made of, its number */
 export function channelMatches(channel: Channel, query: string): boolean {
   const q = query.trim().toLowerCase();

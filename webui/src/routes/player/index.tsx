@@ -5,6 +5,7 @@ import { useCallback, useMemo, useState, type ReactNode } from 'react';
 import type { RailCard } from './-lib/rails';
 import type { CatalogMovie, CatalogShow, ExtraTitle } from './-player.types';
 
+import { autoChannels, numberChannels } from './-lib/channels';
 import { deviceId } from './-lib/device';
 import { parseGenreRow, type HomeLayout, type RowStyle } from './-lib/home-layout';
 import { backdropSet, remoteImage, WIDE_SIZES } from './-lib/images';
@@ -19,7 +20,7 @@ import {
   recentYoutubeCards,
   showCard,
 } from './-lib/rails';
-import { hashSeed, seededShuffle } from './-lib/schedule';
+import { hashSeed, programsInWindow, seededShuffle, startOfLocalDay } from './-lib/schedule';
 import { genresOf } from './-lib/video';
 import {
   albumsQuery,
@@ -55,15 +56,15 @@ export const Route = createFileRoute('/player/')({
 
 const FALLBACK_ROWS = [
   'continue',
+  'live-guide',
   'new-episodes',
   'collections',
+  'top-movies',
   'recent-movies',
   'discovery-playlists',
+  'seasonal',
+  'because',
   'recent-music',
-  'youtube',
-  'top-rated',
-  'audiobooks',
-  'podcasts',
 ];
 
 const day = () => new Date().toISOString().slice(0, 10);
@@ -249,6 +250,66 @@ function PlayerHome() {
     () => (discoverPlaylists.data ?? []).flatMap((sec) => sec.playlists),
     [discoverPlaylists.data],
   );
+  // Live TV right now: top 8 deterministic Guide channels with what's airing at this exact moment
+  const liveGuideCards = useMemo<RailCard[]>(() => {
+    if (!cat) return [];
+    const now = Date.now();
+    const todayStart = startOfLocalDay(now);
+    const chans = numberChannels(autoChannels(cat, [])).slice(0, 10);
+    const out: RailCard[] = [];
+    for (const ch of chans) {
+      const progs = programsInWindow(ch.id, ch.pool, now - 120_000, now + 3_600_000, {
+        daypart: true,
+        blocks: 1,
+        rotateShows: true,
+        today: todayStart,
+        ordered: ch.ordered,
+      });
+      const airing = progs.find((p) => p.start <= now && p.end > now) ?? progs[0];
+      if (!airing) continue;
+      const dur = Math.max(1, airing.end - airing.start);
+      const frac = Math.min(1, Math.max(0, (now - airing.start) / dur));
+      out.push({
+        key: `live-ch:${ch.id}`,
+        title: airing.title,
+        subtitle: `CH ${ch.number ?? ''} · ${ch.name}`,
+        art: airing.art ?? null,
+        href: `/player/guide`,
+        shape: 'wide',
+        badge: 'LIVE',
+        progress: frac,
+      });
+    }
+    return out;
+  }, [cat]);
+
+  // Seasonal spotlight: timely holiday/seasonal picks based on the current month
+  const seasonalInfo = useMemo(() => {
+    const month = new Date().getMonth() + 1; // 1..12
+    const theme =
+      month === 10
+        ? {
+            title: 'October Frights · Horror & Thriller',
+            genres: ['horror', 'thriller', 'mystery'],
+          }
+        : month === 11 || month === 12
+          ? { title: 'Holiday & Cozy Season', genres: ['family', 'animation', 'comedy', 'fantasy'] }
+          : month >= 6 && month <= 8
+            ? { title: 'Summer Blockbusters', genres: ['action', 'adventure', 'science fiction'] }
+            : month >= 1 && month <= 3
+              ? { title: 'Awards & Acclaimed Drama', genres: ['drama', 'history', 'biography'] }
+              : {
+                  title: 'Spring Escapes · Sci-Fi & Adventure',
+                  genres: ['science fiction', 'fantasy', 'adventure'],
+                };
+    const pool = (movies ?? []).filter(
+      (m) => m.genres.some((g) => theme.genres.includes(g.toLowerCase())) && (m.rating ?? 0) >= 6.5,
+    );
+    const cards = seededShuffle(pool, hashSeed(`seasonal-${day()}`))
+      .slice(0, 18)
+      .map(movieCard);
+    return { title: theme.title, cards };
+  }, [movies]);
   const watching = useMemo(
     () => continueRails(progress.data ?? [], resume.data ?? []),
     [progress.data, resume.data],
@@ -261,6 +322,7 @@ function PlayerHome() {
       out[id] = [{ title, cards, more: more ? { to: more } : undefined }];
     };
     out.continue = watching.map((r) => ({ title: r.label, cards: r.cards }));
+    one('live-guide', 'On Live TV right now', liveGuideCards, '/player/guide');
     one(
       'new-episodes',
       'New episodes',
@@ -268,6 +330,7 @@ function PlayerHome() {
       '/player/tv',
     );
     one('collections', 'Collections', collectionCards, '/player/movies?tab=collections');
+    one('seasonal', seasonalInfo.title, seasonalInfo.cards);
     one('top-movies', 'Top 10 movies today', topMovies);
     one(
       'recent-movies',
@@ -370,7 +433,9 @@ function PlayerHome() {
     return out;
   }, [
     watching,
+    liveGuideCards,
     collectionCards,
+    seasonalInfo,
     cat,
     movies,
     shows,

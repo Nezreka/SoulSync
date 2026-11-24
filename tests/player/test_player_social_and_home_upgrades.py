@@ -9,7 +9,7 @@ from contextlib import contextmanager
 
 import pytest
 
-from core.player import discovery, home_layout, lineup, parties
+from core.player import discovery, home_layout, lineup, parties, settings
 
 
 class _InMemoryPlayerDB:
@@ -30,6 +30,17 @@ def test_home_layout_replaces_watchlist_with_collections_and_discovery_playlists
     assert "watchlist" not in row_ids
     assert "collections" in row_ids
     assert "discovery-playlists" in row_ids
+    assert "live-guide" in row_ids
+    assert "seasonal" in row_ids
+
+
+def test_player_accent_color_setting_validation_and_default():
+    assert settings.SETTINGS["accent_color"][0] == "emerald"
+    coercer = settings.SETTINGS["accent_color"][1]
+    assert coercer("violet") == "violet"
+    assert coercer("OCEAN") == "ocean"
+    with pytest.raises(settings.SettingsError):
+        coercer("neon-invalid")
 
 
 def test_discovery_norm_track_artwork_fallbacks():

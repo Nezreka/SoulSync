@@ -18,6 +18,7 @@ import {
   serverMusicChannel,
   specChannel,
   specFromRule,
+  studioCollectionChannels,
   marathonItems,
   type Channel,
   type PeopleTitles,
@@ -53,6 +54,7 @@ import {
   saveFavorites,
   songsQuery,
   playlistsQuery,
+  studioCollectionsQuery,
   videoCatalogQuery,
 } from './-player.api';
 import { ChannelForm } from './-ui/guide-form';
@@ -154,6 +156,11 @@ function GuidePage() {
   const now = useNow();
   const [offset, setOffset] = useState(0);
   const catalog = useQuery({ ...videoCatalogQuery(), enabled: sections.video });
+  const studioCols = useQuery({
+    ...studioCollectionsQuery(),
+    enabled: sections.video,
+    retry: false,
+  });
   const playlists = useQuery({ ...playlistsQuery(), enabled: sections.music });
   const musicChannels = useQuery({ ...musicChannelsQuery(), enabled: sections.music });
   const firstPlaylists = useMemo(
@@ -275,6 +282,9 @@ function GuidePage() {
   );
   const allChannels = useMemo(() => {
     const out: Channel[] = [...videoChannels];
+    if (cat && studioCols.data?.length) {
+      out.push(...studioCollectionChannels(studioCols.data, cat));
+    }
     if (musicChannel) out.splice(Math.min(3, out.length), 0, musicChannel);
     firstPlaylists.forEach((p, i) => {
       // only songs this profile can play, by their library track (a row id plays nothing)
@@ -306,6 +316,7 @@ function GuidePage() {
     return out;
   }, [
     videoChannels,
+    studioCols.data,
     musicChannel,
     serverMusic,
     playlistKey,

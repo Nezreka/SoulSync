@@ -315,6 +315,53 @@ function SettingsPage() {
             />
           </Row>
 
+          <Row
+            label="Accent color"
+            help="Your profile's signature highlight color across Desktop and mobile."
+          >
+            <div
+              style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}
+              role="radiogroup"
+              aria-label="Accent color"
+            >
+              {(
+                [
+                  ['emerald', '#1db954', 'Emerald'],
+                  ['violet', '#8b5cf6', 'Violet'],
+                  ['ocean', '#38bdf8', 'Ocean'],
+                  ['amber', '#f59e0b', 'Amber'],
+                  ['rose', '#f43f5e', 'Rose'],
+                  ['crimson', '#ef4444', 'Crimson'],
+                ] as const
+              ).map(([id, hex, label]) => {
+                const active = (mine?.accent_color ?? 'emerald') === id;
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    role="radio"
+                    aria-checked={active}
+                    aria-label={label}
+                    title={label}
+                    disabled={!mine || busy}
+                    onClick={() => save.mutate({ accent_color: id })}
+                    style={{
+                      width: 28,
+                      height: 28,
+                      borderRadius: '50%',
+                      background: hex,
+                      border: active ? '2.5px solid #fff' : '2px solid rgba(255,255,255,0.2)',
+                      boxShadow: active ? `0 0 0 3px ${hex}55` : 'none',
+                      cursor: 'pointer',
+                      padding: 0,
+                    }}
+                    data-nav
+                  />
+                );
+              })}
+            </div>
+          </Row>
+
           {save.isError ? (
             <div className={s.saveError} role="alert">
               Couldn't save that change — try again in a moment.

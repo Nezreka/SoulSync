@@ -10,8 +10,15 @@
 
 .app {
   --u: 0.875rem;
+  /* Adopt the SoulSync mobile app's signature Emerald + Obsidian palette globally */
+  --accent-rgb: 29, 185, 84;
+  --accent-light-rgb: 30, 215, 96;
+  --accent-neon-rgb: 34, 255, 107;
+  --accent: rgb(var(--accent-rgb));
+  --accent-light: rgb(var(--accent-light-rgb));
+  --accent-color: var(--accent);
   --pl-ink-rgb: 7, 7, 10;
-  --pl-raise-rgb: 22, 22, 30;
+  --pl-raise-rgb: 20, 20, 28;
   --pl-bg: rgba(var(--pl-ink-rgb), 1);
   --pl-panel: rgba(var(--pl-raise-rgb), 0.72);
   --pl-panel-solid: rgba(var(--pl-raise-rgb), 1);
@@ -1218,8 +1225,6 @@
 
 .rail {
   margin-top: calc(var(--u) * 2.2);
-  content-visibility: auto;
-  contain-intrinsic-size: auto 300px;
 }
 
 .railHead {

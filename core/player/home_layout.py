@@ -49,21 +49,23 @@ _SQUARE = ["standard", "large"]
 # the rows, in their default order: (id, label, hint, styles, default style, on by default)
 ROWS = [
     ("continue", "Continue watching", "What you started, here and on your media server", _WIDE, "wide", True),
+    ("live-guide", "On Live TV right now", "Tune straight into what's airing across your channels", _WIDE, "wide", True),
     ("new-episodes", "New episodes", "The latest episodes to land", _WIDE, "wide", True),
     ("collections", "Collections", "Curated movie & TV collections built in SoulSync", _POSTER, "standard", True),
     ("top-movies", "Top 10 movies today", "Today's most watched films that you have", _POSTER, "ranked", True),
     ("recent-movies", "Recently added movies", "Newest films first", _POSTER, "standard", True),
-    ("because", "Because you have…", "Titles you own like ones you own", _POSTER, "standard", True),
-    ("top-shows", "Top 10 shows today", "Today's most watched shows that you have", _POSTER, "ranked", True),
-    ("recent-shows", "Recently added shows", "Shows that just arrived", _POSTER, "standard", False),
     ("discovery-playlists", "SoulSync Discovery Playlists", "Made for you, daily mixes, moods & curated playlists", _SQUARE, "standard", True),
+    ("seasonal", "Seasonal spotlight", "Timely picks and seasonal collections for this time of year", _POSTER, "standard", True),
+    ("because", "Because you have…", "Titles you own like ones you own", _POSTER, "standard", True),
     ("recent-music", "Recently added music", "Newest albums", _SQUARE, "standard", True),
-    ("youtube", "New on YouTube", "Fresh from the channels you follow", _WIDE, "wide", True),
-    ("genre-picks", "Today's picks", "A new handful from your top genre every day", _POSTER, "standard", True),
-    ("top-rated", "Top rated in your library", "The highest rated films you have", _POSTER, "standard", True),
+    ("top-shows", "Top 10 shows today", "Today's most watched shows that you have", _POSTER, "ranked", False),
+    ("recent-shows", "Recently added shows", "Shows that just arrived", _POSTER, "standard", False),
+    ("youtube", "New on YouTube", "Fresh from the channels you follow", _WIDE, "wide", False),
+    ("genre-picks", "Today's picks", "A new handful from your top genre every day", _POSTER, "standard", False),
+    ("top-rated", "Top rated in your library", "The highest rated films you have", _POSTER, "standard", False),
     ("rediscover", "Rediscover", "Films you've had a while", _POSTER, "standard", False),
-    ("audiobooks", "Recently added audiobooks", "Newest books", _SQUARE, "standard", True),
-    ("podcasts", "Your podcasts", "The shows you follow", _SQUARE, "standard", True),
+    ("audiobooks", "Recently added audiobooks", "Newest books", _SQUARE, "standard", False),
+    ("podcasts", "Your podcasts", "The shows you follow", _SQUARE, "standard", False),
 ]
 _ROW_BY_ID = {r[0]: r for r in ROWS}
 GENRE_ROW = re.compile(r"^genre:(movie|show):([^\x00-\x1f]{1,60})$")

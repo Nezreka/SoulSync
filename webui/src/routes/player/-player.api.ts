@@ -381,6 +381,8 @@ export const playlistEdits = {
 
 // ── player settings (per profile) and watching now ────────────────────
 
+export type PlayerAccentColor = 'emerald' | 'violet' | 'ocean' | 'amber' | 'rose' | 'crimson';
+
 export interface PlayerSettings {
   share_activity: boolean;
   autoplay_next: boolean;
@@ -388,6 +390,7 @@ export interface PlayerSettings {
   show_movie_ratings: boolean;
   show_tv_episode_count: boolean;
   show_year_on_cards: boolean;
+  accent_color?: PlayerAccentColor;
 }
 
 export const playerSettingsQuery = () =>

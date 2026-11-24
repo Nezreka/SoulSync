@@ -12,7 +12,21 @@ import { createPortal } from 'react-dom';
 import { useCardSize, type CardSizeRange } from '@/components/card-size';
 import { appURL } from '@/platform/url-base';
 
-import { profilesQuery, watchingNowQuery } from '../-player.api';
+import {
+  playerSettingsQuery,
+  profilesQuery,
+  watchingNowQuery,
+  type PlayerAccentColor,
+} from '../-player.api';
+
+const ACCENT_PALETTE: Record<PlayerAccentColor, { rgb: string; lightRgb: string }> = {
+  emerald: { rgb: '29, 185, 84', lightRgb: '30, 215, 96' },
+  violet: { rgb: '139, 92, 246', lightRgb: '167, 139, 250' },
+  ocean: { rgb: '56, 189, 248', lightRgb: '125, 211, 252' },
+  amber: { rgb: '245, 158, 11', lightRgb: '251, 191, 36' },
+  rose: { rgb: '244, 63, 94', lightRgb: '251, 113, 133' },
+  crimson: { rgb: '239, 68, 68', lightRgb: '248, 113, 113' },
+};
 import { ContextMenuHost } from './context-menu';
 import { BackIcon, ChevronIcon, ExitIcon, GearIcon, MoreIcon } from './icons';
 import { AddToPlaylistHost } from './music/add-to-playlist';
@@ -343,6 +357,9 @@ export function PlayerShell({ profileId }: { profileId: number | null }) {
   const mainRef = useRef<HTMLElement>(null);
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const { data: profiles } = useQuery(profilesQuery());
+  const { data: playerSettings } = useQuery(playerSettingsQuery());
+  const accentChoice = playerSettings?.settings.accent_color ?? 'emerald';
+  const accentTokens = ACCENT_PALETTE[accentChoice] ?? ACCENT_PALETTE.emerald;
   const [gate, setGate] = useState<boolean | null>(null);
 
   useSpatialNav(rootRef);
@@ -412,7 +429,16 @@ export function PlayerShell({ profileId }: { profileId: number | null }) {
       data-player-root
       data-bar={nowPlaying ? 'true' : undefined}
       data-side-collapsed={collapsed ? 'true' : undefined}
-      style={{ '--pl-card-scale': cardScale } as CSSProperties}
+      style={
+        {
+          '--pl-card-scale': cardScale,
+          '--accent-rgb': accentTokens.rgb,
+          '--accent-light-rgb': accentTokens.lightRgb,
+          '--accent': `rgb(${accentTokens.rgb})`,
+          '--accent-light': `rgb(${accentTokens.lightRgb})`,
+          '--accent-color': `rgb(${accentTokens.rgb})`,
+        } as CSSProperties
+      }
     >
       <Sidebar collapsed={collapsed} onToggle={toggleCollapsed} />
       <main className={s.main} ref={mainRef} onScroll={onMainScroll}>

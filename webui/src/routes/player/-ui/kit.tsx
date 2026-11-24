@@ -384,18 +384,27 @@ export function HScroll({ className, children }: { className: string; children: 
   useEffect(() => {
     update();
     const el = ref.current;
-    if (!el || typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(update);
-    observer.observe(el);
-    for (const child of Array.from(el.children).slice(0, 1)) observer.observe(child);
-    return () => observer.disconnect();
-  });
+    if (!el) return;
+    const raf = window.requestAnimationFrame(update);
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(update) : null;
+    ro?.observe(el);
+    for (const child of Array.from(el.children).slice(0, 1)) ro?.observe(child);
+    const mo = typeof MutationObserver !== 'undefined' ? new MutationObserver(update) : null;
+    mo?.observe(el, { childList: true });
+    window.addEventListener('resize', update);
+    return () => {
+      window.cancelAnimationFrame(raf);
+      ro?.disconnect();
+      mo?.disconnect();
+      window.removeEventListener('resize', update);
+    };
+  }, [children]);
   const page = (dir: 1 | -1) => {
     const el = ref.current;
     if (el) el.scrollBy({ left: dir * el.clientWidth * 0.85, behavior: 'smooth' });
   };
   return (
-    <div className={s.hscroll}>
+    <div className={s.hscroll} onMouseEnter={update}>
       <div ref={ref} className={className} onScroll={update}>
         {children}
       </div>

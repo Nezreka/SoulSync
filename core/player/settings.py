@@ -42,6 +42,15 @@ def _int(lo: int, hi: int) -> Callable[[Any], int]:
     return clean
 
 
+ACCENT_COLORS = ("emerald", "violet", "ocean", "amber", "rose", "crimson")
+
+
+def _accent(v: Any) -> str:
+    if isinstance(v, str) and v.strip().lower() in ACCENT_COLORS:
+        return v.strip().lower()
+    raise SettingsError(f"expected one of {', '.join(ACCENT_COLORS)}")
+
+
 # key: (default, cleaner, what it does)
 SETTINGS: Dict[str, Tuple[Any, Callable[[Any], Any], str]] = {
     "share_activity": (True, _bool,
@@ -55,6 +64,8 @@ SETTINGS: Dict[str, Tuple[Any, Callable[[Any], Any], str]] = {
                               "show the episode count badge on TV show poster cards"),
     "show_year_on_cards": (True, _bool,
                            "show the release year beneath movie and TV poster cards"),
+    "accent_color": ("emerald", _accent,
+                     "profile accent color for the player across all devices"),
 }
 
 
