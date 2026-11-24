@@ -15,10 +15,11 @@ import { clock } from '../../-engine/timeline';
 import { playlistEdits, playlistQuery, playlistsQuery } from '../../-player.api';
 import { openContextMenu } from '../context-menu';
 import { DownloadMediaButton } from '../download-button';
-import { ReportIssueButton } from '../report-issue';
 import { DownloadIcon, GripIcon, HeartIcon, PlayIcon, PlusIcon, XIcon } from '../icons';
 import { PlayerLink } from '../kit';
+import { longPress } from '../long-press';
 import { getEngine, usePlayer } from '../playback/use-player';
+import { ReportIssueButton } from '../report-issue';
 import { RetryImg } from '../retry-img';
 import { openAddToPlaylist } from './add-to-playlist';
 import s from './music.module.css';
@@ -204,6 +205,35 @@ export function TrackList({
           else if (row.onMissingAction) row.onMissingAction();
           else if (row.onRequest) row.onRequest();
         };
+        const openRowMenu = (e: { clientX: number; clientY: number }) =>
+          openContextMenu({
+            x: e.clientX,
+            y: e.clientY,
+            kind: 'track',
+            owned: playable,
+            id: playable && row.trackId !== null ? String(row.trackId) : null,
+            title: row.title,
+            subtitle: row.artist ?? row.song?.artist ?? null,
+            artwork: row.art ?? null,
+            href: row.albumHref ?? row.artistHref ?? null,
+            onPlay: playable ? () => onPlay(index) : undefined,
+            onQueue: playable && row.trackId !== null ? () => addToQueue(row) : undefined,
+            liked: playable ? liked : false,
+            onToggleLike: playable && row.song ? () => void toggleLike(row) : undefined,
+            song: playable ? (row.song ?? null) : null,
+            downloadType: playable && row.trackId !== null ? 'track' : null,
+            downloadId: playable && row.trackId !== null ? String(row.trackId) : null,
+            onRequest: !playable ? (row.onMissingAction ?? row.onRequest) : undefined,
+            extraActions: onRemove
+              ? [
+                  {
+                    label: 'Remove from playlist',
+                    onSelect: () => onRemove(index),
+                    danger: true,
+                  },
+                ]
+              : undefined,
+          });
         return (
           <div
             key={row.key}
@@ -249,35 +279,9 @@ export function TrackList({
             }}
             onContextMenu={(e) => {
               e.preventDefault();
-              openContextMenu({
-                x: e.clientX,
-                y: e.clientY,
-                kind: 'track',
-                owned: playable,
-                id: playable && row.trackId !== null ? String(row.trackId) : null,
-                title: row.title,
-                subtitle: row.artist ?? row.song?.artist ?? null,
-                artwork: row.art ?? null,
-                href: row.albumHref ?? row.artistHref ?? null,
-                onPlay: playable ? () => onPlay(index) : undefined,
-                onQueue: playable && row.trackId !== null ? () => addToQueue(row) : undefined,
-                liked: playable ? liked : false,
-                onToggleLike: playable && row.song ? () => void toggleLike(row) : undefined,
-                song: playable ? (row.song ?? null) : null,
-                downloadType: playable && row.trackId !== null ? 'track' : null,
-                downloadId: playable && row.trackId !== null ? String(row.trackId) : null,
-                onRequest: !playable ? (row.onMissingAction ?? row.onRequest) : undefined,
-                extraActions: onRemove
-                  ? [
-                      {
-                        label: 'Remove from playlist',
-                        onSelect: () => onRemove(index),
-                        danger: true,
-                      },
-                    ]
-                  : undefined,
-              });
+              openRowMenu(e);
             }}
+            {...longPress((e) => openRowMenu(e))}
           >
             <div
               className={s.trackHit}

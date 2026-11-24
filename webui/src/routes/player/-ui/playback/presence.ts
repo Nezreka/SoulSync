@@ -21,17 +21,11 @@ import { getEngine, usePlayer } from './use-player';
 
 const BEAT_MS = 15_000;
 
+// one id per page load. sessionStorage was copied when a tab was
+// duplicated, so two tabs shared an id and one's goodbye removed the other
+const PAGE_SESSION = Math.random().toString(36).slice(2, 12);
 function sessionId(): string {
-  try {
-    let id = sessionStorage.getItem('ss-player:session');
-    if (!id) {
-      id = Math.random().toString(36).slice(2, 12);
-      sessionStorage.setItem('ss-player:session', id);
-    }
-    return id;
-  } catch {
-    return 'tab';
-  }
+  return PAGE_SESSION;
 }
 
 function payload(state: PlayerState, session: string) {

@@ -394,6 +394,31 @@ interface PartySeed {
   show_id?: number | null;
 }
 
+/**
+ * a modal's manners, as the player's Sheet has them: focus goes in, escape
+ * closes it, focus comes back where it was
+ */
+function useDialog(onClose: () => void) {
+  const ref = useRef<HTMLDivElement>(null);
+  const close = useRef(onClose);
+  close.current = onClose;
+  useEffect(() => {
+    const before = document.activeElement as HTMLElement | null;
+    ref.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.stopPropagation();
+      close.current();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      before?.focus?.();
+    };
+  }, []);
+  return ref;
+}
+
 function CreatePartyModal({
   initialSeed,
   onClose,
@@ -403,6 +428,7 @@ function CreatePartyModal({
   onClose: () => void;
   onCreated: (party: WatchParty) => void;
 }) {
+  const dialogRef = useDialog(onClose);
   const catalog = useQuery(videoCatalogQuery());
   const [search, setSearch] = useState('');
   const [kindFilter, setKindFilter] = useState<'all' | 'movie' | 'episode'>('all');
@@ -501,7 +527,16 @@ function CreatePartyModal({
 
   return (
     <div className={wp.backdrop} onClick={onClose}>
-      <div className={wp.modal} style={{ maxWidth: 760 }} onClick={(e) => e.stopPropagation()}>
+      <div
+        ref={dialogRef}
+        className={wp.modal}
+        style={{ maxWidth: 760 }}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Start a watch party"
+        tabIndex={-1}
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className={wp.modalHero}>
           {pickedArt ? <img className={wp.modalHeroBg} src={pickedArt} alt="" /> : null}
           <div className={wp.modalHeroInner}>
@@ -771,6 +806,7 @@ interface RoomFloatingBubble {
 }
 
 function WatchPartyRoomModal({ partyId, onClose }: { partyId: string; onClose: () => void }) {
+  const dialogRef = useDialog(onClose);
   const qc = useQueryClient();
   const roomQ = useQuery(watchPartyQuery(partyId));
   const party = roomQ.data;
@@ -1017,7 +1053,15 @@ function WatchPartyRoomModal({ partyId, onClose }: { partyId: string; onClose: (
   return (
     <div className={wp.backdrop} onClick={onClose}>
       <audio ref={audioRef} loop />
-      <div className={wp.modal} onClick={(e) => e.stopPropagation()}>
+      <div
+        ref={dialogRef}
+        className={wp.modal}
+        role="dialog"
+        aria-modal="true"
+        aria-label={party.title}
+        tabIndex={-1}
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Dual-Side (Left + Right) Floating Emoji Reaction Lanes inside the Room Modal */}
         <div className={wp.roomSideLaneLeft} aria-hidden="true">
           {floatingBubbles

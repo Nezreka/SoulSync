@@ -120,8 +120,36 @@ export function shouldCrossfade(
 // ── Lookahead Track Blob Pre-Cache ───────────────────────────────────────────
 
 const MAX_CACHED_BLOBS = 12;
+// whole files held in page memory: hi-res flac runs 50-150 MB a track, and
+// a count alone let the cache reach a gigabyte. a byte budget too, and one
+// file over the per-track limit isn't kept (it streams as usual)
+const MAX_CACHED_BYTES = 200 * 1024 * 1024;
+const MAX_TRACK_BYTES = 80 * 1024 * 1024;
 const blobCache = new Map<string, string>();
+const blobBytes = new Map<string, number>();
 const inflight = new Set<string>();
+
+function cachedBytes(): number {
+  let total = 0;
+  for (const n of blobBytes.values()) total += n;
+  return total;
+}
+
+function evictOldest() {
+  const oldestKey = blobCache.keys().next().value;
+  if (oldestKey === undefined) return false;
+  const oldestUrl = blobCache.get(oldestKey);
+  blobCache.delete(oldestKey);
+  blobBytes.delete(oldestKey);
+  if (oldestUrl) URL.revokeObjectURL(oldestUrl);
+  return true;
+}
+
+/** the browser says data is metered or saving: don't fetch ahead */
+function savingData(): boolean {
+  const c = (navigator as Navigator & { connection?: { saveData?: boolean } }).connection;
+  return !!c?.saveData;
+}
 
 export function getCachedTrackBlobUrl(trackId: string): string | null {
   const hit = blobCache.get(trackId);
@@ -135,7 +163,7 @@ export function getCachedTrackBlobUrl(trackId: string): string | null {
 export function prefetchUpcomingTracks(items: readonly PlayItem[], currentIndex: number) {
   if (typeof window === 'undefined' || typeof fetch !== 'function') return;
   const count = getPrefetchCount();
-  if (count <= 0 || currentIndex < 0) return;
+  if (count <= 0 || currentIndex < 0 || savingData()) return;
   const upcoming = items
     .slice(currentIndex + 1, currentIndex + 1 + count)
     .filter((it) => it.type === 'track' && !blobCache.has(it.id) && !inflight.has(it.id));
@@ -146,16 +174,14 @@ export function prefetchUpcomingTracks(items: readonly PlayItem[], currentIndex:
     void fetch(url, { credentials: 'same-origin' })
       .then((res) => (res.ok ? res.blob() : null))
       .then((blob) => {
-        if (!blob) return;
+        if (!blob || blob.size > MAX_TRACK_BYTES) return;
         const objectUrl = URL.createObjectURL(blob);
         blobCache.set(track.id, objectUrl);
-        while (blobCache.size > MAX_CACHED_BLOBS) {
-          const oldestKey = blobCache.keys().next().value;
-          if (oldestKey === undefined) break;
-          const oldestUrl = blobCache.get(oldestKey);
-          blobCache.delete(oldestKey);
-          if (oldestUrl) URL.revokeObjectURL(oldestUrl);
-        }
+        blobBytes.set(track.id, blob.size);
+        while (
+          (blobCache.size > MAX_CACHED_BLOBS || cachedBytes() > MAX_CACHED_BYTES) &&
+          evictOldest()
+        );
       })
       .catch(() => undefined)
       .finally(() => {

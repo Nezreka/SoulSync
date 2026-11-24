@@ -24,6 +24,7 @@ import {
   PlayIcon,
   PlusIcon,
 } from './icons';
+import { longPress } from './long-press';
 import { usePlayCard } from './playback/play-card';
 import s from './player.module.css';
 import { usePreview } from './preview';
@@ -250,6 +251,17 @@ export function Card({
     </>
   );
 
+  const openCardMenu = (e: { clientX: number; clientY: number }) => {
+    const isOwned = !card.muted && !/\/tmdb\//.test(card.href ?? '');
+    openContextMenu({
+      ...inferContextTargetFromCard(e, card, {
+        onOpen: isOwned && onOpen ? () => onOpen(card) : undefined,
+        extraActions: actions?.map((a) => ({ label: a.label, onSelect: a.onSelect })),
+      }),
+      owned: isOwned,
+    });
+  };
+
   return (
     <div
       className={s.cardWrap}
@@ -260,15 +272,9 @@ export function Card({
       ref={menuRef}
       onContextMenu={(e) => {
         e.preventDefault();
-        const isOwned = !card.muted && !/\/tmdb\//.test(card.href ?? '');
-        openContextMenu({
-          ...inferContextTargetFromCard(e, card, {
-            onOpen: isOwned && onOpen ? () => onOpen(card) : undefined,
-            extraActions: actions?.map((a) => ({ label: a.label, onSelect: a.onSelect })),
-          }),
-          owned: isOwned,
-        });
+        openCardMenu(e);
       }}
+      {...longPress(openCardMenu)}
     >
       {onOpen ? (
         <div

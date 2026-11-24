@@ -61,7 +61,11 @@ export function cuesAt(cues: readonly Cue[], t: number): Cue[] {
     if (cues[mid].start <= t) lo = mid + 1;
     else hi = mid;
   }
+  // look back far enough for a long cue (a sign held on screen) or many at
+  // once (anime typesetting): a fixed 8 dropped them. ten minutes is longer
+  // than any real cue, and the walk stops there
   const out: Cue[] = [];
-  for (let i = lo - 1; i >= 0 && i >= lo - 8; i--) if (cues[i].end > t) out.unshift(cues[i]);
+  for (let i = lo - 1; i >= 0 && cues[i].start > t - 600; i--)
+    if (cues[i].end > t) out.unshift(cues[i]);
   return out;
 }

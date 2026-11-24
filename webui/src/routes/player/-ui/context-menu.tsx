@@ -84,7 +84,7 @@ export function closeContextMenu() {
 
 /** Infer a ContextMenuTarget from any RailCard */
 export function inferContextTargetFromCard(
-  e: React.MouseEvent,
+  e: Pick<React.MouseEvent, 'clientX' | 'clientY'>,
   card: {
     title: string;
     subtitle?: string;
