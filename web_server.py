@@ -3784,27 +3784,30 @@ def spa_catch_all(page):
 
 def _get_windowed_calls(key, current_total):
     """Record current cumulative total and return (calls_1h, calls_24h).
-    Deque stores (timestamp, cumulative_total) in chronological order.
-    To get calls in a window: current_total minus the oldest total within that window."""
+    Deque stores (timestamp, cumulative_total) in chronological order, one entry
+    per change of the total: the status poll runs every ~5 s and an idle
+    service's total does not move, and appending every poll kept up to 17,300
+    identical entries per service. Calls in a window: current_total minus the
+    total in force when the window opened (the last entry at or before its start;
+    the first entry when the history begins inside the window)."""
     now = time.time()
     cutoff_1h = now - 3600
     cutoff_24h = now - 86400
 
     with _enrichment_activity_lock:
         history = _enrichment_activity_log.setdefault(key, collections.deque(maxlen=17300))
-        history.append((now, current_total))
+        if not history or history[-1][1] != current_total:
+            history.append((now, current_total))
 
-        # Forward scan: first entry with ts >= cutoff is the oldest in that window
-        oldest_1h_total = current_total
-        oldest_24h_total = current_total
-        found_24h = False
+        oldest_1h_total = oldest_24h_total = history[0][1]
         for ts, total in history:
-            if not found_24h and ts >= cutoff_24h:
-                oldest_24h_total = total
-                found_24h = True
-            if ts >= cutoff_1h:
-                oldest_1h_total = total
+            if ts > cutoff_24h:
                 break
+            oldest_24h_total = total
+        for ts, total in history:
+            if ts > cutoff_1h:
+                break
+            oldest_1h_total = total
 
     return max(0, current_total - oldest_1h_total), max(0, current_total - oldest_24h_total)
 
@@ -23946,20 +23949,42 @@ def _chat_auto_prove_loop():
         except Exception:
             logger.debug("chat auto-prove loop error", exc_info=True)
 
+def _watched_batch_rooms():
+    """The ``batch:<id>`` rooms with at least one client in them, or None when
+    the socket server's rooms cannot be read (the caller then builds every
+    batch, as before). python-socketio drops a room when its last member
+    leaves or disconnects."""
+    try:
+        rooms = socketio.server.manager.rooms.get('/', {})
+        return {room for room, members in list(rooms.items())
+                if isinstance(room, str) and room.startswith('batch:') and members}
+    except Exception:  # noqa: BLE001 - unknown manager: keep the old behaviour
+        return None
+
+
 def _emit_download_status_loop():
     """Background thread that pushes download batch status every 2 seconds to subscribed rooms.
     Skipped entirely while no client is connected — the transfer fetch below is a real
     slskd API call (TTL-cached), so at idle this loop polled slskd every ~2s for nobody.
     Download progression doesn't depend on it (the workers poll transfers themselves);
-    this cache is populated on demand by its other callers."""
+    this cache is populated on demand by its other callers.
+
+    Only batches someone has joined the room of are built: the status of every
+    batch in memory was built (under tasks_lock) every 2 s and sent to rooms
+    nobody was in; this loop was measured at 29% of a core on a live install."""
     while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(2)
         if not _has_connected_clients():
+            continue
+        watched = _watched_batch_rooms()
+        if watched is not None and not watched:
             continue
         try:
             live_transfers_lookup = get_cached_transfer_data()
             with tasks_lock:
                 for batch_id, batch in download_batches.items():
+                    if watched is not None and f'batch:{batch_id}' not in watched:
+                        continue
                     try:
                         status_data = _build_batch_status_data(
                             batch_id, batch, live_transfers_lookup

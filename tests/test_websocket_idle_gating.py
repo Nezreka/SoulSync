@@ -212,7 +212,57 @@ def test_download_status_loop_fetches_with_a_connected_client(monkeypatch):
     fake_emit = MagicMock()
     monkeypatch.setattr(web_server.socketio, "emit", fake_emit)
 
+    # a client watching a batch: the transfers are fetched for it
+    _rooms(monkeypatch, {None: {'sid-1': 'e1'}, 'batch:x': {'sid-1': 'e1'}})
     web_server._connected_sids.add("sid-1")
     _run_one_tick(web_server._emit_download_status_loop)
 
     fake_fetch.assert_called_once()
+
+
+def _rooms(monkeypatch, rooms):
+    manager = MagicMock()
+    manager.rooms = {'/': rooms}
+    monkeypatch.setattr(web_server.socketio, "server", MagicMock(manager=manager), raising=False)
+
+
+def test_download_status_loop_builds_only_watched_batches(monkeypatch):
+    """every batch in memory was built under tasks_lock and emitted every 2 s,
+    to rooms nobody was in: 29% of a core live."""
+    built = []
+    monkeypatch.setattr(web_server, "_build_batch_status_data",
+                        lambda bid, batch, live: built.append(bid) or {'phase': 'x'})
+    monkeypatch.setattr(web_server, "get_cached_transfer_data", lambda: {})
+    fake_emit = MagicMock()
+    monkeypatch.setattr(web_server.socketio, "emit", fake_emit)
+    monkeypatch.setattr(web_server, "download_batches", {'a': {}, 'b': {}, 'c': {}})
+    _rooms(monkeypatch, {None: {'sid-1': 'e1'}, 'batch:b': {'sid-1': 'e1'}})
+    web_server._connected_sids.add("sid-1")
+    _run_one_tick(web_server._emit_download_status_loop)
+    assert built == ['b']
+    assert [c.kwargs['room'] for c in fake_emit.call_args_list] == ['batch:b']
+
+
+def test_download_status_loop_does_nothing_when_no_batch_is_watched(monkeypatch):
+    fetch = MagicMock(return_value={})
+    monkeypatch.setattr(web_server, "get_cached_transfer_data", fetch)
+    monkeypatch.setattr(web_server, "_build_batch_status_data", MagicMock())
+    monkeypatch.setattr(web_server, "download_batches", {'a': {}})
+    _rooms(monkeypatch, {None: {'sid-1': 'e1'}})
+    web_server._connected_sids.add("sid-1")
+    _run_one_tick(web_server._emit_download_status_loop)
+    fetch.assert_not_called()   # no slskd call for nobody
+    web_server._build_batch_status_data.assert_not_called()
+
+
+def test_download_status_loop_builds_everything_when_rooms_are_unreadable(monkeypatch):
+    built = []
+    monkeypatch.setattr(web_server, "_build_batch_status_data",
+                        lambda bid, batch, live: built.append(bid) or {})
+    monkeypatch.setattr(web_server, "get_cached_transfer_data", lambda: {})
+    monkeypatch.setattr(web_server.socketio, "emit", MagicMock())
+    monkeypatch.setattr(web_server, "download_batches", {'a': {}, 'b': {}})
+    monkeypatch.setattr(web_server.socketio, "server", None, raising=False)
+    web_server._connected_sids.add("sid-1")
+    _run_one_tick(web_server._emit_download_status_loop)
+    assert built == ['a', 'b']

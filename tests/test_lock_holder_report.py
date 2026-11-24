@@ -205,3 +205,16 @@ def test_the_report_ends_with_one_line_naming_the_holder_and_where_it_is(tmp_pat
         done.set()
         th.join(5)
     assert "not on a pooled connection" in db_lock_watchdog.summarize_holder()
+
+
+def test_the_busy_report_reads_no_source_lines():
+    """it ran traceback.extract_stack, which read every frame's source line:
+    linecache then kept each file of the stack, ~26 MB after a day live."""
+    import linecache
+    import threading as _th
+    me = _th.current_thread()
+    linecache.clearcache()
+    text = db_lock_watchdog.format_busy_threads({me.native_id: 1.0}, {me.native_id: 13.0}, 15.0)
+    assert text is not None and " at " in text
+    loaded = [name for name, entry in linecache.cache.items() if len(entry) > 1]
+    assert loaded == []
