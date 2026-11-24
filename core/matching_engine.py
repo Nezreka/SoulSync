@@ -121,7 +121,7 @@ def _fold_traditional_chinese(text: str) -> str:
     if _OPENCC_T2S:
         try:
             return _OPENCC_T2S.convert(text)
-        except Exception:
+        except Exception:  # noqa: BLE001, S110 - opencc failing falls back to the table below
             pass
     return text.translate(_TRAD_TO_SIMP_TABLE)
 

@@ -1235,27 +1235,27 @@ def _embed_cover_art_data(audio, image_data: bytes, mime_type: str) -> bool:
         if not image_data:
             return False
 
+        # the cover as what its bytes are (an image/jpg JPEG and every WebP
+        # went into an M4A marked PNG), a JPEG in place of a WebP, and its real
+        # size in a FLAC block instead of a made-up 640x640: the same helpers
+        # the download tagger uses (core/metadata/cover_art.py)
+        from core.metadata.common import get_mutagen_symbols
+        from core.metadata.cover_art import (
+            flac_picture, mp4_cover, normalize_cover_art, ogg_picture_comment,
+        )
+        symbols = get_mutagen_symbols()
+        image_data, mime_type = normalize_cover_art(image_data, mime_type)
+
         if isinstance(audio.tags, ID3):
             audio.tags.delall('APIC')
             audio.tags.add(APIC(encoding=3, mime=mime_type, type=3, desc='Cover', data=image_data))
         elif isinstance(audio, FLAC):
             audio.clear_pictures()
-            picture = Picture()
-            picture.data = image_data
-            picture.type = 3
-            picture.mime = mime_type
-            picture.width = 640
-            picture.height = 640
-            picture.depth = 24
-            audio.add_picture(picture)
+            audio.add_picture(flac_picture(symbols, image_data, mime_type))
         elif isinstance(audio, MP4):
-            fmt = MP4Cover.FORMAT_JPEG if 'jpeg' in mime_type else MP4Cover.FORMAT_PNG
-            audio['covr'] = [MP4Cover(image_data, imageformat=fmt)]
+            audio['covr'] = [mp4_cover(symbols, image_data, mime_type)]
         elif isinstance(audio, (OggVorbis, OggOpus)):
-            import base64
-            picture = Picture()
-            picture.data, picture.mime, picture.type = image_data, mime_type, 3
-            audio['metadata_block_picture'] = [base64.b64encode(picture.write()).decode('ascii')]
+            audio['metadata_block_picture'] = [ogg_picture_comment(symbols, image_data, mime_type)]
         else:
             return False
 

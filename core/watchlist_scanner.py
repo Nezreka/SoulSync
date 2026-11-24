@@ -1363,7 +1363,7 @@ class WatchlistScanner:
                             cand_dz = str(ext.get('deezer') or '').strip()
                             if cand_dz and cand_dz != bad_id:
                                 new_deezer_id = cand_dz
-                except Exception:
+                except Exception:  # noqa: BLE001, S110 - no replacement id found: the bad one is still cleared
                     pass
                 cur_img = str(row['image_url'] or '')
                 clear_img = bool(
