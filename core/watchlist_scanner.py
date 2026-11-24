@@ -1322,8 +1322,123 @@ class WatchlistScanner:
                 logger.debug("Could not cache %s artist ID for %s: %s", source, artist_name, e)
         return found_id
 
+    def repair_watchlist_duplicates_and_ids(self, profile_id: int) -> dict:
+        """Self-healing repair for watchlist_artists (#2274, #2275):
+        1. Fix rows where an iTunes artist ID was mistakenly copied into deezer_artist_id
+           (deezer_artist_id == itunes_artist_id), pulling the verified Deezer ID from
+           lib2_artists if available and clearing stale Deezer image URLs so artwork
+           re-resolves for the right artist.
+        2. Merge duplicate watchlist_artists rows sharing the same normalized artist name
+           for this profile, coalescing provider IDs onto the kept row.
+        """
+        stats = {"fixed_ids": 0, "cleared_artwork": 0, "merged_duplicates": 0}
+        try:
+            conn = self.database._get_connection()
+            cursor = conn.cursor()
+
+            # 1. Repair bogus deezer_artist_id == itunes_artist_id rows (#2274, #2275)
+            cursor.execute("""
+                SELECT id, artist_name, itunes_artist_id, deezer_artist_id, image_url
+                FROM watchlist_artists
+                WHERE profile_id = ?
+                  AND itunes_artist_id IS NOT NULL AND TRIM(itunes_artist_id) != ''
+                  AND deezer_artist_id IS NOT NULL AND TRIM(deezer_artist_id) = TRIM(itunes_artist_id)
+            """, (profile_id,))
+            bad_id_rows = cursor.fetchall()
+            for row in bad_id_rows:
+                bad_id = str(row['deezer_artist_id']).strip()
+                new_deezer_id = None
+                # Try to recover the verified Deezer ID from lib2_artists
+                try:
+                    cursor.execute("""
+                        SELECT external_ids, image_url FROM lib2_artists
+                        WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))
+                        LIMIT 1
+                    """, (row['artist_name'],))
+                    lib_row = cursor.fetchone()
+                    if lib_row and lib_row['external_ids']:
+                        import json as _json
+                        ext = _json.loads(lib_row['external_ids']) if isinstance(lib_row['external_ids'], str) else lib_row['external_ids']
+                        if isinstance(ext, dict):
+                            cand_dz = str(ext.get('deezer') or '').strip()
+                            if cand_dz and cand_dz != bad_id:
+                                new_deezer_id = cand_dz
+                except Exception:
+                    pass
+                cur_img = str(row['image_url'] or '')
+                clear_img = bool(
+                    cur_img and (f"/artist/{bad_id}/" in cur_img or "dzcdn.net" in cur_img or "api.deezer.com" in cur_img)
+                )
+                if clear_img:
+                    cursor.execute(
+                        "UPDATE watchlist_artists SET deezer_artist_id = ?, image_url = NULL WHERE id = ?",
+                        (new_deezer_id, row['id']),
+                    )
+                    stats["cleared_artwork"] += 1
+                else:
+                    cursor.execute(
+                        "UPDATE watchlist_artists SET deezer_artist_id = ? WHERE id = ?",
+                        (new_deezer_id, row['id']),
+                    )
+                stats["fixed_ids"] += 1
+
+            # 2. Deduplicate watchlist_artists by normalized artist_name (#2274)
+            cursor.execute("""
+                SELECT id, artist_name, spotify_artist_id, itunes_artist_id,
+                       deezer_artist_id, discogs_artist_id, musicbrainz_artist_id, image_url
+                FROM watchlist_artists
+                WHERE profile_id = ?
+                ORDER BY id ASC
+            """, (profile_id,))
+            all_rows = cursor.fetchall()
+            by_name: dict = {}
+            for r in all_rows:
+                key = " ".join(str(r['artist_name'] or '').strip().casefold().split())
+                if not key:
+                    continue
+                by_name.setdefault(key, []).append(r)
+
+            id_cols = (
+                'spotify_artist_id', 'itunes_artist_id', 'deezer_artist_id',
+                'discogs_artist_id', 'musicbrainz_artist_id', 'image_url',
+            )
+            for group in by_name.values():
+                if len(group) < 2:
+                    continue
+                keeper = group[0]
+                merged_vals = {col: keeper[col] for col in id_cols}
+                for dup in group[1:]:
+                    for col in id_cols:
+                        if not merged_vals[col] and dup[col]:
+                            merged_vals[col] = dup[col]
+                cursor.execute("""
+                    UPDATE watchlist_artists
+                    SET spotify_artist_id = ?, itunes_artist_id = ?, deezer_artist_id = ?,
+                        discogs_artist_id = ?, musicbrainz_artist_id = ?, image_url = ?
+                    WHERE id = ?
+                """, (
+                    merged_vals['spotify_artist_id'], merged_vals['itunes_artist_id'],
+                    merged_vals['deezer_artist_id'], merged_vals['discogs_artist_id'],
+                    merged_vals['musicbrainz_artist_id'], merged_vals['image_url'],
+                    keeper['id'],
+                ))
+                for dup in group[1:]:
+                    cursor.execute("DELETE FROM watchlist_artists WHERE id = ?", (dup['id'],))
+                    stats["merged_duplicates"] += 1
+
+            if any(stats.values()):
+                conn.commit()
+                logger.info(
+                    "Repaired watchlist for profile %s: fixed_ids=%s cleared_artwork=%s merged_duplicates=%s",
+                    profile_id, stats["fixed_ids"], stats["cleared_artwork"], stats["merged_duplicates"],
+                )
+        except Exception as e:
+            logger.debug("Watchlist repair skipped for profile %s: %s", profile_id, e)
+        return stats
+
     def backfill_watchlist_artist_images(self, profile_id: int) -> int:
         """Backfill missing watchlist artist images using cached metadata and existing album art."""
+        self.repair_watchlist_duplicates_and_ids(profile_id)
         try:
             conn = self.database._get_connection()
             cursor = conn.cursor()
@@ -1358,8 +1473,12 @@ class WatchlistScanner:
                 if cr and usable_image_url(cr['image_url']):
                     img = cr['image_url']
 
-                # 2. Deezer direct URL (no API call needed)
-                if not img and row['deezer_artist_id']:
+                # 2. Deezer direct URL (skip if deezer_artist_id collides with itunes_artist_id, #2275)
+                if (
+                    not img
+                    and row['deezer_artist_id']
+                    and str(row['deezer_artist_id']).strip() != str(row['itunes_artist_id'] or '').strip()
+                ):
                     img = f"https://api.deezer.com/artist/{row['deezer_artist_id']}/image?size=big"
 
                 # 3. Deezer ID from cache (artist may have a Deezer match we haven't stored on watchlist)

@@ -616,9 +616,26 @@ class MusicMatchingEngine:
         candidate_title_cleaned = self.clean_title(candidate_title)
 
         title_score = self.similarity_score(source_title_cleaned, candidate_title_cleaned)
+        # #2254: A shared trailing suffix (e.g. "- Piano Version", "(Remastered)")
+        # must never inflate two different songs by the same artist into a >=0.70 match
+        # ("Mele Kalikimaka - Piano Version" vs "Someday At Christmas - Piano Version").
+        _src_base = self.normalize_string(re.split(r'\s+[-–—]\s+|\s*[\(\[]', source_title.strip(), maxsplit=1)[0])
+        _cand_base = self.normalize_string(re.split(r'\s+[-–—]\s+|\s*[\(\[]', candidate_title.strip(), maxsplit=1)[0])
+        if _src_base and _cand_base and (
+            _src_base != source_title_cleaned or _cand_base != candidate_title_cleaned
+        ):
+            base_title_score = self.similarity_score(_src_base, _cand_base)
+            title_score = min(title_score, base_title_score)
+        if source_core_title and candidate_core_title:
+            core_title_score = self.similarity_score(source_core_title, candidate_core_title)
+            title_score = min(title_score, core_title_score)
         duration_score = self.duration_similarity(source_duration_ms, candidate_duration_ms)
 
         confidence = (title_score * 0.60) + (artist_score * 0.30) + (duration_score * 0.10)
+        # If the base/core titles themselves clearly disagree (< 0.65), cap confidence
+        # below the 0.70 sync match threshold even when artist + duration agree 100%.
+        if (source_core_title or _src_base) and (candidate_core_title or _cand_base) and title_score < 0.65:
+            confidence = min(confidence, 0.55)
 
         # Apply duration penalty when there is a significant duration mismatch (>15s and >15%)
         if significant_duration_mismatch:
