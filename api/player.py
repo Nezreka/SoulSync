@@ -304,8 +304,22 @@ def video_catalog():
     try:
         sees_movies, sees_shows, sees_youtube, cap = _video_view()
         force = str(request.args.get("refresh") or "").strip().lower() in ("1", "true", "yes")
-        raw = _read_catalog(sees_movies, sees_shows, sees_youtube, force=force)
-        return jsonify({"success": True, **shape_video_catalog(raw, sees_movies, sees_shows, sees_youtube, cap)})
+
+        def shaped():
+            raw = _read_catalog(sees_movies, sees_shows, sees_youtube, force=force)
+            return shape_video_catalog(raw, sees_movies, sees_shows, sees_youtube, cap)
+
+        if str(request.args.get("guide") or "") == "1":
+            # the guide's pool: frozen for the day, so the shared timeline
+            # doesn't re-seed when the library changes (core/player/guide_day.py)
+            from core.player import guide_day
+            view = f"catalog:{int(bool(sees_movies))}{int(bool(sees_shows))}{int(bool(sees_youtube))}:{cap}"
+            day = guide_day.frozen(
+                player_db(), view, shaped,
+                keep=lambda c: bool(c.get("movies") or c.get("shows") or c.get("youtube")),
+            )
+            return jsonify({"success": True, **day, "frozen": True})
+        return jsonify({"success": True, **shaped()})
     except Exception:  # noqa: BLE001
         logger.exception("player video catalog failed")
         return jsonify({"success": False, "error": "Could not read the video library"}), 500
@@ -990,6 +1004,11 @@ def get_commercials_config():
         return _signed_out()
     cfg = commercials.get_server_config(player_db())
     clips = commercials.list_clips_sorted() if cfg["enabled"] else []
+    if cfg["enabled"] and str(request.args.get("guide") or "") == "1":
+        # the clips the day's breaks are scheduled from: frozen like the pool,
+        # or each clip the cache fetched re-seeded everyone's day
+        from core.player import guide_day
+        clips = guide_day.frozen(player_db(), f"clips:{cfg['era']}:{cfg['mode']}", lambda: clips)
     return jsonify({
         "success": True,
         **cfg,
