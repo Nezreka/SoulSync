@@ -951,7 +951,68 @@ def put_player_settings():
         return _failed("settings save", "Couldn't save that setting.")
     if not out["share_activity"]:
         presence.forget_profile(pid)
+    if out.get("commercials_enabled"):
+        try:
+            from core.player import commercials
+            commercials.warm_async(out.get("commercials_era") or "mix")
+        except Exception:  # noqa: BLE001
+            pass
     return jsonify({"success": True, "settings": out})
+
+
+@bp.route("/api/player/commercials/status", methods=["GET"])
+@device_playback
+@self_only
+def get_commercials_status():
+    """Return retro commercial cache readiness and counts."""
+    from core.player import commercials
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    return jsonify({"success": True, **commercials.status()})
+
+
+@bp.route("/api/player/commercials/warm", methods=["POST"])
+@device_playback
+@self_only
+def warm_commercials():
+    """Trigger non-blocking background fetch of retro commercials from Archive.org."""
+    from core.player import commercials
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    body = request.get_json(silent=True) or {}
+    era = str(body.get("era") or "mix").strip().lower()
+    started = commercials.warm_async(era)
+    return jsonify({"success": True, "started": started, **commercials.status()})
+
+
+@bp.route("/api/player/commercials/break", methods=["GET"])
+@device_playback
+@self_only
+def get_commercial_break():
+    """Pick 1-3 retro commercials for a break between Live Guide programs."""
+    from core.player import commercials, settings
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    prefs = settings.get(player_db(), pid)
+    era = str(request.args.get("era") or prefs.get("commercials_era") or "auto").strip().lower()
+    mode = str(request.args.get("mode") or prefs.get("commercials_mode") or "short").strip().lower()
+    channel_id = str(request.args.get("channel_id") or "")
+    channel_name = str(request.args.get("channel_name") or "")
+    try:
+        max_sec = int(request.args.get("max_seconds") or 0) or None
+    except ValueError:
+        max_sec = None
+    clips = commercials.pick_break(
+        era=era,
+        channel_id=channel_id,
+        channel_name=channel_name,
+        mode=mode,
+        max_seconds=max_sec,
+    )
+    return jsonify({"success": True, "clips": clips})
 
 
 # ── watching now (who plays what, live) ─────────────────────────────────

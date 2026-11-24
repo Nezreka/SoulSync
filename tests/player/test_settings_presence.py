@@ -55,6 +55,9 @@ def test_settings_default_then_save_per_profile(db):
         "show_tv_episode_count": True,
         "show_year_on_cards": True,
         "accent_color": "emerald",
+        "commercials_enabled": False,
+        "commercials_era": "auto",
+        "commercials_mode": "short",
     }
     settings.put(db, 2, {"share_activity": False, "still_watching_after": 0})
     assert settings.get(db, 2)["share_activity"] is False

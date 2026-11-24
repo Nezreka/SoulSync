@@ -43,12 +43,26 @@ def _int(lo: int, hi: int) -> Callable[[Any], int]:
 
 
 ACCENT_COLORS = ("emerald", "violet", "ocean", "amber", "rose", "crimson")
+COMMERCIAL_ERAS = ("auto", "70s", "80s", "90s", "2000s", "kids", "mix")
+COMMERCIAL_MODES = ("short", "cable")
 
 
 def _accent(v: Any) -> str:
     if isinstance(v, str) and v.strip().lower() in ACCENT_COLORS:
         return v.strip().lower()
     raise SettingsError(f"expected one of {', '.join(ACCENT_COLORS)}")
+
+
+def _commercial_era(v: Any) -> str:
+    if isinstance(v, str) and v.strip().lower() in COMMERCIAL_ERAS:
+        return v.strip().lower()
+    raise SettingsError(f"expected one of {', '.join(COMMERCIAL_ERAS)}")
+
+
+def _commercial_mode(v: Any) -> str:
+    if isinstance(v, str) and v.strip().lower() in COMMERCIAL_MODES:
+        return v.strip().lower()
+    raise SettingsError(f"expected one of {', '.join(COMMERCIAL_MODES)}")
 
 
 # key: (default, cleaner, what it does)
@@ -66,6 +80,12 @@ SETTINGS: Dict[str, Tuple[Any, Callable[[Any], Any], str]] = {
                            "show the release year beneath movie and TV poster cards"),
     "accent_color": ("emerald", _accent,
                      "profile accent color for the player across all devices"),
+    "commercials_enabled": (False, _bool,
+                            "play optional retro commercial breaks between Live Guide programs"),
+    "commercials_era": ("auto", _commercial_era,
+                        "decade or vibe for retro commercials (auto matches each channel)"),
+    "commercials_mode": ("short", _commercial_mode,
+                         "short 1-2 spot break or classic cable multi-spot break"),
 }
 
 

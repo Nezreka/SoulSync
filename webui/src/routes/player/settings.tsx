@@ -13,7 +13,7 @@ import { useEffect, useRef, useState } from 'react';
 
 import { THEMES } from '@/lib/visualizer';
 
-import type { PlayerSettings } from './-player.api';
+import type { CommercialEra, CommercialMode, PlayerSettings } from './-player.api';
 
 import {
   CROSSFADE_OPTIONS,
@@ -26,7 +26,12 @@ import {
   useSmartGapless,
 } from './-engine/crossfade';
 import { QUALITIES, type Quality } from './-engine/engine';
-import { playerSettingsQuery, savePlayerSettings } from './-player.api';
+import {
+  commercialsStatusQuery,
+  playerSettingsQuery,
+  savePlayerSettings,
+  warmCommercials,
+} from './-player.api';
 import {
   CheckIcon,
   ChevronIcon,
@@ -154,6 +159,11 @@ const ORDERED_BRIGHTNESS = [...BRIGHTNESS_STEPS].reverse();
 function SettingsPage() {
   const queryClient = useQueryClient();
   const settings = useQuery(playerSettingsQuery());
+  const commStatus = useQuery({
+    ...commercialsStatusQuery(),
+    refetchInterval: (q) => (q.state.data?.warming ? 3000 : false),
+  });
+  const [warmingComm, setWarmingComm] = useState(false);
   const [saved, setSaved] = useState(false);
   const timerRef = useRef<number | null>(null);
 
@@ -177,6 +187,9 @@ function SettingsPage() {
         old ? { ...old, settings: next } : old,
       );
       void queryClient.invalidateQueries({ queryKey: ['player', 'watching-now'] });
+      if (next.commercials_enabled) {
+        void queryClient.invalidateQueries({ queryKey: ['player', 'commercials-status'] });
+      }
       flashSaved();
     },
   });
@@ -271,6 +284,126 @@ function SettingsPage() {
               })}
             </div>
           </Row>
+        </Group>
+
+        <Group
+          icon={<MovieIcon />}
+          title="Retro commercial breaks"
+          badge="All screens"
+          note="Optional vintage TV spots from Archive.org (auto-cached in the background, zero manual downloading) or your local commercials folder between Live Guide shows."
+        >
+          <Row
+            label="Play retro commercials between shows"
+            help={
+              commStatus.data?.warming
+                ? 'Fetching retro spots from Archive.org in the background…'
+                : commStatus.data?.total_count
+                  ? `${commStatus.data.total_count} retro spots ready (${commStatus.data.cache_mb} MB cached).`
+                  : 'Off by default. Turn on to automatically cache vintage 15–60s spots.'
+            }
+          >
+            <Switch
+              label="Play retro commercials between shows"
+              on={mine?.commercials_enabled ?? false}
+              busy={!mine || busy}
+              onChange={(v) => save.mutate({ commercials_enabled: v })}
+            />
+          </Row>
+
+          {mine?.commercials_enabled ? (
+            <>
+              <Row
+                stacked
+                label="Commercial era"
+                help="Auto matches each channel's decade or vibe (e.g. 90s channels get 90s spots)."
+              >
+                <div className={s.segGroup} role="radiogroup" aria-label="Commercial era">
+                  {(
+                    [
+                      ['auto', 'Auto'],
+                      ['70s', '70s'],
+                      ['80s', '80s'],
+                      ['90s', '90s'],
+                      ['2000s', '2000s'],
+                      ['kids', 'Kids'],
+                      ['mix', 'Mix'],
+                    ] as [CommercialEra, string][]
+                  ).map(([val, lbl]) => {
+                    const on = (mine?.commercials_era ?? 'auto') === val;
+                    return (
+                      <button
+                        key={val}
+                        type="button"
+                        role="radio"
+                        aria-checked={on}
+                        className={s.segBtn}
+                        data-on={on ? 'true' : undefined}
+                        disabled={!mine || busy}
+                        onClick={() => save.mutate({ commercials_era: val })}
+                        data-nav
+                      >
+                        {lbl}
+                      </button>
+                    );
+                  })}
+                </div>
+              </Row>
+
+              <Row
+                stacked
+                label="Break style"
+                help="Short inserts 1–2 quick spots (~30–60s); Classic cable plays a fuller 2–3 spot block."
+              >
+                <div className={s.segGroup} role="radiogroup" aria-label="Break style">
+                  {(
+                    [
+                      ['short', 'Short (1–2 spots)'],
+                      ['cable', 'Classic cable'],
+                    ] as [CommercialMode, string][]
+                  ).map(([val, lbl]) => {
+                    const on = (mine?.commercials_mode ?? 'short') === val;
+                    return (
+                      <button
+                        key={val}
+                        type="button"
+                        role="radio"
+                        aria-checked={on}
+                        className={s.segBtn}
+                        data-on={on ? 'true' : undefined}
+                        disabled={!mine || busy}
+                        onClick={() => save.mutate({ commercials_mode: val })}
+                        data-nav
+                      >
+                        {lbl}
+                      </button>
+                    );
+                  })}
+                </div>
+              </Row>
+
+              <Row
+                label="Refresh commercial pool"
+                help="Fetch fresh vintage spots from Internet Archive into your rolling cache."
+              >
+                <button
+                  type="button"
+                  className={s.segBtn}
+                  disabled={warmingComm || commStatus.data?.warming}
+                  onClick={() => {
+                    setWarmingComm(true);
+                    void warmCommercials(mine?.commercials_era ?? 'mix')
+                      .then(() =>
+                        queryClient.invalidateQueries({ queryKey: ['player', 'commercials-status'] }),
+                      )
+                      .finally(() => setWarmingComm(false));
+                  }}
+                  data-nav
+                >
+                  {warmingComm || commStatus.data?.warming ? 'Fetching…' : 'Fetch spots now'}
+                </button>
+              </Row>
+            </>
+          ) : null}
         </Group>
 
         <Group

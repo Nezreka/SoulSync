@@ -383,6 +383,9 @@ export const playlistEdits = {
 
 export type PlayerAccentColor = 'emerald' | 'violet' | 'ocean' | 'amber' | 'rose' | 'crimson';
 
+export type CommercialEra = 'auto' | '70s' | '80s' | '90s' | '2000s' | 'kids' | 'mix';
+export type CommercialMode = 'short' | 'cable';
+
 export interface PlayerSettings {
   share_activity: boolean;
   autoplay_next: boolean;
@@ -391,6 +394,75 @@ export interface PlayerSettings {
   show_tv_episode_count: boolean;
   show_year_on_cards: boolean;
   accent_color?: PlayerAccentColor;
+  commercials_enabled?: boolean;
+  commercials_era?: CommercialEra;
+  commercials_mode?: CommercialMode;
+}
+
+export interface CommercialClip {
+  id: string;
+  title: string;
+  era: string;
+  duration_seconds: number;
+  source: string;
+  stream_path: string;
+}
+
+export interface CommercialsStatus {
+  ready: boolean;
+  total_count: number;
+  cached_count: number;
+  local_count: number;
+  cache_mb: number;
+  warming: boolean;
+  eras: Record<string, number>;
+  error?: string | null;
+}
+
+export const commercialsStatusQuery = () =>
+  queryOptions({
+    queryKey: ['player', 'commercials-status'],
+    queryFn: () => apiClient.get('player/commercials/status').json<CommercialsStatus>(),
+    staleTime: 15_000,
+  });
+
+export async function warmCommercials(era: CommercialEra = 'mix'): Promise<CommercialsStatus> {
+  return apiClient.post('player/commercials/warm', { json: { era } }).json<CommercialsStatus>();
+}
+
+export async function fetchPlayerSettings(): Promise<PlayerSettings | null> {
+  try {
+    const res = await apiClient
+      .get('player/settings')
+      .json<{ settings?: PlayerSettings }>();
+    return res.settings ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchCommercialBreak(opts: {
+  era?: CommercialEra;
+  mode?: CommercialMode;
+  channelId?: string;
+  channelName?: string;
+}): Promise<CommercialClip[]> {
+  try {
+    const res = await apiClient
+      .get('player/commercials/break', {
+        searchParams: {
+          ...(opts.era ? { era: opts.era } : {}),
+          ...(opts.mode ? { mode: opts.mode } : {}),
+          ...(opts.channelId ? { channel_id: opts.channelId } : {}),
+          ...(opts.channelName ? { channel_name: opts.channelName } : {}),
+        },
+        timeout: 2500,
+      })
+      .json<{ clips?: CommercialClip[] }>();
+    return res.clips ?? [];
+  } catch {
+    return [];
+  }
 }
 
 export const playerSettingsQuery = () =>

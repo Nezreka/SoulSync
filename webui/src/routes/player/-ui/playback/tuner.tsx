@@ -17,10 +17,11 @@ import type { Channel } from '../../-lib/channels';
 
 import { runtime } from '../../-lib/format';
 import { stepTuning, tuneAt, type Tuning } from '../../-lib/tuner';
+import { fetchCommercialBreak, fetchPlayerSettings } from '../../-player.api';
 import { inPlayer } from '../trailer';
 import { ChannelDownIcon, ChannelUpIcon, LastChannelIcon, StartOverIcon } from './icons';
 import s from './playback.module.css';
-import { playItems, usePlayer } from './use-player';
+import { getEngine, playItems, usePlayer } from './use-player';
 
 interface Tuned {
   lineup: Channel[];
@@ -55,8 +56,37 @@ export function setLineup(channels: Channel[]) {
   emit({ lineup: channels });
 }
 
+function spliceCommercialsIfEnabled(t: Tuning) {
+  if (t.channel.music || t.queue.length < 2) return;
+  void fetchPlayerSettings()
+    .then(async (prefs) => {
+      if (!prefs?.commercials_enabled) return;
+      const clips = await fetchCommercialBreak({
+        era: prefs.commercials_era,
+        mode: prefs.commercials_mode,
+        channelId: t.channel.id,
+        channelName: t.channel.name,
+      });
+      if (!clips.length) return;
+      const eng = getEngine();
+      const st = eng.getState();
+      if (!st.live || st.item?.id !== t.queue[0]?.id) return;
+      const commItems = clips.map((c) => ({
+        type: 'commercial' as const,
+        id: c.id,
+        title: c.title,
+        subtitle: `Commercial Break · CH ${t.channel.number ?? ''} ${t.channel.name}`.trim(),
+        duration: c.duration_seconds,
+      }));
+      // Insert retro commercial break right after the currently playing show
+      eng.playNext(commItems);
+    })
+    .catch(() => undefined);
+}
+
 function play(t: Tuning) {
   playItems(t.queue, 0, { startAt: t.startAt, live: true });
+  spliceCommercialsIfEnabled(t);
   const before = tuned.current?.channel;
   emit({
     current: t,

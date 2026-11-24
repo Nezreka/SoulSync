@@ -352,21 +352,117 @@ def create_cast_token():
         return jsonify({"success": False, "error": "failed"}), 500
     pid = int(getattr(g, "profile_id", 1) or 1)
     ct = _sign_cast_token(pid, item_type, item_id, part_str)
-    stream_path = f"/api/player/cast-stream/{item_type}/{quote(item_id, safe='')}?ct={quote(ct, safe='')}"
     lan_origin = _cast_lan_http_origin()
     _, _, dur_sec = _probe_cast_media(source)
     needs_tx = _cast_needs_transcode(item_type, source)
+    from core.player import transcode as T
+    use_hls = bool(needs_tx and dur_sec and dur_sec > 0 and T.ffmpeg_path())
+    if use_hls:
+        stream_path = f"/api/player/cast-hls/{item_type}/{quote(item_id, safe='')}/index.m3u8?ct={quote(ct, safe='')}"
+        content_type = "application/x-mpegURL"
+    else:
+        stream_path = f"/api/player/cast-stream/{item_type}/{quote(item_id, safe='')}?ct={quote(ct, safe='')}"
+        content_type = "video/mp4" if needs_tx else (source.mime or "application/octet-stream")
     return jsonify({
         "success": True,
         "token": ct,
         "stream_path": stream_path,
         "stream_url": f"{lan_origin}{stream_path}" if lan_origin else None,
         "artwork_base_url": lan_origin,
-        "content_type": "video/mp4" if needs_tx else (source.mime or "application/octet-stream"),
+        "content_type": content_type,
         "duration_ms": int(dur_sec * 1000) if dur_sec and dur_sec > 0 else 0,
         "transcoded": needs_tx,
+        "hls": use_hls,
         "expires_in": _CAST_TOKEN_TTL,
     })
+
+
+def _resolve_cast_source(item_type: str, item_id: str):
+    """Verify signed cast token, hydrate profile context, and resolve playable source."""
+    verified = _verify_cast_token(request.args.get("ct", ""), item_type, item_id)
+    if verified is None:
+        return None, None, (_add_cast_cors(jsonify({"success": False, "error": "invalid_cast_token"})), 401)
+    pid, part = verified
+    from core import permission_store
+    from database.music_database import get_database
+    ctx = permission_store.context_for(get_database(), pid)
+    g.profile_id = pid
+    g.is_admin = bool(ctx.get("is_admin", False))
+    g.perms = ctx.get("perms")
+    g.perms_source = ctx.get("source", "none")
+    from core.player.playable import Refused, resolve
+    try:
+        source = resolve(item_type, item_id, part)
+    except Refused as e:
+        return None, None, (_add_cast_cors(_refused(e)[0]), e.status)
+    except Exception:  # noqa: BLE001
+        logger.exception("cast source resolve failed for %s %s", item_type, item_id)
+        return None, None, (_add_cast_cors(jsonify({"success": False, "error": "failed"})), 500)
+    return pid, source, None
+
+
+@bp.route("/api/player/cast-hls/<item_type>/<path:item_id>/index.m3u8", methods=["GET", "OPTIONS"])
+@public
+def cast_hls_playlist(item_type, item_id):
+    """Serve a deterministic VOD HLS playlist with exact duration for Chromecast."""
+    if request.method == "OPTIONS":
+        return _add_cast_cors(make_response("", 204))
+    pid, source, err = _resolve_cast_source(item_type, item_id)
+    if err is not None:
+        return err
+    _, _, dur_sec = _probe_cast_media(source)
+    if not dur_sec or dur_sec <= 0:
+        return _add_cast_cors(jsonify({"success": False, "error": "unknown_duration"})), 404
+    from core.player.hls_cast import render_vod_playlist
+    ct = request.args.get("ct", "")
+    body = render_vod_playlist(dur_sec, query_string=f"ct={quote(ct, safe='')}")
+    resp = make_response(body, 200)
+    resp.headers["Content-Type"] = "application/vnd.apple.mpegurl"
+    resp.headers["Cache-Control"] = "no-store"
+    return _add_cast_cors(resp)
+
+
+@bp.route("/api/player/cast-hls/<item_type>/<path:item_id>/seg/<int:seg_idx>.ts", methods=["GET", "OPTIONS"])
+@public
+def cast_hls_segment(item_type, item_id, seg_idx):
+    """Serve one 6-second MPEG-TS segment from a rolling ffmpeg HLS session."""
+    if request.method == "OPTIONS":
+        return _add_cast_cors(make_response("", 204))
+    if seg_idx < 0:
+        return _add_cast_cors(jsonify({"success": False, "error": "bad_segment"})), 400
+    pid, source, err = _resolve_cast_source(item_type, item_id)
+    if err is not None:
+        return err
+    from core.player import transcode as T
+    from core.player.hls_cast import get_segment_bytes
+    ffmpeg = T.ffmpeg_path()
+    if not ffmpeg:
+        return _add_cast_cors(jsonify({"success": False, "error": "no_ffmpeg"})), 503
+    v_codec, a_codec, _ = _probe_cast_media(source)
+    p = T.Plan(
+        copy_video=(v_codec == "h264"),
+        copy_audio=(a_codec in ("aac", "mp3")),
+        reasons=["chromecast-hls"],
+        quality="1080p",
+        tonemap=False,
+    )
+    origin = source.path if source.mode == "file" else source.url
+    session_key = f"cast-hls:{pid}:{item_type}:{item_id}"
+    data = get_segment_bytes(
+        session_key=session_key,
+        seg_idx=seg_idx,
+        ffmpeg=ffmpeg,
+        source_origin=origin,
+        plan=p,
+        enc=T.encoder(ffmpeg),
+        can_tonemap=T.has_filter(ffmpeg, "zscale"),
+    )
+    if not data:
+        return _add_cast_cors(jsonify({"success": False, "error": "segment_unavailable"})), 504
+    resp = make_response(data, 200)
+    resp.headers["Content-Type"] = "video/mp2t"
+    resp.headers["Cache-Control"] = "public, max-age=300"
+    return _add_cast_cors(resp)
 
 
 @bp.route("/api/player/cast-stream/<item_type>/<path:item_id>", methods=["GET", "OPTIONS"])
