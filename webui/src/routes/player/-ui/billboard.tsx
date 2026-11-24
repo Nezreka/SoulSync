@@ -20,6 +20,7 @@ import { InfoIcon } from './icons';
 import { Art, PlayButton, PlayerLink, styles as s } from './kit';
 import { usePlayTitle } from './playback/play-title';
 import { BackgroundTrailer, type TrailerStage } from './trailer';
+import { WatchlistButton } from './watchlist';
 
 export type Slide =
   | { kind: 'movie'; item: CatalogMovie; why: string }
@@ -154,6 +155,7 @@ export function Billboard({ slides }: { slides: Slide[] }) {
         <Story slide={slide} />
         <div className={s.billboardActions}>
           <PlayButton onPlay={() => void playTitle(slide.kind, item.id)} />
+          <WatchlistButton kind={slide.kind} id={item.id} compact />
           <PlayerLink href={hrefOf(slide)} className={s.billboardInfo} data-nav>
             <InfoIcon />
             More info

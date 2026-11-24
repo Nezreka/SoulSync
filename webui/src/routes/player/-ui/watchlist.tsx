@@ -20,7 +20,7 @@ import {
   type WatchlistItem,
   type WatchlistKind,
 } from '../-player.api';
-import { CheckIcon, PlusIcon } from './icons';
+import { BookmarkIcon } from './icons';
 import { styles as s } from './kit';
 
 const keyOf = (kind: string, id: string | number) => `${kind}:${id}`;
@@ -94,7 +94,7 @@ export function WatchlistButton({
       }}
       data-nav
     >
-      {on ? <CheckIcon /> : <PlusIcon />}
+      <BookmarkIcon filled={on} />
       {compact ? null : on ? 'On your watchlist' : 'Watchlist'}
     </button>
   );

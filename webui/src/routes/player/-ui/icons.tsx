@@ -203,10 +203,15 @@ export const DownloadIcon = () => (
   </Icon>
 );
 
+export const BookmarkIcon = ({ filled }: { filled?: boolean }) => (
+  <Icon fill={filled ? 'currentColor' : 'none'}>
+    <path d="M7 4h10a1 1 0 0 1 1 1v15l-6-3.6L6 20V5a1 1 0 0 1 1-1Z" />
+  </Icon>
+);
+
 export const WatchlistIcon = () => (
   <Icon>
     <path d="M7 4h10a1 1 0 0 1 1 1v15l-6-3.6L6 20V5a1 1 0 0 1 1-1Z" />
-    <path d="M12 8v5M9.5 10.5h5" />
   </Icon>
 );
 

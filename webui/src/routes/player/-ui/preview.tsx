@@ -13,6 +13,7 @@ import { createPortal } from 'react-dom';
 import { runtime } from '../-lib/format';
 import { backdropUrl, proxiedImage } from '../-lib/rails';
 import { extrasQuery, movieDetailQuery, showDetailQuery } from '../-player.api';
+import { InfoIcon } from './icons';
 import { Art, Badge, PlayButton, PlayerLink, styles as s } from './kit';
 import { usePlayTitle } from './playback/play-title';
 import { embedUrl, useTrailersSetting } from './trailer';
@@ -230,6 +231,7 @@ function PreviewPanel({
           <WatchlistButton kind={target.kind} id={target.id} compact />
           {href ? (
             <PlayerLink href={href} className={s.btn} data-nav>
+              <InfoIcon />
               More info
             </PlayerLink>
           ) : null}

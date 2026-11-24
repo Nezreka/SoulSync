@@ -4507,6 +4507,13 @@ a.crewRow:hover {
 
 .iconRound[aria-pressed='true'] {
   border-color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.16);
+  color: var(--accent-light);
+}
+
+.btn[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.16);
   color: var(--accent-light);
 }
 
