@@ -66,3 +66,6 @@ Stream/
 # Music video library — the ./MusicVideos bind mount from docker-compose.yml.
 # Instance data like /downloads/, including half-finished *.part files.
 MusicVideos/
+# the server's root secret (core/connect/server_key.py) and the player's cache
+database/server_key
+database/player-cache/

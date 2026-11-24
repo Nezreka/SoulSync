@@ -1891,6 +1891,10 @@ def player_issues_list():
         status=status,
         limit=limit,
     )
+    if not can_manage:
+        # where a file lives is the admin's business, not the reporter's
+        for issue in data.get("issues") or []:
+            issue.pop("file_path", None)
     return jsonify({"success": True, "can_manage": can_manage, **data})
 
 
@@ -1926,6 +1930,8 @@ def player_issues_create():
         return _bad(e)
     except Exception:  # noqa: BLE001
         return _failed("player issue create", "Couldn't submit issue report.")
+    if not _is_player_admin():
+        issue.pop("file_path", None)
     return jsonify({"success": True, "issue": issue}), 201
 
 
