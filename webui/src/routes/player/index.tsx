@@ -45,6 +45,7 @@ import { Billboard, type Slide } from './-ui/billboard';
 import { HomeEditor } from './-ui/home-editor';
 import { CardRail, Empty, Rail, SkeletonRail, styles as s, type CardAction } from './-ui/kit';
 import { DiscoverCard } from './-ui/music/discover-card';
+import { notifyError } from './-ui/notice';
 import { useSections } from './-ui/sections';
 import { RankedRail } from './-ui/top10';
 
@@ -203,10 +204,12 @@ function PlayerHome() {
   const remove = useMutation({
     mutationFn: (card: RailCard) => removeProgress(card.source!.itemType, card.source!.itemId),
     onSettled: refresh,
+    onError: notifyError("Couldn't remove it from the row"),
   });
   const finish = useMutation({
     mutationFn: (card: RailCard) => finishProgress(card.source!.itemType, card.source!.itemId),
     onSettled: refresh,
+    onError: notifyError("Couldn't mark it finished"),
   });
   const continueActions = (card: RailCard): CardAction[] =>
     card.source

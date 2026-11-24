@@ -140,8 +140,9 @@ function FullPlayer({ state, onLeave }: { state: PlayerState; onLeave: () => voi
         'input, textarea, select, [role="menu"]',
       );
       if (typing) return;
-      // a menu is open: its own keys (escape closes it, and only it)
-      if (document.querySelector('[role="menu"]')) return;
+      // a menu or a dialog is open over the player (report an issue, a sheet):
+      // its own keys. escape closes it, and only it; space doesn't pause behind it
+      if (document.querySelector('[role="menu"], [aria-modal="true"]')) return;
       const v = engine.getState();
       const togglePlayOrParty = () => {
         if (!handleWatchPartyPlayerToggle()) engine.toggle();

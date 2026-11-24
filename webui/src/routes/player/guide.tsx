@@ -64,6 +64,7 @@ import { GuidePop, GuideStrip } from './-ui/guide-pop';
 import { SearchIcon } from './-ui/icons';
 import { Empty, PageTitle, Tabs, styles as s } from './-ui/kit';
 import { LineupEditor } from './-ui/lineup-editor';
+import { notifyError } from './-ui/notice';
 import { setLineup } from './-ui/playback/tuner';
 import { useSections } from './-ui/sections';
 import { ConfirmSheet } from './-ui/sheet';
@@ -135,8 +136,9 @@ function useFavorites() {
       queryClient.setQueryData(favoritesQuery().queryKey, next);
       return { before };
     },
-    onError: (_e, _next, ctx) => {
+    onError: (e, _next, ctx) => {
       if (ctx?.before) queryClient.setQueryData(favoritesQuery().queryKey, ctx.before);
+      notifyError("Couldn't save your favorites")(e);
     },
   });
   const list = favorites.data ?? [];
@@ -612,11 +614,17 @@ function GuidePage() {
           danger
           onClose={() => setRemoving(null)}
           onConfirm={() => {
-            void guideEdits.remove(removing.id).then(() => {
-              setRemoving(null);
-              setPicked(null);
-              void refreshMade();
-            });
+            void guideEdits
+              .remove(removing.id)
+              .then(() => {
+                setRemoving(null);
+                setPicked(null);
+                void refreshMade();
+              })
+              .catch((e: unknown) => {
+                setRemoving(null);
+                notifyError("Couldn't remove that channel")(e);
+              });
           }}
         >
           {removing.scope === 'server'

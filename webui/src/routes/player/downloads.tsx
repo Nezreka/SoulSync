@@ -9,6 +9,7 @@ import {
   type DownloadItemType,
 } from './-lib/downloads';
 import { PageTitle } from './-ui/kit';
+import { notifyError } from './-ui/notice';
 
 export const Route = createFileRoute('/player/downloads')({
   component: PlayerDownloadsPage,
@@ -72,6 +73,7 @@ export function MyDownloadsPanel() {
       void qc.invalidateQueries({ queryKey: ['player', 'downloads'] });
       void qc.invalidateQueries({ queryKey: ['player', 'admin', 'users'] });
     },
+    onError: notifyError("Couldn't remove that download"),
   });
 
   return (

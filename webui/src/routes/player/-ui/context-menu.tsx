@@ -289,7 +289,11 @@ export function ContextMenuHost() {
       if (target.href) {
         closeContextMenu();
         void navigate({ to: target.href as '/player' });
+        return;
       }
+      // nothing to play (a show with no episodes yet) and nowhere to go
+      setBusyMsg(null);
+      setStatusNote('Nothing to play here yet');
     } catch {
       setBusyMsg(null);
       setStatusNote('Could not start playback');

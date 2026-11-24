@@ -632,6 +632,13 @@ a.nowTitle:hover {
   opacity: 1;
 }
 
+/* a phone has no hover: the move and remove buttons were there but invisible */
+@media (hover: none) {
+  .queueTools {
+    opacity: 1;
+  }
+}
+
 .queueTools button {
   width: calc(var(--u) * 1.7);
   height: calc(var(--u) * 1.7);

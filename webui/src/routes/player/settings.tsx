@@ -47,6 +47,7 @@ import {
   TvIcon,
 } from './-ui/icons';
 import { PageTitle } from './-ui/kit';
+import { notifyError } from './-ui/notice';
 import { QUALITY_LABELS } from './-ui/playback/controls';
 import {
   BRIGHTNESS_STEPS,
@@ -175,6 +176,7 @@ function SettingsPage() {
       void queryClient.invalidateQueries({ queryKey: ['player', 'issues'] });
       flashSaved();
     },
+    onError: notifyError("Couldn't update that report"),
   });
   const commStatus = useQuery({
     ...commercialsStatusQuery(),
@@ -188,6 +190,7 @@ function SettingsPage() {
       void queryClient.invalidateQueries({ queryKey: ['player', 'commercials-status'] });
       flashSaved();
     },
+    onError: notifyError("Couldn't save the commercials setting"),
   });
   const [warmingComm, setWarmingComm] = useState(false);
   const [clearingComm, setClearingComm] = useState(false);
@@ -219,6 +222,7 @@ function SettingsPage() {
       }
       flashSaved();
     },
+    onError: notifyError("Couldn't save that setting"),
   });
 
   const player = usePlayer();
@@ -423,10 +427,15 @@ function SettingsPage() {
                         void warmCommercials(commConfig.data?.era ?? 'mix')
                           .then(() =>
                             Promise.all([
-                              queryClient.invalidateQueries({ queryKey: ['player', 'commercials-status'] }),
-                              queryClient.invalidateQueries({ queryKey: ['player', 'commercials-config'] }),
+                              queryClient.invalidateQueries({
+                                queryKey: ['player', 'commercials-status'],
+                              }),
+                              queryClient.invalidateQueries({
+                                queryKey: ['player', 'commercials-config'],
+                              }),
                             ]),
                           )
+                          .catch(notifyError("Couldn't fetch spots right now"))
                           .finally(() => setWarmingComm(false));
                       }}
                       data-nav
@@ -442,10 +451,15 @@ function SettingsPage() {
                         void clearCommercialsCache()
                           .then(() =>
                             Promise.all([
-                              queryClient.invalidateQueries({ queryKey: ['player', 'commercials-status'] }),
-                              queryClient.invalidateQueries({ queryKey: ['player', 'commercials-config'] }),
+                              queryClient.invalidateQueries({
+                                queryKey: ['player', 'commercials-status'],
+                              }),
+                              queryClient.invalidateQueries({
+                                queryKey: ['player', 'commercials-config'],
+                              }),
                             ]),
                           )
+                          .catch(notifyError("Couldn't clear the spots"))
                           .finally(() => setClearingComm(false));
                       }}
                       data-nav
@@ -835,8 +849,17 @@ function SettingsPage() {
                     gap: 6,
                   }}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: 10,
+                    }}
+                  >
+                    <div
+                      style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}
+                    >
                       <strong style={{ fontSize: '0.92rem' }}>{iss.title}</strong>
                       <span
                         style={{
@@ -892,7 +915,13 @@ function SettingsPage() {
                       {iss.note}
                     </div>
                   ) : null}
-                  <div style={{ fontSize: '0.75rem', color: 'var(--pl-text-3, #8792a6)', wordBreak: 'break-all' }}>
+                  <div
+                    style={{
+                      fontSize: '0.75rem',
+                      color: 'var(--pl-text-3, #8792a6)',
+                      wordBreak: 'break-all',
+                    }}
+                  >
                     {iss.profile_name ? `Reported by ${iss.profile_name}` : ''}
                     {iss.file_path ? ` · ${iss.file_path}` : ''}
                   </div>
@@ -900,8 +929,11 @@ function SettingsPage() {
               ))}
             </div>
           ) : (
-            <div style={{ fontSize: '0.86rem', color: 'var(--pl-text-2, #a8b0c0)', padding: '6px 0' }}>
-              No reported media issues yet. Use the flag button on any movie, episode, YouTube video, track, podcast, or audiobook to report a broken file.
+            <div
+              style={{ fontSize: '0.86rem', color: 'var(--pl-text-2, #a8b0c0)', padding: '6px 0' }}
+            >
+              No reported media issues yet. Use the flag button on any movie, episode, YouTube
+              video, track, podcast, or audiobook to report a broken file.
             </div>
           )}
         </Group>
