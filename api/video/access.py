@@ -306,6 +306,8 @@ ADMIN_ANY = ("/api/video/overlays", "/api/video/import", "/api/video/collections
              "/api/video/title-delete",
              # the library manager: its rows carry file paths
              "/api/video/manager",
+             # a youtube channel's library: file paths, deletes, undo, clean
+             "/api/video/youtube/library",
              # server operations the notification panel shows an admin
              # (#2170): disk, roots and monitor health, and the library
              # manager's bulk job. members never see either
