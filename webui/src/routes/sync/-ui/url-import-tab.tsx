@@ -451,7 +451,8 @@ export function publicLinkSpec(
     sourceId: String(result.url_hash),
     name: asString(result.name),
     owner: (result.subtitle as string | undefined) || '',
-    imageUrl: '',
+    // #2279: the link's own artwork becomes the cover (spotify og:image, itunes)
+    imageUrl: (result.image_url as string | undefined) || '',
     description: (result.url as string | undefined) || '',
     loadTracks: async () => ({
       tracks: Array.isArray(result.tracks) ? (result.tracks as unknown[]) : [],
@@ -646,6 +647,7 @@ export function youtubeSpec(playlist: UrlTabPlaylist): ImportSpec {
     source: 'youtube',
     sourceId: String(playlist.url_hash),
     name: asString(playlist.name),
+    imageUrl: (playlist.image_url as string | undefined) || '',
     description: (playlist.url as string | undefined) || '',
     loadTracks: async () => ({
       tracks: Array.isArray(playlist.tracks) ? (playlist.tracks as unknown[]) : [],

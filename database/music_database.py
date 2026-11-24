@@ -3194,6 +3194,23 @@ class MusicDatabase:
                     "ALTER TABLE mirrored_playlists ADD COLUMN source_image_url TEXT DEFAULT NULL"
                 )
                 logger.info("Added source_image_url column to mirrored_playlists table")
+            # #2281: a cover change the media server hasn't had yet. a restore
+            # sets custom_cover back to 0, and without this the next sync
+            # would treat the restored poster as a source poster and skip it
+            if 'cover_push_pending' not in cols:
+                cursor.execute(
+                    "ALTER TABLE mirrored_playlists ADD COLUMN cover_push_pending INTEGER NOT NULL DEFAULT 0"
+                )
+                logger.info("Added cover_push_pending column to mirrored_playlists table")
+            # #2279: source_image_url used to fill only when a generated cover
+            # went on. a plain mirror's original sat in image_url, so restore
+            # had nothing to go back to once a custom cover replaced it
+            cursor.execute(
+                "UPDATE mirrored_playlists SET source_image_url = image_url "
+                # a user playlist's old cover was the user's pick, not a source's
+                "WHERE custom_cover = 0 AND source_image_url IS NULL AND source != 'soulsync' "
+                "AND (image_url LIKE 'http://%' OR image_url LIKE 'https://%')"
+            )
         except Exception as e:
             logger.error(f"Error adding custom cover columns to mirrored_playlists: {e}")
 
@@ -26873,6 +26890,13 @@ class MusicDatabase:
 
     # ── Mirrored Playlists ───────────────────────────────────────────────
 
+    @staticmethod
+    def _source_poster_url(url: Any) -> Optional[str]:
+        """a source's poster as restore keeps it: http(s) only. a local
+        /api/... cover is ours (generated or uploaded), never the source's."""
+        text = str(url or '').strip()
+        return text if text.startswith(('http://', 'https://')) else None
+
     def mirror_playlist(self, source: str, source_playlist_id: str, name: str,
                         tracks: List[Dict], profile_id: int = 1,
                         quality_profile_id: Optional[int] = None,
@@ -26923,8 +26947,9 @@ class MusicDatabase:
                     INSERT INTO mirrored_playlists
                         (source, source_playlist_id, name, description, owner,
                          image_url, track_count, profile_id, quality_profile_id,
-                         source_skipped, is_request_list, auto_remove_fulfilled, upstream_playlist_id, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                         source_skipped, is_request_list, auto_remove_fulfilled, upstream_playlist_id,
+                         source_image_url, custom_cover, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                     ON CONFLICT(source, source_playlist_id, profile_id) DO UPDATE SET
                         name = excluded.name,
                         description = COALESCE(NULLIF(excluded.description, ''), mirrored_playlists.description),
@@ -26933,16 +26958,18 @@ class MusicDatabase:
                             WHEN mirrored_playlists.custom_cover THEN mirrored_playlists.image_url
                             ELSE COALESCE(NULLIF(excluded.image_url, ''), mirrored_playlists.image_url)
                         END,
-                        -- a refresh whose source sends no poster hands the row's own
-                        -- image back. that's our generated cover, not the source's,
-                        -- so it never becomes the "original" restore goes back to
+                        -- #2279: the source's own poster, kept current whether or not
+                        -- a custom cover sits on top, so restore always has it.
+                        -- excluded.source_image_url is only ever an http(s) poster.
+                        -- a caller that hands the row's own custom cover back (an
+                        -- echo) isn't the source talking, so it never becomes it
                         source_image_url = CASE
+                            WHEN excluded.source_image_url IS NULL
+                            THEN mirrored_playlists.source_image_url
                             WHEN mirrored_playlists.custom_cover
-                                 AND NULLIF(excluded.image_url, '') IS NOT NULL
-                                 AND excluded.image_url IS NOT mirrored_playlists.image_url
-                                 AND excluded.image_url NOT LIKE '/api/user-playlists/%'
-                            THEN excluded.image_url
-                            ELSE mirrored_playlists.source_image_url
+                                 AND excluded.image_url IS mirrored_playlists.image_url
+                            THEN mirrored_playlists.source_image_url
+                            ELSE excluded.source_image_url
                         END,
                         track_count = excluded.track_count,
                         quality_profile_id = CASE
@@ -26975,6 +27002,8 @@ class MusicDatabase:
                     1 if kwargs.get('is_request_list') else 0,
                     1 if kwargs.get('auto_remove_fulfilled') else 0,
                     kwargs.get('upstream_playlist_id'),
+                    self._source_poster_url(kwargs.get('source_image_url') or kwargs.get('image_url')),
+                    1 if kwargs.get('custom_cover') else 0,
                     1 if quality_profile_id is not None else 0,
                     1 if 'source_skipped' in kwargs else 0,
                     1 if 'is_request_list' in kwargs else 0,
@@ -27127,8 +27156,10 @@ class MusicDatabase:
                 owner_sql, owner_params = self._mirror_owner_clause(profile_id)
                 cursor.execute(
                     "UPDATE mirrored_playlists SET "
-                    "source_image_url = CASE WHEN custom_cover THEN source_image_url ELSE image_url END, "
-                    "image_url = ?, custom_cover = 1, updated_at = CURRENT_TIMESTAMP "
+                    "source_image_url = COALESCE(source_image_url, CASE WHEN custom_cover = 0 "
+                    "AND (image_url LIKE 'http://%' OR image_url LIKE 'https://%') THEN image_url END), "
+                    "image_url = ?, custom_cover = 1, cover_push_pending = 1, "
+                    "updated_at = CURRENT_TIMESTAMP "
                     "WHERE id = ?" + owner_sql,
                     [image_url, int(playlist_id), *owner_params],
                 )
@@ -27151,11 +27182,15 @@ class MusicDatabase:
                 owner_sql, owner_params = self._mirror_owner_clause(profile_id)
                 cursor.execute(
                     # a local cover as the "original" is the generated one an
-                    # echo stashed (fixed since); its file goes, so point at nothing
+                    # echo stashed (fixed since); its file goes, so point at
+                    # nothing. the source's poster itself stays for next time
                     "UPDATE mirrored_playlists SET image_url = CASE "
-                    "WHEN source_image_url LIKE '/api/user-playlists/%' THEN NULL "
-                    "ELSE source_image_url END, "
-                    "source_image_url = NULL, custom_cover = 0, updated_at = CURRENT_TIMESTAMP "
+                    "WHEN source_image_url LIKE 'http://%' OR source_image_url LIKE 'https://%' "
+                    "THEN source_image_url END, "
+                    "source_image_url = CASE "
+                    "WHEN source_image_url LIKE 'http://%' OR source_image_url LIKE 'https://%' "
+                    "THEN source_image_url END, "
+                    "custom_cover = 0, cover_push_pending = 1, updated_at = CURRENT_TIMESTAMP "
                     "WHERE id = ?" + owner_sql,
                     [int(playlist_id), *owner_params],
                 )
@@ -27164,6 +27199,18 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error restoring cover for mirrored playlist {playlist_id}: {e}")
             return False
+
+    def clear_mirrored_playlist_cover_push_pending(self, playlist_id: int) -> None:
+        """the media server has the current cover now."""
+        try:
+            with self._get_connection() as conn:
+                conn.execute(
+                    "UPDATE mirrored_playlists SET cover_push_pending = 0 WHERE id = ?",
+                    (int(playlist_id),),
+                )
+                conn.commit()
+        except Exception as e:
+            logger.error(f"Error clearing cover push flag for mirrored playlist {playlist_id}: {e}")
 
     def set_mirrored_playlist_description(
         self,
@@ -27438,6 +27485,10 @@ class MusicDatabase:
             description=mirror.get('description'),
             owner=mirror.get('owner'),
             image_url=mirror.get('image_url'),
+            # #2280/#2281: the copy keeps its cover as a cover, and the
+            # parent's original so it can restore too
+            source_image_url=mirror.get('source_image_url'),
+            custom_cover=1 if mirror.get('custom_cover') else 0,
             quality_profile_id=mirror.get('quality_profile_id'),
             is_request_list=1,
             # off until the user turns it on: it deletes tracks from their real

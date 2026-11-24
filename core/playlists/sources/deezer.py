@@ -80,6 +80,7 @@ class DeezerPlaylistSource(PlaylistSource):
             description=getattr(playlist, "description", None),
             track_count=int(getattr(playlist, "total_tracks", 0) or 0),
             owner=getattr(playlist, "owner", None),
+            image_url=getattr(playlist, "image_url", None) or None,
         )
 
     def _meta_from_dict(self, p: Dict[str, Any]) -> PlaylistMeta:

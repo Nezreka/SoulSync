@@ -154,3 +154,47 @@ describe('the Find uncatalogued tracks row (#2097)', () => {
     expect(screen.queryByLabelText('Find uncatalogued tracks')).toBeNull();
   });
 });
+
+// #2281: restore the original cover from the playlist's settings
+describe('the cover restore row', () => {
+  function renderWithRestore(over: Partial<MirroredPlaylistRow>) {
+    stubPreview();
+    const onRestoreCover = vi.fn();
+    render(
+      <PlaylistSettingsSheet
+        row={{ id: 7, name: 'Mix', source: 'spotify', ...over }}
+        name="Mix"
+        sourceLabel="Spotify"
+        scheduleLabel="Daily"
+        onRename={vi.fn()}
+        onToggleOrganize={vi.fn()}
+        onSetSyncMode={vi.fn()}
+        onRestoreCover={onRestoreCover}
+        onDelete={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+    return onRestoreCover;
+  }
+
+  it('is hidden while the playlist has its original cover', () => {
+    renderWithRestore({ custom_cover: false, source_image_url: 'https://src/a.jpg' });
+    expect(screen.queryByRole('button', { name: 'Restore original' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Remove cover' })).toBeNull();
+  });
+
+  it('restores the original when there is one', () => {
+    const onRestore = renderWithRestore({
+      custom_cover: true,
+      source_image_url: 'https://src/a.jpg',
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Restore original' }));
+    expect(onRestore).toHaveBeenCalledTimes(1);
+  });
+
+  it('removes the cover when the source never had one', () => {
+    renderWithRestore({ custom_cover: true, source_image_url: null });
+    expect(screen.getByRole('button', { name: 'Remove cover' })).toBeInTheDocument();
+    expect(screen.getByText('Back to the collage of its songs')).toBeInTheDocument();
+  });
+});

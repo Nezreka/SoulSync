@@ -44,6 +44,8 @@ export interface PlaylistSettingsSheetProps {
   onToggleAutoRemove?: () => void;
   onEditSource?: () => void;
   onGenerateCover?: () => void;
+  /** back to the source's cover (or the collage); absent hides the row (#2281) */
+  onRestoreCover?: () => void;
   onClear?: () => void;
   onDelete: () => void;
   onClose: () => void;
@@ -63,6 +65,7 @@ export function PlaylistSettingsSheet({
   onToggleAutoRemove,
   onEditSource,
   onGenerateCover,
+  onRestoreCover,
   onClear,
   onDelete,
   onClose,
@@ -191,6 +194,23 @@ export function PlaylistSettingsSheet({
               </div>
               <button type="button" className={styles.link} onClick={onGenerateCover}>
                 Generate cover art
+              </button>
+            </div>
+          ) : null}
+          {onRestoreCover && row.custom_cover ? (
+            <div className={styles.row}>
+              <div className={styles.rowText}>
+                <div className={styles.rowTitle}>
+                  {row.source_image_url ? 'Original cover' : 'Your cover'}
+                </div>
+                <div className={styles.rowDesc}>
+                  {row.source_image_url
+                    ? 'Put back the cover it came with'
+                    : 'Back to the collage of its songs'}
+                </div>
+              </div>
+              <button type="button" className={styles.link} onClick={onRestoreCover}>
+                {row.source_image_url ? 'Restore original' : 'Remove cover'}
               </button>
             </div>
           ) : null}

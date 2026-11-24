@@ -294,10 +294,25 @@ describe('MirroredDetailModal — user playlist meta', () => {
     expect(screen.getByRole('button', { name: 'Add a description' })).toBeInTheDocument();
   });
 
-  it('a synced mirror gets neither', () => {
+  // #2280: any playlist takes a cover of the user's own; the description
+  // stays the source's
+  it('a synced mirror can change its cover but not its description', () => {
     renderModal({ name: 'Theirs', source: 'spotify', tracks: [] });
-    expect(screen.queryByRole('button', { name: 'Change cover' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Change cover' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Add a description' })).toBeNull();
+  });
+
+  it("a mirror's custom cover restores to the source's from the cover menu", () => {
+    renderModal({
+      name: 'Theirs',
+      source: 'spotify',
+      tracks: [],
+      image_url: 'https://mine/x.jpg',
+      custom_cover: true,
+      source_image_url: 'https://src/a.jpg',
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Change cover' }));
+    expect(screen.getByRole('button', { name: 'Restore original cover' })).toBeInTheDocument();
   });
 
   it('an existing description shows with an edit affordance', () => {

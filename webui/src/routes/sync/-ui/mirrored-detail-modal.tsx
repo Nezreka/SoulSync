@@ -656,130 +656,128 @@ export function MirroredDetailModal({
             <div className="mm-hero-bg" style={{ backgroundImage: `url('${heroArt}')` }} />
           ) : null}
           <div className="mm-hero-content">
-            {own ? (
-              <div className="mm-cover-wrap" ref={coverWrapRef}>
-                {liked && !data.image_url ? (
-                  <div className="mm-cover mm-cover-liked">
-                    <LikedArt />
-                  </div>
-                ) : heroArt ? (
-                  <div className="mm-cover" style={{ backgroundImage: `url('${heroArt}')` }} />
-                ) : (
-                  <div className="mm-cover mm-cover-empty soulsync">{sourceIcon}</div>
-                )}
-                <button
-                  type="button"
-                  className="mm-cover-edit"
-                  disabled={coverBusy}
-                  onClick={() => {
-                    setCoverError(null);
-                    setCoverOpen((v) => !v);
-                  }}
-                >
-                  {coverBusy ? 'Saving…' : 'Change cover'}
-                </button>
-                {coverOpen
-                  ? createPortal(
-                      <div
-                        ref={coverMenuRef}
-                        className="mm-cover-menu"
-                        role="menu"
-                        data-popover-layer=""
-                        style={
-                          coverPos
-                            ? { top: coverPos.top, left: coverPos.left }
-                            : { top: 0, left: 0, visibility: 'hidden' }
-                        }
-                      >
-                        <label className="mm-cover-item">
-                          Upload a photo…
-                          <input
-                            type="file"
-                            accept="image/*"
-                            hidden
-                            disabled={coverBusy}
-                            onChange={(event) => {
-                              const file = event.target.files?.[0];
-                              event.target.value = '';
-                              if (file)
-                                void runCoverEdit(() => uploadPlaylistCover(playlistId, file));
-                            }}
-                          />
-                        </label>
-                        {artTracks.length > 0 ? (
-                          <>
-                            <div className="mm-cover-label">From this playlist</div>
-                            <div className="mm-cover-tiles">
-                              {artTracks.slice(0, 8).map((t, i) => (
-                                <button
-                                  key={`${t.position ?? i}-${t.image_url}`}
-                                  type="button"
-                                  className="mm-cover-tile"
-                                  title={`${t.track_name ?? ''} — ${t.artist_name ?? ''}`}
-                                  disabled={coverBusy}
-                                  onClick={() =>
-                                    void runCoverEdit(() =>
-                                      setPlaylistCoverFromTrack(playlistId, t.position ?? i + 1),
-                                    )
-                                  }
-                                >
-                                  <img src={t.image_url} alt="" loading="lazy" />
-                                </button>
-                              ))}
-                            </div>
-                          </>
-                        ) : null}
-                        <div className="mm-cover-label">Or paste an image link</div>
-                        <div className="mm-cover-urlrow">
-                          <input
-                            type="url"
-                            className="mm-cover-url"
-                            placeholder="https://…"
-                            value={coverUrlDraft}
-                            disabled={coverBusy}
-                            onChange={(event) => setCoverUrlDraft(event.target.value)}
-                            onKeyDown={(event) => {
-                              if (event.key === 'Enter' && coverUrlDraft.trim()) {
-                                void runCoverEdit(() =>
-                                  setPlaylistCoverUrl(playlistId, coverUrlDraft.trim()),
-                                );
-                              }
-                            }}
-                          />
-                          <button
-                            type="button"
-                            className="mm-btn mm-btn-ghost mm-btn-sm"
-                            disabled={coverBusy || !coverUrlDraft.trim()}
-                            onClick={() =>
+            {/* #2280: every playlist takes a cover of the user's own, not
+                just a user playlist */}
+            <div className="mm-cover-wrap" ref={coverWrapRef}>
+              {liked && !data.image_url ? (
+                <div className="mm-cover mm-cover-liked">
+                  <LikedArt />
+                </div>
+              ) : heroArt ? (
+                <div className="mm-cover" style={{ backgroundImage: `url('${heroArt}')` }} />
+              ) : (
+                <div className={`mm-cover mm-cover-empty ${own ? 'soulsync' : source}`}>
+                  {sourceIcon}
+                </div>
+              )}
+              <button
+                type="button"
+                className="mm-cover-edit"
+                disabled={coverBusy}
+                onClick={() => {
+                  setCoverError(null);
+                  setCoverOpen((v) => !v);
+                }}
+              >
+                {coverBusy ? 'Saving…' : 'Change cover'}
+              </button>
+              {coverOpen
+                ? createPortal(
+                    <div
+                      ref={coverMenuRef}
+                      className="mm-cover-menu"
+                      role="menu"
+                      data-popover-layer=""
+                      style={
+                        coverPos
+                          ? { top: coverPos.top, left: coverPos.left }
+                          : { top: 0, left: 0, visibility: 'hidden' }
+                      }
+                    >
+                      <label className="mm-cover-item">
+                        Upload a photo…
+                        <input
+                          type="file"
+                          accept="image/jpeg,image/png,image/webp"
+                          hidden
+                          disabled={coverBusy}
+                          onChange={(event) => {
+                            const file = event.target.files?.[0];
+                            event.target.value = '';
+                            if (file)
+                              void runCoverEdit(() => uploadPlaylistCover(playlistId, file));
+                          }}
+                        />
+                      </label>
+                      {artTracks.length > 0 ? (
+                        <>
+                          <div className="mm-cover-label">From this playlist</div>
+                          <div className="mm-cover-tiles">
+                            {artTracks.slice(0, 8).map((t, i) => (
+                              <button
+                                key={`${t.position ?? i}-${t.image_url}`}
+                                type="button"
+                                className="mm-cover-tile"
+                                title={`${t.track_name ?? ''} — ${t.artist_name ?? ''}`}
+                                disabled={coverBusy}
+                                onClick={() =>
+                                  void runCoverEdit(() =>
+                                    setPlaylistCoverFromTrack(playlistId, t.position ?? i + 1),
+                                  )
+                                }
+                              >
+                                <img src={t.image_url} alt="" loading="lazy" />
+                              </button>
+                            ))}
+                          </div>
+                        </>
+                      ) : null}
+                      <div className="mm-cover-label">Or paste an image link</div>
+                      <div className="mm-cover-urlrow">
+                        <input
+                          type="url"
+                          className="mm-cover-url"
+                          placeholder="https://…"
+                          value={coverUrlDraft}
+                          disabled={coverBusy}
+                          onChange={(event) => setCoverUrlDraft(event.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter' && coverUrlDraft.trim()) {
                               void runCoverEdit(() =>
                                 setPlaylistCoverUrl(playlistId, coverUrlDraft.trim()),
-                              )
+                              );
                             }
-                          >
-                            Set
-                          </button>
-                        </div>
-                        {data.image_url ? (
-                          <button
-                            type="button"
-                            className="mm-cover-item mm-cover-remove"
-                            disabled={coverBusy}
-                            onClick={() => void runCoverEdit(() => clearPlaylistCover(playlistId))}
-                          >
-                            Remove cover
-                          </button>
-                        ) : null}
-                        {coverError ? <div className="mm-cover-error">{coverError}</div> : null}
-                      </div>,
-                      document.body,
-                    )
-                  : null}
-              </div>
-            ) : heroArt ? (
-              <div className="mm-cover" style={{ backgroundImage: `url('${heroArt}')` }} />
-            ) : (
-              <div className={`mm-cover mm-cover-empty ${source}`}>{sourceIcon}</div>
-            )}
+                          }}
+                        />
+                        <button
+                          type="button"
+                          className="mm-btn mm-btn-ghost mm-btn-sm"
+                          disabled={coverBusy || !coverUrlDraft.trim()}
+                          onClick={() =>
+                            void runCoverEdit(() =>
+                              setPlaylistCoverUrl(playlistId, coverUrlDraft.trim()),
+                            )
+                          }
+                        >
+                          Set
+                        </button>
+                      </div>
+                      {data.custom_cover || (own && data.image_url) ? (
+                        <button
+                          type="button"
+                          className="mm-cover-item mm-cover-remove"
+                          disabled={coverBusy}
+                          onClick={() => void runCoverEdit(() => clearPlaylistCover(playlistId))}
+                        >
+                          {data.source_image_url ? 'Restore original cover' : 'Remove cover'}
+                        </button>
+                      ) : null}
+                      {coverError ? <div className="mm-cover-error">{coverError}</div> : null}
+                    </div>,
+                    document.body,
+                  )
+                : null}
+            </div>
             <div className="mm-hero-info">
               <span className="mm-eyebrow">
                 {own ? null : <span className={`mm-source-pill ${source}`}>{srcLabel}</span>}
@@ -1136,11 +1134,19 @@ export function MirroredDetailModal({
                         separated: true,
                         onSelect: () => setCoverArtOpen(true),
                       },
-                      ...(!own && data.custom_cover
+                      ...(data.custom_cover
                         ? [
                             {
-                              label: restoring ? 'Restoring…' : 'Restore original cover',
-                              hint: `back to ${srcLabel === 'unknown' ? "the source's" : `${srcLabel}'s`} cover`,
+                              label: restoring
+                                ? 'Restoring…'
+                                : data.source_image_url
+                                  ? 'Restore original cover'
+                                  : 'Remove cover',
+                              hint: !data.source_image_url
+                                ? 'back to the collage of its songs'
+                                : own || srcLabel === 'unknown'
+                                  ? 'back to the cover it came with'
+                                  : `back to ${srcLabel}'s cover`,
                               busy: restoring,
                               onSelect: () => void restoreCover(),
                             },
