@@ -292,11 +292,6 @@
 
 /* ── Shared Titles Grid ("Watching the Same Thing") ── */
 
-.sharedGrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, calc(var(--u) * 21)), 1fr));
-  gap: calc(var(--u) * 1);
-}
 
 .sharedCard {
   display: flex;
@@ -1115,27 +1110,4 @@
   color: var(--pl-6ee7b7);
 }
 
-.premierIconBtn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: calc(var(--u) * 2.15);
-  height: calc(var(--u) * 2.15);
-  padding: 0;
-  border: 1px solid var(--white-a14);
-  border-radius: var(--radius-circle);
-  background: var(--white-a08);
-  color: var(--pl-text);
-  font-size: calc(var(--u) * 0.85);
-  font-weight: 700;
-  cursor: pointer;
-  backdrop-filter: blur(12px);
-  transition:
-    background var(--dur-fast) ease,
-    border-color var(--dur-fast) ease;
-}
 
-.premierIconBtn:hover {
-  border-color: var(--white-a30);
-  background: var(--white-a14);
-}
