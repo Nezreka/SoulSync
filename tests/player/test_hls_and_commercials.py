@@ -38,7 +38,7 @@ def test_commercial_settings_defaults_and_validation():
 
 
 def test_cast_hls_bypasses_session_gate():
-    from core.security.session_profile import requires_profile
-    assert requires_profile('/api/player/cast-hls/youtube/abc123/index.m3u8', 'GET') is False
-    assert requires_profile('/api/player/cast-hls/youtube/abc123/seg/0.ts', 'GET') is False
-    assert requires_profile('/api/player/cast-hls/youtube/abc123/index.m3u8', 'OPTIONS') is False
+    from core.security.session_profile import no_profile_request_is_blocked
+    assert no_profile_request_is_blocked('/api/player/cast-hls/youtube/abc123/index.m3u8', 'GET') is False
+    assert no_profile_request_is_blocked('/api/player/cast-hls/youtube/abc123/seg/0.ts', 'GET') is False
+    assert no_profile_request_is_blocked('/api/player/cast-hls/youtube/abc123/index.m3u8', 'OPTIONS') is False
