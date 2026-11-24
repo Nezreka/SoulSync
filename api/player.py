@@ -955,8 +955,8 @@ def put_player_settings():
         try:
             from core.player import commercials
             commercials.warm_async(out.get("commercials_era") or "mix")
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as e:  # noqa: BLE001
+            logger.debug("commercials warm after a settings save failed: %s", e)
     return jsonify({"success": True, "settings": out})
 
 
