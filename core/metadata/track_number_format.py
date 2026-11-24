@@ -65,8 +65,13 @@ def format_track_number_tuple(
 
 
 def _coerce_positive_int(value, *, default: int) -> int:
-    """Coerce to a non-negative int. Falls back to ``default`` for
+    """Coerce to an int a tag can carry. Falls back to ``default`` for
     None / non-numeric / negative input. Floats truncate.
+
+    A zero falls back too when the default is a real number (a TRACK number:
+    there is no track 0, and "0/14" was being written for a position the
+    import had marked unknown). When the default is 0 (a TOTAL: 0 means
+    unknown), zero is what is asked for and stays.
     """
     if value is None:
         return default
@@ -74,9 +79,20 @@ def _coerce_positive_int(value, *, default: int) -> int:
         coerced = int(value)
     except (TypeError, ValueError):
         return default
-    if coerced < 0:
+    if coerced < 0 or (coerced == 0 and default >= 1):
         return default
     return coerced
+
+
+def track_number_known(value) -> bool:
+    """True for a real track number (1 and up). The import marks a position
+    it couldn't work out as 0; that, a negative, a non-number and None are
+    all "not known". A writer leaves the tag out for an explicit unknown
+    rather than writing a zero or inventing a 1."""
+    try:
+        return value is not None and int(value) >= 1
+    except (TypeError, ValueError):
+        return False
 
 
 def format_vorbis_track_fields(
@@ -98,6 +114,8 @@ def format_vorbis_track_fields(
     ``tracktotal`` comes back None when the total is unknown (0/None), so the
     caller writes no total field rather than a lie.
     """
-    number = track_number if track_number is not None else 1
-    total = total_tracks if total_tracks else None
-    return str(number), (str(total) if total is not None else None)
+    # the same coercion the ID3 and MP4 forms get: "7" and 7 are one number,
+    # and a zero or a non-number is never written as the track number
+    number = _coerce_positive_int(track_number, default=1)
+    total = _coerce_positive_int(total_tracks, default=0)
+    return str(number), (str(total) if total > 0 else None)

@@ -294,6 +294,54 @@ class ConfigManager:
         except Exception as e:
             logger.warning(f"Could not migrate encryption: {e}")
 
+    _TRANSFER_PERMANENT_FLAG = 'config_transfer_permanent_on_1289'
+
+    def _migrate_transfer_permanent_on(self):
+        """one-time: turn 'Music library folder is my permanent library' on
+        where it is saved as off.
+
+        the switch was added off by default (#904, june), and the settings
+        page wrote the checkbox on every save, so every install that saved
+        settings before #1289 made it on by default (october) holds an
+        explicit off it never chose. with it off a standalone deep scan
+        moves files it doesn't recognize out of the music folder. on is the
+        safe setting and the intended one; someone who wants a drop area can
+        turn it off again, and this never runs twice."""
+        try:
+            conn = self._connect_db()
+            try:
+                done = conn.execute("SELECT 1 FROM metadata WHERE key = ?",
+                                    (self._TRANSFER_PERMANENT_FLAG,)).fetchall()
+            finally:
+                conn.close()
+            if done:
+                return
+            section = self.config_data.get('import')
+            changed = isinstance(section, dict) and section.get('transfer_is_permanent') is False
+            if changed:
+                section['transfer_is_permanent'] = True
+                if not self._save_to_database(self.config_data):
+                    section['transfer_is_permanent'] = False
+                    return                          # not saved: try again next start
+            self._mark_transfer_permanent_done()
+            if changed:
+                logger.info("Music library folder is now marked your permanent library "
+                            "(it was saved as off from before that became the default)")
+        except Exception as e:
+            logger.warning(f"Could not apply the permanent-library default: {e}")
+
+    def _mark_transfer_permanent_done(self):
+        try:
+            conn = self._connect_db()
+            try:
+                conn.execute("INSERT OR IGNORE INTO metadata (key, value) VALUES (?, '1')",
+                             (self._TRANSFER_PERMANENT_FLAG,))
+                conn.commit()
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.debug(f"Could not record the permanent-library default as applied: {e}")
+
     def _connect_db(self) -> sqlite3.Connection:
         """Open a configured SQLite connection for the config DB.
 
@@ -1316,6 +1364,7 @@ class ConfigManager:
             self.config_data = self._apply_log_level_overrides(config_data)
             # Ensure sensitive values are encrypted at rest (one-time migration)
             self._migrate_encrypt_if_needed()
+            self._migrate_transfer_permanent_on()
             return
 
         if load_error:
@@ -1357,6 +1406,9 @@ class ConfigManager:
         # Try to save defaults to database
         if self._save_to_database(config_data):
             logger.info("Default configuration saved to database")
+            # a new install starts on today's defaults: whatever it later
+            # saves is its own choice, never the old default to correct
+            self._mark_transfer_permanent_done()
         else:
             logger.warning("Could not save defaults to database - using in-memory config")
 

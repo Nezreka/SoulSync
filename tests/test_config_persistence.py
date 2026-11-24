@@ -122,3 +122,39 @@ def test_qobuz_nested_session_counts_as_configured(monkeypatch, tmp_path):
 
     monkeypatch.setattr(web_server, 'config_manager', _Cfg())
     assert web_server._is_service_configured('qobuz') is True
+
+
+# ── the permanent-library default reaches installs that saved the old one ───
+
+def test_a_saved_off_from_before_the_default_changed_is_turned_on_once(tmp_path, monkeypatch):
+    """'Music library folder is my permanent library' was added off (#904) and
+    the settings page wrote the checkbox on every save, so installs that saved
+    before #1289 made it on by default hold an off they never chose. it is
+    turned on once; a later off is the person's own and stays."""
+    first = _manager(tmp_path, monkeypatch)
+    first.set('import.transfer_is_permanent', False)
+    conn = sqlite3.connect(tmp_path / 'music_library.db')
+    conn.execute("DELETE FROM metadata WHERE key='config_transfer_permanent_on_1289'")
+    conn.commit()
+    conn.close()
+
+    second = _manager(tmp_path, monkeypatch)          # the upgrade's first start
+    assert second.get('import.transfer_is_permanent') is True
+    assert json.loads(_raw_row(tmp_path))['import']['transfer_is_permanent'] is True
+
+    second.set('import.transfer_is_permanent', False)  # now it is a choice
+    third = _manager(tmp_path, monkeypatch)
+    assert third.get('import.transfer_is_permanent') is False
+
+
+def test_a_new_installs_own_off_is_never_turned_back_on(tmp_path, monkeypatch):
+    first = _manager(tmp_path, monkeypatch)            # a fresh install, on today's defaults
+    first.set('import.transfer_is_permanent', False)   # a drop area, on purpose, in its first session
+    assert _manager(tmp_path, monkeypatch).get('import.transfer_is_permanent') is False
+
+
+def test_an_install_with_nothing_saved_as_off_is_left_as_it_is(tmp_path, monkeypatch):
+    _manager(tmp_path, monkeypatch)
+    before = _raw_row(tmp_path)
+    assert _manager(tmp_path, monkeypatch).get('import.transfer_is_permanent', True) is True
+    assert _raw_row(tmp_path) == before                # nothing to correct, nothing written

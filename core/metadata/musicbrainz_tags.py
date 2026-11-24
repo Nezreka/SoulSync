@@ -181,7 +181,7 @@ def write_tag(audio, tag, value, symbols):
     values = [str(v) for v in (value if isinstance(value, (list, tuple)) else [value]) if v is not None]
     if not values:
         return
-    native = {"COPYRIGHT": "TCOP", "DATE": "TDRC", "ARTISTSORT": "TSOP", "ALBUMARTISTSORT": "TSO2", "LABEL": "TPUB", "ISRC": "TSRC"}
+    native = _NATIVE_ID3
     if tag == 'LYRICS':
         if isinstance(audio.tags, symbols.ID3):
             from mutagen.id3 import USLT
@@ -210,7 +210,7 @@ def write_tag(audio, tag, value, symbols):
             factory = getattr(symbols, frame, None) or getattr(id3, frame)
             audio.tags.add(factory(encoding=3, text=values))
     elif isinstance(audio, symbols.MP4):
-        atom = {"DATE": "\xa9day", "ARTISTSORT": "soar", "ALBUMARTISTSORT": "soaa"}.get(tag)
+        atom = _NATIVE_MP4.get(tag)
         if atom:
             audio[atom] = values
         else:
@@ -223,21 +223,35 @@ def write_tag(audio, tag, value, symbols):
         audio[key] = values
 
 
+# the frames and atoms write_tag gives a tag of its own, outside the id maps.
+# read_tag reads from the same table, so the two can't drift apart again:
+# DATE, the two sort names and LYRICS were written to their native frame or
+# atom on MP3 and M4A and looked for somewhere else, so they read back None.
+_NATIVE_ID3 = {"COPYRIGHT": "TCOP", "DATE": "TDRC", "ARTISTSORT": "TSOP", "ALBUMARTISTSORT": "TSO2",
+               "LABEL": "TPUB", "ISRC": "TSRC"}
+_NATIVE_MP4 = {"DATE": "\xa9day", "ARTISTSORT": "soar", "ALBUMARTISTSORT": "soaa",
+               "COPYRIGHT": "cprt", "LYRICS": "\xa9lyr"}
+
+
 def read_tag(audio, tag, symbols):
     """Read the same native frame/atom used by write_tag."""
     from core.metadata.common import is_vorbis_like
     from core.metadata.source import ID3_TAG_MAP, MP4_TAG_MAP, VORBIS_TAG_MAP
     if isinstance(audio.tags, symbols.ID3):
-        frame, desc = ID3_TAG_MAP.get(tag, ('TXXX', tag))
-        frame = {'COPYRIGHT': 'TCOP', 'LABEL': 'TPUB', 'ISRC': 'TSRC'}.get(tag, frame)
-        frames = audio.tags.getall(frame)
-        if frame == 'TXXX':
-            frames = [f for f in frames if f.desc == desc]
-        elif frame == 'UFID':
-            frames = [f for f in frames if f.owner == desc]
-        value = getattr(frames[0], 'data' if frame == 'UFID' else 'text', None) if frames else None
+        if tag == 'LYRICS':
+            frames = audio.tags.getall('USLT')
+            value = getattr(frames[0], 'text', None) if frames else None
+        else:
+            frame, desc = ID3_TAG_MAP.get(tag, ('TXXX', tag))
+            frame = _NATIVE_ID3.get(tag, frame)
+            frames = audio.tags.getall(frame)
+            if frame == 'TXXX':
+                frames = [f for f in frames if f.desc == desc]
+            elif frame == 'UFID':
+                frames = [f for f in frames if f.owner == desc]
+            value = getattr(frames[0], 'data' if frame == 'UFID' else 'text', None) if frames else None
     elif isinstance(audio, symbols.MP4):
-        value = audio.get('cprt' if tag == 'COPYRIGHT' else '----:com.apple.iTunes:' + MP4_TAG_MAP.get(tag, tag))
+        value = audio.get(_NATIVE_MP4.get(tag) or '----:com.apple.iTunes:' + MP4_TAG_MAP.get(tag, tag))
     elif is_vorbis_like(audio, symbols):
         value = audio.get(VORBIS_TAG_MAP.get(tag, tag))
     else:

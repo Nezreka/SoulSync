@@ -53,6 +53,31 @@ _AUDIO_EXTENSIONS = {
 }
 
 
+def context_track_number(original_search: dict, found_file: Optional[str]) -> int:
+    """the track number a download's context carries, else the one its file
+    name shows. 0 when neither says.
+
+    the context's number used to default to 1 and then `== 1` was read as
+    "missing", so a REAL track 1 had its number taken from its file name: the
+    first track of an album, saved as "21 Guns.flac", became track 21. only a
+    number that is absent (or not a real one) sends this to the file name."""
+    raw = (original_search or {}).get('track_number')
+    if isinstance(raw, bool):
+        raw = None
+    try:
+        number = int(raw) if raw is not None else 0
+    except (TypeError, ValueError):
+        number = 0
+    if number >= 1:
+        return number
+    if found_file:
+        number = extract_track_number_from_filename(found_file)
+        logger.warning("[Verification] missing track_number; extracted from filename=%r -> %s",
+                       os.path.basename(found_file), number)
+        return number if isinstance(number, int) and number >= 1 else 0
+    return 0
+
+
 def _is_audio_file(path: str) -> bool:
     return Path(str(path or '')).suffix.lower() in _AUDIO_EXTENSIONS
 
@@ -521,22 +546,12 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
                             # CRITICAL FIX: Create album_info dict with proper structure for metadata enhancement
                             # This must match the format used in main stream processor to ensure consistency
 
-                            # Extract track number from context (should be available from fuzzy match)
-                            track_number = original_search.get('track_number', 1)
-
-                            # If no track number in context, extract from filename
-                            if track_number == 1 and found_file:
-                                track_number = extract_track_number_from_filename(found_file)
-                                logger.warning(
-                                    "[Verification] missing track_number; extracted from filename=%r -> %s",
-                                    os.path.basename(found_file),
-                                    track_number,
-                                )
-
-                            # Ensure track_number is valid
-                            if not isinstance(track_number, int) or track_number < 1:
-                                logger.warning(f"[Verification] Unknown track number ({track_number})")
-                                track_number = 0
+                            # the context's own number, the file name's only when
+                            # the context has none (context_track_number)
+                            track_number = context_track_number(original_search, found_file)
+                            if track_number < 1:
+                                logger.warning("[Verification] Unknown track number for %r",
+                                               os.path.basename(found_file) if found_file else None)
 
                             # Get clean track name
                             clean_track_name = get_import_clean_title(context, default=original_search.get('title', 'Unknown Track'))

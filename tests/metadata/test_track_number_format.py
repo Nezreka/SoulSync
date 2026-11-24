@@ -39,15 +39,16 @@ def test_none_track_number_defaults_to_one():
 
 
 def test_zero_track_number_defaults_to_one():
-    """Track 0 isn't valid in any convention — coerce to 1."""
-    # Note: 0 is non-negative so falls into the default-0 path which
-    # the formatter then treats as "default" via the explicit default
-    # arg. Since 0 is technically valid output of `int(0)`, the helper
-    # passes it through. Document the behavior here.
-    # Actually re-checking: 0 satisfies `>= 0` so returns 0. That
-    # means format would emit "0/13" for malformed input. Not great
-    # but at least it doesn't crash. Test pins current behavior.
-    assert format_track_number_tag(0, 13) == "0/13"
+    """Track 0 isn't valid in any convention — coerce to 1.
+
+    this used to pin "0/13" with a note that it wasn't great: zero passed
+    the non-negative check. the import marks an unknown position 0, so that
+    was a real tag on real files. the tag writer now leaves an explicit
+    unknown out altogether (track_number_known); asked anyway, the formatter
+    falls back to 1 as it does for a missing number."""
+    assert format_track_number_tag(0, 13) == "1/13"
+    # a TOTAL of zero still means unknown, not one
+    assert format_track_number_tag(6, 0) == "6"
 
 
 def test_negative_total_treated_as_unknown():

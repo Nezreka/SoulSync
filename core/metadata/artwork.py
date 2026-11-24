@@ -763,6 +763,12 @@ def _write_embedded_art(audio_file, image_data: bytes, mime_type: str, symbols) 
     # Some CDNs serve genuinely huge originals (#806 deliberately prefers
     # the original over the 1200px thumbnail), so this is reachable on
     # ordinary downloads.
+    # the cover as what its bytes are, and a JPEG in place of a WebP: a CDN's
+    # mime label was written into the file as it came (core/metadata/cover_art.py)
+    from core.metadata.art_preservation import _is_ogg
+    from core.metadata.cover_art import flac_picture, mp4_cover, normalize_cover_art, ogg_picture_comment
+    image_data, mime_type = normalize_cover_art(image_data, mime_type)
+
     if isinstance(audio_file, symbols.FLAC) and len(image_data) > FLAC_MAX_PICTURE_BYTES:
         shrunk = _shrink_for_flac(image_data, mime_type)
         if shrunk is None:
@@ -779,18 +785,18 @@ def _write_embedded_art(audio_file, image_data: bytes, mime_type: str, symbols) 
     if isinstance(audio_file.tags, symbols.ID3):
         audio_file.tags.add(symbols.APIC(encoding=3, mime=mime_type, type=3, desc="Cover", data=image_data))
     elif isinstance(audio_file, symbols.FLAC):
-        picture = symbols.Picture()
-        picture.data = image_data
-        picture.type = 3
-        picture.mime = mime_type
-        width, height = get_image_dimensions(image_data)
-        picture.width = width or 640
-        picture.height = height or 640
-        picture.depth = 24
-        audio_file.add_picture(picture)
+        audio_file.add_picture(flac_picture(symbols, image_data, mime_type))
     elif isinstance(audio_file, symbols.MP4):
-        fmt = symbols.MP4Cover.FORMAT_JPEG if "jpeg" in mime_type else symbols.MP4Cover.FORMAT_PNG
-        audio_file["covr"] = [symbols.MP4Cover(image_data, imageformat=fmt)]
+        audio_file["covr"] = [mp4_cover(symbols, image_data, mime_type)]
+    elif _is_ogg(audio_file, symbols):
+        # an Ogg file's cover is a comment. there was no branch for it: nothing
+        # was written, "successfully embedded" was logged and True returned
+        audio_file["metadata_block_picture"] = [ogg_picture_comment(symbols, image_data, mime_type)]
+    else:
+        # a container with nowhere to put a cover is not a success: the caller
+        # keeps the art the file came with instead of believing it was replaced
+        logger.info("This file type takes no embedded cover; none was written.")
+        return False
 
     logger.info("Album art successfully embedded.")
     return True

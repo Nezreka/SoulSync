@@ -21,6 +21,12 @@ from core.metadata.common import (
     verify_metadata_written,
 )
 from core.metadata.source import embed_source_ids, extract_source_metadata
+from core.metadata.tag_keep import (
+    restore_replaygain,
+    snapshot_replaygain,
+    write_album_artist,
+    write_compilation_flag,
+)
 from utils.logging_config import get_logger as _create_logger
 
 
@@ -120,15 +126,20 @@ def enhance_file_metadata(file_path: str, context: dict, artist: dict, album_inf
                 else:
                     context.pop("_file_album_artist_tag", None)
 
+            # the metadata first: it needs nothing from the file, and when
+            # there is none the file must be left exactly as it came. the APE
+            # strip below rewrites the file on disk, and it used to run before
+            # this, so "original tags retained" was said of a file that had
+            # just lost some of them.
+            metadata = extract_source_metadata(context, artist, album_info)
+            if not metadata:
+                logger.error("Could not extract source metadata; original tags retained.")
+                return False
+
             strip_all_non_audio_tags(file_path)
             audio_file = symbols.File(file_path)
             if audio_file is None:
                 logger.error("Could not load audio file with Mutagen: %s", file_path)
-                return False
-
-            metadata = extract_source_metadata(context, artist, album_info)
-            if not metadata:
-                logger.error("Could not extract source metadata; original tags retained.")
                 return False
 
             # Capture any embedded cover art BEFORE we clear it. The rewrite
@@ -137,6 +148,9 @@ def enhance_file_metadata(file_path: str, context: dict, artist: dict, album_inf
             # Without this snapshot, every such failure saves the file with
             # the art destroyed and nothing put back — issue #764.
             art_snapshot = snapshot_embedded_art(audio_file, symbols)
+            # ReplayGain describes these samples, not the release: it is kept
+            # across the clear (core/metadata/tag_keep.py)
+            gain_snapshot = snapshot_replaygain(audio_file, symbols)
 
             if hasattr(audio_file, "clear_pictures"):
                 audio_file.clear_pictures()
@@ -148,6 +162,7 @@ def enhance_file_metadata(file_path: str, context: dict, artist: dict, album_inf
                 audio_file.tags.clear()
             else:
                 audio_file.add_tags()
+            restore_replaygain(audio_file, symbols, gain_snapshot)
 
             # Discord report (Netti93) — many album-dict construction
             # sites pass `total_tracks: 0` when source data is incomplete
@@ -159,10 +174,17 @@ def enhance_file_metadata(file_path: str, context: dict, artist: dict, album_inf
                 format_track_number_tag,
                 format_track_number_tuple,
                 format_vorbis_track_fields,
+                track_number_known,
             )
             track_num_str = format_track_number_tag(
                 metadata.get('track_number'), metadata.get('total_tracks')
             )
+            # the import marks a position it couldn't work out as 0. that was
+            # written as "0/14": a track number of zero. an unknown number is
+            # left out, so the file says nothing rather than something false.
+            # (a missing number, None, still defaults to 1 as it always has.)
+            _track_unknown = metadata.get('track_number') is not None \
+                and not track_number_known(metadata.get('track_number'))
             # Disc number is written UNCONDITIONALLY (floored to >=1), like the
             # track number above. The old code only wrote it when truthy, so a
             # track whose disc came back 0/None/'' (e.g. matched to a different
@@ -214,7 +236,8 @@ def enhance_file_metadata(file_path: str, context: dict, artist: dict, album_inf
                     audio_file.tags.add(symbols.TDRC(encoding=3, text=[metadata["date"]]))
                 if genres_out:
                     audio_file.tags.add(symbols.TCON(encoding=3, text=genres_out))
-                audio_file.tags.add(symbols.TRCK(encoding=3, text=[track_num_str]))
+                if not _track_unknown:
+                    audio_file.tags.add(symbols.TRCK(encoding=3, text=[track_num_str]))
                 audio_file.tags.add(symbols.TPOS(encoding=3, text=[disc_num_str]))
             elif is_vorbis_like(audio_file, symbols):
                 if metadata.get("title"):
@@ -238,7 +261,8 @@ def enhance_file_metadata(file_path: str, context: dict, artist: dict, album_inf
                 # displayed literally as the track number (Discord, mrderekibmusic).
                 _vorbis_num, _vorbis_total = format_vorbis_track_fields(
                     metadata.get('track_number'), metadata.get('total_tracks'))
-                audio_file["tracknumber"] = [_vorbis_num]
+                if not _track_unknown:
+                    audio_file["tracknumber"] = [_vorbis_num]
                 if _vorbis_total is not None:
                     audio_file["tracktotal"] = [_vorbis_total]
                     audio_file["totaltracks"] = [_vorbis_total]   # legacy readers
@@ -249,18 +273,35 @@ def enhance_file_metadata(file_path: str, context: dict, artist: dict, album_inf
                 if metadata.get("title"):
                     audio_file["\xa9nam"] = [metadata["title"]]
                 if metadata.get("artist"):
-                    audio_file["\xa9ART"] = artists_list if (write_multi and len(artists_list) > 1) else [metadata["artist"]]
+                    # the artist atom is the display artist. with feat_in_title
+                    # the guests are already in the title and the artist is the
+                    # primary alone, as on MP3 and FLAC: the whole list here put
+                    # each guest in both. without it the list stays in the atom,
+                    # which Navidrome and Jellyfin read as several artists (#587).
+                    _multi = write_multi and len(artists_list) > 1
+                    _feat_in_title = cfg.get("metadata_enhancement.tags.feat_in_title", False)
+                    audio_file["\xa9ART"] = list(artists_list) if (_multi and not _feat_in_title) \
+                        else [metadata["artist"]]
+                    # and the per-artist list where Picard and Plex look for it,
+                    # the twin of ID3's TXXX:Artists and Vorbis's ARTISTS
+                    if _multi:
+                        audio_file["----:com.apple.iTunes:ARTISTS"] = [
+                            symbols.MP4FreeForm(str(a).encode("utf-8")) for a in artists_list]
                 if metadata.get("album_artist"):
                     audio_file["aART"] = [metadata["album_artist"]]
+                    if write_multi and len(album_artists_list) > 1:
+                        audio_file["----:com.apple.iTunes:ALBUMARTISTS"] = [
+                            symbols.MP4FreeForm(str(a).encode("utf-8")) for a in album_artists_list]
                 if metadata.get("album"):
                     audio_file["\xa9alb"] = [metadata["album"]]
                 if metadata.get("date"):
                     audio_file["\xa9day"] = [metadata["date"]]
                 if genres_out:
                     audio_file["\xa9gen"] = genres_out
-                audio_file["trkn"] = [format_track_number_tuple(
-                    metadata.get("track_number"), metadata.get("total_tracks")
-                )]
+                if not _track_unknown:
+                    audio_file["trkn"] = [format_track_number_tuple(
+                        metadata.get("track_number"), metadata.get("total_tracks")
+                    )]
                 audio_file["disk"] = [format_track_number_tuple(_disc_num, metadata.get('total_discs'))]
 
             from core.metadata.manual import is_manual_context, manual_cover_path, write_manual_marker
@@ -272,7 +313,17 @@ def enhance_file_metadata(file_path: str, context: dict, artist: dict, album_inf
                 metadata['_manual_cover_path'] = manual_cover_path(context)
                 write_manual_marker(audio_file, symbols)
             else:
+                _album_artist_written = metadata.get("album_artist")
                 embed_source_ids(audio_file, metadata, context, runtime=runtime)
+                # #2259: enrichment can correct the album artist (the release
+                # is 12th Planet's though this track is DJ Evol's). the tag
+                # above was written before that, so it is written again.
+                if metadata.get("album_artist") and metadata.get("album_artist") != _album_artist_written:
+                    write_album_artist(audio_file, symbols, metadata["album_artist"])
+
+            # a various-artists album is flagged a compilation, after the album
+            # artist is final (core/metadata/tag_keep.py)
+            write_compilation_flag(audio_file, symbols, metadata)
 
             if album_info is not None and metadata.get("musicbrainz_release_id"):
                 album_info["musicbrainz_release_id"] = metadata["musicbrainz_release_id"]

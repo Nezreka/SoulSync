@@ -38,6 +38,14 @@ logger = get_logger("metadata.art_preservation")
 ArtSnapshot = List[Tuple[str, list]]
 
 
+_OGG_PICTURE = "metadata_block_picture"
+
+
+def _is_ogg(audio_file: Any, symbols: Any) -> bool:
+    kinds = tuple(k for k in (getattr(symbols, "OggVorbis", None), getattr(symbols, "OggOpus", None)) if k)
+    return bool(kinds) and isinstance(audio_file, kinds)
+
+
 def has_embedded_art(audio_file: Any, symbols: Any) -> bool:
     """True iff ``audio_file`` currently carries embedded cover art in any
     of the formats the enricher manages (FLAC pictures / ID3 APIC / MP4 covr)."""
@@ -48,6 +56,8 @@ def has_embedded_art(audio_file: Any, symbols: Any) -> bool:
         if tags is not None and isinstance(tags, symbols.ID3) and tags.getall("APIC"):
             return True
         if isinstance(audio_file, symbols.MP4) and tags and tags.get("covr"):
+            return True
+        if _is_ogg(audio_file, symbols) and tags and tags.get(_OGG_PICTURE):
             return True
     except Exception as exc:  # defensive: never let art-detection break a save
         logger.debug("has_embedded_art check failed: %s", exc)
@@ -75,6 +85,14 @@ def snapshot_embedded_art(audio_file: Any, symbols: Any) -> ArtSnapshot:
             covr = tags.get("covr")
             if covr:
                 snap.append(("mp4", list(covr)))
+        # an Ogg Vorbis or Opus file's cover is a comment, so tags.clear()
+        # takes it with the rest. it was assumed not to and left out of the
+        # snapshot: a file that arrived with a cover lost it whenever no new
+        # one was embedded (and none ever was, for Ogg).
+        if _is_ogg(audio_file, symbols) and tags:
+            blocks = tags.get(_OGG_PICTURE)
+            if blocks:
+                snap.append(("ogg", list(blocks)))
     except Exception as exc:
         logger.debug("snapshot_embedded_art failed: %s", exc)
     return snap
@@ -104,6 +122,9 @@ def restore_embedded_art(audio_file: Any, symbols: Any, snapshot: ArtSnapshot) -
                     restored = True
             elif kind == "mp4":
                 audio_file["covr"] = payload
+                restored = True
+            elif kind == "ogg":
+                audio_file[_OGG_PICTURE] = payload
                 restored = True
         except Exception as exc:
             logger.debug("restore_embedded_art (%s) failed: %s", kind, exc)
