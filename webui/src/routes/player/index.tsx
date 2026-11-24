@@ -157,22 +157,28 @@ function PlayerHome() {
   const progress = useQuery(continueQuery());
   const resume = useQuery({ ...serverResumeQuery(), enabled: sections.video });
   const catalog = useQuery({ ...videoCatalogQuery(), enabled: sections.video });
+  // Defer below-the-fold rails until the primary hero/catalog is ready so the
+  // Billboard, Continue Watching & New Episodes win 100% of initial bandwidth.
+  const secondaryReady = !sections.video || !!catalog.data || catalog.isError;
   const collections = useQuery({
     ...studioCollectionsQuery(),
-    enabled: sections.video,
+    enabled: sections.video && secondaryReady,
     retry: false,
   });
   const discoverPlaylists = useQuery({
     ...discoverPlaylistsQuery(),
-    enabled: sections.music,
+    enabled: sections.music && secondaryReady,
     retry: false,
   });
   const albums = useQuery({
     ...albumsQuery({ sort: 'added', limit: 20 }),
-    enabled: sections.music,
+    enabled: sections.music && secondaryReady,
   });
-  const books = useQuery({ ...booksQuery(), enabled: sections.audiobooks });
-  const podcasts = useQuery({ ...podcastSubsQuery(), enabled: sections.podcasts });
+  const books = useQuery({ ...booksQuery(), enabled: sections.audiobooks && secondaryReady });
+  const podcasts = useQuery({
+    ...podcastSubsQuery(),
+    enabled: sections.podcasts && secondaryReady,
+  });
   const saved = useQuery(homeLayoutQuery(device));
   const { customize } = Route.useSearch();
   const [draft, setDraft] = useState<HomeLayout | null>(null);
@@ -403,7 +409,9 @@ function PlayerHome() {
     return out;
   }, [cat, movies, shows]);
 
-  const loading = progress.isLoading || catalog.isLoading || albums.isLoading;
+  const loading =
+    (sections.video && catalog.isLoading && !catalog.data) ||
+    (!sections.video && albums.isLoading && !albums.data);
   const drawn: ReactNode[] = [];
   for (const r of layout.rows) {
     if (!r.on || r.id === 'watchlist') continue;

@@ -221,15 +221,51 @@ def shape_video_catalog(raw, sees_movies, sees_shows, sees_youtube, cap):
     }
 
 
+_CACHE_STALE_SECONDS = 600
+_cache_refreshing: set = set()
+
+
+def _refresh_catalog_bg(key, sees_movies, sees_shows, sees_youtube):
+    try:
+        conn = get_video_db()._get_connection()
+        try:
+            raw = catalog.read_all(conn, sees_movies, sees_shows, sees_youtube)
+        finally:
+            conn.close()
+        with _cache_lock:
+            _cache[key] = (time.monotonic(), raw)
+    except Exception:  # noqa: BLE001
+        logger.debug("background video catalog refresh failed", exc_info=True)
+    finally:
+        with _cache_lock:
+            _cache_refreshing.discard(key)
+
+
 def _read_catalog(sees_movies, sees_shows, sees_youtube, *, force: bool = False):
-    """the unfiltered read, shared briefly: on a big library it is a quick
-    table scan, and every screen opening the player asks for it."""
+    """Stale-while-revalidate video catalog read:
+    - < 30s old: instant cache hit (<1ms)
+    - 30s..600s old: instant stale hit + background refresh thread (never blocks Home!)
+    - cold start or force=True (?refresh=1): synchronous DB read.
+    """
     key = (sees_movies, sees_shows, sees_youtube)
     now = time.monotonic()
     with _cache_lock:
         hit = _cache.get(key)
-        if not force and hit and now - hit[0] < _CACHE_SECONDS:
-            return hit[1]
+        if not force and hit:
+            age = now - hit[0]
+            if age < _CACHE_SECONDS:
+                return hit[1]
+            if age < _CACHE_STALE_SECONDS:
+                if key not in _cache_refreshing:
+                    _cache_refreshing.add(key)
+                    import threading
+                    threading.Thread(
+                        target=_refresh_catalog_bg,
+                        args=(key, sees_movies, sees_shows, sees_youtube),
+                        daemon=True,
+                        name="player-catalog-swr",
+                    ).start()
+                return hit[1]
         conn = get_video_db()._get_connection()
         try:
             raw = catalog.read_all(conn, sees_movies, sees_shows, sees_youtube)
