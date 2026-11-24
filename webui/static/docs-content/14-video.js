@@ -89,7 +89,7 @@ What the scan understands:
 - **Episodes** by \`S01E02\`, by air date for daily shows, and by absolute number for anime (\`Show - 127\`). The last two are placed once the show's episode list has been fetched; until then those files wait. A \`Season 1\` folder supplies the season when the name has none.
 - **Two folders of one show** (\`9-1-1 Nashville\` and \`9-1-1 - Nashville\`) are one show. A folder nothing identifies joins the show in your library with exactly its title.
 - **Editions**: a \`{edition-Director's Cut}\` tag or words like Extended, Unrated, Theatrical and IMAX in the file name show as a badge on that version.
-- **Extras**: trailers, featurettes and \`-trailer\` style files are not counted as versions of the movie.
+- **Extras**: trailers, featurettes and \`-trailer\` style files are not counted as versions of the movie. They are listed under **Extras** on the title's page, where each one plays in place (see below).
 - **Your artwork**: a \`poster.jpg\` in the title's folder is its poster until you choose another.
 - **Renames and moves**: a renamed folder or file keeps its library entry, history and your choices.
 - **Real file facts**: the Media Info job reads each file's actual resolution, codecs, HDR and Atmos, so a file named just \`Movie (1999).mkv\` still shows them.
@@ -98,6 +98,15 @@ New files are noticed on their own: a file dropped into a library folder shows u
 
 > [!NOTE]
 > If a library folder can't be reached (a drive or network share that is offline), the scan stops and removes nothing.
+
+## Extras
+
+A movie's or show's page lists the extras in its folder, with any video source: trailers, featurettes, behind the scenes, deleted scenes, interviews, scenes and shorts. SoulSync reads the layout Plex and Jellyfin both use:
+
+- a folder inside the title's folder named for the kind: \`Trailers\`, \`Featurettes\`, \`Behind The Scenes\`, \`Deleted Scenes\`, \`Interviews\`, \`Scenes\`, \`Shorts\`, \`Other\` (or \`Extras\`);
+- a file beside the movie ending \`-trailer\`, \`-featurette\`, \`-behindthescenes\`, \`-deleted\`, \`-interview\`, \`-scene\`, \`-short\` or \`-other\`.
+
+A show's season folders are read too. **Play** opens one right on the page.
 
 ## Downloads appear at once
 

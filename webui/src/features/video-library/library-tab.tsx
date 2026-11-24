@@ -44,6 +44,7 @@ import {
   wishlistEpisodes,
   wishlistMovie,
 } from './api';
+import { Extras } from './extras';
 import { FixMatchDialog } from './fix-match-dialog';
 import {
   audioLabel,
@@ -981,6 +982,8 @@ function MovieView({
         <FileCards files={data.files} actions={actions} label="File" />
       </section>
 
+      <Extras kind="movie" id={data.id} extras={data.extras} />
+
       {fileDialogs}
       <TitleDialogs
         kind="movie"
@@ -1420,6 +1423,7 @@ function ShowView({
     <div className={s.tab} data-layout="page">
       {page.hero ? createPortal(line, page.hero) : line}
       <Attention issues={issues} />
+      <Extras kind="show" id={data.id} extras={data.extras} />
       {page.foot ? createPortal(folders, page.foot) : folders}
       {dialogs}
       <TitleDialogs

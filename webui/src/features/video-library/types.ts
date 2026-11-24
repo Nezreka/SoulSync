@@ -99,6 +99,15 @@ export interface QualityBlock {
   below_cutoff?: number;
 }
 
+/** a trailer, featurette or deleted scene in the title's own folder */
+export interface Extra {
+  key: string;
+  kind: string;
+  name: string;
+  filename: string;
+  size_bytes: number | null;
+}
+
 export interface MovieLibrary {
   kind: 'movie';
   id: number;
@@ -118,6 +127,7 @@ export interface MovieLibrary {
   copies: { count: number; roots: string[]; spans_drives: boolean; same_resolution: boolean };
   extra_copies?: ExtraCopies;
   files: LibraryFile[];
+  extras?: Extra[];
   /** the padlock: automation leaves this title and its files alone */
   locked?: boolean;
   recycle: boolean;
@@ -165,6 +175,7 @@ export interface ShowLibrary {
   title: string;
   year: number | null;
   identity: Identity;
+  extras?: Extra[];
   summary: {
     owned: number;
     total: number;

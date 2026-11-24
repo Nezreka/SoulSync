@@ -261,6 +261,39 @@ const bulkDone = (batch: string | null = 'b1') => ({
 });
 
 describe('movie tab', () => {
+  it('lists the extras and plays one in place by its key', async () => {
+    routes['/library'] = () =>
+      movie({
+        extras: [
+          {
+            key: 'k1',
+            kind: 'Trailer',
+            name: 'Teaser',
+            filename: 'Teaser.mp4',
+            size_bytes: 1048576,
+          },
+          { key: 'k2', kind: 'Featurette', name: 'Making of', filename: 'm.mkv', size_bytes: null },
+        ],
+      });
+    render(<LibraryTab kind="movie" id={7} />);
+    expect(await screen.findByText('Teaser')).toBeTruthy();
+    expect(screen.getByText('Featurette')).toBeTruthy();
+    expect(document.querySelector('video')).toBeNull();
+    fireEvent.click(within(document.querySelector('[data-extra="k1"]')!).getByText('Play'));
+    expect(document.querySelector('video')!.getAttribute('src')).toBe(
+      '/api/video/detail/movie/7/extras/k1',
+    );
+    fireEvent.click(within(document.querySelector('[data-extra="k1"]')!).getByText('Close'));
+    expect(document.querySelector('video')).toBeNull();
+  });
+
+  it('no extras, no section', async () => {
+    routes['/library'] = () => movie();
+    render(<LibraryTab kind="movie" id={7} />);
+    expect(await screen.findByText('Best copy')).toBeTruthy();
+    expect(document.querySelector('[data-extras]')).toBeNull();
+  });
+
   it("shows a version's edition", async () => {
     routes['/library'] = () => movie({ files: [file({ edition: "Director's Cut" })] });
     render(<LibraryTab kind="movie" id={7} />);
