@@ -22,6 +22,137 @@ from core.text.track_prefix import strip_track_prefix
 
 logger = get_logger("matching_engine")
 
+# Compact Traditional -> Simplified Chinese folding table for CJK matching & search (#2249).
+# If `opencc` is installed, it is used first; this built-in table covers the most common
+# Traditional characters encountered in CJK music metadata with zero extra dependencies.
+_TRAD_TO_SIMP_TABLE = str.maketrans({
+    '無': '无', '變': '变', '臨': '临', '燈': '灯', '愛': '爱', '夢': '梦', '風': '风',
+    '雲': '云', '華': '华', '樂': '乐', '國': '国', '時': '时', '間': '间', '門': '门',
+    '開': '开', '關': '关', '聲': '声', '聽': '听', '見': '见', '說': '说', '話': '话',
+    '語': '语', '詞': '词', '詩': '诗', '書': '书', '畫': '画', '點': '点', '線': '线',
+    '體': '体', '實': '实', '現': '现', '當': '当', '經': '经', '過': '过', '來': '来',
+    '動': '动', '運': '运', '轉': '转', '傳': '传', '統': '统', '紀': '纪', '錄': '录',
+    '選': '选', '擇': '择', '錯': '错', '對': '对', '與': '与', '為': '为', '從': '从',
+    '進': '进', '還': '还', '這': '这', '個': '个', '們': '们', '後': '后', '裡': '里',
+    '邊': '边', '頭': '头', '發': '发', '覺': '觉', '會': '会', '讓': '让', '給': '给',
+    '紅': '红', '藍': '蓝', '綠': '绿', '黃': '黄', '銀': '银', '鐵': '铁', '鋼': '钢',
+    '電': '电', '腦': '脑', '機': '机', '車': '车', '飛': '飞', '鳥': '鸟', '魚': '鱼',
+    '龍': '龙', '鳳': '凤', '馬': '马', '貓': '猫', '雙': '双', '單': '单', '萬': '万',
+    '億': '亿', '歲': '岁', '節': '节', '氣': '气', '淚': '泪', '淵': '渊', '島': '岛',
+    '嶺': '岭', '嵐': '岚', '櫻': '樱', '葉': '叶', '藥': '药', '劍': '剑', '戰': '战',
+    '勝': '胜', '敗': '败', '傷': '伤', '歸': '归', '離': '离', '別': '别', '戀': '恋',
+    '憶': '忆', '願': '愿', '嘆': '叹', '響': '响', '韻': '韵', '調': '调', '號': '号',
+    '題': '题', '場': '场', '廣': '广', '廳': '厅', '館': '馆', '園': '园', '鄉': '乡',
+    '鄰': '邻', '遠': '远', '連': '连', '達': '达', '遊': '游', '戲': '戏', '劇': '剧',
+    '鏡': '镜', '鐘': '钟', '鑰': '钥', '鎖': '锁', '階': '阶', '陽': '阳', '陰': '阴',
+    '隊': '队', '險': '险', '隨': '随', '隱': '隐', '霧': '雾', '靜': '静', '顏': '颜',
+    '類': '类', '飄': '飘', '飲': '饮', '飯': '饭', '餘': '余', '騎': '骑', '騙': '骗',
+    '驚': '惊', '鳴': '鸣', '麗': '丽', '齊': '齐', '齒': '齿', '齡': '龄', '長': '长',
+    '東': '东', '買': '买', '賣': '卖', '亞': '亚', '產': '产', '親': '亲', '僅': '仅',
+    '優': '优', '偽': '伪', '價': '价', '儀': '仪', '償': '偿', '儲': '储', '兒': '儿',
+    '兩': '两', '冊': '册', '寫': '写', '軍': '军', '農': '农', '決': '决', '凍': '冻',
+    '淨': '净', '涼': '凉', '準': '准', '擊': '击', '創': '创', '劉': '刘', '勢': '势',
+    '勵': '励', '勸': '劝', '區': '区', '醫': '医', '協': '协', '衛': '卫', '卻': '却',
+    '廠': '厂', '歷': '历', '壓': '压', '厭': '厌', '參': '参', '叢': '丛', '團': '团',
+    '圍': '围', '圓': '圆', '圖': '图', '聖': '圣', '執': '执', '堅': '坚', '報': '报',
+    '塊': '块', '塵': '尘', '壞': '坏', '壯': '壮', '壺': '壶', '夠': '够', '奪': '夺',
+    '奮': '奋', '獎': '奖', '奧': '奥', '學': '学', '寧': '宁', '寶': '宝', '導': '导',
+    '將': '将', '專': '专', '尋': '寻', '層': '层', '屬': '属', '崗': '岗', '峽': '峡',
+    '帶': '带', '師': '师', '帳': '帐', '幣': '币', '幫': '帮', '幹': '干', '慶': '庆',
+    '應': '应', '廢': '废', '張': '张', '強': '强', '彈': '弹', '彎': '弯', '總': '总',
+    '懸': '悬', '戶': '户', '擁': '拥', '擔': '担', '據': '据', '擠': '挤', '擬': '拟',
+    '擴': '扩', '攝': '摄', '擺': '摆', '斷': '断', '舊': '旧', '曉': '晓', '極': '极',
+    '榮': '荣', '構': '构', '槍': '枪', '樣': '样', '標': '标', '樹': '树', '橋': '桥',
+    '權': '权', '歡': '欢', '殘': '残', '殺': '杀', '漢': '汉', '漲': '涨', '漸': '渐',
+    '潔': '洁', '潛': '潜', '濁': '浊', '濃': '浓', '濟': '济', '濤': '涛', '灣': '湾',
+    '滅': '灭', '靈': '灵', '燦': '灿', '爛': '烂', '爭': '争', '爾': '尔', '牆': '墙',
+    '獨': '独', '獄': '狱', '獵': '猎', '獸': '兽', '獻': '献', '環': '环', '異': '异',
+    '瘋': '疯', '盡': '尽', '監': '监', '盤': '盘', '盧': '卢', '眾': '众', '確': '确',
+    '碼': '码', '禮': '礼', '稱': '称', '種': '种', '積': '积', '穩': '稳', '競': '竞',
+    '筆': '笔', '築': '筑', '簡': '简', '簽': '签', '籃': '篮', '約': '约', '級': '级',
+    '純': '纯', '紙': '纸', '紛': '纷', '細': '细', '終': '终', '組': '组', '結': '结',
+    '絕': '绝', '絡': '络', '絲': '丝', '綜': '综', '維': '维', '網': '网', '緊': '紧',
+    '緒': '绪', '緣': '缘', '編': '编', '緩': '缓', '練': '练', '織': '织', '繞': '绕',
+    '繪': '绘', '繼': '继', '續': '续', '羅': '罗', '罰': '罚', '義': '义', '習': '习',
+    '聞': '闻', '聯': '联', '聰': '聪', '職': '职', '肅': '肃', '脈': '脉', '腳': '脚',
+    '脫': '脱', '臉': '脸', '騰': '腾', '臺': '台', '興': '兴', '舉': '举', '艦': '舰',
+    '著': '着', '藝': '艺', '蘇': '苏', '蘭': '兰', '處': '处', '虛': '虚', '虧': '亏',
+    '蟲': '虫', '術': '术', '衝': '冲', '補': '补', '裝': '装', '製': '制', '複': '复',
+    '襲': '袭', '規': '规', '視': '视', '覽': '览', '觀': '观', '觸': '触', '計': '计',
+    '訂': '订', '訊': '讯', '討': '讨', '訓': '训', '託': '托', '記': '记', '訪': '访',
+    '設': '设', '許': '许', '訴': '诉', '診': '诊', '評': '评', '詢': '询', '試': '试',
+    '該': '该', '詳': '详', '誇': '夸', '認': '认', '誕': '诞', '誘': '诱', '誠': '诚',
+    '誤': '误', '誰': '谁', '課': '课', '談': '谈', '請': '请', '論': '论', '諸': '诸',
+    '諾': '诺', '謀': '谋', '謂': '谓', '謎': '谜', '講': '讲', '謝': '谢', '證': '证',
+    '識': '识', '譜': '谱', '譯': '译', '議': '议', '護': '护', '譽': '誉', '讀': '读',
+    '讚': '赞', '貝': '贝', '貞': '贞', '負': '负', '財': '财', '貢': '贡', '貧': '贫',
+    '貨': '货', '貪': '贪', '貫': '贯', '責': '责', '貴': '贵', '貸': '贷', '費': '费',
+    '貼': '贴', '賀': '贺', '資': '资', '賓': '宾', '賜': '赐', '賞': '赏', '賠': '赔',
+    '賢': '贤', '賦': '赋', '質': '质', '賭': '赌', '賴': '赖', '賺': '赚', '購': '购',
+    '賽': '赛', '贊': '赞', '贈': '赠', '贏': '赢', '趕': '赶', '趙': '赵', '趨': '趋',
+    '躍': '跃', '軌': '轨', '軒': '轩', '軟': '软', '較': '较', '載': '载', '輔': '辅',
+    '輕': '轻', '輛': '辆', '輝': '辉', '輩': '辈', '輪': '轮', '輯': '辑', '輸': '输',
+    '轟': '轰', '辭': '辞', '辯': '辩', '邁': '迈', '違': '违', '遲': '迟', '適': '适',
+    '遺': '遗', '遙': '遥', '鄧': '邓', '郵': '邮', '鄭': '郑', '釋': '释', '針': '针',
+    '釣': '钓', '鈴': '铃', '鋪': '铺', '銷': '销', '鋒': '锋', '錢': '钱', '錦': '锦',
+    '鍵': '键', '鍾': '钟', '鎮': '镇', '鑑': '鉴', '閃': '闪', '閉': '闭', '問': '问',
+    '閒': '闲', '悶': '闷', '閣': '阁', '閱': '阅', '闡': '阐', '陣': '阵', '際': '际',
+    '陸': '陆', '陳': '陈', '難': '难', '頁': '页', '頂': '顶', '項': '项', '順': '顺',
+    '須': '须', '預': '预', '頑': '顽', '頓': '顿', '領': '领', '頻': '频', '顆': '颗',
+    '顛': '颠', '顧': '顾', '顯': '显', '飾': '饰', '養': '养', '駐': '驻', '駕': '驾',
+    '駛': '驶', '騷': '骚', '驅': '驱', '驗': '验', '髮': '发', '鬆': '松', '鬧': '闹',
+    '鬱': '郁', '魯': '鲁', '鮮': '鲜', '鴨': '鸭', '鴻': '鸿', '鵝': '鹅', '鷹': '鹰',
+    '鹽': '盐', '麥': '麦', '麵': '面', '黨': '党', '龜': '龟',
+})
+_OPENCC_T2S = None
+
+
+def _fold_traditional_chinese(text: str) -> str:
+    """Fold Traditional Chinese characters to Simplified for matching & query variants (#2249)."""
+    global _OPENCC_T2S
+    if not text:
+        return text
+    if _OPENCC_T2S is None:
+        try:
+            import opencc  # type: ignore
+            _OPENCC_T2S = opencc.OpenCC('t2s')
+        except Exception:
+            _OPENCC_T2S = False
+    if _OPENCC_T2S:
+        try:
+            return _OPENCC_T2S.convert(text)
+        except Exception:
+            pass
+    return text.translate(_TRAD_TO_SIMP_TABLE)
+
+
+def _collapse_spaced_characters(title: str) -> Optional[str]:
+    """Collapse stylized single-character-spaced titles like 'モ　ミ　ア　ゲ' -> 'モミアゲ' (#2248)."""
+    if not title:
+        return None
+    core = re.split(r'\s+(?:feat\.?|ft\.?)\s+|\s*[\(\[]|\s+-\s+', title.strip(), maxsplit=1, flags=re.IGNORECASE)[0].strip()
+    tokens = [t for t in re.split(r'[\s\u3000]+', core) if t]
+    if len(tokens) >= 4 and sum(1 for t in tokens if len(t) == 1) >= max(4, int(len(tokens) * 0.8)):
+        return ''.join(tokens)
+    return None
+
+
+def _raw_short_title(title: str) -> str:
+    """Shorten a title (drop trailing ' - ...', '(...)', '[...]', 'feat. ...') while preserving its
+    original non-Latin script (#2248)."""
+    if not title:
+        return ""
+    s = title.strip()
+    s = re.sub(r'\s+(?:feat\.?|ft\.?)\s+.*$', '', s, flags=re.IGNORECASE).strip()
+    s = re.sub(r'\s*[\(\[].*?[\)\]]', '', s).strip()
+    if ' - ' in s:
+        head, tail = s.split(' - ', 1)
+        tail_l = tail.lower()
+        keep = ('remix', 'mix', 'edit', 'acoustic', 'live', 'instrumental', 'slowed', 'sped up')
+        if head.strip() and not any(k in tail_l for k in keep):
+            s = head.strip()
+    return s.strip(' -–—')
+
 @dataclass
 class MatchResult:
     spotify_track: SpotifyTrack
@@ -155,8 +286,9 @@ class MusicMatchingEngine:
             for c in text
         )
         if has_cjk:
-            # CJK detected: keep the CJK characters, but transliterate the text
-            # around them, so a Cyrillic title in a CJK folder path is not stripped
+            # CJK detected: fold Traditional -> Simplified Chinese (#2249) and keep CJK
+            # characters intact while transliterating non-CJK spans around them (#2246).
+            text = _fold_traditional_chinese(text)
             text = re.sub(
                 r'[^\u2e80-\u9fff\u3040-\u30ff\uff00-\uffef\uac00-\ud7af]+',
                 lambda m: unidecode(m.group()),
@@ -792,6 +924,28 @@ class MusicMatchingEngine:
             raw_query = f"{raw_artist} {raw_title}".strip()
             queries.append(raw_query)
             logger.debug(f"NON-ASCII: Raw original query: '{raw_query}'")
+
+            # #2248: Shortened query in the original script (e.g. Cyrillic title before " - " / "(...)")
+            raw_short = _raw_short_title(raw_title)
+            if raw_short and raw_short != raw_title:
+                queries.append(f"{raw_artist} {raw_short}".strip())
+                if len(raw_short) >= 4:
+                    queries.append(raw_short)
+
+            # #2249: Traditional -> Simplified Chinese query variant
+            simp_artist = _fold_traditional_chinese(raw_artist)
+            simp_title = _fold_traditional_chinese(raw_short or raw_title)
+            if simp_title != (raw_short or raw_title) or simp_artist != raw_artist:
+                queries.append(f"{simp_artist} {simp_title}".strip())
+                if len(simp_title) >= 2:
+                    queries.append(simp_title)
+
+        # #2248: Stylized titles with spaces between single characters (e.g. "モ　ミ　ア　ゲ...")
+        collapsed = _collapse_spaced_characters(raw_title)
+        if collapsed:
+            if raw_artist:
+                queries.append(f"{raw_artist} {collapsed}".strip())
+            queries.append(collapsed)
 
         artist = self.clean_artist(spotify_track.artists[0])
         original_title = spotify_track.name

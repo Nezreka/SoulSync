@@ -787,6 +787,23 @@ def _score_streaming_candidates(results, spotify_track, why=None):
             if _best_artist < 0.5 and _credited_in_title(
                     expected_artists, _cand_artist_raw, r.title):
                 _best_artist = 1.0
+            # #2249: YouTube Topic channels often use romanized artist names (e.g.
+            # "Saishinonana - Topic" for "彩糸乃七"). Check MusicBrainz/known aliases
+            # before rejecting YouTube results on artist score.
+            if r.username == 'youtube' and _best_artist < 0.5 and expected_artists:
+                try:
+                    _yt_aliases = list(_artist_aliases(expected_artists[0]) or [])
+                except Exception:
+                    _yt_aliases = []
+                for _al in _yt_aliases:
+                    _al_norm = matching_engine.normalize_string(str(_al or ''))
+                    if not _al_norm:
+                        continue
+                    if _al_norm == _cand_artist or (
+                        len(_al_norm) > 2 and _re.search(r'\b' + _re.escape(_al_norm) + r'\b', _cand_artist)
+                    ) or _fuzzy_artist_similarity(_al_norm, _cand_artist) >= 0.5:
+                        _best_artist = 1.0
+                        break
             # Raised from 0.4 → 0.5 to close a fencepost bug: SequenceMatcher
             # returns exactly 0.400 for "maduk" vs "tom walker" (5 chars vs
             # 10 chars with 2 coincidental char matches), which bypassed the
