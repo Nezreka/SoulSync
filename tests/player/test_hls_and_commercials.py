@@ -35,3 +35,10 @@ def test_commercial_settings_defaults_and_validation():
     assert defs["commercials_mode"] == "short"
     assert settings._commercial_era("90S") == "90s"
     assert settings._commercial_mode("CABLE") == "cable"
+
+
+def test_cast_hls_bypasses_session_gate():
+    from core.security.session_profile import requires_profile
+    assert requires_profile('/api/player/cast-hls/youtube/abc123/index.m3u8', 'GET') is False
+    assert requires_profile('/api/player/cast-hls/youtube/abc123/seg/0.ts', 'GET') is False
+    assert requires_profile('/api/player/cast-hls/youtube/abc123/index.m3u8', 'OPTIONS') is False
