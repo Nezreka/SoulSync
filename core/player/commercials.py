@@ -484,12 +484,14 @@ def put_server_config(db: Any, body: Any) -> Dict[str, Any]:
     from core.player import settings as S
     if not isinstance(body, dict):
         raise S.SettingsError("expected object")
+    # a null is "leave it": the mobile app sends every field, the unset ones
+    # as null, and null used to read as era "none" (refused) or enabled off
     changes: Dict[str, Any] = {}
-    if "enabled" in body:
+    if body.get("enabled") is not None:
         changes["commercials_enabled"] = bool(body["enabled"])
-    if "era" in body:
+    if body.get("era") is not None:
         changes["commercials_era"] = str(body["era"]).strip().lower()
-    if "mode" in body:
+    if body.get("mode") is not None:
         changes["commercials_mode"] = str(body["mode"]).strip().lower()
     if not changes:
         raise S.SettingsError("nothing to change")

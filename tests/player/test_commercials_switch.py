@@ -54,3 +54,32 @@ def test_a_break_with_an_empty_cache_does_not_download_when_off(monkeypatch):
     assert commercials.pick_break(era="80s") == []
     _settle()
     assert calls == []
+
+
+# the mobile app sends every field of its request, the unset ones as null
+def _put(monkeypatch, body):
+    from core.player import settings as S
+    seen = {}
+
+    def put(_db, _pid, changes):
+        seen.update(changes)
+        return {"commercials_enabled": True, "commercials_era": "auto", "commercials_mode": "cable", **changes}
+
+    monkeypatch.setattr(S, "put", put)
+    monkeypatch.setattr(commercials, "warm_async", lambda *a, **k: False)
+    commercials.put_server_config(object(), body)
+    return seen
+
+
+def test_a_null_field_is_left_alone(monkeypatch):
+    # the switch from the phone: era null used to be saved as "none" and refused
+    assert _put(monkeypatch, {"enabled": True, "era": None, "mode": None}) == {"commercials_enabled": True}
+    # an era pick from the phone: enabled null used to switch commercials off
+    assert _put(monkeypatch, {"enabled": None, "era": "80s", "mode": None}) == {"commercials_era": "80s"}
+
+
+def test_all_null_is_nothing_to_change(monkeypatch):
+    import pytest
+    from core.player import settings as S
+    with pytest.raises(S.SettingsError):
+        _put(monkeypatch, {"enabled": None, "era": None, "mode": None})
