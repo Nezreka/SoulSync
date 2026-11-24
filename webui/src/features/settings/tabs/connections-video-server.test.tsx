@@ -207,6 +207,56 @@ describe('the video media server', () => {
     );
   });
 
+  it('with both servers connected: a switch to keep them in step, its state in words, Link now', async () => {
+    answers['GET /api/video/server/links'] = {
+      success: true,
+      enabled: false,
+      other: 'plex',
+      movies: 0,
+      movies_total: 8929,
+      shows: 0,
+      shows_total: 3482,
+      last: { state: 'idle' },
+    };
+    answers['POST /api/video/server/links'] = {
+      success: true,
+      started: true,
+      enabled: true,
+      other: 'plex',
+      movies: 8812,
+      movies_total: 8929,
+      shows: 3400,
+      shows_total: 3482,
+      last: { state: 'done' },
+    };
+    render(<VideoServerConnection />);
+    await shown();
+    await waitFor(() =>
+      expect(q<HTMLElement>('[data-video-links-status]').textContent).toBe(
+        'Off. Plex is connected too.',
+      ),
+    );
+    expect(q<HTMLButtonElement>('[data-video-links-run]').disabled).toBe(true);
+    fireEvent.click(q('[data-video-links-switch]'));
+    await waitFor(() => expect(posts('/api/video/server/links')).toEqual([{ enabled: true }]));
+    await waitFor(() =>
+      expect(q<HTMLElement>('[data-video-links-status]').textContent).toBe(
+        '8,812 of 8,929 movies and 3,400 of 3,482 shows are on Plex too.',
+      ),
+    );
+    fireEvent.click(q('[data-video-links-run]'));
+    await waitFor(() =>
+      expect(posts('/api/video/server/links')).toEqual([{ enabled: true }, { run: true }]),
+    );
+  });
+
+  it('one server: nothing to link, no row', async () => {
+    answers['GET /api/video/server/links'] = { success: true, enabled: false, other: null };
+    render(<VideoServerConnection />);
+    await shown();
+    expect(document.querySelector('[data-video-links-switch]')).toBeNull();
+  });
+
   it('Test saves quietly first, then says what the server said', async () => {
     answers['POST /api/video/server-config/test'] = { success: false, error: 'refused' };
     render(<VideoServerConnection />);

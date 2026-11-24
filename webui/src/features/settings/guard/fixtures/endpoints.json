@@ -4210,6 +4210,11 @@
   "/api/video/server": {
     "server": "jellyfin"
   },
+  "/api/video/server/links": {
+    "enabled": false,
+    "other": null,
+    "success": true
+  },
   "/api/video/server-config": {
     "jellyfin": {
       "api_key": "",

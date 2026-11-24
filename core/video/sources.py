@@ -278,13 +278,15 @@ def video_jellyfin_test(cfg):
     return True, "Connected to %s" % name
 
 
-def _build_source(movies_lib=None, tv_lib=None, *, interactive=False):
+def _build_source(movies_lib=None, tv_lib=None, *, interactive=False, server=None):
     """Build a media source for the VIDEO server (see resolve_video_server),
     restricted to the named Movies/TV libraries when given. Uses VIDEO's OWN
     effective connection config (its creds, or inherited from music) — never the
-    music side's live connection, so the two stay independent."""
+    music side's live connection, so the two stay independent. ``server``
+    names one outright ('plex' | 'jellyfin'): the other server, for
+    core/video/server_links.py."""
     db = _vdb()
-    server = resolve_video_server(db)
+    server = server or resolve_video_server(db)
 
     if server == "plex":
         cfg = video_plex_config(db)
@@ -375,6 +377,44 @@ def scan_video_source():
             except Exception:
                 logger.debug("video: library auto-pick failed", exc_info=True)
     return _build_source(sel.get("movies") or None, _tv_pick(sel))
+
+
+def source_for_server(server: str):
+    """a source for a NAMED server, whichever one is the video server: its
+    picked libraries, and for a kind never picked there, every library of
+    that kind it has. None when it isn't connected. the second server is only
+    ever read to find the same titles (core/video/server_links.py), so
+    reading all of a kind's libraries is what matching wants."""
+    db = _vdb()
+    if server not in ("plex", "jellyfin") or db is None:
+        return None
+    sel = db.get_library_selection(server) or {}
+    movies, tv = sel.get("movies") or None, _tv_pick(sel)
+    if sel.get("movies") is None or sel.get("tv") is None:
+        probe = _build_source(server=server)
+        if probe is None:
+            return None
+        try:
+            libs = probe.available_libraries() or {}
+        except Exception:   # noqa: BLE001 - unreachable: not connected for now
+            logger.debug("video: couldn't list %s libraries", server, exc_info=True)
+            return None
+        if sel.get("movies") is None:
+            movies = [x["title"] for x in libs.get("movies") or [] if x.get("title")] or None
+        if sel.get("tv") is None:
+            tv = [x["title"] for x in libs.get("tv") or [] if x.get("title")] or None
+    return _build_source(movies, tv, server=server)
+
+
+def configured_video_servers(db=None) -> list:
+    """the media servers the video side has a connection for"""
+    db = _vdb(db)
+    out = []
+    if video_plex_config(db).get("base_url"):
+        out.append("plex")
+    if video_jellyfin_config(db).get("base_url"):
+        out.append("jellyfin")
+    return out
 
 
 def normalize_media_type(media_type) -> str:

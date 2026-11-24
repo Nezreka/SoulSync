@@ -99,6 +99,18 @@ New files are noticed on their own: a file dropped into a library folder shows u
 > [!NOTE]
 > If a library folder can't be reached (a drive or network share that is offline), the scan stops and removes nothing.
 
+## Plex and Jellyfin together
+
+With both servers connected, switch on **Keep Jellyfin in step** (or **Keep Plex in step**) under the server row. The server you picked stays your library; SoulSync also reads the other one and works out which of its items are the same movies, shows and episodes.
+
+- **Watched follows.** Mark something watched or unwatched on either server, or in SoulSync, and the other server is marked the same. If both changed in opposite directions, watched wins.
+- **Switching keeps your library.** Pick the other server as the video server and every linked title keeps its entry, with its monitored setting, fixed match, quality profile and history.
+
+Titles are matched by the file itself first (the same file name and size on both servers), then by TMDB, TVDB or IMDb id. Nothing is matched on a guess: a title only one server has is simply not linked, and the row says how much of your library both have. The other server is read after each library scan, or right away with **Link now**.
+
+> [!NOTE]
+> The watch state that is kept in step is the server account's. A profile signed in with its own Plex account keeps its own, as before. Resume positions are not carried over.
+
 ## Extras
 
 A movie's or show's page lists the extras in its folder, with any video source: trailers, featurettes, behind the scenes, deleted scenes, interviews, scenes and shorts. SoulSync reads the layout Plex and Jellyfin both use:

@@ -98,4 +98,11 @@ def set_watched(db, kind: str, item_id: int, watched: bool, source=_UNSET,
         if src is not None and getattr(src, "server_name", None) == target.get("server_source") \
                 and hasattr(src, "set_watched"):
             pushed = bool(src.set_watched(target["server_id"], watched, kind=kind).get("ok"))
+    if push and watcher is None:
+        # the same title on the linked second server (core/video/server_links.py)
+        try:
+            from core.video import server_links
+            server_links.push_toggle(db, kind, item_id, watched)
+        except Exception:   # noqa: BLE001 - the next compare carries it over
+            logger.debug("linked server not told about a watched toggle", exc_info=True)
     return {"ok": True, "watched": watched, "pushed": pushed}

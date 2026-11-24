@@ -1201,6 +1201,26 @@ CREATE TABLE IF NOT EXISTS video_watch_state (
     PRIMARY KEY (profile_id, kind, item_id)
 );
 
+-- ── the same title on a second media server (core/video/server_links.py) ──
+-- the library's rows belong to the video server. with plex AND jellyfin
+-- connected, the other server's item for each movie, show and episode is
+-- kept here: its id there, and the watch state both sides had when they were
+-- last compared, so a change on either one can be told from no change and
+-- carried to the other. additive: nothing reads it unless linking is on.
+CREATE TABLE IF NOT EXISTS video_server_links (
+    kind TEXT NOT NULL,               -- movie | show | episode
+    item_id INTEGER NOT NULL,         -- movies.id | shows.id | episodes.id
+    server_source TEXT NOT NULL,      -- the OTHER server: plex | jellyfin
+    server_id TEXT NOT NULL,          -- the item's id there
+    their_play_count INTEGER,         -- that server's watch state at the last compare
+    our_play_count INTEGER,           -- the library row's, at the last compare
+    last_viewed_at TEXT,
+    seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (kind, item_id, server_source)
+);
+CREATE INDEX IF NOT EXISTS idx_video_server_links_server
+    ON video_server_links(server_source, kind, server_id);
+
 -- ── file changes (the library manager's history and undo) ──
 -- one row per file a person renamed, moved, deleted or filed under another
 -- episode. enough is kept to put it back: where it was, where the recycle

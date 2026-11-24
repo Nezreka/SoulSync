@@ -22,7 +22,14 @@ import {
 } from '../ui';
 import s from '../ui/settings.module.css';
 import { useCommit } from './commit';
-import { type ConnField, type Server, otherTv, useVideoServer, videoServer } from './video-server';
+import {
+  type ConnField,
+  type Server,
+  linksWords,
+  otherTv,
+  useVideoServer,
+  videoServer,
+} from './video-server';
 
 export const VIDEO_SERVERS: Array<{ id: Server; name: string; logo: string }> = [
   { id: 'plex', name: 'Plex', logo: '/static/img/brands/plex.png' },
@@ -160,6 +167,44 @@ function OtherTv() {
   );
 }
 
+/** plex and jellyfin as one library: shown only with both connected */
+function LinkServers() {
+  const { links } = useVideoServer();
+  if (!links) return null;
+  const other = links.other === 'plex' ? 'Plex' : 'Jellyfin';
+  const running = links.last?.state === 'running';
+  return (
+    <Row
+      label={`Keep ${other} in step`}
+      htmlFor="video-link-servers"
+      field
+      help={
+        <>
+          Watched and unwatched follow across both servers, and switching the video server keeps
+          your library. <span data-video-links-status="">{linksWords(links)}</span>
+        </>
+      }
+    >
+      <Btn
+        small
+        data-video-links-run=""
+        disabled={!links.enabled || running}
+        busy={running}
+        onClick={() => void videoServer.linkNow()}
+      >
+        Link now
+      </Btn>
+      <Switch
+        id="video-link-servers"
+        data-video-links-switch=""
+        aria-label={`Keep ${other} in step`}
+        checked={links.enabled}
+        onChange={(event) => void videoServer.setLinks(event.target.checked)}
+      />
+    </Row>
+  );
+}
+
 /** the card on the Connections page (video side) */
 export function VideoServerConnection({ onView }: { onView?: () => void }) {
   const { active, status } = useVideoServer();
@@ -223,6 +268,7 @@ export function VideoServerConnection({ onView }: { onView?: () => void }) {
             <LibraryRow kind="movies" />
             <LibraryRow kind="tv" />
             <OtherTv />
+            <LinkServers />
           </div>
           <p className={s.cardFoot}>
             Which libraries the video side scans. A library switched to Anime files its shows' new

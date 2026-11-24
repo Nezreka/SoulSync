@@ -18,6 +18,7 @@ export type MediaServer = Exclude<Server, 'soulsync'>;
 export const SERVER_URL = '/api/video/server';
 export const CONN_URL = '/api/video/server-config';
 export const LIBS_URL = '/api/video/libraries';
+export const LINKS_URL = '/api/video/server/links';
 
 export interface Conn {
   'plex-url': string;
@@ -41,6 +42,29 @@ export interface Libraries {
   anime: string[];
 }
 
+/** plex and jellyfin as one library (core/video/server_links.py) */
+export interface Links {
+  enabled: boolean;
+  /** the connected server that isn't the video server; null with only one */
+  other: MediaServer | null;
+  movies: number;
+  movies_total: number;
+  shows: number;
+  shows_total: number;
+  last?: { state?: string; error?: string; unmatched_count?: number };
+}
+
+/** linksWords: how much of the library the other server has too, in words */
+export function linksWords(l: Links): string {
+  const other = l.other === 'plex' ? 'Plex' : 'Jellyfin';
+  if (l.last?.state === 'running') return `Reading ${other}…`;
+  if (l.last?.state === 'error') return `Couldn't read ${other}: ${l.last.error || 'no answer'}`;
+  if (!l.enabled) return `Off. ${other} is connected too.`;
+  if (!l.movies && !l.shows) return `Nothing linked yet. Link now reads ${other}.`;
+  const n = (v: number) => v.toLocaleString('en-US');
+  return `${n(l.movies)} of ${n(l.movies_total)} movies and ${n(l.shows)} of ${n(l.shows_total)} shows are on ${other} too.`;
+}
+
 export interface User {
   id: string;
   name: string;
@@ -57,6 +81,8 @@ interface State {
   /** null until the libraries load: the pickers say Loading... */
   libs: Libraries | null;
   status: string;
+  /** null: one server (or none) connected, so there is nothing to link */
+  links: Links | null;
   /** what the last Test of each server said, in words */
   said: Partial<Record<Server, { tone: 'ok' | 'bad'; text: string }>>;
 }
@@ -99,6 +125,7 @@ function createVideoServer() {
     users: null,
     libs: null,
     status: '',
+    links: null,
     said: {},
   };
   const listeners = new Set<() => void>();
@@ -236,6 +263,43 @@ function createVideoServer() {
     }
   }
 
+  let linksTimer: ReturnType<typeof setTimeout> | undefined;
+  /** the link state; while a pass runs, asked again until it is done */
+  async function loadLinks() {
+    try {
+      const r = await fetch(LINKS_URL, { headers: { Accept: 'application/json' } });
+      const d = r.ok ? ((await r.json()) as (Links & { success?: boolean }) | null) : null;
+      set({ links: d && d.success && d.other ? d : null });
+      clearTimeout(linksTimer);
+      if (d?.last?.state === 'running') linksTimer = setTimeout(() => void loadLinks(), 3000);
+    } catch {
+      set({ links: null });
+    }
+  }
+
+  async function postLinks(body: { enabled?: boolean; run?: boolean }) {
+    try {
+      const r = await fetch(LINKS_URL, json(body));
+      const d = (await r.json()) as Links & {
+        success?: boolean;
+        error?: string;
+        started?: boolean;
+      };
+      if (!d.success) {
+        toast(d.error || 'Could not change linking', 'error');
+        return;
+      }
+      set({ links: d.other ? d : null });
+      if (d.started) {
+        toast(`Reading ${d.other === 'plex' ? 'Plex' : 'Jellyfin'} to link it`, 'info');
+        clearTimeout(linksTimer);
+        linksTimer = setTimeout(() => void loadLinks(), 2000);
+      }
+    } catch {
+      toast('Could not change linking', 'error');
+    }
+  }
+
   async function saveLibs(silent = false) {
     const l = state.libs;
     if (!l) return;
@@ -275,7 +339,11 @@ function createVideoServer() {
       void loadServer();
       void loadConn();
       void loadLibs();
+      void loadLinks();
     },
+    /** linking the two servers: on or off, and Link now */
+    setLinks: (enabled: boolean) => postLinks({ enabled }),
+    linkNow: () => postLinks({ run: true }),
     saveConn,
     saveLibs,
     type: (field: ConnField, value: string) => set({ conn: { ...state.conn, [field]: value } }),
@@ -286,6 +354,7 @@ function createVideoServer() {
       try {
         await fetch(SERVER_URL, json({ server }));
         void loadLibs();
+        void loadLinks();
         toast(
           server === 'soulsync'
             ? 'Video library set to Standalone: SoulSync scans your folders'
@@ -351,6 +420,7 @@ function createVideoServer() {
         users: null,
         libs: null,
         status: '',
+        links: null,
         said: {},
       };
     },
