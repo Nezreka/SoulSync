@@ -1362,7 +1362,11 @@ def _is_admin() -> bool:
 
 
 def _is_player_admin() -> bool:
-    """True for browser admins AND paired mobile devices signed into an admin profile."""
+    """True for browser admins AND paired mobile devices signed into an admin profile.
+
+    every admin check in the player uses this one: a phone on an admin
+    profile runs the same player as that admin's browser (Users & Downloads,
+    server guide channels, party overrides), as the mobile app's README says."""
     from flask import g
     return bool(getattr(g, "is_admin", False) or getattr(g, "perms_source", None) == "admin")
 
@@ -1380,7 +1384,7 @@ def guide_channels():
         out = lineup.list_channels(player_db(), pid)
     except Exception:  # noqa: BLE001
         return _failed("channels read", "Couldn't load the channels.")
-    return jsonify({"success": True, **out, "can_edit_server": _is_admin()})
+    return jsonify({"success": True, **out, "can_edit_server": _is_player_admin()})
 
 
 @bp.route("/api/player/guide/channels", methods=["POST"])
@@ -1394,7 +1398,7 @@ def add_guide_channel():
         return _signed_out()
     body = request.get_json(silent=True) or {}
     server = body.get("scope") == "server"
-    if server and not _is_admin():
+    if server and not _is_player_admin():
         return jsonify({"success": False, "error": "not_allowed",
                         "message": "Only an admin makes channels for everyone."}), 403
     try:
@@ -1416,7 +1420,7 @@ def edit_guide_channel(channel_id):
         return _signed_out()
     try:
         ch = lineup.edit_channel(player_db(), pid, channel_id, (request.get_json(silent=True) or {}).get("spec"),
-                                 admin=_is_admin())
+                                 admin=_is_player_admin())
     except lineup.LineupError as e:
         return _bad(e)
     if ch is None:
@@ -1432,7 +1436,7 @@ def remove_guide_channel(channel_id):
     pid = _profile()
     if pid is None:
         return _signed_out()
-    if not lineup.remove_channel(player_db(), pid, channel_id, admin=_is_admin()):
+    if not lineup.remove_channel(player_db(), pid, channel_id, admin=_is_player_admin()):
         return jsonify({"success": False, "error": "not_found", "message": "No such channel of yours."}), 404
     return jsonify({"success": True})
 
@@ -1708,7 +1712,7 @@ def update_watch_party_state(party_id):
         return jsonify({"success": False, "error": "not_allowed",
                         "message": "That title isn't available to this profile."}), 403
     try:
-        party = parties.update_state(player_db(), party_id, pid, body, is_admin=_is_admin())
+        party = parties.update_state(player_db(), party_id, pid, body, is_admin=_is_player_admin())
     except parties.PartyError as e:
         return _bad(e)
     who = _profiles_by_id()
@@ -1742,7 +1746,7 @@ def delete_watch_party(party_id):
     if pid is None:
         return _signed_out()
     try:
-        deleted = parties.delete_party(player_db(), party_id, pid, is_admin=_is_admin())
+        deleted = parties.delete_party(player_db(), party_id, pid, is_admin=_is_player_admin())
     except parties.PartyError as e:
         return _bad(e)
     return jsonify({"success": True, "deleted": deleted})
@@ -1767,7 +1771,7 @@ def player_downloads_list():
         "success": True,
         "allow_downloads": perm["allow_downloads"],
         "max_items": perm["max_items"],
-        "is_admin": _is_admin(),
+        "is_admin": _is_player_admin(),
         "downloads": items,
     })
 
@@ -1782,7 +1786,7 @@ def player_downloads_log():
     if pid is None:
         return _signed_out()
     perm = downloads.get_permission(player_db(), pid)
-    if not perm["allow_downloads"] and not _is_admin():
+    if not perm["allow_downloads"] and not _is_player_admin():
         return jsonify({
             "success": False,
             "error": "downloads_disabled",
@@ -1801,8 +1805,12 @@ def player_downloads_log():
             device_id=body.get("device_id") or "web",
             device_name=body.get("device_name") or "Web Browser",
             quality=body.get("quality") or "original",
-            size_bytes=int(body.get("size_bytes") or 0),
+            size_bytes=body.get("size_bytes") or 0,
+            # the admin's cap; an admin keeps what they like
+            max_items=0 if _is_player_admin() else int(perm.get("max_items") or 0),
         )
+    except downloads.DownloadLimitReached as e:
+        return jsonify({"success": False, "error": "download_limit", "message": str(e)}), 403
     except ValueError as e:
         return _bad(e)
     return jsonify({"success": True, "download": row})
@@ -1822,7 +1830,7 @@ def player_downloads_removed():
     updated = downloads.mark_removed(
         player_db(),
         pid,
-        download_id=int(dl_id) if dl_id is not None else None,
+        download_id=int(dl_id) if isinstance(dl_id, int) or str(dl_id or "").isdigit() else None,
         item_type=body.get("item_type"),
         item_id=str(body.get("item_id")) if body.get("item_id") is not None else None,
         device_id=body.get("device_id"),
@@ -1839,7 +1847,7 @@ def player_admin_users():
     pid = _profile()
     if pid is None:
         return _signed_out()
-    if not _is_admin():
+    if not _is_player_admin():
         return jsonify({"success": False, "error": "forbidden", "message": "Admin access required."}), 403
     profiles = get_database().get_all_profiles() or []
     filter_pid = request.args.get("profile_id")
@@ -1862,11 +1870,14 @@ def player_admin_user_downloads(target_profile_id: int):
     pid = _profile()
     if pid is None:
         return _signed_out()
-    if not _is_admin():
+    if not _is_player_admin():
         return jsonify({"success": False, "error": "forbidden", "message": "Admin access required."}), 403
     body = request.get_json(silent=True) or {}
     allow = bool(body.get("allow_downloads", True))
-    max_items = int(body.get("max_items") or 0)
+    try:
+        max_items = max(0, int(body.get("max_items") or 0))
+    except (TypeError, ValueError):
+        return _bad("max_items must be a number")
     perm = downloads.set_permission(player_db(), target_profile_id, allow, max_items)
     return jsonify({"success": True, "profile_id": target_profile_id, **perm})
 
