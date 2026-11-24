@@ -307,24 +307,61 @@ body.max-performance .sidebar::after {
     .sidebar-visualizer { display: none; }
 }
 
-/* Sidebar scrollbar webkit styling */
-.sidebar::-webkit-scrollbar {
+/* Global & sidebar scrollbars — harmonized thin accent-tinted styling (#2250) */
+html {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(var(--accent-rgb), 0.35) transparent;
+}
+
+html::-webkit-scrollbar,
+body::-webkit-scrollbar {
     width: 6px;
+    height: 6px;
 }
 
-.sidebar::-webkit-scrollbar-track {
-    background: var(--white-a05);
-    border-radius: var(--radius-control);
+html::-webkit-scrollbar-track,
+body::-webkit-scrollbar-track {
+    background: transparent;
 }
 
-.sidebar::-webkit-scrollbar-thumb {
-    background: rgba(var(--accent-rgb), 0.5);
+html::-webkit-scrollbar-thumb,
+body::-webkit-scrollbar-thumb {
+    background: rgba(var(--accent-rgb), 0.35);
     border-radius: var(--radius-control);
     transition: background var(--dur-slow) ease;
 }
 
-.sidebar::-webkit-scrollbar-thumb:hover {
-    background: rgba(var(--accent-rgb), 0.7);
+html::-webkit-scrollbar-thumb:hover,
+body::-webkit-scrollbar-thumb:hover {
+    background: rgba(var(--accent-rgb), 0.65);
+}
+
+/* Sidebar scrollbar webkit styling — hidden by default, subtle accent thumb on hover */
+.sidebar::-webkit-scrollbar,
+.sidebar-scroll::-webkit-scrollbar {
+    width: 6px;
+}
+
+.sidebar::-webkit-scrollbar-track,
+.sidebar-scroll::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.sidebar::-webkit-scrollbar-thumb,
+.sidebar-scroll::-webkit-scrollbar-thumb {
+    background: transparent;
+    border-radius: var(--radius-control);
+    transition: background var(--dur-slow) ease;
+}
+
+.sidebar:hover::-webkit-scrollbar-thumb,
+.sidebar-scroll:hover::-webkit-scrollbar-thumb {
+    background: rgba(var(--accent-rgb), 0.38);
+}
+
+.sidebar::-webkit-scrollbar-thumb:hover,
+.sidebar-scroll::-webkit-scrollbar-thumb:hover {
+    background: rgba(var(--accent-rgb), 0.68);
 }
 
 /* Sidebar Header */
@@ -369,6 +406,12 @@ body.max-performance .sidebar::after {
     overflow-x: hidden;
     display: flex;
     flex-direction: column;
+    scrollbar-width: none;
+}
+
+.sidebar-scroll:hover {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(var(--accent-rgb), 0.38) transparent;
 }
 
 .sidebar-header {

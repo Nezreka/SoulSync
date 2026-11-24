@@ -137,11 +137,17 @@ export function vdlIsPackRow(d: VdlDownload): boolean {
   return (d.kind || '').toLowerCase() === 'show' && c.season != null && c.episode == null;
 }
 
-/** Downloads of the same show + season collapse into one parent card. */
+/** Downloads of the same show + season (or whole-series pack) collapse into one parent card. */
 export function vdlGroupKey(d: VdlDownload): string | null {
-  if ((d.kind || '').toLowerCase() !== 'show') return null;
+  const k = (d.kind || '').toLowerCase();
+  if (k !== 'show' && k !== 'series' && k !== 'season') return null;
   const c = vdlParseCtx(d);
-  if (c.season == null) return null;
+  if (c.season == null) {
+    if (vdlIsPackRow(d) || k === 'series') {
+      return `g:${d.media_id ?? d.title ?? '?'}:series`;
+    }
+    return null;
+  }
   if (c.episode == null && !vdlIsPackRow(d)) return null;
   return `g:${d.media_id ?? d.title ?? '?'}:s${c.season}`;
 }
