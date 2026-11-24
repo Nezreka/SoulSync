@@ -114,6 +114,27 @@ def _clean_item(item_type: Any, item_id: Any) -> tuple:
     return kind, ident
 
 
+def _lobby_art(value: Any) -> Optional[str]:
+    """the lobby song's cover: our own artwork route, or an https image. it's
+    shown to every member, so nothing else (no http on the lan, no data:)"""
+    text = str(value or "").strip()[:300]
+    if text.startswith("/api/") or text.startswith("https://"):
+        return text
+    return None
+
+
+def _forget_old(now: float) -> None:
+    """the pee break and reaction memories only matter for a while: without
+    this they grew by a key per party and person forever"""
+    if len(_pee_cooldowns) > 500:
+        for k in [k for k, ts in _pee_cooldowns.items() if now - ts > PEE_BREAK_COOLDOWN_SEC]:
+            _pee_cooldowns.pop(k, None)
+    if len(_reaction_timestamps) > 500:
+        for k in [k for k, v in _reaction_timestamps.items()
+                  if not v or now - v[-1] > REACTION_BURST_WINDOW_SEC]:
+            _reaction_timestamps.pop(k, None)
+
+
 def _clean_lobby_track(raw: Any, now: float) -> Optional[Dict[str, Any]]:
     if not isinstance(raw, dict):
         return None
@@ -129,7 +150,7 @@ def _clean_lobby_track(raw: Any, now: float) -> Optional[Dict[str, Any]]:
         "title": str(raw.get("title") or "Lobby Music")[:160],
         "artist": str(raw.get("artist") or "")[:120],
         "album_id": aid,
-        "artwork": str(raw.get("artwork") or "")[:300] or None,
+        "artwork": _lobby_art(raw.get("artwork")),
         "duration_ms": dur_ms,
         "started_at": float(raw.get("started_at") or now),
     }
@@ -603,6 +624,7 @@ def update_state(
                 rem_min = max(1, int(round((PEE_BREAK_COOLDOWN_SEC - (t - last_pee)) / 60.0)))
                 raise PartyError(f"Pee break is on cooldown ({rem_min}m remaining)")
             _pee_cooldowns[ck] = t
+            _forget_old(t)
             new_status = "paused"
             if body.get("position") is not None:
                 new_pos = max(0.0, _position(body["position"]))
@@ -716,6 +738,7 @@ def post_message(
             raise PartyError("Slow down on the emoji reactions!")
         recent.append(t)
         _reaction_timestamps[rk] = recent
+        _forget_old(t)
     with db._get_connection() as conn:
         row = conn.execute(
             f"SELECT status, host_profile_id FROM {PARTIES_TABLE} WHERE id = ?", (str(party_id),)

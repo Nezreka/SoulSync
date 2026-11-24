@@ -75,3 +75,18 @@ def test_a_bad_position_is_refused_not_a_crash(db):
     for bad in ("ten", "nan", "inf", [1]):
         with pytest.raises(parties.PartyError, match="number"):
             parties.update_state(db, pid, HOST, {"action": "seek", "position": bad})
+
+
+def test_lobby_art_is_our_route_or_https_only():
+    assert parties._lobby_art("/api/library/v2/artwork/album/3?size=thumb").startswith("/api/")
+    assert parties._lobby_art("https://img.example/a.jpg") == "https://img.example/a.jpg"
+    for bad in ("http://192.168.1.2/x.jpg", "data:image/png;base64,AAAA", "javascript:x", "", None):
+        assert parties._lobby_art(bad) is None
+
+
+def test_old_cooldowns_and_reactions_are_forgotten(monkeypatch):
+    monkeypatch.setattr(parties, "_pee_cooldowns", {(f"p{i}", i): 0.0 for i in range(600)})
+    monkeypatch.setattr(parties, "_reaction_timestamps", {(f"p{i}", i): [0.0] for i in range(600)})
+    parties._forget_old(10_000_000.0)
+    assert parties._pee_cooldowns == {}
+    assert parties._reaction_timestamps == {}

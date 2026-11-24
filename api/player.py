@@ -130,7 +130,7 @@ def finish_progress():
     except Exception:  # noqa: BLE001
         return _failed("finish")
     return jsonify({"success": True, "progress": row,
-                    "watched": watched.mark(body.get("item_type"), body.get("item_id"))})
+                    "watched": _mark_if_allowed(body.get("item_type"), body.get("item_id"))})
 
 
 @bp.route("/api/player/watched", methods=["POST"])
@@ -143,7 +143,15 @@ def mark_watched():
     if pid is None:
         return _signed_out()
     body = request.get_json(silent=True) or {}
-    return jsonify({"success": True, "watched": watched.mark(body.get("item_type"), body.get("item_id"))})
+    return jsonify({"success": True, "watched": _mark_if_allowed(body.get("item_type"), body.get("item_id"))})
+
+
+def _mark_if_allowed(item_type, item_id):
+    """watched goes to the media server account too: only for a title this
+    profile may see (a kids profile marking any movie id watched pushed it)"""
+    if item_type in ("movie", "episode") and not _may_see_title(str(item_type), str(item_id or "")):
+        return False
+    return watched.mark(item_type, item_id)
 
 
 @bp.route("/api/player/progress", methods=["DELETE"])
@@ -1155,8 +1163,8 @@ def _viewer_may_see(s) -> bool:
             return True
         if s.item_type == "movie":
             return library_title_allowed(get_video_db(), "movie", int(s.item_id), cap)
-        show = (s.meta or {}).get("parent_id")
-        return bool(show) and library_title_allowed(get_video_db(), "show", int(show), cap)
+        # the episode's real show, never the parent_id the client sent
+        return _may_see_title("episode", str(s.item_id))
     except Exception:  # noqa: BLE001 - can't tell: don't show it
         return False
 

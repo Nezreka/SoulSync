@@ -103,6 +103,9 @@ def beat(profile_id: int, body: Any, *, now: Optional[float] = None) -> Session:
         _sessions[key] = s
         if len(_sessions) > MAX_SESSIONS:
             _sweep(t)
+        # still over (many fresh session ids at once): the longest quiet go
+        while len(_sessions) > MAX_SESSIONS:
+            _sessions.pop(min(_sessions, key=lambda k: _sessions[k].seen), None)
     return s
 
 
