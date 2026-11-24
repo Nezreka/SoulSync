@@ -232,3 +232,26 @@ def test_audio_sync_moves_the_sound():
 def test_audio_sync_always_converts(client):
     body = client.get("/api/player/playable/movie/fine?delay=-300").get_json()
     assert body["url"].endswith("&delay=-300") and "sound moved earlier by 300 ms" in body["transcode"]["reasons"]
+
+
+def test_a_noisy_ffmpeg_does_not_stall(tmp_path):
+    """stderr was a pipe nobody read until the end: past the pipe's buffer
+    (4 KB on windows, 64 KB on linux) ffmpeg blocked writing its log and the
+    viewer's stream froze while it held a slot."""
+    import sys
+    import threading
+
+    from core.player import transcode as tc
+
+    script = ("import sys; sys.stderr.write('frame= warn ' * 60000); sys.stderr.flush(); "
+              "sys.stdout.write('done'); sys.stdout.flush()")
+    out = []
+
+    def run():
+        body = tc.stream([sys.executable, "-c", script])
+        out.append(b"".join(body))
+
+    t = threading.Thread(target=run, daemon=True)
+    t.start()
+    t.join(timeout=20)
+    assert out == [b"done"]

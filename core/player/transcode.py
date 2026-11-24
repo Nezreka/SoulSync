@@ -235,8 +235,11 @@ class _Run:
     the response ends or the viewer goes away, read or not) kills ffmpeg
     and frees the slot, exactly once."""
 
-    def __init__(self, proc: subprocess.Popen):
+    def __init__(self, proc: subprocess.Popen, err_file=None):
         self.proc = proc
+        # ffmpeg's stderr goes to a temp file, not a pipe: nobody reads a pipe
+        # until the end, and a noisy file filled it and stalled ffmpeg
+        self.err_file = err_file
         self.closed = False
         self.owner: Optional[str] = None
 
@@ -253,8 +256,11 @@ class _Run:
 
     def _report(self):
         try:
-            if self.proc.poll() not in (0, None):
-                err = self.proc.stderr.read().decode("utf-8", "replace").strip()
+            if self.proc.poll() not in (0, None) and self.err_file is not None:
+                self.err_file.seek(0, 2)
+                size = self.err_file.tell()
+                self.err_file.seek(max(0, size - 2000))
+                err = self.err_file.read().decode("utf-8", "replace").strip()
                 if err:
                     logger.warning("transcode ended with an error: %s", err[-500:])
         except Exception:  # noqa: BLE001 - reporting never breaks the stream's end
@@ -275,6 +281,11 @@ class _Run:
             logger.debug("ffmpeg didn't exit after kill", exc_info=True)
         finally:
             _slots.release()
+            if self.err_file is not None:
+                try:
+                    self.err_file.close()
+                except OSError:
+                    logger.debug("couldn't close ffmpeg's error log", exc_info=True)
 
 
 def stream(cmd: List[str], owner: Optional[str] = None) -> Iterator[bytes]:
@@ -291,13 +302,18 @@ def stream(cmd: List[str], owner: Optional[str] = None) -> Iterator[bytes]:
             before.close()
     if not _slots.acquire(blocking=False):
         raise Busy()
+    err_file = None
     try:
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,  # noqa: S603 - our own argv
+        import tempfile
+        err_file = tempfile.TemporaryFile()
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=err_file,  # noqa: S603 - our own argv
                                 stdin=subprocess.DEVNULL, bufsize=0)
     except Exception:
         _slots.release()
+        if err_file is not None:
+            err_file.close()
         raise
-    run = _Run(proc)
+    run = _Run(proc, err_file)
     if owner:
         run.owner = owner
         with _owners_lock:
