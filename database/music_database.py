@@ -12059,7 +12059,11 @@ class MusicDatabase:
                 # #1573: keep the server mount as an observation on its mapping.
                 # Local resolution helps recognition/technical facts; it never
                 # replaces the imported catalogue's file or its owner.
+                from core.library.path_resolver import is_deleted_quarantine_path
+
                 server_path = file_path
+                if is_deleted_quarantine_path(server_path):
+                    return False
                 if file_path:
                     from core.library.server_paths import local_path_for
                     from core.settings import config_manager
@@ -12068,6 +12072,8 @@ class MusicDatabase:
                     # every comparison below is on the path's text
                     from core.library2.track_files import stored_spelling
                     file_path = stored_spelling(cursor, file_path)
+                    if is_deleted_quarantine_path(file_path):
+                        return False
 
                 catalogue_album = resolve_album(cursor, server_source, album_id)
                 catalogue_artist = resolve_artist(cursor, server_source, artist_id)

@@ -13,6 +13,7 @@ import json
 from contextlib import closing
 from typing import Any, Dict, Iterable, List, Mapping, Optional
 
+from core.library.path_resolver import is_deleted_quarantine_path
 from core.library2.provider_ids import source_ids_from_values
 from core.library2.metadata_context import (
     album_metadata_context, track_metadata_contexts, validate_metadata_purpose,
@@ -179,6 +180,7 @@ def active_file_subjects(
                        COALESCE(t.track_number,2147483647), f.id""",
             params,
         ).fetchall()
+        rows = [row for row in rows if not is_deleted_quarantine_path(row["path"])]
         ids = {int(row["track_id"]) for row in rows}
         contexts = {key: track_metadata_contexts(conn, ids, purpose=key)
                     for key in dict.fromkeys(("provider_lookup", purpose))}
