@@ -2706,17 +2706,14 @@ class SoulseekClient(DownloadSourcePlugin):
             return False
 
         try:
-            # Primary check: server or server/state tells us if slskd is connected to the Soulseek network
-            for endpoint in ('server', 'server/state'):
-                state = await self._make_request('GET', endpoint)
-                if isinstance(state, dict) and any(k in state for k in ('isConnected', 'IsConnected', 'isLoggedIn', 'IsLoggedIn')):
-                    is_connected = state.get('isConnected') or state.get('IsConnected', False)
-                    is_logged_in = state.get('isLoggedIn') or state.get('IsLoggedIn', False)
-                    if not (is_connected and is_logged_in):
-                        logger.debug(f"Soulseek not fully connected: isConnected={is_connected}, isLoggedIn={is_logged_in}")
-                    return is_connected and is_logged_in
+            # Primary check: slskd's server state tells us if it is connected to the Soulseek network
+            logged_in = await self.get_login_state()
+            if logged_in is not None:
+                if not logged_in:
+                    logger.debug("Soulseek not fully connected (not connected or not logged in)")
+                return logged_in
 
-            # Fallback: if server endpoints unavailable (older slskd), check API reachability
+            # Fallback: if no endpoint carries the state (older slskd), check API reachability
             logger.debug("server endpoints unavailable, falling back to session check")
             response = await self._make_request('GET', 'session')
             return response is not None
@@ -2878,16 +2875,30 @@ class SoulseekClient(DownloadSourcePlugin):
         """Resolve the Soulseek username slskd is logged in as.
 
         slskd has not kept this field in one place across versions — it lives on
-        the server state in current builds, on the session payload in older ones,
-        and in the options dump either way. Probe them in that order and take the
-        first hit rather than trusting any single endpoint. Returns None (and
-        says why in the log) when nothing carries it; callers must treat an
-        unknown name as "unknown", never as a match.
+        the application state's user block (any api-key role), on the server
+        state in builds whose server controller is open to every role, on the
+        session payload in older ones, and in the options dump (admin only)
+        either way. Probe them in that order and take the first hit rather than
+        trusting any single endpoint. Returns None (and says why in the log)
+        when nothing carries it; callers must treat an unknown name as
+        "unknown", never as a match.
         """
         if not self.base_url:
             return None
 
         seen = {}
+        try:
+            app = await self._make_request('GET', 'application')
+        except Exception as e:
+            app = None
+            seen['application'] = f'error: {e}'
+        if isinstance(app, dict):
+            user = app.get('user') or app.get('User') or {}
+            name = (user.get('username') or user.get('Username')) if isinstance(user, dict) else None
+            if name and str(name).strip():
+                return str(name).strip()
+            seen['application'] = sorted(user.keys()) if isinstance(user, dict) else 'no user block'
+
         for endpoint in ('server', 'server/state', 'session'):
             try:
                 res = await self._make_request('GET', endpoint)
@@ -2934,15 +2945,17 @@ class SoulseekClient(DownloadSourcePlugin):
         """Is slskd connected and logged in to the Soulseek server?
 
         True / False from slskd's own server state, None when slskd didn't
-        answer (unreachable, or no endpoint carried the state). slskd
-        exposes it at /api/v0/server in standard releases and
-        /api/v0/server/state in some builds. slskd 0.26.2 made the server
-        controller admin-only, so non-admin api keys get a 403 there; the
-        application state (any role) carries the same block under 'server'.
+        answer (unreachable, or no endpoint carried the state). The
+        application state (any api-key role) carries it under 'server', so it
+        is asked first: slskd 0.26.2 made the server controller admin-only,
+        and asking /api/v0/server first logged a 403 on every poll for
+        non-admin keys. /api/v0/server, and /api/v0/server/state in some
+        builds, stay as fallbacks for builds whose application state lacks
+        the block.
         """
         if not self.base_url:
             return None
-        for endpoint in ('server', 'server/state', 'application'):
+        for endpoint in ('application', 'server', 'server/state'):
             state = await self._make_request('GET', endpoint)
             if endpoint == 'application' and isinstance(state, dict):
                 state = state.get('server') or state.get('Server')

@@ -111,7 +111,10 @@ class _Client:
         self.base_url = "http://slskd"
         self._responses = responses
 
+        self.asked = []
+
     async def _make_request(self, method, endpoint, **kwargs):
+        self.asked.append(endpoint)
         return self._responses.get(endpoint)
 
 
@@ -121,11 +124,48 @@ def _login_state(responses):
     return asyncio.run(SoulseekClient.get_login_state(client))
 
 
-def test_login_state_reads_server_then_application():
+def test_login_state_reads_application_then_server():
     assert _login_state({"server": {"isConnected": True, "isLoggedIn": True}}) is True
     assert _login_state({"server": {"isConnected": True, "isLoggedIn": False}}) is False
     assert _login_state({"application": {"server": {"isConnected": True, "isLoggedIn": True}}}) is True
     assert _login_state({}) is None      # slskd said nothing: unknown, never "logged out"
+
+
+# slskd 0.26.2 answers /server with 403 to non-admin api keys (None here):
+# the application state, open to every role, is asked first, so a poll that
+# gets its answer there never asks /server and never logs that 403.
+_APP_LOGGED_IN = {"application": {"server": {"isConnected": True, "isLoggedIn": True},
+                                  "user": {"username": "BoulderBadgeDad"}}}
+
+
+def test_the_login_poll_never_asks_the_admin_only_server_controller():
+    from core.soulseek_client import SoulseekClient
+    client = _Client(_APP_LOGGED_IN)
+    assert asyncio.run(SoulseekClient.get_login_state(client)) is True
+    assert client.asked == ["application"]
+
+
+def test_the_connection_check_reads_the_same_state():
+    from core.soulseek_client import SoulseekClient
+    client = _Client({"application": {"server": {"isConnected": True, "isLoggedIn": False}}})
+    client.get_login_state = lambda: SoulseekClient.get_login_state(client)
+    assert asyncio.run(SoulseekClient.check_connection(client)) is False
+    assert "server" not in client.asked
+
+    # no endpoint carries the state (older slskd): reachable API is enough
+    old = _Client({"session": {"token": "x"}})
+    old.get_login_state = lambda: SoulseekClient.get_login_state(old)
+    assert asyncio.run(SoulseekClient.check_connection(old)) is True
+
+
+def test_the_username_comes_from_the_application_state():
+    from core.soulseek_client import SoulseekClient
+    client = _Client(_APP_LOGGED_IN)
+    assert asyncio.run(SoulseekClient.get_soulseek_username(client)) == "BoulderBadgeDad"
+    assert client.asked == ["application"]
+    # builds that keep it elsewhere still resolve it
+    old = _Client({"server": {"username": "BoulderBadgeDad"}})
+    assert asyncio.run(SoulseekClient.get_soulseek_username(old)) == "BoulderBadgeDad"
 
 
 def test_chat_feeds_the_shared_state():
