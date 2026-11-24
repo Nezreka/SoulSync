@@ -945,7 +945,9 @@ export class PlayerEngine {
       this.set({ status: 'ended' });
       return;
     }
-    if (this.state.kind === 'video') {
+    // Live guide channels always advance continuously like a 24/7 broadcast —
+    // never pause for autoplayNext:false or "are you still watching?".
+    if (this.state.kind === 'video' && !this.state.live) {
       // autoplay off: stop here, the end screen offers the next one
       if (!this.prefsAuto.autoplayNext) {
         this.set({ status: 'ended' });
