@@ -414,6 +414,7 @@ export interface CommercialsStatus {
   cached_count: number;
   local_count: number;
   cache_mb: number;
+  max_cache_mb?: number;
   warming: boolean;
   eras: Record<string, number>;
   error?: string | null;
@@ -428,6 +429,10 @@ export const commercialsStatusQuery = () =>
 
 export async function warmCommercials(era: CommercialEra = 'mix'): Promise<CommercialsStatus> {
   return apiClient.post('player/commercials/warm', { json: { era } }).json<CommercialsStatus>();
+}
+
+export async function clearCommercialsCache(): Promise<CommercialsStatus> {
+  return apiClient.delete('player/commercials/cache').json<CommercialsStatus>();
 }
 
 export async function fetchPlayerSettings(): Promise<PlayerSettings | null> {

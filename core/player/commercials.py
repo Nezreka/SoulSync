@@ -34,11 +34,11 @@ logger = get_logger("player.commercials")
 ERAS = ("auto", "70s", "80s", "90s", "2000s", "kids", "mix")
 MODES = ("short", "cable")
 
-MAX_CACHE_BYTES = 120 * 1024 * 1024
+MAX_CACHE_BYTES = 500 * 1024 * 1024
 MAX_CLIP_BYTES = 16 * 1024 * 1024
 MIN_CLIP_SEC = 10
 MAX_CLIP_SEC = 95
-TARGET_CLIPS_PER_ERA = 6
+TARGET_CLIPS_PER_ERA = 14
 HTTP_TIMEOUT = 15
 
 _ARCHIVE_QUERIES: Dict[str, str] = {
@@ -412,10 +412,34 @@ def status() -> Dict[str, Any]:
             "cached_count": cached_count,
             "local_count": local_count,
             "cache_mb": round(total_bytes / (1024 * 1024), 1),
+            "max_cache_mb": MAX_CACHE_BYTES // (1024 * 1024),
             "warming": _warming,
             "eras": by_era,
             "error": _last_error,
         }
+
+
+def clear_cache() -> Dict[str, Any]:
+    """Delete all auto-cached Archive.org commercial clips (keeps user local folder clips)."""
+    with _lock:
+        _load_locked()
+        removed = 0
+        for cid in list(_clips_cache.keys()):
+            clip = _clips_cache[cid]
+            if clip.source == "archive":
+                _clips_cache.pop(cid, None)
+                try:
+                    Path(clip.path).unlink(missing_ok=True)
+                    removed += 1
+                except OSError:
+                    pass
+        try:
+            _manifest_path().unlink(missing_ok=True)
+        except OSError:
+            pass
+    out = status()
+    out["removed"] = removed
+    return out
 
 
 def get_clip(clip_id: str) -> Optional[CommercialClip]:

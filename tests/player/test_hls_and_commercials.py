@@ -53,3 +53,4 @@ def test_commercial_year_extraction_and_era():
     assert commercials.era_for_year(1996) == "90s"
     assert commercials.era_for_year(2004) == "2000s"
     assert commercials.era_for_year(2024) is None
+    assert commercials.MAX_CACHE_BYTES == 500 * 1024 * 1024

@@ -1020,6 +1020,20 @@ def get_commercial_break():
     return jsonify({"success": True, "clips": clips})
 
 
+@bp.route("/api/player/commercials/cache", methods=["DELETE"])
+@device_playback
+@self_only
+def clear_commercials_cache():
+    """Admin-only: clear the auto-cached Archive.org retro commercials from disk."""
+    from core.player import commercials
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    if not getattr(g, "is_admin", False):
+        return jsonify({"success": False, "error": "admin_required", "message": "Only an admin can clear the commercial cache."}), 403
+    return jsonify({"success": True, **commercials.clear_cache()})
+
+
 # ── watching now (who plays what, live) ─────────────────────────────────
 
 def _shares(profile_id: int) -> bool:

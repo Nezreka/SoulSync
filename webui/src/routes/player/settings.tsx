@@ -8,7 +8,7 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { createFileRoute, Link } from '@tanstack/react-router';
+import { createFileRoute, Link, useRouteContext } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
 
 import { THEMES } from '@/lib/visualizer';
@@ -27,6 +27,7 @@ import {
 } from './-engine/crossfade';
 import { QUALITIES, type Quality } from './-engine/engine';
 import {
+  clearCommercialsCache,
   commercialsStatusQuery,
   playerSettingsQuery,
   savePlayerSettings,
@@ -157,6 +158,8 @@ const SUBTITLE_SIZES: { value: SubtitleSize; label: string }[] = [
 const ORDERED_BRIGHTNESS = [...BRIGHTNESS_STEPS].reverse();
 
 function SettingsPage() {
+  const { shell } = useRouteContext({ from: '/player' });
+  const isAdmin = !!shell.profile?.isAdmin;
   const queryClient = useQueryClient();
   const settings = useQuery(playerSettingsQuery());
   const commStatus = useQuery({
@@ -164,6 +167,7 @@ function SettingsPage() {
     refetchInterval: (q) => (q.state.data?.warming ? 3000 : false),
   });
   const [warmingComm, setWarmingComm] = useState(false);
+  const [clearingComm, setClearingComm] = useState(false);
   const [saved, setSaved] = useState(false);
   const timerRef = useRef<number | null>(null);
 
@@ -298,8 +302,8 @@ function SettingsPage() {
               commStatus.data?.warming
                 ? 'Fetching retro spots from Archive.org in the background…'
                 : commStatus.data?.total_count
-                  ? `${commStatus.data.total_count} retro spots ready (${commStatus.data.cache_mb} MB cached).`
-                  : 'Off by default. Turn on to automatically cache vintage 15–60s spots.'
+                  ? `${commStatus.data.total_count} retro spots ready (${commStatus.data.cache_mb} / ${commStatus.data.max_cache_mb ?? 500} MB cached).`
+                  : 'Off by default. Turn on to automatically cache vintage 15–60s spots (max 500 MB).'
             }
           >
             <Switch
@@ -382,25 +386,45 @@ function SettingsPage() {
               </Row>
 
               <Row
-                label="Refresh commercial pool"
-                help="Fetch fresh vintage spots from Internet Archive into your rolling cache."
+                label="Commercial cache"
+                help="Fetch fresh vintage spots from Internet Archive (capped at 500 MB) or clear the server cache."
               >
-                <button
-                  type="button"
-                  className={s.segBtn}
-                  disabled={warmingComm || commStatus.data?.warming}
-                  onClick={() => {
-                    setWarmingComm(true);
-                    void warmCommercials(mine?.commercials_era ?? 'mix')
-                      .then(() =>
-                        queryClient.invalidateQueries({ queryKey: ['player', 'commercials-status'] }),
-                      )
-                      .finally(() => setWarmingComm(false));
-                  }}
-                  data-nav
-                >
-                  {warmingComm || commStatus.data?.warming ? 'Fetching…' : 'Fetch spots now'}
-                </button>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    className={s.segBtn}
+                    disabled={warmingComm || commStatus.data?.warming}
+                    onClick={() => {
+                      setWarmingComm(true);
+                      void warmCommercials(mine?.commercials_era ?? 'mix')
+                        .then(() =>
+                          queryClient.invalidateQueries({ queryKey: ['player', 'commercials-status'] }),
+                        )
+                        .finally(() => setWarmingComm(false));
+                    }}
+                    data-nav
+                  >
+                    {warmingComm || commStatus.data?.warming ? 'Fetching…' : 'Fetch spots now'}
+                  </button>
+                  {isAdmin ? (
+                    <button
+                      type="button"
+                      className={s.segBtn}
+                      disabled={clearingComm || !(commStatus.data?.cached_count ?? 0)}
+                      onClick={() => {
+                        setClearingComm(true);
+                        void clearCommercialsCache()
+                          .then(() =>
+                            queryClient.invalidateQueries({ queryKey: ['player', 'commercials-status'] }),
+                          )
+                          .finally(() => setClearingComm(false));
+                      }}
+                      data-nav
+                    >
+                      {clearingComm ? 'Clearing…' : 'Clear cache'}
+                    </button>
+                  ) : null}
+                </div>
               </Row>
             </>
           ) : null}
