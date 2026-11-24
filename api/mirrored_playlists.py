@@ -151,6 +151,158 @@ def _invalidate_mirror_sync_fingerprint(playlist_id):
         logger.debug("Could not invalidate sync fingerprint for %s: %s", key, e)
 
 
+@bp.route('/api/mirrored-playlists/overview', methods=['GET'])
+@requires("music.access")
+def mirrored_playlists_overview_endpoint():
+    """Centralized playlist synchronization overview (#2273) with schedule status,
+    pause state (#2272), destination, and latest execution summary (#2271)."""
+    try:
+        database = get_database()
+        profile_id = _mirror_scope_profile_id()
+        playlists = database.get_mirrored_playlists(profile_id=profile_id) or []
+
+        # Index scheduled playlist automations by mirrored_playlist_id
+        auto_by_pl: dict = {}
+        try:
+            conn = database._get_connection()
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT id, name, enabled, trigger_type, trigger_config, action_config,
+                       last_run_at, next_run_at
+                FROM automations
+                WHERE action_type IN ('sync_playlist', 'playlist_pipeline')
+                """
+            )
+            for row in cur.fetchall():
+                try:
+                    ac = json.loads(row['action_config']) if isinstance(row['action_config'], str) else (row['action_config'] or {})
+                except Exception:
+                    ac = {}
+                pid = ac.get('mirrored_playlist_id') or ac.get('playlist_id')
+                if pid is not None:
+                    try:
+                        auto_by_pl[int(pid)] = dict(row)
+                    except (TypeError, ValueError):
+                        pass
+        except Exception:
+            pass
+
+        items = []
+        active_server = config_manager.get('active_media_server', 'plex') or 'plex'
+        default_mode = config_manager.get('playlist_sync.mode', 'append') or 'append'
+        for p in playlists:
+            pid = int(p['id'])
+            auto = auto_by_pl.get(pid)
+            if auto is None:
+                status = 'unscheduled'
+            elif auto.get('enabled'):
+                status = 'enabled'
+            else:
+                status = 'paused'
+
+            # Latest sync history execution for this playlist
+            latest = None
+            try:
+                for key in (f"auto_mirror_{pid}", str(p.get('source_playlist_id') or ''), str(pid)):
+                    if not key:
+                        continue
+                    h = database.get_latest_sync_history_by_playlist(key, profile_id=profile_id)
+                    if h:
+                        latest = {
+                            'id': h.get('id'),
+                            'started_at': h.get('started_at'),
+                            'completed_at': h.get('completed_at'),
+                            'total_tracks': h.get('total_tracks') or 0,
+                            'tracks_found': h.get('tracks_found') or 0,
+                            'tracks_downloaded': h.get('tracks_downloaded') or 0,
+                            'tracks_failed': h.get('tracks_failed') or 0,
+                            'trigger': h.get('source_page') or 'manual',
+                        }
+                        break
+            except Exception:
+                latest = None
+
+            items.append({
+                'id': pid,
+                'name': p.get('custom_name') or p.get('name') or 'Untitled Playlist',
+                'source': p.get('source') or 'unknown',
+                'destination': p.get('server_playlist_name') or active_server,
+                'destination_server': active_server,
+                'sync_mode': p.get('sync_mode') or default_mode,
+                'track_count': p.get('track_count') or 0,
+                'status': status,
+                'automation_id': auto.get('id') if auto else None,
+                'trigger_type': auto.get('trigger_type') if auto else None,
+                'trigger_config': auto.get('trigger_config') if auto else None,
+                'last_run_at': (auto.get('last_run_at') if auto else None) or (latest.get('started_at') if latest else None),
+                'next_run_at': auto.get('next_run_at') if (auto and status == 'enabled') else None,
+                'last_result': latest,
+            })
+
+        return jsonify({'success': True, 'items': items, 'total': len(items)})
+    except Exception as e:
+        logger.error(f"Error building playlist sync overview: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@bp.route('/api/mirrored-playlists/<int:playlist_id>/auto-sync/toggle', methods=['POST'])
+@requires("music.access")
+def toggle_mirrored_playlist_autosync_endpoint(playlist_id):
+    """Pause or resume automatic sync for a mirrored playlist (#2272) without
+    deleting its schedule, settings, or history. Manual sync remains available."""
+    try:
+        database = get_database()
+        playlist = _owned_mirrored_playlist(database, playlist_id)
+        if not playlist:
+            return jsonify({'success': False, 'error': 'Playlist not found'}), 404
+
+        data = request.get_json(silent=True) or {}
+        conn = database._get_connection()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT id, enabled, action_config
+            FROM automations
+            WHERE action_type IN ('sync_playlist', 'playlist_pipeline')
+            """
+        )
+        target = None
+        for row in cur.fetchall():
+            try:
+                ac = json.loads(row['action_config']) if isinstance(row['action_config'], str) else (row['action_config'] or {})
+            except Exception:
+                ac = {}
+            pid = ac.get('mirrored_playlist_id') or ac.get('playlist_id')
+            if pid is not None and int(pid) == int(playlist_id):
+                target = row
+                break
+
+        if not target:
+            return jsonify({'success': False, 'error': 'No automatic sync schedule configured for this playlist'}), 404
+
+        if 'enabled' in data:
+            new_enabled = bool(data['enabled'])
+        else:
+            new_enabled = not bool(target['enabled'])
+
+        cur.execute(
+            "UPDATE automations SET enabled = ? WHERE id = ?",
+            (1 if new_enabled else 0, target['id']),
+        )
+        conn.commit()
+        return jsonify({
+            'success': True,
+            'playlist_id': int(playlist_id),
+            'automation_id': target['id'],
+            'enabled': new_enabled,
+            'status': 'enabled' if new_enabled else 'paused',
+        })
+    except Exception as e:
+        logger.error(f"Error toggling auto-sync for playlist {playlist_id}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @bp.route('/api/mirrored-playlists/list', methods=['GET'])
 @requires("music.access")
 def get_mirrored_playlists_list():

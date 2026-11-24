@@ -798,6 +798,11 @@ class ConfigManager:
                 "password": "",
                 "category": "soulsync",
                 "save_path": "",
+                # #2265: Optional additional named torrent client profiles and
+                # per-library assignments (e.g. audiobooks / 4K Movies -> Deluge).
+                # Any library without an assignment uses the global client above.
+                "clients": [],
+                "library_assignments": {},
                 # qBittorrent only (#2087): start what SoulSync adds even when the
                 # client is set to add torrents stopped, or to stop them once the
                 # metadata is in. Off = the client's own setting decides.
