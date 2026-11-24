@@ -1217,6 +1217,8 @@ class PlaylistSyncService:
                         detail['server_placement'] = DUPLICATE
                     elif placement_known:
                         detail['server_placement'] = ON_PLAYLIST
+                if playlist_track_id := getattr(t, "source_track_id", None):
+                    detail["playlist_track_id"] = str(playlist_track_id)
                 _match_details.append(detail)
 
             result = SyncResult(
@@ -1387,7 +1389,9 @@ class PlaylistSyncService:
                 # Check if we have original track data with full album objects
                 original_track_data = None
                 if hasattr(self, '_original_tracks_map') and self._original_tracks_map:
-                    original_track_data = self._original_tracks_map.get(spotify_track.id)
+                    original_track_data = self._original_tracks_map.get(
+                        str(getattr(spotify_track, "source_track_id", None) or spotify_track.id)
+                    )
 
                 # Use original data if available (preserves album images), otherwise convert
                 if original_track_data:
@@ -1395,6 +1399,7 @@ class PlaylistSyncService:
                 else:
                     spotify_track_data = {
                         'id': spotify_track.id,
+                        "source_track_id": getattr(spotify_track, "source_track_id", None),
                         'name': spotify_track.name,
                         'artists': [{'name': a} if isinstance(a, str) else a for a in spotify_track.artists],
                         'album': {'name': spotify_track.album},
