@@ -151,7 +151,8 @@
         }
     </style>
     <style id="soulsync-player-boot">
-        html.ss-player-boot body { background: var(--bg-primary); }
+        html.ss-player-boot,
+        html.ss-player-boot body { background: #000000 !important; }
         /* opacity, not visibility: a child can set itself visible again (the
            manager's nav does), but nothing inside can undo its parent's opacity.
            the profile layers (a pin pad, a forgotten pin) open over the picker
@@ -160,13 +161,32 @@
             opacity: 0;
             pointer-events: none;
         }
+        html.ss-player-boot body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background:
+                radial-gradient(ellipse 46% 42% at 44% 44%, rgba(236, 72, 153, 0.16) 0%, transparent 70%),
+                radial-gradient(ellipse 48% 44% at 56% 52%, rgba(34, 211, 238, 0.16) 0%, transparent 72%);
+            pointer-events: none;
+        }
         html.ss-player-boot body::after {
             content: '';
             position: fixed;
             inset: 0;
-            background: url("{{ url_for('static', filename='trans2.png') }}") center / 72px no-repeat;
-            opacity: 0.85;
+            background: url("{{ url_for('static', filename='soulsync-mark.png') }}") center / min(230px, 48vw) no-repeat;
+            animation: ss-html-breathe 3.2s ease-in-out infinite;
             pointer-events: none;
+        }
+        @keyframes ss-html-breathe {
+            0%, 100% {
+                transform: scale(1) translateY(0);
+                filter: drop-shadow(0 0 14px rgba(236, 72, 153, 0.18)) drop-shadow(0 0 24px rgba(34, 211, 238, 0.16));
+            }
+            50% {
+                transform: scale(1.035) translateY(-5px);
+                filter: brightness(1.08) saturate(1.14) drop-shadow(0 0 24px rgba(251, 146, 60, 0.28)) drop-shadow(0 0 38px rgba(56, 189, 248, 0.28));
+            }
         }
     </style>
     <script>

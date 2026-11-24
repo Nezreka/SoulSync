@@ -67,6 +67,10 @@
   will-change: transform, filter, opacity;
 }
 
+.overlay[data-handoff='true'] .loader {
+  animation: breathe 3.2s ease-in-out infinite;
+}
+
 .loader img {
   display: block;
   width: 100%;

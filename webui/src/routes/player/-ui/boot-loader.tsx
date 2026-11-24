@@ -13,23 +13,26 @@ let bootedThisSession = false;
  * masked strictly to the infinity ribbon silhouette.
  */
 export function PlayerBootOverlay({ ready }: { ready: boolean }) {
+  const [fromHtmlBoot] = useState(() =>
+    typeof document !== 'undefined' && document.documentElement.classList.contains('ss-player-boot'),
+  );
   const [visible, setVisible] = useState(() => !bootedThisSession);
   const [minElapsed, setMinElapsed] = useState(() => bootedThisSession);
   const [fading, setFading] = useState(false);
 
   useEffect(() => {
     if (!visible) return;
-    const tMin = window.setTimeout(() => setMinElapsed(true), 1150);
+    const tMin = window.setTimeout(() => setMinElapsed(true), fromHtmlBoot ? 850 : 1150);
     const tMax = window.setTimeout(() => {
       bootedThisSession = true;
       setFading(true);
       window.setTimeout(() => setVisible(false), 420);
-    }, 2600);
+    }, 2400);
     return () => {
       window.clearTimeout(tMin);
       window.clearTimeout(tMax);
     };
-  }, [visible]);
+  }, [visible, fromHtmlBoot]);
 
   useEffect(() => {
     if (!visible || !ready || !minElapsed) return;
@@ -51,6 +54,7 @@ export function PlayerBootOverlay({ ready }: { ready: boolean }) {
     <div
       className={styles.overlay}
       data-fading={fading ? 'true' : undefined}
+      data-handoff={fromHtmlBoot ? 'true' : undefined}
       role="status"
       aria-label="Loading SoulSync"
     >
