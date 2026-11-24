@@ -460,9 +460,7 @@ export async function clearCommercialsCache(): Promise<CommercialsStatus> {
 
 export async function fetchPlayerSettings(): Promise<PlayerSettings | null> {
   try {
-    const res = await apiClient
-      .get('player/settings')
-      .json<{ settings?: PlayerSettings }>();
+    const res = await apiClient.get('player/settings').json<{ settings?: PlayerSettings }>();
     return res.settings ?? null;
   } catch {
     return null;
@@ -681,7 +679,9 @@ export const watchPartyQuery = (partyId: string) =>
           .json<{ party: WatchParty }>()
       ).party,
     staleTime: 1_500,
-    refetchInterval: 2_500,
+    // a party that's gone stops asking (the room says so instead of spinning)
+    refetchInterval: (q) => (q.state.status === 'error' ? false : 2_500),
+    retry: 1,
   });
 
 export const watchPartyApi = {
