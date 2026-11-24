@@ -39,23 +39,6 @@ export interface Premiere {
   at: number;
 }
 
-/** an episode premieres at 8pm, a film at 9pm */
-const PREMIERE_HOUR = { episode: 20, movie: 21 } as const;
-
-/**
- * when something new premieres: the evening of the day it arrived (or the
- * next one, if it came after its hour). worked out from when it was added,
- * so every screen puts it in the same slot.
- */
-export function premiereAt(addedMs: number, kind: 'episode' | 'movie'): number {
-  const hour = PREMIERE_HOUR[kind];
-  const d = new Date(addedMs);
-  const slot = new Date(d.getFullYear(), d.getMonth(), d.getDate(), hour, 0, 0, 0).getTime();
-  return addedMs < slot
-    ? slot
-    : new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1, hour).getTime();
-}
-
 /** keeps a program long enough to see, and drops broken runtimes */
 export const MIN_SECONDS = 60;
 export const MAX_SECONDS = 6 * 60 * 60;

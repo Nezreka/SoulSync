@@ -50,6 +50,7 @@ _SQUARE = ["standard", "large"]
 ROWS = [
     ("continue", "Continue watching", "What you started, here and on your media server", _WIDE, "wide", True),
     ("live-guide", "On Live TV right now", "Tune straight into what's airing across your channels", _WIDE, "wide", True),
+    ("premieres", "Premieres tonight", "What's new, and when it airs on the guide", _WIDE, "wide", True),
     ("new-episodes", "New episodes", "The latest episodes to land", _WIDE, "wide", True),
     ("collections", "Collections", "Curated movie & TV collections built in SoulSync", _POSTER, "standard", True),
     ("top-movies", "Top 10 movies today", "Today's most watched films that you have", _POSTER, "ranked", True),

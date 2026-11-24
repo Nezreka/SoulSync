@@ -3,6 +3,7 @@ import { infiniteQueryOptions, queryOptions } from '@tanstack/react-query';
 import { apiClient, readJson } from '@/app/api-client';
 
 import type { HomeLayout, LayoutCatalog } from './-lib/home-layout';
+import type { ServerPremiere } from './-lib/premieres';
 import type { ServerResume } from './-lib/rails';
 import type {
   CatalogBook,
@@ -455,6 +456,24 @@ export const guideCommercialsQuery = () =>
         .json<CommercialsConfig>(),
     staleTime: 10 * 60_000,
     refetchInterval: 15 * 60_000,
+  });
+
+/**
+ * what's new and when it airs: the slot, the item and the channels it could
+ * go on, all from the server, so every device airs it in the same place.
+ * asked again every few minutes: something that lands this afternoon
+ * premieres tonight. the server gives a slot at least half an hour ahead.
+ */
+export const guidePremieresQuery = () =>
+  queryOptions({
+    queryKey: ['player', 'guide', 'premieres'],
+    queryFn: () =>
+      apiClient
+        .get('player/guide/premieres')
+        .json<{ success: boolean; premieres: ServerPremiere[] }>()
+        .then((d) => d.premieres ?? []),
+    staleTime: 2 * 60_000,
+    refetchInterval: 5 * 60_000,
   });
 
 export async function saveCommercialsConfig(

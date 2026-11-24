@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { GuideItem } from './schedule';
 
-import { filmHour, premiereAt, programsInWindow, scheduleDay, startOfLocalDay } from './schedule';
+import { filmHour, programsInWindow, scheduleDay, startOfLocalDay } from './schedule';
 
 const ep = (n: number): GuideItem => ({
   key: `episode:${n}`,
@@ -88,13 +88,6 @@ describe('shows in blocks', () => {
 });
 
 describe('premieres', () => {
-  it('a new episode airs at 8pm the evening it came, a film at 9', () => {
-    const at = (h: number, d = 21) => new Date(2026, 10, d, h).getTime();
-    expect(premiereAt(at(9), 'episode')).toBe(at(20));
-    expect(premiereAt(at(21), 'episode')).toBe(at(20, 22));
-    expect(premiereAt(at(9), 'movie')).toBe(at(21));
-  });
-
   it('holds its slot on the channel, back to back with another, marked', () => {
     const pool = Array.from({ length: 10 }, (_, i) => ep(i));
     const day = new Date(2026, 10, 21, 12);

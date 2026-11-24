@@ -501,6 +501,7 @@ A video a browser can't play as it is (an MKV, HEVC, AC3 or DTS sound) is conver
 
 #### Watched
 
+- `GET /api/player/guide/premieres`: what is new and when it airs on the Live Guide, `{now, premieres: [{key, kind, id, show_id, title, subtitle, seconds, at, homes, has_poster}]}`. `kind` is `episode` or `movie`; `at` is the slot in epoch milliseconds; `homes` lists the channel ids it could air on, best first (`network-hbo`, `genre-drama`, ..., `type-tv`). A device airs it on the first of those it has, cutting whatever was on, so every device shows the same thing. The server gives each slot once and never moves it: 8pm for an episode and 9pm for a film on the day it arrived when that is at least half an hour away, else the next top of the hour that is (up to 11pm), else the next evening. A show's new episodes air three a night in order; an evening takes at most 12 shows and 6 films. A profile only gets the kinds and ratings it may see.
 - `POST /api/player/watched` with `{item_type, item_id}`: a movie or episode is into its credits (92% of the way): it counts as watched, in SoulSync's video library and on the media server account, for the profile whose watch state it is (the same rules as the detail page's watched toggle). Returns `{watched}`: false for anything else, or a profile that keeps no watch state of its own. `POST /api/player/progress/finish` does the same for a movie or episode played to the end.
 
 #### Audio and subtitle tracks

@@ -10,6 +10,7 @@ import { deviceId } from './-lib/device';
 import { guideScheduleOptions, sharedCommercials } from './-lib/guide-schedule';
 import { parseGenreRow, type HomeLayout, type RowStyle } from './-lib/home-layout';
 import { backdropSet, remoteImage, WIDE_SIZES } from './-lib/images';
+import { premiereItem, premieresFor, premiereWhen, upcomingPremieres } from './-lib/premieres';
 import {
   continueRails,
   movieCard,
@@ -27,6 +28,7 @@ import {
   albumsQuery,
   booksQuery,
   guideCatalogQuery,
+  guidePremieresQuery,
   guideCommercialsQuery,
   continueQuery,
   discoverListQuery,
@@ -61,6 +63,7 @@ export const Route = createFileRoute('/player/')({
 const FALLBACK_ROWS = [
   'continue',
   'live-guide',
+  'premieres',
   'new-episodes',
   'collections',
   'top-movies',
@@ -260,17 +263,21 @@ function PlayerHome() {
   const guideCat = useQuery({ ...guideCatalogQuery(), enabled: sections.video });
   const commConfig = useQuery(guideCommercialsQuery());
   const commercials = useMemo(() => sharedCommercials(commConfig.data), [commConfig.data]);
+  const premieresQ = useQuery({ ...guidePremieresQuery(), enabled: sections.video });
   // Live TV right now: top 8 deterministic Guide channels with what's airing at this exact moment
   const liveGuideCards = useMemo<RailCard[]>(() => {
     const pool = guideCat.data;
     if (!pool) return [];
     const now = Date.now();
-    const chans = numberChannels(autoChannels(pool, [])).slice(0, 10);
+    const all = autoChannels(pool, []);
+    const chans = numberChannels(all).slice(0, 10);
+    // premieres too, homed among every channel as the guide homes them
+    const premieres = premieresFor(premieresQ.data, all);
     const out: RailCard[] = [];
     for (const ch of chans) {
-      // the guide's own options, commercials included: the same thing is on here as there
+      // the guide's own options, commercials and premieres included: the same thing is on here as there
       const progs = programsInWindow(ch.id, ch.pool, now - 120_000, now + 3_600_000, {
-        ...guideScheduleOptions(now, commercials),
+        ...guideScheduleOptions(now, commercials, premieres.get(ch.id)),
         ordered: ch.ordered,
       });
       const airing = progs.find((p) => p.start <= now && p.end > now) ?? progs[0];
@@ -289,7 +296,27 @@ function PlayerHome() {
       });
     }
     return out;
-  }, [guideCat.data, commercials]);
+  }, [guideCat.data, commercials, premieresQ.data]);
+
+  // Premieres tonight: what's new and when it airs, on the channel the guide airs it on
+  const premiereCards = useMemo<RailCard[]>(() => {
+    const pool = guideCat.data;
+    if (!pool) return [];
+    const now = Date.now();
+    const numbered = numberChannels(autoChannels(pool, []));
+    return upcomingPremieres(premieresQ.data, numbered, now).map(({ premiere: p, channel }) => {
+      const item = premiereItem(p);
+      return {
+        key: `premiere:${p.key}`,
+        title: p.subtitle && p.kind === 'episode' ? `${p.title} · ${p.subtitle}` : p.title,
+        subtitle: `${premiereWhen(p.at, now)} · CH ${channel.number ?? ''} ${channel.name}`,
+        art: item.art ?? null,
+        href: '/player/guide',
+        shape: 'wide',
+        badge: p.at <= now ? 'LIVE' : 'NEW',
+      };
+    });
+  }, [guideCat.data, premieresQ.data]);
 
   // Seasonal spotlight: timely holiday/seasonal picks based on the current month
   const seasonalInfo = useMemo(() => {
@@ -331,6 +358,7 @@ function PlayerHome() {
     };
     out.continue = watching.map((r) => ({ title: r.label, cards: r.cards }));
     one('live-guide', 'On Live TV right now', liveGuideCards, '/player/guide');
+    one('premieres', 'Premieres tonight', premiereCards, '/player/guide');
     one(
       'new-episodes',
       'New episodes',
@@ -442,6 +470,7 @@ function PlayerHome() {
   }, [
     watching,
     liveGuideCards,
+    premiereCards,
     collectionCards,
     seasonalInfo,
     cat,

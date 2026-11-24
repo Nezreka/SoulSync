@@ -34,6 +34,7 @@ import {
 } from './-lib/guide';
 import { guideScheduleOptions, sharedCommercials } from './-lib/guide-schedule';
 import { albumArtwork } from './-lib/images';
+import { premieresFor } from './-lib/premieres';
 import {
   hashSeed,
   mergeIntoBlocks,
@@ -56,6 +57,7 @@ import {
   studioCollectionsQuery,
   guideCatalogQuery,
   guideCommercialsQuery,
+  guidePremieresQuery,
 } from './-player.api';
 import { ChannelForm } from './-ui/guide-form';
 import { GuideDetail, GuideGrid, OnNow, type Picked } from './-ui/guide-grid';
@@ -179,6 +181,7 @@ function GuidePage() {
   const made = useQuery(guideChannelsQuery());
   const lineupQ = useQuery(lineupQuery());
   const commConfigQ = useQuery(guideCommercialsQuery());
+  const premieresQ = useQuery({ ...guidePremieresQuery(), enabled: sections.video });
   const queryClient = useQueryClient();
   const [making, setMaking] = useState<SavedChannel | 'new' | null>(null);
   const [editingLineup, setEditingLineup] = useState(false);
@@ -353,16 +356,21 @@ function GuidePage() {
 
   const channels = useMemo(() => {
     const visible = lined.filter((c) => !c.hidden);
+    // what's new airs in the slot the server gave it, on the channel the
+    // server named: the same on every device (-lib/premieres.ts). the home is
+    // picked among every channel, hidden ones too: a profile that hid HBO
+    // must not move HBO's premiere onto a channel everyone else also watches
+    const premieres = premieresFor(premieresQ.data, lined);
     return numberChannels(visible).map((c) => {
       if (c.music) return c;
       return {
         ...c,
         // Shared broadcast schedule across all devices (Desktop, Android, TV):
         // deterministic from (channelId, day, pool, sharedCommercials)
-        schedule: guideScheduleOptions(today, commercials),
+        schedule: guideScheduleOptions(today, commercials, premieres.get(c.id)),
       };
     });
-  }, [lined, today, commercials]);
+  }, [lined, today, commercials, premieresQ.data]);
   const numbers = useMemo(() => new Map(channels.map((c) => [c.id, c.number])), [channels]);
 
   // channel up / down follow the guide's numbers, from anywhere in the player
