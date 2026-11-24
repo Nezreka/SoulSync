@@ -5508,7 +5508,7 @@ const TOOL_HELP_CONTENT = {
         title: 'Server Scan',
         content: `
             <h4>What is this?</h4>
-            <p>Asks your media server to rescan its own folders, so files that just landed get indexed. It's the manual twin of the post-download "Scan Video Server" automation.</p>
+            <p>Asks your media server to rescan its own folders, so files that just landed get indexed. It's the manual twin of the post-download "Index New Video Files" automation.</p>
 
             <h4>How it fits with Library Scan</h4>
             <p>Server Scan makes the <em>server</em> notice new files. Library Scan then reads the server into SoulSync. After a big import, run them in that order.</p>

@@ -1276,7 +1276,7 @@ Every action below is a DO block you can drop into your own automations. Config 
 | Action | What it does | Key config |
 |--------|--------------|------------|
 | **Scan Video Library** | Tell the media server to rescan your movie/TV sections, then read what it found into SoulSync | Mode (Full), Library (Movies + TV) |
-| **Scan Video Server** | Get the server to index new downloads (skips if it already has them), wait, then fire *Video Library Scan Done* | Library (all), Skip if present (on), Grace 2 min, Max wait 60 min, Fallback wait 120 sec |
+| **Index New Video Files** | Make sure new downloads are in your library: your media server is asked to index them (skipped if it already has them) and SoulSync waits; with Standalone they are already in. Then fires *Video Library Scan Done* | Library (all), Skip if present (on), Grace 2 min, Max wait 60 min, Fallback wait 120 sec |
 | **Update Video Database** | Read newly-indexed media from the server into SoulSync | Mode (Incremental), Library (all) |
 | **Update Video Database (Hourly)** | Same incremental read for an hourly schedule — pair with a 1-hour Schedule trigger | — |
 | **Deep Scan TV Library** | Full reconcile of TV: re-read every show, drop what the server no longer has (never touches movies) | — |
@@ -1350,7 +1350,7 @@ Triggers with conditions let you filter (e.g. only fire when \`kind\` is \`movie
 :::
 
 > [!TIP]
-> The classic post-download chain is already seeded for you: **Auto-Scan Video After Downloads** (Video Download Batch Done → Scan Video Server) and **Auto-Update Video Database After Scan** (Video Library Scan Done → Update Video Database). Chain your own steps after them — e.g. *Video Database Updated → Apply Overlays → Discord*.
+> The classic post-download chain is already seeded for you: **Auto-Scan Video After Downloads** (Video Download Batch Done → Index New Video Files) and **Auto-Update Video Database After Scan** (Video Library Scan Done → Update Video Database). Chain your own steps after them — e.g. *Video Database Updated → Apply Overlays → Discord*.
 
 See [Automations](#auto-overview) for the full builder reference.
 `

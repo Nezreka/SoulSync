@@ -2059,7 +2059,7 @@ const VIDEO_HUB_REFERENCE = {
         },
         {
             group: 'Library', items: [
-                { type: 'video_scan_server', label: 'Scan Video Server', desc: 'Ask the server to index new downloads, wait for it' },
+                { type: 'video_scan_server', label: 'Index New Video Files', desc: 'Make sure new downloads are in your library (asks your media server to index them and waits)' },
                 { type: 'video_update_database', label: 'Update Video Database', desc: 'Read the server\'s library into SoulSync' },
                 { type: 'video_deep_scan_movies', label: 'Deep Scan Movies', desc: 'Full movie-library reconcile' },
                 { type: 'video_deep_scan_tv', label: 'Deep Scan TV', desc: 'Full TV-library reconcile' },
@@ -3850,7 +3850,7 @@ function _autoFormatAction(type) {
         full_cleanup: 'Full Cleanup',
         playlist_pipeline: 'Playlist Pipeline',
         // Video side
-        video_scan_library: 'Scan Video Library', video_scan_server: 'Scan Video Server',
+        video_scan_library: 'Scan Video Library', video_scan_server: 'Index New Video Files',
         video_update_database: 'Update Video Database', video_update_database_hourly: 'Update Video Database (Hourly)',
         video_add_airing_episodes: 'Wishlist Airing Episodes',
         video_deep_scan_movies: 'Deep Scan Movie Library', video_deep_scan_tv: 'Deep Scan TV Library',

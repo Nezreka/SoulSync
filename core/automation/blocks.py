@@ -517,8 +517,8 @@ ACTIONS: list[dict] = [
      ]},
     # Post-download chain actions (two stages, like music's scan_library +
     # start_database_update). Stage 1 nudges the server; stage 2 reads it in.
-    {"type": "video_scan_server", "label": "Scan Video Server", "icon": "refresh", "scope": "video",
-     "description": "Get the server to index new downloads (skips the scan if it already has them), waits until it finishes, then fires 'Video Library Scan Done'", "available": True,
+    {"type": "video_scan_server", "label": "Index New Video Files", "icon": "refresh", "scope": "video",
+     "description": "Make sure new downloads are in your library: your media server is asked to index them (skipped when it already has them) and SoulSync waits for it; with Standalone they are already in. Then fires 'Video Library Scan Done'", "available": True,
      "config_fields": [
          {"key": "media_type", "type": "select", "label": "Library",
           "options": [{"value": "all", "label": "Movies + TV"},
