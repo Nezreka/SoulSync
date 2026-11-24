@@ -424,6 +424,16 @@ def _known_library_files(db):
     return known
 
 
+def _skip_hidden_dirs(dirs) -> None:
+    """keep an os.walk out of hidden folders, in place. an album still
+    downloading sits in <music folder>/.soulsync_atomic_staging until it is
+    whole: walked, a refresh indexed half an album as library tracks and a
+    deep scan moved its files to the import folder mid-download. the
+    standalone library's own reader skips them for the same reason
+    (core/soulsync_client.py), and so does the usual hidden clutter."""
+    dirs[:] = [d for d in dirs if not d.startswith('.')]
+
+
 def _run_soulsync_full_refresh(incremental=False):
     """Re-index the standalone output folder through the native import writer.
 
@@ -448,6 +458,7 @@ def _run_soulsync_full_refresh(incremental=False):
         audio_exts = {'.mp3', '.flac', '.ogg', '.opus', '.m4a', '.aac', '.wav', '.wma', '.aiff', '.aif', '.ape'}
         audio_files = []
         for root, _dirs, files in os.walk(transfer_path):
+            _skip_hidden_dirs(_dirs)
             for fname in files:
                 if os.path.splitext(fname)[1].lower() in audio_exts:
                     audio_files.append(os.path.join(root, fname))
@@ -608,6 +619,7 @@ def _run_soulsync_deep_scan():
         audio_extensions = {'.mp3', '.flac', '.ogg', '.opus', '.m4a', '.aac', '.wav', '.wma', '.aiff', '.aif', '.ape'}
         transfer_files = set()
         for root, _dirs, files in os.walk(transfer_path):
+            _skip_hidden_dirs(_dirs)
             for filename in files:
                 if os.path.splitext(filename)[1].lower() in audio_extensions:
                     transfer_files.add(os.path.realpath(os.path.join(root, filename)))

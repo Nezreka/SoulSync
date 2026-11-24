@@ -502,7 +502,7 @@ ACTIONS: list[dict] = [
     # Tagged scope='video' so they appear ONLY on the video automation
     # builder, never the music one. Their handlers bridge into core.video.
     {"type": "video_scan_library", "label": "Scan Video Library", "icon": "refresh", "scope": "video",
-     "description": "Tell the media server to rescan your selected movie/TV sections, then read what it found into SoulSync", "available": True,
+     "description": "Read your movie/TV library into SoulSync: your media server is asked to rescan first; with Standalone, SoulSync reads your own folders", "available": True,
      "config_fields": [
          {"key": "mode", "type": "select", "label": "Mode",
           "options": [{"value": "full", "label": "Full (add + refresh)"},

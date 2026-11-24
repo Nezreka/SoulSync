@@ -156,8 +156,9 @@ class VideoLibraryScanner:
         try:
             source = source_factory()
             if source is None:
-                self._set(state="error", phase="no video server",
-                          error="No connected Plex/Jellyfin video server")
+                self._set(state="error", phase="no video library",
+                          error="No video library to scan: connect Plex or Jellyfin, or set your "
+                                "Movies and TV folders")
                 return
             server = source.server_name
             problem = getattr(source, "scan_problem", None)
@@ -167,7 +168,15 @@ class VideoLibraryScanner:
                 self._set(state="error", phase="no library", error=problem)
                 return
             incremental = mode == "incremental"
-            do_prune = mode == "deep"
+            # soulsync's own folders (core/video/disk_source.py) are not a
+            # server: there is no "recently added" list to read newest first
+            # and stop early on, and no dates worth trusting. its quick scan
+            # walks every folder and reads the titles whose listing changed,
+            # and what the walk no longer finds is gone, so every mode prunes
+            # (a row only goes when its files really are gone from disk, and an
+            # unreachable folder stopped the scan above).
+            disk = server == "soulsync"
+            do_prune = mode == "deep" or disk
             # Movies and TV are independent libraries — scan only the requested
             # kind(s) so a TV scan never pulls in (or prunes) movies, and vice-versa.
             do_movies = media_type in ("all", "movie")
@@ -179,7 +188,11 @@ class VideoLibraryScanner:
 
             # Incremental on a near-empty library is pointless — fall back to a
             # full pass so the first scan actually populates (music does this).
-            if incremental and (self.db.table_count("movies") + self.db.table_count("shows")) < INCREMENTAL_MIN_LIBRARY:
+            # (this server's own rows: another server's library says nothing
+            # about how much of this one has been read)
+            if incremental and not disk and (
+                    len(self.db.server_ids("movies", server)) + len(self.db.server_ids("shows", server))
+            ) < INCREMENTAL_MIN_LIBRARY:
                 incremental = False
 
             # Modified-since delta: on incremental, ask the server for only what it
@@ -187,7 +200,7 @@ class VideoLibraryScanner:
             # item propagates, not just brand-new adds. No baseline yet → the source
             # uses its recent-window fallback (and the movie loop keeps the early-stop).
             since = None
-            if incremental:
+            if incremental and not disk:
                 ts = self.db.get_setting("video_last_scan_at")
                 if ts:
                     try:
@@ -210,9 +223,12 @@ class VideoLibraryScanner:
             def pct():
                 return round(processed / total * 100) if total else None
 
-            known_movies = self.db.server_ids("movies", server) if (incremental and do_movies) else set()
-            known_shows = self.db.server_ids("shows", server) if (incremental and do_shows) else set()
-            known_eps = self.db.server_ids("episodes", server) if (incremental and do_shows) else set()
+            # the server shortcuts below (re-upsert a known id, stop after a run
+            # of known ones) are for a newest-first server read, never the disk
+            quick = incremental and not disk
+            known_movies = self.db.server_ids("movies", server) if (quick and do_movies) else set()
+            known_shows = self.db.server_ids("shows", server) if (quick and do_shows) else set()
+            known_eps = self.db.server_ids("episodes", server) if (quick and do_shows) else set()
 
             # ── Movies ── (skipped entirely on a TV-only scan)
             seen_movies: set[str] = set()
@@ -231,7 +247,7 @@ class VideoLibraryScanner:
                     # returned only what changed since last scan, so process them all. In
                     # the recent-window fallback (no baseline) we keep the count-based
                     # early-stop. Either way a re-upsert isn't tallied as a NEW movie.
-                    if incremental and sid in known_movies:
+                    if quick and sid in known_movies:
                         try:
                             self.db.upsert_movie(server, item, preserve_enrichment=preserve)
                         except Exception:
@@ -253,6 +269,8 @@ class VideoLibraryScanner:
                     if movies % 10 == 0:
                         self._set(movies=movies, percent=pct())
                 self._set(movies=movies, percent=pct())
+                # the disk walk passed every title, read or not: none of them is gone
+                seen_movies |= {str(i) for i in getattr(source, "walked", lambda _t: set())("movies")}
                 # Prune ONLY on a deep scan, and only when we actually saw items —
                 # so a transient empty response can never wipe the library. The prune
                 # runs AFTER the bar fills, and a big cleanup (many orphaned rows +
@@ -279,7 +297,7 @@ class VideoLibraryScanner:
                     # last scan, so re-upsert every one (apply the change). Only the
                     # recent-window fallback uses the 'skip fully-present + early-stop'
                     # optimisation below.
-                    if incremental and since is None:
+                    if quick and since is None:
                         # A known show is 'complete' only when we already have EVERY
                         # episode. Skip only fully-present shows, and stop after a run.
                         ep_ids = [str(e.get("server_id")) for s in show.get("seasons", [])
@@ -301,6 +319,7 @@ class VideoLibraryScanner:
                     episodes += sum(len(s.get("episodes", [])) for s in show.get("seasons", []))
                     processed += 1
                     self._set(shows=shows, episodes=episodes, percent=pct())
+                seen_shows |= {str(i) for i in getattr(source, "walked", lambda _t: set())("shows")}
                 # Final prune (the one that delays "done" on a deep scan) — show it.
                 if do_prune and seen_shows:
                     self._set(phase="cleaning up removed shows", percent=100)

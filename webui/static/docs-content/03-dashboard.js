@@ -776,9 +776,9 @@ The **\<Server\> Database Updater** card (e.g. "Plex Database Updater") shows **
 
 Pick from the update-type select, then click **Update Database** (the button stays as **Stop Update** while running — even during "Starting…" so a wedged start is cancellable):
 
-- **Incremental Update** (default) — only new artists/albums/tracks since the last update. Fast. (In SoulSync standalone this is a no-op — the library updates at download time — so use Deep Scan or Full Refresh there.)
-- **Full Refresh** — confirm dialog: "This will clear and rebuild the database for the active server. It can take a long time." Clears and rebuilds everything from the active media server.
-- **Deep Scan** — confirm dialog: "A deep scan re-checks every track in your media server library… Adds any new tracks that were missed · Removes tracks no longer on your server · Preserves all existing metadata and enrichment data."
+- **Incremental Update** (default) — only what is new since the last update. Fast. With a media server it reads the server's recently added albums; with SoulSync Standalone it walks your music folder and adds the files the library doesn't know yet.
+- **Full Refresh** — confirm dialog: "A full refresh re-reads your whole library and updates what changed. Nothing is cleared first. It can take a long time." With Standalone it also re-reads every known file's tags and quality.
+- **Deep Scan** — confirm dialog: "A deep scan re-checks every track in your library… Catches what the regular scans missed · Removes tracks that are no longer there · Preserves all existing metadata and enrichment data." With a media server it removes tracks the server no longer has. With Standalone it finds files the library doesn't track and marks files that have gone missing.
 
 Progress shows phase text plus "N / M artists (P%)"; the card stats refresh when the run lands.
 `

@@ -257,6 +257,9 @@ class DiskVideoSource:
         self.fs = walker or _Walker()
         self._scanner_status = scanner_status
         self._known: Dict[str, Dict[str, Dict[str, Any]]] = {}
+        self._snap: Dict[str, Dict[str, frozenset]] = {}
+        # every title this scan walked past, changed or not: {table: ids}
+        self._walked: Dict[str, set] = {"movies": set(), "shows": set()}
         self._aliases: Optional[Dict[str, str]] = None
         self._maps: Dict[int, tuple] = {}
 
@@ -295,11 +298,12 @@ class DiskVideoSource:
         return (get_video_scanner(self.db).get_status() or {}).get("state") == "scanning"
 
     def refresh_sections(self, media_type="all") -> dict:
-        """'scan the server' is a scan of soulsync's own folders"""
-        from core.video.scanner import get_video_scanner
-        r = get_video_scanner(self.db).request_scan(
-            lambda: self, mode="incremental", media_type=media_type)
-        return {"ok": True, "sections": [SERVER_NAME], **r}
+        """a media server is asked to index its folders before soulsync reads
+        it. there is no server here and nothing to wait for: the scan that
+        follows reads the folders itself. (starting a scan from here made the
+        scan that follows find one already running and skip, so a scheduled
+        full or deep scan never ran.)"""
+        return {"ok": True, "sections": [], "note": "SoulSync reads its own folders"}
 
     def has_item(self, media_type, item) -> bool:
         """a landed download is already in the library (library_ingest wrote
@@ -329,6 +333,41 @@ class DiskVideoSource:
             finally:
                 conn.close()
         return self._known[table]
+
+    def walked(self, table: str) -> set:
+        """the ids of every title the scan found on disk, read or skipped as
+        unchanged: what is NOT here is gone from the folders"""
+        return set(self._walked.get(table) or ())
+
+    def _snapshot(self, table: str) -> Dict[str, frozenset]:
+        """what the library holds for each of this source's titles: its files
+        as {(path, size)}. a quick scan reads a title again only when the
+        folder's own listing differs from this: a file added, replaced,
+        renamed or removed, however deep, and whatever its dates say."""
+        if table not in self._snap:
+            join = ("JOIN movies t ON t.id=f.movie_id" if table == "movies" else
+                    "JOIN episodes e ON e.id=f.episode_id JOIN shows t ON t.id=e.show_id")
+            out: Dict[str, set] = {}
+            conn = self.db._get_connection()
+            try:
+                for sid, path, size in conn.execute(
+                        f"SELECT t.server_id, f.relative_path, f.size_bytes FROM media_files f {join} "
+                        "WHERE t.server_source=?", (SERVER_NAME,)):
+                    out.setdefault(sid, set()).add((path, size))
+            finally:
+                conn.close()
+            self._snap[table] = {k: frozenset(v) for k, v in out.items()}
+        return self._snap[table]
+
+    @staticmethod
+    def _listing(paths: Iterable[str]) -> frozenset:
+        out = set()
+        for p in paths:
+            try:
+                out.add((p, os.path.getsize(p)))
+            except OSError:
+                out.add((p, None))
+        return frozenset(out)
 
     def _show_aliases(self) -> Dict[str, str]:
         """a show folder's id -> the id of the show row its files are already
@@ -497,18 +536,6 @@ class DiskVideoSource:
         nfos.sort(key=lambda p: (os.path.basename(p).lower() != "movie.nfo", p))
         return videos, nfos
 
-    def _changed_since(self, paths: Iterable[str], since) -> bool:
-        if since is None:
-            return True
-        cutoff = since.timestamp() if hasattr(since, "timestamp") else float(since)
-        for p in paths:
-            try:
-                if os.stat(p).st_mtime >= cutoff:
-                    return True
-            except OSError:
-                return True
-        return False
-
     def _movie(self, folder: str, name: str, videos: List[str], nfos: List[str]) -> Dict[str, Any]:
         from core.video import owned_ids
         who = self._identify("movie", folder, name, videos, nfos)
@@ -525,8 +552,16 @@ class DiskVideoSource:
         return item
 
     def iter_movies(self, incremental=False, since=None):
+        """every movie; ``incremental`` skips the ones whose folder lists
+        exactly the files the library already has for it (``since`` is a
+        server's notion: a folder's dates don't move when it is renamed or
+        moved in, so they aren't asked)"""
+        from core.video import owned_ids
+        snap = self._snapshot("movies") if incremental else {}
         for folder, name, videos, nfos in self._movie_entries():
-            if incremental and not self._changed_since([folder, *videos], since):
+            sid = owned_ids.of_path(folder)
+            self._walked["movies"].add(sid)
+            if incremental and sid in snap and snap[sid] == self._listing(videos):
                 continue
             try:
                 yield self._movie(folder, name, videos, nfos)
@@ -724,20 +759,21 @@ class DiskVideoSource:
         return item
 
     def iter_shows(self, incremental=False, since=None):
+        """every show; ``incremental`` skips the ones whose folders list
+        exactly the files the library already has for them"""
+        from core.video import owned_ids
+        snap = self._snapshot("shows") if incremental else {}
         for group in self._show_groups():
-            if incremental and since is not None and not any(
-                    self._show_changed(f, since) for f in group["folders"]):
+            row = group["who"].get("row")
+            sid = row["server_id"] if row else owned_ids.of_path(group["folders"][0])
+            self._walked["shows"].add(sid)
+            if incremental and sid in snap and \
+                    snap[sid] == self._listing(p for p, _hint in group["files"]):
                 continue
             try:
                 yield self._show(group)
             except Exception:   # noqa: BLE001 - one unreadable show never stops the scan
                 logger.exception("disk scan: skipping show %s", group["folders"][0])
-
-    def _show_changed(self, folder: str, since) -> bool:
-        """a file added or removed changes its folder's mtime: the show folder
-        or one of its season folders"""
-        dirs = [folder] + [e.path for e in self.fs.entries(folder) if e.is_dir()]
-        return self._changed_since(dirs, since)
 
     def show_tree(self, server_id, title=None, tmdb_id=None):
         self._reachable(self.tv_roots)
