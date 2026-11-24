@@ -220,3 +220,72 @@ def test_a_symlinked_transfer_moves_new_files_into_staging(tmp_path, monkeypatch
     assert errors == []
     assert (staging / "Artist" / "Album" / "new.flac").is_file()
     assert not (real / "Artist" / "Album" / "new.flac").exists()
+
+
+def _quiet(monkeypatch, db_admin, errors):
+    monkeypatch.setattr(db_admin, "_db_update_phase_callback", lambda *_: None)
+    monkeypatch.setattr(db_admin, "add_activity_item", lambda *_: None)
+    monkeypatch.setattr(db_admin, "_db_update_finished_callback", lambda *args: None)
+    monkeypatch.setattr(db_admin, "_db_update_error_callback", lambda error: errors.append(error))
+
+
+def test_a_refresh_never_indexes_an_album_that_is_still_downloading(tmp_path, monkeypatch):
+    """an album downloads into <music folder>/.soulsync_atomic_staging and is
+    published whole. the standalone refresh walked hidden folders, so it
+    could index half an album as library tracks."""
+    import web_server
+    from api import database_admin as db_admin
+
+    transfer = tmp_path / "Transfer"
+    staging = tmp_path / "Staging"
+    (transfer / "Artist" / "Album").mkdir(parents=True)
+    (transfer / ".soulsync_atomic_staging" / "job1").mkdir(parents=True)
+    staging.mkdir()
+    real = transfer / "Artist" / "Album" / "01.flac"
+    real.write_bytes(b"fLaC")
+    (transfer / ".soulsync_atomic_staging" / "job1" / "02.flac").write_bytes(b"fLaC")
+    db = MusicDatabase(str(tmp_path / "music.db"))
+    _db_holder["db"] = db
+    _configure_paths(monkeypatch, web_server, transfer, staging)
+    monkeypatch.setattr(web_server, "get_database", lambda: db)
+    imports = []
+    monkeypatch.setattr(
+        "core.library2.autolink.link_download_into_library_v2",
+        lambda context, *, raise_on_error=False: imports.append(context["_final_processed_path"]) or 1,
+    )
+    errors = []
+    _quiet(monkeypatch, db_admin, errors)
+
+    db_admin._run_soulsync_full_refresh()
+    db_admin._run_soulsync_full_refresh(incremental=True)
+
+    assert errors == []
+    assert set(imports) == {str(real)}
+
+
+def test_a_deep_scan_never_moves_an_album_that_is_still_downloading(tmp_path, monkeypatch):
+    import web_server
+    from api import database_admin as db_admin
+
+    transfer = tmp_path / "Transfer"
+    staging = tmp_path / "Staging"
+    (transfer / "Artist" / "Album").mkdir(parents=True)
+    (transfer / ".soulsync_atomic_staging" / "job1").mkdir(parents=True)
+    staging.mkdir()
+    (transfer / "Artist" / "Album" / "new.flac").write_bytes(b"fLaC")
+    partial = transfer / ".soulsync_atomic_staging" / "job1" / "02.flac"
+    partial.write_bytes(b"fLaC")
+    db = MusicDatabase(str(tmp_path / "music.db"))
+    _db_holder["db"] = db
+    _configure_paths(monkeypatch, web_server, transfer, staging)
+    monkeypatch.setattr(web_server, "get_database", lambda: db)
+    monkeypatch.setattr("core.library2.scan.rescan_files", lambda database, *, file_ids: {})
+    errors = []
+    _quiet(monkeypatch, db_admin, errors)
+
+    db_admin._run_soulsync_deep_scan()
+
+    assert errors == []
+    assert partial.is_file()                                    # left where the download put it
+    assert (staging / "Artist" / "Album" / "new.flac").is_file()   # a real untracked file still moves
+    assert not any(p.name == "02.flac" for p in staging.rglob("*"))

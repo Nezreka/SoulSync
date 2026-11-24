@@ -217,15 +217,137 @@ def test_a_landed_download_and_the_scan_are_one_row(lib, monkeypatch):
     assert len(_q(db, "SELECT id FROM media_files")) == 2
 
 
-def test_an_incremental_scan_reads_only_changed_folders(lib):
+def test_a_quick_scan_reads_only_what_changed_and_sees_what_dates_dont(lib):
+    """the quick (incremental) scan compares each folder's listing with the
+    library, not its dates: a folder moved in or renamed keeps its old dates,
+    and a deleted one has none to look at."""
     db, movies, tv, search, source = lib
+    import shutil
     import time
-    from datetime import datetime
+    _touch(movies, "The Matrix (1999)/m.mkv", 500)
+    _touch(movies, "Blade Runner (1982) {tmdb-78}/br.mkv", 600)
+    _touch(movies, "Alien (1979) {tmdb-348}/alien.mkv", 700)
+    _touch(tv, "Silo {tmdb-125988}/Season 01/Silo - S01E01.mkv", 100)
+    _scan(db, source)                                   # the first read is a full one
+    # nothing changed: a quick scan reads no title again
+    src = source()
+    assert list(src.iter_movies(incremental=True)) == [] and list(src.iter_shows(incremental=True)) == []
+    assert len(src.walked("movies")) == 3 and len(src.walked("shows")) == 1
+
+    old = time.time() - 30 * 86400
+    # a folder made a month ago, moved in now: its dates are a month old
+    moved_in = tmp_dir = movies.parent / "elsewhere" / "Heat (1995) {tmdb-949}"
+    _touch(tmp_dir.parent, "Heat (1995) {tmdb-949}/heat.mkv", 800)
+    os.utime(moved_in / "heat.mkv", (old, old))
+    os.utime(moved_in, (old, old))
+    shutil.move(str(moved_in), str(movies / "Heat (1995) {tmdb-949}"))
+    # a rename, a delete, a file replaced under the same name, an episode two folders down
+    os.rename(movies / "Blade Runner (1982) {tmdb-78}", movies / "Blade Runner - Final Cut {tmdb-78}")
+    shutil.rmtree(movies / "Alien (1979) {tmdb-348}")
+    (movies / "The Matrix (1999)" / "m.mkv").write_bytes(b"x" * 999)
+    _touch(tv, "Silo {tmdb-125988}/Season 01/Disc 1/Silo - S01E02.mkv", 100)
+    br_id = _q(db, "SELECT id FROM movies WHERE tmdb_id=78")[0]["id"]
+
+    st = _scan(db, source, mode="incremental")
+    assert st["state"] == "done"
+    got = {r["tmdb_id"]: r for r in _q(db, "SELECT * FROM movies")}
+    assert set(got) == {603, 78, 949}                    # Heat in, Alien gone
+    assert got[78]["id"] == br_id                         # the rename kept its row
+    assert _q(db, "SELECT size_bytes FROM media_files WHERE movie_id=?", got[603]["id"]) == [{"size_bytes": 999}]
+    assert len(_q(db, "SELECT id FROM episodes WHERE has_file=1")) == 2
+    assert st["removed"] == 1
+
+
+def test_a_quick_scan_never_drops_a_title_whose_folder_it_couldnt_read(lib, monkeypatch):
+    db, movies, tv, search, source = lib
+    _touch(movies, "The Matrix (1999)/m.mkv")
+    _touch(movies, "Blade Runner (1982) {tmdb-78}/br.mkv")
+    _scan(db, source)
+    # one title blows up mid-read: it isn't "seen", but its file is on disk
+    real = DiskVideoSource._movie
+
+    def boom(self, folder, name, videos, nfos):
+        if "Blade" in name:
+            raise OSError("share hiccup")
+        return real(self, folder, name, videos, nfos)
+
+    monkeypatch.setattr(DiskVideoSource, "_movie", boom)
+    (movies / "Blade Runner (1982) {tmdb-78}" / "br.mkv").write_bytes(b"x" * 321)   # so it is read
+    _scan(db, source, mode="incremental")
+    assert len(_q(db, "SELECT id FROM movies")) == 2
+
+
+def test_a_scheduled_scan_of_soulsyncs_folders_actually_runs(lib):
+    # asking a media server to index first is a no-op here. it used to start a
+    # scan of its own, so the scan that followed found one running and skipped
+    db, movies, tv, search, source = lib
     _touch(movies, "The Matrix (1999)/m.mkv")
     src = source()
-    since = datetime.fromtimestamp(time.time() + 5)
-    assert list(src.iter_movies(incremental=True, since=since)) == []
-    assert len(list(src.iter_movies(incremental=True, since=None))) == 1
+    assert src.refresh_sections("all")["ok"] is True
+    assert _q(db, "SELECT id FROM movies") == []           # nothing was started behind our back
+    from core.automation.handlers import video_scan_library as handler
+
+    class Deps:
+        def update_progress(self, *a, **k):
+            pass
+
+    ran = []
+
+    def run(mode, media_type):
+        ran.append(mode)
+        return VideoLibraryScanner(db).scan_sync(source, mode=mode, media_type=media_type)
+
+    out = handler.auto_video_scan_library({"mode": "deep"}, Deps(), server_refresh=src.refresh_sections,
+                                          run_video_scan=run)
+    assert ran == ["deep"] and out["status"] == "completed" and out["movies"] == 1
+
+
+def test_another_servers_library_doesnt_make_this_one_look_scanned(tmp_path):
+    # 60 soulsync rows, then plex becomes the video server: plex's first quick
+    # scan must read everything, not stop early as if the library were full
+    db = VideoDatabase(database_path=str(tmp_path / "v.db"))
+    for i in range(60):
+        db.upsert_movie("soulsync", {"server_id": f"ss:{i}", "title": f"m{i}"})
+
+    class Plex:
+        server_name = "plex"
+
+        def __init__(self):
+            self.asked = []
+
+        def counts(self, incremental=False):
+            return {}
+
+        def iter_movies(self, incremental=False, since=None):
+            self.asked.append(incremental)
+            return iter([])
+
+        def iter_shows(self, incremental=False, since=None):
+            return iter([])
+
+    plex = Plex()
+    VideoLibraryScanner(db).scan_sync(lambda: plex, mode="incremental")
+    assert plex.asked == [False]
+
+
+def test_switching_the_video_source_forgets_the_last_scan_mark(tmp_path):
+    from flask import Flask
+    import api.video as videoapi
+    db = VideoDatabase(database_path=str(tmp_path / "v.db"))
+    db.set_setting("video_last_scan_at", "1795000000")
+    videoapi._video_db = db
+    try:
+        app = Flask(__name__)
+        app.register_blueprint(videoapi.create_video_blueprint(), url_prefix="/api/video")
+        c = app.test_client()
+        assert c.post("/api/video/server", json={"server": "soulsync"}).status_code == 200
+        assert not db.get_setting("video_last_scan_at")
+        # the same pick again leaves a new mark alone
+        db.set_setting("video_last_scan_at", "1795000001")
+        c.post("/api/video/server", json={"server": "soulsync"})
+        assert db.get_setting("video_last_scan_at") == "1795000001"
+    finally:
+        videoapi._video_db = None
 
 
 def test_page_sync_reads_one_title_again(lib):

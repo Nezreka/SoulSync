@@ -164,7 +164,7 @@ def register_routes(bp):
         # soulsync: its own folder scan is the library (core/video/disk_source.py)
         if choice not in ("plex", "jellyfin", "soulsync"):
             return jsonify({"error": "bad server"}), 400
-        moved = None
+        moved, was = None, None
         try:
             # with the two servers linked, the library follows the pick: every
             # linked title keeps its row (core/video/server_links.py)
@@ -176,6 +176,14 @@ def register_routes(bp):
         except Exception:
             logger.exception("video server switch: the library could not follow the pick")
         get_video_db().set_setting("video_server", choice)
+        try:
+            # the "changed since the last scan" mark was the OTHER library's:
+            # kept, the new one's first quick scan would read only what changed
+            # since then and leave the library mostly empty
+            if choice != was:
+                get_video_db().set_setting("video_last_scan_at", "")
+        except Exception:
+            logger.debug("video server switch: scan baseline not cleared", exc_info=True)
         try:
             from core.video.sources import invalidate_video_source_cache
             invalidate_video_source_cache()

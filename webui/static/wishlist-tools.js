@@ -4212,12 +4212,13 @@ const TOOL_HELP_CONTENT = {
         title: 'Database Updater',
         content: `
             <h4>What does this tool do?</h4>
-            <p>The Database Updater syncs your media server library (Plex, Jellyfin, or Navidrome) with SoulSync's internal database.</p>
+            <p>The Database Updater brings SoulSync's library in line with your music: your media server (Plex, Jellyfin or Navidrome), or with SoulSync Standalone, the files in your music folders.</p>
 
             <h4>Update Modes</h4>
             <ul>
                 <li><strong>Incremental Update:</strong> Only scans for new artists, albums, and tracks that have been added since the last update. Fast and efficient for regular updates.</li>
-                <li><strong>Full Refresh:</strong> Completely rebuilds the database from scratch. Use this if you've made significant changes to your library or if data seems out of sync.</li>
+                <li><strong>Full Refresh:</strong> Re-reads your whole library and updates what changed. Nothing is cleared first. Use this if you've made significant changes to your library or if data seems out of sync.</li>
+                <li><strong>Deep Scan:</strong> Re-checks every track and removes the ones that are no longer there.</li>
             </ul>
 
             <h4>When to use it?</h4>
