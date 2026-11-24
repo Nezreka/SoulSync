@@ -98,7 +98,7 @@ First-run setup finds your media server and download clients on its own. You don
 | **Metadata** | Spotify (with or without an account), Apple Music / iTunes, Deezer, Discogs, MusicBrainz, plus 14 background enrichment workers |
 | **Media servers** | Plex, Jellyfin, Navidrome, or **SoulSync Standalone** (no server needed) |
 | **Playlist sources** | Spotify, Tidal, Qobuz, Deezer, YouTube, YouTube Music, Apple Music links, ListenBrainz, Last.fm, Beatport, SoulSync's own mixes, CSV / TSV / TXT / M3U files, and NewPipe backups |
-| **Video** | Movies, TV and YouTube channels with TMDB / TVDB, Prowlarr, qBittorrent / Transmission / Deluge / SABnzbd / NZBGet, Plex and Jellyfin |
+| **Video** | Movies, TV and YouTube channels with TMDB / TVDB, Prowlarr, qBittorrent / Transmission / Deluge / SABnzbd / NZBGet, Plex, Jellyfin, or **Standalone** (SoulSync scans your own folders, no server needed) |
 | **Automation** | Visual WHEN → DO → THEN builder, 60+ triggers and actions, Discord / Telegram / Pushbullet / webhook notifications |
 | **Network (optional)** | **MetaSync** companion: share anonymous weekly taste signals with other SoulSync installs and get **SoulSync Charts** back as ready-to-sync playlists |
 | **Runs on** | Docker (amd64 + arm64), Unraid, or plain Python 3.11 |

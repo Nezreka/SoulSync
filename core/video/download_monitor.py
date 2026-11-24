@@ -516,6 +516,7 @@ def _record_pack_episode(db, ep_dl, patch):
                                  progress=100.0, completed_at=_now(),
                                  quality_label=patch.get("quality_label") or ep_dl.get("quality_label"))
         row = {**ep_dl, "id": child}
+        _own_landed(db, row, patch)
         _archive_history(db, row, patch)
         _publish_terminal(row, patch, _owners(db, row))
         return child
@@ -1327,6 +1328,14 @@ def _search_again_now(db, dl, *, wait: bool = False) -> bool:
     return handled if wait else True
 
 
+def _own_landed(db, dl, upd) -> None:
+    """the placed file is in the library now, not at the server's next scan
+    (core/video/library_ingest.py). best effort."""
+    if upd.get("dest_path"):
+        from core.video.library_ingest import ingest_landed
+        ingest_landed(db, dl, upd["dest_path"], replaced=upd.get("_replaced"))
+
+
 def _archive_history(db, dl, upd) -> None:
     """Snapshot a terminal download into the permanent history. Best-effort — a
     history failure must never disturb the download pipeline."""
@@ -2094,6 +2103,7 @@ def settle_outcome(db, dl, upd) -> None:
     # whose it is, read before the wishlist lets go of it
     owners = _owners(db, dl) if upd.get("status") in _TERMINAL else []
     if upd.get("status") == "completed":
+        _own_landed(db, dl, upd)
         _wishlist_obtained(db, dl, upd)
     # Snapshot terminal outcomes into the permanent history (survives the
     # queue cleanup; powers the History modal + smart post-download scan).

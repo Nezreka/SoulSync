@@ -3559,6 +3559,11 @@
                     document.dispatchEvent(new CustomEvent('soulsync:video-navigate', { detail: 'video-library' }));
                     return;
                 }
+                if (d.waiting) {
+                    // soulsync placed the file; the server just hasn't scanned it in
+                    if (typeof showToast === 'function') showToast('In your library. Your media server hasn\'t scanned it in yet.', 'info');
+                    return;
+                }
                 var bits = [];
                 if (d.files_added) bits.push('+' + d.files_added + ' file' + (d.files_added !== 1 ? 's' : ''));
                 if (d.files_removed) bits.push('-' + d.files_removed + ' file' + (d.files_removed !== 1 ? 's' : ''));
@@ -3602,6 +3607,10 @@
                 if (d.show_removed) {
                     if (typeof showToast === 'function') showToast('"' + (d.title || 'Show') + '" is no longer on your server — removed from the library', 'warning');
                     document.dispatchEvent(new CustomEvent('soulsync:video-navigate', { detail: 'video-library' }));
+                    return;
+                }
+                if (d.waiting) {
+                    if (typeof showToast === 'function') showToast('In your library. Your media server hasn\'t scanned it in yet.', 'info');
                     return;
                 }
                 var bits = [];

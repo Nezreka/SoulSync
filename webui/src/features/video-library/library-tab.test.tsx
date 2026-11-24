@@ -261,6 +261,13 @@ const bulkDone = (batch: string | null = 'b1') => ({
 });
 
 describe('movie tab', () => {
+  it("shows a version's edition", async () => {
+    routes['/library'] = () => movie({ files: [file({ edition: "Director's Cut" })] });
+    render(<LibraryTab kind="movie" id={7} />);
+    expect(await screen.findByText("Director's Cut")).toBeTruthy();
+    expect(document.querySelectorAll('[data-edition]')).toHaveLength(1);
+  });
+
   it('lists every file with what the disk says, and the one only the server can see', async () => {
     routes['/library'] = () => movie();
     render(<LibraryTab kind="movie" id={7} />);

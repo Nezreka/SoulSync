@@ -132,8 +132,12 @@ export function ConnectionsPage(props: SettingsTabProps) {
                 <Btn
                   icon="refresh"
                   data-video-conn-test={video.active ?? ''}
-                  disabled={!video.active}
-                  onClick={() => video.active && void videoServer.test(video.active)}
+                  disabled={!video.active || video.active === 'soulsync'}
+                  onClick={() =>
+                    video.active &&
+                    video.active !== 'soulsync' &&
+                    void videoServer.test(video.active)
+                  }
                 >
                   Test connection
                 </Btn>

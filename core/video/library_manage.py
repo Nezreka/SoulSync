@@ -58,6 +58,7 @@ def light_file(row: dict) -> Dict[str, Any]:
         "audio_codec": row.get("audio_codec"),
         "audio_channels": row.get("audio_channels"),
         "dynamic_range": row.get("dynamic_range"),
+        "edition": row.get("edition") or None,
         "atmos": bool(row.get("atmos")),
         # None = not read yet (the media info job gets to it), [] = no tags
         "audio_languages": _langs_or_none(row.get("audio_languages")),

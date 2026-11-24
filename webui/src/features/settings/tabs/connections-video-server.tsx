@@ -27,6 +27,9 @@ import { type ConnField, type Server, otherTv, useVideoServer, videoServer } fro
 export const VIDEO_SERVERS: Array<{ id: Server; name: string; logo: string }> = [
   { id: 'plex', name: 'Plex', logo: '/static/img/brands/plex.png' },
   { id: 'jellyfin', name: 'Jellyfin', logo: '/static/img/brands/jellyfin.png' },
+  // no media server: SoulSync scans its own Movies and TV folders (the music
+  // side's Standalone, for video)
+  { id: 'soulsync', name: 'Standalone', logo: '/static/trans2.png' },
 ];
 export const videoServerName = (server: Server | null) =>
   VIDEO_SERVERS.find((v) => v.id === server)?.name ?? 'Media server';
@@ -62,6 +65,7 @@ function ConnInput({
 export function useVideoServerState(): { tone: 'ok' | 'bad' | 'warn' | 'idle'; text: string } {
   const { active, said, notes } = useVideoServer();
   if (!active) return { tone: 'idle', text: 'Loading' };
+  if (active === 'soulsync') return { tone: 'ok', text: 'no media server' };
   const tested = said[active];
   if (tested) return tested;
   const note = notes[active] || '';
@@ -160,10 +164,11 @@ function OtherTv() {
 export function VideoServerConnection({ onView }: { onView?: () => void }) {
   const { active, status } = useVideoServer();
   const state = useVideoServerState();
+  const standalone = active === 'soulsync';
   return (
     <Card
       title="Server connections"
-      hint="Pick one. Its fields start as your music side's: change them to point video at another server."
+      hint="Pick one. A server's fields start as your music side's: change them to point video at another server. Standalone needs no server: SoulSync scans your own folders."
       id="stg-video-server-card"
       data-video-only=""
       data-svc-side="video"
@@ -173,12 +178,12 @@ export function VideoServerConnection({ onView }: { onView?: () => void }) {
           <Btn
             small
             data-video-conn-test={active ?? ''}
-            disabled={!active}
-            onClick={() => active && void videoServer.test(active)}
+            disabled={!active || standalone}
+            onClick={() => active && active !== 'soulsync' && void videoServer.test(active)}
           >
             Test server
           </Btn>
-          <Btn small icon="gear" disabled={!active} onClick={() => onView?.()}>
+          <Btn small icon="gear" disabled={!active || standalone} onClick={() => onView?.()}>
             View configuration
           </Btn>
         </>
@@ -187,7 +192,7 @@ export function VideoServerConnection({ onView }: { onView?: () => void }) {
       <div
         id="video-server-pick"
         className={s.servers}
-        data-count="2"
+        data-count={VIDEO_SERVERS.length}
         role="radiogroup"
         aria-label="Video media server"
       >
@@ -206,16 +211,26 @@ export function VideoServerConnection({ onView }: { onView?: () => void }) {
           </button>
         ))}
       </div>
-      <div className={s.cardRows}>
-        <LibraryRow kind="movies" />
-        <LibraryRow kind="tv" />
-        <OtherTv />
-      </div>
-      <p className={s.cardFoot}>
-        Which libraries the video side scans. A library switched to Anime files its shows' new
-        episodes in the Anime folder (Settings, Library).{' '}
-        <span data-video-lib-save-status="">{status}</span>
-      </p>
+      {standalone ? (
+        <p className={s.cardFoot} data-video-standalone="">
+          SoulSync scans your Movies and TV folders (Settings, Library) and works out what each
+          title is. A title it isn't sure of is listed under Tools as unmatched for you to pick,
+          never guessed. Downloads appear in the library the moment they land.
+        </p>
+      ) : (
+        <>
+          <div className={s.cardRows}>
+            <LibraryRow kind="movies" />
+            <LibraryRow kind="tv" />
+            <OtherTv />
+          </div>
+          <p className={s.cardFoot}>
+            Which libraries the video side scans. A library switched to Anime files its shows' new
+            episodes in the Anime folder (Settings, Library).{' '}
+            <span data-video-lib-save-status="">{status}</span>
+          </p>
+        </>
+      )}
     </Card>
   );
 }

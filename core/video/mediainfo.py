@@ -123,6 +123,30 @@ def stream_languages(streams: Any, codec_type: str) -> list:
     return out
 
 
+def _dynamic_range(video: Any) -> str | None:
+    """'DV', 'HDR10', 'HDR10+', 'HLG' (joined, DV first) from a video stream's
+    transfer function and side data; None for SDR"""
+    if not isinstance(video, dict):
+        return None
+    side = " ".join(str((d or {}).get("side_data_type") or "").lower()
+                    for d in (video.get("side_data_list") or []) if isinstance(d, dict))
+    transfer = str(video.get("color_transfer") or "").lower()
+    parts = []
+    if "dovi" in side or "dolby vision" in side:
+        parts.append("DV")
+    if transfer == "smpte2084":
+        parts.append("HDR10+" if "hdr10+" in side or "2094-40" in side else "HDR10")
+    elif transfer == "arib-std-b67":
+        parts.append("HLG")
+    return " ".join(parts) or None
+
+
+def _is_atmos(audio: dict) -> bool:
+    tags = audio.get("tags") if isinstance(audio.get("tags"), dict) else {}
+    said = " ".join(str(x or "") for x in (audio.get("profile"), tags.get("title"))).lower()
+    return "atmos" in said
+
+
 def parse_ffprobe(data: Any) -> dict:
     """Parse ffprobe's ``-show_format -show_streams`` JSON into the fields we use.
     ``ok`` is True only when a video stream is present (else: corrupt / not a video)."""
@@ -144,6 +168,11 @@ def parse_ffprobe(data: Any) -> dict:
         "video_codec": _norm_codec((video or {}).get("codec_name")),
         "audio_codec": str((audio or {}).get("codec_name") or "") or None,
         "audio_channels": _int((audio or {}).get("channels")) or None,
+        # HDR and Atmos as the file itself states them, the same labels the
+        # release-name reader gives (core/video/sources._format_from_name)
+        "dynamic_range": _dynamic_range(video),
+        "atmos": any(_is_atmos(s) for s in streams if isinstance(s, dict)
+                     and s.get("codec_type") == "audio"),
         # the language tags Thibs asked for: audio, beside subs and resolution
         "audio_languages": stream_languages(streams, "audio"),
         "subtitle_languages": stream_languages(streams, "subtitle"),

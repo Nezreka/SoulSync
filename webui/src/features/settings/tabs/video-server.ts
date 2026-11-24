@@ -11,7 +11,10 @@ import { useSyncExternalStore } from 'react';
 
 import { onVideoSave, videoShown } from './video-shown';
 
-export type Server = 'plex' | 'jellyfin';
+/** soulsync: Standalone, its own folder scan is the library (no media server) */
+export type Server = 'plex' | 'jellyfin' | 'soulsync';
+/** the two that have a connection to fill in and test */
+export type MediaServer = Exclude<Server, 'soulsync'>;
 export const SERVER_URL = '/api/video/server';
 export const CONN_URL = '/api/video/server-config';
 export const LIBS_URL = '/api/video/libraries';
@@ -48,7 +51,7 @@ interface State {
   /** null until the server is known: no panel shows */
   active: Server | null;
   conn: Conn;
-  notes: Record<Server, string>;
+  notes: Record<MediaServer, string>;
   /** null: the picker is hidden */
   users: { list: User[]; selected: string } | null;
   /** null until the libraries load: the pickers say Loading... */
@@ -58,10 +61,15 @@ interface State {
   said: Partial<Record<Server, { tone: 'ok' | 'bad'; text: string }>>;
 }
 
-const NAME: Record<Server, string> = { plex: 'Plex', jellyfin: 'Jellyfin' };
+const NAME: Record<Server, string> = { plex: 'Plex', jellyfin: 'Jellyfin', soulsync: 'Standalone' };
 
 /** connNote: what is still missing, or where the connection came from */
-export function connNote(server: Server, hasUrl: boolean, hasSecret: boolean, inherited: boolean) {
+export function connNote(
+  server: MediaServer,
+  hasUrl: boolean,
+  hasSecret: boolean,
+  inherited: boolean,
+) {
   const secret = server === 'plex' ? 'token' : 'API key';
   if (!hasUrl && !hasSecret) return `Not connected: add a server URL and ${secret}.`;
   if (!hasSecret) return `Add the ${secret} to finish this connection.`;
@@ -278,13 +286,18 @@ function createVideoServer() {
       try {
         await fetch(SERVER_URL, json({ server }));
         void loadLibs();
-        toast(`Video server set to ${NAME[server]}`, 'success');
+        toast(
+          server === 'soulsync'
+            ? 'Video library set to Standalone: SoulSync scans your folders'
+            : `Video server set to ${NAME[server]}`,
+          'success',
+        );
       } catch {
         // ignore
       }
     },
     /** testConn: save quietly, then ask the server */
-    test: async (server: Server) => {
+    test: async (server: MediaServer) => {
       const name = NAME[server];
       toast(`Testing ${name} connection…`, 'info');
       try {

@@ -161,9 +161,15 @@ def register_routes(bp):
         from . import get_video_db
         body = request.get_json(silent=True) or {}
         choice = body.get("server")
-        if choice not in ("plex", "jellyfin"):
+        # soulsync: its own folder scan is the library (core/video/disk_source.py)
+        if choice not in ("plex", "jellyfin", "soulsync"):
             return jsonify({"error": "bad server"}), 400
         get_video_db().set_setting("video_server", choice)
+        try:
+            from core.video.sources import invalidate_video_source_cache
+            invalidate_video_source_cache()
+        except Exception:   # noqa: BLE001, S110 - a stale cached connection ages out by itself
+            pass
         return jsonify({"status": "saved", "server": choice})
 
     @bp.route("/service-status", methods=["GET"])
@@ -190,9 +196,11 @@ def register_routes(bp):
             return jsonify({
                 "metadata": {"configured": bool(tmdb and tvdb), "tmdb": tmdb, "tvdb": tvdb,
                              "name": "TMDB / TVDB"},
-                "server": {"active": server, "configured": bool(plex_ok or jelly_ok),
+                "server": {"active": server,
+                           "configured": bool(plex_ok or jelly_ok or server == "soulsync"),
                            "plex": plex_ok, "jellyfin": jelly_ok,
-                           "name": server.capitalize() if server else "No server"},
+                           "name": ("SoulSync" if server == "soulsync" else server.capitalize())
+                           if server else "No server"},
                 "download": {"configured": True, "mode": mode, "hybrid_order": order,
                              "name": dl_name},
             })

@@ -168,6 +168,9 @@ def resolve_video_server(db=None):
         return "plex"
     if pref == "jellyfin" and jelly_ok:
         return "jellyfin"
+    if pref == "soulsync":
+        # soulsync scans its own folders (core/video/disk_source.py)
+        return "soulsync"
     # Fully INDEPENDENT of the music 'active server' — only an explicit video pick
     # or the configured server(s) decide, so changing the music server NEVER
     # changes video (and vice-versa). Auto-pick the single configured one; default
@@ -178,7 +181,29 @@ def resolve_video_server(db=None):
         return "jellyfin"
     if plex_ok and jelly_ok:
         return "plex"
-    return None
+    # no media server at all: soulsync's own folder scan is the library, when
+    # there are folders to scan and no server's library is already here (an
+    # install whose server is only unconfigured for now keeps its rows as is)
+    return "soulsync" if _standalone_ready(db) else None
+
+
+def _standalone_ready(db) -> bool:
+    if db is None:
+        return False
+    try:
+        if not (db.get_setting("movies_path") or db.get_setting("tv_path")):
+            return False
+        conn = db._get_connection()
+        try:
+            for table in ("movies", "shows"):
+                if conn.execute(f"SELECT 1 FROM {table} WHERE server_source IN ('plex', 'jellyfin') "
+                                "LIMIT 1").fetchone():
+                    return False
+        finally:
+            conn.close()
+        return True
+    except Exception:   # noqa: BLE001 - unreadable: as before, no server
+        return False
 
 
 def _video_jellyfin_source(cfg, movies_lib=None, tv_lib=None):
@@ -289,6 +314,11 @@ def _build_source(movies_lib=None, tv_lib=None, *, interactive=False):
 
     if server == "jellyfin":
         return _video_jellyfin_source(video_jellyfin_config(db), movies_lib, tv_lib)
+
+    if server == "soulsync" and db is not None:
+        from core.video.disk_source import DiskVideoSource
+        from core.video.file_identity import hash_lookup
+        return DiskVideoSource(db, hash_lookup=hash_lookup(db))
 
     return None
 
@@ -633,8 +663,10 @@ class PlexVideoSource:
         raise so a hiccup never deletes local state. Plex ids can be re-keyed,
         so fall back to title/TMDB search before giving up."""
         from plexapi.exceptions import NotFound
+        from core.video.owned_ids import is_owned
         try:
-            item = self._server.fetchItem(int(server_id))
+            # a row soulsync made has no plex key yet: straight to the search
+            item = None if is_owned(server_id) else self._server.fetchItem(int(server_id))
         except NotFound:
             item = None
         if item is not None and getattr(item, "type", "") == "movie":
@@ -702,8 +734,9 @@ class PlexVideoSource:
         from the search carries the NEW server_id; the caller heals the row).
         Any other failure raises, so a server hiccup can't delete anything."""
         from plexapi.exceptions import NotFound
+        from core.video.owned_ids import is_owned
         try:
-            item = self._server.fetchItem(int(server_id))
+            item = None if is_owned(server_id) else self._server.fetchItem(int(server_id))
         except NotFound:
             item = None
         if item is not None and getattr(item, "type", "") == "show":

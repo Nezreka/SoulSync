@@ -211,6 +211,15 @@ def register_routes(bp):
                           "poster_url": row.get("poster_url"),
                           "search_ctx": json.dumps({"scope": scope, "season": override.get("season"),
                                                     "episode": override.get("episode")})}
+            # in the library now, as the picked title (core/video/library_ingest.py)
+            from core.video.library_ingest import ingest_landed
+            ingest_landed(db, {**row, **sidecar_dl, "title": body.get("title") or row.get("title"),
+                               "year": body.get("year") or row.get("year"),
+                               "search_ctx": json.dumps({"scope": scope, "season": override.get("season"),
+                                                         "episode": override.get("episode"),
+                                                         "title": body.get("title") or row.get("title"),
+                                                         "year": body.get("year") or row.get("year")})},
+                          patch["dest_path"], replaced=patch.get("_replaced"))
             if settings.get("save_artwork") or settings.get("write_nfo"):
                 try:
                     from core.video.download_monitor import write_sidecars
