@@ -245,7 +245,8 @@ function scheduleDayUncached(
   const items = airable(pool);
   if (!items.length) return [];
   const dayStart = startOfLocalDay(day.getTime());
-  const dayEnd = dayStart + 24 * 60 * 60 * 1000;
+  // the next local midnight, not +24h: a fall-back day is 25 hours, a spring one 23
+  const dayEnd = startOfLocalDay(dayStart + 36 * 60 * 60 * 1000);
   const dayStamp = dayKey(new Date(dayStart));
   const seed = hashSeed(`${channelId}|${dayStamp}`);
 
