@@ -1702,6 +1702,11 @@ def update_watch_party_state(party_id):
     body = request.get_json(silent=True) or {}
     if body.get("shuffle_lobby_music"):
         body = {**body, "lobby_track": _pick_default_lobby_track()}
+    if body.get("item_type") and body.get("item_id") and not _party_may_see(
+        str(body["item_type"]), str(body["item_id"])
+    ):
+        return jsonify({"success": False, "error": "not_allowed",
+                        "message": "That title isn't available to this profile."}), 403
     try:
         party = parties.update_state(player_db(), party_id, pid, body, is_admin=_is_admin())
     except parties.PartyError as e:
