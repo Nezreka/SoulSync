@@ -1586,6 +1586,47 @@ export async function resetPageLayout(page: string, device?: string) {
   });
 }
 
+// ── the music page's listening rows ────────────────────────────────────
+
+export interface ListeningAlbum {
+  album_id: number;
+  title: string;
+  artist: string | null;
+  year: number | null;
+  image_url: string | null;
+  plays?: number;
+}
+export interface ListeningArtist {
+  artist_id: number;
+  name: string;
+  plays: number;
+  image_url: string | null;
+}
+export interface ListeningTrack {
+  track_id: number;
+  title: string;
+  artist: string | null;
+  album_id: number;
+  album: string | null;
+  plays: number;
+  image_url: string | null;
+}
+export interface MusicListening {
+  recent: ListeningAlbum[];
+  heavy_rotation: ListeningArtist[];
+  top_albums: ListeningAlbum[];
+  top_tracks: ListeningTrack[];
+  all_time_artists: ListeningArtist[];
+}
+
+/** this profile's plays as albums, artists and tracks of its library */
+export const musicListeningQuery = () =>
+  queryOptions({
+    queryKey: ['player', 'music-listening'],
+    queryFn: async () => await apiClient.get('player/music/listening').json<MusicListening>(),
+    staleTime: 2 * MINUTE,
+  });
+
 // ── watchlist (per profile, in player.db) ──────────────────────────────
 
 export type WatchlistKind = 'movie' | 'show' | 'youtube';

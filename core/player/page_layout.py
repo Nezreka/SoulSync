@@ -104,7 +104,6 @@ _MUSIC = [
     ("top-albums", "Most played albums", "Your top albums these 30 days", _SQUARE, "standard", False),
     ("top-tracks", "Most played tracks", "Your top tracks these 30 days", _SQUARE, "standard", False),
     ("all-time-artists", "Most played of all time", "The artists you've played most, ever", _SQUARE, "standard", False),
-    ("rediscover", "Rediscover", "Albums you've had a year or more", _SQUARE, "standard", False),
 ]
 
 _YOUTUBE = [
@@ -115,8 +114,8 @@ _YOUTUBE = [
     ("by-channel", "A row per channel", "The latest from each of your biggest channels", _WIDE, "wide", True),
     ("this-week", "This week", "Uploaded in the last seven days", _WIDE, "wide", False),
     ("quick", "Quick watches", "Under ten minutes", _WIDE, "wide", False),
-    ("sit-down", "Sit-down watches", "Ten to forty minutes", _WIDE, "wide", False),
-    ("long", "Long watches", "Forty minutes and up", _WIDE, "wide", False),
+    ("sit-down", "Sit-down watches", "Ten to thirty minutes", _WIDE, "wide", False),
+    ("long", "Long watches", "Thirty minutes and up", _WIDE, "wide", False),
     ("most-viewed", "Most viewed", "The biggest videos you have", _WIDE, "wide", False),
 ]
 

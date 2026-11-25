@@ -508,6 +508,36 @@ def music_channels():
     return jsonify({"success": True, "channels": channels})
 
 
+_listening_cache: dict = {}
+_LISTENING_CACHE_SECONDS = 120
+
+
+@bp.route("/api/player/music/listening", methods=["GET"])
+@device_playback
+@requires("music.library")
+def music_listening():
+    """the music page's listening rows (recently played, heavy rotation,
+    most played): this profile's plays as albums, artists and tracks of its
+    library. cached two minutes per profile and scope."""
+    from core.player import music_listening as ml
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    from core.player.sources.music import hides_explicit
+    clean = hides_explicit()
+    key = (pid, str(_session_scope()), clean)
+    hit = _listening_cache.get(key)
+    if hit and time.monotonic() - hit[0] < _LISTENING_CACHE_SECONDS:
+        return jsonify({"success": True, **hit[1]})
+    try:
+        rows = ml.read(get_database(), pid, hide_explicit=clean)
+    except Exception:  # noqa: BLE001
+        logger.exception("player music listening failed")
+        return jsonify({"success": False, "error": "Could not read your listening"}), 500
+    _listening_cache[key] = (time.monotonic(), rows)
+    return jsonify({"success": True, **rows})
+
+
 def _session_scope():
     """the library scope the caller picked (#1199), part of the cache key"""
     try:

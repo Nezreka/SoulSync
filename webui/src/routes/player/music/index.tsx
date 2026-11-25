@@ -1,6 +1,6 @@
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
-import { useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 
 import { apiClient } from '@/app/api-client';
 
@@ -9,10 +9,15 @@ import type { LibAlbum, LibArtist, LibSong, Pagination } from '../-player.types'
 
 import { albumArtwork, libraryThumb, remoteImage } from '../-lib/images';
 import { songItems } from '../-lib/play-items';
-import { discoverPlaylistsQuery, musicChannelsQuery, playlistsQuery } from '../-player.api';
+import { dayKey, hashSeed, seededShuffle } from '../-lib/schedule';
+import {
+  discoverPlaylistsQuery,
+  musicChannelsQuery,
+  musicListeningQuery,
+  playlistsQuery,
+} from '../-player.api';
 import {
   CardGrid,
-  CardRail,
   Empty,
   PageTitle,
   PlayButton,
@@ -27,8 +32,20 @@ import m from '../-ui/music/music.module.css';
 import { PlaylistCard } from '../-ui/music/playlist-card';
 import { TrackList } from '../-ui/music/track-list';
 import { NotPartOfProfile } from '../-ui/not-part';
+import { StyledRow, usePageRows } from '../-ui/page-rows';
 import { getEngine, playItems } from '../-ui/playback/use-player';
 import { useSections } from '../-ui/sections';
+
+/** the rows the page shows before its layout has loaded: the defaults that are on */
+const MUSIC_ROWS = [
+  'recently-played',
+  'stations',
+  'discovery',
+  'heavy-rotation',
+  'recent-albums',
+  'artists',
+  'playlists',
+] as const;
 
 type MusicTab = 'foryou' | 'artists' | 'albums' | 'songs' | 'playlists';
 
@@ -114,6 +131,26 @@ function MusicBrowse() {
     enabled: sections.music && (tab === 'foryou' || tab === 'playlists'),
   });
 
+  const { rows, editor, customize } = usePageRows({
+    page: 'music',
+    name: 'Music',
+    fallback: MUSIC_ROWS,
+  });
+  const listensOn = rows.some((r) =>
+    ['recently-played', 'heavy-rotation', 'top-albums', 'top-tracks', 'all-time-artists'].includes(
+      r.id,
+    ),
+  );
+  const listening = useQuery({
+    ...musicListeningQuery(),
+    enabled: sections.music && tab === 'foryou' && listensOn,
+  });
+  // a different handful of artists each day, from the ones loaded
+  const dailyArtists = useMemo(
+    () => seededShuffle(artists.data?.items ?? [], hashSeed(`music-artists|${dayKey(new Date())}`)),
+    [artists.data],
+  );
+
   if (!sections.music) return <NotPartOfProfile what="Music" single />;
 
   const artistCards: RailCard[] = (artists.data?.items ?? []).map((a) => ({
@@ -169,6 +206,237 @@ function MusicBrowse() {
   const discoverList = (discover.data ?? []).flatMap((sec) => sec.playlists);
   const allPlaylists = [...(playlists.data?.yours ?? []), ...(playlists.data?.mirrored ?? [])];
 
+  // every row of For you, by its layout id (core/player/page_layout.py)
+  const albumCard = (
+    a: {
+      album_id: number;
+      title: string;
+      artist: string | null;
+      image_url: string | null;
+    },
+    sub?: string,
+  ): RailCard => ({
+    key: `al${a.album_id}`,
+    title: a.title,
+    subtitle: sub ?? a.artist ?? undefined,
+    art: libraryThumb(a.image_url),
+    href: `/player/music/album/${a.album_id}`,
+    play: { kind: 'album' as const, id: Number(a.album_id) },
+    shape: 'square',
+  });
+  const plays = (n: number) => `${n.toLocaleString()} play${n === 1 ? '' : 's'}`;
+  const artistRow = (list: NonNullable<typeof listening.data>['heavy_rotation']): RailCard[] =>
+    list.map((a) => ({
+      key: `ar${a.artist_id}`,
+      title: a.name,
+      subtitle: plays(a.plays),
+      art: libraryThumb(a.image_url),
+      href: `/player/music/artist/${a.artist_id}`,
+      shape: 'square',
+    }));
+  const heard = listening.data;
+  const drawn: ReactNode[] = [];
+  if (tab === 'foryou')
+    for (const r of rows) {
+      const row = (
+        title: string,
+        cards: RailCard[],
+        more?: { to: string; label?: string },
+        round = false,
+      ) =>
+        drawn.push(
+          <StyledRow
+            key={r.id}
+            style={r.style}
+            title={title}
+            cards={cards}
+            more={more}
+            round={round}
+          />,
+        );
+      if (r.id === 'recently-played')
+        row(
+          'Recently played',
+          (heard?.recent ?? []).map((a) => albumCard(a)),
+        );
+      else if (r.id === 'heavy-rotation')
+        row(
+          'Heavy rotation · last 30 days',
+          artistRow(heard?.heavy_rotation ?? []),
+          undefined,
+          true,
+        );
+      else if (r.id === 'all-time-artists')
+        row('Most played of all time', artistRow(heard?.all_time_artists ?? []), undefined, true);
+      else if (r.id === 'top-albums')
+        row(
+          'Most played albums · last 30 days',
+          (heard?.top_albums ?? []).map((a) =>
+            albumCard(a, [a.artist, plays(a.plays ?? 0)].filter(Boolean).join(' · ')),
+          ),
+        );
+      else if (r.id === 'top-tracks')
+        row(
+          'Most played tracks · last 30 days',
+          (heard?.top_tracks ?? []).map((t) => ({
+            ...albumCard(
+              { album_id: t.album_id, title: t.title, artist: t.artist, image_url: t.image_url },
+              [t.artist, plays(t.plays)].filter(Boolean).join(' · '),
+            ),
+            key: `tr${t.track_id}`,
+          })),
+        );
+      else if (r.id === 'recent-albums')
+        row('Recently added albums', albumCards.slice(0, 20), {
+          to: '/player/music?tab=albums',
+          label: 'All albums',
+        });
+      else if (r.id === 'artists')
+        row(
+          'Artists in your library',
+          dailyArtists.slice(0, 20).map((a) => ({
+            key: `ar${a.id}`,
+            title: a.name,
+            subtitle: a.album_count
+              ? `${a.album_count} album${a.album_count === 1 ? '' : 's'}`
+              : undefined,
+            art: libraryThumb(a.image_url) ?? remoteImage(a.remote_image_url),
+            href: `/player/music/artist/${a.id}`,
+            shape: 'square' as const,
+          })),
+          { to: '/player/music?tab=artists', label: 'All artists' },
+          true,
+        );
+      else if (r.id === 'stations')
+        drawn.push(
+          <div key="stations">
+            <Rail title="Stations & Artist Mixes">
+              <button
+                type="button"
+                className={m.mixCard}
+                data-tone="accent"
+                onClick={playLibraryShuffle}
+                data-nav
+              >
+                <div className={m.mixCover}>
+                  <div className={m.mixMosaic}>
+                    {(albums.data?.items ?? []).slice(0, 4).map((al) => {
+                      const art = libraryThumb(al.image_url) ?? remoteImage(al.remote_image_url);
+                      return art ? (
+                        <img key={al.id} src={art} alt="" loading="lazy" />
+                      ) : (
+                        <span key={al.id} />
+                      );
+                    })}
+                  </div>
+                  <div className={m.mixVignette} aria-hidden="true" />
+                  <span className={m.mixBadge}>Library Radio</span>
+                  <span className={m.mixPlayOrb} aria-hidden="true">
+                    ▶
+                  </span>
+                </div>
+                <div className={m.mixTitle}>Library Shuffle</div>
+                <div className={m.mixSub}>
+                  {songs.data?.total
+                    ? `${songs.data.total.toLocaleString()} songs · all vibes`
+                    : 'Shuffle your whole library'}
+                </div>
+              </button>
+              {(musicStations.data ?? []).slice(0, 12).map((st) => {
+                const distinctArtists: string[] = [];
+                const seenArtists = new Set<string>();
+                const mosaicUrls: string[] = [];
+                const seenAlbums = new Set<number>();
+                for (const [, , artist, , albumId] of st.tracks) {
+                  const aName = artist?.trim();
+                  if (
+                    aName &&
+                    !seenArtists.has(aName.toLowerCase()) &&
+                    distinctArtists.length < 3
+                  ) {
+                    seenArtists.add(aName.toLowerCase());
+                    distinctArtists.push(aName);
+                  }
+                  if (albumId && !seenAlbums.has(albumId) && mosaicUrls.length < 4) {
+                    seenAlbums.add(albumId);
+                    const artUrl = albumArtwork(albumId);
+                    if (artUrl) mosaicUrls.push(artUrl);
+                  }
+                  if (distinctArtists.length >= 3 && mosaicUrls.length >= 4) break;
+                }
+                const artistHeadline =
+                  distinctArtists.length >= 2
+                    ? `${distinctArtists.slice(0, 2).join(', ')} & More`
+                    : st.name;
+                return (
+                  <button
+                    key={st.id}
+                    type="button"
+                    className={m.mixCard}
+                    data-tone={st.kind === 'vibe' ? 'vibe' : undefined}
+                    onClick={() => playStation(st)}
+                    data-nav
+                  >
+                    <div className={m.mixCover}>
+                      {mosaicUrls.length >= 4 ? (
+                        <div className={m.mixMosaic}>
+                          {mosaicUrls.map((u, idx) => (
+                            <img key={idx} src={u} alt="" loading="lazy" />
+                          ))}
+                        </div>
+                      ) : mosaicUrls[0] ? (
+                        <img src={mosaicUrls[0]} alt="" className={m.mixSingleImg} loading="lazy" />
+                      ) : null}
+                      <div className={m.mixVignette} aria-hidden="true" />
+                      <span className={m.mixBadge}>
+                        {st.kind === 'vibe' ? `${st.name} Vibe` : `${st.name} Mix`}
+                      </span>
+                      <span className={m.mixPlayOrb} aria-hidden="true">
+                        ▶
+                      </span>
+                    </div>
+                    <div className={m.mixTitle}>{artistHeadline}</div>
+                    <div className={m.mixSub}>
+                      {st.name} · {st.count.toLocaleString()} songs
+                    </div>
+                  </button>
+                );
+              })}
+            </Rail>
+          </div>,
+        );
+      else if (r.id === 'discovery')
+        drawn.push(
+          <div key="discovery">
+            {discoverList.length > 0 ? (
+              <Rail
+                title="Made for you · SoulSync Discovery"
+                more={{ to: '/player/music?tab=playlists', label: `All ${discoverList.length}` }}
+              >
+                {discoverList.slice(0, 24).map((pl) => (
+                  <DiscoverCard key={pl.key} card={pl} />
+                ))}
+              </Rail>
+            ) : null}
+          </div>,
+        );
+      else if (r.id === 'playlists')
+        drawn.push(
+          <div key="playlists">
+            {allPlaylists.length > 0 ? (
+              <Rail
+                title="Your playlists"
+                more={{ to: '/player/music/playlists', label: 'All playlists' }}
+              >
+                {allPlaylists.slice(0, 14).map((pl) => (
+                  <PlaylistCard key={pl.id} playlist={pl} />
+                ))}
+              </Rail>
+            ) : null}
+          </div>,
+        );
+    }
+
   return (
     <>
       <PageTitle>Music</PageTitle>
@@ -221,131 +489,9 @@ function MusicBrowse() {
 
       {tab === 'foryou' ? (
         <>
-          {/* Plexamp-style Artist Mixes & Vibes (similar artist clusters + 2x2 album mosaic) */}
-          <Rail title="Stations & Artist Mixes">
-            <button
-              type="button"
-              className={m.mixCard}
-              data-tone="accent"
-              onClick={playLibraryShuffle}
-              data-nav
-            >
-              <div className={m.mixCover}>
-                <div className={m.mixMosaic}>
-                  {(albums.data?.items ?? []).slice(0, 4).map((al) => {
-                    const art = libraryThumb(al.image_url) ?? remoteImage(al.remote_image_url);
-                    return art ? (
-                      <img key={al.id} src={art} alt="" loading="lazy" />
-                    ) : (
-                      <span key={al.id} />
-                    );
-                  })}
-                </div>
-                <div className={m.mixVignette} aria-hidden="true" />
-                <span className={m.mixBadge}>Library Radio</span>
-                <span className={m.mixPlayOrb} aria-hidden="true">
-                  ▶
-                </span>
-              </div>
-              <div className={m.mixTitle}>Library Shuffle</div>
-              <div className={m.mixSub}>
-                {songs.data?.total
-                  ? `${songs.data.total.toLocaleString()} songs · all vibes`
-                  : 'Shuffle your whole library'}
-              </div>
-            </button>
-            {(musicStations.data ?? []).slice(0, 12).map((st) => {
-              const distinctArtists: string[] = [];
-              const seenArtists = new Set<string>();
-              const mosaicUrls: string[] = [];
-              const seenAlbums = new Set<number>();
-              for (const [, , artist, , albumId] of st.tracks) {
-                const aName = artist?.trim();
-                if (aName && !seenArtists.has(aName.toLowerCase()) && distinctArtists.length < 3) {
-                  seenArtists.add(aName.toLowerCase());
-                  distinctArtists.push(aName);
-                }
-                if (albumId && !seenAlbums.has(albumId) && mosaicUrls.length < 4) {
-                  seenAlbums.add(albumId);
-                  const artUrl = albumArtwork(albumId);
-                  if (artUrl) mosaicUrls.push(artUrl);
-                }
-                if (distinctArtists.length >= 3 && mosaicUrls.length >= 4) break;
-              }
-              const artistHeadline =
-                distinctArtists.length >= 2
-                  ? `${distinctArtists.slice(0, 2).join(', ')} & More`
-                  : st.name;
-              return (
-                <button
-                  key={st.id}
-                  type="button"
-                  className={m.mixCard}
-                  data-tone={st.kind === 'vibe' ? 'vibe' : undefined}
-                  onClick={() => playStation(st)}
-                  data-nav
-                >
-                  <div className={m.mixCover}>
-                    {mosaicUrls.length >= 4 ? (
-                      <div className={m.mixMosaic}>
-                        {mosaicUrls.map((u, idx) => (
-                          <img key={idx} src={u} alt="" loading="lazy" />
-                        ))}
-                      </div>
-                    ) : mosaicUrls[0] ? (
-                      <img src={mosaicUrls[0]} alt="" className={m.mixSingleImg} loading="lazy" />
-                    ) : null}
-                    <div className={m.mixVignette} aria-hidden="true" />
-                    <span className={m.mixBadge}>
-                      {st.kind === 'vibe' ? `${st.name} Vibe` : `${st.name} Mix`}
-                    </span>
-                    <span className={m.mixPlayOrb} aria-hidden="true">
-                      ▶
-                    </span>
-                  </div>
-                  <div className={m.mixTitle}>{artistHeadline}</div>
-                  <div className={m.mixSub}>
-                    {st.name} · {st.count.toLocaleString()} songs
-                  </div>
-                </button>
-              );
-            })}
-          </Rail>
-
-          {discoverList.length > 0 ? (
-            <Rail
-              title="Made for you · SoulSync Discovery"
-              more={{ to: '/player/music?tab=playlists', label: `All ${discoverList.length}` }}
-            >
-              {discoverList.slice(0, 24).map((pl) => (
-                <DiscoverCard key={pl.key} card={pl} />
-              ))}
-            </Rail>
-          ) : null}
-
-          <CardRail
-            title="Recently added albums"
-            cards={albumCards.slice(0, 20)}
-            more={{ to: '/player/music?tab=albums', label: 'All albums' }}
-          />
-
-          <CardRail
-            title="Artists in your library"
-            cards={artistCards.slice(0, 20)}
-            round
-            more={{ to: '/player/music?tab=artists', label: 'All artists' }}
-          />
-
-          {allPlaylists.length > 0 ? (
-            <Rail
-              title="Your playlists"
-              more={{ to: '/player/music/playlists', label: 'All playlists' }}
-            >
-              {allPlaylists.slice(0, 14).map((pl) => (
-                <PlaylistCard key={pl.id} playlist={pl} />
-              ))}
-            </Rail>
-          ) : null}
+          {drawn}
+          {customize}
+          {editor}
         </>
       ) : null}
 
