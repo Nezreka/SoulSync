@@ -22,6 +22,7 @@ import {
   watchingNowQuery,
   type PlayerAccentColor,
 } from '../-player.api';
+import { PlayerSetupHost } from './player-setup';
 
 const ACCENT_PALETTE: Record<PlayerAccentColor, { rgb: string; lightRgb: string }> = {
   emerald: { rgb: '29, 185, 84', lightRgb: '30, 215, 96' },
@@ -224,18 +225,22 @@ function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => 
       : 0;
   // every place, in this profile's order: the pages, and each library with a
   // page of its own after the page it is a kind of
-  const mine = useQuery(playerSettingsQuery()).data?.settings;
+  const prefs = useQuery(playerSettingsQuery()).data;
+  const mine = prefs?.settings;
+  // the name the admin gave the server (player setup)
+  const serverName = prefs?.server?.name;
   const places = arrangeNav(
     navPlaces(entries, ownPages),
-    mine?.sidebar_order,
-    mine?.sidebar_hidden,
+    // a profile's own order wins; otherwise the one the admin set for the server
+    mine?.sidebar_order?.length ? mine.sidebar_order : prefs?.server?.sidebar_order,
+    [...(prefs?.server?.sidebar_hidden ?? []), ...(mine?.sidebar_hidden ?? [])],
   );
   const currentId = onLibrary ? `lib:${onLibrary}` : (current?.to ?? '');
   return (
     <nav className={s.side} aria-label="Player" data-collapsed={collapsed ? 'true' : undefined}>
       <div className={s.brand}>
         <img className={s.brandLogo} src={appURL('/static/trans2.png')} alt="" />
-        <span className={s.brandWord}>SoulSync</span>
+        <span className={s.brandWord}>{serverName || 'SoulSync'}</span>
       </div>
       {NAV_GROUPS.map((group) => {
         const items = places.filter((p) => p.entry.group === group.id);
@@ -519,6 +524,7 @@ export function PlayerShell({ profileId }: { profileId: number | null }) {
       {gate && profiles ? (
         <WhoGate profiles={profiles} currentId={profileId} onDone={() => setGate(false)} />
       ) : null}
+      <PlayerSetupHost />
       <PlayerBootOverlay ready={!!playerSettings} />
     </div>,
     document.body,
