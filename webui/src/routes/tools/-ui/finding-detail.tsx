@@ -29,6 +29,7 @@ import { createContext, Fragment, useContext, useState } from 'react';
 import type { FindingDetailRow } from '../-tools.core';
 import type { TagChange } from '../-tools.finding-copy';
 import type { RepairFinding } from '../-tools.types';
+import type { CoverApplyTarget } from './cover-art-finding';
 
 import { findExactArtist, searchLibraryArtists } from '../-tools.api';
 import {
@@ -57,6 +58,8 @@ import {
 // The artist-detail `enhanced` family is gone on this branch (Library v2
 // replaced it); the same helper still lives beside the sync server view.
 import { formatDurationMs } from '../../sync/-sync.server';
+import { CoverArtFinding } from './cover-art-finding';
+import { NativeDuplicateReview } from './native-duplicate-review';
 import { TagChangeTable } from './tag-changes';
 
 type Details = Record<string, unknown>;
@@ -418,14 +421,16 @@ function hideParent(event: React.SyntheticEvent<HTMLImageElement>): void {
 export interface FindingDetailProps {
   finding: RepairFinding;
   /** `selectDuplicateToKeep` — click a duplicate to keep that version. */
-  onKeepDuplicate: (findingId: number, trackId: string) => void;
+  onKeepDuplicate: (findingId: number, trackId: string, message?: string) => void;
   /** `applyCoverArtTarget` — per-image apply on a cover-art finding. */
-  onApplyCoverArt: (findingId: number, target: 'album' | 'artist') => void;
+  onApplyCoverArt: (findingId: number, target: CoverApplyTarget) => void;
   /** put back what this finding's fix changed */
   onUndo?: (finding: RepairFinding) => void;
   /** fix this finding with an answer of the user's own (#2150: a split
    *  artist edited by hand, or "it's one artist") */
   onFixAction?: (finding: RepairFinding, action: string) => void;
+  /** the finding changed outside a fix (#2169: a cover picked for it) */
+  onChanged?: () => void;
 }
 
 const DUPLICATE_PROTECTION_LABELS: Record<string, string> = {
@@ -442,125 +447,6 @@ const DUPLICATE_PROTECTION_LABELS: Record<string, string> = {
   media_server_reference: 'Referenced by a media server',
   file_unavailable: 'File currently unavailable',
 };
-
-function NativeDuplicateReview({
-  finding,
-  onKeepDuplicate,
-}: Pick<FindingDetailProps, 'finding' | 'onKeepDuplicate'>) {
-  const [confirmedRecording, setConfirmedRecording] = useState(false);
-  const details = finding.details || {};
-  const tracks = list<{
-    file_id: number;
-    track_id: number;
-    title?: string;
-    artist?: string;
-    album?: string;
-    file_path?: string;
-    format?: string;
-    bitrate?: number;
-    duration?: number;
-    playlists?: string[];
-    protected_reasons?: string[];
-  }>(details.tracks);
-  const needsConfirmation = Boolean(details.requires_recording_confirmation);
-  const approvedRecording = !needsConfirmation || confirmedRecording;
-  const choose = (action: string) =>
-    onKeepDuplicate(
-      finding.id,
-      `${action}${needsConfirmation && confirmedRecording ? ':confirmed' : ''}`,
-    );
-  if (details.schema !== 'native_duplicate_review/v1' || !tracks.length) {
-    return <p>This duplicate review needs a fresh native scan before it can be applied.</p>;
-  }
-  return (
-    <>
-      <FindingMedia details={details} />
-      <p>
-        Compare the copies, then keep a file. Redundant copies move to recoverable quarantine;
-        protected files stay.
-      </p>
-      {needsConfirmation ? (
-        <label>
-          <input
-            type="checkbox"
-            checked={confirmedRecording}
-            onChange={(event) => setConfirmedRecording(event.target.checked)}
-          />{' '}
-          I confirm these files contain the same recording
-        </label>
-      ) : null}
-      <div className="repair-detail-sublist">
-        {tracks.map((track) => {
-          const isBest = track.file_id === details.recommended_file_id;
-          const protectedReasons = track.protected_reasons || [];
-          const protectedCopy = protectedReasons.length > 0;
-          return (
-            <div
-              className={`repair-detail-subitem ${isBest ? 'best' : protectedCopy ? 'protected' : 'removable'}`}
-              key={track.file_id}
-            >
-              <div className="repair-subitem-body">
-                <strong>
-                  <span
-                    className={
-                      isBest || protectedCopy ? 'repair-keep-badge' : 'repair-remove-badge'
-                    }
-                  >
-                    {isBest ? 'KEEP' : protectedCopy ? 'PROTECTED' : 'QUARANTINE'}
-                  </span>{' '}
-                  {text(track.title)} by {text(track.artist)}
-                </strong>
-                <span>
-                  Album: {text(track.album) || 'Unknown'}
-                  {track.format ? ` · ${track.format.toUpperCase()}` : ''}
-                  {track.bitrate ? ` · ${track.bitrate} kbps` : ''}
-                  {track.duration ? ` · ${formatDurationMs(track.duration)}` : ''}
-                </span>
-                {track.file_path ? <span className="mono">{track.file_path}</span> : null}
-                {protectedReasons.length ? (
-                  <span>
-                    Preserved:{' '}
-                    {protectedReasons
-                      .map((reason) => DUPLICATE_PROTECTION_LABELS[reason] || 'Protected copy')
-                      .join(', ')}
-                  </span>
-                ) : null}
-                {track.playlists?.length ? (
-                  <span className="repair-in-playlist">
-                    In playlist: {track.playlists.join(', ')}
-                  </span>
-                ) : null}
-                <button
-                  type="button"
-                  className="repair-btn repair-btn-fix"
-                  disabled={!approvedRecording || protectedReasons.includes('file_unavailable')}
-                  onClick={() => choose(`file-${track.file_id}`)}
-                >
-                  Keep this file
-                </button>
-              </div>
-              <SubitemPlayButton
-                filePath={track.file_path}
-                trackId={`lib2:${track.track_id}`}
-                title={track.title}
-                artist={track.artist}
-                album={track.album}
-              />
-            </div>
-          );
-        })}
-      </div>
-      <button
-        type="button"
-        className="repair-btn repair-btn-fix"
-        disabled={!approvedRecording}
-        onClick={() => choose('keep_best')}
-      >
-        Keep Best
-      </button>
-    </>
-  );
-}
 
 function CatalogueDuplicateReview({
   finding,
@@ -738,6 +624,7 @@ function FindingDetailBody({
   onApplyCoverArt,
   onUndo,
   onFixAction,
+  onChanged,
 }: FindingDetailProps) {
   const d = (finding.details || {}) as Details;
   const rows: FindingDetailRow[] = [];
@@ -752,6 +639,17 @@ function FindingDetailBody({
           key={finding.id}
           finding={finding}
           onKeepDuplicate={onKeepDuplicate}
+          protectionLabels={DUPLICATE_PROTECTION_LABELS}
+          media={<FindingMedia details={d} />}
+          renderPlay={(track) => (
+            <SubitemPlayButton
+              filePath={track.file_path}
+              trackId={`lib2:${track.track_id}`}
+              title={track.title}
+              artist={track.artist}
+              album={track.album}
+            />
+          )}
         />
       );
     case 'genre_cleanup': {
@@ -872,7 +770,11 @@ function FindingDetailBody({
       if (d.track_count != null) rows.push(['Tracks affected', text(d.track_count)]);
       // the split changes the library; the files follow through Re-tag and
       // Reorganize (docs/library-v2-data-flow.md)
-      if (d.library_v2_native) rows.push(['Files', 'Re-tag and Reorganize check them after the split, if they are switched on']);
+      if (d.library_v2_native)
+        rows.push([
+          'Files',
+          'Re-tag and Reorganize check them after the split, if they are switched on',
+        ]);
 
       const chips = commaSplitChips(d);
       const tracks = list<{ title?: string; album?: string; file_path?: string }>(d.tracks);
@@ -1436,84 +1338,16 @@ function FindingDetailBody({
       );
     }
 
-    case 'missing_cover_art': {
-      for (const [key, label] of [
-        ['db_missing', 'In the library'],
-        ['embed_missing', 'In the audio files'],
-        ['sidecar_missing', 'In the album folder'],
-      ]) {
-        if (typeof d[key] === 'boolean')
-          rows.push([label, d[key] ? 'No cover' : 'Has a cover', d[key] ? 'warning' : undefined]);
-      }
-      pushIf(rows, d.artist, 'Artist');
-      pushIf(rows, d.album_title, 'Album');
-      pushIf(rows, d.spotify_album_id, 'Spotify ID');
-      const foundArtwork = text(d.found_artwork_url);
-      const currentArtist = text(d.artist_thumb_url);
-      const foundArtist = text(d.found_artist_url);
-      // Each found image is independently applyable (Pache711: "fix one, dismiss
-      // the other") — the right album art can be taken while a wrong artist image
-      // is skipped, or the reverse.
+    case 'missing_cover_art':
+      // #2169: the library, the files, the folder and the found cover side
+      // by side, and what Apply Art does in each
       return (
-        <>
-          {currentArtist || foundArtwork || foundArtist ? (
-            <div className="repair-finding-media">
-              {foundArtwork ? (
-                <div className="repair-finding-media-card">
-                  <img
-                    className="repair-finding-media-img"
-                    src={foundArtwork}
-                    alt="Found album art"
-                    onError={hideParent}
-                  />
-                  <span className="repair-finding-media-label">Found Album Art</span>
-                  <button
-                    className="repair-art-apply-btn"
-                    type="button"
-                    onClick={() => onApplyCoverArt(finding.id, 'album')}
-                  >
-                    Use for album
-                  </button>
-                </div>
-              ) : null}
-              {/* Current artist image — context only, no apply: it's what's there now. */}
-              {currentArtist ? (
-                <div className="repair-finding-media-card">
-                  <img
-                    className="repair-finding-media-img artist"
-                    src={currentArtist}
-                    alt="Current artist art"
-                    onError={hideParent}
-                  />
-                  <span className="repair-finding-media-label">
-                    {text(d.artist) || 'Artist'} (current)
-                  </span>
-                </div>
-              ) : null}
-              {foundArtist ? (
-                <div className="repair-finding-media-card">
-                  <img
-                    className="repair-finding-media-img artist"
-                    src={foundArtist}
-                    alt="Found artist art"
-                    onError={hideParent}
-                  />
-                  <span className="repair-finding-media-label">Found Artist Art</span>
-                  <button
-                    className="repair-art-apply-btn"
-                    type="button"
-                    onClick={() => onApplyCoverArt(finding.id, 'artist')}
-                  >
-                    Use for artist
-                  </button>
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-          <DetailGrid rows={rows} />
-        </>
+        <CoverArtFinding
+          finding={finding}
+          onApplyCoverArt={onApplyCoverArt}
+          onChanged={onChanged}
+        />
       );
-    }
 
     case 'missing_lyrics':
       pushIf(rows, d.track_title, 'Track');

@@ -273,6 +273,8 @@ interface WishlistResponse {
   items?: AudiobookWishlistEntry[];
   counts?: AudiobookWishlistCounts;
   worker?: AudiobookWishlistSummary;
+  /** books this profile asked an admin for and is waiting on (#2188) */
+  requested?: string[];
   error?: string;
 }
 
@@ -292,6 +294,8 @@ export interface AudiobookWishlistView {
   items: AudiobookWishlistEntry[];
   counts: AudiobookWishlistCounts;
   worker: AudiobookWishlistSummary | null;
+  /** asins this profile asked for and is still waiting on (Ask first, #2188) */
+  requested: string[];
 }
 
 const EMPTY_COUNTS: AudiobookWishlistCounts = {
@@ -306,15 +310,48 @@ const EMPTY_COUNTS: AudiobookWishlistCounts = {
 export async function fetchWishlist(): Promise<AudiobookWishlistView> {
   try {
     const data = await readJson<WishlistResponse>(audiobookClient.get('audiobooks/wishlist'));
-    if (!data?.success) return { items: [], counts: EMPTY_COUNTS, worker: null };
+    if (!data?.success) return { items: [], counts: EMPTY_COUNTS, worker: null, requested: [] };
     return {
       items: Array.isArray(data.items) ? data.items : [],
       counts: data.counts ?? EMPTY_COUNTS,
       worker: data.worker ?? null,
+      requested: Array.isArray(data.requested) ? data.requested.map(String) : [],
     };
   } catch (err) {
     console.error('Failed to load the audiobook wishlist:', err);
-    return { items: [], counts: EMPTY_COUNTS, worker: null };
+    return { items: [], counts: EMPTY_COUNTS, worker: null, requested: [] };
+  }
+}
+
+export interface BookRequestResult {
+  ok: boolean;
+  /** already waiting from an earlier ask */
+  already?: boolean;
+  error?: string;
+}
+
+/**
+ * Ask an admin for a book (a profile on Ask first for audiobooks, #2188).
+ * The same route as a wishlist add: the server files it as a request, and
+ * an approval puts it on this profile's wishlist.
+ */
+export async function requestBook(
+  asin: string,
+  narratorMode: AudiobookNarratorMode = 'exact',
+): Promise<BookRequestResult> {
+  if (!asin) return { ok: false };
+  try {
+    const data = await readJson<MutationResponse & { requested?: boolean; already?: boolean }>(
+      audiobookClient.post('audiobooks/wishlist', { json: { asin, narrator_mode: narratorMode } }),
+    );
+    return {
+      ok: Boolean(data?.success && data.requested),
+      already: Boolean(data?.already),
+      error: data?.error,
+    };
+  } catch (err) {
+    console.error(`Failed to request ${asin}:`, err);
+    return { ok: false };
   }
 }
 

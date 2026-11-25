@@ -27,6 +27,8 @@ import {
   mirroredHeroArt,
   mirroredRowDuration,
   mirroredTotalRuntime,
+  placementChip,
+  placementSegments,
   timeAgo,
   trackStatusChip,
   trackStatusSegments,
@@ -64,6 +66,8 @@ export interface MirroredDetailModalProps {
   onExport?: () => void;
   /** 1151 — Auto-Sync (runMirroredPlaylistPipeline). */
   onRunPipeline: () => void;
+  /** the same sync without the wishlist: on the server, nothing downloaded */
+  onSyncOnly?: () => void;
   /** pull the source + discover the new tracks, nothing pushed (#1413) */
   onRefreshFromSource?: () => void;
   /** 1153 — Discover (discoverMirroredPlaylist). */
@@ -273,14 +277,18 @@ function TrackRow({
   track,
   edit,
   onPlay,
+  serverType,
 }: {
   track: MirroredTrack;
   edit?: EditProps;
   /** play the playlist from this song on; the number turns into it on hover */
   onPlay?: () => void;
+  /** the active media server, for "Not on Jellyfin yet" (#2235) */
+  serverType?: string | null;
 }) {
   const cls = `mm-row${edit?.dragging ? ' mm-row--dragging' : ''}${edit?.over ? ' mm-row--over' : ''}`;
   const chip = trackStatusChip(track.status);
+  const placed = placementChip(track, serverType);
   return (
     <div
       className={cls}
@@ -359,6 +367,11 @@ function TrackRow({
               {chip}
             </span>
           ) : null}
+          {placed ? (
+            <span className="mm-row-st" data-st={track.server_placement} title={placed.title}>
+              {placed.label}
+            </span>
+          ) : null}
         </span>
       </div>
       <span className="mm-row-album">{track.album_name || ''}</span>
@@ -424,6 +437,7 @@ export function MirroredDetailModal({
   onEditSource,
   onExport,
   onRunPipeline,
+  onSyncOnly,
   onRefreshFromSource,
   onDiscover,
   discoverLabel = 'Identify',
@@ -467,7 +481,10 @@ export function MirroredDetailModal({
     }
   };
   // click a part of the status line to see just those tracks
-  const [statusFilter, setStatusFilter] = useState<MirroredTrackStatus | null>(null);
+  // or to the in-library tracks the server playlist doesn't hold (#2235)
+  const [statusFilter, setStatusFilter] = useState<
+    MirroredTrackStatus | 'not_on_server' | 'duplicate' | null
+  >(null);
   // tracks nothing has checked against the library yet get checked now, so
   // the line says what's owned instead of "not checked yet" (#1910)
   const checkingLibrary = useLibraryCheck(
@@ -478,8 +495,13 @@ export function MirroredDetailModal({
   const segments = trackStatusSegments(data.status_counts).map((seg) =>
     seg.status === 'unchecked' && checkingLibrary ? { ...seg, label: 'being checked…' } : seg,
   );
+  const placements = placementSegments(data.placement_counts, data.server_type);
   const shownTracks = sortTracks(tracks, sort).filter(
-    (t) => !statusFilter || t.status === statusFilter,
+    (t) =>
+      !statusFilter ||
+      (statusFilter === 'not_on_server' || statusFilter === 'duplicate'
+        ? t.status === 'in_library' && t.server_placement === statusFilter
+        : t.status === statusFilter),
   );
   // dragging only means something in the playlist's own order, all of it
   const editable = own && Boolean(onRemoveTrack && onReorder);
@@ -637,130 +659,128 @@ export function MirroredDetailModal({
             <div className="mm-hero-bg" style={{ backgroundImage: `url('${heroArt}')` }} />
           ) : null}
           <div className="mm-hero-content">
-            {own ? (
-              <div className="mm-cover-wrap" ref={coverWrapRef}>
-                {liked && !data.image_url ? (
-                  <div className="mm-cover mm-cover-liked">
-                    <LikedArt />
-                  </div>
-                ) : heroArt ? (
-                  <div className="mm-cover" style={{ backgroundImage: `url('${heroArt}')` }} />
-                ) : (
-                  <div className="mm-cover mm-cover-empty soulsync">{sourceIcon}</div>
-                )}
-                <button
-                  type="button"
-                  className="mm-cover-edit"
-                  disabled={coverBusy}
-                  onClick={() => {
-                    setCoverError(null);
-                    setCoverOpen((v) => !v);
-                  }}
-                >
-                  {coverBusy ? 'Saving…' : 'Change cover'}
-                </button>
-                {coverOpen
-                  ? createPortal(
-                      <div
-                        ref={coverMenuRef}
-                        className="mm-cover-menu"
-                        role="menu"
-                        data-popover-layer=""
-                        style={
-                          coverPos
-                            ? { top: coverPos.top, left: coverPos.left }
-                            : { top: 0, left: 0, visibility: 'hidden' }
-                        }
-                      >
-                        <label className="mm-cover-item">
-                          Upload a photo…
-                          <input
-                            type="file"
-                            accept="image/*"
-                            hidden
-                            disabled={coverBusy}
-                            onChange={(event) => {
-                              const file = event.target.files?.[0];
-                              event.target.value = '';
-                              if (file)
-                                void runCoverEdit(() => uploadPlaylistCover(playlistId, file));
-                            }}
-                          />
-                        </label>
-                        {artTracks.length > 0 ? (
-                          <>
-                            <div className="mm-cover-label">From this playlist</div>
-                            <div className="mm-cover-tiles">
-                              {artTracks.slice(0, 8).map((t, i) => (
-                                <button
-                                  key={`${t.position ?? i}-${t.image_url}`}
-                                  type="button"
-                                  className="mm-cover-tile"
-                                  title={`${t.track_name ?? ''} — ${t.artist_name ?? ''}`}
-                                  disabled={coverBusy}
-                                  onClick={() =>
-                                    void runCoverEdit(() =>
-                                      setPlaylistCoverFromTrack(playlistId, t.position ?? i + 1),
-                                    )
-                                  }
-                                >
-                                  <img src={t.image_url} alt="" loading="lazy" />
-                                </button>
-                              ))}
-                            </div>
-                          </>
-                        ) : null}
-                        <div className="mm-cover-label">Or paste an image link</div>
-                        <div className="mm-cover-urlrow">
-                          <input
-                            type="url"
-                            className="mm-cover-url"
-                            placeholder="https://…"
-                            value={coverUrlDraft}
-                            disabled={coverBusy}
-                            onChange={(event) => setCoverUrlDraft(event.target.value)}
-                            onKeyDown={(event) => {
-                              if (event.key === 'Enter' && coverUrlDraft.trim()) {
-                                void runCoverEdit(() =>
-                                  setPlaylistCoverUrl(playlistId, coverUrlDraft.trim()),
-                                );
-                              }
-                            }}
-                          />
-                          <button
-                            type="button"
-                            className="mm-btn mm-btn-ghost mm-btn-sm"
-                            disabled={coverBusy || !coverUrlDraft.trim()}
-                            onClick={() =>
+            {/* #2280: every playlist takes a cover of the user's own, not
+                just a user playlist */}
+            <div className="mm-cover-wrap" ref={coverWrapRef}>
+              {liked && !data.image_url ? (
+                <div className="mm-cover mm-cover-liked">
+                  <LikedArt />
+                </div>
+              ) : heroArt ? (
+                <div className="mm-cover" style={{ backgroundImage: `url('${heroArt}')` }} />
+              ) : (
+                <div className={`mm-cover mm-cover-empty ${own ? 'soulsync' : source}`}>
+                  {sourceIcon}
+                </div>
+              )}
+              <button
+                type="button"
+                className="mm-cover-edit"
+                disabled={coverBusy}
+                onClick={() => {
+                  setCoverError(null);
+                  setCoverOpen((v) => !v);
+                }}
+              >
+                {coverBusy ? 'Saving…' : 'Change cover'}
+              </button>
+              {coverOpen
+                ? createPortal(
+                    <div
+                      ref={coverMenuRef}
+                      className="mm-cover-menu"
+                      role="menu"
+                      data-popover-layer=""
+                      style={
+                        coverPos
+                          ? { top: coverPos.top, left: coverPos.left }
+                          : { top: 0, left: 0, visibility: 'hidden' }
+                      }
+                    >
+                      <label className="mm-cover-item">
+                        Upload a photo…
+                        <input
+                          type="file"
+                          accept="image/jpeg,image/png,image/webp"
+                          hidden
+                          disabled={coverBusy}
+                          onChange={(event) => {
+                            const file = event.target.files?.[0];
+                            event.target.value = '';
+                            if (file)
+                              void runCoverEdit(() => uploadPlaylistCover(playlistId, file));
+                          }}
+                        />
+                      </label>
+                      {artTracks.length > 0 ? (
+                        <>
+                          <div className="mm-cover-label">From this playlist</div>
+                          <div className="mm-cover-tiles">
+                            {artTracks.slice(0, 8).map((t, i) => (
+                              <button
+                                key={`${t.position ?? i}-${t.image_url}`}
+                                type="button"
+                                className="mm-cover-tile"
+                                title={`${t.track_name ?? ''} — ${t.artist_name ?? ''}`}
+                                disabled={coverBusy}
+                                onClick={() =>
+                                  void runCoverEdit(() =>
+                                    setPlaylistCoverFromTrack(playlistId, t.position ?? i + 1),
+                                  )
+                                }
+                              >
+                                <img src={t.image_url} alt="" loading="lazy" />
+                              </button>
+                            ))}
+                          </div>
+                        </>
+                      ) : null}
+                      <div className="mm-cover-label">Or paste an image link</div>
+                      <div className="mm-cover-urlrow">
+                        <input
+                          type="url"
+                          className="mm-cover-url"
+                          placeholder="https://…"
+                          value={coverUrlDraft}
+                          disabled={coverBusy}
+                          onChange={(event) => setCoverUrlDraft(event.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter' && coverUrlDraft.trim()) {
                               void runCoverEdit(() =>
                                 setPlaylistCoverUrl(playlistId, coverUrlDraft.trim()),
-                              )
+                              );
                             }
-                          >
-                            Set
-                          </button>
-                        </div>
-                        {data.image_url ? (
-                          <button
-                            type="button"
-                            className="mm-cover-item mm-cover-remove"
-                            disabled={coverBusy}
-                            onClick={() => void runCoverEdit(() => clearPlaylistCover(playlistId))}
-                          >
-                            Remove cover
-                          </button>
-                        ) : null}
-                        {coverError ? <div className="mm-cover-error">{coverError}</div> : null}
-                      </div>,
-                      document.body,
-                    )
-                  : null}
-              </div>
-            ) : heroArt ? (
-              <div className="mm-cover" style={{ backgroundImage: `url('${heroArt}')` }} />
-            ) : (
-              <div className={`mm-cover mm-cover-empty ${source}`}>{sourceIcon}</div>
-            )}
+                          }}
+                        />
+                        <button
+                          type="button"
+                          className="mm-btn mm-btn-ghost mm-btn-sm"
+                          disabled={coverBusy || !coverUrlDraft.trim()}
+                          onClick={() =>
+                            void runCoverEdit(() =>
+                              setPlaylistCoverUrl(playlistId, coverUrlDraft.trim()),
+                            )
+                          }
+                        >
+                          Set
+                        </button>
+                      </div>
+                      {data.custom_cover || (own && data.image_url) ? (
+                        <button
+                          type="button"
+                          className="mm-cover-item mm-cover-remove"
+                          disabled={coverBusy}
+                          onClick={() => void runCoverEdit(() => clearPlaylistCover(playlistId))}
+                        >
+                          {data.source_image_url ? 'Restore original cover' : 'Remove cover'}
+                        </button>
+                      ) : null}
+                      {coverError ? <div className="mm-cover-error">{coverError}</div> : null}
+                    </div>,
+                    document.body,
+                  )
+                : null}
+            </div>
             <div className="mm-hero-info">
               <span className="mm-eyebrow">
                 {own ? null : <span className={`mm-source-pill ${source}`}>{srcLabel}</span>}
@@ -887,6 +907,40 @@ export function MirroredDetailModal({
                   ) : null}
                 </div>
               ) : null}
+              {placements.length > 0 ? (
+                <div
+                  className="mm-status"
+                  role="group"
+                  aria-label="Tracks in your library that are not on the server playlist"
+                >
+                  {placements.map((seg) => (
+                    <button
+                      key={seg.placement}
+                      type="button"
+                      className={`mm-status-seg${statusFilter === seg.placement ? ' mm-status-seg--on' : ''}`}
+                      data-st={seg.placement}
+                      aria-pressed={statusFilter === seg.placement}
+                      title={seg.title}
+                      onClick={() =>
+                        setStatusFilter((cur) => (cur === seg.placement ? null : seg.placement))
+                      }
+                    >
+                      <span className="mm-status-dot" aria-hidden="true" />
+                      <b>{seg.count}</b> {seg.label}
+                    </button>
+                  ))}
+                  {placements.some((seg) => seg.placement === 'not_on_server') ? (
+                    <button
+                      type="button"
+                      className="mm-status-fix"
+                      title="Sync again after a library scan, to put them on the playlist"
+                      onClick={onRunPipeline}
+                    >
+                      Sync again
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
               {/* play is the one big thing; the rest sit beside it, quiet */}
               <div className="mm-play-row">
                 <button
@@ -958,6 +1012,16 @@ export function MirroredDetailModal({
                 >
                   Sync & download
                 </button>
+                {onSyncOnly ? (
+                  <button
+                    type="button"
+                    className="mm-pill mm-pill--quiet"
+                    title="Match and push the playlist to your server. Songs you don't have aren't added to the wishlist or downloaded."
+                    onClick={onSyncOnly}
+                  >
+                    Sync only
+                  </button>
+                ) : null}
                 {onOpenEditor ? (
                   <button
                     type="button"
@@ -1083,11 +1147,19 @@ export function MirroredDetailModal({
                         separated: true,
                         onSelect: () => setCoverArtOpen(true),
                       },
-                      ...(!own && data.custom_cover
+                      ...(data.custom_cover
                         ? [
                             {
-                              label: restoring ? 'Restoring…' : 'Restore original cover',
-                              hint: `back to ${srcLabel === 'unknown' ? "the source's" : `${srcLabel}'s`} cover`,
+                              label: restoring
+                                ? 'Restoring…'
+                                : data.source_image_url
+                                  ? 'Restore original cover'
+                                  : 'Remove cover',
+                              hint: !data.source_image_url
+                                ? 'back to the collage of its songs'
+                                : own || srcLabel === 'unknown'
+                                  ? 'back to the cover it came with'
+                                  : `back to ${srcLabel}'s cover`,
                               busy: restoring,
                               onSelect: () => void restoreCover(),
                             },
@@ -1166,6 +1238,7 @@ export function MirroredDetailModal({
               <TrackRow
                 key={`${track.position ?? index}-${track.track_name ?? ''}`}
                 track={track}
+                serverType={data.server_type}
                 onPlay={() => void runPlay('play', index)}
                 edit={
                   editable

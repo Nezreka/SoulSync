@@ -26,6 +26,11 @@ interface AudiobookReleasesModalProps {
   asin: string;
   title: string;
   onClose: () => void;
+  /**
+   * Picking a release for someone's request (#2199): told once a grab went
+   * through, and the book isn't offered for the picker's own wishlist.
+   */
+  onGrabbed?: () => void;
 }
 
 /** Plain words for a download row's state. "staged" means nothing to anyone. */
@@ -66,7 +71,12 @@ function formatSize(bytes: number): string {
  * global — a peer with the right narrator has to be able to land above a
  * torrent found two queries earlier.
  */
-export function AudiobookReleasesModal({ asin, title, onClose }: AudiobookReleasesModalProps) {
+export function AudiobookReleasesModal({
+  asin,
+  title,
+  onClose,
+  onGrabbed,
+}: AudiobookReleasesModalProps) {
   const [releases, setReleases] = useState<AudiobookReleaseCandidate[]>([]);
   const [loading, setLoading] = useState(true);
   const [stage, setStage] = useState('');
@@ -182,6 +192,7 @@ export function AudiobookReleasesModal({ asin, title, onClose }: AudiobookReleas
     if (result.ok && result.ref) {
       setGrabbedRefs((prev) => ({ ...prev, [key]: result.ref }));
     }
+    if (result.ok) onGrabbed?.();
     setMessage(
       !result.ok
         ? result.error || 'Grab failed.'
@@ -418,17 +429,24 @@ export function AudiobookReleasesModal({ asin, title, onClose }: AudiobookReleas
               description={
                 query
                   ? 'Nothing matched that search. Try fewer words, or reset to the automatic search.'
-                  : 'No indexer has this one right now. Add it to your wishlist and it will keep looking on its own.'
+                  : onGrabbed
+                    ? 'No indexer has this one right now. Search again later, or let it download automatically.'
+                    : 'No indexer has this one right now. Add it to your wishlist and it will keep looking on its own.'
               }
             >
-              <button
-                type="button"
-                className={styles.emptyAction}
-                onClick={() => void wishlist()}
-                disabled={wishlisting}
-              >
-                {wishlisting ? 'Adding…' : 'Add to wishlist'}
-              </button>
+              {onGrabbed ? null : (
+                <button
+                  type="button"
+                  className={styles.emptyAction}
+                  // a wished book is grabbed by the wishlist pass: hidden for a
+                  // profile that can't get books, like the grab buttons here
+                  data-books-action
+                  onClick={() => void wishlist()}
+                  disabled={wishlisting}
+                >
+                  {wishlisting ? 'Adding…' : 'Add to wishlist'}
+                </button>
+              )}
             </EmptyState>
           ) : (
             <ul className={styles.releaseList}>
@@ -629,7 +647,7 @@ export function AudiobookReleasesModal({ asin, title, onClose }: AudiobookReleas
                       <button
                         type="button"
                         className={styles.releaseGrab}
-                        data-download-action=""
+                        data-books-action=""
                         onClick={() => void grab(release)}
                         disabled={Boolean(grabbing)}
                       >

@@ -13,6 +13,8 @@ from datetime import datetime
 from flask import Blueprint, jsonify, request
 
 from utils.logging_config import get_logger
+from core.permissions import requires
+from core.profile_context import admin_only
 
 logger = get_logger("api.auto_import")
 
@@ -35,6 +37,7 @@ def create_blueprint():
 
 
 @bp.route('/api/auto-import/status', methods=['GET'])
+@requires("music.import")
 def auto_import_status():
     if not _auto_import_worker():
         return jsonify({"success": False, "error": "Auto-import not available"}), 500
@@ -42,6 +45,7 @@ def auto_import_status():
 
 
 @bp.route('/api/auto-import/toggle', methods=['POST'])
+@admin_only
 def auto_import_toggle():
     # install-wide settings: an admin's to change (Nov 13 2026). reading stays open
     from core.profile_context import is_admin_request
@@ -65,6 +69,7 @@ def auto_import_toggle():
 
 
 @bp.route('/api/auto-import/settings', methods=['GET', 'POST'])
+@requires("music.import")
 def auto_import_settings():
     def normalize_quality_profile_id(raw_profile_id):
         if raw_profile_id in (None, '', 0, '0'):
@@ -133,6 +138,7 @@ def auto_import_settings():
 
 
 @bp.route('/api/auto-import/results', methods=['GET'])
+@requires("music.import")
 def auto_import_results():
     if not _auto_import_worker():
         return jsonify({"success": False, "error": "Auto-import not available"}), 500
@@ -143,6 +149,7 @@ def auto_import_results():
 
 
 @bp.route('/api/auto-import/approve/<int:item_id>', methods=['POST'])
+@requires("music.import")
 def auto_import_approve(item_id):
     if not _auto_import_worker():
         return jsonify({"success": False, "error": "Auto-import not available"}), 500
@@ -157,6 +164,7 @@ def auto_import_approve(item_id):
 
 
 @bp.route('/api/auto-import/reject/<int:item_id>', methods=['POST'])
+@requires("music.import")
 def auto_import_reject(item_id):
     if not _auto_import_worker():
         return jsonify({"success": False, "error": "Auto-import not available"}), 500
@@ -164,6 +172,7 @@ def auto_import_reject(item_id):
 
 
 @bp.route('/api/auto-import/retry/<int:item_id>', methods=['POST'])
+@requires("music.access")
 def auto_import_retry(item_id):
     """forget a finished row so the next scan picks the folder up again, and
     kick that scan off if the worker is running."""
@@ -180,6 +189,7 @@ def auto_import_retry(item_id):
 
 
 @bp.route('/api/auto-import/resolve/<int:item_id>', methods=['POST'])
+@requires("music.import")
 def auto_import_resolve(item_id):
     """the inbox matcher imported this item by hand; record it as done."""
     if not _auto_import_worker():
@@ -188,6 +198,7 @@ def auto_import_resolve(item_id):
 
 
 @bp.route('/api/auto-import/scan-now', methods=['POST'])
+@requires("music.import")
 def auto_import_scan_now():
     """Trigger an immediate scan cycle.
 
@@ -225,6 +236,7 @@ def auto_import_scan_now():
 
 
 @bp.route('/api/auto-import/approve-all', methods=['POST'])
+@requires("music.import")
 def auto_import_approve_all():
     """Approve all pending review items."""
     if not _auto_import_worker():
@@ -248,6 +260,7 @@ def auto_import_approve_all():
 
 
 @bp.route('/api/auto-import/clear-completed', methods=['POST'])
+@requires("music.import")
 def auto_import_clear_completed():
     """Remove completed/imported items from history.
 
@@ -268,7 +281,7 @@ def auto_import_clear_completed():
             base_sql = (
                 "DELETE FROM auto_import_history "
                 "WHERE status IN ('completed', 'partial', 'approved', 'failed', "
-                "'needs_identification', 'rejected', 'processing')"
+                "'needs_identification', 'rejected', 'processing', 'retried')"
             )
             if active_hashes:
                 placeholders = ','.join('?' * len(active_hashes))

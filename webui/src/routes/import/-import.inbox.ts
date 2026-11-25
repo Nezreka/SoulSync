@@ -227,6 +227,7 @@ export const TRACK_OUTCOME_META: Record<ImportTrackOutcome, { label: string; ton
   upgraded: { label: 'Upgraded', tone: 'info' },
   skipped_owned: { label: 'Already in library', tone: 'neutral' },
   failed: { label: 'Failed', tone: 'danger' },
+  left_behind: { label: 'Left in Import', tone: 'warning' },
 };
 
 export interface ImportOutcomeLine {
@@ -238,9 +239,10 @@ export interface ImportOutcomeLine {
   why: string;
 }
 
-/** one line per track the import decided something about, in track order */
+/** one line per track the import decided something about, in track order,
+ * then the files it left in Import with the reason (#2220) */
 export function importOutcomeLines(item: ImportInboxItem): ImportOutcomeLine[] {
-  return (item.match?.matches ?? [])
+  const ran = (item.match?.matches ?? [])
     .filter((m) => m.import_status)
     .map((m, index) => ({
       key: `${m.file_path || m.file}-${index}`,
@@ -251,6 +253,35 @@ export function importOutcomeLines(item: ImportInboxItem): ImportOutcomeLine[] {
       why: (m.import_status === 'failed' ? m.import_error : m.import_reason) || '',
     }))
     .sort((a, b) => (Number(a.number) || 0) - (Number(b.number) || 0));
+  if (!ran.length) return ran;
+  const left = (item.match?.left_behind ?? []).map((entry, index) => ({
+    key: `left-${entry.file}-${index}`,
+    number: '-',
+    track: entry.file,
+    file: entry.file,
+    outcome: 'left_behind' as const,
+    why: entry.why || 'not matched to a track on this release',
+  }));
+  return [...ran, ...left];
+}
+
+/** the release the rest of this folder went to, when a run imported some of
+ * it: Fix match opens on it, so the leftovers join their album (#2220) */
+export function siblingRelease(
+  item: ImportInboxItem,
+): { id: string; source: string; name: string; artist: string; image_url?: string | null } | null {
+  const source = item.match?.source;
+  if (!item.album_id || !source) return null;
+  const counts = importOutcomeCounts(item);
+  const imported = counts && counts.imported + counts.upgraded + counts.skipped_owned > 0;
+  if (!imported && item.identification_method !== 'sibling_release') return null;
+  return {
+    id: String(item.album_id),
+    source,
+    name: item.guessed_name || item.name,
+    artist: item.artist,
+    image_url: item.image_url ?? null,
+  };
 }
 
 export function confidencePercent(item: ImportInboxItem): number | null {
@@ -272,6 +303,7 @@ const METHOD_LABELS: Record<string, string> = {
   exact_id: 'from embedded ids',
   manual: 'by hand',
   rematch_hint: 'by re-identify',
+  sibling_release: 'from the rest of the folder',
 };
 
 export function methodLabel(method: string | null | undefined): string {

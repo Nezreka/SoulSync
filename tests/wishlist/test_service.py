@@ -217,6 +217,8 @@ def test_get_wishlist_tracks_for_download_formats_modal_shape():
             "last_attempted": "2024-01-02",
             "source_type": "playlist",
             "source_info": {"playlist_name": "Playlist One"},
+            # filled in later by the MusicBrainz worker; none matched yet
+            "musicbrainz_release_group_id": None,
             # H10: formatted tracks carry their owner so cycles can batch
             # per-profile instead of stamping every batch with the runtime's.
             "profile_id": 7,

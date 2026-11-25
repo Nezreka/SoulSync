@@ -160,6 +160,19 @@ from core.matching.artist_credit import (  # noqa: E402,F401
 )
 
 
+def credit_lead_artist(credit: str, known_names=(), library_has=None) -> str:
+    """the first artist of a credit line given as one name, when it is
+    provably a list (#2240). the library files a release under an artist,
+    never under a whole credit: "12th Planet, BARELY ALIVE & PhaseOne" made
+    an artist of its own. '' when it stays one name: a name the user keeps
+    whole (#2150), or nothing proves its parts are artists ("Earth, Wind &
+    Fire"). same proof as the folder's first-listed rule (split_credit_primary)."""
+    credit = str(credit or "").strip()
+    if not credit or " ".join(credit.split()).casefold() in kept_whole_keys():
+        return ""
+    return split_credit_primary(credit, known_names, library_has)
+
+
 def library_has_identified_artist(name: str, conn=None) -> bool:
     """does the library hold an artist by exactly this name that a provider
     identified, or one the user said is one artist. False on any doubt."""
@@ -208,6 +221,16 @@ def collab_primary(album_artist: str, album_artists=None, track_artists=None,
     credited to "Above" (or a library holding "Above" and "Beyond") never
     turns "Above & Beyond" into a list (#2131). only a ";" or " / " still
     reads as one, those are never part of an act's name."""
+    from core.matching.artist_credit import credit_verdict
+
+    # A provider artist ID identifies the complete name. A display-only album
+    # list may simply repeat a combined credit (#2028).
+    if album_artists and len(album_artists) == 1:
+        entry = album_artists[0]
+        if isinstance(entry, dict) and entry.get("id"):
+            verdict = credit_verdict(album_artist, [("album credits", album_artists)])
+            if verdict and verdict[0] == "whole":
+                return ""
     primary = first_listed_artist(album_artist, album_artists)
     if primary:
         return primary

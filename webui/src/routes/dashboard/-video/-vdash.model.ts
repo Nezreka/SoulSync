@@ -20,7 +20,8 @@ export interface RecentItem {
 
 /** GET /api/video/dashboard (api/video/dashboard.py) */
 export interface VideoDashboardStats {
-  library: { movies: number; shows: number; episodes: number; size_bytes: number };
+  /** size_bytes is the admin's: a member's payload leaves it out (#2207) */
+  library: { movies: number; shows: number; episodes: number; size_bytes?: number };
   downloads: { active: number; finished: number; speed_bps: number };
   watchlist: number;
   wishlist: number;
@@ -121,7 +122,7 @@ export function videoHeroNumbers(stats: VideoDashboardStats | null | undefined):
     { id: 'shows', label: 'Shows', value: compactCount(lib.shows) },
     { id: 'episodes', label: 'Episodes', value: compactCount(lib.episodes) },
   ];
-  if (lib.size_bytes > 0)
+  if (lib.size_bytes && lib.size_bytes > 0)
     out.push({ id: 'size', label: 'On disk', value: formatBytes(lib.size_bytes) });
   return out;
 }

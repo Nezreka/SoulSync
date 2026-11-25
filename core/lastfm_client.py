@@ -8,10 +8,135 @@ from utils.logging_config import get_logger
 
 logger = get_logger("lastfm_client")
 
+# ── key state ──
+# from 1 december 2026 a last.fm api key needs a pro subscription, and a key
+# without one is refused. the refusal is remembered per key for a while so
+# nothing hammers last.fm, then tried again: a user who subscribes gets it
+# back on their own. a new key starts clean (the memory is keyed by the key).
+
+LASTFM_PRO_MESSAGE = (
+    "Last.fm now requires a Pro subscription for API keys (from 1 December 2026). "
+    "Your key was not accepted. SoulSync falls back to free sources; scrobble "
+    "with ListenBrainz instead."
+)
+# the history import has no free stand-in, so it says so
+LASTFM_IMPORT_REJECTED_MESSAGE = (
+    "Last.fm now needs a Pro subscription for API keys; your key was not accepted. "
+    "ListenBrainz import works without one."
+)
+# 10 invalid api key, 26 suspended api key. 4 (authentication failed, no
+# permission for the service) only counts on unsigned reads: on a signed call
+# it can be the secret or the session
+KEY_REJECTED_CODES = frozenset({10, 26})
+READ_KEY_REJECTED_CODES = frozenset({4, 10, 26})
+KEY_REJECTED_HTTP = frozenset({401, 403})
+KEY_REJECT_TTL = 6 * 3600
+
+# cached reads: catalogue facts barely move, a user's charts do
+CATALOGUE_TTL = 30 * 86400
+USER_TTL = 6 * 3600
+
+_key_state: Dict[str, Dict[str, Any]] = {}
+_key_state_lock = threading.Lock()
+
+
+class LastFMKeyRejected(Exception):
+    """last.fm refused the api key (no pro subscription, invalid, suspended)."""
+
+    def __init__(self, message: str = LASTFM_PRO_MESSAGE, code: Optional[int] = None):
+        super().__init__(message)
+        self.code = code
+
+
+def _fingerprint(api_key: str) -> str:
+    import hashlib
+    return hashlib.sha256(str(api_key or '').strip().encode('utf-8')).hexdigest()[:16]
+
+
+def note_key_rejected(api_key: str, code: Any = None, message: str = '') -> None:
+    if not api_key:
+        return
+    fp = _fingerprint(api_key)
+    with _key_state_lock:
+        first = fp not in _key_state
+        _key_state[fp] = {'at': time.time(), 'code': code, 'message': str(message or '')}
+    if first:
+        logger.warning(
+            "Last.fm did not accept the API key (%s%s). Last.fm features fall back to "
+            "free sources and try the key again in %dh.",
+            f"error {code}" if code is not None else "refused",
+            f": {message}" if message else "", KEY_REJECT_TTL // 3600)
+
+
+def note_key_accepted(api_key: str) -> None:
+    if not api_key:
+        return
+    fp = _fingerprint(api_key)
+    with _key_state_lock:
+        was = _key_state.pop(fp, None)
+    if was is not None:
+        logger.info("Last.fm accepts the API key again")
+
+
+def key_rejection(api_key: str) -> Optional[Dict[str, Any]]:
+    """the remembered refusal for this key, or None (never refused, or the
+    memory ran out and it is due another try)."""
+    if not api_key:
+        return None
+    fp = _fingerprint(api_key)
+    with _key_state_lock:
+        state = _key_state.get(fp)
+        if state is None:
+            return None
+        if time.time() - state['at'] >= KEY_REJECT_TTL:
+            _key_state.pop(fp, None)
+            return None
+        return dict(state)
+
+
+def reset_key_state() -> None:
+    with _key_state_lock:
+        _key_state.clear()
+
+
+def _configured_key() -> str:
+    try:
+        from core.settings import config_manager
+        return str(config_manager.get('lastfm.api_key', '') or '').strip()
+    except Exception:  # noqa: BLE001
+        return ''
+
+
+def lastfm_usable(api_key: Optional[str] = None) -> bool:
+    """a key is set and last.fm has not refused it lately."""
+    key = _configured_key() if api_key is None else str(api_key or '').strip()
+    return bool(key) and key_rejection(key) is None
+
+
+def lastfm_key_status(api_key: Optional[str] = None) -> Dict[str, Any]:
+    """what the settings card and the routes show."""
+    key = _configured_key() if api_key is None else str(api_key or '').strip()
+    state = key_rejection(key) if key else None
+    return {
+        'configured': bool(key),
+        'usable': bool(key) and state is None,
+        'key_rejected': state is not None,
+        'code': state.get('code') if state else None,
+        'message': LASTFM_PRO_MESSAGE if state else '',
+        'retry_at': (state['at'] + KEY_REJECT_TTL) if state else None,
+    }
+
 # Global rate limiting variables
 _last_api_call_time = 0
 _api_call_lock = threading.Lock()
 MIN_API_INTERVAL = 0.2  # 200ms between calls (Last.fm allows 5 req/sec)
+
+
+def _int_code(value: Any) -> Optional[int]:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def rate_limited(func):
@@ -20,11 +145,17 @@ def rate_limited(func):
     def wrapper(*args, **kwargs):
         global _last_api_call_time
 
+        # a refused key makes no request, so it waits for no slot
+        owner = args[0] if args else None
+        if isinstance(owner, LastFMClient) and key_rejection(owner.api_key):
+            return func(*args, **kwargs)
+
         with _api_call_lock:
             current_time = time.time()
             time_since_last_call = current_time - _last_api_call_time
 
-            if time_since_last_call < MIN_API_INTERVAL:
+            # a clock that stepped back makes this negative: never sleep on that
+            if 0 <= time_since_last_call < MIN_API_INTERVAL:
                 sleep_time = MIN_API_INTERVAL - time_since_last_call
                 time.sleep(sleep_time)
 
@@ -120,6 +251,12 @@ class LastFMClient:
             logger.error(f"Last.fm session key exchange failed: {e}")
             return None
 
+    @property
+    def key_rejected(self) -> bool:
+        """True while last.fm refuses this client's key (the process-wide
+        memory, KEY_REJECT_TTL). the enrichment worker reads this name."""
+        return bool(self.api_key) and key_rejection(self.api_key) is not None
+
     def can_scrobble(self) -> bool:
         """Check if scrobbling is possible (has api_key, api_secret, and session_key)."""
         return bool(self.api_key and self.api_secret and self.session_key)
@@ -139,6 +276,10 @@ class LastFMClient:
 
         if not tracks:
             return True
+
+        # a refused key: the plays stay queued (unscrobbled) for when it works
+        if key_rejection(self.api_key):
+            return False
 
         # Last.fm accepts max 50 scrobbles per request
         batch = tracks[:50]
@@ -179,25 +320,79 @@ class LastFMClient:
             if 'scrobbles' in data:
                 accepted = data['scrobbles'].get('@attr', {}).get('accepted', 0)
                 logger.info(f"Last.fm scrobbled {accepted}/{len(batch)} tracks")
+                note_key_accepted(self.api_key)
                 return True
             else:
                 error = data.get('error', 'Unknown')
+                if _int_code(error) in KEY_REJECTED_CODES:
+                    note_key_rejected(self.api_key, _int_code(error), data.get('message', ''))
+                    return False
                 logger.warning(f"Last.fm scrobble failed: {data.get('message', error)}")
                 return False
         except Exception as e:
             logger.error(f"Last.fm scrobble error: {e}")
             return False
 
-    def _make_request(self, method: str, params: Dict = None, timeout: int = 10, raise_on_transient: bool = False) -> Optional[Dict]:
+    @rate_limited
+    def update_now_playing(self, artist: str, track: str, album: str = '',
+                           duration_seconds: int = 0) -> bool:
+        """Tell Last.fm what is playing right now (track.updateNowPlaying).
+
+        Not a scrobble: Last.fm shows it on the profile until the track ends.
+        A refused key sends nothing.
+        """
+        if not self.can_scrobble() or not artist or not track:
+            return False
+        if key_rejection(self.api_key):
+            return False
+        params = {
+            'method': 'track.updateNowPlaying',
+            'api_key': self.api_key,
+            'sk': self.session_key,
+            'artist': artist,
+            'track': track,
+        }
+        if album:
+            params['album'] = album
+        if duration_seconds and int(duration_seconds) > 0:
+            params['duration'] = str(int(duration_seconds))
+        params['api_sig'] = self._sign_request(params)
+        params['format'] = 'json'
+        try:
+            response = self.session.post(self.BASE_URL, data=params, timeout=10)
+            data = response.json()
+            if 'nowplaying' in data:
+                note_key_accepted(self.api_key)
+                return True
+            error = data.get('error', 'Unknown')
+            if _int_code(error) in KEY_REJECTED_CODES:
+                note_key_rejected(self.api_key, _int_code(error), data.get('message', ''))
+                return False
+            logger.debug(f"Last.fm now playing failed: {data.get('message', error)}")
+            return False
+        except Exception as e:
+            logger.debug(f"Last.fm now playing error: {e}")
+            return False
+
+    def _make_request(self, method: str, params: Dict = None, timeout: int = 10, raise_on_transient: bool = False,
+                      ignore_key_memory: bool = False) -> Optional[Dict]:
         """Make a request to the Last.fm API.
 
         Args:
             raise_on_transient: If True, raise exceptions on transient errors (timeouts, HTTP errors)
                 instead of returning None. Used by get_*_info methods so the worker can distinguish
                 'not found' (mark not_found, retry in 30 days) from 'API failed' (mark error, retry in 7 days).
+                A refused key raises LastFMKeyRejected then, never reads as 'not found'.
+            ignore_key_memory: ask even when the key was refused lately (the settings test).
         """
         if not self.api_key:
             logger.warning("Last.fm API key not configured")
+            return None
+
+        # a key last.fm refused lately: no request, same empty answer
+        if not ignore_key_memory and key_rejection(self.api_key):
+            if raise_on_transient:
+                raise LastFMKeyRejected()
             return None
 
         request_params = {
@@ -214,9 +409,25 @@ class LastFMClient:
                 params=request_params,
                 timeout=timeout
             )
-            response.raise_for_status()
 
-            data = response.json()
+            # the error body comes with a 4xx, so read it before raise_for_status
+            try:
+                data = response.json()
+            except Exception:  # noqa: BLE001 - not json, raise_for_status decides
+                data = None
+            error_code = _int_code(data.get('error')) if isinstance(data, dict) and 'error' in data else None
+            status = getattr(response, 'status_code', None)
+            if error_code in READ_KEY_REJECTED_CODES or (
+                    error_code is None and isinstance(status, int) and status in KEY_REJECTED_HTTP):
+                note_key_rejected(self.api_key, error_code if error_code is not None else status,
+                                  (data or {}).get('message', '') if isinstance(data, dict) else '')
+                if raise_on_transient:
+                    raise LastFMKeyRejected(code=error_code)
+                return None
+
+            response.raise_for_status()
+            if data is None:
+                data = response.json()
 
             # Last.fm returns errors inside the JSON
             if 'error' in data:
@@ -224,6 +435,7 @@ class LastFMClient:
                 error_msg = data.get('message', 'Unknown error')
                 # Error 6 = "Artist/Album/Track not found" — not a real error
                 if error_code == 6:
+                    note_key_accepted(self.api_key)
                     return None
                 # Transient errors: 11=Service Offline, 16=Temporarily Unavailable, 29=Rate Limit
                 if raise_on_transient and error_code in (11, 16, 29):
@@ -231,8 +443,11 @@ class LastFMClient:
                 logger.error(f"Last.fm API error ({error_code}): {error_msg}")
                 return None
 
+            note_key_accepted(self.api_key)
             return data
 
+        except LastFMKeyRejected:
+            raise
         except requests.exceptions.Timeout:
             logger.warning(f"Last.fm API timeout for method: {method}")
             if raise_on_transient:
@@ -243,6 +458,23 @@ class LastFMClient:
             if raise_on_transient:
                 raise
             return None
+
+    _throttled_request = rate_limited(_make_request)
+
+    def _cached_request(self, method: str, params: Dict, ttl: float) -> Optional[Dict]:
+        """a read through the provider cache: fresh row, else last.fm, else
+        the stale row (a refused key or an outage keeps what we knew)."""
+        from core import provider_cache
+
+        def fetch():
+            if not self.api_key or key_rejection(self.api_key):
+                return None
+            return self._throttled_request(method, params)
+
+        data, how = provider_cache.cached('lastfm', method, params, ttl, fetch)
+        if how == 'stale':
+            logger.debug("Last.fm %s: serving the cached answer", method)
+        return data
 
     # ── Artist Methods ──
 
@@ -323,7 +555,6 @@ class LastFMClient:
             params['extended'] = '1'
         return self._make_request('user.getRecentTracks', params, timeout=20, raise_on_transient=True)
 
-    @rate_limited
     def get_user_top_artists(self, username: str, period: str = 'overall', limit: int = 200) -> list:
         """Fetch user's top artists from Last.fm.
         Args:
@@ -340,12 +571,12 @@ class LastFMClient:
             page = 1
             per_page = min(limit, 200)
             while len(artists) < limit:
-                data = self._make_request('user.getTopArtists', {
+                data = self._cached_request('user.getTopArtists', {
                     'user': username,
                     'period': period,
                     'limit': str(per_page),
                     'page': str(page)
-                })
+                }, USER_TTL)
                 if not data:
                     break
                 items = data.get('topartists', {}).get('artist', [])
@@ -400,7 +631,6 @@ class LastFMClient:
 
         return None
 
-    @rate_limited
     def get_artist_top_tags(self, artist_name: str) -> List[Dict[str, Any]]:
         """
         Get top tags for an artist (genres, styles, moods).
@@ -408,17 +638,16 @@ class LastFMClient:
         Returns:
             List of tag dicts with: name, count, url
         """
-        data = self._make_request('artist.gettoptags', {
+        data = self._cached_request('artist.gettoptags', {
             'artist': artist_name,
             'autocorrect': 1
-        })
+        }, CATALOGUE_TTL)
         if not data:
             return []
 
         tags = data.get('toptags', {}).get('tag', [])
         return tags if isinstance(tags, list) else [tags] if tags else []
 
-    @rate_limited
     def get_artist_top_tracks(self, artist_name: str, limit: int = 5) -> List[Dict[str, Any]]:
         """
         Get top tracks for an artist.
@@ -426,11 +655,11 @@ class LastFMClient:
         Returns:
             List of track dicts with: name, playcount, listeners, url
         """
-        data = self._make_request('artist.gettoptracks', {
+        data = self._cached_request('artist.gettoptracks', {
             'artist': artist_name,
             'autocorrect': 1,
             'limit': limit
-        })
+        }, CATALOGUE_TTL)
         if not data:
             return []
 
@@ -448,7 +677,6 @@ class LastFMClient:
             })
         return result
 
-    @rate_limited
     def get_similar_artists(self, artist_name: str, limit: int = 10) -> List[Dict[str, Any]]:
         """
         Get similar artists.
@@ -456,11 +684,11 @@ class LastFMClient:
         Returns:
             List of artist dicts with: name, mbid, match (similarity score), url, image
         """
-        data = self._make_request('artist.getsimilar', {
+        data = self._cached_request('artist.getsimilar', {
             'artist': artist_name,
             'autocorrect': 1,
             'limit': limit
-        })
+        }, CATALOGUE_TTL)
         if not data:
             return []
 
@@ -476,10 +704,10 @@ class LastFMClient:
         """
         if not str(tag or '').strip():
             return []
-        data = self._make_request('tag.gettopartists', {
+        data = self._cached_request('tag.gettopartists', {
             'tag': str(tag).strip(),
             'limit': limit,
-        })
+        }, CATALOGUE_TTL)
         if not data:
             return []
         artists = (data.get('topartists') or {}).get('artist', [])
@@ -584,7 +812,6 @@ class LastFMClient:
 
         return None
 
-    @rate_limited
     def get_similar_tracks(self, artist_name: str, track_title: str, limit: int = 20) -> List[Dict[str, Any]]:
         """
         Get tracks similar to the given track.
@@ -592,12 +819,12 @@ class LastFMClient:
         Returns:
             List of track dicts with: name, artist, match (0.0–1.0), mbid
         """
-        data = self._make_request('track.getsimilar', {
+        data = self._cached_request('track.getsimilar', {
             'artist': artist_name,
             'track': track_title,
             'autocorrect': 1,
             'limit': limit
-        })
+        }, CATALOGUE_TTL)
         if not data:
             return []
 
@@ -661,8 +888,21 @@ class LastFMClient:
 
     def validate_api_key(self) -> bool:
         """Test if the API key is valid by making a simple request"""
-        if not self.api_key:
-            return False
+        return self.check_api_key()[0]
 
-        data = self._make_request('chart.gettopartists', {'limit': 1})
-        return data is not None
+    def check_api_key(self) -> tuple:
+        """(ok, message) from a real request, past the remembered refusal, so a
+        user who just subscribed to pro sees it work straight away."""
+        if not self.api_key:
+            return False, "Missing Last.fm API key."
+        try:
+            data = self._make_request('chart.gettopartists', {'limit': 1}, raise_on_transient=True,
+                                      ignore_key_memory=True)
+        except LastFMKeyRejected:
+            return False, LASTFM_PRO_MESSAGE
+        except Exception as e:  # noqa: BLE001
+            import re
+            return False, "Could not reach Last.fm: " + re.sub(r"api_key=[^&\s]+", "api_key=REDACTED", str(e))
+        if data is None:
+            return False, "Invalid Last.fm API key."
+        return True, "Successfully connected to Last.fm!"

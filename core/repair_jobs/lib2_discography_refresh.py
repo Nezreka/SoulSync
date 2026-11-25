@@ -92,7 +92,20 @@ def _release_included(album: Dict[str, Any], filters: Dict[str, bool]) -> bool:
     elif not filters.get({"album": "include_albums", "ep": "include_eps",
                           "single": "include_singles"}[kind], True):
         return False
+    if not _status_included(album, filters):
+        return False
     return not _track_content_excluded(title, title, filters)
+
+
+def _status_included(album: Dict[str, Any], filters: Dict[str, Any]) -> bool:
+    """#2175: a release group MusicBrainz only knows as statuses the artist
+    keeps out is not missing. Not known (never asked, another source, no
+    status on any release) is let through."""
+    from core.release_statuses import stored_statuses, statuses_pass
+
+    known = stored_statuses(album.get("release_statuses"),
+                            album.get("musicbrainz_release_group_id"))
+    return statuses_pass(known, filters.get("release_statuses"))
 
 
 def _truthy(value: Any) -> bool:
@@ -295,9 +308,12 @@ class Lib2DiscographyRefreshJob(RepairJob):
 
         if watching_profile_ids(conn, artist_id):
             return _artist_content_filters(conn, artist_id, profile_id)
+        from core.library2.discography import _library_release_statuses
         filters = dict(_CONTENT_FILTER_DEFAULTS)
         filters.update({key: bool(settings.get(key, filters.get(key, False)))
                         for key in _RELEASE_FILTER_KEYS})
+        # #2175: an artist on no watchlist goes by the library-wide statuses
+        filters["release_statuses"] = _library_release_statuses()
         return filters
 
     @staticmethod
@@ -316,6 +332,7 @@ class Lib2DiscographyRefreshJob(RepairJob):
         members = json.dumps(group)
         rows = [dict(r) for r in conn.execute(
             f"""SELECT al.id, al.title, al.album_type, al.release_date, al.year,
+                       al.release_statuses, al.musicbrainz_release_group_id,
                        COALESCE(al.expected_track_count, al.track_count) AS track_count,
                        ar.name AS artist_name,
                        (SELECT COUNT(*) FROM lib2_tracks t WHERE t.album_id = al.id) AS fetched

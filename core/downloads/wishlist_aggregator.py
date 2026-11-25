@@ -200,6 +200,15 @@ def merge_wishlist_run_status(
     elif 'album_bundle' in primary:
         merged['album_bundle'] = primary['album_bundle']
     merged['active_count'] = active_total
+    # #2242: most of a big run's batches wait for one of the few album
+    # workers. say so instead of letting 78 waiting albums read as running
+    _ended = ('complete', 'error', 'cancelled', 'failed')
+    phases = [s.get('phase') for s in all_statuses]
+    merged['run_batches'] = {
+        'total': len(phases),
+        'waiting': sum(1 for p in phases if p == 'queued'),
+        'running': sum(1 for p in phases if p and p != 'queued' and p not in _ended),
+    }
 
     return merged
 

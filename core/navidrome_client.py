@@ -544,6 +544,28 @@ class NavidromeClient(MediaServerBase):
     # exposed either way (only its salted md5).
     _COVER_ART_SALT = 'soulsync-cover'
 
+    def image_fetch_url(self, thumb) -> Optional[str]:
+        """the absolute, authenticated URL SoulSync's OWN code downloads an
+        image from. ``image_url`` answers for the browser: a getCoverArt
+        reference becomes the proxy path /api/navidrome/cover/<id>, which a
+        page can load and a server-side download can't. the re-tagger and
+        the cover.jpg writer took that path, found it wasn't http, and
+        wrote no cover for any album whose art came from Navidrome (#2293).
+        takes the stored reference or the proxy path."""
+        if not thumb:
+            return None
+        from urllib.parse import parse_qs, unquote, urlparse
+        parsed = urlparse(str(thumb))
+        cover_id = ''
+        if parsed.path.rstrip('/').endswith('getCoverArt'):
+            cover_id = parse_qs(parsed.query).get('id', [''])[0]
+        elif parsed.path.startswith('/api/navidrome/cover/'):
+            cover_id = unquote(parsed.path[len('/api/navidrome/cover/'):])
+        if cover_id:
+            return self.build_cover_art_url(cover_id)
+        url = self.image_url(thumb)
+        return url if url and str(url).startswith(('http://', 'https://')) else None
+
     def build_cover_art_url(self, cover_id, size=None) -> Optional[str]:
         """Absolute, Subsonic-authenticated getCoverArt URL for ``cover_id``.
 
@@ -1700,6 +1722,26 @@ class NavidromeClient(MediaServerBase):
         except Exception as e:
             logger.error(f"Error getting tracks for playlist {playlist_id}: {e}")
             return []
+
+    def read_playlist_track_ids(self, playlist_name: str, playlist_id=None) -> Optional[List[str]]:
+        """what the server playlist holds right now, for the sync's readback
+        (#2235). None when it can't be read, never a guess: [] means empty."""
+        if not self.ensure_connection():
+            return None
+        try:
+            target = self._follow_playlist_id(playlist_name, playlist_id) if playlist_id else None
+            if target is None:
+                target = self.get_playlist_by_name(playlist_name)
+            if target is None:
+                return None
+            response = self._make_request('getPlaylist', {'id': target.id})
+            if not response:
+                return None
+            return [str(e.get('id')) for e in (response.get('playlist') or {}).get('entry', []) or []
+                    if e.get('id')]
+        except Exception as e:
+            logger.debug(f"Navidrome playlist readback for '{playlist_name}' failed: {e}")
+            return None
 
     def get_playlists_by_name(self, name: str) -> List[PlaylistInfo]:
         """Get all playlists matching a specific name (case-insensitive), own

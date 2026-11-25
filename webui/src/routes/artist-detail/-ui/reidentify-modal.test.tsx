@@ -31,6 +31,32 @@ function mount() {
 }
 
 describe('ReidentifyModal', () => {
+  it('renders on document.body, not inside the cell that opened it (#2197)', () => {
+    // the library album page mounts it in a track-table cell whose wrapper is
+    // a size container: a fixed overlay inside it is pinned to the table, not
+    // the screen, and inherits the cell's right alignment
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ sources: [] }))),
+    );
+    const { container } = render(
+      <div className="cell">
+        <ReidentifyModal
+          trackId={9}
+          trackTitle="Xtal"
+          artistName="Aphex Twin"
+          albumTitle="SAW 85-92"
+          imageUrl=""
+          onClose={() => {}}
+        />
+      </div>,
+    );
+    const overlay = document.getElementById('reid-modal-overlay');
+    expect(overlay).not.toBeNull();
+    expect(container.contains(overlay)).toBe(false);
+    expect(overlay?.parentElement).toBe(document.body);
+  });
+
   it('auto-searches the ACTIVE source and ranks ISRC hits first', async () => {
     const calls: string[] = [];
     vi.stubGlobal(

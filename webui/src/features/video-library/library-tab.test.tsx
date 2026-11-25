@@ -261,6 +261,46 @@ const bulkDone = (batch: string | null = 'b1') => ({
 });
 
 describe('movie tab', () => {
+  it('lists the extras and plays one in place by its key', async () => {
+    routes['/library'] = () =>
+      movie({
+        extras: [
+          {
+            key: 'k1',
+            kind: 'Trailer',
+            name: 'Teaser',
+            filename: 'Teaser.mp4',
+            size_bytes: 1048576,
+          },
+          { key: 'k2', kind: 'Featurette', name: 'Making of', filename: 'm.mkv', size_bytes: null },
+        ],
+      });
+    render(<LibraryTab kind="movie" id={7} />);
+    expect(await screen.findByText('Teaser')).toBeTruthy();
+    expect(screen.getByText('Featurette')).toBeTruthy();
+    expect(document.querySelector('video')).toBeNull();
+    fireEvent.click(within(document.querySelector('[data-extra="k1"]')!).getByText('Play'));
+    expect(document.querySelector('video')!.getAttribute('src')).toBe(
+      '/api/video/detail/movie/7/extras/k1',
+    );
+    fireEvent.click(within(document.querySelector('[data-extra="k1"]')!).getByText('Close'));
+    expect(document.querySelector('video')).toBeNull();
+  });
+
+  it('no extras, no section', async () => {
+    routes['/library'] = () => movie();
+    render(<LibraryTab kind="movie" id={7} />);
+    expect(await screen.findByText('Best copy')).toBeTruthy();
+    expect(document.querySelector('[data-extras]')).toBeNull();
+  });
+
+  it("shows a version's edition", async () => {
+    routes['/library'] = () => movie({ files: [file({ edition: "Director's Cut" })] });
+    render(<LibraryTab kind="movie" id={7} />);
+    expect(await screen.findByText("Director's Cut")).toBeTruthy();
+    expect(document.querySelectorAll('[data-edition]')).toHaveLength(1);
+  });
+
   it('lists every file with what the disk says, and the one only the server can see', async () => {
     routes['/library'] = () => movie();
     render(<LibraryTab kind="movie" id={7} />);
@@ -775,6 +815,103 @@ describe('needs attention', () => {
       episodes: { season_number: number; episode_number: number }[];
     };
     expect(add.episodes.map((e) => [e.season_number, e.episode_number])).toEqual([[1, 2]]);
+  });
+
+  /** #2177: an old season left unmonitored read as "273 missing" and Get
+   *  missing grabbed all of it. the headline and the grab are the monitored
+   *  gaps; the rest is still said, quieter. */
+  function showWithOffSeason(): ShowLibrary {
+    const d = show();
+    d.summary.missing_unmonitored = 2;
+    d.seasons[1].episodes = [3, 4].map((n) => ({
+      id: 20 + n,
+      episode_number: n,
+      title: `Old ${n}`,
+      air_date: '2009-03-08',
+      has_file: false,
+      monitored: false,
+      watched: false,
+      aired: true,
+      files: [],
+    }));
+    return d;
+  }
+
+  it('a monitored special without a file is missing; an unmonitored one is not said (#2284)', async () => {
+    const special = (monitored: boolean) => {
+      const d = show();
+      d.seasons.push({
+        ...d.seasons[1],
+        season_number: 0,
+        episodes: [
+          {
+            id: 90,
+            episode_number: 1,
+            title: 'Special',
+            air_date: '2009-03-08',
+            has_file: false,
+            monitored,
+            watched: false,
+            aired: true,
+            files: [],
+          },
+        ],
+      });
+      return d;
+    };
+    routes['/library'] = () => special(true);
+    const first = render(<LibraryTab kind="show" id={445} />);
+    await screen.findByRole('button', { name: 'Get missing' });
+    expect(first.container.querySelector('[data-issue="missing"]')?.textContent).toContain(
+      '2 aired episodes missing',
+    );
+    first.unmount();
+    routes['/library'] = () => special(false);
+    const second = render(<LibraryTab kind="show" id={445} />);
+    await screen.findByRole('button', { name: 'Get missing' });
+    const issue = second.container.querySelector('[data-issue="missing"]') as HTMLElement;
+    expect(issue.textContent).toContain('1 aired episode missing');
+    expect(issue.textContent).not.toContain('unmonitored');
+  });
+
+  it('get missing leaves unmonitored seasons alone and says how many it left', async () => {
+    routes['/library'] = () => showWithOffSeason();
+    routes['/wishlist/add'] = () => ({ success: true, added: 1 });
+    routes['/wishlist/search'] = () => ({ success: true });
+    const { container } = render(<LibraryTab kind="show" id={445} />);
+    const button = await screen.findByRole('button', { name: 'Get missing' });
+    const issue = container.querySelector('[data-issue="missing"]') as HTMLElement;
+    expect(issue.textContent).toContain('1 aired episode missing');
+    expect(issue.textContent).toContain('2 more in unmonitored seasons are left alone.');
+    expect(container.querySelector('[data-part="unmonitored"]')?.textContent).toBe(
+      '2 in unmonitored seasons',
+    );
+    // the gaps are still aired episodes: 3 owned of 6, not of 4
+    expect(container.textContent).toContain('of 6 aired episodes');
+    fireEvent.click(button);
+    await waitFor(() => expect(calls.some((c) => c.url.endsWith('/wishlist/add'))).toBe(true));
+    const add = calls.find((c) => c.url.endsWith('/wishlist/add'))?.body as {
+      episodes: { season_number: number; episode_number: number }[];
+    };
+    expect(add.episodes.map((e) => [e.season_number, e.episode_number])).toEqual([[1, 2]]);
+  });
+
+  it('an episode unmonitored inside a monitored season is not hunted either', async () => {
+    routes['/library'] = () => {
+      const d = show();
+      d.seasons[0].episodes[1].monitored = false;
+      d.summary.missing = 0;
+      d.summary.missing_unmonitored = 1;
+      return d;
+    };
+    const { container } = render(<LibraryTab kind="show" id={445} />);
+    await screen.findByText('not monitored', { exact: false });
+    // nothing monitored is missing: nothing needs attention, nothing to get
+    expect(container.querySelector('[data-issue="missing"]')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Get missing' })).toBeNull();
+    expect(container.querySelector('[data-part="unmonitored"]')?.textContent).toBe(
+      '1 not monitored',
+    );
   });
 
   it('a split show is brought together: plan first, then the move with its progress', async () => {

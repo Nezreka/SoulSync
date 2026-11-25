@@ -71,8 +71,7 @@ Create `/boot/config/plugins/dockerMan/templates-user/soulsync.xml`:
 ```
 /mnt/user/Music/               # Your main music share
 ├── Downloads/                 # slskd download folder
-├── Library/                   # Organized music library
-└── Transfer/                  # Processing folder
+└── Library/                   # Organized music library (your music library folder)
 
 /mnt/user/appdata/soulsync/    # App configuration
 ├── config/                    # SoulSync settings
@@ -88,11 +87,11 @@ In SoulSync settings, use these URLs:
 - **Plex**: `http://192.168.1.100:32400`
 - **Jellyfin**: `http://192.168.1.100:8096`
 
-### 2. Download/Transfer Paths
+### 2. Download and Music Library Folders
 Set these paths in SoulSync settings:
 
 - **Download Path**: `/host/music/Downloads`
-- **Transfer Path**: `/host/music/Library`
+- **Music Library Folder**: `/host/music/Library`
 
 ### 3. slskd Integration
 If running slskd on Unraid:

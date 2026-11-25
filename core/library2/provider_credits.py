@@ -83,9 +83,9 @@ CREDIT_CHECK_TTL_DAYS = 180
 UNMATCHED_RETRY_DAYS = 30
 # an empty answer (no results at all) may be an outage: asked again sooner
 EMPTY_RETRY_DAYS = 3
-# sources whose text search can never match a track: their results carry no
-# album to check against (MusicBrainz is found by ISRC, Tidal by its id)
-_NO_TEXT_SEARCH = frozenset({"musicbrainz", "tidal"})
+# MusicBrainz and Tidal searches omit the album needed for a match.
+# Discogs has no track search; its credits come from a release's tracklist.
+_NO_TEXT_SEARCH = frozenset({"musicbrainz", "tidal", "discogs"})
 
 
 def ensure_provider_credits_schema(cursor: Any) -> None:
@@ -153,13 +153,17 @@ def _artist_id_sql(service: str) -> Optional[str]:
     return None
 
 
-def _credited(artists: Optional[Iterable[Any]]) -> list:
+def _credited(artists: Optional[Iterable[Any]], service: Optional[str] = None) -> list:
     """``[(provider id, name)]`` in credit order, artists without an id left out."""
+    from core.various_artists_ids import is_various_artists_id
     out = []
     for artist in artists or []:
         if isinstance(artist, dict):
             pid = artist.get("id")
-            if pid not in (None, ""):
+            # "Various Artists" is no artist: left out like one with no id,
+            # or every compilation went to whoever held its id (#2229)
+            if pid not in (None, "") and not is_various_artists_id(
+                    pid, artist.get("source") or service):
                 out.append((str(pid), str(artist.get("name") or "")))
     return out
 
@@ -178,8 +182,27 @@ def _store_snapshot(conn: Any, entity_type: str, entity_id: int, service: str,
          for position, (pid, name) in enumerate(credited)])
 
 
+def _credited_already(conn: Any, entity_type: str, entity_id: int, artist_id: int) -> bool:
+    """another artist row with this artist's name, spelling aside, is
+    already credited here: "The Chamber Orchestra Of London" from the source
+    beside the "Chamber Orchestra of London" the files named. a second credit
+    is the same orchestra twice in ARTIST (#2217)"""
+    from core.text.normalize import credit_name_key
+    junction, column = (("lib2_track_artists", "track_id") if entity_type == "track"
+                        else ("lib2_album_artists", "album_id"))
+    row = conn.execute("SELECT name FROM lib2_artists WHERE id=?", (int(artist_id),)).fetchone()
+    key = credit_name_key(row[0] if row else "")
+    if not key:
+        return False
+    return any(credit_name_key(name) == key for (name,) in conn.execute(
+        f"SELECT a.name FROM {junction} j JOIN lib2_artists a ON a.id = j.artist_id"
+        f" WHERE j.{column} = ? AND j.artist_id <> ?", (int(entity_id), int(artist_id))))
+
+
 def _insert_credit(conn: Any, entity_type: str, entity_id: int, artist_id: int,
                    position: int) -> int:
+    if _credited_already(conn, entity_type, entity_id, artist_id):
+        return 0
     if entity_type == "track":
         cur = conn.execute(
             "INSERT OR IGNORE INTO lib2_track_artists(track_id, artist_id, role, position)"
@@ -349,7 +372,7 @@ def link_credited_artists(conn: Any, entity_type: str, entity_id: int,
     sql = _artist_id_sql(service)
     if not sql or entity_type not in ("track", "album") or artists is None:
         return 0
-    credited = _credited(artists)
+    credited = _credited(artists, service)
     drop_source_credits(conn, entity_type, entity_id, service,
                         keep_provider_ids=[pid for pid, _name in credited])
     if not credited:
@@ -667,24 +690,28 @@ def ensure_track_credits(database: Any, track_id: int, services: Optional[Iterab
                     s == service for s, _n in checked_track_credits(conn, track_id))):
                 continue
             search_key = (_unmatched_key(conn, track_id, artist_hints)
-                          if not provider_id and match else "")
+                          if not provider_id and match and service not in _NO_TEXT_SEARCH else "")
             if search_key and _searched_lately(conn, service, search_key):
                 continue    # this very lookup found nothing there lately
             if not provider_id and service == "musicbrainz":
                 # an ISRC names the recording exactly, no text search
-                isrc = (conn.execute("SELECT isrc FROM lib2_tracks WHERE id=?",
-                                     (int(track_id),)).fetchone() or [None])[0]
-                client = _credit_client("musicbrainz") if str(isrc or "").strip() else None
+                row = conn.execute("SELECT isrc FROM lib2_tracks WHERE id=?",
+                                   (int(track_id),)).fetchone()
+                isrc = str((row[0] if row else None) or "").strip()
+                isrc_key = f"unmatched:isrc:{isrc.upper().replace('-', '')}"
+                if not isrc or _searched_lately(conn, service, isrc_key):
+                    continue
+                client = _credit_client("musicbrainz")
                 if client is not None:
                     try:
-                        exact = client.track_artist_credits_by_isrc(str(isrc))
+                        exact = client.track_artist_credits_by_isrc(isrc)
                     except Exception as exc:  # noqa: BLE001 - an outage: ask again next time
                         logger.debug("isrc lookup for track %s failed: %s", track_id, exc)
                         continue
-                    if not exact and search_key:
-                        _record_unmatched(conn, service, search_key)   # it answered: none
+                    if not exact:
+                        _record_unmatched(conn, service, isrc_key)   # it answered: none
                         conn.commit()
-            if search_key and not exact and service not in _NO_TEXT_SEARCH:
+            if search_key:
                 from core.library2.native_enrich import enrich_native_entity_for_service
                 answered = False
                 for artist in (None, *_hint_names(artist_hints)):

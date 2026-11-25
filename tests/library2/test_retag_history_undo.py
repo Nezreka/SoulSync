@@ -228,3 +228,29 @@ def test_a_known_edition_writes_the_numbers_as_before(library):
     result = _worker(db, config)._fix_library_retag('track', 'lib2:7', str(path), details)
     assert result['success'] is True, result
     assert FLAC(path)['tracknumber'] == ['7']
+
+
+@pytest.mark.parametrize('original', [[], ['Earth, Wind & Fire', 'MFSB; The Sound of Philadelphia']])
+def test_undo_restores_the_original_multi_artist_values(library, monkeypatch, original):
+    import core.tag_writer as tw
+
+    db, path, config = library
+    monkeypatch.setattr(tw, '_multi_artist_write_enabled', lambda: True)
+    if original:
+        assert tw.write_tag_fields(path, {'artists': original})['success']
+    _drift(path)
+    observe(library)
+    finding_id = _item(db)['id']
+    before = tw.read_file_tags(path)
+    names = ['Earth, Wind & Fire', 'The Emotions']
+    diff = tw.build_tag_diff(before, {'artists_list': names})
+    assert tw.write_tag_fields(path, {'artists': names})['success']
+    change = retag._change_record(
+        {'id': 1, 'path': str(path)}, diff, {'artists': names}, before, tw.read_file_tags(path), None)
+    worker = _worker(db, config)
+    worker._save_applied(finding_id, [change])
+    with closing(db._get_connection()) as conn, conn:
+        conn.execute("UPDATE repair_findings SET status='resolved' WHERE id=?", (finding_id,))
+
+    assert worker.undo_finding(finding_id)['success']
+    assert tw.read_file_tags(path)['artists'] == original

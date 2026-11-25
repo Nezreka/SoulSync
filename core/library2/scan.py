@@ -286,6 +286,8 @@ def rescan_files(
     source='scan',
     on_presence_change: Optional[Callable[[List[int]], None]] = None,
     confirmed_gone: bool = False,
+    outage_guard: bool = True,
+    confirm_missing: bool = True,
 ) -> Dict[str, int]:
     """Probe the files in scope and persist their measured audio properties.
 
@@ -314,11 +316,27 @@ def rescan_files(
     the share of the library and whatever its root looks like. A file that is
     there is still read as there, and a rename is still repointed first.
 
+    ``outage_guard=False`` is for a caller that already judged the whole set
+    before scanning it in pieces (Dead File Cleaner looks at every file, read
+    only, before its first write). The share-of-the-batch outage test is then
+    the wrong question: it sees one 500-file piece, and a run of deleted
+    files that sit next to each other in the catalogue (one artist, one
+    import) is far more than a quarter of that piece while being 4% of the
+    library (#2216). Every miss still needs its own root to be reachable
+    (``missing_path_root_is_healthy``), so an unmounted drive still advances
+    nothing.
+
+    ``confirm_missing=False`` caps a miss at ``missing_suspected``: the folder
+    watcher reads a folder every time it changes, and two of its passes a
+    minute apart are not the two scans the confirmation waits for. The next
+    library scan confirms.
+
     Returns a stats dict: ``scanned``/``updated`` for files that were there,
     ``missing`` for paths that did not resolve, ``path_drift``/``path_repointed``
     for renames spotted and repaired, ``missing_suspected``/``missing_confirmed``
     for lifecycle transitions written, and ``recovered`` for files that came
-    back.  ``released`` appears when ``library.redownload_externally_deleted``
+    back.  ``paths_relocated`` appears when records followed a music library
+    folder that moved (``core.library2.path_repoint``).  ``released`` appears when ``library.redownload_externally_deleted``
     is off and counts the tracks that are no longer wanted.  Never raises for individual files — a broken file just stays on its
     imported values.
 
@@ -342,12 +360,16 @@ def rescan_files(
             )
         ]
 
+    from core.library.path_resolver import is_deleted_quarantine_path
+
+    rows = [row for row in rows if not is_deleted_quarantine_path(row["path"])]
     total = len(rows)
     presence: List[int] = []
     confirmed: List[int] = []
     _rescan_loop(database, rows, total, progress=progress, stats=stats,
                  manual=manual or confirmed_gone, presence=presence, source=source,
-                 confirmed=confirmed, confirmed_gone=confirmed_gone)
+                 confirmed=confirmed, confirmed_gone=confirmed_gone,
+                 outage_guard=outage_guard, confirm_missing=confirm_missing)
     if confirmed and not _redownload_externally_deleted():
         # Before the presence consumer: it mirrors the wanted projection, so
         # it has to see the track already released.
@@ -429,7 +451,8 @@ def _flush_observations(database, pending, stats, presence=None,
 
 def _rescan_loop(database, rows, total, *, progress, stats, manual: bool = False,
                  presence=None, source='scan', confirmed=None,
-                 confirmed_gone: bool = False) -> None:
+                 confirmed_gone: bool = False, outage_guard: bool = True,
+                 confirm_missing: bool = True) -> None:
     """The per-file body of :func:`rescan_files`, in three ordered phases.
 
     The order is the behaviour, not an implementation detail:
@@ -446,8 +469,17 @@ def _rescan_loop(database, rows, total, *, progress, stats, manual: bool = False
     observations are buffered and flushed in batches (see
     ``_OBSERVATION_FLUSH_BATCH``).
     """
+    relocated: List[Dict[str, Any]] = []
     unresolved = _probe_rows(database, rows, total, progress=progress, stats=stats,
-                             presence=presence, source=source)
+                             presence=presence, source=source, relocated=relocated)
+    if relocated:
+        # the file was found, but not where the record says: the music
+        # library folder moved (Storm: /app/Transfer -> /music). the record
+        # follows, under the same rules as Tools > Update File Locations
+        from core.library2.path_repoint import repoint_scanned
+        moved = repoint_scanned(database, relocated)
+        if moved:
+            stats["paths_relocated"] = stats.get("paths_relocated", 0) + len(moved)
     if not unresolved:
         return
     repointed, ambiguous, still_missing = _reconcile_drifted_paths(
@@ -461,12 +493,16 @@ def _rescan_loop(database, rows, total, *, progress, stats, manual: bool = False
                     presence=presence, source=source)
     _observe_missing(database, still_missing, stats=stats, manual=manual,
                      ambiguous=ambiguous, presence=presence, confirmed=confirmed,
-                     confirmed_gone=confirmed_gone)
+                     confirmed_gone=confirmed_gone, outage_guard=outage_guard,
+                     confirm_missing=confirm_missing)
 
 
 def _probe_rows(database, rows, total, *, progress, stats,
-                presence=None, source='scan') -> List[Dict[str, Any]]:
-    """Phase 1: measure every file that resolves; return the ones that do not."""
+                presence=None, source='scan', relocated=None) -> List[Dict[str, Any]]:
+    """Phase 1: measure every file that resolves; return the ones that do not.
+
+    ``relocated`` collects the rows that resolved somewhere other than their
+    stored path, for the file-location pass."""
     from core.imports.file_ops import probe_audio_quality
     from core.library2.paths import resolve_lib2_path
     from core.library2.status import quality_tier
@@ -483,6 +519,8 @@ def _probe_rows(database, rows, total, *, progress, stats,
         if not path:
             unresolved.append(row)
             continue
+        if relocated is not None and path != row["path"]:
+            relocated.append(row)
 
         stats["scanned"] += 1
         file_tags = read_tag_snapshot(path)
@@ -581,26 +619,23 @@ def _reconcile_drifted_paths(database, rows, *, stats, repair: bool):
 
 
 def _observe_missing(database, rows, *, stats, manual: bool, ambiguous,
-                     presence=None, confirmed=None, confirmed_gone: bool = False) -> None:
+                     presence=None, confirmed=None, confirmed_gone: bool = False,
+                     outage_guard: bool = True, confirm_missing: bool = True) -> None:
     """Phase 3: what survived the drift check is genuinely absent."""
     from core.library2.paths import missing_path_root_is_healthy
 
-    # a file already confirmed missing is a known miss, not news of an outage:
-    # a library someone emptied and confirmed would otherwise read as a
-    # dropped mount on every scan after it (#2005)
-    fresh = sum(1 for row in rows if row.get("file_state") != "missing_confirmed")
-    mass = (not confirmed_gone and fresh >= MASS_MISSING_MIN
-            and fresh > MASS_MISSING_SHARE * (stats["scanned"] + len(rows)))
-    if mass:
-        stats["mass_missing_deferred"] = len(rows)
-        logger.warning(
-            "Library scan: %d of %d files unreachable at once - treating it as "
-            "a storage outage, no file is marked missing", len(rows),
-            stats["scanned"] + len(rows))
-    elif rows:
-        # a record of where a file used to be, when the same file is on disk
-        # under another record: settled now, not after the two-scan wait, and
-        # never handed on as "this song is gone" (core/library2/moved_file_records)
+    # a record of where a file used to be, when the same file is on disk
+    # under another record: settled now, not after the two-scan wait, and
+    # never handed on as "this song is gone" (core/library2/moved_file_records).
+    #
+    # BEFORE the outage check, and not counted by it (#2289). a settled record
+    # needs its twin present on disk, which is exactly what an outage can't
+    # show, so settling is safe whatever the numbers. it used to run only when
+    # the outage check passed: a library that had been moved between mounts a
+    # few times (681 records for 124 songs) had most of its records absent,
+    # read as "storage is away" on every scan, and the old records were never
+    # settled. the duplicate and re-tag jobs went on reading all of them.
+    if rows:
         try:
             from core.library2.moved_file_records import settle_absent_rows
             settled = settle_absent_rows(database, rows)
@@ -611,6 +646,19 @@ def _observe_missing(database, rows, *, stats, manual: bool, ambiguous,
             stats["moved_records"] = stats.get("moved_records", 0) + len(settled)
             stats["missing"] += len(settled)
             rows = [row for row in rows if int(row["id"]) not in settled]
+
+    # a file already confirmed missing is a known miss, not news of an outage:
+    # a library someone emptied and confirmed would otherwise read as a
+    # dropped mount on every scan after it (#2005)
+    fresh = sum(1 for row in rows if row.get("file_state") != "missing_confirmed")
+    mass = (not confirmed_gone and outage_guard and fresh >= MASS_MISSING_MIN
+            and fresh > MASS_MISSING_SHARE * (stats["scanned"] + len(rows)))
+    if mass:
+        stats["mass_missing_deferred"] = len(rows)
+        logger.warning(
+            "Library scan: %d of %d files unreachable at once - treating it as "
+            "a storage outage, no file is marked missing", len(rows),
+            stats["scanned"] + len(rows))
     pending: list = []
     for row in rows:
         stats["missing"] += 1
@@ -621,7 +669,8 @@ def _observe_missing(database, rows, *, stats, manual: bool, ambiguous,
             "file_id": row["id"],
             "root_healthy": confirmed_gone or (
                 not mass and missing_path_root_is_healthy(row["path"])),
-            "allow_confirm": int(row["id"]) not in ambiguous,
+            "allow_confirm": (confirm_missing or confirmed_gone)
+                             and int(row["id"]) not in ambiguous,
             "force_confirm": bool(manual),
         }))
         if len(pending) >= _OBSERVATION_FLUSH_BATCH:

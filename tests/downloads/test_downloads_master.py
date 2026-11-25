@@ -1608,6 +1608,63 @@ def test_organize_by_playlist_keeps_provenance_not_routing(monkeypatch):
     assert info['_playlist_name'] == 'My Mix'          # provenance preserved
 
 
+def test_organize_tidal_playlist_dispatches_the_native_track_id(monkeypatch):
+    import asyncio
+    from unittest.mock import Mock
+
+    from core.download_orchestrator import DownloadOrchestrator
+    from core.downloads.track_hint import hint_from_track
+    from core.playlists.organize_download import mirrored_tracks_to_download_json
+    from core.tidal_download_client import TidalDownloadClient
+
+    db = _FakeDB()
+    monkeypatch.setattr("database.music_database.MusicDatabase", lambda: db)
+    monkeypatch.setattr("core.tidal_download_client.quality_tier_for_source", lambda *args, **kwargs: "lossless")
+    _seed_batch(
+        "tidal-batch",
+        playlist_folder_mode=True,
+        organize_by_playlist=True,
+        batch_source="tidal",
+        source_playlist_ref="tidal-playlist",
+    )
+    tracks = mirrored_tracks_to_download_json(
+        [
+            {
+                "source_track_id": "303656585",
+                "artist_name": "Becky Hill",
+                "album_name": "Disconnect",
+                "duration_ms": 165000,
+                "extra_data": {"spotify_hint": {"id": "catalogue-id", "name": "Disconnect"}},
+            }
+        ]
+    )
+    mw.run_full_missing_tracks_process("tidal-batch", "P1", tracks, _build_deps())
+    (task_id,) = download_batches["tidal-batch"]["queue"]
+    track = download_tasks[task_id]["track_info"]
+    assert track["id"] == "catalogue-id"
+
+    client = TidalDownloadClient.__new__(TidalDownloadClient)
+    client.session = SimpleNamespace(access_token="token", country_code="GB")
+    client.is_available = lambda: True
+    client._engine = SimpleNamespace(worker=SimpleNamespace(dispatch=Mock(return_value="download-id")))
+    response = Mock()
+    response.json.return_value = {"data": {"attributes": {"title": "Disconnect", "isrc": "GBUM72306588"}}}
+    client._get_with_rate_limit_retry = Mock(return_value=response)
+    orchestrator = DownloadOrchestrator.__new__(DownloadOrchestrator)
+    orchestrator.mode = "tidal"
+    orchestrator._client = lambda name: client
+    orchestrator.registry = SimpleNamespace(display_name=lambda name: name)
+
+    candidates, albums = asyncio.run(orchestrator.search("Becky Hill Disconnect", track_hint=hint_from_track(track)))
+    (candidate,) = candidates
+    assert not albums
+    assert candidate.duration == 165000
+    assert candidate._source_metadata["isrc"] == "GBUM72306588"
+    assert client._get_with_rate_limit_retry.call_args.args[0].endswith("/tracks/303656585")
+    assert asyncio.run(client.download(candidate.username, candidate.filename)) == "download-id"
+    assert client._engine.worker.dispatch.call_args.kwargs["target_id"] == 303656585
+
+
 # ---------------------------------------------------------------------------
 # Hand-off to monitor + start_next_batch
 # ---------------------------------------------------------------------------
@@ -1856,3 +1913,62 @@ def test_a_stored_library_v2_upgrade_row_still_mints_its_intent(monkeypatch):
              'artists': [{'name': 'Any Artist'}], 'source_info': {}}
     intent = _wishlist_upgrade_task(monkeypatch, db, track)
     assert intent is not None and intent.track_id == 42
+
+
+class _CheckerSpy:
+    """stands in for core.wishlist.processing.BatchOwnedChecker (#2221)"""
+    made = []
+
+    def __init__(self, db, profile_id, tracks, active_server, **kwargs):
+        self.checked = []
+        self.finished = False
+        _CheckerSpy.made.append(self)
+
+    def check(self, track):
+        self.checked.append(track.get('name'))
+        if track.get('name') == 'Owned':
+            return True, SimpleNamespace(file_path='/music/owned.flac', id=7)
+        return False, None
+
+    def finish(self):
+        self.finished = True
+
+
+def test_an_auto_wishlist_batch_checks_its_tracks_before_downloading(monkeypatch):
+    """#2221: the cycle-start sweep stops at its time budget, so an auto
+    wishlist batch (force_download_all) checks its own tracks against the
+    library and does not download the owned one."""
+    db = _FakeDB()
+    monkeypatch.setattr('database.music_database.MusicDatabase', lambda: db)
+    monkeypatch.setattr('core.wishlist.processing.BatchOwnedChecker', _CheckerSpy)
+    _CheckerSpy.made.clear()
+    _seed_batch('B2221', force_download_all=True, check_owned_before_download=True, profile_id=1)
+    deps = _build_deps()
+    tracks = [{'id': 'o', 'name': 'Owned', 'artists': ['A']},
+              {'id': 'm', 'name': 'Missing', 'artists': ['A']}]
+
+    mw.run_full_missing_tracks_process('B2221', 'wishlist', tracks, deps)
+
+    checker = _CheckerSpy.made[0]
+    assert checker.checked == ['Owned', 'Missing'] and checker.finished
+    results = {r['track']['name']: r for r in download_batches['B2221']['analysis_results']}
+    assert results['Owned']['found'] is True
+    assert results['Owned']['match_reason'] == 'already_owned'
+    assert results['Owned']['matched_file_path'] == '/music/owned.flac'
+    assert results['Missing']['found'] is False
+    assert len(download_batches['B2221']['queue']) == 1
+
+
+def test_a_batch_without_the_flag_keeps_its_force_semantics(monkeypatch):
+    """a manual or playlist force batch never asked for the check: no checker"""
+    db = _FakeDB()
+    monkeypatch.setattr('database.music_database.MusicDatabase', lambda: db)
+    monkeypatch.setattr('core.wishlist.processing.BatchOwnedChecker', _CheckerSpy)
+    _CheckerSpy.made.clear()
+    _seed_batch('B2221b', force_download_all=True, profile_id=1)
+    tracks = [{'id': 'o', 'name': 'Owned', 'artists': ['A']}]
+
+    mw.run_full_missing_tracks_process('B2221b', 'wishlist', tracks, _build_deps())
+
+    assert _CheckerSpy.made == []
+    assert len(download_batches['B2221b']['queue']) == 1

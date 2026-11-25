@@ -9,7 +9,7 @@ import threading
 import time
 from dataclasses import dataclass
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Optional
 
 from core.settings import config_manager
 from core.imports.file_ops import (
@@ -109,6 +109,29 @@ __all__ = [
     "post_process_matched_download",
     "post_process_matched_download_with_verification",
 ]
+
+# what an artist context can carry as the artist's provider id
+_ARTIST_ID_KEYS = ("id", "artist_id", "source_artist_id", "spotify_artist_id",
+                   "itunes_artist_id", "deezer_id", "deezer_artist_id", "discogs_id",
+                   "soul_id", "musicbrainz_id", "mbid", "provider_ids", "external_ids")
+
+
+def _take_artist_identity(artist_context: dict, name: str, artist: Any) -> None:
+    """The artist context becomes ``name``, with ``artist``'s id or none.
+
+    a context named "Various Artists" carries the compilation's id (spotify's
+    0LyfQWJT6nXafLPZqxe9Of). renaming it to the track's singer and keeping
+    that id paired the singer with it: the library stored it on them, and every
+    later compilation was found by it and renamed after them (#2229). the id
+    belonged to the old name, so it goes with it."""
+    for key in _ARTIST_ID_KEYS:
+        artist_context.pop(key, None)
+    artist_context['name'] = name
+    if isinstance(artist, dict):
+        from core.various_artists_ids import is_various_artists_id
+        own = str(artist.get('id') or '').strip()
+        if own and not is_various_artists_id(own, artist.get('source') or artist.get('provider')):
+            artist_context['id'] = own
 
 
 def _retire_replaced_library_file(path: str, reason: str, context) -> None:
@@ -764,6 +787,55 @@ def import_rejection_reason(context: dict) -> str | None:
     return None
 
 
+REJECTED_SUFFIX = ".rejected"
+
+
+def _set_rejected_file_aside(file_path: str) -> Optional[str]:
+    """Rename a rejected download that could not be moved to quarantine.
+
+    It is kept (deleting a file we could not even quarantine is data loss),
+    but under its own name it was found again: the retry downloads the next
+    candidate, the finder looks for the file by name, and the rejected one,
+    still sitting there, could be picked up and judged a second time in the
+    new one's place. With ``.rejected`` on the end it is no longer an audio
+    file to the finder, and it is still on disk for whoever wants it.
+    Returns the new path, or None when it could not be renamed either."""
+    try:
+        if not file_path or not os.path.isfile(file_path):
+            return None
+        target = file_path + REJECTED_SUFFIX
+        counter = 2
+        while os.path.exists(target):
+            target = f"{file_path}{REJECTED_SUFFIX}{counter}"
+            counter += 1
+        os.replace(file_path, target)
+        logger.warning("Rejected file set aside as %s", os.path.basename(target))
+        return target
+    except OSError as exc:
+        logger.debug("rejected file could not be set aside (%s): %s", file_path, exc)
+        return None
+
+
+def _discard_redundant_download(file_path: str, config_manager) -> bool:
+    """Remove a download the library did not need, when it sits in the
+    downloads folder. A file anywhere else (the import folder, a staging
+    tree) is not SoulSync's to delete. True when it was removed."""
+    try:
+        downloads = os.path.realpath(docker_resolve_path(
+            config_manager.get('soulseek.download_path', './downloads')))
+        target = os.path.realpath(file_path)
+        if not downloads or os.path.commonpath([downloads, target]) != downloads or target == downloads:
+            return False
+        os.remove(target)
+        logger.info("[Protection] Removed the download the library did not need: %s",
+                    os.path.basename(target))
+        cleanup_empty_directories(downloads, file_path)
+        return True
+    except (OSError, ValueError) as exc:
+        logger.debug("[Protection] redundant download not removed (%s): %s", file_path, exc)
+        return False
+
+
 def kept_existing_library_file(context: dict) -> bool:
     """the pipeline found this track already at its library path and left
     that copy alone (not an improvement, or already tagged). nothing was
@@ -914,8 +986,10 @@ def _maybe_stage_album_track(context, final_path):
                 else:
                     # an own-library profile's batch stages under its folder (#1199)
                     from core.audiobook_routing import routed_root_for_context
-                    from core.imports.paths import import_owner_id, library_root_for_profile
+                    from core.imports.paths import (
+                        import_owner_id, library_root_for_profile, lidarr_root_for_context)
                     transfer_dir = (routed_root_for_context(context)
+                                    or lidarr_root_for_context(context)
                                     or library_root_for_profile(import_owner_id(batch))
                                     or docker_resolve_path(
                                         config_manager.get('soulseek.transfer_path', './Transfer')))
@@ -970,7 +1044,7 @@ def _maybe_stage_album_track(context, final_path):
             transfer_dir = batch.get('_atomic_transfer_dir')
         staged = to_staging_path(final_path, transfer_dir, staging_root)
         if not staged:
-            logger.warning("[Atomic Publish] Batch %s: %r is not under the transfer dir %r "
+            logger.warning("[Atomic Publish] Batch %s: %r is not under the music library folder %r "
                            "— publishing directly (check soulseek.transfer_path)",
                            batch_id, final_path, transfer_dir)
             return final_path
@@ -1046,7 +1120,7 @@ def _recover_moved_file_bookkeeping(context, artist_context=None, album_info=Non
     try:
         from core.library2.autolink import link_download_into_library_v2
         linked_lib2_file_id = link_download_into_library_v2(
-            context, raise_on_error=True)
+            context, raise_on_error=True, fill_known_tags=True)
         if linked_lib2_file_id is None:
             raise RuntimeError("The Library did not create a file row")
         from core.settings import config_manager
@@ -1261,6 +1335,8 @@ def _merge_upgraded_album_folder(context, artist_context, album_info, old_album_
                 )
                 continue
             try:
+                from core.library import own_writes
+                own_writes.note(src, dst)
                 shutil.move(src, dst)
             except OSError as e:
                 logger.error("[M5] Upgrade merge: could not move %s -> %s: %s", src, dst, e)
@@ -1458,6 +1534,7 @@ def _post_process_matched_download(context_key, context, file_path, runtime, met
                     f"Quarantine failed ({quarantine_error}) — leaving file in place "
                     f"for retry (not deleting): {file_path}"
                 )
+                _set_rejected_file_aside(file_path)
 
             with matched_context_lock:
                 if context_key in matched_downloads_context:
@@ -1502,6 +1579,13 @@ def _post_process_matched_download(context_key, context, file_path, runtime, met
             config_manager.get('post_processing.audio_completeness_check', False))
         _skip_audio = (not _audio_guard_enabled) or _should_skip_quarantine_check(context, 'silence')
         audio_reason = None if _skip_audio else detect_broken_audio(file_path)
+        if not _skip_audio and not audio_reason:
+            # the same opt-in look inside the file: a lossless file cut from a
+            # lossy one (core/imports/lossless_check.py). nothing checked the
+            # quality a file CLAIMED against what is in it, so a FLAC made from
+            # a 128 kbps MP3 met a lossless target and counted as an upgrade.
+            from core.imports.lossless_check import detect_lossy_transcode
+            audio_reason = detect_lossy_transcode(file_path)
         if audio_reason:
             logger.error(f"[AudioGuard] Rejected {_basename}: {audio_reason}")
             context['_silence_rejected'] = True
@@ -1529,6 +1613,7 @@ def _post_process_matched_download(context_key, context, file_path, runtime, met
                     f"Quarantine failed ({quarantine_error}) — leaving file in place "
                     f"for retry (not deleting): {file_path}"
                 )
+                _set_rejected_file_aside(file_path)
 
             with matched_context_lock:
                 matched_downloads_context.pop(context_key, None)
@@ -1657,6 +1742,7 @@ def _post_process_matched_download(context_key, context, file_path, runtime, met
                         f"Quarantine failed ({quarantine_error}) — leaving file in place "
                         f"for retry (not deleting): {file_path}"
                     )
+                    _set_rejected_file_aside(file_path)
 
                 context['_bitdepth_rejected'] = True
                 # Same wrapper stash as the audio guard above.
@@ -1850,6 +1936,7 @@ def _post_process_matched_download(context_key, context, file_path, runtime, met
                                     f"Quarantine failed ({quarantine_error}) — leaving file "
                                     f"in place for retry (not deleting): {file_path}"
                                 )
+                                _set_rejected_file_aside(file_path)
 
                             context['_acoustid_quarantined'] = True
                             context['_acoustid_failure_msg'] = verification_msg
@@ -1924,8 +2011,18 @@ def _post_process_matched_download(context_key, context, file_path, runtime, met
             if album_name:
                 logger.info(f"Moving to album folder: {album_name}")
             else:
-                logger.info("Moving to Transfer root (single track)")
+                logger.info("Moving to music library folder root (single track)")
 
+            # a different file already at that name is not replaced: this
+            # path judges nothing about the two (free_destination)
+            from core.imports.file_ops import free_destination
+            _free = free_destination(file_path, destination)
+            if str(_free) != str(destination):
+                logger.warning(
+                    "A different file is already at %s; filing this download as %s",
+                    destination, os.path.basename(str(_free)))
+                destination = type(destination)(_free)
+                filename = os.path.basename(str(_free))
             safe_move_file(file_path, destination)
             logger.info(f"Moved simple download to: {destination}")
             from core.imports.file_ops import move_companion_sidecars
@@ -2028,14 +2125,15 @@ def _post_process_matched_download(context_key, context, file_path, runtime, met
                 _first = _ti_artists[0]
                 _name = _first.get('name', '') if isinstance(_first, dict) else str(_first)
                 if _name and _name.strip().lower() not in _junk_artist_names:
-                    artist_context['name'] = _name.strip()
+                    _take_artist_identity(artist_context, _name.strip(),
+                                          _first if isinstance(_first, dict) else None)
                     logger.info(f"[Unknown Artist Guard] Resolved from track_info.artists: '{_name}'")
                     _resolved = True
 
             if not _resolved:
                 _os_artist = original_search_guard.get('artist') or original_search_guard.get('artist_name') or ''
                 if isinstance(_os_artist, str) and _os_artist.strip().lower() not in _junk_artist_names:
-                    artist_context['name'] = _os_artist.strip()
+                    _take_artist_identity(artist_context, _os_artist.strip(), None)
                     logger.info(f"[Unknown Artist Guard] Resolved from original_search_result: '{_os_artist}'")
                     _resolved = True
 
@@ -2055,7 +2153,9 @@ def _post_process_matched_download(context_key, context, file_path, runtime, met
                                     _d_first = _d_artists[0]
                                     _d_name = _d_first.get('name', '') if isinstance(_d_first, dict) else str(_d_first)
                                     if _d_name and _d_name.strip().lower() not in _junk_artist_names:
-                                        artist_context['name'] = _d_name.strip()
+                                        _take_artist_identity(
+                                            artist_context, _d_name.strip(),
+                                            _d_first if isinstance(_d_first, dict) else None)
                                         logger.info(f"[Unknown Artist Guard] Resolved from metadata API: '{_d_name}'")
                                         _resolved = True
                     except Exception as _guard_err:
@@ -2515,6 +2615,11 @@ def _post_process_matched_download(context_key, context, file_path, runtime, met
                 # Keep the staged source; optional staging cleanup owns it.
                 if _confirm_existing_file_bookkeeping(context, artist_context, album_info):
                     context['_kept_existing_library_file'] = True
+                    # ...a file in the import/staging folder is the person's
+                    # own and stays. a file SoulSync downloaded is not: it was
+                    # left in the downloads folder for good, and the next grab
+                    # of the track then found that stale copy by its name.
+                    _discard_redundant_download(file_path, config_manager)
                 return
             try:
                 from mutagen import File as MutagenFile

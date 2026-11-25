@@ -1,29 +1,27 @@
 /**
- * Library > Video Preferences (SETTINGS_PORT.md, video pass V2c): the markup
- * it replaced, the summary, autoplay and the region (read from the enrichment
- * config, saved together), and Monitor Specials (read from the video
- * downloads config, posted alone).
+ * What was Library > Video Preferences (settings-bic phase 4): autoplay and
+ * the region on Appearance, "Video pages" (read from the enrichment config,
+ * saved together), and Monitor Specials on Downloads > Behaviour, Video (read
+ * from the video downloads config, posted alone).
  */
 
 import { act, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { createSettingsStore, type SettingsStore } from '../settings-store';
-import { shape, vanilla } from './__fixtures__/shape';
-import { LibraryTab } from './library-folders';
+import { createSettingsStore } from '../settings-store';
+import { AppearanceTab } from './appearance-tab';
+import { MonitorSpecialsRow, VideoPagesCard } from './library-video-prefs';
 import { videoDownloads } from './video-downloads';
 import { videoPrefs } from './video-prefs';
 
 type Shell = Window & Record<string, unknown>;
 const shell = window as unknown as Shell;
-let store: SettingsStore;
 let calls: Array<{ url: string; method: string; body?: Record<string, unknown> }>;
 let answers: Record<string, unknown>;
 
 beforeEach(() => {
   videoPrefs.reset();
   videoDownloads.reset();
-  store = createSettingsStore({ post: () => Promise.resolve({ success: true }), delay: 0 });
   calls = [];
   answers = {
     'GET /api/video/enrichment/config': {
@@ -57,20 +55,27 @@ afterEach(() => {
 
 const el = (id: string) => document.getElementById(id) as HTMLInputElement;
 const section = () =>
-  render(<LibraryTab store={store} part="video-prefs" opened={0} active={false} />);
+  render(
+    <>
+      <VideoPagesCard />
+      <MonitorSpecialsRow />
+    </>,
+  );
 const posts = (url: string) =>
   calls.filter((c) => c.method === 'POST' && c.url === url).map((c) => c.body);
-const summary = () => document.querySelector('[data-stg-summary="library-video-prefs"]')!;
 
-describe('Video Preferences', () => {
-  it('is the markup it replaced', () => {
-    const { container } = section();
-    expect(shape(container)).toEqual(shape(vanilla('video-prefs.vanilla.html')));
+describe('Video pages and Monitor Specials', () => {
+  it('Appearance draws the video pages card, on the video side only', () => {
+    const store = createSettingsStore({ post: () => Promise.resolve({ success: true }) });
+    render(<AppearanceTab store={store} part="page" opened={0} active={false} />);
+    // settings-bic phase 5: a card of the Appearance page
+    expect(el('video-watch-region').closest('[data-stg-new="appearance"]')).not.toBeNull();
+    const card = el('video-watch-region').closest('[data-video-only]')!;
+    expect(card.textContent).toContain('Video pages');
   });
 
-  it('reads both configs the first time the Library tab is shown, and the summary', async () => {
+  it('reads both configs the first time the Library tab is shown', async () => {
     section();
-    expect(summary().textContent).toBe('Trailers & where-to-watch region');
     expect(el('video-monitor-specials').checked).toBe(true);
     act(() => {
       document.dispatchEvent(new CustomEvent('soulsync:library-settings-shown'));
@@ -78,10 +83,6 @@ describe('Video Preferences', () => {
     await waitFor(() => expect(el('video-watch-region').value).toBe('JP'));
     expect(el('video-billboard-autoplay').checked).toBe(true);
     await waitFor(() => expect(el('video-monitor-specials').checked).toBe(false));
-    // the summary goes live with the settings, as refreshLibrarySummaries did
-    act(() => store.hydrate({}));
-    expect(summary().textContent).toBe('where to watch: Japan');
-    expect(summary().classList.contains('is-live')).toBe(true);
   });
 
   it('autoplay and the region save together, with a toast', async () => {

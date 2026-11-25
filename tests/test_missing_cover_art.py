@@ -271,7 +271,8 @@ def test_embedded_art_but_no_cover_jpg_is_flagged(monkeypatch):
 
     assert result.findings_created == 1
     assert context.findings[0]['details']['sidecar_from_embedded'] is True
-    assert context.findings[0]['details']['artwork_source'] == 'embedded'
+    # #2202: the library's own cover is the first pick when it has one
+    assert context.findings[0]['details']['artwork_source'] == 'library'
 
 
 def test_files_genuinely_without_art_are_flagged(monkeypatch):
@@ -337,8 +338,11 @@ def test_cover_art_download_off_stops_the_sidecar_flag(monkeypatch):
 
 def test_an_artist_no_provider_id_reaches_is_found_by_name(monkeypatch):
     """3.6.1 searched artist photos by name. v2 asked by provider id only, so
-    an artist with no ids never got a photo offered."""
+    an artist with no ids never got a photo offered. #2169: only an artist
+    with no photo at all gets one suggested"""
     conn = _make_db(file_path='/music/Album/01.flac')
+    conn.execute("UPDATE lib2_artists SET image_url=''")
+    conn.commit()
     context = _make_context(conn)
     _patch_disk(monkeypatch, resolved=lambda raw: raw, embedded=False, sidecar=False)
     _patch_artwork(monkeypatch, album=_found(), artist=None)

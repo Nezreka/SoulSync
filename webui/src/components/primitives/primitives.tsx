@@ -168,3 +168,28 @@ export const EmptyState = forwardRef<HTMLDivElement, EmptyStateProps>(function E
     </div>
   );
 });
+
+/** a download arrow drawn as svg. the old arrow glyph U+2B73 is missing from
+ *  android's fonts and showed as an empty box on Get Show (#2184). sized to
+ *  the text around it, coloured by it. static/video/video-detail.js has the
+ *  same arrow as DL_IC */
+export function DownloadGlyph() {
+  return (
+    <svg
+      data-slot="download-glyph"
+      viewBox="0 0 24 24"
+      width="1em"
+      height="1em"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2.2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+      style={{ verticalAlign: '-0.125em' }}
+    >
+      <path d="M12 4v11M7 10.5l5 5 5-5M5 20h14" />
+    </svg>
+  );
+}

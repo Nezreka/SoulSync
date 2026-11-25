@@ -807,6 +807,21 @@ class JellyfinClient(MediaServerBase):
         logger.info(f"Triggered Jellyfin folder scan of {len(folders)} folder(s)")
         return True
 
+    def get_music_library_folders(self) -> List[Dict[str, Any]]:
+        """every music library with its folders, as jellyfin names them:
+        ``[{library, folders}]``. all of them, for the library coverage check"""
+        if not self.ensure_connection():
+            return []
+        try:
+            folders = self._make_request('/Library/VirtualFolders') or []
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("jellyfin library folders lookup failed: %s", exc)
+            return []
+        return [{"library": str(f.get('Name') or ''),
+                 "folders": [str(loc) for loc in (f.get('Locations') or []) if loc]}
+                for f in folders if isinstance(f, dict)
+                and str(f.get('CollectionType') or '').lower() == 'music']
+
     def get_music_library_locations(self) -> List[str]:
         """the folders behind the music library, as jellyfin sees them.
         the selected library when one is set, every music library otherwise"""
@@ -1735,7 +1750,8 @@ class JellyfinClient(MediaServerBase):
             # Step 2: Add tracks in batches of 100
             batch_size = 100
             total_batches = (len(track_ids) + batch_size - 1) // batch_size
-            
+            failed_batches = 0
+
             for i in range(0, len(track_ids), batch_size):
                 batch = track_ids[i:i + batch_size]
                 batch_num = (i // batch_size) + 1
@@ -1767,8 +1783,15 @@ class JellyfinClient(MediaServerBase):
                     logger.error(f"  Track IDs in batch (first 5): {valid_batch[:5]}")
                     logger.error(f"  Request URL: {add_url}")
                     logger.error(f"  Request params: Ids={add_params['Ids'][:200]}... (truncated)")
-                    # Continue with other batches even if one fails
-                    
+                    # the other batches still go in, but this is not a
+                    # success: it used to return True with a batch missing,
+                    # so the sync counted every track as placed (#2235)
+                    failed_batches += 1
+
+            if failed_batches:
+                logger.error(f"Jellyfin playlist '{name}': {failed_batches} of {total_batches} "
+                             f"batch(es) were refused, the playlist is short")
+                return False
             logger.info(f"Created large Jellyfin playlist '{name}' with {len(track_ids)} tracks in {total_batches} batches")
             return True
             
@@ -2065,6 +2088,21 @@ class JellyfinClient(MediaServerBase):
         except Exception as e:
             logger.error(f"Error reconciling Jellyfin playlist '{playlist_name}': {e}")
             return False
+
+    def read_playlist_track_ids(self, playlist_name: str, playlist_id=None) -> Optional[List[str]]:
+        """what the server playlist holds right now, for the sync's readback
+        (#2235). None when it can't be read, never a guess: [] means empty."""
+        if not self.ensure_connection():
+            return None
+        try:
+            target = self._target_playlist(playlist_name, playlist_id)
+            if target is None:
+                return None
+            entries = self._playlist_entries(target.id)
+            return None if entries is None else [tid for tid, _eid in entries]
+        except Exception as e:
+            logger.debug(f"Jellyfin playlist readback for '{playlist_name}' failed: {e}")
+            return None
 
     def get_playlist_track_ids(self, playlist_id: str) -> List[str]:
         """The playlist's current track ids (Item Ids), in current order. [] on miss."""

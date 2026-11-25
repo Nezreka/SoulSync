@@ -8,6 +8,8 @@ Reads only video.db; isolated from the music API.
 
 from __future__ import annotations
 
+from core.connect.device_access import device_playback
+
 from flask import jsonify, request
 
 from utils.logging_config import get_logger
@@ -113,6 +115,10 @@ def register_routes(bp):
         if kind not in ("movie", "show"):
             return jsonify({"error": "bad kind"}), 400
         db = get_video_db()
+        from .kids import library_title_allowed, restricted_response, video_cap
+        cap = video_cap()
+        if cap is not None and not library_title_allowed(db, kind, item_id, cap):
+            return restricted_response()
         detail = db.movie_detail(item_id) if kind == "movie" else db.show_detail(item_id)
         if not detail:
             return jsonify({"error": "not found"}), 404
@@ -240,6 +246,10 @@ def register_routes(bp):
         if kind not in ("movie", "show"):
             return jsonify({"error": "bad kind"}), 400
         db = get_video_db()
+        from .kids import library_title_allowed, restricted_response, video_cap
+        cap = video_cap()
+        if cap is not None and not library_title_allowed(db, kind, item_id, cap):
+            return restricted_response()
         detail = db.movie_detail(item_id) if kind == "movie" else db.show_detail(item_id)
         if not detail:
             return jsonify({"error": "not found"}), 404
@@ -248,10 +258,10 @@ def register_routes(bp):
         return jsonify({"success": True, "history": rows})
 
     @bp.route("/detail/show/<int:show_id>", methods=["GET"])
+    @device_playback
     def video_show_detail(show_id):
         from . import get_video_db
-        from .kids import restricted_response, video_cap
-        from core.content_filter import title_allowed
+        from .kids import rating_allowed, restricted_response, video_cap
         from core.video.watch_scope import current_watcher
         watcher = current_watcher()
         data = get_video_db().show_detail(show_id, watcher=watcher.rows)
@@ -262,15 +272,15 @@ def register_routes(bp):
         data["can_mark_watched"] = watcher.can_mark
         # kids profiles: over the cap (or unrated) is a hard no
         cap = video_cap()
-        if cap is not None and not title_allowed(data.get("content_rating"), cap):
-            return restricted_response()
+        if cap is not None and not rating_allowed(cap, "show", data.get("content_rating")):
+            return restricted_response("show")
         return jsonify(data)
 
     @bp.route("/detail/movie/<int:movie_id>", methods=["GET"])
+    @device_playback
     def video_movie_detail(movie_id):
         from . import get_video_db
-        from .kids import restricted_response, video_cap
-        from core.content_filter import title_allowed
+        from .kids import rating_allowed, restricted_response, video_cap
         from core.video.watch_scope import current_watcher
         watcher = current_watcher()
         data = get_video_db().movie_detail(movie_id, watcher=watcher.rows)
@@ -280,8 +290,8 @@ def register_routes(bp):
         # a profile with no watch state of its own gets no watched toggle (#1941)
         data["can_mark_watched"] = watcher.can_mark
         cap = video_cap()
-        if cap is not None and not title_allowed(data.get("content_rating"), cap):
-            return restricted_response()
+        if cap is not None and not rating_allowed(cap, "movie", data.get("content_rating")):
+            return restricted_response("movie")
         return jsonify(data)
 
     @bp.route("/detail/<kind>/<int:item_id>/freshen", methods=["GET", "POST"])
@@ -390,11 +400,10 @@ def register_routes(bp):
             return jsonify({"error": "not found"}), 404
         # a redirect points at the library detail, which does its own check
         if not d.get("redirect"):
-            from .kids import restricted_response, video_cap
-            from core.content_filter import title_allowed
+            from .kids import rating_allowed, restricted_response, video_cap
             cap = video_cap()
-            if cap is not None and not title_allowed(d.get("content_rating"), cap):
-                return restricted_response()
+            if cap is not None and not rating_allowed(cap, kind, d.get("content_rating")):
+                return restricted_response(kind)
         return jsonify(d)
 
     @bp.route("/tmdb/show/<int:tv_id>/season/<int:season_number>", methods=["GET"])
@@ -416,6 +425,7 @@ def register_routes(bp):
         return jsonify(d)
 
     @bp.route("/episode/<int:tmdb_id>/<int:season>/<int:episode>", methods=["GET"])
+    @device_playback
     def video_episode_extra(tmdb_id, season, episode):
         """Episode expand: guest stars + bigger still (by the SHOW's tmdb id)."""
         from . import get_video_db
@@ -434,6 +444,7 @@ def register_routes(bp):
         return jsonify(d)
 
     @bp.route("/person/<int:tmdb_id>", methods=["GET"])
+    @device_playback
     def video_person_detail(tmdb_id):
         """In-app person page: bio + filmography (each credit annotated owned/not)."""
         try:
@@ -454,6 +465,7 @@ def register_routes(bp):
         return jsonify(d)
 
     @bp.route("/detail/<kind>/<int:item_id>/extras", methods=["GET"])
+    @device_playback
     def video_detail_extras(kind, item_id):
         """Live TMDB extras (trailer / where-to-watch / similar) for the detail page."""
         if kind not in ("movie", "show"):

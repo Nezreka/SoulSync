@@ -68,6 +68,49 @@ def _stamp_release_types(cursor: Any, album_id: Any, release_group_id: Any, rele
     stamp(cursor, album_id, release_group_id, kinds)
 
 
+def _release_status_lookup(conn: Any, artist: Any, artist_id: int, profile_id: int,
+                           source: Any, provider_result: Any,
+                           source_artist_ids: Dict[str, Any]) -> tuple:
+    """#2175: the MusicBrainz statuses this artist lets through, and each
+    release group's statuses when they keep anything out. Only a
+    MusicBrainz catalogue has them: any other source gets (allowed, None)
+    and nothing is kept out by status."""
+    from core.release_statuses import fetch_group_statuses, is_restrictive
+
+    allowed = _artist_content_filters(conn, artist_id, profile_id).get("release_statuses")
+    if source != "musicbrainz" or not is_restrictive(allowed):
+        return allowed, None
+    keys = artist.keys() if hasattr(artist, "keys") else ()
+    mbid = (getattr(provider_result, "provider_entity_id", None)
+            or source_artist_ids.get("musicbrainz")
+            or (artist["musicbrainz_id"] if "musicbrainz_id" in keys else None))
+    if not mbid:
+        return allowed, None
+    return allowed, fetch_group_statuses(str(mbid))
+
+
+def _group_statuses_for(group_statuses: Any, release_group_id: Any) -> Any:
+    """A release group's statuses from the lookup, None when not known."""
+    if not group_statuses or not release_group_id:
+        return None
+    return group_statuses.get(str(release_group_id).strip().lower())
+
+
+def _statuses_allowed(statuses: Any, allowed: Any) -> bool:
+    from core.release_statuses import statuses_pass
+    return statuses_pass(statuses, allowed)
+
+
+def _stamp_release_statuses(cursor: Any, album_id: Any, release_group_id: Any,
+                            statuses: Any) -> None:
+    """Keep what MusicBrainz said, so the Discography Refresh findings can
+    go by it without asking again (#2175)."""
+    if statuses is None:
+        return
+    from core.release_statuses import stamp
+    stamp(cursor, album_id, release_group_id, statuses)
+
+
 def _normalize_type(raw: Any) -> str:
     value = str(raw or "").strip().lower()
     if value in {"album", "single", "ep", "compilation", "live"}:
@@ -345,8 +388,20 @@ def _artist_content_filters(conn, artist_id: int, profile_id: int = 1) -> Dict[s
         live_tracks = settings.get("include_live_tracks")
         filters["include_live_tracks"] = (
             filters["include_live"] if live_tracks is None else bool(live_tracks))
+        # #2175: the MusicBrainz statuses this artist lets through
+        filters["release_statuses"] = tuple(
+            settings.get("effective_release_statuses") or _library_release_statuses())
         return filters
-    return dict(_CONTENT_FILTER_DEFAULTS)
+    return {**_CONTENT_FILTER_DEFAULTS, "release_statuses": _library_release_statuses()}
+
+
+def _library_release_statuses() -> tuple:
+    from core.release_statuses import library_statuses
+    try:
+        from core.settings import config_manager
+    except Exception:  # noqa: BLE001 - no config reads as every status
+        config_manager = None
+    return library_statuses(config_manager)
 
 
 def _full_release_date_key(release_date: Any) -> Optional[tuple[int, int, int]]:
@@ -377,13 +432,44 @@ def _expected_count(row: Dict[str, Any]) -> Optional[int]:
         return None
 
 
+def _row_year(row: Dict[str, Any]) -> Optional[str]:
+    value = str(row.get("release_date") or row.get("year") or "")[:4]
+    return value if value.isdigit() and value != "0000" else None
+
+
+def _rows_are_several_releases(rows: List[Dict[str, Any]], bucket: str) -> bool:
+    """the library already holds this name under more than one year"""
+    years = {_row_year(row) for row in rows
+             if row.get("origin") == "library" and _bucket(row["album_type"]) == bucket}
+    return len(years - {None}) > 1
+
+
+def _names_listed_several_times(releases: Any) -> set:
+    """(title key, bucket) of every name the provider lists under more than
+    one year: weezer's six "weezer"s."""
+    years: Dict[tuple, set] = {}
+    for release in releases:
+        year = _row_year({"release_date": release.release_date, "year": release.year})
+        if year:
+            years.setdefault((release_title_key(release.title),
+                              _bucket(_normalize_type(release.album_type))), set()).add(year)
+    return {key for key, found in years.items() if len(found) > 1}
+
+
 def _match_existing(index: Dict[str, List[Dict[str, Any]]], *, title: str,
                     album_type: str, provider_id: str, source: Optional[str],
                     release_date: Any = None,
                     track_count: Any = None,
-                    release_group_id: Optional[str] = None
+                    release_group_id: Optional[str] = None,
+                    year: Any = None,
+                    several: bool = False,
                     ) -> Optional[Dict[str, Any]]:
-    """Find the library row a provider release corresponds to, if any."""
+    """Find the library row a provider release corresponds to, if any.
+
+    ``several``: this name is several releases of the artist (weezer's
+    "weezer" of 1994, 2001, 2008, 2016; #2110). The name alone then says
+    nothing: the row of the same year takes it, one with no year yet may, and
+    a release of a year nobody holds gets its own row."""
     # 1) Provider-id match beats everything (exact release identity).
     #    A MusicBrainz release GROUP is matched against the column that holds
     #    group ids — not against external_ids, which is the release namespace.
@@ -409,6 +495,16 @@ def _match_existing(index: Dict[str, List[Dict[str, Any]]], *, title: str,
     #    spellings of the same title still land on the library row.
     candidates = index.get(release_title_key(title)) or []
     want = _bucket(album_type)
+    if several or _rows_are_several_releases(candidates, want):
+        wanted_year = _row_year({"release_date": release_date, "year": year})
+        pool = [row for row in candidates if _bucket(row["album_type"]) == want]
+        for row in pool:
+            if wanted_year and _row_year(row) == wanted_year:
+                return row
+        for row in pool:
+            if _row_year(row) is None:
+                return row
+        return None
     for row in candidates:
         if _bucket(row["album_type"]) == want:
             return row
@@ -528,7 +624,7 @@ def _expand_artist_discography(
     with closing(database._get_connection()) as conn:
         artist = conn.execute(
             "SELECT id, name, spotify_id, external_ids, quality_profile_id, monitored, monitor_new_items, "
-            "discography_synced_at FROM lib2_artists WHERE id=?",
+            "discography_synced_at, musicbrainz_id FROM lib2_artists WHERE id=?",
             (artist_id,),
         ).fetchone()
         if not artist:
@@ -578,6 +674,11 @@ def _expand_artist_discography(
         stats["source"] = source
         stats["total"] = len(provider_result.releases)
         stats["is_complete"] = provider_result.is_complete
+
+        # #2175: asked before any write, so no transaction waits on MusicBrainz
+        allowed_statuses, group_statuses = _release_status_lookup(
+            conn, artist, artist_id, filter_profile_id, source, provider_result,
+            source_artist_ids)
 
         from core.library2.provider_snapshots import record_provider_snapshot
         snapshot_write = record_provider_snapshot(
@@ -631,6 +732,7 @@ def _expand_artist_discography(
         seen_ids: set = set()
         cursor = conn.cursor()
 
+        several_names = _names_listed_several_times(provider_result.releases)
         for release in provider_result.releases:
             title = release.title
             provider_id = release.provider_id
@@ -664,6 +766,10 @@ def _expand_artist_discography(
             if (auto_monitor_release and content_filters is not None
                     and not _release_type_included(track_count, content_filters)):
                 auto_monitor_release = False
+            release_statuses = _group_statuses_for(group_statuses, release_group_id)
+            if (auto_monitor_release and content_filters is not None
+                    and not _statuses_allowed(release_statuses, allowed_statuses)):
+                auto_monitor_release = False
             if (
                 auto_monitor_release
                 and content_filters is not None
@@ -683,9 +789,14 @@ def _expand_artist_discography(
                                        provider_id=provider_id, source=source,
                                        release_group_id=release_group_id,
                                        release_date=release_date,
-                                       track_count=track_count)
+                                       track_count=track_count, year=year,
+                                       several=(release_title_key(title),
+                                                _bucket(album_type)) in several_names)
             if existing:
                 seen_ids.add(existing["id"])
+                # the next release of this name must see whose year this row is
+                existing["release_date"] = existing.get("release_date") or release_date
+                existing["year"] = existing.get("year") or year
                 merged_external_ids, id_conflict = _merge_external_id_details(
                     existing["external_ids"], source,
                     "" if id_is_group else provider_id)
@@ -695,17 +806,23 @@ def _expand_artist_discography(
                            image_url = COALESCE(image_url, ?),
                            release_date = COALESCE(release_date, ?),
                            year = COALESCE(year, ?),
-                           expected_track_count = MAX(
-                               COALESCE(expected_track_count, 0),
-                               COALESCE(?, 0)
-                           ),
+                           expected_track_count = CASE
+                               WHEN COALESCE(canonical_locked, 0) = 1
+                                    OR ?
+                               THEN expected_track_count
+                               ELSE MAX(
+                                   COALESCE(expected_track_count, 0),
+                                   COALESCE(?, 0)
+                               )
+                           END,
                            external_ids = ?,
                            musicbrainz_release_group_id = COALESCE(
                                NULLIF(musicbrainz_release_group_id, ''), ?),
                            updated_at = CURRENT_TIMESTAMP
                        WHERE id = ?""",
-                    (spotify_id, image_url, release_date, year, track_count,
-                     merged_external_ids, release_group_id, existing["id"]),
+                    (spotify_id, image_url, release_date, year,
+                    bool(id_conflict), track_count,
+                    merged_external_ids, release_group_id, existing["id"]),
                 )
                 existing["external_ids"] = merged_external_ids
                 if release_group_id and not existing["musicbrainz_release_group_id"]:
@@ -713,6 +830,8 @@ def _expand_artist_discography(
                 if release_group_id and str(
                         existing["musicbrainz_release_group_id"]).lower() == str(release_group_id).lower():
                     _stamp_release_types(cursor, existing["id"], release_group_id, release)
+                    _stamp_release_statuses(cursor, existing["id"], release_group_id,
+                                            release_statuses)
                 if id_conflict:
                     from core.library2.editions import record_alternative_edition
                     record_alternative_edition(
@@ -749,6 +868,7 @@ def _expand_artist_discography(
             confirm_release_kind(cursor, new_id, album_type)
             if release_group_id:
                 _stamp_release_types(cursor, new_id, release_group_id, release)
+                _stamp_release_statuses(cursor, new_id, release_group_id, release_statuses)
             seen_ids.add(new_id)
             if auto_monitor_release:
                 if not defer_auto_monitor:

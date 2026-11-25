@@ -79,9 +79,16 @@ def register_routes(bp):
                 ))
             from core.video.watch_scope import current_watcher
 
-            from .kids import video_cap
+            from .kids import kind_visible, rating_capped, video_cap
             cap = video_cap()
-            if cap is not None:
+            lib_kind = request.args.get("kind", "movies")
+            if not kind_visible(cap, lib_kind):
+                # a kind this profile can't see at all (a tv-only profile on
+                # the Movies tab): an honest empty page, no walk
+                return jsonify({"items": [], "total_size_bytes": 0,
+                                "pagination": {"page": 1, "total_pages": 1, "total_count": 0,
+                                               "has_next": False, "has_prev": False}})
+            if rating_capped(cap, lib_kind):
                 return jsonify(_capped_library(get_video_db(), cap, resolve_video_server()))
             return jsonify(get_video_db().query_library(
                 request.args.get("kind", "movies"),

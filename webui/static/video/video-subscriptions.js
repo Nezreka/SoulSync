@@ -49,6 +49,17 @@
             if (e.target.closest('[data-vsub-pick]')) { el.querySelector('[data-vsub-file]').click(); return; }
             if (e.target.closest('[data-vsub-import]')) { startImport(); return; }
         });
+        // an import follows every channel in the file, which wishes their
+        // uploads: a profile with downloads off is told so instead
+        var vr = window.VideoRequests;
+        var canGet = (vr && typeof vr.canGet === 'function') ? vr.canGet('youtube')
+            : (typeof canDownload !== 'function' || canDownload());
+        if (!canGet) {
+            el.querySelector('[data-vsub-body]').innerHTML =
+                '<p class="vsub-sub">Downloads are off for this profile, so it can\'t import subscriptions. ' +
+                'Ask an admin to turn downloads on, or to import the file for you.</p>';
+            return;
+        }
         renderDrop();
     }
 

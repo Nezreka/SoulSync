@@ -23,6 +23,14 @@
         Plex: '/static/img/brands/plex.png',
         Jellyfin: '/static/img/brands/jellyfin.png',
     };
+    // the download arrow, drawn: the arrow glyph U+2B73 is missing from android's
+    // fonts and showed as an empty box on Get Show (#2184). sized to the text
+    // around it and coloured by it. DownloadGlyph in components/primitives is
+    // the react twin
+    var DL_IC = '<svg class="vd-dl-ic" viewBox="0 0 24 24" width="1em" height="1em" fill="none" ' +
+        'stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" ' +
+        'aria-hidden="true" focusable="false" style="vertical-align:-0.125em">' +
+        '<path d="M12 4v11M7 10.5l5 5 5-5M5 20h14"/></svg>';
     var VIEW_KEY = 'soulsync_vd_season_view';
     var VIEWS = [
         { id: 'rail', label: 'Rail', ic: '▦' },
@@ -45,6 +53,15 @@
     var currentKind = 'show';
     var currentSource = 'library';  // 'library' (video.db) or 'tmdb' (live preview)
     var artAttemptedFor = null;     // lazy art refresh runs once per detail view
+
+    // may this profile get this kind right away (#2166)? movies, shows and
+    // youtube each have their own mode (VideoRequests, from the server's
+    // rules); until that's loaded, the old one switch answers
+    function vdCanGet(kind) {
+        var vr = window.VideoRequests;
+        if (vr && typeof vr.canGet === 'function') return vr.canGet(kind);
+        return (typeof canDownload !== 'function') || canDownload();
+    }
 
     var TMDB_URL = '/api/video/tmdb/';
     function detailURL(kind, id, source) {
@@ -892,11 +909,14 @@
         if (d.wikidata_url) out += moreLink('Official site', d.wikidata_url);
         return out;
     }
+    // #2177: what SoulSync hunts, like sonarr: an episode in a season you
+    // unmonitored is not "missing" (a tmdb preview has no flag: all wanted)
     function missingAiredCount(d) {
         var today = new Date().toISOString().slice(0, 10), n = 0;
         (d.seasons || []).forEach(function (s) {
             if (s.season_number === 0) return;
             (s.episodes || []).forEach(function (ep) {
+                if (ep.monitored === false) return;
                 if (!ep.owned && (!ep.air_date || ep.air_date <= today)) n++;
             });
         });
@@ -952,7 +972,11 @@
         // Requests (arr-parity P4): a profile WITHOUT download rights has no
         // acquisition path at all — give it the ask-an-admin button instead of
         // the Get/Watchlist controls (those APIs are gated for this profile).
-        var _canDl = (typeof canDownload !== 'function') || canDownload();
+        // per kind (#2166): movies and shows each have their own "download
+        // right away / ask first / can't request"; VideoRequests knows which
+        var _vr = window.VideoRequests;
+        var _canDl = vdCanGet(d.kind);
+        var _mayAsk = !(_vr && _vr.mayAsk) || _vr.mayAsk(d.kind);
         // an owned movie has nothing left to ask for; a show can still be
         // missing seasons. "Requested" once this profile has one waiting.
         var _ownedMovie = d.kind === 'movie' && ((d.source !== 'tmdb') || !!d.owned);
@@ -989,7 +1013,7 @@
             primary = '<a class="vd-play-btn vd-action-main" href="' + esc(href) +
                 '" target="_blank" rel="noopener" title="' + tip + '">' + inner + '</a>';
         }
-        if (!_canDl && (d.kind === 'movie' || d.kind === 'show') && d.tmdb_id && !_ownedMovie) {
+        if (!_canDl && _mayAsk && (d.kind === 'movie' || d.kind === 'show') && d.tmdb_id && !_ownedMovie) {
             // what the button says comes from the title's status (#2160,
             // loadTitleStatus): your own ask, or already on its way, is a
             // disabled state; someone else's ask can be joined
@@ -1059,12 +1083,19 @@
         if (d.kind === 'show' && window.VideoGet && _canDl) {
             var showGetLabel = haveShow ? 'Get Missing' : 'Get Show';
             var getShow = '<button class="discog-download-btn discog-btn-compact vd-action-main" type="button" data-vd-act="missing">' +
-                '<span class="discog-btn-icon">⭳</span><span class="discog-btn-text">' + showGetLabel + '</span>' +
+                '<span class="discog-btn-icon">' + DL_IC + '</span><span class="discog-btn-text">' + showGetLabel + '</span>' +
                 '<span class="discog-btn-shimmer"></span></button>';
             if (!primary && (!haveShow || missingEps > 0)) primary = getShow;
-            else getMore += moreItem('missing', '⭳', haveShow
+            else getMore += moreItem('missing', DL_IC, haveShow
                 ? (missingEps ? 'Get ' + missingEps + ' missing episode' + (missingEps === 1 ? '' : 's') + '…' : 'Get episodes…')
                 : 'Get show…');
+        }
+        // the release picker for a show (#2233): whole series, a season or one
+        // episode, picked inside the modal. the same modal a movie's opens
+        if (d.kind === 'show' && d.source !== 'youtube' && _canDl &&
+                window.VideoDownload && window.VideoDownload.manualSearch) {
+            getMore += moreItem('manualsearch', '⌕', 'Manual search…',
+                'Search every source yourself for the whole series, a season or one episode, and pick the release');
         }
         if (d.trailer && d.trailer.key) {
             companions = '<button class="vd-trailer-btn" type="button" data-vd-act="trailer">' +
@@ -1891,7 +1922,9 @@
         var live = (Number(c.queued) || 0) + (Number(c.downloading) || 0);
         var failed = Number(c.failed) || 0;
         var ignored = Number(c.ignored) || 0;
-        var outstanding = total > 0 ? Math.max(0, total - owned) : 0;
+        // #2177: ignored (aired, unmonitored) is in total but nothing hunts
+        // it, so it is its own chip, not part of the "N missing" headline
+        var outstanding = total > 0 ? Math.max(0, total - owned - ignored) : 0;
         if (!failed && !live && !ignored && !outstanding) return '';
         var shown = _ACQ_STATES.filter(function (s) {
             if (s[0] === 'owned' && !owned) return false;
@@ -1919,6 +1952,8 @@
                     '<span class="vd-acq-k">' + esc(s[1]) + '</span></span>';
             }).join('') + '</div>' + bar +
             (live ? '<div class="vd-acq-note">Queued and downloading are part of wanted, not extra to it.</div>' : '') +
+            (ignored && outstanding ? '<div class="vd-acq-note">' + ignored + ' more ' + (ignored === 1 ? 'isn’t' : 'aren’t') +
+                ' monitored, so nothing is looking for ' + (ignored === 1 ? 'it' : 'them') + '.</div>' : '') +
             '</div>';
     }
     function loadAcquisition(kind, id) {
@@ -1933,6 +1968,104 @@
                 section.hidden = !html;
             })
             .catch(function () { section.hidden = true; });
+    }
+
+    // ── Shelf Life (admins only) ───────────────────────────────────────────────
+    // The score the Shelf Life job gave this title, its top reasons, when it
+    // was scored, and Keep. Members never fetch it (the route is admin-only
+    // too). The page reads the stored result; it never scores.
+    function _isAdmin() {
+        try {
+            if (typeof getCurrentProfileContext !== 'function') return false;
+            var ctx = getCurrentProfileContext();
+            return !!(ctx && ctx.isAdmin);
+        } catch (e) { return false; }
+    }
+    function shelfAgo(stamp) {
+        if (!stamp) return '';
+        var t = Date.parse(String(stamp).replace(' ', 'T') + (/[zZ]|[+-]\d\d:?\d\d$/.test(stamp) ? '' : 'Z'));
+        if (isNaN(t)) return '';
+        var hr = Math.max(0, Math.round((Date.now() - t) / 3600000));
+        if (hr < 1) return 'scored just now';
+        if (hr < 48) return 'scored ' + hr + ' hour' + (hr === 1 ? '' : 's') + ' ago';
+        return 'scored ' + Math.round(hr / 24) + ' days ago';
+    }
+    // the same shield the library manager's badge draws
+    function shelfShield() {
+        return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" aria-hidden="true">' +
+            '<path d="M12 3l7 3v5c0 4.5-3 8.2-7 10-4-1.8-7-5.5-7-10V6z" stroke-linejoin="round"/></svg>';
+    }
+    function shelfPanelHtml(v) {
+        var head, note = '';
+        if (v.keep) {
+            head = '<span class="vd-shelf-chip vd-shelf-chip--gate">' + shelfShield() + ' Kept</span>';
+            note = 'Never flagged while it is kept.';
+        } else if (!v.scored) {
+            head = '<span class="vd-shelf-chip">Not scored yet</span>';
+            note = 'It gets a score on the next Shelf Life run.';
+        } else if (v.gate) {
+            head = '<span class="vd-shelf-chip vd-shelf-chip--gate">' + shelfShield() + ' Protected</span>';
+            note = v.gate_text || '';
+        } else {
+            var low = v.score < v.threshold;
+            var band = low ? 'low' : (v.score < v.threshold + 15 ? 'mid' : 'ok');
+            head = '<span class="vd-shelf-chip vd-shelf-chip--' + band + '">' + esc(v.score) + '</span>' +
+                (low ? '<span class="vd-shelf-flag">Flagged for cleanup (under ' + esc(v.threshold) + ')</span>' : '');
+        }
+        var reasons = (!v.keep && v.scored && !v.gate) ? (v.reasons || []) : [];
+        var when = v.scored ? shelfAgo(v.scored_at) : '';
+        var btn = v.can_keep
+            ? '<button type="button" class="vd-shelf-keep' + (v.keep ? ' vd-shelf-keep--on' : '') + '" ' +
+              'data-vd-shelf-keep="' + (v.keep ? '0' : '1') + '" aria-pressed="' + (v.keep ? 'true' : 'false') + '" title="' +
+              (v.keep ? 'Stop keeping it: the next run can flag it again' : 'Keep it: Shelf Life never flags it') + '">' +
+              (v.keep ? 'Kept' : 'Keep') + '</button>'
+            : '';
+        return '<div class="vd-shelf-head"><span class="vd-shelf-label">Shelf Life</span>' + head +
+            (when ? '<span class="vd-shelf-when">' + esc(when) + '</span>' : '') + btn + '</div>' +
+            (note ? '<div class="vd-shelf-note">' + esc(note) + '</div>' : '') +
+            (reasons.length ? '<ul class="vd-shelf-reasons">' + reasons.map(function (r) {
+                return '<li>' + esc(r.text) + '</li>';
+            }).join('') + '</ul>' : '');
+    }
+    function renderShelf(v) {
+        var host = q('[data-vd-shelf]');
+        if (!host) return;
+        if (!v) { host.hidden = true; host.innerHTML = ''; return; }
+        host.innerHTML = shelfPanelHtml(v);
+        host.setAttribute('data-vd-shelf-for', v.kind + ':' + v.item_id);
+        host.hidden = false;
+    }
+    function loadShelfLife(kind, id) {
+        renderShelf(null);
+        if (!_isAdmin()) return;
+        fetch('/api/video/repair/shelf-life/' + kind + '/' + encodeURIComponent(id),
+              { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (v) {
+                // a late answer for a title the page has since left is dropped
+                if (String(currentId) !== String(id) || currentKind !== kind) return;
+                // the job switched off shows nothing: a stale score would read as live
+                renderShelf(v && v.success && v.enabled ? v : null);
+            })
+            .catch(function () { renderShelf(null); });
+    }
+    function toggleShelfKeep(btn) {
+        var host = btn.closest('[data-vd-shelf]');
+        var key = host && (host.getAttribute('data-vd-shelf-for') || '').split(':');
+        if (!key || key.length !== 2) return;
+        var keep = btn.getAttribute('data-vd-shelf-keep') === '1';
+        btn.disabled = true;
+        fetch('/api/video/repair/shelf-life/' + key[0] + '/' + encodeURIComponent(key[1]) + '/keep', {
+            method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify({ keep: keep })
+        })
+            .then(function (r) { return r.json().catch(function () { return null; }); })
+            .then(function (v) {
+                if (!v || !v.success) { btn.disabled = false; toast((v && v.error) || 'Couldn\u2019t save Keep', 'error'); return; }
+                if (String(currentId) === String(key[1]) && currentKind === key[0]) renderShelf(v);
+                toast(keep ? 'Kept: Shelf Life will never flag it' : 'No longer kept', 'success');
+            })
+            .catch(function () { btn.disabled = false; toast('Couldn\u2019t reach the server', 'error'); });
     }
 
     function loadTitleHistory(kind, id) {
@@ -1972,7 +2105,7 @@
          '[data-vd-next-ep]', '[data-vd-crew-line]', '[data-vd-season-overview]',
          '[data-vd-facts-section]', '[data-vd-videos-section]', '[data-vd-gallery-section]',
          '[data-vd-review-section]', '[data-vd-cast-all]', '[data-vd-history-section]', '[data-vd-health]',
-         '[data-vd-acq-section]', '[data-vd-essentials]'].forEach(function (s) {
+         '[data-vd-acq-section]', '[data-vd-essentials]', '[data-vd-shelf]'].forEach(function (s) {
             var n = q(s); if (n) n.hidden = true;
         });
         // Clear any YouTube-channel playlists from the show DOM so they don't leak
@@ -2021,7 +2154,7 @@
                     tmdbId: data.tmdb_id || (data.source === 'tmdb' ? data.id : null),
                     source: lib ? 'library' : 'tmdb' },
             season: season, missingOnly: missingOnly, nextUp: data.next_up || null,
-            canDownload: (typeof canDownload !== 'function') || canDownload(),
+            canDownload: vdCanGet('show'),
             canGrab: !!window.VideoGrab,
             downloads: Object.assign({}, _dlActive), finished: Object.assign({}, _dlDone)
         };
@@ -2039,24 +2172,33 @@
     }
     // the name is from when this drew two tabs; it now turns the one-page
     // library parts on for a title you own and off for a preview or a channel
+    // a followed youtube channel is a library too: its files, what needs
+    // attention, deletes. it's built from the download ledger, not
+    // media_files (src/features/video-library/channel-library.tsx)
+    function channelLibrary() {
+        return !!(data && data.source === 'youtube' && data.kind === 'channel' && data.id);
+    }
     function renderTabs() {
         var body = q('.vd-body'), panel = q('[data-vd-library-panel]');
         if (!body || !panel) return;
         var one = onePage();
+        var chan = !one && channelLibrary();
         body.classList.toggle('vd-body--one', one);
-        panel.hidden = !one;
-        if (one) mountLibraryTab();
+        panel.hidden = !(one || chan);
+        if (one || chan) mountLibraryTab();
     }
     function mountLibraryTab() {
         var panel = q('[data-vd-library-panel]');
-        if (!panel || !onePage()) return;
+        var chan = !onePage() && channelLibrary();
+        if (!panel || !(onePage() || chan)) return;
         if (!window.VideoLibraryTab) {
             // main.tsx is a deferred module: on a cold deep link the page can get
             // here first. it announces itself when it lands.
             document.addEventListener('soulsync:video-library-tab-ready', mountLibraryTab, { once: true });
             return;
         }
-        window.VideoLibraryTab.mount(panel, { kind: data.kind, id: data.id,
+        window.VideoLibraryTab.mount(panel, { kind: chan ? 'channel' : data.kind, id: data.id,
+            title: data.title,
             slots: { hero: q('[data-vd-libline]'), foot: q('[data-vd-libfoot]') } });
         _libMounted = panel;
     }
@@ -2791,7 +2933,9 @@
         // A profile without download rights can't grab or wishlist — it can
         // ASK for the video instead (the request flow). Owned videos keep
         // their treatment: nothing left to ask for.
-        var noDl = (typeof canDownload === 'function') && !canDownload() && window.VideoRequests;
+        // youtube's own mode (#2166); the old switch until it's loaded
+        var noDl = !(window.VideoRequests && window.VideoRequests.canGet ? window.VideoRequests.canGet('youtube')
+            : ((typeof canDownload !== 'function') || canDownload())) && window.VideoRequests;
         var ch = (data && data._channel) || {};
         var reqBtn = (!ep.owned && noDl)
             ? '<div class="vd-ep-get">' + window.VideoRequests.cardButton({
@@ -2815,13 +2959,13 @@
                             '<span class="vd-ep-dl" data-vd-ep-dl></span>' +
                             '<div class="vd-ep-badge">Downloaded</div>' +
                             '<button class="vd-ep-getbtn vd-ep-grab" type="button" data-vd-yt-grab="' + esc(ep.youtube_id) +
-                                '" title="Download again (e.g. after deleting it on the server)" aria-label="Download again">⭳</button>' +
+                                '" title="Download again (e.g. after deleting it on the server)" aria-label="Download again">' + DL_IC + '</button>' +
                         '</div>'
                       : '<div class="vd-ep-get" data-vd-ep-get="' + esc(ep.youtube_id) + '">' +
                             '<span class="vd-ep-dl" data-vd-ep-dl></span>' +
                             (reqBtn ||
                             '<button class="vd-ep-getbtn vd-ep-grab" type="button" data-vd-yt-grab="' + esc(ep.youtube_id) +
-                                '" title="Download this video now" aria-label="Download video">⭳</button>' +
+                                '" title="Download this video now" aria-label="Download video">' + DL_IC + '</button>' +
                             '<button class="vd-ep-getbtn vd-ep-wish' + (wished ? ' vd-ep-wish--done' : '') +
                                 '" type="button" data-vd-yt-wish="' + esc(ep.youtube_id) +
                                 '" title="' + (wished ? 'Remove from wishlist' : 'Add this video to the wishlist') +
@@ -2859,7 +3003,9 @@
             : '';
         var state = ep.owned ? '<span class="vd-ytc-state vd-ytc-state--owned">✓ Downloaded</span>'
             : (ep.wished ? '<span class="vd-ytc-state vd-ytc-state--wished">In wishlist</span>' : '');
-        var noDl = (typeof canDownload === 'function') && !canDownload() && window.VideoRequests;
+        // youtube's own mode (#2166); the old switch until it's loaded
+        var noDl = !(window.VideoRequests && window.VideoRequests.canGet ? window.VideoRequests.canGet('youtube')
+            : ((typeof canDownload !== 'function') || canDownload())) && window.VideoRequests;
         var ch = (data && data._channel) || {};
         var actions;
         if (!ep.owned && noDl) {
@@ -2868,7 +3014,7 @@
         } else {
             actions = (!ep.owned
                     ? '<button class="vd-ep-getbtn vd-ep-grab vd-ytc-get" type="button" data-vd-yt-grab="' + esc(id) +
-                        '" title="Download this video now" aria-label="Download video">⭳</button>'
+                        '" title="Download this video now" aria-label="Download video">' + DL_IC + '</button>'
                     : '') +
                 '<span class="vd-pop">' +
                 '<button class="vd-ep-getbtn vd-pop-btn" type="button" data-vd-pop aria-haspopup="menu" aria-expanded="false" ' +
@@ -2876,7 +3022,7 @@
                 '<div class="vd-pop-menu" data-vd-pop-menu role="menu" hidden>' +
                 (ep.owned
                     ? '<button class="vd-manage-btn vd-ep-grab" type="button" role="menuitem" data-vd-yt-grab="' + esc(id) +
-                        '" title="Download again (e.g. after deleting it on the server)">⭳ Download again</button>'
+                        '" title="Download again (e.g. after deleting it on the server)">' + DL_IC + ' Download again</button>'
                     : '<button class="vd-manage-btn vd-ytc-wish' + (ep.wished ? ' watching' : '') + '" type="button" role="menuitem" ' +
                         'data-vd-yt-wish="' + esc(id) + '"><span class="watchlist-icon">' + (ep.wished ? '✓' : '＋') + '</span> ' +
                         '<span class="watchlist-text">' + (ep.wished ? 'In Wishlist' : 'Wishlist') + '</span></button>') +
@@ -3007,14 +3153,16 @@
         if (ytFilter.q || ytFilter.state !== 'all' || ytFilter.duration !== 'all') seasonMissing = [];   // a filtered view isn't "the season"
         // A profile without download rights gets no acquisition buttons here either —
         // the server 403s the grab/wishlist endpoints for it (same as the per-row buttons).
-        var canDl = (typeof canDownload !== 'function') || canDownload();
+        // youtube's own mode (#2166); the old switch until it's loaded
+        var canDl = (window.VideoRequests && window.VideoRequests.canGet ? window.VideoRequests.canGet('youtube')
+            : ((typeof canDownload !== 'function') || canDownload()));
         if (!seasonMissing.length || !canDl) return '';
         var scope = grabScope();
         return '<div class="vd-season-actions">' +
             '<span class="vd-season-actions-count">' + seasonMissing.length + ' missing</span>' +
             '<button class="discog-download-btn discog-btn-compact" type="button" data-vd-season-grab ' +
                 'title="Download every missing video ' + scope.what + '">' +
-                '<span class="discog-btn-icon">⭳</span><span class="discog-btn-text">Grab ' + scope.word + '</span>' +
+                '<span class="discog-btn-icon">' + DL_IC + '</span><span class="discog-btn-text">Grab ' + scope.word + '</span>' +
                 '<span class="discog-btn-shimmer"></span></button>' +
             '<span class="vd-pop">' +
                 '<button class="vd-pop-btn" type="button" data-vd-pop aria-haspopup="menu" aria-expanded="false" ' +
@@ -3257,6 +3405,7 @@
                     loadExtras('movie', id);
                     loadTitleHistory('movie', id);    // acquisition history (P9)
                     loadAcquisition('movie', id);        // ...and where it stands now
+                    loadShelfLife('movie', id);          // admins: score, reasons, Keep
                     watchMovieDownload(id);           // live download progress chip (if any)
                 }
             })
@@ -3347,6 +3496,7 @@
                     loadExtras('show', id);
                     loadTitleHistory('show', id);     // acquisition history (P9)
                     loadAcquisition('show', id);        // ...and where it stands now
+                    loadShelfLife('show', id);          // admins: score, reasons, Keep
                 }
             })
             .catch(function () { showLoading(false); showLoadError('show', 'offline'); });
@@ -3409,6 +3559,11 @@
                     document.dispatchEvent(new CustomEvent('soulsync:video-navigate', { detail: 'video-library' }));
                     return;
                 }
+                if (d.waiting) {
+                    // soulsync placed the file; the server just hasn't scanned it in
+                    if (typeof showToast === 'function') showToast('In your library. Your media server hasn\'t scanned it in yet.', 'info');
+                    return;
+                }
                 var bits = [];
                 if (d.files_added) bits.push('+' + d.files_added + ' file' + (d.files_added !== 1 ? 's' : ''));
                 if (d.files_removed) bits.push('-' + d.files_removed + ' file' + (d.files_removed !== 1 ? 's' : ''));
@@ -3452,6 +3607,10 @@
                 if (d.show_removed) {
                     if (typeof showToast === 'function') showToast('"' + (d.title || 'Show') + '" is no longer on your server — removed from the library', 'warning');
                     document.dispatchEvent(new CustomEvent('soulsync:video-navigate', { detail: 'video-library' }));
+                    return;
+                }
+                if (d.waiting) {
+                    if (typeof showToast === 'function') showToast('In your library. Your media server hasn\'t scanned it in yet.', 'info');
                     return;
                 }
                 var bits = [];
@@ -4151,6 +4310,8 @@
         if (shot && r.contains(shot)) { openLightbox(parseInt(shot.getAttribute('data-vd-shot'), 10) || 0); return; }
         var vid = e.target.closest('[data-vd-video]');
         if (vid && r.contains(vid)) { openTrailer(vid.getAttribute('data-vd-video')); return; }
+        var shelfKeep = e.target.closest('[data-vd-shelf-keep]');
+        if (shelfKeep && r.contains(shelfKeep)) { e.preventDefault(); toggleShelfKeep(shelfKeep); return; }
         var healthFix = e.target.closest('[data-vd-health-fix]');
         if (healthFix && r.contains(healthFix)) {
             e.preventDefault();
@@ -4257,7 +4418,7 @@
             else if (which === 'wishtoggle') toggleMovieWishlist(act);
             else if (which === 'get') openGetModal();
             else if (which === 'subsearch') subSearchMovie();
-            else if (which === 'manualsearch') manualSearchMovie();
+            else if (which === 'manualsearch') { if (data && data.kind === 'show') manualSearchShow(); else manualSearchMovie(); }
             else if (which === 'missing') openGetModal(true);
             else if (which === 'wishlist-missing') wishlistAllMissing(act);
             else if (which === 'poster') openPosterModal();
@@ -4388,12 +4549,19 @@
         var s = seasonByNum(selectedSeason);
         return s ? (s.episodes || []).filter(function (e) { return !e.owned; }) : [];
     }
+    // where data.id comes from. a library payload carries no `source` of its
+    // own, so grabs sent media_id (the library row id) with no media_source,
+    // and the downloads card read it as a tmdb id: library show 37 showed up
+    // as tmdb's Seven of One (#2176). currentSource is what the page loaded.
+    function _dataSource() {
+        return (data && data.source) || currentSource || 'library';
+    }
     function _grabParams(en, src) {
         // poster travels with the grab → the downloads page rows (and the season
         // group header, which borrows its first row's art) render real posters
         // instead of the placeholder TV orb. Same resolver the wishlist writes use.
         return { title: data.title, source: src, season: selectedSeason, episode: en,
-            mediaId: (data.source !== 'tmdb' ? data.id : null), mediaSource: data.source, year: data.year,
+            mediaId: (_dataSource() !== 'tmdb' ? data.id : null), mediaSource: _dataSource(), year: data.year,
             tmdbId: data.tmdb_id || null, poster: _showPoster() };
     }
     // Optimistic per-episode state for the search phase — the grab has no row in
@@ -4581,7 +4749,7 @@
         // behaviour back.
         return VideoGrab.season({ title: data.title, season: selectedSeason,
             episodes: missing.map(function (e) { return e.episode_number; }),
-            mediaId: (data.source !== 'tmdb' ? data.id : null), mediaSource: data.source, year: data.year,
+            mediaId: (_dataSource() !== 'tmdb' ? data.id : null), mediaSource: _dataSource(), year: data.year,
             tmdbId: data.tmdb_id || null, poster: _showPoster() },
             function (en, state) { _setEpSynthetic(en, state); }
         ).then(function (res) {
@@ -4630,6 +4798,7 @@
         (data.seasons || []).forEach(function (s) {
             (s.episodes || []).forEach(function (ep) {
                 if (ep.owned) return;
+                if (ep.monitored === false) return;     // #2177: unmonitored is left alone
                 if (ep.air_date && ep.air_date > today) return;
                 var still = (data.source === 'tmdb')
                     ? (ep.still_url || null)
@@ -4664,8 +4833,26 @@
     function _openManualSearch(scope, en) {
         if (!window.VideoDownload || !window.VideoDownload.manualSearch || !data) return;
         VideoDownload.manualSearch({ title: data.title, scope: scope, season: selectedSeason, episode: en,
-            mediaId: (data.source !== 'tmdb' ? data.id : null), mediaSource: data.source,
-            tmdbId: (data.source === 'tmdb' ? data.id : (data.tmdb_id || null)), year: data.year, poster: _showPoster() });
+            mediaId: (_dataSource() !== 'tmdb' ? data.id : null), mediaSource: _dataSource(),
+            tmdbId: (data.source === 'tmdb' ? data.id : (data.tmdb_id || null)), year: data.year, poster: _showPoster(),
+            seasons: _manualSeasons() });
+    }
+    // the show's seasons for the modal's scope picker (#2233): what each has,
+    // and its episodes where the page has them loaded
+    function _manualSeasons() {
+        if (!data || data.kind !== 'show' || !Array.isArray(data.seasons)) return [];
+        return data.seasons.filter(function (s) { return s && s.season_number != null; }).map(function (s) {
+            return { season: s.season_number, title: s.title || null,
+                total: s.episode_total || (s.episodes ? s.episodes.length : 0), have: s.episode_owned || 0,
+                episodes: (s.episodes || []).filter(function (e) { return e && e.episode_number != null; })
+                    .map(function (e) { return { episode: e.episode_number, title: e.title || e.name || null, have: !!e.owned }; }) };
+        });
+    }
+    // a show's manual search from its ⋯ menu (#2233): opens on the season the
+    // page shows; the modal switches to the whole series or one episode
+    function manualSearchShow() {
+        if (!data || data.kind !== 'show') return;
+        _openManualSearch(seasonByNum(selectedSeason) ? 'season' : 'series');
     }
 
     // A movie's manual search (#2122): a library movie or a tmdb preview, the
@@ -4673,7 +4860,7 @@
     function manualSearchMovie() {
         if (!data || data.kind !== 'movie' || !window.VideoDownload || !VideoDownload.manualSearch) return;
         VideoDownload.manualSearch({ title: data.title, scope: 'movie', year: data.year,
-            mediaId: data.id, mediaSource: data.source,
+            mediaId: data.id, mediaSource: _dataSource(),
             tmdbId: data.source === 'tmdb' ? data.id : (data.tmdb_id || null),
             poster: data.source === 'tmdb' ? (data.poster_url || null)
                 : (data.has_poster ? '/api/video/poster/movie/' + data.id : null) });
@@ -4915,6 +5102,18 @@
             renderEpisodes();
         }
         window.addEventListener('ss:webui-profile-context-changed', onProfileChanged);
+        // the per-kind answer lands after the first paint: repaint the actions
+        // the episode rows' get / ask buttons follow it too, repainted only
+        // when the answer for this page moved (open panels stay open)
+        var _lastKindGet = null;
+        document.addEventListener('soulsync:video-access-ready', function () {
+            if (data && root()) renderActions(data);
+            var kindGet = vdCanGet(currentKind === 'movie' ? 'movie' : data && data.source === 'youtube' ? 'youtube' : 'show');
+            // before the first answer the page was drawn from the old switch
+            var before = _lastKindGet === null ? ((typeof canDownload !== 'function') || canDownload()) : _lastKindGet;
+            if (before !== kindGet && data && root()) renderEpisodes();
+            _lastKindGet = kindGet;
+        });
         // Metadata edited via the Manage panel → re-render the page from the DB
         // (title/genres/summary changed under us). Quiet events (toggles) skip it.
         document.addEventListener('soulsync:video-meta-changed', function (e) {

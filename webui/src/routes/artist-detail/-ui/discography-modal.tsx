@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 
 import { profileAsksFirst } from '@/platform/shell/download-rights';
+import { useMusicAsksLeft } from '@/platform/shell/my-permissions';
 
 import type {
   DiscogAlbumUpdate,
@@ -104,6 +105,7 @@ export function DiscographyModal({
   /** canonical identity for the watchlist add; null hides the combined button */
   watchlistIdentity?: { id: unknown; name: string; source?: string } | null;
 }) {
+  const asksLeft = useMusicAsksLeft();
   const [data, setData] = useState<DiscogModalData | null>(null);
   const [filters, setFilters] = useState<DiscogFilters>(DISCOG_DEFAULT_FILTERS);
   const [checked, setChecked] = useState<Set<string>>(new Set());
@@ -471,7 +473,11 @@ export function DiscographyModal({
           <div className="discog-footer" id="discog-footer">
             <div className="discog-footer-info" id="discog-footer-info">
               {phase === 'pick' ? (
-                footer.info
+                <>
+                  {footer.info}
+                  {/* a profile that asks first sees what's left (#2166) */}
+                  {asksLeft ? <div className="discog-watch-note">{asksLeft}</div> : null}
+                </>
               ) : totals ? (
                 <>
                   <div>

@@ -45,9 +45,9 @@ they write only when the user switched their automatic mode on, and they
 apply their own rules (hand-set values, hand-tagged files, locks, history).
 A job the user switched off is not run (#1207), and a request waits out the
 maintenance pause; whether a heal asks at all is the healer's own setting
-(Split Artists: Request Re-tag / Request Reorganize). Requests for one job
-that arrive
-before it starts add up to one run over all their files. If a projection
+(Split Artists: Request Re-tag / Request Reorganize). Compatible file
+requests for one job add up to one run. When a request only allows findings,
+the combined run keeps that restriction. If a projection
 fails or waits, the corrected catalogue stays, and the next run of the job
 finds the same files again.
 
@@ -93,14 +93,15 @@ or other healer splits a combined artist. One that meets a name reading as a
 list hands it over, `RepairWorker.request_split(artist_ids)` (or
 `repair_worker.request_artist_split` outside a job), the way healers hand
 files to Re-tag and Reorganize: the reconcile, the local credit pass, the
-collaboration ghost clean-up and the step after a download all do. The import
-keeps a credit as written. Every job keeps its own competence and asks the
-owner of another one.
+collaboration ghost clean-up and the step after a download all do. The
+legacy import preserves ambiguous separators such as commas, ampersands and
+slashes. Explicit guest markers, lowercase spaced `x`, `×`, semicolons and
+pipes separate credits at import.
 
-**Split Artists splits only what the providers confirm.**
-`native_enrich.split_confirmed(conn, artist_id, parts)` (kernel:
-`artist_credit.credits_confirm`): every part is credited on one of its tracks
-by a stored provider list, so the track exists under each of them there.
+**Automatic splits require provider confirmation.**
+`native_enrich.split_confirmed(conn, artist_id, parts)` uses
+`artist_credit.credits_confirm` to check that one stored provider list credits
+all the proposed artists on the same track.
 Names (a ";", the album's artist inside the name, parts the library knows)
 only propose a split. A split it cannot confirm is a finding the user
 confirms on the finding itself; Fix All and live mode leave it alone. A
@@ -116,9 +117,9 @@ has a string ("A & B") or one name is not evidence of who is on a track. A
 one-artist answer is stored too: it is what keeps a band whole. The lists
 come in with the data: a download keeps the list its source gave (two or more
 artists with ids; a search result often names only the main artist), every
-enrichment worker keeps the list of a track it matched
+track-matching enrichment worker keeps the list of a track it matched
 (`provider_credits.keep_match_credits`), and the credit fetcher asks for the
-rest on request.
+rest on request. Discogs supplies credits through release tracklists.
 
 When a needed scoped operation is absent, extend its existing owner rather
 than create another tag writer, rename planner, provider search or identity

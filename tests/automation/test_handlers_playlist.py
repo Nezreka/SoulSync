@@ -1106,7 +1106,7 @@ class TestSyncPlaylist:
             'auto_mirror_1': {
                 'tracks_hash': expected_hash,
                 'mirror_tracks_hash': expected_hash,
-                'matched_tracks': 1,
+                'matched_tracks': 1, 'unplaced_tracks': 0,
             }
         }
 
@@ -1281,7 +1281,7 @@ class TestSyncPlaylist:
             'auto_mirror_1': {
                 'tracks_hash': expected_hash,
                 'mirror_tracks_hash': expected_hash,
-                'matched_tracks': 1,
+                'matched_tracks': 1, 'unplaced_tracks': 0,
                 'quality_profile_id': 23,
             }
         }

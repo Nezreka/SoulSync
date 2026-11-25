@@ -93,7 +93,8 @@ describe('the settings save status', () => {
   });
 
   it('the page and the tour tell the same story', () => {
-    expect(HTML).toMatch(/id="save-settings" data-state="idle"/);
+    // it opens at rest (#2187): hidden on the music side until a change
+    expect(HTML).toMatch(/id="save-settings" data-state="rest"/);
     expect(HTML).toContain('<span>All changes saved</span>');
     expect(HELPER).not.toContain("Changes aren\\'t applied until you click this button");
   });

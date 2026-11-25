@@ -17,6 +17,7 @@ import threading
 import time
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
+from core.download_plugins.types import track_candidates
 from utils.logging_config import get_logger
 
 logger = get_logger("download_engine")
@@ -490,9 +491,11 @@ class DownloadEngine:
             try:
                 logger.info(f"Trying {source_name} (priority {i+1}): {query}")
                 tracks, albums = await plugin.search(query, timeout, progress_callback)
-                if not tracks:
+                # a soulseek search whose every hit sat in a folder group has
+                # no loose tracks but still has candidates (#2228)
+                if not track_candidates(tracks, albums):
                     continue
-                logger.info(f"{source_name} found {len(tracks)} tracks")
+                logger.info(f"{source_name} found {len(tracks or [])} tracks, {len(albums or [])} albums")
                 return (tracks, albums)
             except Exception as e:
                 logger.warning(f"{source_name} search failed: {e}")

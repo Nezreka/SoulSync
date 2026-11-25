@@ -44,6 +44,28 @@
         return profile.can_download !== false && profile.can_download !== 0;
     }
 
+    // the server's permission map (#2166, src/shell/my-permissions.ts), once
+    // it's in for this profile. null before that: the columns answer
+    function livePerms(profile) {
+        var p = window.SoulSyncPerms;
+        if (!p || !p.live()) return null;
+        var got = p.get();
+        return got && String(got.profileId) === String(profile.id) ? p : null;
+    }
+
+    /** the Requests pages: admins and moderators answer them, see-everyone's
+     *  reads them, and a profile that asks first makes them. a profile that
+     *  can't ask for anything there has nothing to open. */
+    function requestsVisible(profile, side) {
+        if (!profile || profile.is_admin || isRoot(profile)) return true;
+        var p = livePerms(profile);
+        if (!p) return !canDownload(profile);
+        if (p.on('requests.moderate') || p.on('requests.see_all')) return true;
+        if (side === 'video') return p.mode('movies') === 'ask' || p.mode('tv') === 'ask';
+        // audiobook and episode asks land on the music side's page too (#2188)
+        return p.mode('music') === 'ask' || p.mode('books') === 'ask' || p.mode('podcasts') === 'ask';
+    }
+
     function allowedSides(profile) {
         if (!profile || profile.is_admin || isRoot(profile)) return 'both';
         var s = profile.allowed_sides;
@@ -59,13 +81,13 @@
             if (pageId === 'video-help' || pageId === 'video-issues') return true;
             if (VIDEO_ADMIN_ONLY.indexOf(pageId) > -1) return !!profile.is_admin;
             // admins answer requests, profiles without download rights make them
-            if (pageId === 'video-requests') return !!profile.is_admin || !canDownload(profile);
+            if (pageId === 'video-requests') return requestsVisible(profile, 'video');
             if (isRoot(profile)) return true;
             var vap = profile.allowed_pages;
             return !vap || vap.indexOf(pageId) > -1;
         }
         if (pageId === 'settings') return !!profile.is_admin;
-        if (pageId === 'requests') return !!profile.is_admin || !canDownload(profile);
+        if (pageId === 'requests') return requestsVisible(profile, 'music');
         if (pageId === 'help' || pageId === 'issues') return true;
         if (isRoot(profile)) return true;
         var ap = normalizePageList(profile.allowed_pages);
@@ -164,6 +186,7 @@
         normalizePageList: normalizePageList,
         allowedSides: allowedSides,
         navButtonVisible: navButtonVisible,
+        requestsVisible: requestsVisible,
         refreshSectionLabels: refreshSectionLabels,
         apply: apply,
         featureHiddenPages: featureHiddenPages,

@@ -771,38 +771,89 @@ describe('Library V2 artist detail — All Releases views', () => {
     );
 
     const { router } = renderArtist('/library?artist=1&releases=all&releaseView=table');
-    const dummyTitle = await screen.findByRole('button', { name: 'Dummy' });
+    const dummyTitle = await screen.findByRole('link', { name: 'Dummy' });
     const dummyRow = dummyTitle.parentElement?.parentElement as HTMLElement;
     const now = vi.spyOn(Date, 'now');
 
-    // The blank/header area and the title now share the same one-click rule.
+    // a click on the row (not the title) expands it
     now.mockReturnValue(1_000);
     fireEvent.click(dummyRow);
     expect(await screen.findByText('Inline track 1')).toBeInTheDocument();
     expect(router.state.location.search).not.toHaveProperty('album');
 
-    const roselandTitle = screen.getByRole('button', { name: 'Roseland NYC Live' });
-    now.mockReturnValue(1_000);
-    fireEvent.click(roselandTitle);
+    // the chevron is a real button: it toggles, and says which way
+    const roselandToggle = screen.getByRole('button', {
+      name: 'Show the tracks of Roseland NYC Live',
+    });
+    expect(roselandToggle).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(roselandToggle);
     expect(await screen.findByText('Inline track 2')).toBeInTheDocument();
+    expect(roselandToggle).toHaveAttribute('aria-expanded', 'true');
+    expect(roselandToggle).toHaveAccessibleName('Hide the tracks of Roseland NYC Live');
     expect(router.state.location.search).not.toHaveProperty('album');
 
-    // Repeated, deliberate single clicks keep toggling and never accumulate
-    // into a later full-view navigation.
+    // repeated, deliberate single clicks on the row keep toggling and never
+    // accumulate into a later full-view navigation
+    const roselandRow = screen.getByRole('link', { name: 'Roseland NYC Live' }).parentElement
+      ?.parentElement as HTMLElement;
     now.mockReturnValue(2_000);
-    fireEvent.click(roselandTitle);
+    fireEvent.click(roselandRow);
     now.mockReturnValue(3_000);
-    fireEvent.click(roselandTitle);
+    fireEvent.click(roselandRow);
     expect(router.state.location.search).not.toHaveProperty('album');
 
-    // Two clicks on the same album inside the explicit window are the only
-    // gesture that opens its full detail page.
+    // two clicks on the same row inside the window still open its page
     now.mockReturnValue(4_000);
-    fireEvent.click(roselandTitle);
+    fireEvent.click(roselandRow);
     now.mockReturnValue(4_100);
-    fireEvent.click(roselandTitle);
+    fireEvent.click(roselandRow);
     now.mockRestore();
     await waitFor(() => expect(router.state.location.search).toMatchObject({ album: 2 }));
+  });
+
+  it('the album title is a link to the album page (#2204)', async () => {
+    server.use(
+      http.get('/api/library/v2/quality-profiles', () =>
+        HttpResponse.json({ success: true, profiles: [] }),
+      ),
+    );
+    const { router } = renderArtist('/library?artist=1&releases=all&releaseView=table');
+    const title = await screen.findByRole('link', { name: 'Dummy' });
+    // a real href: middle click and "open in new tab" land on the album page
+    const href = new URL(title.getAttribute('href') ?? '', 'http://x');
+    expect(href.pathname).toBe('/library');
+    expect(href.searchParams.get('album')).toBe('1');
+    expect(href.searchParams.get('artist')).toBe('1');
+
+    // a modified click is the browser's (new tab): the page stays, the row stays shut
+    // (fireEvent answers false when the default was prevented)
+    expect(fireEvent.click(title, { ctrlKey: true })).toBe(true);
+    expect(router.state.location.search).not.toHaveProperty('album');
+    expect(screen.getByRole('button', { name: 'Show the tracks of Dummy' })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    );
+
+    // a plain click opens the album page in place, without toggling the row
+    expect(fireEvent.click(title)).toBe(false);
+    expect(screen.queryByRole('button', { name: 'Hide the tracks of Dummy' })).toBeNull();
+    await waitFor(() => expect(router.state.location.search).toMatchObject({ album: 1 }));
+  });
+
+  it('the title link and the expand button are reachable from the keyboard (#2204)', async () => {
+    server.use(
+      http.get('/api/library/v2/quality-profiles', () =>
+        HttpResponse.json({ success: true, profiles: [] }),
+      ),
+    );
+    renderArtist('/library?artist=1&releases=all&releaseView=table');
+    const title = await screen.findByRole('link', { name: 'Dummy' });
+    title.focus();
+    expect(document.activeElement).toBe(title);
+    const toggle = screen.getByRole('button', { name: 'Show the tracks of Dummy' });
+    toggle.focus();
+    expect(document.activeElement).toBe(toggle);
+    expect(toggle.tagName).toBe('BUTTON');
   });
 
   it('opens on the rich hero and switches to compact and back (ldp-05)', async () => {
@@ -826,15 +877,20 @@ describe('Library V2 artist detail — All Releases views', () => {
     expect(document.querySelectorAll('.artist-hero-numbers')).toHaveLength(1);
   });
 
-  it('places compact media-server recognition beside the size in the compact header', async () => {
+  it('puts a logo pill per recognising server beside the size in the header', async () => {
     renderArtist('/library?artist=1');
 
-    const recognition = await screen.findByLabelText('Recognised by Navidrome and Plex');
-    expect(recognition).toHaveAttribute('title', 'Recognised by Navidrome and Plex');
-    expect(recognition).toHaveTextContent('✓2');
-    expect(recognition.parentElement).toContainElement(screen.getByText('2.00 KB'));
-    expect(screen.queryByText('Navidrome')).not.toBeInTheDocument();
-    expect(screen.queryByText('Plex')).not.toBeInTheDocument();
+    const navidrome = await screen.findByRole('img', { name: 'Recognised by Navidrome' });
+    const plex = screen.getByRole('img', { name: 'Recognised by Plex' });
+    expect(navidrome).toHaveAttribute('title', 'Recognised by Navidrome');
+    expect(navidrome).toHaveTextContent('Navidrome');
+    expect(plex).toHaveTextContent('Plex');
+    expect(navidrome.querySelector('img')).toHaveAttribute(
+      'src',
+      '/static/img/brands/navidrome.png',
+    );
+    expect(navidrome.parentElement).toContainElement(screen.getByText('2.00 KB'));
+    expect(plex.parentElement).toBe(navidrome.parentElement);
   });
 
   /** "Missing" is monitored+absent now (§44/LV2-CNT-01) — so a release the
@@ -1497,6 +1553,108 @@ describe('Library V2 artist detail — All Releases views', () => {
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /^Enhance/ }));
     await waitFor(() => expect(posts).toEqual([{ track_ids: [1, 2] }]));
+  });
+
+  describe('#2173: download actions follow what the profile may get', () => {
+    const enhanceList = () =>
+      http.get('/api/library/v2/artists/1/enhance', () =>
+        HttpResponse.json({
+          success: true,
+          tracks: [1, 2].map((n) => ({
+            track_id: n,
+            title: `Song ${n}`,
+            album_id: 1,
+            album_title: 'Dummy',
+            disc_number: 1,
+            track_number: n,
+            current: 'MP3 128',
+            profile: 'Lossless',
+            target: 'FLAC',
+            monitored: false,
+          })),
+        }),
+      );
+    const ownedArtist = () =>
+      http.get('/api/library/v2/artists/1', () =>
+        HttpResponse.json({
+          success: true,
+          artist: portishead({
+            albums: [album({ id: 1, title: 'Dummy', tracks_present: 2, origin: 'library' })],
+          }),
+        }),
+      );
+
+    it('a member who asks first keeps the Wishlist and gets no search, enhance or upgrade', async () => {
+      const enhanceAsked: string[] = [];
+      server.use(
+        http.get('/api/library/v2/enabled', () =>
+          HttpResponse.json({
+            success: true,
+            enabled: true,
+            can_write: false,
+            can_wish: true,
+            can_download: false,
+            can_grab: false,
+          }),
+        ),
+        ownedArtist(),
+        http.get('/api/library/v2/artists/1/enhance', ({ request }) => {
+          enhanceAsked.push(new URL(request.url).pathname);
+          return HttpResponse.json({ success: true, tracks: [] });
+        }),
+      );
+      renderArtist('/library?artist=1');
+
+      expect(await screen.findByText('Dummy')).toBeInTheDocument();
+      // the way in is the Wishlist, which becomes a request
+      expect(await screen.findByText(/add what you want to your Wishlist/)).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /Automatic Search/ })).toBeNull();
+      expect(screen.queryByRole('button', { name: /Interactive Search/ })).toBeNull();
+      expect(screen.queryByRole('button', { name: /Enhance Quality/ })).toBeNull();
+      expect(screen.queryByRole('button', { name: /^Upgrade/ })).toBeNull();
+      // it never even asks for the list of files to enhance
+      expect(enhanceAsked).toEqual([]);
+    });
+
+    it('a member who downloads in the shared library searches, but picks no row by hand', async () => {
+      server.use(
+        http.get('/api/library/v2/enabled', () =>
+          HttpResponse.json({
+            success: true,
+            enabled: true,
+            can_write: false,
+            can_wish: true,
+            can_download: true,
+            can_grab: false,
+          }),
+        ),
+        ownedArtist(),
+        enhanceList(),
+      );
+      renderArtist('/library?artist=1');
+
+      expect(
+        await screen.findByRole('button', { name: 'Automatic Search' }, { timeout: 5000 }),
+      ).toBeEnabled();
+      expect(await screen.findByRole('button', { name: /Enhance Quality/ })).toBeEnabled();
+      expect(screen.getByRole('button', { name: 'Upgrade 2' })).toBeEnabled();
+      // the server's profile_may_grab refuses a hand pick for a shared row
+      expect(screen.queryByRole('button', { name: /Interactive Search/ })).toBeNull();
+    });
+
+    it('the admin keeps every one of them', async () => {
+      server.use(ownedArtist(), enhanceList());
+      renderArtist('/library?artist=1');
+      expect(
+        await screen.findByRole('button', { name: 'Automatic Search' }, { timeout: 5000 }),
+      ).toBeEnabled();
+      // the toolbar's and the album row's
+      const interactive = screen.getAllByRole('button', { name: 'Interactive Search' });
+      expect(interactive.length).toBeGreaterThan(0);
+      for (const b of interactive) expect(b).toBeEnabled();
+      expect(await screen.findByRole('button', { name: /Enhance Quality/ })).toBeEnabled();
+      expect(screen.getByRole('button', { name: 'Upgrade 2' })).toBeEnabled();
+    });
   });
 
   it('labels the back link with where an arriving visit came from', async () => {

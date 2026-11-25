@@ -554,6 +554,7 @@ def test_every_name_the_old_list_held_stays_whole_on_the_data(band):
     ("Simon & Garfunkel", ["Simon & Garfunkel"]),
     ("Dan + Shay", ["Dan + Shay"]),
     ("AC/DC", ["AC/DC"]),
+    ("Artist A / Artist B", ["Artist A / Artist B"]),
     ("MAN WITH A MISSION", ["MAN WITH A MISSION"]),
     ("Bear vs. Shark", ["Bear vs. Shark"]),
     ("Tyler, The Creator feat. Kali Uchis", ["Tyler, The Creator", "Kali Uchis"]),
@@ -578,3 +579,20 @@ def test_a_lookup_searches_a_joining_word_band_whole(band):
     """Nezreka's review, 1: beatport / musicmap searched the fragment"""
     from core.matching.artist_credit import lookup_name
     assert lookup_name(band) == band
+
+
+def test_split_confirmation_requires_a_single_provider_credit_list():
+    from core.matching.artist_credit import credits_confirm
+
+    parts = ("Alpha", "Beta")
+    assert not credits_confirm(parts, [("spotify credits", ["Alpha"]), ("deezer credits", ["Beta"])])
+    assert not credits_confirm(parts, [("spotify credits", ["Alpha"]), ("spotify credits", ["Beta"])])
+    assert credits_confirm(parts, [("spotify credits", ["Alpha", "Beta", "Guest"])])
+
+
+def test_first_listed_respects_an_identified_album_artist_listed_whole():
+    from core.imports.collab_artist import collab_primary
+
+    for band, fragment in [("MAN WITH A MISSION", "MAN"), ("Sleeping With Sirens", "Sleeping"),
+                           ("Bear vs. Shark", "Bear"), ("Boy Meets Girl", "Boy")]:
+        assert collab_primary(band, [{"id": "band", "name": band}], [{"name": fragment}]) == ""

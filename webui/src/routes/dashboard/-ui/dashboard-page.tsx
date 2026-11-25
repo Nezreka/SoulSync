@@ -26,6 +26,7 @@ import { useEffect } from 'react';
 
 import { FinishSetupCard } from '@/features/onboarding/checklist-card';
 import { useFeatureOn } from '@/platform/features';
+import { usePermNotOff } from '@/platform/shell/my-permissions';
 
 import { useDashboardHeader } from '../-dash.header';
 import { ActiveDownloadsShell } from './active-downloads-shell';
@@ -38,25 +39,40 @@ import { ListenBand } from './listen-band';
 import { ListeningHistoryBand } from './listening-history-band';
 import { SyncRail } from './sync-band';
 import { WeeklyDigest } from './weekly-digest';
+import { YearReadyBanner } from './year-ready-banner';
 
-export function DashboardPage() {
-  const header = useDashboardHeader();
+/** `isAdmin` decides the worker orbs, their sheet and Manage Workers: server
+ *  maintenance, the admins' (#2196). */
+export function DashboardPage({ isAdmin }: { isAdmin: boolean }) {
+  const header = useDashboardHeader({ workers: isAdmin });
   // cards for parts this profile switched off stay off the dashboard (#1909)
   const statsOn = useFeatureOn('stats');
-  const playlistsOn = useFeatureOn('playlists');
+  // playlist sync off for this profile: no sync rail, its auto-sync runs
+  // aren't theirs (#2166)
+  const playlistSync = usePermNotOff('music.playlist_sync');
+  const playlistsOn = useFeatureOn('playlists') && playlistSync;
   const automationsOn = useFeatureOn('automations');
 
   useEffect(() => {
-    window.workerOrbs?.setPage('dashboard');
-  }, []);
+    if (isAdmin) window.workerOrbs?.setPage('dashboard');
+  }, [isAdmin]);
 
   return (
     <div className="page-shell dashboard-container dash-room" id="dashboard-page">
-      <DashboardHeaderView header={header} library={<LibraryCard />} />
+      <DashboardHeaderView
+        header={header}
+        library={<LibraryCard admin={isAdmin} />}
+        workers={isAdmin}
+      />
       {/* The exception surface: renders NOTHING while every core connection
-          is healthy — the one place that shouts when a human is needed. */}
-      <AlertsBand />
+          is healthy — the one place that shouts when a human is needed.
+          That human is the admin: a down server or a spotify ban, with a
+          jump to Settings, is nothing a member can act on (#2208). */}
+      {isAdmin ? <AlertsBand /> : null}
       <div className="room-top">
+        {/* "Your <year> is ready", Dec 1 to Jan 15, until this profile
+            hides it. Renders nothing the rest of the year. */}
+        {statsOn ? <YearReadyBanner /> : null}
         {/* What setup left for later. Renders nothing once it's all done,
             dismissed, or for anyone who isn't an admin. */}
         <FinishSetupCard />

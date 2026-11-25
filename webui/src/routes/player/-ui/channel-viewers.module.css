@@ -1,0 +1,86 @@
+/* faces on a channel's row: who else is on it */
+.faces {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  margin-right: calc(var(--u) * 0.3);
+}
+
+.faces > span {
+  width: calc(var(--u) * 1.3);
+  height: calc(var(--u) * 1.3);
+  margin-left: calc(var(--u) * -0.4);
+  font-size: calc(var(--u) * 0.6);
+  box-shadow: 0 0 0 2px var(--pl-panel-solid);
+}
+
+.faces > span:first-child {
+  margin-left: 0;
+}
+
+.more {
+  display: inline-grid;
+  place-items: center;
+  border-radius: var(--radius-circle);
+  background: var(--white-a20);
+  color: var(--pl-text);
+  font-weight: 800;
+}
+
+/* where someone is in what's on */
+.pin {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--pl-text);
+  pointer-events: none;
+}
+
+.pin > span {
+  position: absolute;
+  top: calc(var(--u) * -0.1);
+  left: 50%;
+  width: calc(var(--u) * 1.2);
+  height: calc(var(--u) * 1.2);
+  font-size: calc(var(--u) * 0.55);
+  box-shadow: 0 0 0 2px var(--pl-bg);
+  transform: translateX(-50%);
+}
+
+/* in the panel: join them */
+.here {
+  display: flex;
+  flex-wrap: wrap;
+  gap: calc(var(--u) * 0.6);
+  margin: calc(var(--u) * 0.6) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.person {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 0.6);
+  padding: calc(var(--u) * 0.35) calc(var(--u) * 0.4) calc(var(--u) * 0.35) calc(var(--u) * 0.5);
+  border-radius: var(--radius-pill);
+  background: var(--white-a06);
+}
+
+.personText {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  font-size: calc(var(--u) * 0.78);
+  line-height: 1.25;
+}
+
+.personText > span {
+  overflow: hidden;
+  color: var(--pl-text-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: calc(var(--u) * 16);
+}

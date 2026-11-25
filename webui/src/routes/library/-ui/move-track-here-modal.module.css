@@ -1,0 +1,397 @@
+/* Move a track here (#2193, rebuilt for #2241).
+ *
+ * the dialog used to mount inside the album table's actions cell, so it took
+ * that cell's right align and nowrap and the missing row's italic: every line
+ * sat on the right edge, slanted, and long lines ran off the dialog. it
+ * portals to body now, and still sets its own text flow here so no parent
+ * can lean on it again. */
+
+.dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(640px, calc(100vw - 32px));
+  max-height: 88vh;
+  max-height: 88dvh;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
+  background: var(--sa-sheet);
+  box-shadow: 0 24px 80px var(--black-a60);
+  color: var(--text-1);
+  font-style: normal;
+  text-align: left;
+  white-space: normal;
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.heading {
+  flex: 1;
+  min-width: 0;
+}
+
+.title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text-1);
+}
+
+.subtitle {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-3);
+}
+
+.close {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-circle);
+  background: var(--surface-1);
+  color: var(--text-2);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.close:hover:not(:disabled) {
+  background: var(--surface-3);
+  color: var(--text-1);
+}
+
+/* header and footer stay put, everything between scrolls */
+.body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.slot {
+  padding: 12px 14px;
+  border: 1px solid rgba(var(--accent-rgb), 0.22);
+  border-radius: var(--radius-control);
+  background: rgba(var(--accent-rgb), 0.06);
+  min-width: 0;
+}
+
+.eyebrow {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+  color: var(--accent-light);
+}
+
+.slotTitle {
+  margin-top: 4px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-1);
+  overflow-wrap: anywhere;
+}
+
+.slotMeta {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-3);
+  overflow-wrap: anywhere;
+}
+
+.search {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.searchInput {
+  flex: 1;
+  min-width: 0;
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface-1);
+  color: var(--text-1);
+  font: inherit;
+  font-size: 13px;
+}
+
+.searchInput:focus {
+  outline: none;
+  border-color: rgba(var(--accent-rgb), 0.6);
+}
+
+.results {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.hint {
+  padding: 10px 2px;
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+.hintError {
+  color: var(--danger-light);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--white-a05);
+  border-radius: var(--radius-control);
+  background: var(--surface-1);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-standard);
+}
+
+.row:hover,
+.row:focus-visible,
+.rowSelected {
+  border-color: rgba(var(--accent-rgb), 0.35);
+  background: rgba(var(--accent-rgb), 0.08);
+  outline: none;
+}
+
+.rowBusy {
+  opacity: 0.55;
+  cursor: wait;
+  pointer-events: none;
+}
+
+.radio {
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  border: 1px solid var(--white-a30);
+  border-radius: var(--radius-circle);
+}
+
+.rowSelected .radio {
+  border-color: var(--accent-light);
+  background: var(--accent-light);
+  box-shadow: inset 0 0 0 4px var(--sa-sheet);
+}
+
+.rowMain {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* one line each, cut with an ellipsis; the full text is in the tooltip */
+.rowTitle,
+.rowMeta,
+.rowPath {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rowTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-1);
+}
+
+.rowMeta {
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.rowPath {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+.rowSide {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.note {
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+.error {
+  padding: 10px 12px;
+  border: 1px solid rgba(var(--danger-soft-rgb), 0.32);
+  border-radius: var(--radius-md);
+  background: rgba(var(--danger-soft-rgb), 0.08);
+  color: var(--danger-light);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+/* what happens */
+.plan {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-1);
+}
+
+.planHeading {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.planSentence {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-1);
+}
+
+.planLabel {
+  margin-bottom: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.move {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 4px 10px;
+  margin: 0;
+  font-size: 12px;
+}
+
+.move dt {
+  color: var(--text-3);
+}
+
+.move dd {
+  margin: 0;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+
+.moveTo {
+  color: var(--text-1);
+}
+
+.tags {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 12px;
+}
+
+.tags th,
+.tags td {
+  padding: 6px 8px;
+  border-top: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+  font-weight: 400;
+}
+
+.tags thead th {
+  border-top: 0;
+  padding-top: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-3);
+}
+
+.tags th:first-child {
+  width: 34%;
+}
+
+.tags tbody th {
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+
+.tags td {
+  color: var(--text-1);
+  overflow-wrap: anywhere;
+}
+
+.tagFrom {
+  color: var(--text-3);
+}
+
+.arrow {
+  padding: 0 6px;
+  color: var(--text-3);
+}
+
+.more {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent-light);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.more:hover {
+  text-decoration: underline;
+}
+
+.footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--line);
+}
+
+@media (max-width: 480px) {
+  .header,
+  .body,
+  .footer {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+
+  .tags th:first-child {
+    width: 38%;
+  }
+}

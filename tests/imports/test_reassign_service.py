@@ -48,7 +48,7 @@ def db(tmp_path):
     conn.execute("CREATE TABLE lib2_albums (id INTEGER PRIMARY KEY, title TEXT, "
                  "spotify_id TEXT, musicbrainz_id TEXT, external_ids TEXT DEFAULT '{}')")
     conn.execute("CREATE TABLE lib2_tracks (id INTEGER PRIMARY KEY, album_id INTEGER, "
-                 "title TEXT, track_number INTEGER)")
+                 "title TEXT, track_number INTEGER, duration INTEGER)")
     conn.execute("CREATE TABLE lib2_track_files (id INTEGER PRIMARY KEY, track_id INTEGER, "
                  "path TEXT, is_primary INTEGER DEFAULT 1, file_state TEXT DEFAULT 'active')")
     conn.commit()

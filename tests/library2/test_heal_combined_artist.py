@@ -170,7 +170,7 @@ def test_a_request_waits_out_the_pause_and_is_no_manual_run(db):
     worker.request_projection(tracks, reorganize=False)
     assert worker._background_runs == {'library_retag'}
     ran = []
-    worker._run_job = lambda job_id, forced=False, background=False: ran.append(
+    worker._run_job = lambda job_id, forced=False, background=False, run_scope=None: ran.append(
         (job_id, background)) or worker._stop_event.set()
     worker._sleep_or_stop = lambda seconds: (ran.append('slept'), True)[1]
     worker._run()
@@ -263,3 +263,41 @@ def test_a_request_never_narrows_a_run_already_waiting():
     assert _merge_scope(artist, {'artist_ids': [3]}, queued=True) == artist
     # a whole-library run asked for after a request covers it
     assert _merge_scope(files, whole, queued=True) == whole
+
+
+@pytest.mark.parametrize('findings_first', [True, False])
+def test_coalescing_projection_requests_preserves_findings_only(db, findings_first):
+    tracks = _album(db, 'Camellia', 'One')
+    worker = _bare_worker(db)
+    findings_only = {'file_paths': ['/review.flac'], 'findings_only': True}
+    if findings_first:
+        worker.run_job_now('library_retag', scope=findings_only)
+    worker.request_projection(tracks, reorganize=False)
+    if not findings_first:
+        worker.run_job_now('library_retag', scope=findings_only)
+    scope = worker._force_run_scopes['library_retag']
+    assert scope['findings_only'] is True
+    assert '/review.flac' in scope['file_paths']
+    assert len(scope['file_paths']) == 2
+
+
+def test_a_request_received_during_a_run_has_its_own_scope(db):
+    tracks = _album(db, 'Camellia', 'One', 'Two')
+    worker = _bare_worker(db)
+    worker.enabled = True
+    worker.request_projection(tracks[:1], reorganize=False)
+    scopes = []
+
+    def run(job_id, forced=False, background=False, run_scope=None):
+        scopes.append(run_scope)
+        if len(scopes) == 1:
+            worker.request_projection(tracks[1:], reorganize=False)
+        else:
+            worker._stop_event.set()
+
+    worker._run_job = run
+    worker._sleep_or_stop = lambda seconds: worker._stop_event.is_set()
+    worker._run()
+    assert len(scopes) == 2
+    assert all(len(s['file_paths']) == 1 for s in scopes)
+    assert scopes[0] != scopes[1]

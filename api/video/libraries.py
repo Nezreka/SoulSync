@@ -161,10 +161,69 @@ def register_routes(bp):
         from . import get_video_db
         body = request.get_json(silent=True) or {}
         choice = body.get("server")
-        if choice not in ("plex", "jellyfin"):
+        # soulsync: its own folder scan is the library (core/video/disk_source.py)
+        if choice not in ("plex", "jellyfin", "soulsync"):
             return jsonify({"error": "bad server"}), 400
+        moved, was = None, None
+        try:
+            # with the two servers linked, the library follows the pick: every
+            # linked title keeps its row (core/video/server_links.py)
+            from core.video import server_links
+            from core.video.sources import resolve_video_server
+            was = resolve_video_server(get_video_db())
+            if server_links.enabled(get_video_db()) and was != choice:
+                moved = server_links.rekey_library(get_video_db(), was, choice)
+        except Exception:
+            logger.exception("video server switch: the library could not follow the pick")
         get_video_db().set_setting("video_server", choice)
-        return jsonify({"status": "saved", "server": choice})
+        try:
+            # the "changed since the last scan" mark was the OTHER library's:
+            # kept, the new one's first quick scan would read only what changed
+            # since then and leave the library mostly empty
+            if choice != was:
+                get_video_db().set_setting("video_last_scan_at", "")
+        except Exception:
+            logger.debug("video server switch: scan baseline not cleared", exc_info=True)
+        try:
+            from core.video.sources import invalidate_video_source_cache
+            invalidate_video_source_cache()
+        except Exception:   # noqa: BLE001, S110 - a stale cached connection ages out by itself
+            pass
+        return jsonify({"status": "saved", "server": choice, **({"moved": moved} if moved else {})})
+
+    @bp.route("/server/links", methods=["GET"])
+    def video_server_links():
+        """plex and jellyfin as one library: whether it's on, how much of the
+        library is on the other server too, and the last pass."""
+        from . import get_video_db
+        from core.video import server_links
+        try:
+            return jsonify({"success": True, **server_links.counts(get_video_db()),
+                            "last": server_links.status()})
+        except Exception:
+            logger.exception("video server links status failed")
+            return jsonify({"success": False, "error": "Couldn't read the link status"}), 500
+
+    @bp.route("/server/links", methods=["POST"])
+    def video_server_links_set():
+        """body ``{enabled?: bool, run?: bool}``: switch linking on or off,
+        and/or read the other server now (in the background)."""
+        from . import get_video_db
+        from core.video import server_links
+        body = request.get_json(silent=True) or {}
+        db = get_video_db()
+        if isinstance(body.get("enabled"), bool):
+            db.set_setting(server_links.SETTING, "1" if body["enabled"] else "0")
+        started = False
+        if body.get("run") or body.get("enabled") is True:
+            if not server_links.other_server(db):
+                if body.get("run"):
+                    return jsonify({"success": False,
+                                    "error": "Connect both Plex and Jellyfin first."}), 400
+            else:
+                started = server_links.run_async(db)
+        return jsonify({"success": True, "started": started, **server_links.counts(db),
+                        "last": server_links.status()})
 
     @bp.route("/service-status", methods=["GET"])
     def video_service_status():
@@ -190,9 +249,11 @@ def register_routes(bp):
             return jsonify({
                 "metadata": {"configured": bool(tmdb and tvdb), "tmdb": tmdb, "tvdb": tvdb,
                              "name": "TMDB / TVDB"},
-                "server": {"active": server, "configured": bool(plex_ok or jelly_ok),
+                "server": {"active": server,
+                           "configured": bool(plex_ok or jelly_ok or server == "soulsync"),
                            "plex": plex_ok, "jellyfin": jelly_ok,
-                           "name": server.capitalize() if server else "No server"},
+                           "name": ("SoulSync" if server == "soulsync" else server.capitalize())
+                           if server else "No server"},
                 "download": {"configured": True, "mode": mode, "hybrid_order": order,
                              "name": dl_name},
             })

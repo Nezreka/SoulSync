@@ -275,9 +275,6 @@ FIXTURE = (
 )
 
 ALLOWED_DASHBOARD_ID_REFS = {
-    # helper.js: the help-search/tour CONTENT — read-only selectors resolved
-    # against React's ids.
-    "helper.js": None,  # None = any id allowed (read-only by construction)
     # worker-orbs.js: anchors #dashboard-page .dashboard-header, reads only.
     "worker-orbs.js": {"dashboard-page"},
     # wishlist-tools.js: the Active Downloads ADOPTED REGION — React renders

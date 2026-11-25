@@ -224,6 +224,8 @@ def require_api_key(f):
 
         return f(*args, **kwargs)
 
+    # the route inventory (tests/test_route_permissions.py) reads this
+    decorated._soulsync_access = ("api_key", None)
     return decorated
 
 

@@ -453,7 +453,9 @@ class AudioDBWorker:
             'mood': data.get('strMood'),
             'label': data.get('strLabel'),
             'banner_url': data.get('strArtistBanner'),
-        }, image=data.get('strArtistThumb'))
+        }, image=data.get('strArtistThumb'),
+            # the artist page's bio when last.fm has none (core.library2.artist_about)
+            payload={'bio': (data.get('strBiographyEN') or '').strip() or None})
 
     def _update_album(self, album_id: int, data: Dict[str, Any]):
         """Store AudioDB metadata for an album using generic column names"""
@@ -472,7 +474,8 @@ class AudioDBWorker:
 
     def _write(self, entity_type: str, entity_id: int, provider_id,
                data: Dict[str, Any], columns: Dict[str, Any],
-               image: Optional[str] = None):
+               image: Optional[str] = None,
+               payload: Optional[Dict[str, Any]] = None):
         """One write path for all three entity types (docs §32.3.1 stage 2).
 
         ``columns`` are written outright: style/mood/label/banner_url carry no
@@ -501,6 +504,7 @@ class AudioDBWorker:
             write_provider_enrichment(
                 conn, entity_type=entity_type, entity_id=entity_id,
                 service='audiodb',
+                payload=payload,
                 provider_id=provider_id,
                 columns=columns,
                 backfill=backfill or None,

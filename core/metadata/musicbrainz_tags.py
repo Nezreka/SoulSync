@@ -109,8 +109,10 @@ def credit_tags(credits, album=False, expected_names=None):
     other tags (ARTISTS, the MusicBrainz ids) keep the full credit; without
     ``expected_names`` behavior is unchanged from before."""
     entries = [c for c in credits or [] if isinstance(c, dict)]
-    names = [c.get("name") or c.get("artist", {}).get("name") for c in entries]
-    ids = [c.get("artist", {}).get("id") for c in entries]
+    # Prefer the artist entity's current canonical name on MusicBrainz over the
+    # historical printed credit on older releases (#2257: e.g. 16BL vs 16 Bit Lolita's).
+    names = [(c.get("artist") or {}).get("name") or c.get("name") for c in entries]
+    ids = [(c.get("artist") or {}).get("id") for c in entries]
     if expected_names:
         from core.text.fold import fold_title
         expected = {fold_title(n, drop_brackets=False) for n in expected_names if n}
@@ -172,81 +174,44 @@ def release_tags(release, album_artist_names=None):
     return tags
 
 
+# the tags with a frame or atom of their own (core/metadata/tagfields.py).
+# every other tag is an id or a custom value: its address comes from the id
+# maps in core/metadata/source.py, and failing that it is a freeform tag of
+# its own name.
+_NATIVE_TAGS = ("COPYRIGHT", "DATE", "ARTISTSORT", "ALBUMARTISTSORT", "LABEL", "ISRC", "LYRICS")
+
+
+def tag_field(tag):
+    """where ``tag`` lives in each container. write_tag and read_tag both
+    ask here, so what one writes the other reads: DATE, the sort names and
+    LYRICS used to be written to their native frame or atom on MP3 and M4A
+    and looked for somewhere else, and read back None."""
+    from core.metadata import tagfields
+    from core.metadata.source import ID3_TAG_MAP, MP4_TAG_MAP, VORBIS_TAG_MAP
+    if tag in _NATIVE_TAGS:
+        known = tagfields.FIELDS[tag.lower()]
+        # (the Vorbis key keeps the caller's spelling; the comment names are
+        # case-blind, and a mapped id still wins)
+        return tagfields.Field(known.id3, VORBIS_TAG_MAP.get(tag, tag), known.mp4, known.kind)
+    frame, desc = ID3_TAG_MAP.get(tag, ("TXXX", tag))
+    id3 = "%s:%s" % (frame, desc) if frame in ("TXXX", "UFID") else frame
+    return tagfields.Field(id3, VORBIS_TAG_MAP.get(tag, tag), "----:" + MP4_TAG_MAP.get(tag, tag))
+
+
 def write_tag(audio, tag, value, symbols):
     """Write Picard's native frames/atoms and preserve multi-value fields."""
-    from core.metadata.common import is_vorbis_like
-    from core.metadata.source import ID3_TAG_MAP, MP4_TAG_MAP, VORBIS_TAG_MAP
+    from core.metadata import tagfields
     values = [str(v) for v in (value if isinstance(value, (list, tuple)) else [value]) if v is not None]
     if not values:
         return
-    native = {"COPYRIGHT": "TCOP", "DATE": "TDRC", "ARTISTSORT": "TSOP", "ALBUMARTISTSORT": "TSO2", "LABEL": "TPUB", "ISRC": "TSRC"}
-    if tag == 'LYRICS':
-        if isinstance(audio.tags, symbols.ID3):
-            from mutagen.id3 import USLT
-            # review 5 R5-A-3: a USLT is keyed by lang and desc, so adding
-            # one beside an old 'XXX' frame stacked a second set of lyrics
-            # and the reader still saw the old. replace, as mp4 and vorbis do
-            audio.tags.delall('USLT')
-            audio.tags.add(USLT(encoding=3, lang='eng', desc='', text=values[0]))
-        elif isinstance(audio, symbols.MP4):
-            audio['\xa9lyr'] = values
-        elif is_vorbis_like(audio, symbols):
-            audio['LYRICS'] = values
-        return
-    if tag == 'COPYRIGHT' and isinstance(audio, symbols.MP4):
-        audio['cprt'] = values
-        return
-    if isinstance(audio.tags, symbols.ID3):
-        frame, desc = ID3_TAG_MAP.get(tag, ("TXXX", tag))
-        frame = native.get(tag, frame)
-        if frame == "UFID":
-            audio.tags.add(symbols.UFID(owner=desc, data=values[0].encode("ascii")))
-        elif frame == "TXXX":
-            # one frame per tag, whatever case another tagger used for its
-            # description (Picard: TXXX:ARTISTS, here TXXX:Artists): keep the
-            # file's own spelling and never add a second frame beside it
-            existing = [k for k in audio.tags.keys() if k.upper() == f"TXXX:{desc}".upper()]
-            if existing:
-                desc = existing[0].split(":", 1)[1]
-                for key in existing:
-                    del audio.tags[key]
-            audio.tags.add(symbols.TXXX(encoding=3, desc=desc, text=values))
-        else:
-            from mutagen import id3
-            factory = getattr(symbols, frame, None) or getattr(id3, frame)
-            audio.tags.add(factory(encoding=3, text=values))
-    elif isinstance(audio, symbols.MP4):
-        atom = {"DATE": "\xa9day", "ARTISTSORT": "soar", "ALBUMARTISTSORT": "soaa"}.get(tag)
-        if atom:
-            audio[atom] = values
-        else:
-            key = "----:com.apple.iTunes:" + MP4_TAG_MAP.get(tag, tag)
-            audio[key] = [symbols.MP4FreeForm(v.encode("utf-8")) for v in values]
-    elif is_vorbis_like(audio, symbols):
-        key = VORBIS_TAG_MAP.get(tag, tag)
-        if key != tag and tag in audio:
-            del audio[tag]  # Remove SoulSync's legacy alias before writing Picard's key.
-        audio[key] = values
+    field = tag_field(tag)
+    if tagfields.container(audio, symbols) == "vorbis" and field.vorbis != tag and tag in audio:
+        del audio[tag]  # Remove SoulSync's legacy alias before writing Picard's key.
+    tagfields.write_at(audio, symbols, field, values)
 
 
 def read_tag(audio, tag, symbols):
     """Read the same native frame/atom used by write_tag."""
-    from core.metadata.common import is_vorbis_like
-    from core.metadata.source import ID3_TAG_MAP, MP4_TAG_MAP, VORBIS_TAG_MAP
-    if isinstance(audio.tags, symbols.ID3):
-        frame, desc = ID3_TAG_MAP.get(tag, ('TXXX', tag))
-        frame = {'COPYRIGHT': 'TCOP', 'LABEL': 'TPUB', 'ISRC': 'TSRC'}.get(tag, frame)
-        frames = audio.tags.getall(frame)
-        if frame == 'TXXX':
-            frames = [f for f in frames if f.desc == desc]
-        elif frame == 'UFID':
-            frames = [f for f in frames if f.owner == desc]
-        value = getattr(frames[0], 'data' if frame == 'UFID' else 'text', None) if frames else None
-    elif isinstance(audio, symbols.MP4):
-        value = audio.get('cprt' if tag == 'COPYRIGHT' else '----:com.apple.iTunes:' + MP4_TAG_MAP.get(tag, tag))
-    elif is_vorbis_like(audio, symbols):
-        value = audio.get(VORBIS_TAG_MAP.get(tag, tag))
-    else:
-        value = None
-    first = value[0] if isinstance(value, (list, tuple)) and value else value
-    return first.decode('utf-8') if isinstance(first, bytes) else str(first) if first is not None else None
+    from core.metadata import tagfields
+    values = tagfields.read_at(audio, symbols, tag_field(tag))
+    return values[0] if values else None

@@ -480,6 +480,17 @@ def try_staging_match(task_id, batch_id, track, deps: StagingDeps):
             transfer_dir = library_root_for_profile(import_owner_id({'batch_id': batch_id})) or transfer_dir
         except Exception as _root_err:  # noqa: BLE001
             logger.debug(f"[Staging] per-profile root lookup failed: {_root_err}")
+        # a Lidarr album bundle's files are imported into Lidarr's own folder
+        # (lidarr_download.transfer_path), so stage them there too; with
+        # import_through_lidarr every source's files wait there for Lidarr
+        if batch_id and deps.get_batch_field is not None:
+            try:
+                from core.imports.paths import imports_through_lidarr, lidarr_transfer_root
+                if (imports_through_lidarr()
+                        or deps.get_batch_field(batch_id, 'album_bundle_source') == 'lidarr'):
+                    transfer_dir = lidarr_transfer_root() or transfer_dir
+            except Exception as _exc:  # noqa: BLE001
+                logger.debug("lidarr staging root lookup failed: %s", _exc)
         dest_filename = os.path.basename(best_match['full_path'])
         dest_path = os.path.join(transfer_dir, dest_filename)
         os.makedirs(transfer_dir, exist_ok=True)
@@ -491,7 +502,7 @@ def try_staging_match(task_id, batch_id, track, deps: StagingDeps):
 
         import shutil
         shutil.copy2(best_match['full_path'], dest_path)
-        logger.info(f"[Staging] Copied to transfer: {dest_path}")
+        logger.info(f"[Staging] Copied to music library folder: {dest_path}")
 
         # Mark task as completed with staging context.
         # If the batch was populated by the torrent / usenet album-bundle

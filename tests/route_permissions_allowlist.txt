@@ -1,0 +1,2 @@
+# routes that don't declare their access yet (tests/test_route_permissions.py).
+# this list may only shrink: declare the route, then regenerate. never add to it.

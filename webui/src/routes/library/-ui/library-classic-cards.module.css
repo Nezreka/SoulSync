@@ -23,14 +23,6 @@
   z-index: var(--z-card-overlay);
 }
 
-/* the media-server tag next to the toggle */
-.recognition {
-  top: 10px;
-  left: 46px;
-  right: auto;
-  z-index: var(--z-card-overlay);
-}
-
 /* dev's play button was a span: a button needs its font back */
 .play {
   font: inherit;

@@ -142,6 +142,12 @@ def clean_track(raw: Any) -> Optional[Dict[str, Any]]:
     origin = clean_origin(raw.get('source'), raw.get('source_id'))
     if origin:
         track['extra_data'] = {'origin': origin}
+    # a song picked from the library (a music app) names its library track,
+    # so it never has to be found again by name
+    lib2_id = raw.get('lib2_track_id')
+    if isinstance(lib2_id, int) and not isinstance(lib2_id, bool) and lib2_id > 0:
+        track['extra_data'] = dict(track.get('extra_data') or {}, in_library=True,
+                                   library_track_id=lib2_id, library_track_id_kind='lib2')
     return track
 
 
@@ -332,6 +338,15 @@ def add_tracks(
     }
 
 
+def replace_tracks(db: Any, playlist: Dict[str, Any], raw_tracks: Iterable[Any]) -> int:
+    """the playlist becomes exactly these songs (a music app saving its
+    edit). returns the new count."""
+    incoming = [t for t in (clean_track(r) for r in raw_tracks or []) if t]
+    with _edit_lock:
+        _write(db, playlist, incoming)
+    return len(incoming)
+
+
 def remove_track(db: Any, playlist: Dict[str, Any], position: int) -> int:
     """drop the track at a 1-based position; returns the new count."""
     with _edit_lock:
@@ -504,11 +519,17 @@ def set_cover_upload(db: Any, playlist: Dict[str, Any], file_storage: Any,
         fh.write(data)
     os.replace(tmp, path)
     url = cover_url(playlist['id'])
-    if not db.set_mirrored_playlist_image_url(
+    _save_custom_cover(db, playlist, url)
+    return url
+
+
+def _save_custom_cover(db: Any, playlist: Dict[str, Any], url: str) -> None:
+    """the user's pick, on any playlist (#2280): marked custom so a refresh
+    from the source leaves it, with the source's own poster kept for restore."""
+    if not db.set_mirrored_playlist_custom_cover(
         playlist['id'], url, profile_id=playlist.get('profile_id'),
     ):
         raise RuntimeError('could not save the cover')
-    return url
 
 
 def set_cover_url(db: Any, playlist: Dict[str, Any], url: Any) -> str:
@@ -519,10 +540,7 @@ def set_cover_url(db: Any, playlist: Dict[str, Any], url: Any) -> str:
         raise UserPlaylistError('That URL is too long')
     if not cleaned.startswith(('http://', 'https://')):
         raise UserPlaylistError('Cover needs an http(s) image URL')
-    if not db.set_mirrored_playlist_image_url(
-        playlist['id'], cleaned, profile_id=playlist.get('profile_id'),
-    ):
-        raise RuntimeError('could not save the cover')
+    _save_custom_cover(db, playlist, cleaned)
     return cleaned
 
 
@@ -539,10 +557,7 @@ def set_cover_from_track(db: Any, playlist: Dict[str, Any], position: Any) -> st
     art = tracks[pos - 1].get('image_url')
     if not art:
         raise UserPlaylistError('That track has no artwork')
-    if not db.set_mirrored_playlist_image_url(
-        playlist['id'], art, profile_id=playlist.get('profile_id'),
-    ):
-        raise RuntimeError('could not save the cover')
+    _save_custom_cover(db, playlist, art)
     return art
 
 
@@ -558,16 +573,36 @@ def remove_cover_file(playlist_id: int, base_dir: Optional[str] = None) -> None:
 
 
 def clear_cover(db: Any, playlist: Dict[str, Any], *, base_dir: Optional[str] = None) -> None:
-    """back to no cover: the views fall back to track art. the uploaded file,
+    """back to the original cover (#2281): the source's own poster, or none
+    and the views fall back to the collage. the uploaded or generated file,
     if there ever was one, is deleted best-effort."""
-    try:
-        os.remove(cover_path(playlist['id'], base_dir))
-    except OSError:
-        pass
-    if not db.set_mirrored_playlist_image_url(
-        playlist['id'], None, profile_id=playlist.get('profile_id'),
+    if not db.restore_mirrored_playlist_source_cover(
+        playlist['id'], profile_id=playlist.get('profile_id'),
     ):
         raise RuntimeError('could not clear the cover')
+    try:
+        os.remove(cover_path(playlist['id'], base_dir, mkdir=False))
+    except OSError:
+        pass
+
+
+def carry_cover_file(db: Any, from_id: int, playlist: Dict[str, Any],
+                     *, base_dir: Optional[str] = None) -> None:
+    """a copy whose cover is the original's local file gets its own copy of
+    the file, so deleting or restoring the original never breaks it."""
+    image = str(playlist.get('image_url') or '')
+    if not image.startswith(f"/api/user-playlists/{int(from_id)}/cover"):
+        return
+    src = cover_path(from_id, base_dir, mkdir=False)
+    if os.path.isfile(src):
+        shutil.copyfile(src, cover_path(playlist['id'], base_dir))
+        url = cover_url(playlist['id'])
+        if playlist.get('custom_cover'):
+            db.set_mirrored_playlist_custom_cover(playlist['id'], url, profile_id=playlist.get('profile_id'))
+        else:
+            db.set_mirrored_playlist_image_url(playlist['id'], url, profile_id=playlist.get('profile_id'))
+    else:
+        db.restore_mirrored_playlist_source_cover(playlist['id'], profile_id=playlist.get('profile_id'))
 
 
 def set_description(db: Any, playlist: Dict[str, Any], description: Any) -> str:

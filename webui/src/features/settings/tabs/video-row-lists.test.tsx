@@ -1,7 +1,9 @@
 /**
- * Notifications and Import Lists (SETTINGS_PORT.md, video pass V3c): the
- * markup they replaced (the retired source picker that rode along inside
- * Notifications aside), the load each time the video settings page is shown,
+ * Notifications and Import Lists (SETTINGS_PORT.md, video pass V3c), both on
+ * the parts: Import Lists since settings-bic phase 5 (column headers, named
+ * fields, a delete that asks first), Notifications since phase 6 (a block
+ * per connection, events as chips, a delete that asks first), the load each time the
+ * video settings page is shown,
  * a row saved alone when a field changes (read off the page), add, delete,
  * Test, and a new notification type drawing its row again.
  */
@@ -9,13 +11,7 @@
 import { act, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { shape, vanilla } from './__fixtures__/shape';
-import {
-  ImportListsSection,
-  importLists,
-  NotificationsSection,
-  notifications,
-} from './video-row-lists';
+import { ImportListsCard, importLists, NotificationsCard, notifications } from './video-row-lists';
 
 type Shell = Window & Record<string, unknown>;
 const shell = window as unknown as Shell;
@@ -112,30 +108,31 @@ function shown() {
   });
 }
 const q = <T extends Element = HTMLInputElement>(sel: string) => document.querySelector<T>(sel)!;
+/** a field whose wrapper is hidden: not this connection's type */
+const gone = (sel: string) => !!q(sel).closest('[hidden]');
 function leave(el: HTMLElement) {
   el.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
-describe('the markup they replaced', () => {
-  it('Notifications, without the retired source picker', () => {
-    const { container } = render(<NotificationsSection />);
-    const old = vanilla('video-notifications.vanilla.html');
-    for (const el of old.querySelectorAll('[data-video-legacy-source]')) el.remove();
-    expect(shape(container)).toEqual(shape(old));
-  });
-
-  it('Import Lists', () => {
-    const { container } = render(<ImportListsSection />);
-    expect(shape(container)).toEqual(shape(vanilla('video-import-lists.vanilla.html')));
-  });
-});
-
 describe('Import Lists', () => {
+  it('says so when every list is switched off, and not while one is on', async () => {
+    render(<ImportListsCard />);
+    shown();
+    await waitFor(() => expect(document.querySelectorAll('[data-vq-implist]')).toHaveLength(2));
+    expect(document.body.textContent).not.toContain('Every list is switched off');
+    fireEvent.click(q('[data-vq-implist="1"] [data-vq-il-f="enabled"]'));
+    await waitFor(() =>
+      expect(document.body.textContent).toContain(
+        'Every list is switched off, so nothing is added from them.',
+      ),
+    );
+  });
+
   it('loads each time the video settings page is shown', async () => {
-    render(<ImportListsSection />);
+    render(<ImportListsCard />);
     expect(q('#vq-implist-rows').children).toHaveLength(0);
     shown();
-    await waitFor(() => expect(document.querySelectorAll('.vq-implist-row')).toHaveLength(2));
+    await waitFor(() => expect(document.querySelectorAll('[data-vq-implist]')).toHaveLength(2));
     const row = q('[data-vq-implist="2"]');
     expect(q<HTMLSelectElement>('[data-vq-implist="2"] [data-vq-il-f="source"]').value).toBe(
       'imdb_list',
@@ -147,10 +144,43 @@ describe('Import Lists', () => {
     );
   });
 
-  it('a field saves its row alone, read off the page; a bad one says why', async () => {
-    render(<ImportListsSection />);
+  it('the rows have column headers, a named field each, and say what a List takes', async () => {
+    render(<ImportListsCard />);
     shown();
-    await waitFor(() => expect(document.querySelectorAll('.vq-implist-row')).toHaveLength(2));
+    await waitFor(() => expect(document.querySelectorAll('[data-vq-implist]')).toHaveLength(2));
+    const head = q('#vq-implist-rows').firstElementChild!;
+    expect([...head.children].map((c) => c.textContent)).toEqual([
+      'Name',
+      'From',
+      'List',
+      'Adds',
+      'A followed show gets',
+      'On',
+      '',
+    ]);
+    const row = q('[data-vq-implist="2"]');
+    for (const el of row.querySelectorAll('input, select, button'))
+      expect(el.getAttribute('aria-label'), el.outerHTML).toBeTruthy();
+    expect(q('[data-vq-implist="2"] [data-vq-il-f="enabled"]').getAttribute('aria-label')).toBe(
+      'Use this list',
+    );
+    expect(q('[data-vq-implist-del="2"]').getAttribute('aria-label')).toBe('Delete Mine');
+    // the List field says what goes in it, by where the list comes from
+    expect(q('[data-vq-implist="1"] [data-vq-il-f="ref"]').placeholder).toBe(
+      'chart, like trending_movies',
+    );
+    expect(q('[data-vq-implist="2"] [data-vq-il-f="ref"]').placeholder).toBe('IMDb ls id or link');
+    // a movie list does not use what a followed show gets: dimmed, not disabled
+    const monitor = q<HTMLSelectElement>('[data-vq-implist="1"] [data-vq-il-f="monitor"]');
+    expect(monitor.disabled).toBe(false);
+    expect(monitor.closest('[title="Only used for shows"]')).not.toBeNull();
+    expect(document.body.textContent).not.toContain('—');
+  });
+
+  it('a field saves its row alone, read off the page; a bad one says why', async () => {
+    render(<ImportListsCard />);
+    shown();
+    await waitFor(() => expect(document.querySelectorAll('[data-vq-implist]')).toHaveLength(2));
     // a pick: saved with the new value (heard before React's own change)
     fireEvent.change(q('[data-vq-implist="1"] [data-vq-il-f="media"]'), {
       target: { value: 'show' },
@@ -172,7 +202,7 @@ describe('Import Lists', () => {
     answers['POST /api/video/downloads/config/import-lists'] = { success: false };
     leave(ref);
     await waitFor(() =>
-      expect(shell.showToast).toHaveBeenCalledWith('A list needs a valid source + ref', 'error'),
+      expect(shell.showToast).toHaveBeenCalledWith('A list needs a valid source and list', 'error'),
     );
     expect(posts('/api/video/downloads/config/import-lists')[1].ref).toBe('nope');
     // what was typed stays
@@ -180,9 +210,9 @@ describe('Import Lists', () => {
   });
 
   it('add and delete draw the rows again', async () => {
-    render(<ImportListsSection />);
+    render(<ImportListsCard />);
     shown();
-    await waitFor(() => expect(document.querySelectorAll('.vq-implist-row')).toHaveLength(2));
+    await waitFor(() => expect(document.querySelectorAll('[data-vq-implist]')).toHaveLength(2));
     answers['POST /api/video/downloads/config/import-lists'] = {
       success: true,
       id: 9,
@@ -194,50 +224,100 @@ describe('Import Lists', () => {
       enabled: true,
     };
     fireEvent.click(q('[data-vq-implist-add]'));
-    await waitFor(() => expect(document.querySelectorAll('.vq-implist-row')).toHaveLength(3));
+    await waitFor(() => expect(document.querySelectorAll('[data-vq-implist]')).toHaveLength(3));
     expect(posts('/api/video/downloads/config/import-lists')[0]).toEqual({
       name: 'New list',
       source: 'tmdb_chart',
       ref: 'trending_movies',
     });
+    // a delete asks first: kept on Keep it, gone on Delete
+    let answer = false;
+    const asked: Array<Record<string, unknown>> = [];
+    shell.showConfirmDialog = vi.fn((o?: Record<string, unknown>) => {
+      asked.push(o ?? {});
+      return Promise.resolve(answer);
+    });
     fireEvent.click(q('[data-vq-implist-del="1"]'));
-    await waitFor(() => expect(document.querySelectorAll('.vq-implist-row')).toHaveLength(2));
+    await waitFor(() => expect(asked).toHaveLength(1));
+    expect(asked[0]).toMatchObject({ title: 'Delete Trending?', destructive: true });
+    await act(async () => {});
+    expect(calls.some((c) => c.method === 'DELETE')).toBe(false);
+    expect(document.querySelectorAll('[data-vq-implist]')).toHaveLength(3);
+    answer = true;
+    fireEvent.click(q('[data-vq-implist-del="1"]'));
+    await waitFor(() => expect(document.querySelectorAll('[data-vq-implist]')).toHaveLength(2));
     expect(calls.some((c) => c.method === 'DELETE' && c.url.endsWith('/import-lists/1'))).toBe(
       true,
     );
     fireEvent.click(q('[data-vq-implist-del="2"]'));
     fireEvent.click(q('[data-vq-implist-del="9"]'));
     await waitFor(() => expect(q('#vq-implist-rows').textContent).toBe('No import lists yet.'));
+    delete shell.showConfirmDialog;
   });
 });
 
 describe('Notifications', () => {
-  it('loads the connections and their events; a non-admin sees none', async () => {
-    render(<NotificationsSection />);
+  it('a connection that hears no events says so on its block; all switched off says so too', async () => {
+    render(<NotificationsCard />);
     shown();
-    await waitFor(() => expect(document.querySelectorAll('.vq-nt-block')).toHaveLength(2));
+    await waitFor(() => expect(document.querySelectorAll('[data-vq-notify]')).toHaveLength(2));
+    const deaf = (id: number) => q(`[data-vq-notify="${id}"]`).querySelector('[data-vq-nt-deaf]');
+    // Telegram hears nothing but is off: nothing to say yet
+    expect(deaf(5)).toBeNull();
+    expect(deaf(4)).toBeNull();
+    fireEvent.click(q('[data-vq-notify="5"] [data-vq-nt-f="enabled"]'));
+    await waitFor(() => expect(deaf(5)).not.toBeNull());
+    expect(deaf(5)!.textContent).toContain('Hears no events yet');
+    expect(document.body.textContent).not.toContain('Every connection is switched off');
+    fireEvent.click(q('[data-vq-notify="5"] [data-vq-nt-f="enabled"]'));
+    fireEvent.click(q('[data-vq-notify="4"] [data-vq-nt-f="enabled"]'));
+    await waitFor(() =>
+      expect(document.body.textContent).toContain(
+        'Every connection is switched off, so nothing is sent.',
+      ),
+    );
+  });
+
+  it('loads the connections and their events; a non-admin sees none', async () => {
+    render(<NotificationsCard />);
+    shown();
+    await waitFor(() => expect(document.querySelectorAll('[data-vq-notify]')).toHaveLength(2));
     // the target fields follow the type
-    expect(q('[data-vq-notify="4"] [data-vq-nt-f="url"]').style.display).toBe('');
-    expect(q('[data-vq-notify="4"] [data-vq-nt-f="token"]').style.display).toBe('none');
-    expect(q('[data-vq-notify="5"] [data-vq-nt-f="url"]').style.display).toBe('none');
+    expect(gone('[data-vq-notify="4"] [data-vq-nt-f="url"]')).toBe(false);
+    expect(gone('[data-vq-notify="4"] [data-vq-nt-f="token"]')).toBe(true);
+    expect(gone('[data-vq-notify="5"] [data-vq-nt-f="url"]')).toBe(true);
+    expect(gone('[data-vq-notify="5"] [data-vq-nt-f="chat_id"]')).toBe(false);
+    // the events are chips, each a real tick box with its hook
     expect(
-      [...document.querySelectorAll('[data-vq-notify="4"] .vq-nt-ev')].map((l) => l.textContent),
+      [...document.querySelectorAll('[data-vq-notify="4"] [role="group"] label')].map(
+        (l) => l.textContent,
+      ),
     ).toEqual(['Imported', 'Failed', 'Followed']);
+    expect(q('[data-vq-notify="4"] [role="group"]').getAttribute('aria-label')).toBe(
+      'What Discord hears',
+    );
+    // each field and button named for the connection it is in
+    expect(q('[data-vq-notify="4"] [data-vq-nt-f="enabled"]').getAttribute('aria-label')).toBe(
+      'Use Discord',
+    );
+    expect(q('[data-vq-notify-test="5"]').getAttribute('aria-label')).toBe('Test TG');
+    expect(q('[data-vq-notify-del="5"]').getAttribute('aria-label')).toBe('Delete TG');
+    expect(q('[data-vq-notify="4"] [data-vq-nt-f="enabled"]').getAttribute('role')).toBe('switch');
     expect(q('[data-vq-notify="4"] [data-vq-nt-ev="video_download_completed"]').checked).toBe(true);
   });
 
   it('a non-admin (403) sees nothing, not an empty list', async () => {
     answers['GET /api/video/notifications'] = 403;
-    render(<NotificationsSection />);
+    render(<NotificationsCard />);
     shown();
     await waitFor(() => expect(calls.some((c) => c.url === '/api/video/notifications')).toBe(true));
     expect(q('#vq-notify-rows').textContent).toBe('');
   });
 
   it('an event ticked saves the block with its events in order', async () => {
-    render(<NotificationsSection />);
+    render(<NotificationsCard />);
     shown();
-    await waitFor(() => expect(document.querySelectorAll('.vq-nt-block')).toHaveLength(2));
+    await waitFor(() => expect(document.querySelectorAll('[data-vq-notify]')).toHaveLength(2));
     fireEvent.click(q('[data-vq-notify="4"] [data-vq-nt-ev="video_watchlist_added"]'));
     await waitFor(() => expect(posts('/api/video/notifications')).toHaveLength(1));
     expect(posts('/api/video/notifications')[0]).toEqual({
@@ -253,25 +333,23 @@ describe('Notifications', () => {
   });
 
   it('a new type is drawn again, so its fields swap', async () => {
-    render(<NotificationsSection />);
+    render(<NotificationsCard />);
     shown();
-    await waitFor(() => expect(document.querySelectorAll('.vq-nt-block')).toHaveLength(2));
+    await waitFor(() => expect(document.querySelectorAll('[data-vq-notify]')).toHaveLength(2));
     answers['POST /api/video/notifications'] = { ...CONNS[0], type: 'telegram', success: true };
     fireEvent.change(q('[data-vq-notify="4"] [data-vq-nt-f="type"]'), {
       target: { value: 'telegram' },
     });
-    await waitFor(() =>
-      expect(q('[data-vq-notify="4"] [data-vq-nt-f="token"]').style.display).toBe(''),
-    );
-    expect(q('[data-vq-notify="4"] [data-vq-nt-f="url"]').style.display).toBe('none');
+    await waitFor(() => expect(gone('[data-vq-notify="4"] [data-vq-nt-f="token"]')).toBe(false));
+    expect(gone('[data-vq-notify="4"] [data-vq-nt-f="url"]')).toBe(true);
     expect(posts('/api/video/notifications')[0].type).toBe('telegram');
   });
 
   it('Test sends the block as it is, off while it runs', async () => {
     answers['POST /api/video/notifications/test'] = { success: false, error: 'bad hook' };
-    render(<NotificationsSection />);
+    render(<NotificationsCard />);
     shown();
-    await waitFor(() => expect(document.querySelectorAll('.vq-nt-block')).toHaveLength(2));
+    await waitFor(() => expect(document.querySelectorAll('[data-vq-notify]')).toHaveLength(2));
     const test = q<HTMLButtonElement>('[data-vq-notify-test="5"]');
     fireEvent.click(test);
     expect(test.disabled).toBe(true);
@@ -286,9 +364,9 @@ describe('Notifications', () => {
   });
 
   it('add puts a Discord connection in; delete takes it out', async () => {
-    render(<NotificationsSection />);
+    render(<NotificationsCard />);
     shown();
-    await waitFor(() => expect(document.querySelectorAll('.vq-nt-block')).toHaveLength(2));
+    await waitFor(() => expect(document.querySelectorAll('[data-vq-notify]')).toHaveLength(2));
     answers['POST /api/video/notifications'] = {
       success: true,
       id: 7,
@@ -299,13 +377,23 @@ describe('Notifications', () => {
       events: [],
     };
     fireEvent.click(q('[data-vq-notify-add]'));
-    await waitFor(() => expect(document.querySelectorAll('.vq-nt-block')).toHaveLength(3));
+    await waitFor(() => expect(document.querySelectorAll('[data-vq-notify]')).toHaveLength(3));
     expect(posts('/api/video/notifications')[0]).toEqual({
       name: 'Discord',
       type: 'discord',
       url: 'https://discord.com/api/webhooks/REPLACE-ME',
     });
+    // a delete asks first: Keep it keeps it and sends nothing
+    shell.showConfirmDialog = vi.fn().mockResolvedValueOnce(false).mockResolvedValue(true);
     fireEvent.click(q('[data-vq-notify-del="7"]'));
-    await waitFor(() => expect(document.querySelectorAll('.vq-nt-block')).toHaveLength(2));
+    await act(() => Promise.resolve());
+    expect(calls.some((c) => c.method === 'DELETE')).toBe(false);
+    expect(document.querySelectorAll('[data-vq-notify]')).toHaveLength(3);
+    fireEvent.click(q('[data-vq-notify-del="7"]'));
+    await waitFor(() => expect(document.querySelectorAll('[data-vq-notify]')).toHaveLength(2));
+    expect(shell.showConfirmDialog).toHaveBeenCalledWith(
+      expect.objectContaining({ title: 'Delete Discord?', destructive: true }),
+    );
+    delete shell.showConfirmDialog;
   });
 });

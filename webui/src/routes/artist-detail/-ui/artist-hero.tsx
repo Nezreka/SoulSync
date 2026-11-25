@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { AudiobookRouteToggle } from '@/features/audiobook-routes/audiobook-route-toggle';
-import { profileAsksFirst } from '@/platform/shell/download-rights';
+import { getShellProfileContext } from '@/platform/shell/bridge';
+import { useMusicGet } from '@/platform/shell/download-rights';
+import { usePermNotOff } from '@/platform/shell/my-permissions';
 
 import type { StreamCounts } from '../-artist-detail.completion';
 import type { ArtistInfo, Discography, DiscographyBucket } from '../-artist-detail.types';
@@ -14,15 +16,17 @@ import {
 import { buildHeroBadges } from '../-artist-detail.hero';
 import {
   artistFormatTags,
+  artistTags,
   buildGenreChips,
   categoryStats,
   type CategoryStats,
-  cleanArtistBio,
   formatHeroNumber,
   heroImage,
   type HeroImageStage,
   heroImageSrc,
+  heroNumbers,
   nextHeroImageStage,
+  pickArtistBio,
   resolvedCategoryStats,
   streamCategoryStats,
   totalReleaseCount,
@@ -30,6 +34,7 @@ import {
 import { bucketCounts } from '../-artist-detail.use-completion';
 import { checkWatchlistRequest, toggleWatchlistRequest } from '../-artist-detail.watchlist-button';
 import { ReportIssueButton } from '../../issues/-ui/report-issue-button';
+import { AboutSourceNote } from './about-source-note';
 import { ArtPicker } from './art-picker';
 import { ArtistDbRecord } from './artist-db-record';
 import { ArtistFixMatch } from './artist-matches-modal';
@@ -197,7 +202,11 @@ export function ArtistHero({
   const image = heroImage(artist, discography);
   const badges = buildHeroBadges(artist);
   const chips = buildGenreChips(artist);
-  const bio = cleanArtistBio(artist.lastfm_bio);
+  // last.fm first, then the media server's summary, then the free sources
+  const pickedBio = pickArtistBio(artist);
+  const bio = pickedBio?.text ?? '';
+  const tagsSource = artistTags(artist).source;
+  const numbers = heroNumbers(artist);
   const [bioExpanded, setBioExpanded] = useState(false);
   const bioRef = useRef<HTMLDivElement | null>(null);
   /**
@@ -221,9 +230,15 @@ export function ArtistHero({
   /** null = unknown (check pending/failed); the vanilla left the default label. */
   const [watching, setWatching] = useState<boolean | null>(null);
   const [watchlistBusy, setWatchlistBusy] = useState(false);
+  const mayWatch = usePermNotOff('music.watchlist');
   const [watchlistAddOpen, setWatchlistAddOpen] = useState(false);
   const [downloadingDiscog, setDownloadingDiscog] = useState(false);
-  const asksFirst = profileAsksFirst();
+  // download, ask first, or can't request at all (#2166): the last has no
+  // button, not a dead one
+  const { asksFirst, cantRequest } = useMusicGet();
+  /** setting the photo writes the shared library, the server and artist.jpg,
+      so it's the admin's. no shell (a test) leaves it to the server's 403. */
+  const canChangePhoto = getShellProfileContext()?.isAdmin !== false;
   /** A freshly applied photo shows immediately, as the vanilla swapped the
       hero img src in place (openArtistArtPicker apply, library.js:1966-1971). */
   const [appliedPhoto, setAppliedPhoto] = useState<string | null>(null);
@@ -274,7 +289,7 @@ export function ArtistHero({
    *  long as the stream ran. That's the "watched/unwatched over and over"
    *  flapping, and it also swallowed toggles — an in-flight check that resolved
    *  after a toggle overwrote the new state with the old one. */
-  const watchlistId = watchlist?.id ?? null;
+  const watchlistId = mayWatch ? (watchlist?.id ?? null) : null;
   const watchlistSource = watchlist?.source;
   useEffect(() => {
     setWatching(null);
@@ -369,8 +384,8 @@ export function ArtistHero({
       <div className="artist-hero-content">
         <div
           className="artist-image-container"
-          title="Change artist photo"
-          onClick={() => setPickingPhoto(true)}
+          title={canChangePhoto ? 'Change artist photo' : undefined}
+          onClick={canChangePhoto ? () => setPickingPhoto(true) : undefined}
         >
           <ArtistPhoto
             artist={
@@ -380,23 +395,25 @@ export function ArtistHero({
             }
             discography={discography}
           />
-          <div className="artist-image-edit-overlay">
-            <svg
-              viewBox="0 0 24 24"
-              width="26"
-              height="26"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.7"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <rect x="3" y="3" width="18" height="18" rx="2" />
-              <circle cx="8.5" cy="8.5" r="1.5" />
-              <path d="m21 15-5-5L5 21" />
-            </svg>
-            <span>Change photo</span>
-          </div>
+          {canChangePhoto ? (
+            <div className="artist-image-edit-overlay">
+              <svg
+                viewBox="0 0 24 24"
+                width="26"
+                height="26"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <rect x="3" y="3" width="18" height="18" rx="2" />
+                <circle cx="8.5" cy="8.5" r="1.5" />
+                <path d="m21 15-5-5L5 21" />
+              </svg>
+              <span>Change photo</span>
+            </div>
+          ) : null}
         </div>
 
         <div className="artist-info">
@@ -444,18 +461,21 @@ export function ArtistHero({
               React: checkArtistEnhanceEligibility unhides it and rewrites
               `.enhance-text` with the count, so it has no React state.
             */}
-            <button
-              type="button"
-              className={`library-artist-watchlist-btn${watching ? ' watching' : ''}`}
-              id="library-artist-watchlist-btn"
-              disabled={watchlistBusy}
-              onClick={() => void toggleWatchlist()}
-            >
-              <span className="watchlist-icon">👁️</span>
-              <span className="watchlist-text">
-                {watchlistBusy ? 'Loading...' : watching ? 'Watching...' : 'Add to Watchlist'}
-              </span>
-            </button>
+            {/* #2209: no Watchlist in the profile, no button (the server refuses it) */}
+            {mayWatch ? (
+              <button
+                type="button"
+                className={`library-artist-watchlist-btn${watching ? ' watching' : ''}`}
+                id="library-artist-watchlist-btn"
+                disabled={watchlistBusy}
+                onClick={() => void toggleWatchlist()}
+              >
+                <span className="watchlist-icon">👁️</span>
+                <span className="watchlist-text">
+                  {watchlistBusy ? 'Loading...' : watching ? 'Watching...' : 'Add to Watchlist'}
+                </span>
+              </button>
+            ) : null}
             {artist.name ? (
               <AudiobookRouteToggle
                 name={String(artist.name)}
@@ -466,7 +486,7 @@ export function ArtistHero({
             <div
               className="discog-download-wrap"
               id="discog-download-wrap"
-              style={{ display: hasReleases ? '' : 'none' }}
+              style={{ display: hasReleases && !cantRequest ? '' : 'none' }}
             >
               <button
                 type="button"
@@ -522,10 +542,11 @@ export function ArtistHero({
           <div className="artist-genres-container" id="artist-genres">
             {chips.map((chip) => (
               <span
-                key={`${chip.fromLastfm ? 'lfm' : 'genre'}-${chip.label}`}
+                key={`${chip.source}-${chip.label}`}
                 className="genre-tag"
-                // Last.fm tags are dimmed so they read as secondary.
-                style={chip.fromLastfm ? { opacity: 0.6 } : undefined}
+                // tags (last.fm, or musicbrainz without it) are dimmed so they
+                // read as secondary.
+                style={chip.source !== 'genre' ? { opacity: 0.6 } : undefined}
               >
                 {chip.label}
               </span>
@@ -564,19 +585,19 @@ export function ArtistHero({
             </div>
           ) : null}
 
+          <AboutSourceNote
+            bioSource={pickedBio?.source}
+            bioUrl={pickedBio?.url}
+            tagsSource={chips.some((chip) => chip.source !== 'genre') ? tagsSource : null}
+          />
+
           <div className="artist-hero-numbers">
-            {artist.lastfm_listeners ? (
-              <div className="artist-hero-stat" id="artist-hero-listeners">
-                <span className="hero-stat-value">{formatHeroNumber(artist.lastfm_listeners)}</span>
-                <span className="hero-stat-label">listeners</span>
+            {numbers.map((stat) => (
+              <div className="artist-hero-stat" id={`artist-hero-${stat.id}`} key={stat.id}>
+                <span className="hero-stat-value">{formatHeroNumber(stat.value)}</span>
+                <span className="hero-stat-label">{stat.label}</span>
               </div>
-            ) : null}
-            {artist.lastfm_playcount ? (
-              <div className="artist-hero-stat" id="artist-hero-playcount">
-                <span className="hero-stat-value">{formatHeroNumber(artist.lastfm_playcount)}</span>
-                <span className="hero-stat-label">plays</span>
-              </div>
-            ) : null}
+            ))}
           </div>
 
           {/* Completion bars are library-only: a source artist owns nothing, so

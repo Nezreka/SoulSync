@@ -124,6 +124,8 @@ def target_tracks(source: str, album_id: str) -> List[Dict[str, Any]]:
             "name": str(_attr(track, "name", "") or _attr(track, "title", "") or ""),
             "track_number": _attr(track, "track_number"),
             "disc_number": _attr(track, "disc_number") or 1,
+            # a length tells two songs at one position apart
+            "duration_ms": _attr(track, "duration_ms"),
         })
     return rows
 
@@ -178,7 +180,7 @@ def local_album_tracks(database, album_id: Any) -> List[Dict[str, Any]]:
         # retired) another library's file (review 5 W2-WD-3)
         cursor.execute(
             f"""
-            SELECT t.id, t.title, t.track_number, f.path, f.id
+            SELECT t.id, t.title, t.track_number, f.path, f.id, t.duration
             FROM lib2_tracks t
             JOIN lib2_track_files f ON f.track_id = t.id
             WHERE t.album_id = ?
@@ -197,7 +199,8 @@ def local_album_tracks(database, album_id: Any) -> List[Dict[str, Any]]:
                 continue          # a second file of a track already listed
             seen.add(track_id)
             rows.append({"id": track_id, "title": row[1], "track_number": row[2],
-                         "file_path": _readable_path(row[3]), "file_id": row[4]})
+                         "file_path": _readable_path(row[3]), "file_id": row[4],
+                         "duration": row[5]})
         return rows
     except Exception as exc:
         logger.error("reassign could not read local album %s: %s", album_id, exc)

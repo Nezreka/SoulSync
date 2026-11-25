@@ -125,9 +125,9 @@ def test_off_does_not_move_the_naming_fingerprint(monkeypatch):
 
 
 def test_settings_ui_round_trip_wiring():
-    # the Organization card is React (SETTINGS_PORT.md step 8b): it shows the
-    # key off unless saved on, and saves it under file_organization
+    # Library > Naming (settings-bic phase 4): a switch that shows the key off
+    # unless saved on, and saves it under file_organization
     card = (_ROOT / "webui" / "src" / "features" / "settings" / "tabs" / "library-organization.tsx").read_text(encoding="utf-8")
-    assert "'unicode-substitution'," in card
-    assert "org.unicode_substitution === true," in card
-    assert "setOrg('unicode_substitution', v, 0)" in card
+    assert 'id="unicode-substitution"' in card
+    assert "checked={org.unicode_substitution === true}" in card
+    assert "setOrg('unicode_substitution', event.target.checked)" in card

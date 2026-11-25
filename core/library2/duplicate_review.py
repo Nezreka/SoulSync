@@ -214,10 +214,15 @@ def _load_files(database, config_manager, *, scope=None, playlist_membership=Non
             f"WHERE derived_from_file_id IS NOT NULL AND COALESCE(file_state,'active')<>'deleted'{where}",
             args)}
         mappings = defaultdict(set)
+        # the active server's own item for each track, and the file it plays
+        server_items = defaultdict(list)
+        active = str(source or "").lower()
         where, args = only("entity_id", ids)
-        for row in conn.execute("SELECT entity_id,server_source FROM lib2_media_server_mappings "
-                                f"WHERE entity_type='track'{where}", args):
+        for row in conn.execute("SELECT entity_id,server_source,server_id,server_path,match_status "
+                                f"FROM lib2_media_server_mappings WHERE entity_type='track'{where}", args):
             mappings[int(row[0])].add(str(row[1] or "").lower())
+            if str(row[1] or "").lower() == active and row[4] == "recognized" and row[2]:
+                server_items[int(row[0])].append((str(row[2]), str(row[3] or "")))
         playlists = {}
         for start in range(0, len(ids), 500):
             playlists.update(track_server_playlists(conn, ids[start:start + 500], source, membership or {}))
@@ -232,6 +237,22 @@ def _load_files(database, config_manager, *, scope=None, playlist_membership=Non
         performers = {int(r[0]): r[1] for r in conn.execute(
             "SELECT id, track_artist FROM lib2_tracks"
             f" WHERE track_artist IS NOT NULL AND track_artist <> ''{where}", args)}
+
+    ignored = never_protecting_playlists(config_manager)
+    # #2172: two files of one track share the track's one server item. the
+    # path the server plays says which file it is, so only that copy is in
+    # its playlists; with no path that says, both still are
+    copies = defaultdict(list)
+    for subject in subjects:
+        copies[int(subject["track_id"])].append(subject)
+    owner_of_item = {}
+    for tid, members in copies.items():
+        if len(members) < 2 or not server_items.get(tid):
+            continue
+        tails = {_path_tail(path) for _sid, path in server_items[tid] if path}
+        hits = [m for m in members if _path_tail(m["path"]) in tails]
+        if len(hits) == 1:
+            owner_of_item[tid] = int(hits[0]["file_id"])
 
     reference_keys = defaultdict(set)
     inode_keys = defaultdict(set)
@@ -257,7 +278,17 @@ def _load_files(database, config_manager, *, scope=None, playlist_membership=Non
             credits.get(tid) or [subject["artist_name"]], performers.get(tid), subject)
         subject["quality_order"] = order[fid]
         subject["quality_tier"] = tiers[fid]
-        subject["playlists"] = playlists.get(tid, [])
+        attributed = owner_of_item.get(tid)
+        if attributed is not None and attributed != fid:
+            # the track's server item plays the other copy
+            subject["playlists"], subject["server_item"] = [], None
+        else:
+            subject["playlists"] = playlists.get(tid, [])
+            subject["server_item"] = (server_items.get(tid) or [(None, "")])[0][0]
+        subject["server_item_shared"] = bool(
+            subject["server_item"] and attributed is None and len(copies[tid]) > 1)
+        subject["ignored_playlists"] = [p for p in subject["playlists"] if p.casefold() in ignored]
+        subject["protecting_playlists"] = [p for p in subject["playlists"] if p.casefold() not in ignored]
         reasons = []
         if subject.get("primary_manual"):
             reasons.append("manual_primary")
@@ -287,7 +318,7 @@ def _load_files(database, config_manager, *, scope=None, playlist_membership=Non
         if (reference_keys[path] - {fid} or (inode and inode_keys[inode] - {fid})
                 or any(root != tuple(parts[:-3]) and other != fid for root, other in aliases)):
             reasons.append("shared_file_reference")
-        if subject["playlists"]:
+        if subject["protecting_playlists"]:
             reasons.append("playlist_reference")
         # The active server's playlists were read above, so its mapping alone
         # protects nothing (or every server-known copy would stay forever).
@@ -299,6 +330,159 @@ def _load_files(database, config_manager, *, scope=None, playlist_membership=Non
         subject["protected_reasons"] = reasons
         subject["snapshot"] = _file_snapshot(subject)
     return subjects
+
+
+def _path_tail(path) -> tuple:
+    """the album folder and file name: the part of a path two mounts share"""
+    parts = [p for p in str(path or "").replace("\\", "/").split("/") if p]
+    return tuple(p.casefold() for p in parts[-2:])
+
+
+SETTINGS_KEY = "repair.jobs.native_duplicate_detector.settings"
+
+
+def _job_settings(config_manager) -> dict:
+    try:
+        settings = (config_manager.get(SETTINGS_KEY, {}) if config_manager else {}) or {}
+    except Exception:  # noqa: BLE001 - unreadable settings keep the defaults
+        settings = {}
+    return settings if isinstance(settings, dict) else {}
+
+
+def never_protecting_playlists(config_manager) -> set:
+    """#2172: playlists the user said never keep a copy, folded. a smart
+    "unsorted" playlist lists every file nobody sorted yet, so it would
+    protect them all. names one per ';' or line"""
+    from core.imports.collab_artist import parse_kept_whole_names
+    names = parse_kept_whole_names(_job_settings(config_manager).get("playlists_that_never_protect"))
+    return {name.casefold() for name in names}
+
+
+def move_entries_by_default(config_manager) -> bool:
+    return _job_settings(config_manager).get("move_playlist_entries") is True
+
+
+def settle_playlists(files: list[dict], keeper: dict, *, move: bool) -> None:
+    """#2172: what each copy's playlists mean once a keeper is chosen.
+
+    A copy in only playlists the kept copy is in too loses nothing when it
+    goes: those playlists still hold the song. With ``move`` on, a copy in
+    playlists the kept copy is not in has its entries there pointed at the
+    kept copy first. Either way the copy is no longer protected by them.
+    One server item behind both copies (no path to tell which file it
+    plays) stays protected: removing the wrong file breaks the entry.
+    """
+    kept = set(keeper.get("playlists") or [])
+    for f in files:
+        f["playlists_covered"], f["playlist_moves"], f["playlists_blocked"] = [], [], ""
+        f.pop("playlist_movable", None)
+        if f is keeper or "playlist_reference" not in f["protected_reasons"]:
+            continue
+        own = list(f.get("protecting_playlists") or [])
+        same_item = bool(f.get("server_item")) and f.get("server_item") == keeper.get("server_item")
+        if same_item or f.get("server_item_shared"):
+            f["playlists_blocked"] = "same_server_item"
+            continue
+        covered = [p for p in own if p in kept]
+        missing = [p for p in own if p not in kept]
+        if missing and not move:
+            f["playlists_covered"] = covered
+            f["playlists_blocked"] = "not_in_kept"
+            # whether moving the entries could settle it: both copies on
+            # the server (a bulk Keep Best counts what moving would unblock)
+            f["playlist_movable"] = bool(keeper.get("server_item") and f.get("server_item"))
+            continue
+        if missing and not (keeper.get("server_item") and f.get("server_item")):
+            f["playlists_covered"] = covered
+            f["playlists_blocked"] = "kept_not_on_server"
+            continue
+        f["playlists_covered"], f["playlist_moves"] = covered, missing
+        f["protected_reasons"] = [r for r in f["protected_reasons"] if r != "playlist_reference"]
+
+
+# #2179: why a bulk Keep Best can't act on a duplicate finding by itself.
+# the finding stays open, marked, and the run says how many and why
+NEEDS_SAME_RECORDING = "same_recording"  # titles differ: a person confirms
+NEEDS_PLAYLIST_MOVE = "playlist"  # a copy is in a playlist the kept copy is not in
+NEEDS_PROTECTED = "protected"  # every other copy is protected for another reason
+NEEDS_YOU_WORDS = {
+    NEEDS_SAME_RECORDING: ("Needs you: the copies are named differently, so confirm they are the "
+                           "same recording on this finding, then Keep Best."),
+    NEEDS_PLAYLIST_MOVE: ("Needs you: a copy is in a playlist the kept copy is not in, so it stays. "
+                          "Keep Best with moving playlist entries on, or pick a file on this finding."),
+    NEEDS_PROTECTED: ("Needs you: every other copy is protected, so Keep Best had nothing to "
+                      "remove. Open the finding to see why each copy stays."),
+}
+
+
+class NeedsRecordingConfirmation(ValueError):
+    """weak evidence and no confirmation: a person has to say it's one recording"""
+
+
+def _playlist_movable(copy: dict) -> bool:
+    """protected only by a playlist the kept copy is not in, and moving the
+    entry could settle it. a scan from before #2179 says nothing about the
+    server items, so it counts as movable: the apply checks again"""
+    return (list(copy.get("protected_reasons") or []) == ["playlist_reference"]
+            and copy.get("playlists_blocked") == "not_in_kept"
+            and copy.get("playlist_movable", True) is not False)
+
+
+def keep_best_blockers(details, *, move: bool = False) -> list:
+    """#2179: what stops a bulk Keep Best on this finding, from its stored
+    review. empty when a bulk run can act on it. ``move``: with moving
+    playlist entries on. NEEDS_YOU_SQL is the same test for move=False"""
+    if not isinstance(details, dict):
+        return []
+    reasons = []
+    if details.get("requires_recording_confirmation"):
+        reasons.append(NEEDS_SAME_RECORDING)
+    keeper = details.get("recommended_file_id")
+    others = [t for t in details.get("tracks") or []
+              if isinstance(t, dict) and t.get("file_id", t.get("id")) != keeper]
+    if others and all(t.get("protected_reasons") for t in others):
+        if not any(_playlist_movable(t) for t in others):
+            reasons.append(NEEDS_PROTECTED)
+        elif not move:
+            reasons.append(NEEDS_PLAYLIST_MOVE)
+    return reasons
+
+
+# the same test as keep_best_blockers(move=False) != [], in SQL, so the
+# finding list can sort the ones that need a person first
+NEEDS_YOU_SQL = (
+    "(finding_type = 'native_duplicate_tracks' AND ("
+    "json_extract(details_json, '$.requires_recording_confirmation') = 1 "
+    "OR NOT EXISTS (SELECT 1 FROM json_each(details_json, '$.tracks') AS copy "
+    "WHERE json_extract(copy.value, '$.file_id') IS NOT json_extract(details_json, '$.recommended_file_id') "
+    "AND COALESCE(json_array_length(json_extract(copy.value, '$.protected_reasons')), 0) = 0)))"
+)
+
+
+def keep_best_summary(details_list) -> dict:
+    """#2179: what a bulk Keep Best over these findings would do, before it
+    runs: how many go through, how many need a person and why, with moving
+    playlist entries off and on"""
+    out = {"total": 0, "ready": 0, "ready_with_move": 0,
+           "needs_you": {}, "needs_you_with_move": {}}
+    for details in details_list:
+        out["total"] += 1
+        for move, ready_key, needs_key in ((False, "ready", "needs_you"),
+                                           (True, "ready_with_move", "needs_you_with_move")):
+            reasons = keep_best_blockers(details, move=move)
+            if not reasons:
+                out[ready_key] += 1
+            for reason in reasons:
+                out[needs_key][reason] = out[needs_key].get(reason, 0) + 1
+    return out
+
+
+def _live_blocker(plan: dict) -> str:
+    """why the plan removes nothing, as the run reports it"""
+    others = [f for f in plan["files"] if f is not plan["keeper"]]
+    if not plan["move"] and any(_playlist_movable(f) for f in others):
+        return NEEDS_PLAYLIST_MOVE
+    return NEEDS_PROTECTED
 
 
 def _performer_names(credited: list, track_artist, subject: dict) -> list:
@@ -320,8 +504,14 @@ def _performer_names(credited: list, track_artist, subject: dict) -> list:
         except (TypeError, ValueError):
             pass
         names = [n for n in (track_artist, tag) if n and not is_various_artists_name(n)][:1]
-    return [str(n).casefold().strip() for name in names
-            for n in split_artist_credits(name or "") if n and not is_various_artists_name(n)]
+    from core.text.cross_script import romanized_forms
+    folded = [str(n).casefold().strip() for name in names
+              for n in split_artist_credits(name or "") if n and not is_various_artists_name(n)]
+    # a greek or cyrillic credit also answers to its latin spellings, so the
+    # copy a download filed under "Δέσποινα Βανδή" pairs with the library's
+    # "Despina Vandi" (#2222)
+    return list(dict.fromkeys(
+        [*folded, *(form.casefold() for n in folded for form in romanized_forms(n))]))
 
 
 def _strong_evidence(a: dict, b: dict) -> bool:
@@ -419,7 +609,7 @@ def _recommended(files: list[dict]) -> dict:
     # the song's place in the record. A better single is never given up for it.
     from core.library2.recording_links import _home_rank
     return min(files, key=lambda f: (
-        not bool(f["playlists"]), not bool(f.get("primary_manual")),
+        not bool(f.get("protecting_playlists", f["playlists"])), not bool(f.get("primary_manual")),
         f.get("quality_tier", f["quality_order"]), -_home_rank(f.get("album_type")),
         f["quality_order"]))
 
@@ -433,6 +623,7 @@ def find_duplicate_candidates(database, config_manager=None, *, settings=None, s
         if not 0 <= options[name] <= 1:
             raise ValueError(f"{name} must be between 0 and 1")
     files = _load_files(database, config_manager, scope=scope, playlist_membership=playlist_membership, server_source=server_source)
+    move_default = move_entries_by_default(config_manager)
     # a file the user tagged by hand is what they say it is (often the live
     # take or the bootleg next to the studio copy): never one of a pair, or
     # Keep Best could keep it and quarantine the studio copy (3.6.1 left
@@ -497,6 +688,7 @@ def find_duplicate_candidates(database, config_manager=None, *, settings=None, s
         used.update(group)
         members = [by_id[value] for value in group]
         keeper = _recommended(members)
+        settle_playlists(members, keeper, move=move_default)
         weak = any(not _strong_evidence(a, b) or a["norm_title"] != b["norm_title"]
                    for i, a in enumerate(members) for b in members[i + 1:])
         snapshots = [f["snapshot"] for f in members]
@@ -508,6 +700,11 @@ def find_duplicate_candidates(database, config_manager=None, *, settings=None, s
             "tracks": [{**f["snapshot"], "id": f["file_id"], "artist_name": f["artist_name"],
                         "album": f["album_title"], "file_path": f["path"], "format": f.get("format"),
                         "bitrate": f.get("bitrate"), "playlists": f["playlists"],
+                        "ignored_playlists": f.get("ignored_playlists") or [],
+                        "playlists_covered": f.get("playlists_covered") or [],
+                        "playlist_moves": f.get("playlist_moves") or [],
+                        "playlists_blocked": f.get("playlists_blocked") or "",
+                        **({"playlist_movable": f["playlist_movable"]} if "playlist_movable" in f else {}),
                         "protected_reasons": f["protected_reasons"]} for f in members],
             "artist_id": keeper["artist_id"], "album_thumb_url": keeper.get("album_image"),
             "artist_thumb_url": keeper.get("artist_image"),
@@ -563,72 +760,216 @@ def _rollback_moves(database, files: list[dict], transfer_folder: str) -> dict:
     return result
 
 
+def _keep_best_plan(database, review: dict, *, config_manager, keep_file_id, confirm_recording,
+                    move, playlist_membership, server_source) -> dict:
+    """everything Keep Best decides before it touches a file: the keeper,
+    which copies go, which stay and why, and the playlist entries that move.
+    raises ValueError / DuplicateRelationshipError for a review that can't
+    be applied"""
+    if review.get("schema") != REVIEW_SCHEMA or not review.get("review_token"):
+        raise ValueError("Native duplicate review required; legacy IDs cannot be applied")
+    original = review.get("tracks") or []
+    ids = [int(f["file_id"]) for f in original]
+    if len(set(ids)) != len(ids) or len(ids) < 2:
+        raise ValueError("Invalid duplicate group")
+    move = move_entries_by_default(config_manager) if move is None else bool(move)
+    # Read the server's playlists once for this group, not once per move.
+    playlist_membership, server_source = _playlist_context(playlist_membership, server_source)
+    ignored = never_protecting_playlists(config_manager)
+    seen_by_id = {int(f["file_id"]): f for f in original}
+
+    def load():
+        by_id = {f["file_id"]: f for f in _load_files(
+            database, config_manager, scope=review.get("scope"),
+            playlist_membership=playlist_membership, server_source=server_source,
+            only_file_ids=ids)}
+        if not playlist_membership:
+            # An empty answer may be a failed read: keep the scan's playlists.
+            for fid, f in by_id.items():
+                seen = seen_by_id.get(fid) or {}
+                if seen.get("playlists") and not f["playlists"]:
+                    f["playlists"] = list(seen["playlists"])
+                    f["protecting_playlists"] = [p for p in f["playlists"] if p.casefold() not in ignored]
+                    if f["protecting_playlists"] and "playlist_reference" not in f["protected_reasons"]:
+                        f["protected_reasons"].append("playlist_reference")
+        return by_id
+
+    by_id = load()
+    files = [by_id[fid] for fid in ids]
+    snapshots = [f["snapshot"] for f in files]
+    token = hashlib.sha256(json.dumps(snapshots, sort_keys=True).encode()).hexdigest()
+    if token != review["review_token"]:
+        raise ValueError("Files or recording identity changed; refresh this review")
+    keeper = by_id[int(keep_file_id)] if keep_file_id is not None else _recommended(files)
+    if keeper["file_id"] not in ids or "file_unavailable" in keeper["protected_reasons"]:
+        raise ValueError("The selected keeper is not an available copy on this review")
+    if "hand_tagged" in keeper["protected_reasons"]:
+        # tagged by hand since the review: it is its own recording now, and
+        # keeping it would quarantine the copy it was paired with
+        raise ValueError("The selected keeper was tagged by hand since the review, "
+                         "so it is no longer a duplicate; refresh this review")
+    settle_playlists(files, keeper, move=move)
+    options = {**DEFAULT_SETTINGS, **(review.get("settings") or {})}
+    companions = lossy_companion_exts(config_manager, database)
+    for i, a in enumerate(files):
+        for b in files[i + 1:]:
+            if not _candidate_pair(a, b, options, companions):
+                raise ValueError("The reviewed copies no longer form a compatible duplicate group")
+            if (not _strong_evidence(a, b) or a["norm_title"] != b["norm_title"]) and confirm_recording is not True:
+                raise NeedsRecordingConfirmation(
+                    "Similar tags are review evidence only; confirm the same recording before Keep Best")
+    removable = [f for f in files if f["file_id"] != keeper["file_id"] and not f["protected_reasons"]]
+    links = _recording_links(database, keeper, removable, confirm_recording)
+    return {"files": files, "keeper": keeper, "removable": removable, "links": links,
+            "load": load, "move": move, "server_source": server_source}
+
+
+def _recording_links(database, keeper: dict, removable: list, confirm_recording) -> list:
+    """Only empty tracks get a new link, and only when the existing manual
+    relationship validator accepts it. No canonical choice is rewritten."""
+    links = []
+    removing_ids = {f["file_id"] for f in removable}
+    with closing(database._get_connection()) as conn:
+        target = int(keeper.get("canonical_track_id") or keeper["track_id"])
+        for source in sorted({int(f["track_id"]) for f in removable} - {target, int(keeper["track_id"])}):
+            remaining = conn.execute("SELECT id FROM lib2_track_files WHERE track_id=? AND COALESCE(file_state,'active')='active'", (source,)).fetchall()
+            if any(int(row[0]) not in removing_ids for row in remaining):
+                continue
+            row = conn.execute("SELECT canonical_track_id FROM lib2_tracks WHERE id=?", (source,)).fetchone()
+            if row[0] is not None:
+                continue
+            validate_duplicate_pair(conn, source, target, confirmed_recording=confirm_recording)
+            links.append((source, target))
+    return links
+
+
+def _repoint_sync_cache(database, plan: dict, moved: list) -> None:
+    """SoulSync's own playlist sync remembers which server item each song
+    was; the removed copy's item now points at the kept one"""
+    from core.library2.media_mappings import repoint_server_track_id
+    keeper_item = plan["keeper"].get("server_item")
+    items = {f["file_id"]: f.get("server_item") for f in plan["files"]}
+    try:
+        with closing(database._get_connection()) as conn:
+            for entry in moved:
+                old = items.get(entry["file_id"])
+                if old and keeper_item:
+                    repoint_server_track_id(conn, str(plan["server_source"] or ""), old, keeper_item)
+            conn.commit()
+    except Exception as exc:  # noqa: BLE001 - the next sync matches again
+        logger.debug("sync cache repoint after playlist move skipped: %s", exc)
+
+
+def _plan_rows(plan: dict) -> list:
+    keeper = plan["keeper"]
+    removing = {f["file_id"] for f in plan["removable"]}
+    rows = []
+    for f in plan["files"]:
+        action = "keep" if f is keeper else "remove" if f["file_id"] in removing else "protected"
+        rows.append({
+            "file_id": f["file_id"], "action": action, "path": f["path"],
+            "playlists": f["playlists"], "ignored_playlists": f.get("ignored_playlists") or [],
+            "playlists_covered": f.get("playlists_covered") or [],
+            "playlist_moves": f.get("playlist_moves") or [],
+            "playlists_blocked": f.get("playlists_blocked") or "",
+            "protected_reasons": f["protected_reasons"] if action == "protected" else [],
+        })
+    return rows
+
+
+def preview_keep_best(database, review: dict, *, config_manager=None, keep_file_id=None,
+                      confirm_recording: bool = False, move_playlist_entries=None,
+                      playlist_membership=None, server_source=None) -> dict:
+    """#2172: what Keep Best would do, changing nothing: which copy stays,
+    which go, which stay protected and why, and the playlist entries moved"""
+    try:
+        plan = _keep_best_plan(
+            database, review, config_manager=config_manager, keep_file_id=keep_file_id,
+            confirm_recording=confirm_recording, move=move_playlist_entries,
+            playlist_membership=playlist_membership, server_source=server_source)
+    except (KeyError, TypeError, ValueError, DuplicateRelationshipError) as exc:
+        return {"success": False, "error": str(exc)}
+    return {"success": True, "kept_file_id": plan["keeper"]["file_id"],
+            "move_playlist_entries": plan["move"], "copies": _plan_rows(plan)}
+
+
+def _move_playlist_entries(plan: dict) -> list:
+    """point each removable copy's entries at the kept copy, before any file
+    moves. a copy whose entries did not all move stays, protected. returns
+    what moved"""
+    moving = [f for f in plan["removable"] if f.get("playlist_moves")]
+    if not moving:
+        return []
+    from core.library.playlist_membership import _active_server_and_client, clear_cache
+    from core.sync.playlist_entry_move import move_entries, server_playlists
+    server, client = _active_server_and_client()
+    if str(server or "").lower() != str(plan["server_source"] or "").lower():
+        server, client = None, None
+    listing = server_playlists(client) if client is not None else []
+    keeper = plan["keeper"]
+    done = []
+    for f in moving:
+        outcome = move_entries(str(server or ""), client, f["playlist_moves"],
+                               f["server_item"], keeper["server_item"], playlists=listing)
+        if outcome["moved"]:
+            done.append({"file_id": f["file_id"], "playlists": outcome["moved"]})
+        if outcome["failed"] or outcome["skipped"]:
+            reasons = outcome["failed"] + outcome["skipped"]
+            logger.warning("Keep Best: playlist entries of %s not moved (%s); the copy stays",
+                           f["path"], "; ".join(f"{t}: {why}" for t, why in reasons))
+            f["playlists_blocked"] = "move_failed"
+            f["playlist_move_errors"] = [{"playlist": t, "error": why} for t, why in reasons]
+            f["protected_reasons"] = [*f["protected_reasons"], "playlist_reference"]
+    if done:
+        clear_cache()
+    plan["removable"] = [f for f in plan["removable"] if "playlist_reference" not in f["protected_reasons"]]
+    return done
+
+
 def apply_keep_best(database, review: dict, *, config_manager=None, transfer_folder: str,
                     approved: bool = False, keep_file_id=None, confirm_recording: bool = False,
-                    playlist_membership=None, server_source=None) -> dict:
-    """Apply a reviewed native group; legacy IDs and stale payloads fail closed."""
+                    playlist_membership=None, server_source=None,
+                    move_playlist_entries=None, require_removal: bool = False) -> dict:
+    """Apply a reviewed native group; legacy IDs and stale payloads fail closed.
+
+    ``move_playlist_entries`` (#2172): None follows the job setting. When on,
+    a copy in playlists the kept copy is not in has those entries pointed
+    at the kept copy before it goes.
+
+    ``require_removal`` (#2179, bulk runs): a plan that removes nothing is
+    not a success. it returns ``needs_you`` with the reason, so the finding
+    stays open instead of resolving like a dismiss"""
     from core.library.deleted_quarantine import quarantine_mover
     from core.library2.file_delete import delete_files_journaled
 
     if approved is not True:
         return {"success": False, "error": "Keep Best requires approval"}
-    if review.get("schema") != REVIEW_SCHEMA or not review.get("review_token"):
-        return {"success": False, "error": "Native duplicate review required; legacy IDs cannot be applied"}
-    original = review.get("tracks") or []
     try:
-        ids = [int(f["file_id"]) for f in original]
-        if len(set(ids)) != len(ids) or len(ids) < 2:
-            raise ValueError("Invalid duplicate group")
-        # Read the server's playlists once for this group, not once per move.
-        playlist_membership, server_source = _playlist_context(playlist_membership, server_source)
-        load = lambda: {f["file_id"]: f for f in _load_files(  # noqa: E731
-            database, config_manager, scope=review.get("scope"),
-            playlist_membership=playlist_membership, server_source=server_source,
-            only_file_ids=ids)}
-        by_id = load()
-        files = [by_id[fid] for fid in ids]
-        if not playlist_membership:
-            # An empty answer may be a failed read: keep the scan's playlists.
-            for f, seen in zip(files, original, strict=False):
-                if seen.get("playlists") and "playlist_reference" not in f["protected_reasons"]:
-                    f["protected_reasons"].append("playlist_reference")
-        snapshots = [f["snapshot"] for f in files]
-        token = hashlib.sha256(json.dumps(snapshots, sort_keys=True).encode()).hexdigest()
-        if token != review["review_token"]:
-            raise ValueError("Files or recording identity changed; refresh this review")
-        keeper = by_id[int(keep_file_id)] if keep_file_id is not None else _recommended(files)
-        if keeper["file_id"] not in ids or "file_unavailable" in keeper["protected_reasons"]:
-            raise ValueError("The selected keeper is not an available copy on this review")
-        if "hand_tagged" in keeper["protected_reasons"]:
-            # tagged by hand since the review: it is its own recording now, and
-            # keeping it would quarantine the copy it was paired with
-            raise ValueError("The selected keeper was tagged by hand since the review, "
-                             "so it is no longer a duplicate; refresh this review")
-        options = {**DEFAULT_SETTINGS, **(review.get("settings") or {})}
-        companions = lossy_companion_exts(config_manager, database)
-        for i, a in enumerate(files):
-            for b in files[i + 1:]:
-                if not _candidate_pair(a, b, options, companions):
-                    raise ValueError("The reviewed copies no longer form a compatible duplicate group")
-                if (not _strong_evidence(a, b) or a["norm_title"] != b["norm_title"]) and confirm_recording is not True:
-                    raise ValueError("Similar tags are review evidence only; confirm the same recording before Keep Best")
-        removable = [f for f in files if f["file_id"] != keeper["file_id"] and not f["protected_reasons"]]
-        # Only empty tracks get a new link, and only when the existing manual
-        # relationship validator accepts it. No canonical choice is rewritten.
-        links = []
-        removing_ids = {f["file_id"] for f in removable}
-        with closing(database._get_connection()) as conn:
-            target = int(keeper.get("canonical_track_id") or keeper["track_id"])
-            for source in sorted({int(f["track_id"]) for f in removable} - {target, int(keeper["track_id"])}):
-                remaining = conn.execute("SELECT id FROM lib2_track_files WHERE track_id=? AND COALESCE(file_state,'active')='active'", (source,)).fetchall()
-                if any(int(row[0]) not in removing_ids for row in remaining):
-                    continue
-                row = conn.execute("SELECT canonical_track_id FROM lib2_tracks WHERE id=?", (source,)).fetchone()
-                if row[0] is not None:
-                    continue
-                validate_duplicate_pair(conn, source, target, confirmed_recording=confirm_recording)
-                links.append((source, target))
+        plan = _keep_best_plan(
+            database, review, config_manager=config_manager, keep_file_id=keep_file_id,
+            confirm_recording=confirm_recording, move=move_playlist_entries,
+            playlist_membership=playlist_membership, server_source=server_source)
+    except NeedsRecordingConfirmation as exc:
+        return {"success": False, "error": str(exc), "needs_you": NEEDS_SAME_RECORDING}
     except (KeyError, TypeError, ValueError, DuplicateRelationshipError) as exc:
+        return {"success": False, "error": str(exc)}
+    files, keeper, load = plan["files"], plan["keeper"], plan["load"]
+    if require_removal and not plan["removable"]:
+        reason = _live_blocker(plan)
+        return {"success": False, "needs_you": reason, "error": NEEDS_YOU_WORDS[reason]}
+    moved_entries = _move_playlist_entries(plan)
+    if moved_entries:
+        _repoint_sync_cache(database, plan, moved_entries)
+    removable = plan["removable"]
+    if require_removal and not removable:
+        # every entry move failed: the copies stay, and the finding with them
+        return {"success": False, "needs_you": NEEDS_PROTECTED, "playlist_moves": moved_entries,
+                "error": "Needs you: the playlist entries could not be moved to the kept copy, "
+                         "so every copy stays. Open the finding to see which playlist."}
+    try:
+        # a copy that stayed (its playlist entries did not move) is not linked
+        links = _recording_links(database, keeper, removable, confirm_recording)
+    except (ValueError, DuplicateRelationshipError) as exc:
         return {"success": False, "error": str(exc)}
 
     operations = []
@@ -641,6 +982,11 @@ def apply_keep_best(database, review: dict, *, config_manager=None, transfer_fol
         def guarded_move(path, file=f):
             if "files" not in fresh:
                 fresh["files"] = load()
+                if fresh["files"].get(keeper["file_id"]):
+                    # the same playlist rules as the plan: a copy whose
+                    # playlists the keeper covers is not protected by them
+                    settle_playlists(list(fresh["files"].values()),
+                                     fresh["files"][keeper["file_id"]], move=plan["move"])
             lookup = fresh["files"]
             now = lookup.get(file["file_id"])
             kept = lookup.get(keeper["file_id"])
@@ -683,8 +1029,14 @@ def apply_keep_best(database, review: dict, *, config_manager=None, transfer_fol
         # keeper named by this multi-file finding, so report concrete IDs and
         # recompute ownership/wanted state without repeating retirement.
         "library_v2_recompute_wanted": bool(moved), "track_ids": sorted({f["track_id"] for f in files}),
-        "message": f"Kept selected copy; quarantined {len(moved)} redundant file(s), preserved {len(protected)} protected copy/copies",
+        "playlist_moves": moved_entries,
+        "message": f"Kept selected copy; quarantined {len(moved)} redundant file(s), preserved {len(protected)} protected copy/copies"
+                   + (f"; moved {sum(len(m['playlists']) for m in moved_entries)} playlist entr"
+                      f"{'y' if sum(len(m['playlists']) for m in moved_entries) == 1 else 'ies'} to the kept copy"
+                      if moved_entries else ""),
     }
 
 
-__all__ = ["apply_keep_best", "find_duplicate_candidates", "DEFAULT_SETTINGS", "REVIEW_SCHEMA"]
+__all__ = ["apply_keep_best", "find_duplicate_candidates", "preview_keep_best",
+           "keep_best_blockers", "keep_best_summary", "NEEDS_YOU_SQL", "NEEDS_YOU_WORDS",
+           "DEFAULT_SETTINGS", "REVIEW_SCHEMA"]

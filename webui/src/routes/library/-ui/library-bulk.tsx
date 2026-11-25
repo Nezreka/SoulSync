@@ -18,6 +18,7 @@ import type { LibraryV2ArtistSummary } from '../-library-v2.types';
 
 import {
   LIBRARY_V2_QUERY_KEY,
+  deleteLibraryV2Entity,
   fetchLibraryV2ArtistIds,
   fetchLibraryV2JobStatus,
   libraryV2QualityProfilesQueryOptions,
@@ -254,6 +255,8 @@ export function ArtistBulkBar({
   filters,
   canWrite,
   canWish,
+  canWatch = canWrite,
+  canSearch = canWish,
 }: {
   selection: ArtistSelection;
   pageArtists: LibraryV2ArtistSummary[];
@@ -263,6 +266,10 @@ export function ArtistBulkBar({
   filters: Parameters<typeof fetchLibraryV2ArtistIds>[0];
   canWrite: boolean;
   canWish: boolean;
+  /** #2209: following artists is the Watchlist's; hidden for a profile without it */
+  canWatch?: boolean;
+  /** #2173: Search missing starts downloads; hidden for a profile that asks first */
+  canSearch?: boolean;
 }) {
   const queryClient = useQueryClient();
   const run = useBulkRun();
@@ -299,12 +306,16 @@ export function ArtistBulkBar({
     window.showToast?.(parts.join(', '), result.failed ? 'warning' : 'success');
   };
 
+  // #2209: a member's watchlist is their own, so the words say so
+  const addLabel = canWrite ? 'Add to Watchlist' : 'Add to your Watchlist';
+  const removeLabel = canWrite ? 'Remove from Watchlist' : 'Remove from your Watchlist';
   const watch = async (on: boolean) => {
+    if (!canWatch) return;
     const list = ids();
     if (
       !on &&
       !(await confirmed({
-        title: 'Remove from Watchlist',
+        title: removeLabel,
         message: `Take ${plural(list.length, 'artist')} off your Watchlist? New releases from them stop being added to your Wishlist. Nothing on disk is touched.`,
         confirmText: 'Remove',
         destructive: true,
@@ -312,7 +323,7 @@ export function ArtistBulkBar({
     )
       return;
     finish(
-      await runBulk(on ? 'Add to Watchlist' : 'Remove from Watchlist', list, async (id) => {
+      await runBulk(on ? addLabel : removeLabel, list, async (id) => {
         const row = known.get(id);
         if (row && row.monitored === on) return 'skipped';
         await setLibraryV2Monitored('artists', id, on);
@@ -392,6 +403,27 @@ export function ArtistBulkBar({
         'error',
       );
     }
+  };
+
+  // remove several artists at once (#2300): the single remove's own route,
+  // one artist at a time. the library rows go, the files on disk stay
+  const remove = async () => {
+    const list = ids();
+    if (
+      !(await confirmed({
+        title: 'Remove from library',
+        message: `Remove ${plural(list.length, 'artist')} and their releases from your library? Their files stay on disk, and they come off every watchlist. An artist your media server has comes back on its next sync.`,
+        confirmText: `Remove ${plural(list.length, 'artist')}`,
+        destructive: true,
+      }))
+    )
+      return;
+    const result = await runBulk('Remove from library', list, async (id) => {
+      await deleteLibraryV2Entity('artists', id);
+      return 'done';
+    });
+    selection.clear();
+    finish(result);
   };
 
   const applyProfile = async () => {
@@ -502,39 +534,47 @@ export function ArtistBulkBar({
 
       {count > 0 ? (
         <div className={css.actions}>
-          <button
-            type="button"
-            className={styles.btnGhost}
-            disabled={busy || !canWish}
-            onClick={() => void watch(true)}
-          >
-            Add to Watchlist
-          </button>
-          <button
-            type="button"
-            className={styles.btnGhost}
-            disabled={busy || !canWish}
-            onClick={() => void watch(false)}
-          >
-            Remove from Watchlist
-          </button>
-          <button
-            type="button"
-            className={styles.btnGhost}
-            disabled={busy || !canWish}
-            title="Search for missing tracks and upgrades, one artist at a time"
-            onClick={() => void search()}
-          >
-            Search missing
-          </button>
-          <button
-            type="button"
-            className={styles.btnGhost}
-            disabled={busy || !canWrite}
-            onClick={() => void refreshDiscography()}
-          >
-            Refresh discography
-          </button>
+          {canWatch ? (
+            <>
+              <button
+                type="button"
+                className={styles.btnGhost}
+                disabled={busy}
+                onClick={() => void watch(true)}
+              >
+                {addLabel}
+              </button>
+              <button
+                type="button"
+                className={styles.btnGhost}
+                disabled={busy}
+                onClick={() => void watch(false)}
+              >
+                {removeLabel}
+              </button>
+            </>
+          ) : null}
+          {canSearch ? (
+            <button
+              type="button"
+              className={styles.btnGhost}
+              disabled={busy || !canWish}
+              title="Search for missing tracks and upgrades, one artist at a time"
+              onClick={() => void search()}
+            >
+              Search missing
+            </button>
+          ) : null}
+          {canWrite ? (
+            <button
+              type="button"
+              className={styles.btnGhost}
+              disabled={busy}
+              onClick={() => void refreshDiscography()}
+            >
+              Refresh discography
+            </button>
+          ) : null}
           {admin ? (
             <>
               <button
@@ -552,6 +592,14 @@ export function ArtistBulkBar({
                 onClick={() => void lock(false)}
               >
                 Unlock
+              </button>
+              <button
+                type="button"
+                className={styles.btnGhost}
+                disabled={busy || !canWrite}
+                onClick={() => void remove()}
+              >
+                Remove from library
               </button>
             </>
           ) : null}

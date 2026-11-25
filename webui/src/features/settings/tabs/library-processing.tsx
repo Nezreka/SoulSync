@@ -1,34 +1,41 @@
 /**
- * Library > Post-Processing and Import (SETTINGS_PORT.md, step 8d): the
- * "Processing" group, the Post-Processing card (core features, the preferred
- * album-art sources, tag embedding per source) and the Import card. Same
- * markup, classes and ids.
+ * Library > Tags and artwork, Music, and Import and files, Music (settings-bic
+ * phase 4): post-processing (the master switch, the core features with the
+ * album art sources on the shared order list), the tag options, tag
+ * embedding as one row per service with its tags as chips, the genre list
+ * (moved from Downloads > Filtering, DESIGN 3.3), and the music import
+ * settings. Same ids and keys.
  *
  * Each source's tag switches live in that source's own section (spotify.tags,
- * deezer.tags, ...), beside credentials the Connections tab (still vanilla)
- * saves. So every key here is saved alone: embed_tags, search_all_tracks,
- * use_original_date_for_date, and each tag as a dotted 'tags.<name>' key, the
- * rest of the section kept (settings-store.ts).
+ * deezer.tags, ...), beside credentials Connections saves. So every key here
+ * is saved alone: embed_tags, search_all_tracks, use_original_date_for_date,
+ * and each tag as a dotted 'tags.<name>' key, the rest of the section kept
+ * (settings-store.ts). A tag chip is a real tick box with its data-config.
  */
 
-import { type ReactNode, useEffect, useState, useSyncExternalStore } from 'react';
+import { useEffect, useId, useState } from 'react';
 
-import type { SettingsTabProps } from '../host';
 import type { SettingsStore } from '../settings-store';
 
-import { HintGroup, LIBRARY_TAB, useLoadedDraft } from './library-card';
-import { helpBits, Section, useHelp } from './parts';
+import {
+  Btn,
+  Card,
+  CheckChips,
+  Mark,
+  NumberField,
+  OrderList,
+  Row,
+  SectionLabel,
+  Select,
+  Switch,
+} from '../ui';
+import s from '../ui/settings.module.css';
+import { GenresCard } from './downloads/filtering-view';
+import { useLoadedDraft, useLoads, useSettings } from './library-card';
+import { MusicTagOptions, RedownloadDeleted } from './library-organization';
 import { text } from './source-panels';
 
-const TAB = LIBRARY_TAB;
 type Section_ = Record<string, unknown>;
-
-function useSettings(store: SettingsStore) {
-  return useSyncExternalStore(store.subscribe, () => store.getState().settings);
-}
-function useLoads(store: SettingsStore) {
-  return useSyncExternalStore(store.subscribe, () => store.getState().loads);
-}
 
 /** a data-config path's value: off only when saved off */
 function tagOn(settings: Record<string, unknown>, path: string) {
@@ -48,18 +55,19 @@ export function postProcessingSummary(tagging: boolean, artwork: boolean) {
 // ── the preferred album-art sources ──
 
 export const ART_SOURCES = [
-  { id: 'caa', name: 'Cover Art Archive', icon: '/static/img/brands/musicbrainz.png', emoji: '🎨' },
-  { id: 'deezer', name: 'Deezer', icon: '/static/img/brands/deezer.png', emoji: '🎧' },
-  { id: 'itunes', name: 'iTunes', icon: '/static/img/brands/itunes.png', emoji: '🍎' },
-  { id: 'spotify', name: 'Spotify', icon: '/static/img/brands/spotify.png', emoji: '🟢' },
-  { id: 'audiodb', name: 'TheAudioDB', icon: null, emoji: '💿' },
+  { id: 'caa', name: 'Cover Art Archive', icon: '/static/img/brands/musicbrainz.png' },
+  { id: 'deezer', name: 'Deezer', icon: '/static/img/brands/deezer.png' },
+  { id: 'itunes', name: 'iTunes', icon: '/static/img/brands/itunes.png' },
+  { id: 'spotify', name: 'Spotify', icon: '/static/img/brands/spotify.png' },
+  { id: 'audiodb', name: 'TheAudioDB', icon: '/static/img/brands/audiodb.png' },
 ];
+const artName = (id: string) => ART_SOURCES.find((src) => src.id === id)?.name ?? id;
 
 /** the saved order first (known sources only, available or not, so a save
  *  before the availability answer can never wipe it), then each connected
  *  source not in it, switched off (loadArtSourceOrder) */
 export function artList(saved: unknown, available: string[]) {
-  const valid = new Set(ART_SOURCES.map((s) => s.id));
+  const valid = new Set(ART_SOURCES.map((src) => src.id));
   const order: string[] = [];
   const enabled: Record<string, boolean> = {};
   for (const id of Array.isArray(saved) ? saved : []) {
@@ -77,26 +85,12 @@ export function artList(saved: unknown, available: string[]) {
   return { order, enabled };
 }
 
-function ArtIcon({ src }: { src: (typeof ART_SOURCES)[number] }) {
-  const [broken, setBroken] = useState(false);
-  if (!src.icon || broken)
-    return <span className="hybrid-source-icon emoji-icon">{src.emoji}</span>;
-  return (
-    <img
-      className="hybrid-source-icon"
-      src={src.icon}
-      alt={src.name}
-      onError={() => setBroken(true)}
-    />
-  );
-}
+type ArtList = { order: string[]; enabled: Record<string, boolean> };
 
 function ArtSources({ store }: { store: SettingsStore }) {
   const settings = useSettings(store);
   const loads = useLoads(store);
-  const [list, setList] = useState<{ order: string[]; enabled: Record<string, boolean> } | null>(
-    null,
-  );
+  const [list, setList] = useState<ArtList | null>(null);
   useEffect(() => {
     if (!loads) return;
     const saved = (settings.metadata_enhancement || {}).album_art_order;
@@ -108,7 +102,7 @@ function ArtSources({ store }: { store: SettingsStore }) {
         const data = (await (await fetch('/api/metadata/art-sources')).json()) as {
           available?: Array<string | { id: string }>;
         };
-        available = (data.available || []).map((s) => (typeof s === 'string' ? s : s?.id));
+        available = (data.available || []).map((src) => (typeof src === 'string' ? src : src?.id));
       } catch {
         available = [];
       }
@@ -126,7 +120,7 @@ function ArtSources({ store }: { store: SettingsStore }) {
   }, [loads]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // saved: the switched-on sources in their shown order
-  const commit = (next: { order: string[]; enabled: Record<string, boolean> }) => {
+  const commit = (next: ArtList) => {
     setList(next);
     store.set(
       'metadata_enhancement',
@@ -135,57 +129,52 @@ function ArtSources({ store }: { store: SettingsStore }) {
     );
   };
 
-  if (!list) return <div className="hybrid-source-list" id="art-source-list"></div>;
-  const on = list.order.filter((id) => list.enabled[id] === true);
+  if (!list) return <div id="art-source-list" />;
+  if (!list.order.length)
+    return (
+      <div id="art-source-list">
+        <p className={s.listEmpty}>No connected art sources available.</p>
+      </div>
+    );
   return (
-    <div className="hybrid-source-list" id="art-source-list">
-      {list.order.length === 0 ? (
-        <div style={{ padding: '10px', color: '#888', fontSize: '13px' }}>
-          No connected art sources available.
-        </div>
-      ) : (
-        list.order.map((id, index) => {
-          const src = ART_SOURCES.find((s) => s.id === id);
-          if (!src) return null;
-          const enabled = list.enabled[id] === true;
-          const move = (direction: number) => {
-            const to = index + direction;
-            if (to < 0 || to >= list.order.length) return;
-            const order = list.order.slice();
-            [order[index], order[to]] = [order[to], order[index]];
-            commit({ ...list, order });
+    <div id="art-source-list">
+      <OrderList
+        label="Album art sources, first tried first"
+        items={list.order.map((id) => {
+          const src = ART_SOURCES.find((x) => x.id === id);
+          return {
+            id,
+            name: artName(id),
+            mark: <Mark src={src?.icon} icon="box" size="sm" />,
+            keepAction: true,
+            action: (
+              <Switch
+                aria-label={`Use ${artName(id)} for cover art`}
+                data-art-toggle={id}
+                checked={list.enabled[id] === true}
+                onChange={(event) =>
+                  commit({ ...list, enabled: { ...list.enabled, [id]: event.target.checked } })
+                }
+              />
+            ),
           };
-          return (
-            <div
-              key={id}
-              className={enabled ? 'hybrid-source-item' : 'hybrid-source-item disabled'}
-              data-source-id={id}
-            >
-              <span className="hybrid-source-arrows">
-                <button className="hybrid-arrow-btn" onClick={() => move(-1)} title="Move up">
-                  ▲
-                </button>
-                <button className="hybrid-arrow-btn" onClick={() => move(1)} title="Move down">
-                  ▼
-                </button>
-              </span>
-              <ArtIcon src={src} />
-              <span className="hybrid-source-name">{src.name}</span>
-              <span className="hybrid-source-priority">{enabled ? on.indexOf(id) + 1 : ''}</span>
-              <label className="hybrid-source-toggle">
-                <input
-                  type="checkbox"
-                  checked={enabled}
-                  onChange={(event) =>
-                    commit({ ...list, enabled: { ...list.enabled, [id]: event.target.checked } })
-                  }
-                />
-                <span className="toggle-track"></span>
-              </label>
-            </div>
-          );
-        })
-      )}
+        })}
+        role={(id, _index, order) => {
+          if (list.enabled[id] !== true) return 'Off: not asked';
+          const place = order.filter((x) => list.enabled[x] === true).indexOf(id);
+          return place === 0
+            ? 'Asked first'
+            : `Asked ${place + 1}${['nd', 'rd'][place - 1] ?? 'th'}`;
+        }}
+        dropText={(_id, index) => `Drop here: place ${index + 1}`}
+        afterText={(order) => {
+          const first = order.find((id) => list.enabled[id] === true);
+          return first ? `${artName(first)} is asked first.` : 'None is switched on.';
+        }}
+        onChange={(order) => commit({ ...list, order })}
+        minItems={list.order.length}
+        keepText="Switch it off instead"
+      />
     </div>
   );
 }
@@ -198,13 +187,13 @@ const IDS: Tag[] = [
   ['artist_id', 'Artist ID'],
   ['album_id', 'Album ID'],
 ];
-const TAG_GROUPS: Array<{ service: string; name: string; count: string; tags: Tag[] }> = [
-  { service: 'spotify', name: 'Spotify', count: '3 tags', tags: IDS },
-  { service: 'itunes', name: 'iTunes', count: '3 tags', tags: IDS },
+export const TAG_GROUPS: Array<{ service: string; name: string; tags: Tag[]; icon?: string }> = [
+  { service: 'spotify', name: 'Spotify', tags: IDS, icon: 'spotify.png' },
+  { service: 'itunes', name: 'iTunes', tags: IDS, icon: 'itunes.png' },
   {
     service: 'musicbrainz',
     name: 'MusicBrainz',
-    count: '19 tags',
+    icon: 'musicbrainz.png',
     tags: [
       ['recording_id', 'Recording ID'],
       ['artist_id', 'Artist ID'],
@@ -236,7 +225,7 @@ const TAG_GROUPS: Array<{ service: string; name: string; count: string; tags: Ta
   {
     service: 'deezer',
     name: 'Deezer',
-    count: '4 tags',
+    icon: 'deezer.png',
     tags: [
       ['track_id', 'Track ID'],
       ['artist_id', 'Artist ID'],
@@ -247,7 +236,7 @@ const TAG_GROUPS: Array<{ service: string; name: string; count: string; tags: Ta
   {
     service: 'audiodb',
     name: 'AudioDB',
-    count: '4 tags',
+    icon: 'audiodb.png',
     tags: [
       ['track_id', 'Track ID'],
       ['mood', 'Mood'],
@@ -258,7 +247,7 @@ const TAG_GROUPS: Array<{ service: string; name: string; count: string; tags: Ta
   {
     service: 'tidal',
     name: 'Tidal',
-    count: '5 tags',
+    icon: 'tidal.png',
     tags: [
       ['track_id', 'Track ID'],
       ['artist_id', 'Artist ID'],
@@ -270,7 +259,7 @@ const TAG_GROUPS: Array<{ service: string; name: string; count: string; tags: Ta
   {
     service: 'qobuz',
     name: 'Qobuz',
-    count: '5 tags',
+    icon: 'qobuz.svg',
     tags: [
       ['track_id', 'Track ID'],
       ['artist_id', 'Artist ID'],
@@ -282,7 +271,7 @@ const TAG_GROUPS: Array<{ service: string; name: string; count: string; tags: Ta
   {
     service: 'lastfm',
     name: 'Last.fm',
-    count: '2 tags',
+    icon: 'lastfm.png',
     tags: [
       ['genres', 'Genres'],
       ['url', 'URL'],
@@ -291,7 +280,7 @@ const TAG_GROUPS: Array<{ service: string; name: string; count: string; tags: Ta
   {
     service: 'genius',
     name: 'Genius',
-    count: '2 tags',
+    icon: 'genius.png',
     tags: [
       ['track_id', 'Track ID'],
       ['url', 'URL'],
@@ -300,7 +289,6 @@ const TAG_GROUPS: Array<{ service: string; name: string; count: string; tags: Ta
   {
     service: 'hifi',
     name: 'HiFi',
-    count: '5 tags',
     tags: [
       ['track_id', 'Track ID'],
       ['artist_id', 'Artist ID'],
@@ -312,7 +300,6 @@ const TAG_GROUPS: Array<{ service: string; name: string; count: string; tags: Ta
   {
     service: 'beatport',
     name: 'Beatport',
-    count: '6 tags',
     tags: [
       ['bpm', 'BPM'],
       ['key', 'Key'],
@@ -324,401 +311,410 @@ const TAG_GROUPS: Array<{ service: string; name: string; count: string; tags: Ta
   },
 ];
 
-/** one tag switch: data-config is its path, section then dotted key */
-function TagBox({
-  store,
-  path,
-  label,
-  disabled,
-  desc,
-}: {
-  store: SettingsStore;
-  path: string;
-  label: string;
-  disabled?: boolean;
-  desc?: string;
-}) {
-  const settings = useSettings(store);
-  const loads = useLoads(store);
-  const [section, ...rest] = path.split('.');
-  return (
-    <label className={disabled ? 'checkbox-label disabled-tag' : 'checkbox-label'}>
-      <input
-        type="checkbox"
-        data-config={path}
-        checked={loads ? tagOn(settings, path) : true}
-        disabled={disabled}
-        onChange={(event) => store.set(section, rest.join('.'), event.target.checked)}
-      />{' '}
-      {label}
-      {desc ? <small className="tag-embed-desc">{desc}</small> : null}
-    </label>
-  );
-}
+const GENERAL_TAGS: Tag[] = [
+  ['quality_tag', 'Quality'],
+  ['genre_merge', 'Genre merging'],
+];
 
-/** a source's group: the master switch in the header, its tags below
- *  (toggleTagGroup opens it; a master switched off greys its tags) */
-function TagGroup({
-  store,
-  service,
-  name,
-  count,
-  tags,
-  children,
-}: {
-  store: SettingsStore;
-  service?: string;
-  name: string;
-  count: string;
-  tags: ReactNode | ((masterOff: boolean) => ReactNode);
-  children?: ReactNode;
-}) {
-  const settings = useSettings(store);
-  const loads = useLoads(store);
-  const [open, setOpen] = useState(false);
-  const embed = service ? (loads ? (settings[service] || {}).embed_tags !== false : true) : true;
-  return (
-    <div className="tag-service-group">
-      <div className="tag-service-header" onClick={() => setOpen(!open)}>
-        <span className={open ? 'tag-group-arrow open' : 'tag-group-arrow'}>&#9654;</span>
-        {service ? (
-          <label className="checkbox-label" onClick={(event) => event.stopPropagation()}>
-            <input
-              type="checkbox"
-              id={`embed-${service}`}
-              checked={embed}
-              onChange={(event) => store.set(service, 'embed_tags', event.target.checked)}
-            />{' '}
-            {name}
-          </label>
-        ) : (
-          <label className="checkbox-label" style={{ pointerEvents: 'none' }}>
-            {name}
-          </label>
-        )}
-        <span className="tag-service-count">{count}</span>
-      </div>
-      <div className="tag-service-body" style={{ display: open ? 'block' : 'none' }}>
-        {children}
-        {typeof tags === 'function' ? tags(!embed) : tags}
-      </div>
-    </div>
-  );
-}
-
-/** a setting-row checkbox with its help below (the Import card's rows) */
-function Row({ control, help }: { control: ReactNode; help: ReactNode }) {
-  const state = useHelp();
-  const bits = helpBits(help, state);
-  return (
-    <div className="form-group">
-      <div className="setting-row">
-        {control}
-        {bits.icon}
-      </div>
-      <div className="help-text setting-help-body" hidden={!state.open}>
-        {help}
-      </div>
-      {bits.line}
-    </div>
-  );
-}
-
-export function ProcessingCards({ store }: SettingsTabProps) {
-  const settings = useSettings(store);
-  const loads = useLoads(store);
-  const meta = (settings.metadata_enhancement || {}) as Section_;
-  const post = (settings.post_processing || {}) as Section_;
-  const imp = (settings.import || {}) as Section_;
-
-  // before a load the markup's own defaults show (most boxes ticked)
-  const enabled = loads ? meta.enabled !== false : true;
-  const summary = loads ? postProcessingSummary(enabled, meta.embed_album_art !== false) : '';
-
-  const duration = useLoadedDraft(store, text(post.duration_tolerance_seconds ?? 0), (raw) =>
-    store.set('post_processing', 'duration_tolerance_seconds', parseFloat(raw) || 0),
-  );
-
-  const check = (id: string, checked: boolean, save: (value: boolean) => void, label: string) => (
-    <label className="checkbox-label">
-      <input
-        type="checkbox"
-        id={id}
-        checked={checked}
-        onChange={(event) => save(event.target.checked)}
-      />{' '}
-      {label}
-    </label>
-  );
-  const setMeta = (key: string) => (value: unknown) =>
-    store.set('metadata_enhancement', key, value);
-  const plain = (id: string, value: boolean, save: (v: boolean) => void, label: string) => (
-    <div className="form-group">{check(id, value, save, label)}</div>
-  );
-
-  return (
-    <>
-      <div className="stg-cardgroup" data-stg={TAB}>
-        <span className="stg-cardgroup-label">Processing</span>
-        <span className="stg-cardgroup-sub">What happens to a file after it arrives</span>
-      </div>
-      <Section
-        tab={TAB}
-        title="Post-Processing"
-        hint="Metadata, tags, conversion, lyrics"
-        summaryKey="library-post-processing"
-        summary={summary}
-      >
-        <div className="settings-group" data-stg={TAB}>
-          <HintGroup help="Master toggle — disabling this skips all metadata, artwork, and lyrics processing.">
-            {check(
-              'metadata-enabled',
-              enabled,
-              setMeta('enabled'),
-              'Enable post-processing on downloaded files',
-            )}
-          </HintGroup>
-
-          <div id="post-processing-options" style={{ display: enabled ? 'block' : 'none' }}>
-            <div className="post-processing-section">
-              <div className="post-processing-section-title">Core Features</div>
-              {plain(
-                'embed-album-art',
-                loads ? meta.embed_album_art !== false : true,
-                setMeta('embed_album_art'),
-                'Embed album art into file',
-              )}
-              {plain(
-                'cover-art-download',
-                loads ? meta.cover_art_download !== false : true,
-                setMeta('cover_art_download'),
-                'Download cover.jpg to album folder',
-              )}
-              <HintGroup help="Higher resolution but quality may vary. When off, uses Spotify/iTunes/Deezer art (consistent 640x640). Ignored when a preferred album art source list is set below — add Cover Art Archive to that list instead.">
-                {check(
-                  'prefer-caa-art',
-                  meta.prefer_caa_art === true,
-                  setMeta('prefer_caa_art'),
-                  'Use MusicBrainz Cover Art Archive for album art',
-                )}
-              </HintGroup>
-              <HintGroup
-                help="Order the sources to choose whose cover art is used. The first source that has a cover wins; misses fall through to the next, and if none match, your download's own art is kept. Only sources you're connected to are shown — leave all off to keep current behavior."
-                after={<ArtSources store={store} />}
-              >
-                <label className="checkbox-label" style={{ cursor: 'default' }}>
-                  Preferred album art sources
-                </label>
-              </HintGroup>
-              <HintGroup help="When a track matches a single release, look up the album that contains it and tag it as that album — so every song in an album gets the same (album) cover instead of some getting the single's art. Off by default: adds an extra metadata lookup per single-matched track.">
-                {check(
-                  'single-to-album-enabled',
-                  meta.single_to_album === true,
-                  setMeta('single_to_album'),
-                  'Match singles to their parent album',
-                )}
-              </HintGroup>
-              {plain(
-                'lrclib-enabled',
-                loads ? meta.lrclib_enabled !== false : true,
-                setMeta('lrclib_enabled'),
-                'Generate .lrc lyrics files (LRClib)',
-              )}
-              <HintGroup help="Analyzes loudness and writes ReplayGain track gain/peak tags. Requires ffmpeg. Adds a few seconds per track.">
-                {check(
-                  'replaygain-enabled',
-                  post.replaygain_enabled === true,
-                  (v) => store.set('post_processing', 'replaygain_enabled', v),
-                  'Apply ReplayGain tags after download',
-                )}
-              </HintGroup>
-              <HintGroup
-                help={
-                  <>
-                    Maximum drift between the file's actual length and the metadata source's
-                    expected length before the file is quarantined. <strong>0 = auto</strong>: files
-                    can run 3s short (5s for tracks &gt;10min) or 15s long. Raise this if tracks
-                    routinely quarantine for being a few seconds off (live recordings, alternate
-                    masterings, CD pregaps). A set value applies both ways, so anything under 15
-                    also tightens the long side. Capped at 60s.
-                  </>
-                }
-              >
-                <label htmlFor="duration-tolerance-seconds">Duration tolerance (seconds)</label>
-                <input
-                  type="number"
-                  id="duration-tolerance-seconds"
-                  min="0"
-                  max="60"
-                  step="0.5"
-                  style={{ width: '100px' }}
-                  value={loads ? duration.value : '0'}
-                  onChange={(event) => duration.onChange(event.target.value)}
-                />
-              </HintGroup>
-            </div>
-
-            <div className="post-processing-section">
-              <div className="post-processing-section-title">Tag Embedding</div>
-              <small className="settings-hint" style={{ marginBottom: '8px', display: 'block' }}>
-                Toggle a service to enable/disable all its tags, or expand to control individual
-                tags.
-              </small>
-
-              {TAG_GROUPS.map((group) => (
-                <ServiceTags key={group.service} store={store} group={group} />
-              ))}
-
-              <TagGroup
-                store={store}
-                name="General"
-                count="2 tags"
-                tags={
-                  <>
-                    <TagBox
-                      store={store}
-                      path="metadata_enhancement.tags.quality_tag"
-                      label="Quality"
-                      desc="Audio quality (e.g. FLAC, MP3-320)"
-                    />
-                    <TagBox
-                      store={store}
-                      path="metadata_enhancement.tags.genre_merge"
-                      label="Genre Merging"
-                      desc="Merge genres from Spotify + enabled sources"
-                    />
-                  </>
-                }
-              />
-            </div>
-
-            <div className="form-group">
-              <label>Supported Formats:</label>
-              <div className="supported-formats">MP3, FLAC, MP4/M4A, OGG</div>
-            </div>
-          </div>
-        </div>
-      </Section>
-
-      <Section tab={TAB} title="Import" hint="Folder-artist override, permanent library">
-        <div className="settings-group" data-stg={TAB}>
-          <Row
-            control={check(
-              'import-folder-artist-override',
-              loads ? imp.folder_artist_override !== false : false,
-              (v) => store.set('import', 'folder_artist_override', v),
-              'Use the top Staging folder as the artist',
-            )}
-            help={
-              <>
-                On by default (legacy behaviour). When enabled, files staged as{' '}
-                <code>Artist/Album/…</code> (or <code>Artist/Albums/Album/…</code>) take the top
-                folder as the album artist — handy for mixtapes/compilations whose embedded tags
-                carry DJ names. <strong>Turn this off</strong> if you drop a mixed pile of songs
-                under one container folder: otherwise every file's artist gets overwritten with that
-                folder's name (the cause of the "soulsync" mass-mislabel). With it off, the
-                metadata-identified artist is always kept.
-              </>
-            }
-          />
-          <Row
-            control={check(
-              'import-transfer-permanent',
-              loads ? imp.transfer_is_permanent !== false : false,
-              (v) => store.set('import', 'transfer_is_permanent', v),
-              'Music Library is my permanent library — never move files out',
-            )}
-            help={
-              <>
-                On by default for new installs. Turn this <strong>off</strong> if your Music Library
-                folder is just a scratch drop area rather than your real, permanent library (served
-                by Navidrome/Plex/etc.). A Deep Scan then never relocates files it doesn't recognize
-                out to Staging — it leaves them in place and just reports them. Even with this off,
-                a Deep Scan now refuses to move files when the database looks badly out of sync with
-                disk, as a safety guard against wiping a library (issue #904).
-              </>
-            }
-          />
-        </div>
-      </Section>
-    </>
-  );
-}
-
-/** a source's tag group; MusicBrainz is followed by its original-date row */
+/** a service's row: its switch (every tag at once), how many are on, and
+ *  its tags as chips under it */
 function ServiceTags({
   store,
   group,
 }: {
   store: SettingsStore;
-  group: (typeof TAG_GROUPS)[number];
+  group: (typeof TAG_GROUPS)[number] | { service: null; name: string; tags: Tag[]; icon?: string };
 }) {
   const settings = useSettings(store);
+  const loads = useLoads(store);
+  const [open, setOpen] = useState(false);
+  const chipsId = useId();
+  const section = group.service ?? 'metadata_enhancement';
+  const path = (key: string) => `${section}.tags.${key}`;
+  const master = group.service
+    ? loads
+      ? ((settings[group.service] || {}) as Section_).embed_tags !== false
+      : true
+    : true;
+  const on = group.tags
+    .filter(([key]) => (loads ? tagOn(settings, path(key)) : true))
+    .map(([key]) => key);
   const mb = (settings.musicbrainz || {}) as Section_;
   const beatport = (settings.beatport || {}) as Section_;
-  const boxes = (off: boolean) => (
+  const words = !master
+    ? `Off: none of its ${group.tags.length} tags are written`
+    : `${on.length} of ${group.tags.length} tags written`;
+  return (
     <>
-      {group.tags.map(([key, label]) => (
-        <TagBox
-          key={key}
-          store={store}
-          path={`${group.service}.tags.${key}`}
-          label={label}
-          disabled={off}
+      <Row
+        label={group.name}
+        htmlFor={group.service ? `embed-${group.service}` : undefined}
+        help={
+          group.service
+            ? words
+            : 'Audio quality (like FLAC, MP3-320), and genres merged from Spotify and the switched-on sources.'
+        }
+        mark={
+          <Mark
+            src={group.icon ? `/static/img/brands/${group.icon}` : null}
+            icon={group.service ? 'wave' : 'sliders'}
+            size="sm"
+          />
+        }
+      >
+        <Btn
+          kind="ghost"
+          small
+          aria-expanded={open}
+          aria-controls={chipsId}
+          data-tags-toggle={group.service ?? 'general'}
+          onClick={() => setOpen((o) => !o)}
+        >
+          {open ? 'Hide tags' : `${group.tags.length} tags`}
+        </Btn>
+        {group.service ? (
+          <Switch
+            id={`embed-${group.service}`}
+            aria-label={`Write ${group.name} tags`}
+            checked={master}
+            onChange={(event) => store.set(group.service!, 'embed_tags', event.target.checked)}
+          />
+        ) : null}
+      </Row>
+      <div className={s.tagChips} id={chipsId} hidden={!open} data-tag-group={section}>
+        {group.service === 'beatport' ? (
+          <p className={s.tagNote}>
+            Found by ISRC, only the exact recording. Free for tracks that came from a Beatport
+            chart; other electronic tracks are looked up on Beatport.
+          </p>
+        ) : null}
+        <CheckChips
+          label={`${group.name} tags`}
+          options={group.tags.map(([value, label]) => ({ value, label }))}
+          value={on}
+          disabled={!master}
+          inputAttrs={(key) => ({ 'data-config': path(key) })}
+          onToggle={(key, value) => store.set(section, `tags.${key}`, value)}
         />
-      ))}
-      {group.service === 'beatport' ? (
-        <label className={off ? 'checkbox-label disabled-tag' : 'checkbox-label'}>
-          <input
-            type="checkbox"
-            id="beatport-search-all"
-            checked={beatport.search_all_tracks === true}
-            disabled={off}
-            onChange={(event) => store.set('beatport', 'search_all_tracks', event.target.checked)}
-          />{' '}
-          Look up every track, not just electronic ones
-          <small className="tag-embed-desc">Slower: one Beatport request per track.</small>
-        </label>
+        {group.service === 'beatport' ? (
+          <label className={s.tagExtra}>
+            <Switch
+              id="beatport-search-all"
+              checked={beatport.search_all_tracks === true}
+              disabled={!master}
+              onChange={(event) => store.set('beatport', 'search_all_tracks', event.target.checked)}
+            />
+            <span>
+              Look up every track, not just electronic ones
+              <small>Slower: one Beatport request per track.</small>
+            </span>
+          </label>
+        ) : null}
+      </div>
+      {group.service === 'musicbrainz' ? (
+        <Row
+          sub
+          label="Use original release date for DATE"
+          htmlFor="mb-use-original-date-for-date"
+          help="The release group's first release date goes in DATE, not the downloaded edition's (a 2016 reissue of a 2010 album gets 2010)."
+          more="Beets-style. The original date is kept in ORIGINALDATE either way, and a more precise date in the same year is never replaced by a vaguer one."
+        >
+          <Switch
+            id="mb-use-original-date-for-date"
+            checked={mb.use_original_date_for_date === true}
+            onChange={(event) =>
+              store.set('musicbrainz', 'use_original_date_for_date', event.target.checked)
+            }
+          />
+        </Row>
       ) : null}
     </>
   );
+}
+
+/** "Fill empty tags automatically" (core/library2/tag_fill.py). unset is
+ *  Fill empty tags only: the import already fills blanks the same way */
+export const FILL_EMPTY_TAGS_OPTIONS = [
+  { value: 'fill', label: 'Fill empty tags only' },
+  { value: 'update', label: 'Fill and update' },
+  { value: 'off', label: 'Off' },
+] as const;
+
+export function fillEmptyTags(raw: unknown): string {
+  const value = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+  return FILL_EMPTY_TAGS_OPTIONS.some((o) => o.value === value) ? value : 'fill';
+}
+
+export function MusicTags({ store }: { store: SettingsStore }) {
+  const settings = useSettings(store);
+  const loads = useLoads(store);
+  const meta = (settings.metadata_enhancement || {}) as Section_;
+  const post = (settings.post_processing || {}) as Section_;
+  // before a load the markup's own defaults show (most switches on)
+  const enabled = loads ? meta.enabled !== false : true;
+  const duration = useLoadedDraft(store, text(post.duration_tolerance_seconds ?? 0), (raw) =>
+    store.set('post_processing', 'duration_tolerance_seconds', parseFloat(raw) || 0),
+  );
+  const setMeta = (key: string) => (value: unknown) =>
+    store.set('metadata_enhancement', key, value);
+  const art = !!(loads
+    ? meta.embed_album_art !== false || meta.cover_art_download !== false
+    : true);
   return (
     <>
-      <TagGroup
-        store={store}
-        service={group.service}
-        name={group.name}
-        count={group.count}
-        tags={boxes}
-      >
-        {group.service === 'beatport' ? (
-          <small className="tag-embed-desc">
-            Found by ISRC, only the exact recording. Free for tracks that came from a Beatport
-            chart; other electronic tracks are looked up on Beatport.
-          </small>
-        ) : null}
-      </TagGroup>
-      {group.service === 'musicbrainz' ? (
-        <>
-          <label className="toggle-row" style={{ margin: '8px 0 2px' }}>
-            <input
-              type="checkbox"
-              id="mb-use-original-date-for-date"
-              checked={mb.use_original_date_for_date === true}
+      <Card>
+        <Row
+          label="Enable post-processing on downloaded files"
+          htmlFor="metadata-enabled"
+          help="Off skips all metadata, artwork and lyrics processing: files are kept as they arrive."
+          warn={
+            loads && !enabled
+              ? 'Post-processing is off: downloads get no tags, artwork or lyrics.'
+              : undefined
+          }
+        >
+          <Switch
+            id="metadata-enabled"
+            checked={enabled}
+            onChange={(event) => setMeta('enabled')(event.target.checked)}
+          />
+        </Row>
+      </Card>
+
+      <div id="post-processing-options" hidden={!enabled}>
+        <SectionLabel title="Core features" hint="What every download gets" />
+        <Card>
+          <Row label="Embed album art into file" htmlFor="embed-album-art">
+            <Switch
+              id="embed-album-art"
+              checked={loads ? meta.embed_album_art !== false : true}
+              onChange={(event) => setMeta('embed_album_art')(event.target.checked)}
+            />
+          </Row>
+          <Row label="Download cover.jpg to album folder" htmlFor="cover-art-download">
+            <Switch
+              id="cover-art-download"
+              checked={loads ? meta.cover_art_download !== false : true}
+              onChange={(event) => setMeta('cover_art_download')(event.target.checked)}
+            />
+          </Row>
+          <Row
+            label="Use MusicBrainz Cover Art Archive for album art"
+            htmlFor="prefer-caa-art"
+            off={art && Array.isArray(meta.album_art_order) && meta.album_art_order.length > 0}
+            help="Higher resolution, but quality may vary. Off uses Spotify, iTunes or Deezer art (a steady 640x640)."
+            more="Ignored when the album art sources below have any switched on: add Cover Art Archive to that list instead."
+          >
+            <Switch
+              id="prefer-caa-art"
+              checked={meta.prefer_caa_art === true}
+              onChange={(event) => setMeta('prefer_caa_art')(event.target.checked)}
+            />
+          </Row>
+          <Row
+            stack
+            label="Preferred album art sources"
+            help="The first source that has a cover wins; a miss falls through to the next. None switched on keeps how it works today."
+            more="Only sources you're connected to are listed. When none matches, the download's own art is kept."
+          >
+            <ArtSources store={store} />
+          </Row>
+          <Row
+            label="Match singles to their parent album"
+            htmlFor="single-to-album-enabled"
+            help="A track matched to a single is tagged as the album that holds it, so every song of an album gets the same cover."
+            more="Off by default: it adds a metadata lookup per single-matched track."
+          >
+            <Switch
+              id="single-to-album-enabled"
+              checked={meta.single_to_album === true}
+              onChange={(event) => setMeta('single_to_album')(event.target.checked)}
+            />
+          </Row>
+          <Row label="Generate .lrc lyrics files (LRClib)" htmlFor="lrclib-enabled">
+            <Switch
+              id="lrclib-enabled"
+              checked={loads ? meta.lrclib_enabled !== false : true}
+              onChange={(event) => setMeta('lrclib_enabled')(event.target.checked)}
+            />
+          </Row>
+          <Row
+            label="Save lyrics the player finds beside library songs"
+            htmlFor="lrclib-cache-player"
+            help="When the player finds lyrics on LRClib for a library song, it saves them next to the file as .lrc or .txt. An existing lyrics file is never overwritten."
+          >
+            <Switch
+              id="lrclib-cache-player"
+              checked={loads ? meta.lrclib_cache_player !== false : true}
+              onChange={(event) => setMeta('lrclib_cache_player')(event.target.checked)}
+            />
+          </Row>
+          <Row
+            label="Apply ReplayGain tags after download"
+            htmlFor="replaygain-enabled"
+            help="Measures loudness and writes ReplayGain track gain and peak tags. Needs ffmpeg; adds a few seconds per track."
+          >
+            <Switch
+              id="replaygain-enabled"
+              checked={post.replaygain_enabled === true}
               onChange={(event) =>
-                store.set('musicbrainz', 'use_original_date_for_date', event.target.checked)
+                store.set('post_processing', 'replaygain_enabled', event.target.checked)
               }
-            />{' '}
-            <span>Use original release date for DATE</span>
-          </label>
-          <div className="help-text" style={{ marginTop: '6px' }}>
-            Beets-style: write the MusicBrainz release-group's first-release-date as the DATE tag
-            instead of the downloaded edition's date (a 2016 reissue of a 2010 album gets 2010). The
-            original date is still kept in ORIGINALDATE either way, and a more precise same-year
-            date is never replaced by a vaguer one.
-          </div>
-        </>
-      ) : null}
+            />
+          </Row>
+          <Row
+            field
+            label="Duration tolerance"
+            htmlFor="duration-tolerance-seconds"
+            help="How far a file's length may drift from the expected length before it is quarantined. 0 is automatic."
+            more={
+              <>
+                <strong>0, automatic</strong>: a file may run 3 seconds short (5 for tracks over 10
+                minutes) or 15 long. Raise it if tracks are quarantined for being a few seconds off
+                (live recordings, other masterings, CD pregaps). A set value applies both ways, so
+                anything under 15 also tightens the long side. At most 60.
+              </>
+            }
+          >
+            <NumberField
+              id="duration-tolerance-seconds"
+              min="0"
+              max="60"
+              step="0.5"
+              unit="seconds"
+              value={loads ? duration.value : '0'}
+              onChange={(event) => duration.onChange(event.target.value)}
+            />
+          </Row>
+        </Card>
+
+        <SectionLabel title="Tag options" hint="How several artists and genres are written" />
+        <Card>
+          <MusicTagOptions store={store} />
+        </Card>
+
+        <SectionLabel
+          title="Tag embedding"
+          hint="A service's switch writes all its tags or none; its tags pick which"
+        />
+        <Card>
+          {TAG_GROUPS.map((group) => (
+            <ServiceTags key={group.service} store={store} group={group} />
+          ))}
+          <ServiceTags
+            store={store}
+            group={{ service: null, name: 'General', tags: GENERAL_TAGS }}
+          />
+          <p className={s.cardFoot}>Supported formats: MP3, FLAC, MP4/M4A, OGG.</p>
+        </Card>
+
+        <SectionLabel title="Library files" hint="Tags the library learns after a download" />
+        <Card>
+          <Row
+            field
+            label="Fill empty tags automatically"
+            htmlFor="fill-empty-tags"
+            help="When the library learns something after a download (a genre, a year, a track total), SoulSync writes it into the tags the file left blank."
+            more={
+              <>
+                <strong>Fill empty tags only</strong> never replaces a tag the file has.{' '}
+                <strong>Fill and update</strong> also replaces tags that differ from the library, as
+                applying a Library Re-tag finding does. Hand-tagged and locked albums, files still
+                downloading or seeding, and read-only files are left alone. Every fill is listed on
+                the Tools page under Filled Tags and can be undone. <strong>Off</strong> files them
+                as Library Re-tag findings instead.
+              </>
+            }
+          >
+            <Select
+              id="fill-empty-tags"
+              value={loads ? fillEmptyTags(meta.fill_empty_tags) : 'fill'}
+              options={FILL_EMPTY_TAGS_OPTIONS.map((o) => ({ ...o }))}
+              onChange={(event) => setMeta('fill_empty_tags')(event.target.value)}
+            />
+          </Row>
+        </Card>
+      </div>
+
+      <SectionLabel title="Genres" hint="Which genre tags are kept when music is tagged" />
+      <GenresCard store={store} />
     </>
+  );
+}
+
+// ── Import and files > Music ──
+
+/** the import matcher's default search source (#2203); '' is Any source */
+export const IMPORT_SEARCH_SOURCE_OPTIONS = [
+  { value: '', label: 'Any source' },
+  { value: 'musicbrainz', label: 'MusicBrainz' },
+  { value: 'spotify', label: 'Spotify' },
+  { value: 'deezer', label: 'Deezer' },
+  { value: 'itunes', label: 'iTunes' },
+  { value: 'discogs', label: 'Discogs' },
+  { value: 'jiosaavn', label: 'JioSaavn' },
+  { value: 'bandcamp', label: 'Bandcamp' },
+] as const;
+
+export function MusicImport({ store }: { store: SettingsStore }) {
+  const settings = useSettings(store);
+  const loads = useLoads(store);
+  const imp = (settings.import || {}) as Section_;
+  return (
+    <Card>
+      <Row
+        field
+        id="import-default-search-source-group"
+        label="Default search source"
+        htmlFor="import-default-search-source"
+        help="The source the Import page searches when you identify or fix a match. Any source asks your primary metadata source first; a source that isn't connected falls back to Any source."
+      >
+        <Select
+          id="import-default-search-source"
+          value={loads ? text(imp.default_search_source) : ''}
+          onChange={(event) => store.set('import', 'default_search_source', event.target.value)}
+          options={IMPORT_SEARCH_SOURCE_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+        />
+      </Row>
+      <Row
+        label="Use the top Staging folder as the artist"
+        htmlFor="import-folder-artist-override"
+        help="On by default. Files staged as Artist/Album/... take the top folder as the album artist, handy for mixtapes whose tags carry DJ names."
+        more={
+          <>
+            <strong>Turn this off</strong> if you drop a mixed pile of songs under one folder:
+            otherwise every file&apos;s artist is overwritten with that folder&apos;s name (the
+            cause of the &ldquo;soulsync&rdquo; mass-mislabel). Off, the artist the metadata found
+            is always kept. <code>Artist/Albums/Album/...</code> works too.
+          </>
+        }
+      >
+        <Switch
+          id="import-folder-artist-override"
+          checked={loads ? imp.folder_artist_override !== false : false}
+          onChange={(event) => store.set('import', 'folder_artist_override', event.target.checked)}
+        />
+      </Row>
+      <Row
+        label="Music library folder is my permanent library, never move files out"
+        htmlFor="import-transfer-permanent"
+        help="On by default. Off if your music library folder is only a drop area, not your real library."
+        more={
+          <>
+            On, a Deep Scan never moves files out: one it doesn&apos;t recognize is added to the
+            library where it sits. Off, a Deep Scan moves those files to the import folder to be
+            matched and filed. Even with this off, a Deep Scan refuses to move files when the
+            database looks badly out of step with the disk, so a library is never wiped (#904).
+          </>
+        }
+      >
+        <Switch
+          id="import-transfer-permanent"
+          checked={loads ? imp.transfer_is_permanent !== false : false}
+          onChange={(event) => store.set('import', 'transfer_is_permanent', event.target.checked)}
+        />
+      </Row>
+      <RedownloadDeleted store={store} />
+    </Card>
   );
 }

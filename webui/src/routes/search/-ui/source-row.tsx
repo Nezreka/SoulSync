@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { useFeatureOn } from '@/platform/features';
+import { useMusicVideosAllowed } from '@/platform/shell/my-permissions';
 
 import type { SearchControllerState } from '../-search.use-controller';
 
@@ -46,7 +47,9 @@ export function ModeTabs({
   onSelect: (source: string) => void;
 }) {
   const mode = modeOf(state.activeSource);
-  // music videos switched off (#1909): no Videos tab, unless you're on it
+  // music videos switched off (#1909): no Videos tab, unless you're on it.
+  // not part of this profile (#2166): no tab at all
+  const videosAllowed = useMusicVideosAllowed();
   const videosOn = useFeatureOn('music_videos');
   // the hint says what each one searches. "files" alone meant nothing to
   // someone who'd never used soulseek (#1909)
@@ -64,7 +67,7 @@ export function ModeTabs({
       hint: 'Artists, albums and tracks from a music catalogue. Downloads arrive tagged and filed.',
       icon: <DiscIcon />,
     },
-    ...(videosOn || mode === 'videos'
+    ...(videosAllowed && (videosOn || mode === 'videos')
       ? [
           {
             mode: 'videos' as const,
@@ -84,7 +87,13 @@ export function ModeTabs({
     },
   ];
   return (
-    <div className={styles.modes} id="enh-source-row" role="tablist" aria-label="What to search">
+    <div
+      className={styles.modes}
+      id="enh-source-row"
+      role="tablist"
+      aria-label="What to search"
+      data-tour="search.modes"
+    >
       {tabs.map((tab) => (
         <button
           key={tab.mode}
@@ -209,7 +218,7 @@ export function SourcePicker({
 
   if (mode === 'videos') {
     return (
-      <span className={styles.source} data-static>
+      <span className={styles.source} data-static data-tour="search.source">
         <SourceLogo source="youtube_videos" />
         <span className={styles.sourceLabel}>YouTube</span>
       </span>
@@ -222,6 +231,7 @@ export function SourcePicker({
       <button
         type="button"
         className={styles.source}
+        data-tour="search.source"
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={`Search with ${sourceLabel(current)}`}

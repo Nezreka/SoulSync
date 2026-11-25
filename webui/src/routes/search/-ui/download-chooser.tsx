@@ -20,7 +20,7 @@ const OPTIONS: {
   {
     mode: 'plain',
     title: 'Download as-is',
-    text: 'Keeps the file exactly as shared: its own name, its own tags. Lands in Transfer.',
+    text: 'Keeps the file exactly as shared: its own name, its own tags. Lands in your music library folder.',
     icon: (
       <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
         <path

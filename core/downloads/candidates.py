@@ -109,19 +109,15 @@ def _preferred_version_hit(r):
     return 1 if getattr(r, 'preferred_version_hit', False) else 0
 
 
-# Streaming plugins identify themselves via ``TrackResult.username``. Soulseek
-# peers use the sharing username, so they are everything else. Keep this list
-# in sync with ``core.downloads.validation._STREAMING_USERNAMES`` — imported
-# lazily would cycle (validation → candidates).
 # Soulseek candidates whose confidence is within this of the band leader are
 # equally likely to be the right file; a normal pathname's noise (a year, a
 # format tag) moves the score more than this.
 _CONFIDENCE_BAND_WIDTH = 0.08
 
-_STREAMING_USERNAMES = frozenset({
-    'youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'soundcloud',
-    'amazon', 'torrent', 'usenet', 'lidarr',
-})
+# Streaming plugins identify themselves via ``TrackResult.username``. Soulseek
+# peers use the sharing username, so they are everything else. The set is
+# source_policy's, shared with validation, so the two can't drift again.
+from core.downloads.source_policy import STREAMING_SOURCE_NAMES as _STREAMING_USERNAMES  # noqa: E402
 
 
 def _candidate_source_name(r) -> str:
@@ -294,6 +290,27 @@ def dedupe_cross_source_pool(ranked):
     return out
 
 
+def _fallback_rank(row, targets) -> tuple:
+    """``(1, 0.0)`` for a file the quality profile asked for; ``(0, quality)``
+    for one it only takes as a fallback.
+
+    Among the files the profile asked for, the peer decides: they are all
+    acceptable, so the one that will actually arrive goes first. A fallback
+    pool is different. Nothing in it is what was asked for, it is everything
+    there was, and there the peer decided too: with a FLAC-24 profile and
+    fallback on, an MP3 128 from a peer with a free slot was downloaded ahead
+    of a FLAC 16 from a busy one, and the import then accepted it "via
+    fallback". The better file leads; the peer only orders equals."""
+    if not targets:
+        return (1, 0.0)
+    try:
+        from core.quality.model import rank_candidate
+        index, tier = rank_candidate(row.audio_quality, targets)
+    except Exception:  # noqa: BLE001 - a row with no stated quality is ordered as before
+        return (1, 0.0)
+    return (1, 0.0) if index < len(targets) else (0, float(tier or 0.0))
+
+
 def order_candidates(candidates, *, quality_first=False, targets=None,
                      source_order=None, peer_speeds=None, peer_occupancy=None):
     """Return *candidates* ordered best-first for the download walk.
@@ -365,7 +382,7 @@ def order_candidates(candidates, *, quality_first=False, targets=None,
                     and leader - (getattr(row, 'confidence', 0) or 0) <= _CONFIDENCE_BAND_WIDTH]
             band_ids = {id(row) for row in band}
             remaining = [row for row in remaining if id(row) not in band_ids]
-            band.sort(key=lambda row: peer_availability_key(
+            band.sort(key=lambda row: _fallback_rank(row, targets) + peer_availability_key(
                 row, peer_speeds.get(row.username),
                 occupancy=peer_occupancy.get(row.username, 0),
             ) + (
@@ -1053,6 +1070,16 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
                     _simple = track_info.get('_simple_search_result') if track_info.get('_simple_download') else None
                     if isinstance(_simple, dict):
                         matched_downloads_context[context_key]['search_result'] = dict(_simple)
+                    # what the peer or source said the file's length is. when
+                    # the track's own length isn't known, the integrity check
+                    # measures against this, so a transfer cut short is still
+                    # caught (core/imports/file_integrity.py)
+                    try:
+                        _listed_ms = int(getattr(candidate, 'duration', 0) or 0)
+                    except (TypeError, ValueError):
+                        _listed_ms = 0
+                    if _listed_ms > 0:
+                        matched_downloads_context[context_key]['_advertised_duration_ms'] = _listed_ms
                     try:
                         from core.matching_engine import MusicMatchingEngine
                         _took, _adv_ms = preferred_version_stamp(

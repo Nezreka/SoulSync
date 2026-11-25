@@ -1,6 +1,8 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 
+import { RELEASE_STATUS_COPY, RELEASE_STATUSES, toggleStatus } from '@/components/release-statuses';
+
 import type { WatchlistGlobalConfig } from '../-watchlist.types';
 
 import {
@@ -95,6 +97,8 @@ export const EMPTY_GLOBAL_CONFIG: WatchlistGlobalConfig = {
   // #1450: defaults match the server ("all" = today's behaviour, opt-in).
   edition_preference: 'all',
   prefer_explicit_edition: true,
+  // #2175: every status until someone picks
+  release_statuses: [...RELEASE_STATUSES],
 };
 
 /**
@@ -281,6 +285,41 @@ export function WatchlistGlobalSettingsModal({ profileId, initialConfig, onClose
                       {...OPTION_COPY[key]}
                     />
                   ))}
+                </div>
+              </div>
+
+              {/* #2175: MusicBrainz statuses. Pills like the edition rows below,
+                  not another checkbox stack. The last one on can't be turned
+                  off: a filter that lets nothing through is never meant. */}
+              <div className="config-section">
+                <h3 className="config-section-title">Release Status</h3>
+                <p className="config-section-subtitle">
+                  Which MusicBrainz statuses to grab. A release from another source, or with no
+                  status, always gets through.
+                </p>
+                <div className="discog-future-pills" role="group" aria-label="Release statuses">
+                  {RELEASE_STATUSES.map((status) => {
+                    const on = config.release_statuses.includes(status);
+                    const last = on && config.release_statuses.length === 1;
+                    return (
+                      <button
+                        key={status}
+                        type="button"
+                        aria-pressed={on}
+                        disabled={last}
+                        title={last ? 'Keep at least one status' : RELEASE_STATUS_COPY[status].hint}
+                        className={`watchlist-filter-btn${on ? ' active' : ''}`}
+                        onClick={() =>
+                          setConfig((previous) => ({
+                            ...previous,
+                            release_statuses: toggleStatus(previous.release_statuses, status, !on),
+                          }))
+                        }
+                      >
+                        {RELEASE_STATUS_COPY[status].label}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 

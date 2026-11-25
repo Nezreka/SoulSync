@@ -89,3 +89,59 @@ def test_album_detail_carries_the_popular_flag(imported_conn):
     assert marks[hit] is True
     assert not any(v for tid, v in marks.items() if tid != hit)
     assert all(t["popular"] is False for t in tracks if not t.get("id"))
+
+
+# ── listenbrainz when last.fm knows too little (last.fm keys need pro) ──────
+
+class _Row(dict):
+    def keys(self):  # sqlite3.Row's interface
+        return list(super().keys())
+
+
+def _rows(counts, service):
+    key = "playcount" if service == "lastfm" else "listen_count"
+    return [_Row(id=tid, enrichment=json.dumps({service: {key: n}} if n else {}))
+            for tid, n in counts.items()]
+
+
+LB_ALBUM = {1: 4200, 2: 900, 3: 800, 4: 750, 5: 700, 6: 3100}
+
+
+def test_listenbrainz_ranks_the_album_when_lastfm_has_nothing():
+    from core.library2.track_popularity import popular_for_rows
+    assert popular_for_rows(_rows(LB_ALBUM, "listenbrainz")) == ({1, 6}, "listenbrainz")
+
+
+def test_listenbrainz_counts_have_their_own_floor():
+    """listenbrainz has far fewer listeners: a few hundred listens can be a hit
+    there, but a handful is still noise"""
+    from core.library2.track_popularity import popular_for_rows
+    tiny = {1: 40, 2: 5, 3: 4, 4: 3, 5: 2}
+    assert popular_for_rows(_rows(tiny, "listenbrainz")) == (set(), "listenbrainz")
+
+
+def test_lastfm_wins_when_it_knows_enough_and_the_two_never_mix():
+    from core.library2.track_popularity import popular_for_rows
+    rows = []
+    for tid, n in BACK_IN_BLACK.items():
+        # listenbrainz says track 2 is the hit; last.fm knows enough to decide
+        rows.append(_Row(id=tid, enrichment=json.dumps({
+            "lastfm": {"playcount": n},
+            "listenbrainz": {"listen_count": 99_999 if tid == 2 else 10}})))
+    assert popular_for_rows(rows) == ({1, 6, 7}, "lastfm")
+
+
+def test_a_few_lastfm_counts_hand_the_album_to_listenbrainz():
+    from core.library2.track_popularity import popular_for_rows
+    rows = []
+    for tid, n in LB_ALBUM.items():
+        data = {"listenbrainz": {"listen_count": n}}
+        if tid == 2:
+            data["lastfm"] = {"playcount": 9_000_000}  # one stray last.fm number
+        rows.append(_Row(id=tid, enrichment=json.dumps(data)))
+    assert popular_for_rows(rows) == ({1, 6}, "listenbrainz")
+
+
+def test_nothing_known_says_no_source():
+    from core.library2.track_popularity import popular_for_rows
+    assert popular_for_rows(_rows({1: None, 2: None}, "lastfm")) == (set(), None)

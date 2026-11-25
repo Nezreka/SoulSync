@@ -1,23 +1,19 @@
 /**
- * The YouTube, Prowlarr, torrent and usenet source panels (SETTINGS_PORT.md,
- * step 7g): the markup they replaced, their load and save rules, the video
- * blocks they borrow without remounting, and their tests and updater.
+ * The YouTube, Prowlarr, torrent and usenet source panels on the settings
+ * parts: their load and save rules, the "For music" and "For video" groups
+ * (the video blocks borrowed without remounting), Prowlarr's own Test, the
+ * torrent and usenet lights following the sheet's Test, and the yt-dlp
+ * updater. The frozen vanilla markup comparisons went with the markup; the
+ * key guard (guard/) holds every id, key and button.
  */
 
-import { act, fireEvent, render, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createSettingsStore, type SettingsPayload, type SettingsStore } from '../settings-store';
-import { shape, vanilla } from './__fixtures__/shape';
 import { REDACTED_SECRET_SENTINEL } from './parts';
-import {
-  MoreSourcePanels,
-  ProwlarrPanel,
-  TorrentPanel,
-  UsenetPanel,
-  YoutubePanel,
-} from './source-panels-more';
-import { sourcesModel } from './sources-model';
+import { ProwlarrPanel, TorrentPanel, UsenetPanel, YoutubePanel } from './source-panels-more';
+import { createSourcesModel, sourcesModel } from './sources-model';
 import { SourceModal } from './sources-tab';
 import { videoDownloads } from './video-downloads';
 
@@ -66,34 +62,22 @@ afterEach(async () => {
 });
 
 const input = (id: string) => document.getElementById(id) as HTMLInputElement;
+/** the sheet group a control sits under: the nearest group title above it */
+function groupOf(el: Element): string {
+  const panel = el.closest('[data-react-panel]')!;
+  let title = '';
+  for (const node of panel.querySelectorAll('h4, [data-row], [data-field], [id]')) {
+    if (node.tagName === 'H4') title = node.textContent ?? '';
+    if (node === el) return title;
+  }
+  return title;
+}
 function saved(): SettingsPayload {
   const merged: SettingsPayload = {};
   for (const body of posted)
     for (const [k, v] of Object.entries(body)) merged[k] = { ...merged[k], ...v };
   return merged;
 }
-
-describe('the panels are the markup they replaced', () => {
-  it('YouTube, after settings.js drew its help lines', () => {
-    const { container } = render(
-      <MoreSourcePanels store={store} part="youtube" opened={0} active={false} />,
-    );
-    const want = shape(vanilla('panel-youtube.vanilla.html', { afterInit: true }));
-    const got = shape(container);
-    expect(got.elements).toEqual(want.elements);
-    expect(got.text).toBe(want.text);
-  });
-
-  it("Prowlarr, torrent and usenet, with the video side's blocks in them", () => {
-    const { container } = render(
-      <MoreSourcePanels store={store} part="prowlarr-torrent-usenet" opened={0} active={false} />,
-    );
-    const want = shape(vanilla('panels-prowlarr-torrent-usenet.vanilla.html', { afterInit: true }));
-    const got = shape(container);
-    expect(got.elements).toEqual(want.elements);
-    expect(got.text).toBe(want.text);
-  });
-});
 
 describe("the video side's blocks", () => {
   it('show the video downloads config, keep it through the modal, and save it', async () => {
@@ -131,19 +115,15 @@ describe("the video side's blocks", () => {
     );
     act(() => sourcesModel.closeModal());
     expect(input('video-seed-ratio').value).toBe('2');
-    // usenet's two follow its music settings in the frame
-    const frame = document.querySelector('#usenet-client-settings-container .api-service-frame')!;
-    expect([...frame.children].slice(-3).map((n) => n.id)).toEqual([
-      'music-usenet-remove-completed-group',
-      'video-usenet-remove-completed-group',
-      'video-redownload-failed-group',
-    ]);
-    fireEvent.click(input('video-redownload-failed'));
-    await waitFor(() =>
-      expect(calls.filter((c) => c.method === 'POST').at(-1)?.body).toMatchObject({
-        redownload_failed: true,
-      }),
-    );
+    // usenet's video rule is under "For video", after the music one under
+    // "For music"; the next-best release rule is on Downloads > Behaviour now
+    // (downloads.test.tsx)
+    const usenet = document.getElementById('usenet-client-settings-container')!;
+    const music = usenet.querySelector('#music-usenet-remove-completed-group')!;
+    const video = usenet.querySelector('#video-usenet-remove-completed-group')!;
+    expect(groupOf(music)).toBe('For music');
+    expect(groupOf(video)).toBe('For video');
+    expect(document.getElementById('video-redownload-failed')).toBeNull();
   });
 });
 
@@ -164,7 +144,10 @@ describe('Prowlarr', () => {
     fireEvent.change(input('prowlarr-search-min-gap'), { target: { value: '' } });
     fireEvent.change(input('prowlarr-max-searches-per-minute'), { target: { value: '5' } });
     fireEvent.click(document.getElementById('prowlarr-test-btn')!);
-    await waitFor(() => expect(document.querySelectorAll('.ind-indexer-card')).toHaveLength(2));
+    const cards = () => [
+      ...document.querySelectorAll<HTMLElement>('#prowlarr-indexer-list [data-indexer]'),
+    ];
+    await waitFor(() => expect(cards()).toHaveLength(2));
     expect(shell.saveSettings).toHaveBeenCalledOnce();
     expect(document.getElementById('prowlarr-connection-status')!.textContent).toBe(
       'Prowlarr 1.2 ok',
@@ -172,9 +155,13 @@ describe('Prowlarr', () => {
     const dot = document.getElementById('prowlarr-status-dot')!;
     expect(dot.className).toBe('ind-status-dot ind-status-dot-connected');
     expect(dot.title).toBe('Connected');
-    const cards = document.querySelectorAll('.ind-indexer-card');
-    expect(cards[1].className).toBe('ind-indexer-card ind-indexer-card-disabled');
-    expect(cards[0].textContent).toBe('#3TrackerprivateTorrent');
+    // a disabled indexer is dimmed; each says its id, name, privacy and kind
+    expect(cards()[1].className).toMatch(/itemOff/);
+    expect(cards()[0].className).not.toMatch(/itemOff/);
+    expect(cards()[0].textContent).toBe('#3TrackerprivateTorrent');
+    expect(screen.getByRole('button', { name: 'Test and load indexers' }).id).toBe(
+      'prowlarr-test-btn',
+    );
     await waitFor(() => expect(store.hasPending()).toBe(false));
     expect(saved()).toEqual({
       prowlarr: { search_min_gap_seconds: 2, max_searches_per_minute: 5 },
@@ -216,19 +203,18 @@ describe('the torrent client', () => {
     });
   });
 
-  it('Test saves first and colours the dot', async () => {
+  it("has no Test of its own: the sheet's Test is the same request, and lights the dot", async () => {
     routes['POST /api/test-connection'] = () => ({ success: false, error: 'login refused' });
-    render(<TorrentPanel store={store} />);
-    fireEvent.click(document.getElementById('torrent-client-test-btn')!);
-    await waitFor(() =>
-      expect(document.getElementById('torrent-client-connection-status')!.textContent).toBe(
-        'login refused',
-      ),
-    );
+    const model = createSourcesModel({ store });
+    render(<TorrentPanel store={store} model={model} />);
+    expect(document.getElementById('torrent-client-test-btn')).toBeNull();
+    expect(document.getElementById('torrent-client-connection-status')).toBeNull();
+    const dot = document.getElementById('torrent-client-status-dot')!;
+    expect(dot.className).toBe('ind-status-dot ind-status-dot-unknown');
+    await act(() => model.testOne('torrent'));
     expect(calls[0].body).toEqual({ service: 'torrent_client' });
-    expect(document.getElementById('torrent-client-status-dot')!.className).toBe(
-      'ind-status-dot ind-status-dot-error',
-    );
+    expect(dot.className).toBe('ind-status-dot ind-status-dot-error');
+    expect(model.getState().said.torrent_client).toBe('login refused');
   });
 });
 
@@ -236,7 +222,7 @@ describe('the usenet client', () => {
   it('shows the key for SABnzbd and the login for NZBGet', async () => {
     act(() => store.hydrate({ usenet_client: {} }));
     render(<UsenetPanel store={store} />);
-    const shown = (id: string) => document.getElementById(id)!.style.display !== 'none';
+    const shown = (id: string) => !document.getElementById(id)!.hidden;
     expect([
       shown('usenet-apikey-group'),
       shown('usenet-username-group'),
@@ -267,7 +253,7 @@ describe('YouTube', () => {
     const labels = [...document.querySelectorAll('#youtube-cookies-browser option')].map(
       (o) => o.textContent,
     );
-    expect(labels).toContain('Chrome — not supported on Windows');
+    expect(labels).toContain('Chrome (not supported on Windows)');
     expect(labels).toContain('Firefox');
     const warn = document.getElementById('youtube-cookie-abe-warning')!;
     expect(warn.hidden).toBe(false);
@@ -284,7 +270,7 @@ describe('YouTube', () => {
     );
     render(<YoutubePanel store={store} opened={0} active={false} />);
     const group = document.getElementById('youtube-cookies-paste-group')!;
-    expect(group.style.display).toBe('');
+    expect(group.hidden).toBe(false);
     const box = document.getElementById('youtube-cookies-paste') as HTMLTextAreaElement;
     expect(box.placeholder).toBe(
       'A cookies.txt is saved. Paste again to replace it, or leave blank to keep it.',
@@ -298,13 +284,13 @@ describe('YouTube', () => {
     act(() => store.hydrate({ youtube: {} }));
     render(<YoutubePanel store={store} opened={0} active={false} />);
     const opts = document.getElementById('youtube-transcode-options')!;
-    expect(opts.style.display).toBe('block');
+    expect(opts.hidden).toBe(false);
     fireEvent.change(document.getElementById('youtube-transcode-codec')!, {
       target: { value: 'opus' },
     });
     expect(input('youtube-transcode-bitrate').value).toBe('256');
     fireEvent.click(input('youtube-transcode'));
-    expect(opts.style.display).toBe('none');
+    expect(opts.hidden).toBe(true);
     fireEvent.click(input('youtube-album-bundle'));
     await waitFor(() => expect(store.hasPending()).toBe(false));
     expect(saved()).toEqual({
@@ -334,7 +320,7 @@ describe('YouTube', () => {
     await waitFor(() =>
       expect(document.getElementById('ytdlp-latest')!.textContent).toBe('2026.11.10'),
     );
-    expect(document.getElementById('ytdlp-latest')!.style.color).toBe('rgb(255, 179, 0)');
+    expect(document.getElementById('ytdlp-latest')!.dataset.tone).toBe('warn');
     const badge = document.getElementById('ytdlp-hint-badge')!;
     expect(badge.hidden).toBe(false);
     expect(badge.title).toBe('A newer yt-dlp is available');
@@ -350,12 +336,12 @@ describe('YouTube', () => {
     );
     expect(document.getElementById('ytdlp-detail')!.textContent).toBe('pip said ok');
     expect(shell.showToast).toHaveBeenCalledWith(
-      'yt-dlp updated — restart SoulSync to use it',
+      'yt-dlp updated. Restart SoulSync to use it',
       'info',
     );
     await waitFor(() =>
       expect(document.getElementById('ytdlp-installed')!.textContent).toBe(
-        '2026.11.01 running — 2026.11.10 installed, restart to finish',
+        '2026.11.01 running, 2026.11.10 installed. Restart to finish.',
       ),
     );
     fireEvent.change(document.getElementById('ytdlp-channel')!, { target: { value: 'stable' } });

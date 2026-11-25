@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
+import type { ArtistAbout } from './-artist-detail.types';
+
 import {
   buildGenreChips,
+  heroNumbers,
+  pickArtistBio,
   categoryStats,
   cleanArtistBio,
   formatHeroNumber,
@@ -201,16 +205,16 @@ describe('totalReleaseCount', () => {
 describe('buildGenreChips', () => {
   it("lists the artist's own genres first, undimmed", () => {
     expect(buildGenreChips({ genres: ['IDM', 'Ambient'] })).toEqual([
-      { label: 'IDM', fromLastfm: false },
-      { label: 'Ambient', fromLastfm: false },
+      { label: 'IDM', source: 'genre' },
+      { label: 'Ambient', source: 'genre' },
     ]);
   });
 
   it('appends Last.fm tags as dimmed extras', () => {
     const chips = buildGenreChips({ genres: ['IDM'], lastfm_tags: ['electronic'] });
     expect(chips).toEqual([
-      { label: 'IDM', fromLastfm: false },
-      { label: 'electronic', fromLastfm: true },
+      { label: 'IDM', source: 'genre' },
+      { label: 'electronic', source: 'lastfm' },
     ]);
   });
 
@@ -222,7 +226,7 @@ describe('buildGenreChips', () => {
 
   it('swallows malformed tags rather than taking the hero down', () => {
     expect(buildGenreChips({ genres: ['IDM'], lastfm_tags: '{not json' })).toEqual([
-      { label: 'IDM', fromLastfm: false },
+      { label: 'IDM', source: 'genre' },
     ]);
   });
 
@@ -239,12 +243,117 @@ describe('buildGenreChips', () => {
       genres: ['a', 'b', 'c', 'd', 'e', 'f', 'g'],
       lastfm_tags: ['t1', 't2', 't3', 't4', 't5', 't6', 't7'],
     });
-    expect(chips.filter((c) => !c.fromLastfm)).toHaveLength(7);
-    expect(chips.filter((c) => c.fromLastfm)).toHaveLength(5);
+    expect(chips.filter((c) => c.source === 'genre')).toHaveLength(7);
+    expect(chips.filter((c) => c.source === 'lastfm')).toHaveLength(5);
   });
 
   it('handles an artist with neither', () => {
     expect(buildGenreChips({})).toEqual([]);
+  });
+
+  it('takes musicbrainz tags only when last.fm has none', () => {
+    const about = {
+      ...EMPTY_ABOUT,
+      tags: ['trip hop', 'IDM'],
+      tags_source: 'musicbrainz' as const,
+    };
+    expect(buildGenreChips({ genres: ['IDM'], about })).toEqual([
+      { label: 'IDM', source: 'genre' },
+      { label: 'trip hop', source: 'musicbrainz' },
+    ]);
+    // last.fm's tags win when there are any
+    expect(buildGenreChips({ lastfm_tags: ['electronic'], about })).toEqual([
+      { label: 'electronic', source: 'lastfm' },
+    ]);
+  });
+});
+
+const EMPTY_ABOUT: ArtistAbout = {
+  bio: null,
+  bio_source: null,
+  bio_url: null,
+  tags: [],
+  tags_source: null,
+  listeners: null,
+  plays: null,
+  popularity_source: null,
+  fans: null,
+  fans_source: null,
+};
+
+describe('pickArtistBio', () => {
+  const wiki: ArtistAbout = {
+    ...EMPTY_ABOUT,
+    bio: 'Massive Attack are a trip hop collective.',
+    bio_source: 'wikipedia',
+    bio_url: 'https://en.wikipedia.org/wiki/Massive_Attack',
+  };
+
+  it('last.fm first, with no note', () => {
+    expect(pickArtistBio({ lastfm_bio: 'From Bristol.', about: wiki })).toEqual({
+      text: 'From Bristol.',
+      source: null,
+      url: null,
+    });
+  });
+
+  it("then the media server's summary", () => {
+    expect(pickArtistBio({ bio: 'Plex says hi.', about: wiki })?.text).toBe('Plex says hi.');
+  });
+
+  it('then a free source, with its name and link', () => {
+    expect(pickArtistBio({ about: wiki })).toEqual({
+      text: 'Massive Attack are a trip hop collective.',
+      source: 'wikipedia',
+      url: 'https://en.wikipedia.org/wiki/Massive_Attack',
+    });
+    const audiodb = { ...EMPTY_ABOUT, bio: 'AudioDB bio.', bio_source: 'audiodb' as const };
+    expect(pickArtistBio({ about: audiodb })).toEqual({
+      text: 'AudioDB bio.',
+      source: 'audiodb',
+      url: null,
+    });
+  });
+
+  it('a stored last.fm bio carries no note either', () => {
+    const lastfm = { ...EMPTY_ABOUT, bio: 'stored', bio_source: 'lastfm' as const };
+    expect(pickArtistBio({ about: lastfm })?.source).toBeNull();
+  });
+
+  it('nothing anywhere is no bio', () => {
+    expect(pickArtistBio({})).toBeNull();
+  });
+});
+
+describe('heroNumbers', () => {
+  it("last.fm's numbers keep their plain labels", () => {
+    expect(heroNumbers({ lastfm_listeners: 10, lastfm_playcount: 99 })).toEqual([
+      { id: 'listeners', value: 10, label: 'listeners' },
+      { id: 'playcount', value: 99, label: 'plays' },
+    ]);
+  });
+
+  it('listenbrainz numbers say listenbrainz, deezer fans say fans', () => {
+    const about: ArtistAbout = {
+      ...EMPTY_ABOUT,
+      listeners: 5,
+      plays: 50,
+      popularity_source: 'listenbrainz',
+      fans: 7,
+      fans_source: 'deezer',
+    };
+    expect(heroNumbers({ about })).toEqual([
+      { id: 'listeners', value: 5, label: 'ListenBrainz listeners' },
+      { id: 'playcount', value: 50, label: 'ListenBrainz listens' },
+      { id: 'fans', value: 7, label: 'Deezer fans' },
+    ]);
+  });
+
+  it('live last.fm numbers win over stored listenbrainz ones', () => {
+    const about = { ...EMPTY_ABOUT, listeners: 5, popularity_source: 'listenbrainz' as const };
+    expect(heroNumbers({ lastfm_listeners: 10, about })).toEqual([
+      { id: 'listeners', value: 10, label: 'listeners' },
+    ]);
   });
 });
 

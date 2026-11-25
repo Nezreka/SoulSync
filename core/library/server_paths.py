@@ -93,6 +93,30 @@ def _from_learned(normalized: str) -> Optional[str]:
     return None
 
 
+def _from_override(server_path: str, exists=None) -> Optional[str]:
+    """the folder override the user set for this path, when it finds it here.
+    an override beats every learned mount: it is the user's own answer"""
+    try:
+        from core.library.path_mappings import local_path
+        return local_path(server_path, media_type="music", exists=exists)
+    except Exception as e:  # noqa: BLE001
+        logger.debug("folder override lookup failed for %r: %s", server_path, e)
+        return None
+
+
+def _foreign(path: str) -> bool:
+    """a media server's unix path (/mnt/music) read on a Windows host. Windows
+    takes it as a folder on the current drive (E:\\mnt\\music), so "does it
+    exist here?" answered yes for a stray folder of that name with a handful
+    of files in it, and that folder was taken for the server's library: the
+    folder check said 0% of 311,000 tracks could be read while every one of
+    them played, and a file lookup could have landed on the stray copy. such a
+    path is never the same place here; the overrides, the learned mounts and
+    the resolver translate it (core/library/path_mappings.foreign_rooted)."""
+    from core.library.path_mappings import foreign_rooted
+    return foreign_rooted(path)
+
+
 def local_folder_for(server_folder: Any) -> Optional[str]:
     """SoulSync's own path for a library folder the server reported, or None.
     Only an exact folder or a learned mount counts here, never a guess: the
@@ -100,8 +124,11 @@ def local_folder_for(server_folder: Any) -> Optional[str]:
     if not isinstance(server_folder, str) or not server_folder.strip():
         return None
     folder = server_folder.strip()
-    if os.path.isdir(folder):
+    if not _foreign(folder) and os.path.isdir(folder):
         return os.path.abspath(folder)
+    override = _from_override(folder, os.path.isdir)
+    if override:
+        return os.path.abspath(override)
     normalized = folder.replace('\\', '/').rstrip('/')
     with _lock:
         pairs = list(_learned.items())
@@ -119,8 +146,12 @@ def local_path_for(server_path: Any, config_manager: Any = None) -> Optional[str
     if not isinstance(server_path, str) or not server_path:
         return None
     try:
-        if os.path.exists(server_path):
+        if not _foreign(server_path) and os.path.exists(server_path):
             return os.path.abspath(server_path)
+        # the user's folder override first, the learned mounts after it
+        override = _from_override(server_path)
+        if override:
+            return os.path.abspath(override)
         normalized = server_path.replace('\\', '/')
         hit = _from_learned(normalized)
         if hit:

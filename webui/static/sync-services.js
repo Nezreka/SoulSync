@@ -1147,10 +1147,11 @@ async function openDownloadMissingModalForTidal(virtualPlaylistId, playlistName,
                             <span>Organize by Playlist (Downloads/Playlist/Artist - Track.ext)</span>
                         </label>`}
                     </div>
+                    <p class="music-get-off-note" role="note">Getting music isn't part of your profile. You can still see what's here and what you already have. Ask your admin if you'd like it.</p>
                     <button class="download-control-btn primary" id="begin-analysis-btn-${virtualPlaylistId}" onclick="startMissingTracksProcess('${virtualPlaylistId}')">
                         Begin Analysis
                     </button>
-                    <button class="download-control-btn" id="add-to-wishlist-btn-${virtualPlaylistId}" onclick="addModalTracksToWishlist('${virtualPlaylistId}')" style="background-color: #9333ea; color: white;">
+                    <button class="download-control-btn" data-request-action id="add-to-wishlist-btn-${virtualPlaylistId}" onclick="addModalTracksToWishlist('${virtualPlaylistId}')" style="background-color: #9333ea; color: white;">
                         ${typeof wishlistAddLabel === 'function' ? wishlistAddLabel() : 'Add to Wishlist'}
                     </button>
                     <button class="download-control-btn danger" id="cancel-all-btn-${virtualPlaylistId}" onclick="cancelAllOperations('${virtualPlaylistId}')" style="display: none;">
@@ -2962,11 +2963,11 @@ async function handleDbUpdateButtonClick() {
 
         if (isFullRefresh) {
             // Replicates the QMessageBox confirmation from the GUI
-            const confirmed = await showConfirmDialog({ title: 'Full Refresh', message: 'This will clear and rebuild the database for the active server. It can take a long time.\n\nAre you sure you want to proceed?', confirmText: 'Proceed' });
+            const confirmed = await showConfirmDialog({ title: 'Full Refresh', message: 'A full refresh re-reads your whole library and updates what changed. Nothing is cleared first. It can take a long time.\n\nAre you sure you want to proceed?', confirmText: 'Proceed' });
             if (!confirmed) return;
         } else if (isDeepScan) {
             // Deep scan removes stale entries — confirm like the dashboard deep scan does.
-            const confirmed = await showConfirmDialog({ title: 'Deep Scan', message: 'A deep scan re-checks every track in your media server library against the database.\n\n• Adds any new tracks that were missed\n• Removes tracks no longer on your server\n• Preserves all existing metadata and enrichment data\n\nThis may take a while for large libraries. Proceed?', confirmText: 'Proceed' });
+            const confirmed = await showConfirmDialog({ title: 'Deep Scan', message: 'A deep scan re-checks every track in your library against the database.\n\n• Catches what the regular scans missed\n• Removes tracks that are no longer there\n• Preserves all existing metadata and enrichment data\n\nThis may take a while for large libraries. Proceed?', confirmText: 'Proceed' });
             if (!confirmed) return;
         }
 

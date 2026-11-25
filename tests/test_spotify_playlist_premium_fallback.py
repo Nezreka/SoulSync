@@ -102,8 +102,18 @@ def _stub_public(monkeypatch, *, full=None, embed=None):
                         lambda *a: embed if embed is not None else {'error': 'embed down'})
 
 
+def _as_admin():
+    """the route declares music.access, and the real app refuses a request
+    with no profile on it. these tests are about the fallback, so they run
+    as the admin profile the gate would have put on g."""
+    from flask import g
+    g.profile_id = 1
+    g.is_admin = True
+
+
 def _call(monkeypatch):
     with web_server.app.test_request_context():
+        _as_admin()
         resp = web_server.get_playlist_tracks('abc')
     # Flask view may return (response, status); normalize.
     if isinstance(resp, tuple):
@@ -135,6 +145,7 @@ def test_non_premium_error_propagates(monkeypatch):
     _authed_client(monkeypatch, playlist_side_effect=_NotFound())
 
     with web_server.app.test_request_context():
+        _as_admin()
         resp = web_server.get_playlist_tracks('abc')
     # The view's outer except renders {"error": ...}, 500.
     assert isinstance(resp, tuple)
@@ -178,6 +189,7 @@ def test_public_fallback_failure_still_errors(monkeypatch):
     _stub_public(monkeypatch, embed={'error': 'No tracks found in this Spotify link'})
 
     with web_server.app.test_request_context():
+        _as_admin()
         resp = web_server.get_playlist_tracks('abc')
     assert isinstance(resp, tuple)
     body, status = resp
@@ -198,3 +210,14 @@ def test_premium_403_full_fetch_down_uses_embed(monkeypatch):
     assert data['name'] == 'Public Mix'
     assert data['track_count'] == 100
     assert data['incomplete'] is True
+
+
+def test_the_route_still_refuses_a_request_with_no_profile(monkeypatch):
+    """negative check for _as_admin: without a profile the gate answers
+    before spotify is ever asked."""
+    client = _authed_client(monkeypatch, playlist_return={'id': 'abc'})
+    with web_server.app.test_request_context():
+        resp = web_server.get_playlist_tracks('abc')
+    status = resp[1] if isinstance(resp, tuple) else resp.status_code
+    assert status == 403
+    client.sp.playlist.assert_not_called()

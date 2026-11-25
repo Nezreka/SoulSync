@@ -211,7 +211,10 @@ def test_start_no_thumb_anywhere_leaves_null(db):
     assert row['thumb_url'] is None
 
 
-def test_start_updates_existing_entry_for_same_playlist_id(db):
+def test_each_run_of_a_playlist_is_its_own_entry_and_the_newest_is_latest(db):
+    """#2271: a run no longer overwrites the one before it. two runs in the
+    same second must still read newest-first: "latest" was ordered by a
+    timestamp that only counts seconds and gave back the older run."""
     history.record_sync_history_start(
         db, batch_id='b1', playlist_id='spot_pl', playlist_name='Original',
         tracks=[{'name': 'a'}], is_album_download=False,
@@ -225,8 +228,7 @@ def test_start_updates_existing_entry_for_same_playlist_id(db):
         album_context=None, artist_context=None, playlist_folder_mode=False,
     )
     second_row = db.get_latest_sync_history_by_playlist('spot_pl')
-    # Same row id (updated, not duplicated)
-    assert second_row['id'] == first_row['id']
+    assert second_row['id'] != first_row['id']
     assert second_row['batch_id'] == 'b2'
     assert second_row['playlist_name'] == 'Renamed'
     assert second_row['total_tracks'] == 3

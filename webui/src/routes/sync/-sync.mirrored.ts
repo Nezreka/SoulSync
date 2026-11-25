@@ -30,8 +30,12 @@ export interface MirroredPlaylistRow {
   source_playlist_id?: string;
   source_ref?: string;
   description?: string;
-  /** The poster the SOURCE supplied, when it supplied one. */
+  /** The cover shown: the source's poster, or one the user picked. */
   image_url?: string;
+  /** the user picked the cover; restore goes back to source_image_url (#2281) */
+  custom_cover?: boolean | number;
+  /** the source's own poster, kept for restore */
+  source_image_url?: string | null;
   /**
    * Up to four distinct album covers borrowed from the playlist's discovered
    * tracks, as a JSON array string. The fallback for the many sources that send
@@ -168,7 +172,14 @@ export interface MirroredTrack {
   added_at?: string | null;
   /** where it stands: core/playlists/track_status.py (#1721) */
   status?: MirroredTrackStatus;
+  /** in the library, and on the server playlist or why not (#2235) */
+  server_placement?: ServerPlacement | null;
+  /** for a duplicate: the playlist track it shares a file with */
+  server_placement_with?: string;
 }
+
+/** core/sync/server_placement.py */
+export type ServerPlacement = 'on_playlist' | 'duplicate' | 'not_on_server';
 
 export type MirroredTrackStatus =
   | 'in_library'
@@ -516,4 +527,88 @@ export function trackStatusSegments(
 export function needsMatchLabel(row: { needs_match_count?: number }): string | null {
   const n = row.needs_match_count ?? 0;
   return n > 0 ? `${n} guess${n === 1 ? '' : 'es'} to review` : null;
+}
+
+/* ── in the library vs on the server playlist (#2235) ────────────────────── */
+
+const SERVER_NAMES: Record<string, string> = {
+  plex: 'Plex',
+  jellyfin: 'Jellyfin',
+  emby: 'Emby',
+  navidrome: 'Navidrome',
+};
+
+/** "Jellyfin", or "your server" when the payload doesn't say which */
+export function serverName(serverType: string | null | undefined): string {
+  return SERVER_NAMES[String(serverType ?? '').toLowerCase()] ?? 'your server';
+}
+
+export interface PlacementSegment {
+  placement: Exclude<ServerPlacement, 'on_playlist'>;
+  count: number;
+  label: string;
+  title: string;
+}
+
+/**
+ * the tracks soulsync has that the server playlist doesn't hold. "167 in
+ * library" sat over a 149-track jellyfin playlist and nothing said why, so
+ * the strip says it: the ones the server doesn't know yet, and the ones that
+ * share a file with another track of the playlist. empty when they all made it
+ * or no sync has read the playlist back.
+ */
+export function placementSegments(
+  counts: Partial<Record<ServerPlacement, number>> | null | undefined,
+  serverType: string | null | undefined,
+): PlacementSegment[] {
+  if (!counts) return [];
+  const server = serverName(serverType);
+  const out: PlacementSegment[] = [];
+  const missing = counts.not_on_server ?? 0;
+  if (missing > 0) {
+    out.push({
+      placement: 'not_on_server',
+      count: missing,
+      label: `not on the ${server} playlist`,
+      title:
+        `In your library, but ${server} doesn't have ${missing === 1 ? 'this file' : 'these files'} ` +
+        `under the id SoulSync knows yet. Scan the library on ${server}, then in SoulSync, and sync again.`,
+    });
+  }
+  const dupes = counts.duplicate ?? 0;
+  if (dupes > 0) {
+    out.push({
+      placement: 'duplicate',
+      count: dupes,
+      label: dupes === 1 ? 'shares a file with another track' : 'share a file with another track',
+      title:
+        `${server} holds a file on a playlist once. ${dupes === 1 ? 'This track matched' : 'These tracks matched'} ` +
+        'the same file as an earlier track, so it is on the playlist once.',
+    });
+  }
+  return out;
+}
+
+/** the row chip for an in-library track the server playlist doesn't hold */
+export function placementChip(
+  track: Pick<MirroredTrack, 'status' | 'server_placement' | 'server_placement_with'>,
+  serverType: string | null | undefined,
+): { label: string; title: string } | null {
+  if (track.status !== 'in_library') return null;
+  const server = serverName(serverType);
+  if (track.server_placement === 'not_on_server') {
+    return {
+      label: `Not on ${server} yet`,
+      title: `In your library, but the ${server} playlist doesn't hold it. Scan the library on ${server}, then sync again.`,
+    };
+  }
+  if (track.server_placement === 'duplicate') {
+    return {
+      label: 'Same file as another track',
+      title: track.server_placement_with
+        ? `On the playlist once, as ${track.server_placement_with}`
+        : 'On the playlist once, under an earlier track',
+    };
+  }
+  return null;
 }

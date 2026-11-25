@@ -872,6 +872,10 @@ def _rename_track_in_place(
     takes its own back out.
     """
     made: List[str] = []
+    # a reorganize records its own moves: the folder watcher leaves them alone
+    from core.library import own_writes
+    own_writes.note(current_abs, new_abs, os.path.dirname(current_abs), os.path.dirname(new_abs),
+                    *sibling_paths)
     try:
         if current_abs and not os.path.exists(current_abs):
             return False, 'source file no longer on disk'
@@ -1117,7 +1121,8 @@ def reorganize_album_rename_only(
     if summary.get('moved', 0) > 0 and preview.get('record_type') == 'compilation':
         _persist_compilation_record_type(db, album_id)
 
-    if (_run_placed_everything(summary, stop_check)
+    # a run limited to some tracks (#2193) says nothing about the rest
+    if (_run_placed_everything(summary, stop_check) and not preview.get('track_subset')
             and tracks and all(t.get('matched') and t.get('file_exists')
                                and not t.get('collision') for t in tracks)):
         mark_album_placed(db, album_id)
@@ -1257,6 +1262,8 @@ def _is_junk(name: str) -> bool:
 
 
 def _move_entry(src: str, dst: str) -> None:
+    from core.library import own_writes
+    own_writes.note(src, dst)
     try:
         os.rename(src, dst)
     except OSError as e:
@@ -1512,6 +1519,8 @@ def _move_sibling_to_destination(sibling_src: str, canonical_dst: str) -> Option
         return None
     try:
         os.makedirs(dst_dir, exist_ok=True)
+        from core.library import own_writes
+        own_writes.note(sibling_src, sibling_dst)
         shutil.move(sibling_src, sibling_dst)
         return sibling_dst
     except OSError as e:

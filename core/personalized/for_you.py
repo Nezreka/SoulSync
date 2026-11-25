@@ -10,8 +10,9 @@ these mixes play the moment you press play, nothing to download first.
   of your library you never play: rarely-played tracks by artists you love,
   and owned tracks by artists similar to them. new every time you press it.
 - blend: one mix out of two people's listening. only between profiles that
-  each have their own listening history (#1293); otherwise it's you blended
-  with yourself.
+  each have their own listening history (#1293), and only when both share
+  their listening (core.personalized.listening_privacy). the closest tastes
+  (most artists in common) get the cards.
 
 each reads the listening pile the profile owns (core.listening_scope).
 """
@@ -355,11 +356,51 @@ def _profile_names(conn) -> Dict[int, str]:
         return {}
 
 
+def _artists(conn, owner: int, since: str) -> set:
+    rows = conn.execute(
+        "SELECT DISTINCT LOWER(artist) FROM listening_history "
+        "WHERE profile_id = ? AND played_at >= ? AND artist IS NOT NULL AND artist != ''",
+        (owner, since)).fetchall()
+    return {r[0] for r in rows if r[0]}
+
+
+def rank_partners(conn, owner: int, partners: Sequence[int], *,
+                  now: Optional[datetime] = None) -> List[int]:
+    """partners with the most artists in common first; ties go to the
+    closer match (shared over all), then the lower id so the order is stable"""
+    since = _stamp((now or _now()) - timedelta(days=BLEND_DAYS))
+    mine = _artists(conn, owner, since)
+    scored = []
+    for other in partners:
+        theirs = _artists(conn, other, since)
+        both = len(mine & theirs)
+        union = len(mine | theirs) or 1
+        scored.append((-both, -(both / union), other))
+    scored.sort()
+    return [other for _b, _j, other in scored]
+
+
+def blend_partners(database, owner: int) -> List[int]:
+    """the piles this pile may blend with: both have to share listening
+    (core.personalized.listening_privacy), so nobody's plays turn up on
+    someone else's shelf without them saying yes"""
+    from core.listening_scope import listening_owners
+    from core.personalized.listening_privacy import sharing_piles
+    sharing = sharing_piles(database)
+    if owner not in sharing:
+        return []
+    return [o for o in listening_owners(database) if o != owner and o in sharing]
+
+
 def build_for_you(database, profile_id: int, *, now: Optional[datetime] = None) -> Dict[str, Any]:
     """on repeat, repeat rewind and any blends for this profile."""
-    from core.listening_scope import listening_owner, listening_owners
+    from core.listening_scope import listening_owner
     owner = listening_owner(database, profile_id)
-    others = [o for o in listening_owners(database) if o != owner]
+    try:
+        partners = blend_partners(database, owner)
+    except Exception as e:  # noqa: BLE001 - can't tell who shares: no blends
+        logger.debug("blend partners lookup failed: %s", e)
+        partners = []
     conn = database._get_connection()
     try:
         mixes = [
@@ -370,7 +411,7 @@ def build_for_you(database, profile_id: int, *, now: Optional[datetime] = None) 
         ]
         names = _profile_names(conn)
         me = names.get(int(profile_id or 1), 'You')
-        for other in others[:3]:
+        for other in rank_partners(conn, owner, partners, now=now)[:3]:
             them = names.get(other, 'Someone')
             mixes.append(_card(f'blend_{other}', f'{me} + {them}',
                                f'A blend of what you and {them} play', blend(conn, owner, other, now=now)))

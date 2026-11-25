@@ -1,39 +1,48 @@
 /**
- * The Folders card's Video panel (SETTINGS_PORT.md, video pass V2a): where
- * downloads arrive, the Movies, TV, Anime and YouTube libraries, the optional
- * 4K ones, More libraries (#2029), your library's folders (the drive map),
- * the folders your server doesn't list, and the Docker volume lines. Was
- * video-settings.js. The folders are the video downloads config
- * (video-downloads.ts), saved whole on each change as before; More libraries
- * and the drive map have their own endpoints.
+ * Library > Folders, Video (settings-bic phase 4): where downloads arrive
+ * (with the video minimum free disk space beside the download folder, DESIGN
+ * 3.3), the Movies, TV, Anime and YouTube libraries, the optional 4K ones,
+ * More libraries (#2029), your library's folders (the drive map), the folders
+ * your server doesn't list, and the Docker volume lines. The folders are the
+ * video downloads config (video-downloads.ts), saved whole on each change as
+ * before; More libraries and the drive map have their own endpoints.
  *
  * A typed path saves when it is left, as it did (useCommit); the Docker lines
- * and the summary follow it while it is typed.
+ * and the hero follow it while it is typed.
+ *
+ * More libraries: a library's fields are its own until its Save. Saving,
+ * making default or removing one reloads the list, and only that library's
+ * card is drawn again: what is typed into another card stays (the old list
+ * drew every card again and dropped it, settings-bic AUDIT 32).
  */
 
-import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 
+import {
+  Btn,
+  Card,
+  NumberField,
+  PathField,
+  Pre,
+  Row,
+  SectionLabel,
+  StatusWords,
+  Switch,
+  Tag,
+} from '../ui';
+import s from '../ui/settings.module.css';
 import { useCommit } from './commit';
+import {
+  FolderRows,
+  checkAttrs,
+  folderChecks,
+  refreshChecks,
+  shell,
+  toast,
+  useBusyGate,
+} from './library-card';
 import { videoDownloads, useVideoDownloads, type DownloadsConfig } from './video-downloads';
-
-type Shell = Window & {
-  showToast?: (message: string, type?: string) => void;
-  showConfirmDialog?: (o: {
-    title: string;
-    message: string;
-    confirmText?: string;
-    cancelText?: string;
-    destructive?: boolean;
-  }) => Promise<boolean>;
-  SoulSyncFolderCheck?: {
-    refresh: (group: string) => void;
-    environment?: () => Promise<{ docker?: boolean } | null>;
-  };
-};
-const shell = () => window as Shell;
-const toast = (message: string, type: string) => shell().showToast?.(message, type);
-const refreshChecks = () => setTimeout(() => shell().SoulSyncFolderCheck?.refresh('video'), 0);
-const TAB = 'library';
+import { useVideoOrganization, videoOrganization } from './video-organization';
 
 const str = (v: unknown) => (typeof v === 'string' ? v : typeof v === 'number' ? String(v) : '');
 
@@ -63,48 +72,32 @@ function VideoPath({
   field: string;
   placeholder: string;
   label: string;
-  role?: string;
+  role?: 'input' | 'existing';
   aria?: string;
   openRef?: { current: (() => void) | null };
 }) {
   const { config } = useVideoDownloads();
-  const [open, setOpen] = useState(false);
-  const input = useRef<HTMLInputElement | null>(null);
+  const [locked, setLocked] = useState(true);
   const commit = useCommit<HTMLInputElement>(() => void videoDownloads.save());
   if (openRef)
     openRef.current = () => {
-      setOpen(true);
-      setTimeout(() => input.current?.focus(), 0);
+      setLocked(false);
+      setTimeout(() => document.getElementById(id)?.focus(), 0);
     };
   return (
-    <div className="path-input-group">
-      <input
-        type="text"
-        id={id}
-        placeholder={placeholder}
-        readOnly={!open}
-        aria-label={aria}
-        data-folder-check="video"
-        data-folder-role={role}
-        data-folder-label={label}
-        ref={(el) => {
-          input.current = el;
-          commit(el);
-        }}
-        value={str(config?.[field])}
-        onChange={(event) => videoDownloads.edit({ [field]: event.target.value })}
-      />{' '}
-      <button
-        type="button"
-        className={open ? 'browse-button' : 'browse-button locked'}
-        onClick={() => {
-          setOpen(!open);
-          if (!open) setTimeout(() => input.current?.focus(), 0);
-        }}
-      >
-        {open ? 'Lock' : 'Unlock'}
-      </button>
-    </div>
+    <PathField
+      id={id}
+      value={str(config?.[field])}
+      onChange={(value) => videoDownloads.edit({ [field]: value })}
+      placeholder={placeholder}
+      locked={locked}
+      onLock={(next) => {
+        setLocked(next);
+        if (!next) setTimeout(() => document.getElementById(id)?.focus(), 0);
+      }}
+      onCheck={(answer) => folderChecks.set(id, answer)}
+      inputProps={{ ...checkAttrs('video', label, role), 'aria-label': aria, ref: commit }}
+    />
   );
 }
 
@@ -113,90 +106,24 @@ function ExtraPaths({ kind }: { kind: 'movies' | 'tv' }) {
   const { config, loads } = useVideoDownloads();
   const key = `${kind}_additional_paths`;
   const rows = (config?.[key] as string[] | undefined) || [];
-  const list = useRef<HTMLDivElement>(null);
-  const [focusLast, setFocusLast] = useState(false);
   const commitAll = useCommit<HTMLDivElement>(() => void videoDownloads.save());
-  // a key per row that stays with it: removing one row must take that row's
-  // element (and the status line folder-check.js put after it), not the last
-  const ids = useRef<{ loads: number; list: number[]; next: number }>({
-    loads: -1,
-    list: [],
-    next: 0,
-  });
-  if (ids.current.loads !== loads) ids.current = { loads, list: [], next: 0 };
-  while (ids.current.list.length < rows.length) ids.current.list.push(ids.current.next++);
-  if (ids.current.list.length > rows.length) ids.current.list.length = rows.length;
-
-  useEffect(() => {
-    if (!focusLast) return;
-    setFocusLast(false);
-    const inputs = list.current?.querySelectorAll('input');
-    inputs?.[inputs.length - 1]?.focus();
-  }, [focusLast]);
-
-  const set = (next: string[]) => videoDownloads.edit({ [key]: next });
   return (
-    <>
-      <div
-        id={`video-${kind}-additional-paths`}
-        data-video-extra-kind={kind}
-        data-loaded={loads ? 'true' : undefined}
-        ref={(el) => {
-          list.current = el;
-          commitAll(el);
-        }}
-      >
-        {rows.map((value, i) => (
-          <div
-            key={`${loads}-${ids.current.list[i]}`}
-            data-folder-row=""
-            style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '8px' }}
-          >
-            <input
-              type="text"
-              value={value}
-              placeholder={kind === 'movies' ? '/media/movies2' : '/media/tv2'}
-              aria-label={
-                kind === 'movies' ? 'Additional movie library path' : 'Additional TV library path'
-              }
-              data-folder-check="video"
-              data-folder-role="existing"
-              data-folder-label={kind === 'movies' ? 'Movie folder' : 'TV folder'}
-              style={{ flex: 1, minWidth: 0 }}
-              onChange={(event) => set(rows.map((r, j) => (j === i ? event.target.value : r)))}
-            />
-            <button
-              type="button"
-              className="test-button"
-              aria-label="Remove library path"
-              onClick={(event) => {
-                // folder-check.js's status line for this row goes with it
-                const status = event.currentTarget.closest('[data-folder-row]')?.nextElementSibling;
-                if (status && status.classList.contains('folder-check')) status.remove();
-                ids.current.list.splice(i, 1);
-                void videoDownloads.change({ [key]: rows.filter((_, j) => j !== i) });
-                refreshChecks();
-              }}
-            >
-              Remove
-            </button>
-          </div>
-        ))}
-      </div>
-      <button
-        type="button"
-        className="test-button"
-        data-video-add-path={kind}
-        onClick={() => {
-          if (!loads) return;
-          set([...rows, '']);
-          setFocusLast(true);
-          refreshChecks();
-        }}
-      >
-        + Add folder
-      </button>
-    </>
+    <FolderRows
+      id={`video-${kind}-additional-paths`}
+      listAttrs={{ 'data-video-extra-kind': kind, 'data-loaded': loads ? 'true' : undefined }}
+      listRef={commitAll}
+      rows={rows}
+      onRows={(next) => videoDownloads.edit({ [key]: next })}
+      // removing saves at once, as before
+      onRemove={(next) => void videoDownloads.change({ [key]: next })}
+      onAdd={(next) => {
+        if (loads) videoDownloads.edit({ [key]: next });
+      }}
+      placeholder={kind === 'movies' ? '/media/movies2' : '/media/tv2'}
+      itemLabel={kind === 'movies' ? 'Additional movie library path' : 'Additional TV library path'}
+      check={checkAttrs('video', kind === 'movies' ? 'Movie folder' : 'TV folder', 'existing')}
+      addAttrs={{ 'data-video-add-path': kind }}
+    />
   );
 }
 
@@ -272,6 +199,32 @@ const splitTerms = (v: string) =>
     .map((x) => x.trim())
     .filter(Boolean);
 
+/** a field of a library card: the parts' look, its own class for the hooks */
+function LibInput({
+  className,
+  ...rest
+}: { className: string } & React.InputHTMLAttributes<HTMLInputElement>) {
+  return (
+    <span className={`${s.field} ${s.fieldFull}`}>
+      <input type="text" {...rest} className={`${s.input} ${className}`} />
+    </span>
+  );
+}
+
+function LibSelect({
+  className,
+  children,
+  ...rest
+}: { className: string; children: ReactNode } & React.SelectHTMLAttributes<HTMLSelectElement>) {
+  return (
+    <span className={`${s.field} ${s.fieldSelect}`}>
+      <select {...rest} className={`${s.select} ${className}`}>
+        {children}
+      </select>
+    </span>
+  );
+}
+
 function LibraryRow({
   lib,
   profiles,
@@ -280,7 +233,8 @@ function LibraryRow({
 }: {
   lib: Library;
   profiles: Array<{ id: number; name: string }>;
-  reload: () => void;
+  /** reload the list; `drawAgain` is this card, whose fields show what the server has */
+  reload: (drawAgain?: string) => void;
   cancelNew: () => void;
 }) {
   const row = useRef<HTMLDivElement>(null);
@@ -288,7 +242,12 @@ function LibraryRow({
   const builtin = lib.builtin;
   const rules = lib.rules || {};
   const options = lib.options || {};
+  const [open, setOpen] = useState(isNew);
+  const bodyId = useId();
   const [order, setOrder] = useState<string[]>(options.sources || []);
+  // the folder is the one field drawn by the parts' PathField (its check
+  // line): it keeps what is typed here, as the others keep theirs
+  const [path, setPath] = useState(lib.path || '');
   const [, setIndexersVersion] = useState(0);
   useEffect(() => {
     const l = () => setIndexersVersion((n) => n + 1);
@@ -310,7 +269,7 @@ function LibraryRow({
           ? `Default for new ${lib.kind === 'movie' ? 'movies' : 'shows'}`
           : '';
 
-  /** settings.js libraryBody: what the row says now */
+  /** settings.js libraryBody: what the card says now */
   function body() {
     const r = row.current!;
     const val = (sel: string) => (r.querySelector<HTMLInputElement>(sel)?.value || '').trim();
@@ -358,7 +317,7 @@ function LibraryRow({
         return;
       }
       toast(done, 'success');
-      reload();
+      reload(str(lib.id));
     } catch {
       toast('Could not save the library', 'error');
     }
@@ -389,6 +348,7 @@ function LibraryRow({
     if (ok) go();
   }
 
+  const kindWord = lib.kind === 'show' ? 'shows' : 'movies';
   return (
     <div
       className="video-library-row"
@@ -397,231 +357,250 @@ function LibraryRow({
       data-builtin={builtin || undefined}
       ref={row}
     >
-      <div className="video-library-head">
-        <input
-          type="text"
+      <div className={`video-library-head ${s.libHead}`}>
+        <LibInput
           className="video-library-name"
           defaultValue={lib.name || ''}
-          placeholder="Library name, e.g. Stand-Up"
+          placeholder="Library name, like Stand-Up"
           aria-label="Library name"
           maxLength={80}
         />
         {isNew ? (
-          <select
+          <LibSelect
             className="video-library-kind-pick"
             aria-label="What the library holds"
             defaultValue="movie"
           >
             <option value="movie">Movies</option>
             <option value="show">TV</option>
-          </select>
+          </LibSelect>
         ) : (
-          <span className="video-library-kind">{LIB_KIND[lib.kind || ''] || lib.kind}</span>
+          <Tag>
+            <span className="video-library-kind">{LIB_KIND[lib.kind || ''] || lib.kind}</span>
+          </Tag>
         )}
         {state ? (
-          <span
-            className={
-              lib.is_default && lib.usable
-                ? 'video-library-state is-default'
-                : 'video-library-state'
-            }
-          >
-            {state}
-          </span>
+          <StatusWords tone={lib.is_default && lib.usable ? 'ok' : lib.usable ? 'idle' : 'warn'}>
+            <span
+              className={
+                lib.is_default && lib.usable
+                  ? 'video-library-state is-default'
+                  : 'video-library-state'
+              }
+            >
+              {state}
+            </span>
+          </StatusWords>
         ) : null}
+        <Btn
+          kind="ghost"
+          small
+          icon={open ? 'up' : 'down'}
+          aria-expanded={open}
+          aria-controls={bodyId}
+          aria-label={`${open ? 'Close' : 'Open'} ${lib.name || 'the new library'}`}
+          onClick={() => setOpen((o) => !o)}
+        >
+          {open ? 'Close' : 'Edit'}
+        </Btn>
       </div>
       {builtin ? (
         <div className="video-library-known">
           {lib.path || 'No folder set'} <span>(set above)</span>
         </div>
-      ) : (
-        <input
-          type="text"
-          className="video-library-path"
-          defaultValue={lib.path || ''}
-          placeholder="/media/stand-up"
-          aria-label="Library folder"
-          data-folder-check="video"
-          data-folder-label={`${lib.name || 'New'} library`}
-        />
-      )}
-      <div className="video-library-rules">
-        <input
-          type="text"
-          className="video-library-genres"
-          list="video-library-genre-list"
-          defaultValue={terms(rules.genres)}
-          placeholder="Genres, e.g. Documentary, Family"
-          aria-label="Genres that send a title here"
-        />
-        <input
-          type="text"
-          className="video-library-keywords"
-          defaultValue={terms(rules.keywords)}
-          placeholder="Keywords, e.g. stand-up"
-          aria-label="Keywords that send a title here"
-        />
-      </div>
-      <label className="video-library-field">
-        Quality profile{' '}
-        <select
-          className="video-library-profile"
-          aria-label="Quality profile for titles in this library"
-          defaultValue={String(lib.quality_profile_id || 0)}
-        >
-          <option value="0">
-            {lib.kind === 'show' ? 'Default for new shows' : 'Default for new movies'}
-          </option>
-          {profiles
-            .filter((p) => p.id)
-            .map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-        </select>
-      </label>
-      <div
-        className="video-library-field video-library-sources"
-        role="group"
-        aria-label="Download from, in order"
-      >
-        Download from{' '}
-        {LIB_SOURCES.map(([key, name]) => {
-          const at = order.indexOf(key);
-          return (
-            <button
-              key={key}
-              type="button"
-              className={at >= 0 ? 'video-library-src is-on' : 'video-library-src'}
-              data-library-src={key}
-              aria-pressed={at >= 0 ? 'true' : 'false'}
-              onClick={() => setOrder(at >= 0 ? order.filter((k) => k !== key) : [...order, key])}
-            >
-              {at >= 0 ? `${at + 1} ` : ''}
-              {name}
-            </button>
-          );
-        })}
-        <span className="video-library-hint">{order.length ? '' : 'the global order'}</span>
-      </div>
-      <details
-        className="video-library-indexers"
-        data-library-idx-ids={idxIds.join(',')}
-        onToggle={(event) => {
-          if ((event.currentTarget as HTMLDetailsElement).open) loadIndexers();
-        }}
-      >
-        <summary>Indexers: {idxIds.length ? `${idxIds.length} picked` : 'every one'}</summary>
-        <div className="video-library-idx-list">
-          {indexers === null || (indexers.length === 0 && !indexersLoaded()) ? (
-            <em className="video-library-hint">Loading…</em>
-          ) : !indexers.length ? (
-            <em className="video-library-hint">
-              No Prowlarr indexers (Settings → Indexers &amp; Downloaders).
-            </em>
-          ) : (
-            indexers.map((i) => (
-              <label key={i.id} className="checkbox-label">
-                <input
-                  type="checkbox"
-                  className="video-library-idx"
-                  value={i.id}
-                  defaultChecked={idxIds.includes(i.id)}
-                />{' '}
-                {i.name}
-                {i.protocol ? (
-                  <>
-                    {' '}
-                    <span className="video-library-hint">{i.protocol}</span>
-                  </>
-                ) : null}
-              </label>
-            ))
-          )}
-        </div>
-      </details>
-      <div className="video-library-rules">
-        <input
-          type="text"
-          className="video-library-tcat"
-          defaultValue={options.torrent_category || ''}
-          placeholder="Torrent category / label"
-          aria-label="Torrent client category or label"
-          maxLength={64}
-        />
-        <input
-          type="text"
-          className="video-library-ucat"
-          defaultValue={options.usenet_category || ''}
-          placeholder="Usenet category"
-          aria-label="Usenet client category"
-          maxLength={64}
-        />
-      </div>
-      <div className="video-library-field">
-        <label
-          className="checkbox-label"
-          title="The wishlist and RSS sync hunt its titles; off = only when you search"
-        >
-          <input
-            type="checkbox"
-            className="video-library-auto"
-            defaultChecked={options.auto_search !== false}
-          />{' '}
-          Search automatically
-        </label>
-        <label
-          className="checkbox-label"
-          title="Titles you have keep upgrading toward their profile's cutoff"
-        >
-          <input
-            type="checkbox"
-            className="video-library-upgrades"
-            defaultChecked={options.upgrades !== false}
-          />{' '}
-          Upgrade what you have
-        </label>
-      </div>
-      <div className="video-library-actions">
+      ) : null}
+      <div className={s.libBody} id={bodyId} hidden={!open}>
         {builtin ? null : (
-          <label className="checkbox-label">
-            <input
-              type="checkbox"
-              className="video-library-enabled"
-              defaultChecked={lib.enabled !== false}
-            />{' '}
-            Switched on
+          <label className={s.libField}>
+            <span>Folder</span>
+            <PathField
+              value={path}
+              onChange={setPath}
+              placeholder="/media/stand-up"
+              inputClass="video-library-path"
+              inputProps={{
+                'aria-label': 'Library folder',
+                ...checkAttrs('video', `${lib.name || 'New'} library`),
+              }}
+            />
           </label>
         )}
-        <button
-          type="button"
-          className="test-button"
-          data-library-action="save"
-          onClick={() => void act('save')}
+        <div className={s.libGrid}>
+          <label className={s.libField}>
+            <span>Genres that send a title here</span>
+            <LibInput
+              className="video-library-genres"
+              list="video-library-genre-list"
+              defaultValue={terms(rules.genres)}
+              placeholder="Genres, like Documentary, Family"
+              aria-label="Genres that send a title here"
+            />
+          </label>
+          <label className={s.libField}>
+            <span>Keywords that send a title here</span>
+            <LibInput
+              className="video-library-keywords"
+              defaultValue={terms(rules.keywords)}
+              placeholder="Keywords, like stand-up"
+              aria-label="Keywords that send a title here"
+            />
+          </label>
+          <label className={s.libField}>
+            <span>Quality profile</span>
+            <LibSelect
+              className="video-library-profile"
+              aria-label="Quality profile for titles in this library"
+              defaultValue={String(lib.quality_profile_id || 0)}
+            >
+              <option value="0">{`Default for new ${kindWord}`}</option>
+              {profiles
+                .filter((p) => p.id)
+                .map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+            </LibSelect>
+          </label>
+          <div className={s.libField} role="group" aria-label="Download from, in order">
+            <span>Download from, in the order picked</span>
+            <div className={s.libSources}>
+              {LIB_SOURCES.map(([key, name]) => {
+                const at = order.indexOf(key);
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    className={
+                      at >= 0
+                        ? `video-library-src is-on ${s.chip} ${s.chipOn}`
+                        : `video-library-src ${s.chip}`
+                    }
+                    data-library-src={key}
+                    aria-pressed={at >= 0 ? 'true' : 'false'}
+                    onClick={() =>
+                      setOrder(at >= 0 ? order.filter((k) => k !== key) : [...order, key])
+                    }
+                  >
+                    {at >= 0 ? `${at + 1} ` : ''}
+                    {name}
+                  </button>
+                );
+              })}
+              <span className="video-library-hint">{order.length ? '' : 'the global order'}</span>
+            </div>
+          </div>
+          <label className={s.libField}>
+            <span>Torrent client category or label</span>
+            <LibInput
+              className="video-library-tcat"
+              defaultValue={options.torrent_category || ''}
+              placeholder="Torrent category / label"
+              aria-label="Torrent client category or label"
+              maxLength={64}
+            />
+          </label>
+          <label className={s.libField}>
+            <span>Usenet client category</span>
+            <LibInput
+              className="video-library-ucat"
+              defaultValue={options.usenet_category || ''}
+              placeholder="Usenet category"
+              aria-label="Usenet client category"
+              maxLength={64}
+            />
+          </label>
+        </div>
+        <details
+          className={`video-library-indexers ${s.libIndexers}`}
+          data-library-idx-ids={idxIds.join(',')}
+          onToggle={(event) => {
+            if ((event.currentTarget as HTMLDetailsElement).open) loadIndexers();
+          }}
         >
-          {isNew ? 'Add' : 'Save'}
-        </button>
-        {!isNew && lib.usable && !lib.is_default ? (
-          <button
-            type="button"
-            className="test-button"
-            data-library-action="default"
-            onClick={() => void act('default')}
-          >
-            Make default
-          </button>
-        ) : null}
-        {isNew || !builtin ? (
-          <button
-            type="button"
-            className="test-button"
-            data-library-action="remove"
-            onClick={() => void act('remove')}
-          >
-            {isNew ? 'Cancel' : 'Remove'}
-          </button>
-        ) : null}
+          <summary>Indexers: {idxIds.length ? `${idxIds.length} picked` : 'every one'}</summary>
+          <div className="video-library-idx-list">
+            {indexers === null || (indexers.length === 0 && !indexersLoaded()) ? (
+              <em className="video-library-hint">Loading…</em>
+            ) : !indexers.length ? (
+              <em className="video-library-hint">
+                No Prowlarr indexers (Downloads, Sources, Indexers).
+              </em>
+            ) : (
+              indexers.map((i) => (
+                <label key={i.id} className={s.libCheck}>
+                  <input
+                    type="checkbox"
+                    className="video-library-idx"
+                    value={i.id}
+                    defaultChecked={idxIds.includes(i.id)}
+                  />{' '}
+                  {i.name}
+                  {i.protocol ? (
+                    <>
+                      {' '}
+                      <span className="video-library-hint">{i.protocol}</span>
+                    </>
+                  ) : null}
+                </label>
+              ))
+            )}
+          </div>
+        </details>
+        <div className={s.libChecks}>
+          <label className={s.libCheck}>
+            <Switch
+              aria-label="Search automatically"
+              className="video-library-auto"
+              defaultChecked={options.auto_search !== false}
+            />
+            <span>
+              Search automatically
+              <small>The wishlist and RSS sync hunt its titles; off, only when you search</small>
+            </span>
+          </label>
+          <label className={s.libCheck}>
+            <Switch
+              aria-label="Upgrade what you have"
+              className="video-library-upgrades"
+              defaultChecked={options.upgrades !== false}
+            />
+            <span>
+              Upgrade what you have
+              <small>Titles you have keep upgrading toward their profile&apos;s cutoff</small>
+            </span>
+          </label>
+          {builtin ? null : (
+            <label className={s.libCheck}>
+              <Switch
+                aria-label="Switched on"
+                className="video-library-enabled"
+                defaultChecked={lib.enabled !== false}
+              />
+              <span>Switched on</span>
+            </label>
+          )}
+        </div>
+        <div className={`video-library-actions ${s.libActions}`}>
+          <Btn kind="primary" small data-library-action="save" onClick={() => void act('save')}>
+            {isNew ? 'Add' : 'Save'}
+          </Btn>
+          {!isNew && lib.usable && !lib.is_default ? (
+            <Btn small data-library-action="default" onClick={() => void act('default')}>
+              Make default
+            </Btn>
+          ) : null}
+          {isNew || !builtin ? (
+            <Btn
+              kind={isNew ? 'ghost' : 'danger'}
+              small
+              data-library-action="remove"
+              onClick={() => void act('remove')}
+            >
+              {isNew ? 'Cancel' : 'Remove'}
+            </Btn>
+          ) : null}
+        </div>
       </div>
     </div>
   );
@@ -644,10 +623,16 @@ function VideoLibraries({ loads }: { loads: number }) {
   const [genres, setGenres] = useState<string[]>([]);
   const [profiles, setProfiles] = useState<Array<{ id: number; name: string }>>([]);
   const [adding, setAdding] = useState(false);
-  const [version, setVersion] = useState(0);
+  // the cards drawn again after a load: only the one that was acted on
+  // (and a new one, which comes back with an id)
+  const [drawn, setDrawn] = useState<Record<string, number>>({});
+  const [added, setAdded] = useState(0);
+  // a fresh load (the settings loaded again, Retry) draws every card again,
+  // with the list it brought: in the same render, so no card is drawn twice
+  const [generation, setGeneration] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
 
-  async function load() {
+  async function load(drawAgain?: string) {
     const get = (url: string) =>
       fetch(url, { headers: { Accept: 'application/json' } })
         .then((r) => (r.ok ? r.json() : null))
@@ -663,9 +648,13 @@ function VideoLibraries({ loads }: { loads: number }) {
     if (libs && libs.libraries) {
       setList(libs.libraries);
       setGenres(libs.genres || []);
-      setAdding(false);
-      setVersion((n) => n + 1);
-      refreshChecks();
+      if (drawAgain === undefined) setGeneration((n) => n + 1);
+      else if (drawAgain === '') {
+        // the new card was saved: it comes back with an id
+        setAdding(false);
+        setAdded((n) => n + 1);
+      } else if (drawAgain) setDrawn((d) => ({ ...d, [drawAgain]: (d[drawAgain] ?? 0) + 1 }));
+      refreshChecks('video');
     }
   }
 
@@ -680,27 +669,27 @@ function VideoLibraries({ loads }: { loads: number }) {
         '.video-library-row[data-library-id=""] .video-library-name',
       )
       ?.focus();
-    refreshChecks();
+    refreshChecks('video');
   }, [adding]);
 
   return (
     <>
-      <div id="video-libraries-list" className="video-libraries" ref={listRef}>
+      <div id="video-libraries-list" className={`video-libraries ${s.libList}`} ref={listRef}>
         {(list || []).map((lib) => (
           <LibraryRow
-            key={`${lib.id}-${version}`}
+            key={`${lib.id}-${generation}-${drawn[str(lib.id)] ?? 0}`}
             lib={lib}
             profiles={profiles}
-            reload={() => void load()}
+            reload={(drawAgain) => void load(drawAgain)}
             cancelNew={() => setAdding(false)}
           />
         ))}
         {adding ? (
           <LibraryRow
-            key={`new-${version}`}
+            key={`new-${added}`}
             lib={{ kind: 'movie', enabled: true }}
             profiles={profiles}
-            reload={() => void load()}
+            reload={(drawAgain) => void load(drawAgain)}
             cancelNew={() => setAdding(false)}
           />
         ) : null}
@@ -710,14 +699,11 @@ function VideoLibraries({ loads }: { loads: number }) {
           <option key={g} value={g} />
         ))}
       </datalist>
-      <button
-        type="button"
-        className="test-button"
-        id="video-library-add"
-        onClick={() => setAdding(true)}
-      >
-        + Add library
-      </button>
+      <div>
+        <Btn small icon="plus" id="video-library-add" onClick={() => setAdding(true)}>
+          Add library
+        </Btn>
+      </div>
     </>
   );
 }
@@ -736,25 +722,25 @@ interface Drive {
   local?: string;
   role?: string;
 }
-type DriveStatus = { text: string; cls: string };
+type DriveStatus = { text: string; tone: 'ok' | 'bad' | 'idle' | 'busy' };
 
 /** settings.js drivePrefix: one folder of a drive reached, where its
  *  neighbours are (never past the drive itself) */
 export function drivePrefix(server: string, local: string) {
-  const s = String(server).split('/').filter(Boolean);
+  const parts = String(server).split('/').filter(Boolean);
   const l = String(local).split(/[\\/]/);
   let n = 0;
-  const keep = s.length > 2 ? 2 : 1;
+  const keep = parts.length > 2 ? 2 : 1;
   while (
-    n < s.length - keep &&
+    n < parts.length - keep &&
     n < l.length - 1 &&
-    s[s.length - 1 - n].toLowerCase() === String(l[l.length - 1 - n]).toLowerCase()
+    parts[parts.length - 1 - n].toLowerCase() === String(l[l.length - 1 - n]).toLowerCase()
   )
     n++;
   if (!n) return null;
   const sep = local.includes('\\') ? '\\' : '/';
   return {
-    server: `/${s.slice(0, s.length - n).join('/')}`,
+    server: `/${parts.slice(0, parts.length - n).join('/')}`,
     local: l.slice(0, l.length - n).join(sep),
     sep,
   };
@@ -783,13 +769,13 @@ function DriveMap({ loads }: { loads: number }) {
   async function check(server: string, all: Drive[] = drives || []) {
     const value = (localNow.current[server] || '').trim();
     if (!value) {
-      setStatus((s) => ({
-        ...s,
-        [server]: { text: 'Not reached yet: works the way it does today', cls: '' },
+      setStatus((st) => ({
+        ...st,
+        [server]: { text: 'Not reached yet: works the way it does today', tone: 'idle' },
       }));
       return;
     }
-    setStatus((s) => ({ ...s, [server]: { text: 'Checking…', cls: '' } }));
+    setStatus((st) => ({ ...st, [server]: { text: 'Checking…', tone: 'busy' } }));
     try {
       const r = await fetch(`${DRIVES_URL}/check`, {
         method: 'POST',
@@ -798,16 +784,16 @@ function DriveMap({ loads }: { loads: number }) {
       });
       const res = (await r.json()) as { ok?: boolean; message?: string };
       if ((localNow.current[server] || '').trim() !== value) return; // typed on meanwhile
-      setStatus((s) => ({
-        ...s,
+      setStatus((st) => ({
+        ...st,
         [server]: {
-          text: `${res.ok ? '✓ ' : '✗ '}${res.message || ''}`,
-          cls: res.ok ? 'is-ok' : 'is-bad',
+          text: res.message || (res.ok ? 'Reached' : 'Not reached'),
+          tone: res.ok ? 'ok' : 'bad',
         },
       }));
       if (res.ok) fillSiblings(server, value, all);
     } catch {
-      setStatus((s) => ({ ...s, [server]: { text: 'The check failed', cls: 'is-bad' } }));
+      setStatus((st) => ({ ...st, [server]: { text: 'The check failed', tone: 'bad' } }));
     }
   }
 
@@ -870,11 +856,9 @@ function DriveMap({ loads }: { loads: number }) {
 
   return (
     <>
-      <div id="video-drive-map" className="video-drive-map">
+      <div id="video-drive-map" className={s.driveMap}>
         {drives === null ? null : !drives.length ? (
-          <div className="setting-help-text">
-            No library folders yet: pick your libraries and scan first.
-          </div>
+          <p className={s.listEmpty}>No library folders yet: pick your libraries and scan first.</p>
         ) : (
           drives.map((d) => {
             const meta = [
@@ -885,23 +869,26 @@ function DriveMap({ loads }: { loads: number }) {
               .filter(Boolean)
               .join(' · ');
             const head = (
-              <div className="video-drive-server">
+              <div className={s.driveServer}>
                 <code title={d.server}>{d.server}</code>
-                <span className="video-drive-count">{meta}</span>
+                <span>{meta}</span>
               </div>
             );
             if (d.auto)
               return (
                 <div
                   key={d.server}
-                  className="video-drive-row is-auto"
+                  className={s.driveRow}
                   data-server={d.server}
                   data-kind={d.kind || ''}
                   data-local={d.local}
+                  data-auto=""
                 >
                   {head}
-                  <div className="video-drive-known">{d.local}</div>
-                  <div className="video-drive-status is-ok">✓ {d.role || 'Already reached'}</div>
+                  <div className={s.driveLocal}>
+                    <div className={s.driveKnown}>{d.local}</div>
+                    <StatusWords tone="ok">{d.role || 'Already reached'}</StatusWords>
+                  </div>
                 </div>
               );
             // the example is the drive's own path on a share
@@ -911,44 +898,42 @@ function DriveMap({ loads }: { loads: number }) {
             return (
               <div
                 key={d.server}
-                className="video-drive-row"
+                className={s.driveRow}
                 data-server={d.server}
                 data-kind={d.kind || ''}
               >
                 {head}
-                <input
-                  type="text"
-                  className="video-drive-local"
-                  value={local[d.server] || ''}
-                  placeholder={`Where SoulSync reaches it, e.g. ${example}`}
-                  aria-label={`Where SoulSync reaches ${d.server}`}
-                  onChange={(event) => {
-                    const v = event.target.value;
-                    localNow.current = { ...localNow.current, [d.server]: v };
-                    setLocal(localNow.current);
-                    clearTimeout(timers.current[d.server]);
-                    timers.current[d.server] = setTimeout(() => void check(d.server), 600);
-                  }}
-                />
-                <div
-                  className={st?.cls ? `video-drive-status ${st.cls}` : 'video-drive-status'}
-                  aria-live="polite"
-                >
-                  {st?.text || ''}
+                <div className={s.driveLocal}>
+                  <span className={`${s.field} ${s.fieldFull}`}>
+                    <input
+                      type="text"
+                      className={`${s.input} ${s.inputMono} video-drive-local`}
+                      value={local[d.server] || ''}
+                      placeholder={`Where SoulSync reaches it, like ${example}`}
+                      aria-label={`Where SoulSync reaches ${d.server}`}
+                      onChange={(event) => {
+                        const v = event.target.value;
+                        localNow.current = { ...localNow.current, [d.server]: v };
+                        setLocal(localNow.current);
+                        clearTimeout(timers.current[d.server]);
+                        timers.current[d.server] = setTimeout(() => void check(d.server), 600);
+                      }}
+                    />
+                  </span>
+                  <div className={s.check} data-tone={st?.tone} aria-live="polite">
+                    {st?.text || ''}
+                  </div>
                 </div>
               </div>
             );
           })
         )}
       </div>
-      <button
-        type="button"
-        className="test-button"
-        id="video-drive-map-save"
-        onClick={() => void save()}
-      >
-        Save folders
-      </button>
+      <div>
+        <Btn small id="video-drive-map-save" onClick={() => void save()}>
+          Save folders
+        </Btn>
+      </div>
     </>
   );
 }
@@ -974,7 +959,7 @@ function Compose({ panel }: { panel: { current: HTMLElement | null } }) {
   useVideoDownloads();
   const [docker, setDocker] = useState(false);
   // empty until the first load, as the page had it
-  const [text, setText] = useState('');
+  const [lines, setLines] = useState('');
   useEffect(() => {
     void shell()
       .SoulSyncFolderCheck?.environment?.()
@@ -985,7 +970,7 @@ function Compose({ panel }: { panel: { current: HTMLElement | null } }) {
     const el = panel.current;
     if (!el) return;
     const read = () =>
-      setText(
+      setLines(
         composeLines(
           [...el.querySelectorAll<HTMLInputElement>('[data-folder-check="video"]')]
             .filter((input) => !input.closest('[data-folder-optional][hidden]'))
@@ -997,36 +982,40 @@ function Compose({ panel }: { panel: { current: HTMLElement | null } }) {
     return () => el.removeEventListener('input', read);
   });
   return (
-    <div className="settings-group" data-stg={TAB} data-video-compose="" hidden={!docker}>
-      <h3>Docker volumes</h3>
-      <div className="setting-help-text">
-        In Docker every folder above is a path inside the container. Each one needs a line in your
-        compose file mapping a real folder to it, read-write so renames, upgrades and the recycle
-        bin work. These are the lines for what's set here: swap the left side for the folder on your
-        machine, then recreate the container.
-      </div>
-      <pre className="video-compose-lines" id="video-compose-lines">
-        {text}
-      </pre>
-      <button
-        type="button"
-        className="test-button"
-        id="video-compose-copy"
-        onClick={() => {
-          if (!navigator.clipboard) return toast('Select the lines and copy them', 'info');
-          navigator.clipboard
-            .writeText(text)
-            .then(() => toast('Compose lines copied', 'success'))
-            .catch(() => toast('Select the lines and copy them', 'info'));
-        }}
-      >
-        Copy lines
-      </button>
+    <div data-video-compose="" hidden={!docker}>
+      <SectionLabel
+        title="Docker volumes"
+        hint="The compose lines for the folders set here"
+        action={
+          <Btn
+            small
+            icon="copy"
+            id="video-compose-copy"
+            onClick={() => {
+              if (!navigator.clipboard) return toast('Select the lines and copy them', 'info');
+              navigator.clipboard
+                .writeText(lines)
+                .then(() => toast('Compose lines copied', 'success'))
+                .catch(() => toast('Select the lines and copy them', 'info'));
+            }}
+          >
+            Copy lines
+          </Btn>
+        }
+      />
+      <Card>
+        <div className={s.cardPad}>
+          <Pre id="video-compose-lines">{lines}</Pre>
+        </div>
+        <p className={s.cardFoot}>
+          In Docker every folder above is a path inside the container. Each needs a line in your
+          compose file mapping a real folder to it, read-write so renames, upgrades and the recycle
+          bin work. Swap the left side for the folder on your machine, then recreate the container.
+        </p>
+      </Card>
     </div>
   );
 }
-
-// ── the panel ──
 
 // ── the import folder (#2129) ──
 
@@ -1039,7 +1028,7 @@ function ImportFolder() {
   const { loads } = useVideoDownloads();
   const [path, setPath] = useState('');
   const [auto, setAuto] = useState(false);
-  const [open, setOpen] = useState(false);
+  const [locked, setLocked] = useState(true);
   const pathEl = useRef<HTMLInputElement | null>(null);
   const autoEl = useRef<HTMLInputElement | null>(null);
 
@@ -1076,85 +1065,111 @@ function ImportFolder() {
       if (!r.ok) throw new Error('save');
       toast('Import folder saved', 'success');
     } catch {
-      toast('Couldn\u2019t save the import folder', 'error');
+      toast('Couldn’t save the import folder', 'error');
     }
   }
   const commitPath = useCommit<HTMLInputElement>(() => void save());
   const commitAuto = useCommit<HTMLInputElement>(() => void save());
 
   return (
-    <div className="form-group">
-      <label htmlFor="video-import-folder-path">Import folder (optional):</label>
-      <div className="path-input-group">
-        <input
-          type="text"
+    <>
+      <Row
+        wide
+        label="Import folder"
+        htmlFor="video-import-folder-path"
+        help="Optional. Movie or episode files dropped here show on the Import page with the title SoulSync found."
+        more="They're filed into your libraries with your naming template, exactly like a download. Keep it apart from the download folder."
+      >
+        <PathField
           id="video-import-folder-path"
-          readOnly={!open}
-          placeholder="/media/import"
-          data-folder-check="video"
-          data-folder-role="input"
-          data-folder-label="Import folder"
-          ref={(el) => {
-            pathEl.current = el;
-            commitPath(el);
-          }}
           value={path}
-          onChange={(event) => setPath(event.target.value)}
-        />
-        <button
-          type="button"
-          className={open ? 'browse-button' : 'browse-button locked'}
-          onClick={() => {
-            setOpen(!open);
-            if (!open) setTimeout(() => pathEl.current?.focus(), 0);
+          onChange={setPath}
+          placeholder="/media/import"
+          locked={locked}
+          onLock={(next) => {
+            setLocked(next);
+            if (!next) setTimeout(() => pathEl.current?.focus(), 0);
           }}
-        >
-          {open ? 'Lock' : 'Unlock'}
-        </button>
-      </div>
-      <label className="checkbox-label">
-        <input
-          type="checkbox"
+          onCheck={(answer) => folderChecks.set('video-import-folder-path', answer)}
+          inputProps={{
+            ...checkAttrs('video', 'Import folder', 'input'),
+            ref: (el: HTMLInputElement | null) => {
+              pathEl.current = el;
+              commitPath(el);
+            },
+          }}
+        />
+      </Row>
+      <Row
+        sub
+        label="Import sure matches automatically"
+        htmlFor="video-import-folder-auto"
+        help="A sure match is imported on its own once it has finished copying."
+      >
+        <Switch
           id="video-import-folder-auto"
-          ref={(el) => {
+          ref={(el: HTMLInputElement | null) => {
             autoEl.current = el;
             commitAuto(el);
           }}
           checked={auto}
           onChange={(event) => setAuto(event.target.checked)}
-        />{' '}
-        Import sure matches automatically
-      </label>
-      <Help>
-        Drop movie or episode files (or whole folders) here and they show on the Import page with
-        the title SoulSync found. They're filed into your libraries with your naming template,
-        exactly like a download. With the box ticked, a sure match is imported on its own once it
-        has finished copying. Keep it apart from the download folder.
-      </Help>
-    </div>
+        />
+      </Row>
+    </>
   );
 }
 
-function Help({ children }: { children: ReactNode }) {
-  return <div className="setting-help-text">{children}</div>;
+/** the video minimum free disk space: a key of the video organization, saved when left */
+function VideoMinFree() {
+  const { form } = useVideoOrganization();
+  const commit = useCommit<HTMLInputElement>(() => void videoOrganization.save());
+  return (
+    <Row
+      field
+      label="Minimum free disk space"
+      htmlFor="vo-min-free"
+      help="New grabs are refused, and the wishlist pauses, when the target drive has less free space than this. 0 turns it off."
+    >
+      <NumberField
+        id="vo-min-free"
+        min="0"
+        step="1"
+        placeholder="0"
+        unit="GB"
+        ref={commit}
+        value={String(form.min_free_disk_gb ?? '')}
+        onChange={(event) => videoOrganization.edit({ min_free_disk_gb: event.target.value })}
+      />
+    </Row>
+  );
 }
 
-export function VideoFoldersPanel({
-  hidden,
-  docker,
-  settingsLoaded = false,
-}: {
-  hidden: boolean;
-  /** null until the settings load: both guides show */
-  docker: boolean | null;
-  /** the music settings have loaded: the page's summaries went live then */
-  settingsLoaded?: boolean;
-}) {
+function Retry({ status, onRetry }: { status: string; onRetry: () => void }) {
+  if (status !== 'loading' && status !== 'failed') return null;
+  return (
+    <p className={s.loadNote} role="status">
+      {status === 'loading' ? (
+        'Loading saved video settings...'
+      ) : (
+        <>
+          Could not load saved video settings.{' '}
+          <button type="button" className="stg-library-retry" onClick={onRetry}>
+            Retry
+          </button>
+        </>
+      )}
+    </p>
+  );
+}
+
+export function VideoFolders({ docker }: { docker: boolean | null }) {
   const { config, status, loads } = useVideoDownloads();
   // an object ref, not a callback: a fresh callback each render is detached
   // and attached again after the Docker lines' effect runs, which saw null
   const panel = useRef<HTMLDivElement | null>(null);
   const busy = status === 'loading' || status === 'failed';
+  useBusyGate(panel, busy);
   const open4k = {
     movies: useRef<(() => void) | null>(null),
     tv: useRef<(() => void) | null>(null),
@@ -1162,38 +1177,19 @@ export function VideoFoldersPanel({
 
   // after each load the folder checks look again
   useEffect(() => {
-    if (loads) refreshChecks();
+    if (loads) refreshChecks('video');
   }, [loads]);
 
-  // while it loads (or failed to) every control is off but Retry, and back
-  // as it was after, as loadSharedLibrary did it
-  useLayoutEffect(() => {
-    const el = panel.current;
-    if (!el || !busy) return;
-    const off = [
-      ...el.querySelectorAll<HTMLInputElement>(
-        'input, select, textarea, button:not(.stg-library-retry)',
-      ),
-    ].filter((c) => !c.disabled);
-    for (const c of off) c.disabled = true;
-    return () => {
-      for (const c of off) c.disabled = false;
-    };
-  }, [busy]);
-
-  // what the page's summary said once the settings had loaded: read off the
-  // panel's fields, empty or not
-  const summary = settingsLoaded ? videoFoldersSummary(config ?? {}) : '';
-  const fallback = 'Movies, TV & YouTube libraries';
   const fourK = (kind: 'movies' | 'tv') => !!config?.[`${kind}_4k_enabled`];
-
   function toggle4k(kind: 'movies' | 'tv', on: boolean) {
     void videoDownloads.change({ [`${kind}_4k_enabled`]: on });
-    refreshChecks();
+    refreshChecks('video');
     // nothing to protect yet: open the lock so the folder can be typed
     if (on && !str(config?.[`${kind}_4k_path`]).trim()) open4k[kind].current?.();
   }
 
+  // a library folder left empty once the settings loaded: said on its row
+  const unset = (field: string) => status === 'loaded' && !str(config?.[field]).trim();
   const lib = (id: string, field: string, placeholder: string, label: string) => (
     <VideoPath id={id} field={field} placeholder={placeholder} label={label} />
   );
@@ -1201,67 +1197,33 @@ export function VideoFoldersPanel({
   return (
     <div
       id="folders-video-panel"
-      role="tabpanel"
-      aria-labelledby="folders-video-tab"
-      className="stg-media-panel"
-      hidden={hidden}
-      tabIndex={0}
-      aria-busy={status === 'idle' ? undefined : busy ? 'true' : 'false'}
       ref={panel}
+      aria-busy={status === 'idle' ? undefined : busy ? 'true' : 'false'}
     >
-      {busy ? (
-        <p className="stg-library-load-status settings-hint" role="status">
-          {status === 'loading' ? (
-            'Loading saved video settings...'
-          ) : (
-            <>
-              Could not load saved video settings.{' '}
-              <button
-                type="button"
-                className="stg-library-retry"
-                onClick={() => void videoDownloads.load()}
-              >
-                Retry
-              </button>
-            </>
-          )}
-        </p>
-      ) : null}
-      <div className="stg-media-context">
-        <strong>Video folders</strong>
-        <span
-          className={summary ? 'stg-media-summary is-live' : 'stg-media-summary'}
-          data-stg-summary="library-video-folders"
-          data-stg-fallback={fallback}
-        >
-          {summary || fallback}
-        </span>
-      </div>
-
-      <div className="settings-group" data-stg={TAB}>
-        <h3>Where downloads arrive</h3>
-        <Help>
-          Files land in the download folder first, then get renamed and moved into the right library
-          below. Each folder gets a live check under it: whether SoulSync can write there and how
-          much room is left. Video folders are separate from your Music folders.
-        </Help>
-        <div
-          className={docker === false ? 'setting-help-text hidden' : 'setting-help-text'}
-          data-paths-guide="docker"
-        >
+      <Retry status={status} onRetry={() => void videoDownloads.load()} />
+      <SectionLabel
+        title="Where downloads arrive"
+        hint="Files land here first, then are renamed and moved into a library below"
+      />
+      <div className={s.guides}>
+        <p className={s.guide} data-paths-guide="docker" hidden={docker === false}>
           <strong>Docker / Unraid detected:</strong> these start on the container paths your compose
           file maps. Leave them and map your real folders in the container config. Unlock one only
           if you mapped it somewhere else.
-        </div>
-        <div
-          className={docker === true ? 'setting-help-text hidden' : 'setting-help-text'}
-          data-paths-guide="native"
-        >
+        </p>
+        <p className={s.guide} data-paths-guide="native" hidden={docker === true}>
           <strong>Bare metal / Proxmox LXC / systemd:</strong> there is no container, so unlock each
           folder and point it at your real one.
-        </div>
-        <div className="form-group">
-          <label htmlFor="video-download-path">Download folder (input, shared with Music):</label>
+        </p>
+      </div>
+      <Card>
+        <Row
+          wide
+          label="Download folder, shared with Music"
+          htmlFor="video-download-path"
+          help="Point this at the same folder as your slskd, torrent and usenet clients."
+          more="It is the same setting as the Music side's download folder, so it is locked here too: change it and Music changes with it. Each folder gets a live check under it: whether SoulSync can write there and how much room is left."
+        >
           <VideoPath
             id="video-download-path"
             field="download_path"
@@ -1269,53 +1231,51 @@ export function VideoFoldersPanel({
             role="input"
             label="Download folder"
           />
-          <Help>
-            Point this at the same folder as your slskd / torrent / usenet client. It's the same
-            setting as the Music side's Download Folder, so it's locked here too: change it and
-            Music changes with it.
-          </Help>
-        </div>
+        </Row>
+        <VideoMinFree />
         <ImportFolder />
-      </div>
+      </Card>
 
-      <div className="settings-group" data-stg={TAB}>
-        <h3>Libraries</h3>
-        <Help>
-          Where finished downloads are filed. Point your Plex / Jellyfin / Emby libraries at the
-          same folders.
-        </Help>
-        <div className="form-group">
-          <label htmlFor="video-movies-path">🎬 Movies:</label>
+      <SectionLabel
+        title="Libraries"
+        hint="Where finished downloads are filed. Point Plex, Jellyfin or Emby at the same folders"
+      />
+      <Card>
+        <Row
+          wide
+          label="Movies"
+          htmlFor="video-movies-path"
+          warn={unset('movies_path') ? 'No movies folder is set yet.' : undefined}
+        >
           {lib('video-movies-path', 'movies_path', '/media/movies', 'Movies library')}
-        </div>
-        <div className="form-group">
-          <label htmlFor="video-tv-path">📺 TV shows:</label>
+        </Row>
+        <Row
+          wide
+          label="TV shows"
+          htmlFor="video-tv-path"
+          warn={unset('tv_path') ? 'No TV folder is set yet.' : undefined}
+        >
           {lib('video-tv-path', 'tv_path', '/media/tv', 'TV library')}
-        </div>
-        <div className="form-group">
-          <label htmlFor="video-anime-path">🍥 Anime (optional):</label>
+        </Row>
+        <Row
+          wide
+          label="Anime"
+          htmlFor="video-anime-path"
+          help="Optional. New anime episodes go here instead of the TV folder. Empty keeps anime with TV."
+          more="Shows in a TV library ticked Anime (Connections), shows set to Anime by hand, and shows not in your library yet that TMDB suggests are anime (an admin can change that on the show's page or when approving)."
+        >
           {lib('video-anime-path', 'anime_path', '/media/anime', 'Anime library')}
-          <Help>
-            New episodes of anime shows go here instead of the TV folder: shows in a TV library
-            ticked Anime (Settings &gt; Connections), shows set to Anime by hand, and shows not in
-            your library yet that TMDB suggests are anime (an admin can change that on the show's
-            page or when approving). Leave empty to keep anime with TV.
-          </Help>
-        </div>
-        <div className="form-group">
-          <label htmlFor="video-youtube-path">▶️ YouTube:</label>
+        </Row>
+        <Row wide label="YouTube" htmlFor="video-youtube-path">
           {lib('video-youtube-path', 'youtube_path', '/media/youtube', 'YouTube library')}
-        </div>
-      </div>
+        </Row>
+      </Card>
 
-      <div className="settings-group" data-stg={TAB}>
-        <h3>4K libraries (optional)</h3>
-        <Help>
-          Keep 4K copies in their own folders, like a separate Movies 4K library in Plex. Off until
-          you turn one on. A title files here when its quality profile is set to save to the 4K
-          library (Settings &gt; Quality). Titles you already have stay where they are, and their
-          upgrades land beside the copy you have.
-        </Help>
+      <SectionLabel
+        title="4K libraries"
+        hint="Optional. 4K copies in their own folders, like a separate Movies 4K library in Plex"
+      />
+      <Card>
         {(
           [
             [
@@ -1328,19 +1288,25 @@ export function VideoFoldersPanel({
             ['tv', 'Separate 4K TV folder', '/media/tv-4k', '4K TV folder', 'TV 4K library'],
           ] as const
         ).map(([kind, words, placeholder, aria, label]) => (
-          <div className="form-group" key={kind}>
-            <label className="checkbox-label">
-              <input
-                type="checkbox"
+          <div key={kind}>
+            <Row
+              label={words}
+              htmlFor={`video-${kind}-4k-enabled`}
+              help={
+                kind === 'movies'
+                  ? 'A title files here when its quality profile saves to the 4K library (Quality). Titles you have stay where they are.'
+                  : 'Anime keeps its own folder when one is set, whatever the profile.'
+              }
+            >
+              <Switch
                 id={`video-${kind}-4k-enabled`}
                 data-video-4k-toggle={kind}
                 checked={fourK(kind)}
                 onChange={(event) => toggle4k(kind, event.target.checked)}
-              />{' '}
-              {words}
-            </label>
+              />
+            </Row>
             <div
-              className="video-4k-path"
+              className={s.fourKPath}
               data-folder-optional=""
               data-video-4k-row={kind}
               hidden={!fourK(kind)}
@@ -1354,52 +1320,73 @@ export function VideoFoldersPanel({
                 openRef={open4k[kind]}
               />
             </div>
-            {kind === 'tv' ? (
-              <Help>Anime keeps its own folder when one is set, whatever the profile.</Help>
-            ) : null}
           </div>
         ))}
-      </div>
+      </Card>
 
-      <div className="settings-group" data-stg={TAB}>
-        <h3>More libraries</h3>
-        <Help>
-          Your own movie and TV libraries, each with its own folder, like a Stand-Up, Documentaries
-          or Kids library in Plex. A new title files into the library picked for it (in its Get or
-          Manual search window), else the 4K one when its quality profile says so, else the first
-          library whose rules match its genres or TMDB keywords, else the default library for its
-          kind. Titles you already have stay where they are. The main and 4K libraries are here too:
-          their folders are the ones above.
-        </Help>
-        <VideoLibraries loads={loads} />
-      </div>
+      <SectionLabel
+        title="More libraries"
+        hint="Your own movie and TV libraries, each with its own folder (Stand-Up, Documentaries, Kids)"
+      />
+      <Card>
+        <div className={s.cardPad}>
+          <VideoLibraries loads={loads} />
+        </div>
+        <p className={s.cardFoot}>
+          A new title files into the library picked for it (in its Get or Manual search window),
+          else the 4K one when its quality profile says so, else the first library whose rules match
+          its genres or TMDB keywords, else the default library for its kind. Titles you have stay
+          where they are. The main and 4K libraries are here too; their folders are the ones above.
+          Each library saves with its own Save.
+        </p>
+      </Card>
 
-      <div className="settings-group" data-stg={TAB}>
-        <h3>Your library's folders</h3>
-        <Help>
-          Every folder your Plex / Jellyfin libraries read, Movies or TV. The ones SoulSync already
-          reaches are ticked. Tell it where it reaches the rest and every file in them is found,
-          renamed to your templates, recycled on delete and kept track of. New downloads still go to
-          the folders above. Leave one blank and it works the way it does today.
-        </Help>
-        <DriveMap loads={loads} />
+      <SectionLabel
+        title="Your library's folders"
+        hint="Every folder your Plex or Jellyfin libraries read, and where SoulSync reaches it"
+      />
+      <Card>
+        <div className={s.cardPad}>
+          <DriveMap loads={loads} />
+        </div>
+        <p className={s.cardFoot}>
+          The ones SoulSync already reaches are ticked. Tell it where it reaches the rest and every
+          file in them is found, renamed to your templates, recycled on delete and kept track of.
+          New downloads still go to the folders above. Leave one blank and it works the way it does
+          today.
+        </p>
+      </Card>
 
-        <h4 className="video-extra-heading">Folders your server doesn't list</h4>
-        <Help>
-          A collection SoulSync should manage that your server doesn't read. New downloads never go
-          here.
-        </Help>
-        <div className="form-group">
-          <label>Movie folders:</label>
+      <SectionLabel
+        title="Folders your server doesn't list"
+        hint="A collection SoulSync should manage that your server doesn't read. New downloads never go here"
+      />
+      <Card>
+        <Row stack label="Movie folders">
           <ExtraPaths kind="movies" />
-        </div>
-        <div className="form-group">
-          <label>TV folders:</label>
+        </Row>
+        <Row stack label="TV folders">
           <ExtraPaths kind="tv" />
-        </div>
-      </div>
+        </Row>
+      </Card>
 
       <Compose panel={panel} />
+    </div>
+  );
+}
+
+/** the old panel's name, for the tests that render the folders on their own */
+export function VideoFoldersPanel({
+  hidden,
+  docker,
+}: {
+  hidden: boolean;
+  docker: boolean | null;
+  settingsLoaded?: boolean;
+}) {
+  return (
+    <div data-ui="" hidden={hidden}>
+      <VideoFolders docker={docker} />
     </div>
   );
 }

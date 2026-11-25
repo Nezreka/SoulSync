@@ -81,6 +81,16 @@ def test_a_file_the_server_found_joins_the_catalogue_unmonitored(lib):
     assert reconciles == [True]
 
 
+def test_server_scan_skips_deleted_quarantine(lib):
+    db, music, _ = lib
+    path = _file(music / ".deleted" / "Muse" / "Origin of Symmetry")
+
+    assert db.insert_or_update_media_track(_Track(path), "al-new", "ar-new",
+                                           server_source="plex") is False
+    assert _count(db, "lib2_track_files") == 0
+    assert path.is_file()
+
+
 def test_the_next_scan_maps_it_and_creates_nothing(lib):
     db, music, _ = lib
     path = _file(music / "Muse" / "Origin of Symmetry")
@@ -171,3 +181,88 @@ def test_a_remote_server_adopts_by_what_the_server_says(tmp_path, monkeypatch):
     assert db.insert_or_update_media_track(track, "al-new", "ar-new",
                                            server_source="plex") == "updated"
     assert _count(db, "lib2_tracks") == 1
+
+
+# ── the same file, reached through another path (#2288, #2290) ──────────────
+
+class _Elsewhere(_Track):
+    """the media server's view of a file: its own mount, its own tags"""
+
+    def __init__(self, path, server_id, size, title="Plug In Baby - Remastered", number=7):
+        super().__init__(path, server_id)
+        self.title = title
+        self.trackNumber = number
+        self.file_size = size
+
+
+def _owned(db, music):
+    path = _file(music / "Muse" / "Origin of Symmetry")
+    assert db.insert_or_update_media_track(_Track(path), "al-new", "ar-new",
+                                           server_source="plex") == "inserted"
+    with db._get_connection() as conn:
+        conn.execute("UPDATE lib2_track_files SET size=?", (path.stat().st_size,))
+        conn.commit()
+        return path, conn.execute("SELECT id FROM lib2_tracks").fetchone()[0]
+
+
+def test_a_server_that_sees_the_file_under_another_path_is_tied_to_the_owned_track(lib):
+    """jellyfin reads the same folder through its own mount and tags the
+    track a little differently. the path didn't match, the title and number
+    didn't either, and the owned song was never tied to jellyfin's copy: in
+    the library, and left out of every playlist pushed to the server."""
+    db, music, _ = lib
+    path, track_id = _owned(db, music)
+    theirs = _Elsewhere("/media/music/Muse/Origin of Symmetry/01 Plug In Baby.flac", "jf-1",
+                        path.stat().st_size)
+    assert db.insert_or_update_media_track(theirs, "jf-album", "jf-artist", server_source="jellyfin")
+    assert _count(db, "lib2_tracks") == 1
+    with db._get_connection() as conn:
+        mapped = conn.execute(
+            "SELECT entity_id FROM lib2_media_server_mappings WHERE entity_type='track' "
+            "AND server_source='jellyfin' AND server_id='jf-1'").fetchone()
+    assert mapped is not None and int(mapped[0]) == track_id
+
+
+def test_a_different_file_of_the_same_name_is_not_taken_for_it(lib):
+    db, music, _ = lib
+    path, _track_id = _owned(db, music)
+    other = _Elsewhere("/media/music/Muse/Other/01 Plug In Baby.flac", "jf-2",
+                       path.stat().st_size + 1)
+    db.insert_or_update_media_track(other, "jf-album", "jf-artist", server_source="jellyfin")
+    with db._get_connection() as conn:
+        assert conn.execute(
+            "SELECT 1 FROM lib2_media_server_mappings WHERE entity_type='track' "
+            "AND server_id='jf-2'").fetchone() is None
+
+
+def test_two_owned_copies_of_one_file_are_a_question_not_an_answer(lib):
+    from core.library2.media_server_sync import owned_track_by_file_twin
+    db, music, _ = lib
+    path, track_id = _owned(db, music)
+    size = path.stat().st_size
+    with db._get_connection() as conn:
+        assert owned_track_by_file_twin(conn.cursor(), "/x/01 Plug In Baby.flac", size) == track_id
+        assert owned_track_by_file_twin(conn.cursor(), "/x/01 PLUG IN BABY.FLAC", size) == track_id
+        assert owned_track_by_file_twin(conn.cursor(), "/x/other.flac", size) is None
+        assert owned_track_by_file_twin(conn.cursor(), "/x/01 Plug In Baby.flac", 0) is None
+        album = conn.execute("SELECT album_id FROM lib2_tracks WHERE id=?", (track_id,)).fetchone()[0]
+        second = conn.execute("INSERT INTO lib2_tracks(album_id, title, track_number) VALUES(?,?,?)",
+                              (album, "Plug In Baby", 2)).lastrowid
+        conn.execute("INSERT INTO lib2_track_files(track_id, path, size) VALUES(?,?,?)",
+                     (second, "/other/01 Plug In Baby.flac", size))
+        assert owned_track_by_file_twin(conn.cursor(), "/x/01 Plug In Baby.flac", size) is None
+
+
+def test_a_second_file_on_this_disk_is_not_a_view_of_the_first(lib):
+    """the same song on two releases: two files, one name, one size. the twin
+    rule is for a path that can't be opened from here, never for a file that
+    is right there beside the other"""
+    from core.library2.media_server_sync import owned_track_by_file_twin
+    db, music, _ = lib
+    path, track_id = _owned(db, music)
+    second = _file(music / "Muse" / "Origin of Symmetry (Deluxe)")
+    assert second.stat().st_size == path.stat().st_size and second.name == path.name
+    with db._get_connection() as conn:
+        assert owned_track_by_file_twin(conn.cursor(), str(second), second.stat().st_size) is None
+        # the very same file, asked by its own path, is itself
+        assert owned_track_by_file_twin(conn.cursor(), str(path), path.stat().st_size) == track_id

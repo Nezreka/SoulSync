@@ -52,13 +52,19 @@
         // different refusals arrived at the user as one bare "Grab failed" with
         // nothing to act on. Callers already read res.error; they were just
         // never given one.
+        // a member's quality pick rides on the searches and grabs (#2168)
+        if (/\/downloads\/(search\/start|grab|grab-pack)$/.test(url)) body = withPick(body);
         return fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
             body: JSON.stringify(body) }).then(function (r) {
                 return r.json().then(function (d) {
                     if (r.ok) return d;
                     // keep whatever the server said; only invent a message when
                     // it sent none, so the user still learns something happened
-                    return Object.assign({ ok: false, error: 'Request failed (HTTP ' + r.status + ')' }, d || {});
+                    // a permission refusal carries its plain words in message
+                    // and its code in error (#2166): show the words
+                    var out = Object.assign({ ok: false, error: 'Request failed (HTTP ' + r.status + ')' }, d || {});
+                    if (d && d.message) { out.code = d.error; out.error = d.message; }
+                    return out;
                 }).catch(function () {
                     // not JSON at all (a proxy error page, an empty 502)
                     return r.ok ? null : { ok: false, error: 'Request failed (HTTP ' + r.status + ')' };
@@ -287,9 +293,20 @@
     // judged it by the Default with no way to pick "Movie 4K". The pick becomes
     // the title's own profile: this search and grab, its wishlist rows, and its
     // library row when it lands (POST /downloads/quality/choose).
+    // a member's pick in this modal (#2168): only the qualities they may
+    // have for this kind; the search is judged by it and the grab carries it,
+    // but it is never saved on the title (that stays the household's).
+    var memberPick = null;
+    function withPick(body) {
+        if (memberPick !== null && body && (body.quality_profile_id === undefined || body.quality_profile_id === null)) {
+            body.quality_profile_id = memberPick;
+        }
+        return body;
+    }
     function titleQS(o, kind) {
         o = o || {};
         var q = ['kind=' + encodeURIComponent(kind || 'movie')];
+        if (memberPick !== null) q.push('quality_profile_id=' + encodeURIComponent(memberPick));
         var id = o.id || o.mediaId, src = o.source || o.mediaSource, tmdb = o.tmdbId || o.tvId;
         if (id != null && id !== '') q.push('media_id=' + encodeURIComponent(id));
         if (src) q.push('media_source=' + encodeURIComponent(src));
@@ -306,15 +323,17 @@
         if (!info || !info.profiles || info.profiles.length < 2) return '';
         var kindDefault = null;
         info.profiles.forEach(function (p) { if (p.id === info.kind_default_id) kindDefault = p; });
-        var cur = info.assigned ? info.profile_id : 0;
+        var cur = info.member ? info.profile_id : (info.assigned ? info.profile_id : 0);
         var opts = info.profiles.map(function (p) {
-            var label = p.id === 0
+            var label = p.id === 0 && !info.member
                 ? (kindDefault && kindDefault.id !== 0 ? 'Default (' + kindDefault.name + ')' : 'Default')
                 : p.name;
+            // the same words as the people settings (#2192)
+            if (p.asks) label += ' (needs approval)';
             return '<option value="' + p.id + '"' + (p.id === cur ? ' selected' : '') + '>' + esc(label) + '</option>';
         }).join('');
         return '<label class="vdl-prof" title="The quality profile this title is searched, grabbed and upgraded by">' +
-            '<span class="vdl-prof-lab">Profile</span>' +
+            '<span class="vdl-prof-lab">Quality profile</span>' +
             '<select class="vdl-prof-sel" data-vdl-profile>' + opts + '</select></label>';
     }
     // the title's video library (#2029): where a grab of it files. only shown
@@ -358,9 +377,11 @@
     // fetch the title's profile, render it, and keep the picker's change wired.
     // onChanged runs after a pick is saved (the overlay re-runs its searches)
     function loadTitleProfile(host, getIdent, kind, render, onChanged) {
+        if (!host._vdlProfWired) memberPick = null;      // a new modal starts on the usual one
         var url = '/api/video/downloads/quality/for?' + titleQS(getIdent(), kind);
         getJSON(url).then(function (info) {
             if (!host.isConnected) return;
+            host._vdlInfo = info;
             if (info && info.profile) { render(info.profile, info); return; }
             // an older server without /quality/for: the classic Default, no picker
             getJSON('/api/video/downloads/quality').then(function (p) { if (host.isConnected && p) render(p, null); });
@@ -418,6 +439,17 @@
             var sel = e.target.closest && e.target.closest('[data-vdl-profile]');
             if (!sel) return;
             var pid = parseInt(sel.value, 10) || 0;
+            if (host._vdlInfo && host._vdlInfo.member) {
+                // a member's pick lives in this modal only (see memberPick)
+                memberPick = pid;
+                var picked = (host._vdlInfo.profiles || []).filter(function (p) { return p.id === pid; })[0];
+                if (picked && picked.asks) {
+                    toast('That quality needs an OK first. Use Request on the title to ask for it', 'info');
+                }
+                loadTitleProfile(host, getIdent, kind, render, onChanged);
+                if (onChanged) onChanged();
+                return;
+            }
             sel.disabled = true;
             postJSON('/api/video/downloads/quality/choose', titleBody(getIdent(), kind, pid)).then(function (res) {
                 sel.disabled = false;
@@ -553,7 +585,7 @@
             ' · <span class="vdl-res-okn">' + okN + ' meet your profile</span>' +
             (narrowed ? ' · <span class="vdl-res-shown">' + shown.length + ' match your filter</span>' : '') + badge;
         list.innerHTML = shown.length
-            ? shown.map(function (it) { return resultCardHTML(it.row, it.index); }).join('')
+            ? shown.map(function (it) { return resultCardHTML(it.row, it.index, params.scope); }).join('')
             : '<div class="vdl-res-empty">No release matches your filter. <button type="button" class="vdl-rf-link" data-vdl-rf-clear>Show all</button></div>';
         // a card that was grabbed keeps its live tracker through a re-sort
         Object.keys(resultsEl._grabbed || {}).forEach(function (idx) {
@@ -901,7 +933,11 @@
                 (params.media_id != null ? '&media_id=' + encodeURIComponent(params.media_id) +
                     '&media_source=' + encodeURIComponent(params.media_source || '') : '') +
                 (params.tmdb_id != null ? '&tmdb_id=' + encodeURIComponent(params.tmdb_id) : '') +
-                (params.year ? '&year=' + encodeURIComponent(params.year) : '');
+                (params.year ? '&year=' + encodeURIComponent(params.year) : '') +
+                // a season search judges that season's single episodes too (#2233)
+                (params.with_episodes ? '&with_episodes=1' : '') +
+                // the typed words are an accepted name for this search (#2234)
+                (params.query ? '&query=' + encodeURIComponent(params.query) : '');
             getJSON('/api/video/downloads/search/poll' + qs).then(function (d) {
                 if (!resultsEl.isConnected) { _setScanning(triggerRows, false); if (onDone) onDone(); return; }
                 var rows = (d && d.results) || [];
@@ -942,8 +978,21 @@
             media_id: o.id || o.mediaId, media_source: o.source || o.mediaSource,
             year: o.year, poster_url: o.poster,
             search_ctx: { scope: p.scope || 'movie', title: p.title || '', year: o.year,
-                season: p.season != null ? p.season : null, episode: p.episode != null ? p.episode : null }
+                season: p.season != null ? p.season : null, episode: p.episode != null ? p.episode : null,
+                // the title's tmdb id for the downloads card's detail: media_id
+                // is a library id on an owned title (#2176)
+                tmdb_id: o.tmdbId || o.tvId || ((o.source || o.mediaSource) === 'tmdb' ? (o.id || o.mediaId) : null) || null }
         };
+        // a single episode picked out of a season or series search is THAT
+        // episode: sent as the season, the monitor would map it like a pack
+        // and the retry would search for the season again (#2233)
+        if ((p.scope === 'season' || p.scope === 'series') && !_isSeasonPack(r) &&
+                r.season != null && r.episode != null) {
+            payload.kind = 'episode';
+            payload.search_ctx.scope = 'episode';
+            payload.search_ctx.season = r.season;
+            payload.search_ctx.episode = r.episode;
+        }
         if (src === 'soulseek') {
             // the other accepted (live slskd) hits become the auto-retry pool
             payload.username = r.username;
@@ -1071,11 +1120,17 @@
         var rows = files.map(function (f) {
             var m = /[Ss](\d{1,2})[\s._-]*[Ee](\d{1,2})/.exec(_baseName(f.filename));
             var tag = m ? ('S' + _pk2(m[1]) + 'E' + _pk2(m[2])) : '·';
-            return '<div class="vdl-pack-ep">' +
+            // which of the pack's episodes you already have (#2233)
+            return '<div class="vdl-pack-ep' + (f.have ? ' vdl-pack-ep--have' : '') + '">' +
                 '<span class="vdl-pack-ep-tag">' + tag + '</span>' +
                 '<span class="vdl-pack-ep-name" title="' + esc(_baseName(f.filename)) + '">' + esc(_baseName(f.filename)) + '</span>' +
+                (f.have ? '<span class="vdl-pack-ep-have">In library</span>' : '') +
                 '<span class="vdl-pack-ep-sz">' + _gb(f.size_bytes) + '</span></div>';
         }).join('');
+        // a torrent or usenet pack lists no files before it downloads: its size
+        // and the episodes the library knows for its season say what it is
+        var nEps = files.length || (r.cover && r.cover.total) || r.file_count || 0;
+        var what = r.is_series_pack ? 'Complete series' : (r.season != null ? 'Season ' + r.season : '');
         var getBtn = r.username
             ? '<button class="vdl-res-grab vdl-pack-get' + (r.accepted ? '' : ' vdl-res-grab--override') + '" type="button" data-vdl-grab-pack="' + i +
                 '" title="' + (r.accepted ? 'Download every episode in this pack' : 'Below your quality profile — download anyway') + '">[ GET PACK ]</button>'
@@ -1085,11 +1140,29 @@
                 '<span class="vdl-pack-caret" aria-hidden="true">▸</span>' +
                 '<span class="vdl-r-q vdl-r-q--' + resKind(r.resolution) + '">' + esc(RES_LABEL[r.resolution] || r.resolution || '?') + '</span>' +
                 '<span class="vdl-r-title" title="' + esc(r.title) + '">' + esc(r.title) + '</span>' +
-                '<span class="vdl-pack-meta">' + r.file_count + ' ep' + (r.file_count === 1 ? '' : 's') + ' · ' + _gb(r.folder_size_bytes) + '</span>' +
+                '<span class="vdl-pack-meta">' + esc([what, nEps ? nEps + ' ep' + (nEps === 1 ? '' : 's') : '',
+                    _gb(r.folder_size_bytes || r.size_bytes)].filter(Boolean).join(' · ')) + '</span>' +
+                _coverChipHTML(r) +
                 getBtn +
             '</div>' +
             '<div class="vdl-pack-list">' + rankWhyHTML(r) + rows + '</div>' +
         '</div>';
+    }
+
+    // what a result covers that you already have, from the library's episode
+    // list (the server's `cover`, #2233). nothing when it can't say.
+    function _coverChipHTML(r) {
+        var c = r && r.cover;
+        if (!c || !c.total) return '';
+        var single = c.total === 1;
+        var label = single
+            ? (c.have ? 'In your library' : '')
+            : (c.have >= c.total ? 'You have all ' + c.total
+                : c.have ? 'You have ' + c.have + ' of ' + c.total : 'None in your library');
+        if (!label) return '';
+        var mod = c.have >= c.total ? ' vdl-cover--all' : c.have ? ' vdl-cover--some' : '';
+        return '<span class="vdl-cover' + mod + '" title="' + esc(single ? 'This episode is already in your library'
+            : c.have + ' of the ' + c.total + ' episodes it covers are already in your library') + '">' + esc(label) + '</span>';
     }
 
     // Is this result a whole season rather than one episode? Soulseek says so by
@@ -1148,17 +1221,54 @@
             '</details>';
     }
 
-    function resultCardHTML(r, i) {
-        if (_isSeasonPack(r)) return _packCardHTML(r, i);
+    // #2261: Infer missing resolution / codec / audio / HDR / indexer from the
+    // release title when an indexer omits structured fields.
+    function _inferReleaseMeta(r) {
+        var t = String((r && (r.title || r.release_title)) || '');
+        var res = r && r.resolution;
+        if (!res) {
+            var rm = t.match(/\b(2160p|1080p|720p|480p|4K|UHD)\b/i);
+            if (rm) res = rm[1].toUpperCase() === '4K' || rm[1].toUpperCase() === 'UHD' ? '2160p' : rm[1].toLowerCase();
+        }
+        var codec = r && r.codec;
+        if (!codec) {
+            var cm = t.match(/\b(x265|h\.?265|hevc|x264|h\.?264|avc|av1|vp9|xvid)\b/i);
+            if (cm) {
+                var c = cm[1].toLowerCase().replace('.', '');
+                codec = (c === 'x265' || c === 'h265' || c === 'hevc') ? 'HEVC'
+                    : (c === 'x264' || c === 'h264' || c === 'avc') ? 'H.264' : c.toUpperCase();
+            }
+        }
+        var audio = r && r.audio;
+        if (!audio) {
+            var am = t.match(/\b(Atmos|TrueHD|DTS-HD\.?MA|DTS-HD|DTS|DDP?5\.1|EAC3|AC3|AAC|FLAC|Opus)\b/i);
+            if (am) audio = am[1].toUpperCase();
+        }
+        var hdr = r && r.hdr;
+        if (!hdr) {
+            var hm = t.match(/\b(DV|DoVi|Dolby\.?Vision|HDR10\+|HDR10|HDR|HLG)\b/i);
+            if (hm) hdr = hm[1].toUpperCase().replace(/\./g, ' ');
+        }
+        var indexer = (r && (r.indexer || r.indexer_name || r.tracker)) || '';
+        return { resolution: res || '', codec: codec || '', audio: audio || '', hdr: hdr || '', indexer: indexer };
+    }
+
+    function resultCardHTML(r, i, scope) {
+        // a pack by its name, or by the server's reading of it in a pack
+        // search: 'Show.Complete.Series' names no season to spot (#2233)
+        if (_isSeasonPack(r) || (scope === 'series' && r.is_series_pack) ||
+                (scope === 'season' && r.is_season_pack)) return _packCardHTML(r, i);
         // Flat / brutalist release card: a bracketed quality block + release name on
         // line 1, an UPPERCASE dot-separated spec line, then the verdict + a hard
         // [ GET ] button. Monospace, sharp, no chrome. .vdl-res stays a column so the
         // live download tracker docks under it on grab.
+        var inferred = _inferReleaseMeta(r);
         var meta = [SRC_LABEL[r.source] || r.source || ''];
-        if (r.codec) meta.push(String(r.codec).toUpperCase());
-        if (r.audio) meta.push(String(r.audio).toUpperCase().replace('-', ' '));
-        if (r.hdr) meta.push(String(r.hdr).toUpperCase());
+        if (inferred.codec) meta.push(String(inferred.codec).toUpperCase());
+        if (inferred.audio) meta.push(String(inferred.audio).toUpperCase().replace('-', ' '));
+        if (inferred.hdr) meta.push(String(inferred.hdr).toUpperCase());
         if (r.repack) meta.push('REPACK');
+        if (inferred.indexer && !r.username) meta.push(inferred.indexer);
         meta.push(r.username ? r.username + (r.peers > 1 ? ' (' + r.peers + ')' : '') : (r.seeders || 0) + ' SEED');
         if (r.group) meta.push(r.group);
         meta.push(r.size_gb + ' GB');
@@ -1189,9 +1299,14 @@
         return '<div class="vdl-res' + (r.accepted ? ' vdl-res--ok' : ' vdl-res--rejected') + (isBest ? ' vdl-res--best' : '') + '" data-vdl-card="' + i + '">' +
             '<div class="vdl-res-main">' +
                 '<div class="vdl-r-l1">' +
-                    '<span class="vdl-r-q vdl-r-q--' + resKind(r.resolution) + '">' + esc(RES_LABEL[r.resolution] || r.resolution || '?') + '</span>' +
+                    '<span class="vdl-r-q vdl-r-q--' + resKind(inferred.resolution) + '">' + esc(RES_LABEL[inferred.resolution] || inferred.resolution || '?') + '</span>' +
                     '<span class="vdl-r-title" title="' + esc(r.title) + '">' + esc(r.title) + '</span>' +
                     (isBest ? '<span class="vdl-r-best">Best match</span>' : '') +
+                    // in a show's search: which episode this is, and whether you have it
+                    (r.cover && r.season != null && r.episode != null
+                        ? '<span class="vdl-r-ep">S' + _pk2(r.season) + 'E' + _pk2(r.episode) +
+                            (r.episode_end != null && r.episode_end > r.episode ? '–E' + _pk2(r.episode_end) : '') + '</span>' : '') +
+                    _coverChipHTML(r) +
                 '</div>' +
                 '<div class="vdl-r-l2">' + esc(meta.filter(Boolean).join('  ·  ')) + '</div>' +
                 formatNote +
@@ -1901,8 +2016,12 @@
         var payload = buildGrabPayload(panel, r);
         payload.kind = 'show';
         payload.search_ctx = payload.search_ctx || {};
-        payload.search_ctx.scope = 'season';        // what makes the monitor map the folder
-        if (payload.search_ctx.season == null && p.season != null) payload.search_ctx.season = p.season;
+        // a pack scope is what makes the monitor map the folder. a complete
+        // series stays one: no season, so every season in it is filed (#2233)
+        var series = p.scope === 'series' || (!!r.is_series_pack && p.scope !== 'season');
+        payload.search_ctx.scope = series ? 'series' : 'season';
+        if (series) payload.search_ctx.season = null;
+        else if (payload.search_ctx.season == null) payload.search_ctx.season = r.season != null ? r.season : p.season;
         payload.search_ctx.episode = null;          // a pack names no single episode
         return sendGrab(payload).then(function (res) {
             // grab-pack answers {started, skipped}; the normal grab answers {id}. Give
@@ -1956,26 +2075,118 @@
         if (scope === 'movie' && opts.year) return (t + ' ' + opts.year).trim();
         return t;
     }
+    // A show's scope picker (#2233): whole series, a season, or one episode.
+    // opts.seasons = [{ season, title, total, have, episodes: [{ episode, title, have }] }]
+    // (episodes optional: a season with none listed offers 1..total).
+    function _msSeasons(opts) {
+        return (Array.isArray(opts.seasons) ? opts.seasons : []).filter(function (s) {
+            return s && s.season != null && !isNaN(parseInt(s.season, 10));
+        });
+    }
+    function _msSeason(seasons, n) {
+        for (var i = 0; i < seasons.length; i++) if (parseInt(seasons[i].season, 10) === parseInt(n, 10)) return seasons[i];
+        return null;
+    }
+    function _msEpisodes(season) {
+        if (!season) return [];
+        if (Array.isArray(season.episodes) && season.episodes.length) {
+            return season.episodes.filter(function (e) { return e && e.episode != null; });
+        }
+        var out = [], n = parseInt(season.total, 10) || 0;
+        for (var i = 1; i <= n; i++) out.push({ episode: i });
+        return out;
+    }
+    function _msSeasonName(s) {
+        var n = parseInt(s.season, 10);
+        return n === 0 ? 'Specials' : ('Season ' + n);
+    }
+    // the line under the title: what is being searched, and what you have of it
+    function manualScopeLabel(opts, st) {
+        var seasons = _msSeasons(opts);
+        if (st.scope === 'movie') return opts.year ? String(opts.year) : 'Movie';
+        if (st.scope === 'series') {
+            var have = 0, total = 0;
+            seasons.forEach(function (s) {
+                if (parseInt(s.season, 10) < 1) return;
+                have += parseInt(s.have, 10) || 0; total += parseInt(s.total, 10) || 0;
+            });
+            return 'Complete series' + (total ? ' · you have ' + have + ' of ' + total + ' episodes' : '');
+        }
+        if (st.scope === 'season') {
+            var se = _msSeason(seasons, st.season);
+            return (se ? _msSeasonName(se) : 'Season ' + st.season) +
+                (se && se.total ? ' · you have ' + (parseInt(se.have, 10) || 0) + ' of ' + se.total : '');
+        }
+        var pad = function (n) { n = parseInt(n, 10); return (n < 10 ? '0' : '') + n; };
+        var ep = null;
+        _msEpisodes(_msSeason(seasons, st.season)).forEach(function (e) {
+            if (parseInt(e.episode, 10) === parseInt(st.episode, 10)) ep = e;
+        });
+        return 'S' + pad(st.season) + 'E' + pad(st.episode) + (ep && ep.title ? ' · ' + ep.title : '') +
+            (ep && ep.have ? ' · in your library' : '');
+    }
+    function _msScopeBarHTML(opts, st) {
+        var seasons = _msSeasons(opts);
+        var seg = [['series', 'Whole series'], ['season', 'Season'], ['episode', 'Episode']].map(function (x) {
+            return '<button type="button" class="vms-seg-btn" data-vms-scope="' + x[0] + '" aria-pressed="' +
+                (st.scope === x[0] ? 'true' : 'false') + '">' + x[1] + '</button>';
+        }).join('');
+        var seasonOpts = seasons.map(function (s) {
+            var n = parseInt(s.season, 10);
+            return '<option value="' + n + '"' + (n === parseInt(st.season, 10) ? ' selected' : '') + '>' +
+                esc(_msSeasonName(s)) + (s.total ? ' (' + (parseInt(s.have, 10) || 0) + '/' + s.total + ')' : '') + '</option>';
+        }).join('');
+        return '<div class="vms-scopes" data-vms-scopes>' +
+            '<div class="vms-seg" role="group" aria-label="What to search for">' + seg + '</div>' +
+            '<select class="vms-scope-sel" data-vms-season aria-label="Season"' + (st.scope === 'series' ? ' hidden' : '') + '>' +
+                seasonOpts + '</select>' +
+            '<select class="vms-scope-sel" data-vms-episode aria-label="Episode"' + (st.scope !== 'episode' ? ' hidden' : '') + '>' +
+                _msEpisodeOptions(_msSeason(seasons, st.season), st.episode) + '</select>' +
+        '</div>';
+    }
+    function _msEpisodeOptions(season, picked) {
+        var pad = function (n) { n = parseInt(n, 10); return (n < 10 ? '0' : '') + n; };
+        return _msEpisodes(season).map(function (e) {
+            var n = parseInt(e.episode, 10);
+            return '<option value="' + n + '"' + (n === parseInt(picked, 10) ? ' selected' : '') + '>' +
+                'E' + pad(n) + (e.title ? ' · ' + esc(e.title) : '') + (e.have ? ' ✓' : '') + '</option>';
+        }).join('');
+    }
+    // what each scope searches for, in plain words
+    function _msScopeHint(st) {
+        if (st.scope === 'series') return 'Complete-series packs.';
+        if (st.scope === 'season') return 'Season packs, plus single episodes from this season.';
+        return '';
+    }
+
     function manualSearch(opts) {
         opts = opts || {};
-        var scope = opts.scope || (opts.episode != null ? 'episode' : 'season');
-        var defaultQuery = manualDefaultQuery(opts);
-        var scopeLabel = scope === 'episode'
-            ? ('S' + opts.season + 'E' + opts.episode)
-            : scope === 'movie'
-                ? (opts.year ? String(opts.year) : 'Movie')
-                : (scope === 'series' ? 'Complete series' : ('Season ' + opts.season));
+        var seasons = _msSeasons(opts);
+        // the scope can change inside the modal when it was opened for a show
+        var st = { scope: opts.scope || (opts.episode != null ? 'episode' : 'season'),
+            season: opts.season, episode: opts.episode };
+        var canScope = st.scope !== 'movie' && seasons.length > 0;
+        if (canScope) {
+            var firstReal = seasons.filter(function (s) { return parseInt(s.season, 10) >= 1; })[0] || seasons[0];
+            if (st.season == null || !_msSeason(seasons, st.season)) st.season = firstReal.season;
+            if (st.scope === 'episode' && st.episode == null) {
+                var eps0 = _msEpisodes(_msSeason(seasons, st.season));
+                st.episode = eps0.length ? eps0[0].episode : 1;
+            }
+        }
+        var defaultQuery = manualDefaultQuery(Object.assign({}, opts, st));
         var ov = document.createElement('div');
         ov.className = 'vms-overlay';
         ov.innerHTML =
-            '<div class="vms-modal">' +
+            '<div class="vms-modal" role="dialog" aria-modal="true" aria-label="Manual search">' +
                 '<button class="vms-close" type="button" data-vms-close aria-label="Close">&times;</button>' +
                 '<div class="vms-head">' +
                     '<div class="vms-eyebrow">Manual search</div>' +
                     '<div class="vms-title">' + esc(opts.title || '') + '</div>' +
-                    '<div class="vms-scope">' + esc(scopeLabel) + '</div>' +
+                    '<div class="vms-scope" data-vms-scope-label>' + esc(manualScopeLabel(opts, st)) + '</div>' +
+                    (canScope ? _msScopeBarHTML(opts, st) : '') +
                     '<div class="vms-prof" data-vms-prof></div>' +
-                    // the query, prefilled and editable, like prowlarr's own search (#2121)
+                    // the query, prefilled and editable, like an indexer's own search box (#2121)
                     '<form class="vms-query" data-vms-query-form role="search">' +
                         '<input class="vms-query-input" type="search" data-vms-query aria-label="Search for" ' +
                             'autocomplete="off" spellcheck="false" value="' + esc(defaultQuery) + '">' +
@@ -1994,6 +2205,8 @@
 
         ov.addEventListener('click', function (e) {
             if (e.target === ov || e.target.closest('[data-vms-close]')) { _closeManual(ov); return; }
+            var sb = e.target.closest('[data-vms-scope]');
+            if (sb && canScope) { setScope({ scope: sb.getAttribute('data-vms-scope') }); return; }
             if (_handlePackClick(e)) return;
             var gb = e.target.closest('[data-vdl-grab]');
             if (gb) {
@@ -2010,6 +2223,11 @@
                 });
             }
         });
+        ov.addEventListener('change', function (e) {
+            if (!canScope) return;
+            if (e.target.matches('[data-vms-season]')) setScope({ season: parseInt(e.target.value, 10) });
+            else if (e.target.matches('[data-vms-episode]')) setScope({ episode: parseInt(e.target.value, 10) });
+        });
         var onKey = function (e) { if (e.key === 'Escape') { _closeManual(ov); document.removeEventListener('keydown', onKey); } };
         document.addEventListener('keydown', onKey);
         var queryInput = ov.querySelector('[data-vms-query]');
@@ -2018,9 +2236,36 @@
             runAll();
         });
 
+        // a new scope, season or episode: the label, the pickers and the box
+        // follow it, and the search runs again for it
+        function setScope(change) {
+            var next = Object.assign({}, st, change);
+            if (next.scope === 'episode') {
+                var eps = _msEpisodes(_msSeason(seasons, next.season));
+                var known = eps.some(function (x) { return parseInt(x.episode, 10) === parseInt(next.episode, 10); });
+                if (!known || change.season != null) next.episode = eps.length ? eps[0].episode : 1;
+            }
+            if (next.scope === st.scope && next.season === st.season && next.episode === st.episode) return;
+            st = next;
+            ov.querySelectorAll('[data-vms-scope]').forEach(function (b) {
+                b.setAttribute('aria-pressed', b.getAttribute('data-vms-scope') === st.scope ? 'true' : 'false');
+            });
+            var ss = ov.querySelector('[data-vms-season]'), es = ov.querySelector('[data-vms-episode]');
+            if (ss) { ss.hidden = st.scope === 'series'; ss.value = String(st.season); }
+            if (es) {
+                es.hidden = st.scope !== 'episode';
+                es.innerHTML = _msEpisodeOptions(_msSeason(seasons, st.season), st.episode);
+            }
+            var lab = ov.querySelector('[data-vms-scope-label]');
+            if (lab) lab.textContent = manualScopeLabel(opts, st);
+            defaultQuery = manualDefaultQuery(Object.assign({}, opts, st));
+            if (queryInput) queryInput.value = defaultQuery;
+            runAll();
+        }
+
         var profHost = ov.querySelector('[data-vms-prof]');
         loadTitleProfile(profHost, function () { return body._opts || {}; },
-            scope === 'movie' ? 'movie' : 'show',
+            st.scope === 'movie' ? 'movie' : 'show',
             function (p, info) {
                 var picker = profilePickerHTML(info);
                 profHost.innerHTML = picker;
@@ -2028,8 +2273,11 @@
             },
             function () { runAll(); });   // a new profile re-judges every result
 
+        var runSeq = 0;
         function runAll() {
+        var mine = ++runSeq;
         getJSON('/api/video/downloads/config').then(function (c) {
+            if (mine !== runSeq || !ov.isConnected) return;   // a newer scope already searched
             // Search every configured source that returns REAL, grabbable results. Soulseek
             // (slskd), Torrent + Usenet (Prowlarr) are all wired end-to-end now — live search
             // + source-aware grab — so honour the user's configured sources/hybrid order.
@@ -2041,7 +2289,8 @@
             // structured and scene queries); edited, exactly what was typed
             var typed = String((queryInput && queryInput.value) || '').trim();
             var custom = typed && typed !== defaultQuery ? typed : null;
-            if (sub) sub.textContent = 'Searching ' + srcs.map(function (s) { return SRC_META[s].name; }).join(' · ') +
+            var hint = canScope ? _msScopeHint(st) : '';
+            if (sub) sub.textContent = (hint ? hint + ' ' : '') + 'Searching ' + srcs.map(function (s) { return SRC_META[s].name; }).join(' · ') +
                 (custom ? ' for “' + custom + '”' : '') + '…';
             body.innerHTML = srcs.map(function (s) {
                 return '<div class="vms-src" data-vms-src="' + s + '">' +
@@ -2051,15 +2300,22 @@
             }).join('');
             srcs.forEach(function (s) {
                 var res = body.querySelector('[data-vms-results-for="' + s + '"]');
-                var params = { scope: scope, title: opts.title, season: opts.season,
-                    year: opts.year || null,   // movies search title+year (same as the get-modal)
-                    episode: (scope === 'episode' ? opts.episode : null), source: s };
-                if (custom) params.query = custom;
-                searchInto(ov, res, params, []);
+                searchInto(ov, res, manualSearchParams(opts, st, s, custom), []);
             });
         });
         }
         runAll();
+    }
+    // the search one source runs for the modal's current scope
+    function manualSearchParams(opts, st, source, custom) {
+        var params = { scope: st.scope, title: opts.title,
+            season: st.scope === 'series' || st.scope === 'movie' ? null : st.season,
+            year: opts.year || null,   // movies search title+year (same as the get-modal)
+            episode: (st.scope === 'episode' ? st.episode : null), source: source };
+        // a season search lists that season's single episodes beside its packs
+        if (st.scope === 'season') params.with_episodes = true;
+        if (custom) params.query = custom;
+        return params;
     }
 
     window.VideoDownload = { render: render, manualSearch: manualSearch };

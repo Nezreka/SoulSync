@@ -47,6 +47,8 @@ if _XDIST_WORKER and 'soulsync-testdb-' in _os.environ.get('DATABASE_PATH', ''):
         _os.environ.pop(_var, None)
 if _XDIST_WORKER and 'soulsync-test-imagecache-' in _os.environ.get('SOULSYNC_IMAGE_CACHE_DIR', ''):
     _os.environ.pop('SOULSYNC_IMAGE_CACHE_DIR', None)
+if _XDIST_WORKER and 'soulsync-test-saimages-' in _os.environ.get('SOULSYNC_SA_IMAGE_DIR', ''):
+    _os.environ.pop('SOULSYNC_SA_IMAGE_DIR', None)
 if _XDIST_WORKER and 'soulsync-test-audiobooks-' in _os.environ.get('AUDIOBOOK_DATABASE_PATH', ''):
     _os.environ.pop('AUDIOBOOK_DATABASE_PATH', None)
 for _var, _mark in (('SOULSYNC_PLAYLIST_COVER_DIR', 'soulsync-test-covers-'),
@@ -80,6 +82,13 @@ if not _os.environ.get('SOULSYNC_IMAGE_CACHE_DIR'):
     _TEST_IMAGE_CACHE_DIR = _tempfile.mkdtemp(prefix='soulsync-test-imagecache-')
     _os.environ['SOULSYNC_IMAGE_CACHE_DIR'] = _TEST_IMAGE_CACHE_DIR
     _atexit.register(lambda: _shutil.rmtree(_TEST_IMAGE_CACHE_DIR, ignore_errors=True))
+
+# the server activity poster cache (core/server_activity/images.py) the same
+# way: without this a test reaching the proxy would write into storage/.
+if not _os.environ.get('SOULSYNC_SA_IMAGE_DIR'):
+    _TEST_SA_IMAGE_DIR = _tempfile.mkdtemp(prefix='soulsync-test-saimages-')
+    _os.environ['SOULSYNC_SA_IMAGE_DIR'] = _TEST_SA_IMAGE_DIR
+    _atexit.register(lambda: _shutil.rmtree(_TEST_SA_IMAGE_DIR, ignore_errors=True))
 
 # the logs too: web_server and acoustid_client log to logging.path, which the
 # test config leaves at the default logs/app.log in the checkout. every run
@@ -1126,6 +1135,43 @@ def _no_match_credit_fetch(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _fresh_provider_cache_and_lastfm_key(monkeypatch):
+    """the last.fm / listenbrainz / deezer answer cache and the remembered
+    last.fm key refusal live per process. each test starts with neither, and
+    nothing a test caches reaches the database."""
+    from core import lastfm_client, lastfm_fallback, listenbrainz_public, provider_cache
+    provider_cache.use_store(provider_cache.MemoryStore())
+    lastfm_client.reset_key_state()
+    # the free fallbacks ask deezer / listenbrainz / musicbrainz. no test asks
+    # the real ones; the fallback tests set their own answers
+    monkeypatch.setattr(lastfm_fallback, "_deezer_get", lambda *a, **k: None)
+    monkeypatch.setattr(listenbrainz_public, "_get", lambda *a, **k: None)
+    monkeypatch.setattr(listenbrainz_public, "artist_mbid", lambda *a, **k: None)
+    # no saved listenbrainz token unless a test gives one; never the live
+    # settings or profiles
+    from core import listenbrainz_auth
+    listenbrainz_auth.reset()
+    monkeypatch.setattr(listenbrainz_auth, "_candidates", lambda: [])
+    yield
+    listenbrainz_auth.reset()
+    lastfm_client.reset_key_state()
+    provider_cache.use_store(provider_cache.MemoryStore())
+
+
+@pytest.fixture(autouse=True)
+def _fresh_soulseek_session_and_koito_probe():
+    """the soulseek login state and the koito probe answers live per process.
+    each test starts logged-in-unknown with nothing probed: a chat test that
+    saw "logged out" must not park the next test's downloads."""
+    from core import listenbrainz_client, soulseek_session
+    soulseek_session._reset_for_tests()
+    listenbrainz_client._KOITO_SERVERS.clear()
+    yield
+    soulseek_session._reset_for_tests()
+    listenbrainz_client._KOITO_SERVERS.clear()
+
+
+@pytest.fixture(autouse=True)
 def _fresh_reconciler_name_misses():
     """the reconciler believes a file-name miss for a few minutes; each test
     starts without one from another test"""
@@ -1185,7 +1231,17 @@ def _fresh_fold_index():
     from core.imports import artist_facts as _artist_facts
     saved_online, _artist_facts.ONLINE_LOOKUP = _artist_facts.ONLINE_LOOKUP, False
     _artist_facts.clear_cache()
+    # the library's name for a download's artist (#2165) is cached for 30s;
+    # one test's library must not name the next test's download
+    from core.imports import library_names as _library_names
+    _library_names.clear_cache()
+    # the library's other names for an artist (#2222) are read into a map
+    # kept per database; one test's artists must not answer the next one's
+    from core.library2 import artist_equivalence as _artist_equivalence
+    _artist_equivalence.clear_cache()
+    saved_equivalence_ttl, _artist_equivalence.INDEX_TTL = _artist_equivalence.INDEX_TTL, 0.0
     yield
+    _artist_equivalence.INDEX_TTL = saved_equivalence_ttl
     fold_index.CHECK_SECONDS = saved
     worker_queue.PROGRESS_SNAPSHOT_TTL = saved_ttl
     MusicDatabase._QUARANTINE_NAME_MAPS_TTL = saved_quarantine_ttl

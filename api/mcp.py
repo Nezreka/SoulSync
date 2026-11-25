@@ -15,6 +15,7 @@ from flask import Blueprint, Response, current_app, g, jsonify, request
 from core.mcp import protocol
 from core.mcp.tools import API_TOOLS, build_request, check_args, custom_tools
 from utils.logging_config import get_logger
+from core.permissions import api_key_only, public
 
 logger = get_logger("api.mcp")
 
@@ -146,6 +147,7 @@ def _caller():
 
 
 @bp.route(MCP_PATH, methods=["GET", "DELETE"])
+@public
 def mcp_other():
     if not enabled():
         return jsonify({"error": "not found"}), 404
@@ -154,6 +156,7 @@ def mcp_other():
 
 
 @bp.route(MCP_PATH, methods=["POST"])
+@api_key_only
 def mcp_post():
     if not enabled():
         return jsonify({"error": "not found"}), 404

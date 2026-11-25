@@ -20,9 +20,9 @@ def test_stop_between_chunks_ends_the_scan(monkeypatch):
     monkeypatch.setattr(job_module, "scoped_file_subjects", lambda context, rows: rows, raising=False)
     calls = []
     monkeypatch.setattr(scan_module, "rescan_files",
-                        lambda db, file_ids: calls.append(list(file_ids)) or {"scanned": len(file_ids)})
+                        lambda db, file_ids, **_k: calls.append(list(file_ids)) or {"scanned": len(file_ids)})
     monkeypatch.setattr(job_module, "_CHUNK", 2)
-    monkeypatch.setattr(job_module, "_count_unreachable", lambda _context, _subjects: 0)
+    monkeypatch.setattr(job_module, "_unreachable_paths", lambda _context, _subjects: [])
     progress = []
     stops = iter([False, True])
     context = SimpleNamespace(

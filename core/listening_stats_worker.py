@@ -56,6 +56,10 @@ class ListeningStatsWorker:
         self.thread = None
         self.current_item = None
         self._stop_event = threading.Event()
+        # set when a play just became scrobble-eligible: the loop flushes now
+        # instead of waiting out scrobble_interval (which stays as the retry
+        # backstop for a flush that failed)
+        self._flush_event = threading.Event()
 
         # Stats
         self.stats = {
@@ -93,6 +97,21 @@ class ListeningStatsWorker:
         if self.thread:
             self.thread.join(timeout=1)
         logger.info("Listening stats worker stopped")
+
+    def request_scrobble_flush(self):
+        """A play just counted: send it now, on the worker thread (so two
+        flushes never send the same rows), instead of at the next batch."""
+        self._flush_event.set()
+
+    def _sleep_or_flush(self, seconds):
+        """Sleep up to ``seconds``; True when a flush was requested."""
+        remaining = max(0.0, float(seconds))
+        while remaining > 0 and not self._stop_event.is_set():
+            step = min(0.5, remaining)
+            if self._flush_event.wait(step):
+                return True
+            remaining -= step
+        return self._flush_event.is_set()
 
     def pause(self):
         self.paused = True
@@ -162,6 +181,9 @@ class ListeningStatsWorker:
                 # _scrobble_new_events self-gates on each service's own
                 # scrobble_enabled + credentials, so with nothing configured
                 # this is a cheap no-op.
+                if self._flush_event.is_set():
+                    self._flush_event.clear()
+                    next_scrobble_at = now
                 if now >= next_scrobble_at:
                     self.current_item = "Scrobbling to external services..."
                     self._scrobble_new_events()
@@ -173,7 +195,7 @@ class ListeningStatsWorker:
                 wake_in = next_scrobble_at - now
                 if stats_enabled:
                     wake_in = min(wake_in, next_poll_at - now)
-                interruptible_sleep(self._stop_event, max(0, wake_in))
+                self._sleep_or_flush(max(0, wake_in))
 
             except Exception as e:
                 logger.error(f"Error in listening stats worker: {e}", exc_info=True)
@@ -463,8 +485,15 @@ class ListeningStatsWorker:
             logger.error(f"Failed to build stats cache: {e}")
 
     def _build_owner_stats_cache(self, owner):
-        """every cached stat for one pile. the shared pile keeps the old keys."""
-        from core.listening_scope import STATS_CACHE_RANGES, owner_clause, owner_key
+        """every cached stat for one pile. the shared pile keeps the old keys.
+
+        drawn as stats, so plays the pile keeps for taste only stay out."""
+        from core.listening_scope import stats_view
+        with stats_view(self.db):
+            self._build_owner_stats_cache_view(owner)
+
+    def _build_owner_stats_cache_view(self, owner):
+        from core.listening_scope import STATS_CACHE_RANGES, owner_key, stats_owner_clause
         for time_range in STATS_CACHE_RANGES:
             granularity = 'month' if time_range in ('12m', 'all') else 'day'
             cache = {
@@ -507,7 +536,7 @@ class ListeningStatsWorker:
         cursor = conn.cursor()
         cursor.execute(f"""
             SELECT title, artist, album, played_at, duration_ms
-            FROM listening_history WHERE {owner_clause(owner)}
+            FROM listening_history WHERE {stats_owner_clause(owner)}
             ORDER BY played_at DESC LIMIT 20
         """)
         recent = [{'title': r[0], 'artist': r[1], 'album': r[2], 'played_at': r[3], 'duration_ms': r[4]}
@@ -650,6 +679,13 @@ class ListeningStatsWorker:
             api_secret = self.config_manager.get('lastfm.api_secret', '')
             if not (api_key and api_secret):
                 return
+            from core.lastfm_client import LASTFM_PRO_MESSAGE, key_rejection
+            if key_rejection(api_key):
+                # pro only from 1 december 2026. the plays stay unscrobbled
+                # (queued) and go out once the key works again; nothing is
+                # posted until the remembered refusal runs out
+                self._note_lastfm_scrobble('key_rejected', LASTFM_PRO_MESSAGE)
+                return
             rows = self._unscrobbled('scrobbled_lastfm', scope, lastfm_since, 200)
             if rows:
                 try:
@@ -662,11 +698,21 @@ class ListeningStatsWorker:
                         batch = rows[i:i + 50]
                         if lfm_client.scrobble_tracks(self._as_listens(batch)):
                             done.extend(r[0] for r in batch)
+                        elif key_rejection(api_key):
+                            # refused mid-run: stop, the rest stay queued
+                            self._note_lastfm_scrobble('key_rejected', LASTFM_PRO_MESSAGE)
+                            break
                     self._mark_scrobbled('scrobbled_lastfm', done)
                     if done:
+                        self._note_lastfm_scrobble('ok', '')
                         logger.info(f"Scrobbled {len(done)} events to Last.fm ({label})")
                 except Exception as e:
                     logger.debug(f"Last.fm scrobble failed ({label}): {e}")
+
+    def _note_lastfm_scrobble(self, status, message):
+        """the last.fm scrobble state get_stats shows ('ok', 'key_rejected')."""
+        self.stats['lastfm_scrobble_status'] = status
+        self.stats['lastfm_scrobble_message'] = message
 
     def _resolve_db_track_id(self, title, artist):
         """Try to match a server track to a local DB track by title+artist."""

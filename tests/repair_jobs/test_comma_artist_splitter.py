@@ -791,3 +791,19 @@ def test_a_run_asks_the_providers_for_a_bounded_number_of_artists(db, no_fetch, 
     result, _findings = _scan(db, scope={'artist_ids': ids})
     assert len(no_fetch) == 1 and result.scanned == 1
     assert asked == [ids[1]]           # the rest is asked for again, for the next run
+
+
+def test_fix_all_checks_provider_evidence_still_supports_a_pending_split(db, no_fetch):
+    tracks = _album_by(db, 'Camellia, Toby Fox', 'One')
+    _credits(db, tracks[0], ['Camellia', 'Toby Fox'])
+    finding = _finding(db, 'Camellia, Toby Fox')
+    assert finding['details']['confirmed']
+    with db._get_connection() as conn:
+        conn.execute('DELETE FROM lib2_provider_credits WHERE entity_id=?', (tracks[0],))
+        conn.commit()
+
+    worker = _worker(db)
+    out = worker._fix_comma_artist_split('artist', finding['entity_id'], None, finding['details'])
+    assert out['skipped_by_design'] is True
+    assert _artist_id(db, 'Camellia, Toby Fox') is not None
+    assert worker.asked == []

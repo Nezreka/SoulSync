@@ -3,7 +3,12 @@
   "ignorePatterns": [
     "src/routeTree.gen.ts",
     "src/routes/tools/duplicate-keep-parity.json",
-    "src/routes/dashboard/-ui/dash-vanilla-fixture.html"
+    "src/routes/dashboard/-ui/dash-vanilla-fixture.html",
+    "src/features/settings/__fixtures__/**/*.html",
+    "src/features/settings/tabs/__fixtures__/**/*.html",
+    "src/features/settings/guard/fixtures/**/*.json",
+    "src/features/settings/tabs/people/__fixtures__/**/*.json",
+    "src/features/settings/tabs/people/editor/__fixtures__/**/*.json"
   ],
   "singleQuote": true,
   "sortImports": {

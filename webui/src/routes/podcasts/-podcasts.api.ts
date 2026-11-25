@@ -32,6 +32,10 @@ interface DownloadResponse {
   download_id?: string;
   status?: string;
   error?: string;
+  /** Ask first (#2188): filed as a request for an admin, nothing downloaded */
+  requested?: boolean;
+  /** that request was already waiting */
+  already?: boolean;
 }
 
 interface DownloadsListResponse {
@@ -100,6 +104,8 @@ export async function fetchPodcastShow(
 export async function downloadPodcastEpisode(
   episode: PodcastEpisodeItem,
   showTitle: string = 'Podcasts',
+  /** sent with an ask (#2188), so the request can tell when it has landed */
+  feedUrl?: string | null,
 ): Promise<DownloadResponse> {
   try {
     return await readJson<DownloadResponse>(
@@ -118,6 +124,7 @@ export async function downloadPodcastEpisode(
           episode_type: episode.episode_type,
           enclosure_type: episode.enclosure_type,
           enclosure_length: episode.enclosure_length,
+          ...(feedUrl ? { feed_url: feedUrl } : {}),
         },
       }),
     );

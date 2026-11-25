@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate } from '@tanstack/react-router';
 import clsx from 'clsx';
 import { type DragEvent, useEffect, useRef, useState } from 'react';
@@ -27,6 +27,7 @@ import {
   importSearchSourcesQueryOptions,
   matchImportAlbum,
   previewImportAlbum,
+  saveImportDefaultSearchSource,
   searchImportAlbums,
   searchImportTracks,
 } from '../-import.api';
@@ -40,7 +41,7 @@ import {
   getUnmatchedStagingFiles,
   IMPORT_PLACEHOLDER_IMAGE,
 } from '../-import.helpers';
-import { describeFile, describeItemFiles, formatBitrate } from '../-import.inbox';
+import { describeFile, describeItemFiles, formatBitrate, siblingRelease } from '../-import.inbox';
 import styles from './import-page.module.css';
 import { fallbackImage, getErrorMessage, useImportQueueActions } from './import-shared';
 
@@ -118,8 +119,10 @@ function albumMetaLine(album: {
 function AlbumMatcher({ item }: { item: ImportInboxItem }) {
   const navigate = useNavigate();
   const { addQueueJob } = useImportQueueActions();
+  const queryClient = useQueryClient();
   const sources = useQuery(importSearchSourcesQueryOptions());
   const stagingFiles = item.files.map(toStagingFile);
+  const defaultSource = sources.data?.default_source ?? '';
 
   const [candidates, setCandidates] = useState<ImportAlbumResult[]>([]);
   const [lookupSource, setLookupSource] = useState<string | null>(null);
@@ -127,6 +130,9 @@ function AlbumMatcher({ item }: { item: ImportInboxItem }) {
   const [searchError, setSearchError] = useState<string | null>(null);
   const [query, setQuery] = useState(() => [item.artist, item.name].filter(Boolean).join(' '));
   const [sourceOverride, setSourceOverride] = useState('');
+  // #2203: the search was a pasted link; its source, and why it found nothing
+  const [linkResult, setLinkResult] = useState<{ source: string; message: string } | null>(null);
+  const [savingDefault, setSavingDefault] = useState(false);
 
   const [selected, setSelected] = useState<ImportAlbumResult | null>(null);
   const [match, setMatch] = useState<ImportAlbumMatchPayload | null>(null);
@@ -180,6 +186,7 @@ function AlbumMatcher({ item }: { item: ImportInboxItem }) {
       const payload = await searchImportAlbums(trimmed, override || undefined);
       setCandidates(payload.albums ?? []);
       setLookupSource(payload.primary_source ?? null);
+      setLinkResult(payload.link ?? null);
       return payload.albums ?? [];
     } catch (error) {
       setSearchError(getErrorMessage(error));
@@ -226,20 +233,45 @@ function AlbumMatcher({ item }: { item: ImportInboxItem }) {
 
   // First open: search from what we know, and if the worker already had a
   // release in mind, open with that one so the user starts from its answer.
+  // Waits for the source list: the picker opens on the saved default (#2203).
   const booted = useRef(false);
+  const sourcesSettled = sources.isSuccess || sources.isError;
   useEffect(() => {
-    if (booted.current) return;
+    if (booted.current || !sourcesSettled) return;
     booted.current = true;
+    setSourceOverride(defaultSource);
     void (async () => {
-      const found = (await search(query, '')) ?? [];
+      const found = (await search(query, defaultSource)) ?? [];
       const known = item.album_id
         ? found.find((album) => String(album.id) === String(item.album_id))
         : undefined;
-      const first = known ?? (item.status === 'needs_review' ? found[0] : undefined);
+      // #2220: what's left of a folder whose other tracks already imported
+      // opens on their release, even when this search didn't list it (it
+      // came from another source, or past the first page). picking another
+      // edition put the leftovers on a second copy of the album.
+      const sibling = known ? null : siblingRelease(item);
+      if (sibling) setCandidates((current) => [sibling, ...current]);
+      const first = known ?? sibling ?? (item.status === 'needs_review' ? found[0] : undefined);
       if (first) void pick(first);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [sourcesSettled]);
+
+  const saveDefaultSource = async () => {
+    setSavingDefault(true);
+    try {
+      const res = await saveImportDefaultSearchSource(sourceOverride);
+      if (!res.success) throw new Error(res.error || 'Could not save the default source');
+      queryClient.setQueryData(importSearchSourcesQueryOptions().queryKey, (current) =>
+        current ? { ...current, default_source: sourceOverride } : current,
+      );
+      window.showToast?.('Import searches start on this source now', 'success');
+    } catch (error) {
+      window.showToast?.(getErrorMessage(error), 'error');
+    } finally {
+      setSavingDefault(false);
+    }
+  };
 
   const matches = match?.matches ?? [];
   const effective = getEffectiveAlbumMatches(matches, stagingFiles, overrides);
@@ -330,7 +362,7 @@ function AlbumMatcher({ item }: { item: ImportInboxItem }) {
 
           <div>
             <div className={styles.paneTitle} style={{ marginBottom: 8 }}>
-              {selected ? 'Other candidates' : 'Candidates'}
+              {linkResult ? 'From the link' : selected ? 'Other candidates' : 'Candidates'}
             </div>
             {searching ? (
               <div className={styles.searchHint}>Searching…</div>
@@ -339,7 +371,9 @@ function AlbumMatcher({ item }: { item: ImportInboxItem }) {
                 {searchError}
               </Notice>
             ) : candidates.length === 0 ? (
-              <div className={styles.searchHint}>No releases found. Try another search.</div>
+              <div className={styles.searchHint} id="import-page-album-search-empty">
+                {linkResult?.message || 'No releases found. Try another search.'}
+              </div>
             ) : (
               <div className={styles.candidates}>
                 {candidates.map((album) => (
@@ -385,7 +419,8 @@ function AlbumMatcher({ item }: { item: ImportInboxItem }) {
             <div className={styles.searchRow}>
               <TextInput
                 id="import-page-album-search-input"
-                placeholder="Artist and album"
+                placeholder="Artist and album, or a release link"
+                aria-label="Artist and album, or a release link"
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 onKeyDown={(event) => {
@@ -416,7 +451,7 @@ function AlbumMatcher({ item }: { item: ImportInboxItem }) {
               ) : null}
             </div>
             {(sources.data?.sources?.length ?? 0) > 1 ? (
-              <div style={{ marginTop: 8 }}>
+              <div className={styles.searchRow} style={{ marginTop: 8 }}>
                 <Select
                   id="import-page-album-search-source"
                   size="sm"
@@ -431,6 +466,18 @@ function AlbumMatcher({ item }: { item: ImportInboxItem }) {
                     </option>
                   ))}
                 </Select>
+                {sources.data?.can_set_default && sourceOverride !== defaultSource ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    id="import-page-album-search-make-default"
+                    title="Every import search starts on this source"
+                    disabled={savingDefault}
+                    onClick={() => void saveDefaultSource()}
+                  >
+                    Make default
+                  </Button>
+                ) : null}
               </div>
             ) : null}
           </div>

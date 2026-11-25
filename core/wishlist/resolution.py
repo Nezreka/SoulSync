@@ -21,7 +21,7 @@ from core.wishlist.removal_guard import (
     explain_refusal,
     may_remove,
 )
-from core.wishlist.service import get_wishlist_service
+from core.wishlist.service import get_wishlist_service, wishlist_rows_for_sweep as _rows_for_sweep
 from database.music_database import get_database
 from utils.logging_config import get_logger
 
@@ -75,7 +75,7 @@ def _all_profile_wishlist_tracks(wishlist_service, database=None,
         ids = [profile["id"] for profile in database.get_all_profiles()]
     wishlist_tracks: List[Dict[str, Any]] = []
     for pid in ids:
-        for row in wishlist_service.get_wishlist_tracks_for_download(profile_id=pid):
+        for row in _rows_for_sweep(wishlist_service, pid):
             row = dict(row)
             row.setdefault("_profile_id", pid)
             wishlist_tracks.append(row)

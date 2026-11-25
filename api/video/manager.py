@@ -69,6 +69,32 @@ def _active_server(db):
     return server
 
 
+def _shelf_life(db, kind: str):
+    """the Shelf Life job's last result for one side, ({id: {score, gate,
+    gate_text}}, threshold), or (None, None) while the job is off or has stored
+    nothing for that side: a score nobody refreshes would read as a live
+    verdict. the manager is the admin's, so this is too."""
+    from core.video import shelf_life
+    sl_kind = "show" if kind == "shows" else "movie"
+    try:
+        from core.video.repair.worker import get_video_repair_worker
+        cfg = get_video_repair_worker().job_config("shelf_life")
+        if not cfg.get("enabled") or not db.shelf_life_scored(sl_kind):
+            return None, None
+        stored = db.shelf_life_badges(sl_kind)
+        threshold = (cfg.get("settings") or {}).get("threshold")
+    except Exception:   # noqa: BLE001 - a badge never breaks the library page
+        logger.debug("shelf life badges skipped", exc_info=True)
+        return None, None
+    try:
+        threshold = int(threshold if threshold is not None else shelf_life.DEFAULT_THRESHOLD)
+    except (TypeError, ValueError):
+        threshold = shelf_life.DEFAULT_THRESHOLD
+    return ({item_id: {"score": s["score"], "gate": s["gate"],
+                       "gate_text": shelf_life.GATE_TEXT.get(s["gate"]) if s["gate"] else None}
+             for item_id, s in stored.items()}, threshold)
+
+
 def register_routes(bp):
     def _ctx():
         from core.video import library_manager
@@ -89,9 +115,13 @@ def register_routes(bp):
         from core.video import library_manager
         try:
             db, server, watcher = _ctx()
-            return jsonify({"success": True, **library_manager.titles(
-                db, request.args.get("kind", "movies"), request.args.to_dict(),
-                server_source=server, watcher=watcher)})
+            kind = request.args.get("kind", "movies")
+            shelf, threshold = _shelf_life(db, kind)
+            out = library_manager.titles(db, kind, request.args.to_dict(), server_source=server,
+                                         watcher=watcher, shelf_life=shelf)
+            if threshold is not None:
+                out["shelf_life_threshold"] = threshold
+            return jsonify({"success": True, **out})
         except Exception:
             logger.exception("library manager titles failed")
             return jsonify({"success": False, "error": "Could not load the library"}), 500

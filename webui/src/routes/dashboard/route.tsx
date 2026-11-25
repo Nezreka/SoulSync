@@ -1,6 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router';
 
-import { profileAsksFirst } from '@/platform/shell/download-rights';
+import { usePermMode } from '@/platform/shell/my-permissions';
 import { useProfile, useReactPageShell } from '@/platform/shell/route-controllers';
 import { guardPageAccess } from '@/platform/shell/route-guard';
 
@@ -30,17 +30,25 @@ export const Route = createFileRoute('/dashboard')({
 
 function DashboardRoute() {
   const { media } = Route.useSearch();
-  return media === 'video' ? <VideoDashboardRoute /> : <DashboardPage />;
+  return media === 'video' ? <VideoDashboardRoute /> : <MusicDashboardRoute />;
+}
+
+function MusicDashboardRoute() {
+  const profile = useProfile();
+  // the worker orbs and Manage Workers are the admins' (#2196)
+  return <DashboardPage isAdmin={profile.isAdmin} />;
 }
 
 function VideoDashboardRoute() {
   const profile = useProfile();
+  // the week card's get buttons are for episodes: TV's own mode (#2166)
+  const tvGet = usePermMode('tv');
   useReactPageShell('dashboard', '?media=video');
   return (
     <VideoDashboardPage
       profileId={profile.profileId}
       isAdmin={profile.isAdmin}
-      canDownload={!profileAsksFirst()}
+      canDownload={tvGet === 'download'}
     />
   );
 }

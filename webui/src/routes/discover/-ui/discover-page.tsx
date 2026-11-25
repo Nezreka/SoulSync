@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { fetchSinCharts, type SinChart } from '@/features/metasync/charts';
 import { getShellProfileContext } from '@/platform/shell/bridge';
+import { usePermNotOff } from '@/platform/shell/my-permissions';
 
 import type { WebLens } from '../-discover.artist-web';
 import type { CacheItem } from '../-discover.cache-sections';
@@ -124,8 +125,10 @@ import { LastfmRadioSection, ListenBrainzSection } from './radio-sections';
 import { RecipeEditor } from './recipe-editor';
 import { RecommendedModal } from './recommended-modal';
 import { RecommendedShelf } from './recommended-shelf';
+import { ShareListeningAsk } from './share-listening-ask';
 import { SinChartsShelf } from './sin-charts-shelf';
 import { YourAlbumsSourcesModal, YourArtistsSourcesModal } from './sources-modals';
+import { StarterBanner } from './starter-banner';
 import { StationModal } from './station-modal';
 import { StationsRow } from './stations-row';
 import { VideoRail, type RailArtist } from './video-rail';
@@ -261,6 +264,8 @@ export function DiscoverPage() {
   );
   const hero = useHero(heroArtists, (t) => toast(t.message, t.level));
   const rec = useRecommended((t) => toast(t.message, t.level));
+  // a member without the watchlist part gets no watch buttons (#2209)
+  const mayWatch = usePermNotOff('music.watchlist');
   const dial = useAdventurousness(
     okData<{ value?: number }>(page.sections.adventurousness?.data)?.value ?? 0.3,
   );
@@ -1059,6 +1064,7 @@ export function DiscoverPage() {
             mixes={mixes.mixes}
             loaded={true}
             gridId="your-mixes-grid"
+            notice={<ShareListeningAsk />}
             actions={
               <button
                 type="button"
@@ -1552,6 +1558,9 @@ export function DiscoverPage() {
                 </button>
               </div>
             )}
+            {/* a profile with no taste yet: ways to tell discover what it
+                likes. renders nothing once it has enough history. */}
+            <StarterBanner />
             <GreetingGrid
               name={shellProfile?.name}
               hour={new Date().getHours()}
@@ -1699,7 +1708,7 @@ export function DiscoverPage() {
                         >
                           View artist
                         </a>
-                        {artistPick.artist_id ? (
+                        {mayWatch && artistPick.artist_id ? (
                           <button
                             type="button"
                             className="dsc-pulse-btn"

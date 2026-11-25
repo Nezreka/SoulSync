@@ -33,6 +33,8 @@ export const TYPE_RETAG = 'library_retag';
 export const TYPE_BACKFILL = 'missing_discography_track';
 export const TYPE_QUALITY = 'quality_upgrade';
 export const TYPE_SUSPECT_ALBUM = 'suspect_album_tag';
+/** video: deletes the whole title, gated on typing it */
+export const TYPE_SHELF_LIFE = 'shelf_life';
 
 /**
  * A poisoned album holds tracks by many artists, so it can't be re-identified
@@ -106,7 +108,23 @@ export function useFindingFix({
         // of music's questions. a fix that changes a file on disk asks once,
         // in the words the catalog has for it.
         const info = typeInfo(type);
-        if (!override && info?.destructive) {
+        if (!override && type === TYPE_SHELF_LIFE) {
+          // a Shelf Life fix deletes the whole title, so like Delete Title it
+          // only runs with the title typed. the server checks it again.
+          const d = (finding.details || {}) as { title?: string };
+          const phrase = String(d.title || '').trim();
+          if (!phrase) {
+            toast("This finding doesn't name its title. Run Shelf Life again.", 'error');
+            return;
+          }
+          fixAction = await prompts.promptTypeToConfirm({
+            title: `Delete ${phrase}?`,
+            message: info?.confirm || 'The whole title is deleted.',
+            phrase,
+            confirmText: info?.verb || 'Delete Title',
+          });
+          if (!fixAction) return;
+        } else if (!override && info?.destructive) {
           const confirmed = await window.showConfirmDialog?.({
             title: `${info.verb || 'Fix'}: ${finding.title}`,
             message: info.confirm || 'This changes a file on disk.',

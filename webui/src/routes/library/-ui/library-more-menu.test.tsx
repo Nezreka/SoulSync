@@ -12,16 +12,19 @@ import { createTestQueryClient } from '@/test/query-client';
 
 import {
   LibraryMoreMenu,
+  LibraryV2CanWatchContext,
   LibraryV2CanWishContext,
   LibraryV2CanWriteContext,
 } from './library-v2-page';
 
-function renderMenu(canWrite = true, canWish = false) {
+function renderMenu(canWrite = true, canWish = false, canWatch = canWish) {
   render(
     <QueryClientProvider client={createTestQueryClient()}>
       <LibraryV2CanWriteContext.Provider value={canWrite}>
         <LibraryV2CanWishContext.Provider value={canWish}>
-          <LibraryMoreMenu />
+          <LibraryV2CanWatchContext.Provider value={canWatch}>
+            <LibraryMoreMenu />
+          </LibraryV2CanWatchContext.Provider>
         </LibraryV2CanWishContext.Provider>
       </LibraryV2CanWriteContext.Provider>
     </QueryClientProvider>,
@@ -44,20 +47,32 @@ describe('the library More menu', () => {
 
   it('a profile that cannot change the library cannot start the library-wide writes', () => {
     const items = renderMenu(false);
-    expect(items[0]).toBeDisabled();
-    expect(items[1]).toBeDisabled();
+    // #2173: the library-wide search is the admin's, so it isn't offered at all
+    // #2209: nor Watch All, without the Watchlist
+    expect(items.map((i) => i.querySelector('.sync-more-name')?.textContent)).toEqual([
+      'Export artists',
+      'Release file tag values',
+    ]);
     // export only reads
-    expect(items[2]).toBeEnabled();
+    expect(items[0]).toBeEnabled();
     // #2084: releasing what Use File Tags saved changes the library
-    expect(items[3]).toBeDisabled();
+    expect(items[1]).toBeDisabled();
   });
 
   it('a household member watches all on their own watchlist, without the admin-only search', () => {
     // X1: Watch All adds to the caller's own watchlist; it was gated on the
     // admin flag, so a member in the shared library could not use it
     const items = renderMenu(false, true);
-    expect(items[0]).toBeDisabled();
-    expect(items[1]).toBeEnabled();
+    expect(items[0].querySelector('.sync-more-name')?.textContent).toBe('Watch All');
+    expect(items[0]).toBeEnabled();
+    expect(screen.queryByText('Automatic Search')).toBeNull();
+  });
+
+  it('#2209: a member who may wish but has no Watchlist gets no Watch All', () => {
+    const items = renderMenu(false, true, false);
+    expect(items.map((i) => i.querySelector('.sync-more-name')?.textContent)).not.toContain(
+      'Watch All',
+    );
   });
 
   it('Export opens its window', () => {

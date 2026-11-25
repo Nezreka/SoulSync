@@ -328,6 +328,9 @@ NOT_A_SURFACE = {
     '/api/discover/popularity-backfill/cancel',  # backfill state, no rows
     '/api/discover/inbox/<int:item_id>/state',  # one success bool
     '/api/discover/inbox/dismiss-all',  # how many dismissed, no rows
+    '/api/discover/starter',  # the new-profile banner's state and your own picks
+    '/api/discover/starter/dismiss',  # one success bool
+    '/api/discover/starter/picks',  # your own picks echoed back, plus build progress
     '/api/discover/inbox/refresh',  # "started" ack for the background refresh
     # POST /api/discover/recipes returns a mix card, but mixes exclude blocked
     # artists at build time (skip_artist + blocked-fingerprint rebuild, pinned
@@ -352,18 +355,33 @@ NOT_A_SURFACE = {
 # by wraps: every wrapper hide_blocked_in_response builds shares this one.
 _FILTER_CODE = hide_blocked_in_response({})(lambda: None).__code__
 
+# permission gates (requires / requires_any) may sit outside the filter: they
+# either refuse or call straight through, never return rows of their own and
+# never cache, so a new block can't wait behind them. every route of a kind
+# shares one wrapper code object, same as the filter's.
+from core.permissions import requires as _requires, requires_any as _requires_any  # noqa: E402
+_GATE_CODES = {
+    _requires("music.access")(lambda: None).__code__,
+    _requires_any("music.access")(lambda: None).__code__,
+}
+
 
 def _is_hidden(view) -> bool:
-    """True only when the blocked-artist filter is the OUTERMOST wrapper.
+    """True only when the blocked-artist filter is the OUTERMOST wrapper (past any permission gate).
 
     Under a shelf cache the filter must wrap the cache: a cached response
     would otherwise skip the filter and a new block would wait out the TTL.
     Walks the __wrapped__ chain (both decorators use functools.wraps, so it is
     intact); the first frame has to be the filter's.
     """
-    if getattr(view, '__code__', None) is _FILTER_CODE:
+    node = view
+    while node is not None and getattr(node, '__code__', None) in _GATE_CODES:
+        node = getattr(node, '__wrapped__', None)  # a gate, not a row source
+    if node is None:
+        return False
+    if getattr(node, '__code__', None) is _FILTER_CODE:
         return True
-    node = getattr(view, '__wrapped__', None)
+    node = getattr(node, '__wrapped__', None)
     while node is not None:
         if getattr(node, '__code__', None) is _FILTER_CODE:
             return False  # present, but inside another wrapper: not outermost

@@ -103,7 +103,8 @@ def test_written_list_reads_back_as_no_change(tmp_path, multi, ext, codec):
     assert tw.read_file_tags(str(path))['artists'] == ['Camellia', 'Toby Fox']
 
 
-def test_picards_artists_frame_is_read_and_kept_one(tmp_path, multi):
+@pytest.mark.parametrize('partial', [True, False])
+def test_picards_artists_frame_is_read_and_kept_one(tmp_path, multi, partial):
     """Nezreka's review: Picard writes TXXX:ARTISTS; only TXXX:Artists was
     read, so its files always showed a change and got a second frame"""
     if not shutil.which('ffmpeg'):
@@ -117,7 +118,12 @@ def test_picards_artists_frame_is_read_and_kept_one(tmp_path, multi):
     read = tw.read_file_tags(str(path))
     assert read['artists'] == ['Camellia', 'Toby Fox']
     assert _row(tw.build_tag_diff(read, DB), 'artists')['changed'] is False
-    tw.write_tag_fields(str(path), {'artists': ['Camellia', 'Toby Fox', 'Guest']})
+    artists = ['Camellia', 'Toby Fox', 'Guest']
+    if partial:
+        result = tw.write_tag_fields(str(path), {'artists': artists})
+    else:
+        result = tw.write_tags_to_file(str(path), {**DB, 'artists_list': artists})
+    assert result['success'], result
     frames = [k for k in ID3(str(path)).keys() if k.upper() == 'TXXX:ARTISTS']
     assert frames == ['TXXX:ARTISTS']
     assert tw.read_file_tags(str(path))['artists'] == ['Camellia', 'Toby Fox', 'Guest']

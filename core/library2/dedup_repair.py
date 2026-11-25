@@ -267,6 +267,48 @@ def _pair_has_conflict(first: Dict[str, str], second: Dict[str, str]) -> bool:
     return bool(disputed & _STRONG_ARTIST_SOURCES) or len(agreed & _STRONG_ARTIST_SOURCES) < 2
 
 
+def _provably_different(first: Dict[str, str], second: Dict[str, str]) -> bool:
+    """two rows that are two ARTISTS, not one artist with a bad id on it.
+
+    a name is not an identity: there are two bands called Nirvana, and they
+    were alias-linked for sharing the name and shown as one artist with the
+    two discographies run together. the ids are the evidence, and they are
+    weighed, because SoulSync's own enrichment sometimes puts a wrong id on a
+    row (a lone disagreeing Deezer or Spotify id is usually that, and those
+    pairs stay linked as before):
+
+    * MusicBrainz ids that both exist and differ: MusicBrainz gives one id
+      to one artist and tells same-named ones apart by design;
+    * or two of the strong catalogues disagree and none of them agrees:
+      two wrong ids on one row, on two services, is not a slip.
+    """
+    disputed, agreed = set(), set()
+    for source in _STRONG_ARTIST_SOURCES:
+        a, b = first.get(source), second.get(source)
+        if not a or not b:
+            continue
+        (agreed if _id_values(a) & _id_values(b) else disputed).add(source)
+    if "musicbrainz" in disputed:
+        return True
+    return len(disputed) >= 2 and not agreed
+
+
+def _same_name_clusters(members: List[Any]) -> List[List[Any]]:
+    """a same-named group split into the artists it holds: each member joins
+    the first cluster none of whose members it is provably different from"""
+    clusters: List[List[Any]] = []
+    ids = {int(m["id"]): _stored_ids(m) for m in members}
+    for member in members:
+        mine = ids[int(member["id"])]
+        for cluster in clusters:
+            if not any(_provably_different(mine, ids[int(other["id"])]) for other in cluster):
+                cluster.append(member)
+                break
+        else:
+            clusters.append([member])
+    return clusters
+
+
 def _group_has_conflict(members: List[Any]) -> bool:
     ids = [_stored_ids(member) for member in members]
     return any(_pair_has_conflict(first, second)
@@ -376,7 +418,7 @@ def _merge_artist(cursor: Any, survivor: Any, duplicate: Any, reason: str = "") 
 def _album_rows_for_artist(conn: Any, artist_id: int) -> List[Dict[str, Any]]:
     rows = conn.execute(
         """SELECT al.id, al.title, al.album_type, al.origin, al.monitored,
-                  al.release_date, al.expected_track_count, al.track_count,
+                  al.release_date, al.year, al.expected_track_count, al.track_count,
                   al.spotify_id, al.musicbrainz_id, al.external_ids, al.soul_id,
                   (SELECT COUNT(*) FROM lib2_tracks t WHERE t.album_id = al.id) AS track_rows,
                   (SELECT COUNT(*) FROM lib2_track_files tf
@@ -743,6 +785,24 @@ def _years_disagree(a: Any, b: Any) -> bool:
         return value if value.isdigit() and value != "0000" else None
     first, second = year(a), year(b)
     return bool(first and second and first != second)
+
+
+def _row_year(row: Any) -> Optional[str]:
+    value = str(row.get("release_date") or row.get("year") or "")[:4]
+    return value if value.isdigit() and value != "0000" else None
+
+
+def _name_is_several_releases(members: List[Dict[str, Any]]) -> bool:
+    """#2110: the artist really has several releases of this name (weezer's
+    "weezer" of 1994, 2001, 2008, 2016): the albums with files carry more than
+    one year, or the provider's own listings do. Then the year decides which
+    row a same-named listing is, and a listing of a year nobody owns stays a
+    listing. One owned album whose tags say 2004 beside one listing that says
+    1994 is still the same album, as before."""
+    owned = {_row_year(m) for m in members if int(m.get("file_rows") or 0) > 0}
+    listed = {_row_year(m) for m in members
+              if m.get("origin") == "discography" and not int(m.get("file_rows") or 0)}
+    return len(owned - {None}) > 1 or len(listed - {None}) > 1
 
 
 def _release_ids_disagree(a: Any, b: Any) -> bool:
@@ -1240,11 +1300,24 @@ def _fold_albums_within_artist(conn: Any, cursor: Any, artist_id: int,
             continue
         members.sort(key=_survivor_sort_key)
         survivor = members[0]
+        by_title: Dict[tuple, List[Dict[str, Any]]] = {}
+        for member in members:
+            by_title.setdefault((release_title_key(member["title"]),
+                                 _bucket(member["album_type"])), []).append(member)
+        several = {key for key, rows in by_title.items() if _name_is_several_releases(rows)}
 
-        def _takes(home: Dict[str, Any], duplicate: Dict[str, Any]) -> bool:
+        def _takes(home: Dict[str, Any], duplicate: Dict[str, Any],
+                   several=several) -> bool:
             # A title twin keeps the rule it always had. A pair that only ever
             # met through provider ids has to clear the id evidence first.
-            evidence = (_shares_title_key(home, duplicate)
+            title_twin = _shares_title_key(home, duplicate)
+            if (title_twin and _years_disagree(home, duplicate)
+                    and (release_title_key(home["title"]),
+                         _bucket(home["album_type"])) in several):
+                # same name, another year, and the name is several releases:
+                # the 2016 listing is not the 1994 album (#2110)
+                title_twin = False
+            evidence = (title_twin
                         or _identity_supports_fold(home, duplicate))
             return bool(evidence
                         and _counts_compatible(home, duplicate)
@@ -1357,20 +1430,40 @@ def merge_artist_twins(conn: Any, stats: Dict[str, Any]) -> set:
             continue
         if _group_has_conflict(members):
             members.sort(key=_survivor_key, reverse=True)
-            canonical = members[0]
             from core.library2.artist_aliases import (
-                AliasLinkError, link_artist_alias)
-            for member in members[1:]:
-                if member["canonical_artist_id"] is not None:
-                    continue
-                try:
-                    link_artist_alias(conn, member["id"], canonical["id"])
-                    stats["alias_linked"] += 1
-                except AliasLinkError as link_error:
-                    logger.info(
-                        "Same-name conflict group %r: could not alias-link "
-                        "%s -> %s: %s", canonical["name"], member["id"],
-                        canonical["id"], link_error)
+                AliasLinkError, link_artist_alias, unlink_artist_alias)
+            # the group may be more than one artist: each cluster is linked
+            # within itself and never to another (see _provably_different)
+            clusters = _same_name_clusters(members)
+            cluster_of = {int(m["id"]): index for index, cluster in enumerate(clusters)
+                          for m in cluster}
+            for cluster in clusters:
+                canonical = cluster[0]
+                # the cluster's first row stands on its own: an earlier pass
+                # may have linked it into what is a different artist
+                linked_to = canonical["canonical_artist_id"]
+                if linked_to is not None:
+                    unlink_artist_alias(conn, canonical["id"])
+                    if cluster_of.get(int(linked_to)) != cluster_of[int(canonical["id"])]:
+                        stats["alias_unlinked"] = stats.get("alias_unlinked", 0) + 1
+                        logger.info("Same-named artists %r: %s is a different artist from %s, unlinked",
+                                    canonical["name"], canonical["id"], linked_to)
+                for member in cluster[1:]:
+                    linked_to = member["canonical_artist_id"]
+                    if linked_to is not None and int(linked_to) == int(canonical["id"]):
+                        continue
+                    if linked_to is not None:
+                        unlink_artist_alias(conn, member["id"])
+                        if cluster_of.get(int(linked_to)) != cluster_of[int(member["id"])]:
+                            stats["alias_unlinked"] = stats.get("alias_unlinked", 0) + 1
+                    try:
+                        link_artist_alias(conn, member["id"], canonical["id"])
+                        stats["alias_linked"] += 1
+                    except AliasLinkError as link_error:
+                        logger.info(
+                            "Same-name conflict group %r: could not alias-link "
+                            "%s -> %s: %s", canonical["name"], member["id"],
+                            canonical["id"], link_error)
             continue
         members.sort(key=_survivor_key, reverse=True)
         survivor = members[0]

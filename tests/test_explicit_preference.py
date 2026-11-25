@@ -139,12 +139,13 @@ def test_settings_ui_wires_the_sub_toggle():
     index = (root / 'webui' / 'index.html').read_text(encoding='utf-8', errors='replace')
     settings_js = (root / 'webui' / 'src' / 'features' / 'settings' / 'shell.ts').read_text(encoding='utf-8')
 
-    # Filtering is React now (SETTINGS_PORT.md step 5)
-    tab = (root / 'webui' / 'src' / 'features' / 'settings' / 'tabs' / 'downloads-tab.tsx').read_text(encoding='utf-8')
+    # Filtering is Downloads > Filtering (settings-bic)
+    tab = (root / 'webui' / 'src' / 'features' / 'settings' / 'tabs' / 'downloads' / 'filtering-view.tsx').read_text(encoding='utf-8')
     values = (root / 'webui' / 'src' / 'features' / 'settings' / 'tabs' / 'downloads.ts').read_text(encoding='utf-8')
     assert 'id="prefer-explicit"' in tab
-    assert "disabled={blocked}" in tab                    # greyed out with the parent
-    assert "store.set('content_filter', 'prefer_explicit', v)" in tab
+    block = tab[tab.index('id="prefer-explicit"'):tab.index('id="prefer-explicit"') + 300]
+    assert "disabled={blocked}" in block                  # greyed out with the parent
+    assert "store.set('content_filter', 'prefer_explicit', event.target.checked)" in block
     assert "prefer_explicit === true" in values
     assert 'prefer-explicit' not in index and 'prefer-explicit' not in settings_js
 
@@ -236,12 +237,12 @@ def test_settings_ui_wires_never_download_clean():
     index = (root / 'webui' / 'index.html').read_text(encoding='utf-8', errors='replace')
     settings_js = (root / 'webui' / 'src' / 'features' / 'settings' / 'shell.ts').read_text(encoding='utf-8')
 
-    # Filtering is React now (SETTINGS_PORT.md step 5)
-    tab = (root / 'webui' / 'src' / 'features' / 'settings' / 'tabs' / 'downloads-tab.tsx').read_text(encoding='utf-8')
+    # Filtering is Downloads > Filtering (settings-bic)
+    tab = (root / 'webui' / 'src' / 'features' / 'settings' / 'tabs' / 'downloads' / 'filtering-view.tsx').read_text(encoding='utf-8')
     values = (root / 'webui' / 'src' / 'features' / 'settings' / 'tabs' / 'downloads.ts').read_text(encoding='utf-8')
     assert 'id="exclude-clean"' in tab
     block = tab[tab.index('id="exclude-clean"'):tab.index('id="exclude-clean"') + 300]
     assert "disabled={blocked}" in block                  # greyed out with the parent
-    assert "store.set('content_filter', 'exclude_clean', v)" in tab
+    assert "store.set('content_filter', 'exclude_clean', event.target.checked)" in block
     assert "exclude_clean === true" in values
     assert 'exclude-clean' not in index and 'exclude-clean' not in settings_js

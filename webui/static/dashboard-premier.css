@@ -1487,6 +1487,11 @@ body.max-performance #dashboard-page .listen-hero-play::after {
     background: none;
     box-shadow: none;
 }
+/* a member's hero has no orb stage (the workers are the admins', #2196):
+   the greeting and the library take the whole row, music and video */
+#dashboard-page .dashboard-header.dash-hero--solo > .dash-hero-main {
+    grid-column: 1 / -1;
+}
 /* the old card's accent lines along its bottom edge */
 #dashboard-page.dash-room .dashboard-header.dash-hero .dashboard-header-sweep,
 #dashboard-page.dash-room .dashboard-header.dash-hero::after {
@@ -3328,5 +3333,114 @@ body.max-performance #dashboard-page.dash-room .dash-tile-sub::before {
         -webkit-line-clamp: 2;
         white-space: normal;
         line-height: 1.25;
+    }
+}
+
+/* ── "Your <year> is ready": december's banner (year-ready-banner.tsx) ── */
+#dashboard-page .year-ready {
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    padding: 22px 26px;
+    border-radius: 20px;
+    border: 1px solid rgba(var(--accent-light-rgb), 0.3);
+    background:
+        linear-gradient(115deg, rgba(var(--accent-light-rgb), 0.2), rgba(var(--accent-rgb), 0.04) 60%),
+        var(--black-a45);
+    box-shadow: 0 14px 40px var(--black-a35);
+}
+#dashboard-page .year-ready-glow {
+    position: absolute;
+    width: 320px;
+    height: 320px;
+    left: -90px;
+    top: -170px;
+    border-radius: var(--radius-circle);
+    background: radial-gradient(closest-side, rgba(var(--accent-light-rgb), 0.35), transparent);
+    pointer-events: none;
+}
+#dashboard-page .year-ready-text {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+#dashboard-page .year-ready-kicker {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: rgb(var(--accent-light-rgb));
+}
+#dashboard-page .year-ready-title {
+    font-size: 1.6rem;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    color: var(--text-bright);
+}
+#dashboard-page .year-ready-sub {
+    font-size: 0.9rem;
+    color: var(--white-a65);
+}
+#dashboard-page .year-ready-actions {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: none;
+}
+#dashboard-page .year-ready-open {
+    height: 40px;
+    padding: 0 20px;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: var(--text-bright);
+    color: var(--bg-primary);
+    font: inherit;
+    font-size: 0.9rem;
+    font-weight: 750;
+    cursor: pointer;
+    transition: transform var(--dur-fast) var(--ease-standard);
+}
+#dashboard-page .year-ready-open:hover {
+    transform: scale(1.03);
+}
+#dashboard-page .year-ready-dismiss {
+    width: 34px;
+    height: 34px;
+    border-radius: var(--radius-circle);
+    border: 1px solid var(--white-a12);
+    background: var(--black-a25);
+    color: var(--white-a65);
+    font-size: 1.1rem;
+    cursor: pointer;
+}
+#dashboard-page .year-ready-dismiss:hover {
+    color: var(--text-bright);
+    background: var(--white-a10);
+}
+#dashboard-page .year-ready-open:focus-visible,
+#dashboard-page .year-ready-dismiss:focus-visible {
+    outline: 2px solid rgba(var(--accent-rgb), 0.9);
+    outline-offset: 2px;
+}
+@media (max-width: 640px) {
+    #dashboard-page .year-ready {
+        flex-direction: column;
+        align-items: flex-start;
+        padding: 20px 18px;
+    }
+    #dashboard-page .year-ready-title {
+        font-size: 1.3rem;
+    }
+    #dashboard-page .year-ready-actions {
+        width: 100%;
+    }
+    #dashboard-page .year-ready-open {
+        flex: 1;
     }
 }

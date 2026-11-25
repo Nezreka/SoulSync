@@ -52,12 +52,12 @@ function respond(body: unknown, ok = true) {
 }
 
 describe('the shell hands over to the React tabs', () => {
-  it('opening a tab shows its React slot, and a failing mount does not break the switch', () => {
+  it('opening a tab is handed to the page, and a failing page does not break the caller', () => {
     document.body.innerHTML = `<div id="settings-page">
       <button class="stg-tab" data-tab="appearance"></button>
       <button class="stg-tab" data-tab="logs"></button>
-      <div data-stg="appearance" data-stg-react="appearance"></div>
-      <div data-stg="logs"></div></div>`;
+      <div data-stg-react="appearance"></div>
+      <div data-stg-react="advanced"></div></div>`;
     const shown: string[] = [];
     shell.SoulSyncSettings = {
       show: (tab: string) => {
@@ -67,15 +67,11 @@ describe('the shell hands over to the React tabs', () => {
     };
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     switchSettingsTab('appearance');
+    // the page owns where it is (nav.ts) and shows its own tabs; old keys
+    // such as 'logs' are its aliases, so they are handed over as they came
     expect(shown).toEqual(['appearance']);
-    expect(
-      (document.querySelector('[data-stg-react="appearance"]') as HTMLElement).style.display,
-    ).toBe('');
-    expect((document.querySelector('[data-stg="logs"]') as HTMLElement).style.display).toBe('none');
     expect(() => switchSettingsTab('logs')).not.toThrow();
-    expect(document.querySelector('.stg-tab[data-tab="logs"]')!.classList.contains('active')).toBe(
-      true,
-    );
+    expect(shown).toEqual(['appearance', 'logs']);
     error.mockRestore();
   });
 
@@ -118,20 +114,32 @@ describe('the shell hands over to the React tabs', () => {
     expect(btn.dataset.state).toBe('saved');
   });
 
-  it('a save the settings never loaded for is refused, and a template rule holds it back', async () => {
+  it('a save the settings never loaded for is refused; a bad template holds back only itself', async () => {
     shell.showToast = vi.fn();
     const fetcher = respond({ success: true });
     shell._settingsLoadFailed = true;
     await saveSettings(false);
     expect(fetcher).not.toHaveBeenCalled();
     shell._settingsLoadFailed = false;
-    shell.SoulSyncSettings = { templateErrors: () => ['album: no $title'], flush: vi.fn() };
+    document.body.innerHTML = `<button id="save-settings" data-state="idle"><span></span></button>`;
+    const showBlocker = vi.fn();
+    const flush = vi.fn(async () => true);
+    const held =
+      'The album path template would not work: no $title. It is not saved until it is fixed.';
+    shell.SoulSyncSettings = {
+      templateErrors: () => ['album: no $title'],
+      blockers: () => [{ message: held }],
+      showBlocker,
+      flush,
+    };
     await saveSettings(false);
-    expect(fetcher).not.toHaveBeenCalled();
-    expect(shell.showToast).toHaveBeenCalledWith(
-      'Template validation failed: album: no $title',
-      'error',
-    );
+    // the save goes ahead: the store sends everything but that template
+    expect(fetcher).toHaveBeenCalled();
+    expect(flush).toHaveBeenCalledOnce();
+    // and the status says what was held, and goes to it
+    expect(document.getElementById('save-settings')!.dataset.state).toBe('blocked');
+    expect(shell.showToast).toHaveBeenCalledWith(held, 'error');
+    expect(showBlocker).toHaveBeenCalledOnce();
   });
 
   it("the page wires no field of its own: every control is a React tab's; the button saves", async () => {
@@ -146,10 +154,14 @@ describe('the shell hands over to the React tabs', () => {
       .getElementById('stg-search-input')!
       .dispatchEvent(new Event('input', { bubbles: true }));
     await new Promise((r) => setTimeout(r, 0));
-    expect(fetcher).not.toHaveBeenCalled();
-    expect(document.getElementById('save-settings')!.dataset.state).toBe('idle');
+    // the page's own reads (System > Server Activity asks for its settings)
+    // are not saves: nothing is posted
+    const posts = () => fetcher.mock.calls.filter(([, init]) => init?.method === 'POST');
+    expect(posts()).toEqual([]);
+    // nothing changed: the status stays at rest (#2187)
+    expect(document.getElementById('save-settings')!.dataset.state).toBe('rest');
     document.getElementById('save-settings')!.click();
-    await vi.waitFor(() => expect(fetcher).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(posts()).toHaveLength(1));
   });
 });
 

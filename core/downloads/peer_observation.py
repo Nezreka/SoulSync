@@ -50,16 +50,31 @@ def observe_peer(username: str, bytes_per_second: float, sample_seconds: float) 
             previous.sample_count += 1
 
 
+def _speed_class(observed_bps: float | None) -> int:
+    """3 a peer measured healthy, 2 one measured decent, 1 one never
+    measured, 0 a known crawler.
+
+    there were only three classes, and anything under the healthy mark was
+    the bottom one: a peer measured at 300-499 KB/s, with a free slot, ranked
+    BELOW a peer nobody had ever measured with no free slot and three hundred
+    in its queue. a measured, usable speed is better evidence than none."""
+    if observed_bps is None:
+        return 1
+    if observed_bps >= HEALTHY_PEER_BPS:
+        return 3
+    return 2 if observed_bps >= HEALTHY_PEER_BPS / 2 else 0
+
+
 def peer_availability_key(peer: Any, observed_bps: float | None, *, occupancy: int = 0) -> tuple:
     """Sort key (higher is better) for how quickly a peer would likely serve us.
 
     Measured throughput outranks anything the peer advertises: a peer with a
-    healthy measurement first, then peers never measured, then known
-    crawlers. ``occupancy`` is how many of our own transfers the peer is
+    healthy measurement first, then one measured decent, then peers never
+    measured, then known crawlers (_speed_class). ``occupancy`` is how many of our own transfers the peer is
     already serving. Callers append their own tie-breakers.
     """
     return (
-        1 if observed_bps is None else (2 if observed_bps >= HEALTHY_PEER_BPS else 0),
+        _speed_class(observed_bps),
         observed_bps or 0,
         getattr(peer, 'free_upload_slots', 0) or 0,
         -(getattr(peer, 'queue_length', 0) or 0),

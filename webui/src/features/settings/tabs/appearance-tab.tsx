@@ -1,25 +1,28 @@
 /**
- * The Appearance tab of Settings, ported from index.html and settings.js
- * (SETTINGS_PORT.md, step 2). Same markup, classes and ids as the vanilla
- * page, so settings-premier.css, the settings search, the tour and
- * media-player.js's visualizer listener all find what they did before.
+ * The Appearance tab (settings-bic DESIGN.md 3.3), one page on the parts:
+ * the hero reading the look back, Show only what you use (a door to the
+ * feature picker), Look (accent, custom colour, sidebar visualizer), Effects
+ * (the four switches, the two device-only ones marked), Sidebar weather
+ * (open, with its own Save and Clear as before) and, on the video side,
+ * Video pages.
  *
- * Two slots hold it, because the page lays its blocks out in columns:
- *  - part "ui": Show only what you use, and UI Appearance
- *  - part "weather": the Sidebar Weather tile
+ * Same ids, keys and saves as the page it replaces. The accent applies at
+ * once (applyAccentColor paints the whole app),
+ * media-player.js still hears the visualizer select's change event, and the
+ * four effect switches show init.js's window flags, which own them.
  */
 
-import {
-  type MouseEvent,
-  useEffect,
-  useReducer,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from 'react';
+import { type KeyboardEvent, useEffect, useReducer, useRef, useState } from 'react';
+
+import { useFeaturesLocked } from '@/platform/features';
 
 import type { SettingsTabProps } from '../host';
+import type { SettingsStore } from '../settings-store';
+import type { WeatherLine } from './appearance/words';
 
+import { useNav } from '../nav';
+import { Btn, Card, FieldLine, Row, Say, Select, Switch, Tag, TextField } from '../ui';
+import s from '../ui/settings.module.css';
 import {
   ACCENT_PRESETS,
   VISUALIZERS,
@@ -27,6 +30,9 @@ import {
   resolveAppearance,
   savedEffectValue,
 } from './appearance';
+import { useChanged, useValues } from './downloads/behaviour-view';
+import { ViewPanel } from './downloads/downloads-page';
+import { VideoPagesCard } from './library-video-prefs';
 
 const TAB = 'appearance';
 
@@ -34,224 +40,7 @@ function toast(message: string, type: string) {
   window.showToast?.(message, type);
 }
 
-/** the page's collapsible tile, exactly as its inline handler did it. the
- *  settings search and the tab switch change these classes on the nodes
- *  themselves, so this stays out of React state */
-function toggleSection(event: MouseEvent<HTMLElement>) {
-  const header = event.currentTarget;
-  header.classList.toggle('collapsed');
-  const body = header.nextElementSibling as HTMLElement | null;
-  if (!body) return;
-  body.classList.toggle('collapsed');
-  body.style.display = body.classList.contains('collapsed') ? 'none' : '';
-}
-
-function UiAppearance({ store }: SettingsTabProps) {
-  const state = useSyncExternalStore(store.subscribe, store.getState);
-  // the effect switches live in window flags the appliers own: re-read after each
-  const [, reread] = useReducer((n: number) => n + 1, 0);
-  const values = resolveAppearance(state.settings);
-  const flags = effectFlags();
-  const swatch = useRef<HTMLDivElement>(null);
-
-  // applyAccentColor paints the swatch by id, and ran before this mounted
-  useEffect(() => {
-    if (swatch.current) swatch.current.style.background = values.accent;
-  }, [values.accent]);
-
-  const pickPreset = (preset: string) => {
-    window.applyAccentColor?.(preset === 'custom' ? values.custom : preset);
-    store.set('ui_appearance', 'accent_preset', preset);
-  };
-  const pickCustom = (hex: string) => {
-    window.applyAccentColor?.(hex);
-    store.set('ui_appearance', 'accent_color', hex);
-  };
-  const effect = (
-    key: 'particles' | 'workerOrbs' | 'reduceEffects' | 'maxPerformance',
-    setting: string,
-    apply: ((enabled: boolean) => void) | undefined,
-    enabled: boolean,
-  ) => {
-    apply?.(enabled);
-    store.set('ui_appearance', setting, savedEffectValue(key));
-    reread();
-  };
-  const locked = flags.maxPerformance ? 'form-group setting-overridden' : 'form-group';
-
-  return (
-    <>
-      {/* what shows in the app (#1909). per profile, so it lives in the
-          picker, this is just a door to it */}
-      <div className="settings-group" data-stg={TAB}>
-        <h3>Show only what you use</h3>
-        <div className="form-group">
-          <small className="settings-hint">
-            Hide the parts of SoulSync you don't use, like podcasts, audiobooks or the video side.
-            They keep working and come back with one switch. Each profile picks its own.
-          </small>
-          <button
-            type="button"
-            className="test-button"
-            id="settings-open-feature-picker"
-            onClick={() => window.openFeaturePicker?.()}
-          >
-            Customize SoulSync
-          </button>
-        </div>
-      </div>
-
-      <div className="settings-group" data-stg={TAB}>
-        <h3>UI Appearance</h3>
-        <div className="form-group">
-          <label>Accent Color:</label>
-          <div className="accent-color-selector">
-            <select
-              id="accent-preset"
-              className="form-select"
-              value={values.preset}
-              onChange={(event) => pickPreset(event.target.value)}
-            >
-              {ACCENT_PRESETS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-            <div className="accent-preview-swatch" id="accent-preview-swatch" ref={swatch}></div>
-          </div>
-          <small className="settings-hint">Changes the accent color across the entire UI</small>
-        </div>
-        <div
-          className="form-group"
-          id="custom-color-group"
-          style={{ display: values.preset === 'custom' ? undefined : 'none' }}
-        >
-          <label>Custom Color:</label>
-          <input
-            type="color"
-            id="accent-custom-color"
-            value={values.custom}
-            onChange={(event) => pickCustom(event.target.value)}
-          />
-        </div>
-        <div className="form-group">
-          <label>Sidebar Visualizer:</label>
-          <select
-            id="sidebar-visualizer-type"
-            className="form-select"
-            value={values.visualizer}
-            // media-player.js hears the same change event and swaps the visualizer
-            onChange={(event) =>
-              store.set('ui_appearance', 'sidebar_visualizer', event.target.value)
-            }
-          >
-            {VISUALIZERS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-          <small className="settings-hint">
-            Audio-reactive visualizer on the sidebar edge when music is playing
-          </small>
-        </div>
-        <div className={locked}>
-          <label className="checkbox-label">
-            <input
-              type="checkbox"
-              id="particles-enabled"
-              checked={flags.particles}
-              disabled={flags.maxPerformance}
-              onChange={(event) =>
-                effect(
-                  'particles',
-                  'particles_enabled',
-                  window.applyParticlesSetting,
-                  event.target.checked,
-                )
-              }
-            />
-            Background Particles
-          </label>
-          <small className="settings-hint">
-            Animated particle effects behind each page. Off by default — enable for the eye candy
-            (uses GPU).
-          </small>
-        </div>
-        <div className={locked}>
-          <label className="checkbox-label">
-            <input
-              type="checkbox"
-              id="worker-orbs-enabled"
-              checked={flags.workerOrbs}
-              disabled={flags.maxPerformance}
-              onChange={(event) =>
-                effect(
-                  'workerOrbs',
-                  'worker_orbs_enabled',
-                  window.applyWorkerOrbsSetting,
-                  event.target.checked,
-                )
-              }
-            />
-            Worker Orbs
-          </label>
-          <small className="settings-hint">
-            Dashboard header buttons animate as floating orbs. Hover the header to expand. Desktop
-            only.
-          </small>
-        </div>
-        <div className={locked}>
-          <label className="checkbox-label">
-            <input
-              type="checkbox"
-              id="reduce-effects-enabled"
-              checked={flags.reduceEffects}
-              disabled={flags.maxPerformance}
-              onChange={(event) =>
-                effect(
-                  'reduceEffects',
-                  'reduce_effects',
-                  window.applyReduceEffects,
-                  event.target.checked,
-                )
-              }
-            />
-            Reduce Visual Effects
-          </label>
-          <small className="settings-hint">
-            Disables backdrop blur and shadows (the GPU-heavy bits). Keeps functional motion like
-            loading spinners. Good for low-end devices.
-          </small>
-        </div>
-        <div className="form-group">
-          <label className="checkbox-label">
-            <input
-              type="checkbox"
-              id="max-performance-enabled"
-              checked={flags.maxPerformance}
-              onChange={(event) =>
-                effect(
-                  'maxPerformance',
-                  'max_performance',
-                  window.applyMaxPerformance,
-                  event.target.checked,
-                )
-              }
-            />
-            Max Performance
-          </label>
-          <small className="settings-hint">
-            Nuclear low-power mode for software-rendered / no-GPU setups (e.g. Docker, remote
-            desktop). Turns off Worker Orbs, Particles, all blur/shadows AND every animation &amp;
-            transition (loading spinners go static). Overrides the three options above.
-          </small>
-        </div>
-      </div>
-    </>
-  );
-}
+// ── sidebar weather ──
 
 interface WeatherData {
   success?: boolean;
@@ -272,23 +61,23 @@ async function weatherApi(method: string, path: string, body?: unknown): Promise
   return (await response.json()) as WeatherData;
 }
 
-/** the line under the controls: where, how warm, how fresh */
+/** the line under the location: where, how warm, how fresh */
 export function weatherStatus(data: WeatherData): string {
   if (data.location && data.snapshot) {
     const current = data.snapshot.current;
     const temp = current && typeof current.temp === 'number' ? Math.round(current.temp) : null;
     const unit = data.units === 'celsius' ? '°C' : '°F';
     return temp === null
-      ? `${data.location.name} — waiting for first forecast`
-      : `${data.location.name} — ${temp}${unit}, updated ${data.snapshot.fetched_at || 'recently'}`;
+      ? `${data.location.name}: waiting for the first forecast`
+      : `${data.location.name}, ${temp}${unit}, updated ${data.snapshot.fetched_at || 'recently'}`;
   }
   if (data.location) {
     // switched off also means no snapshot: say that, not "unavailable"
     return data.enabled === false
-      ? `${data.location.name} — weather display off`
-      : `${data.location.name} — forecast unavailable right now`;
+      ? `${data.location.name}: weather display off`
+      : `${data.location.name}: forecast unavailable right now`;
   }
-  return 'Off — set a location to turn it on';
+  return 'Off: set a location to turn it on';
 }
 
 /** the sidebar line, popover and scene pick the change up without a reload */
@@ -306,12 +95,18 @@ function rebootSidebar() {
   }
 }
 
-function SidebarWeather({ opened }: SettingsTabProps) {
+const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
+
+/** the weather settings: loaded each time the tab is opened, as before */
+function useWeather(opened: number) {
   const [location, setLocation] = useState('');
   const [enabled, setEnabled] = useState(true);
   const [holidays, setHolidays] = useState(true);
   const [celsius, setCelsius] = useState(false);
-  const [status, setStatus] = useState('Loading...');
+  const [status, setStatus] = useState('Loading…');
+  const [failed, setFailed] = useState(false);
+  /** for the hero: null until it loaded */
+  const [line, setLine] = useState<WeatherLine | null>(null);
   const input = useRef<HTMLInputElement>(null);
 
   const load = async () => {
@@ -321,6 +116,7 @@ function SidebarWeather({ opened }: SettingsTabProps) {
       // just means no forecast is cached yet
       if (!data || data.success !== true) {
         setStatus('Could not load weather settings');
+        setFailed(true);
         return;
       }
       // not while it is being typed in
@@ -329,9 +125,12 @@ function SidebarWeather({ opened }: SettingsTabProps) {
       setCelsius(data.units === 'celsius');
       setHolidays(data.holidays !== false);
       setStatus(weatherStatus(data));
+      setFailed(false);
+      setLine({ place: data.location?.name || '', enabled: data.enabled !== false });
     } catch (error) {
       console.error('sidebar weather settings failed', error);
       setStatus('Could not load weather settings');
+      setFailed(true);
     }
   };
 
@@ -342,192 +141,462 @@ function SidebarWeather({ opened }: SettingsTabProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [opened]);
 
-  const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
-
-  const saveLocation = async () => {
-    const query = location.trim();
-    if (!query) {
-      toast('Enter a ZIP or city first', 'error');
-      return;
-    }
-    try {
-      const data = await weatherApi('PUT', '/location', { location: query });
-      if (data.success) {
-        toast(`Weather location set to ${data.location?.name}`, 'success');
-        void load();
-        rebootSidebar();
-      } else {
-        toast(data.error || 'Could not resolve that location', 'error');
+  return {
+    input,
+    location,
+    setLocation,
+    enabled,
+    holidays,
+    celsius,
+    status,
+    failed,
+    line,
+    async saveLocation() {
+      const query = location.trim();
+      if (!query) {
+        toast('Enter a ZIP or city first', 'error');
+        return;
       }
-    } catch (error) {
-      toast('Could not save location: ' + message(error), 'error');
-    }
-  };
-
-  const clearLocation = async () => {
-    try {
-      const data = await weatherApi('PUT', '/location', { location: '' });
-      if (data.success) {
-        toast('Sidebar weather turned off', 'success');
-        setLocation('');
-        void load();
-        rebootSidebar();
-      } else {
-        toast(data.error || 'Could not clear the location', 'error');
+      try {
+        const data = await weatherApi('PUT', '/location', { location: query });
+        if (data.success) {
+          toast(`Weather location set to ${data.location?.name}`, 'success');
+          void load();
+          rebootSidebar();
+        } else {
+          toast(data.error || 'Could not resolve that location', 'error');
+        }
+      } catch (error) {
+        toast('Could not save location: ' + message(error), 'error');
       }
-    } catch (error) {
-      toast('Could not clear location: ' + message(error), 'error');
-    }
-  };
-
-  const toggleEnabled = async (next: boolean) => {
-    setEnabled(next);
-    try {
-      const data = await weatherApi('PUT', '/display', { enabled: next });
-      if (data.success) {
-        toast(next ? 'Sidebar weather on' : 'Sidebar weather off', 'success');
-        rebootSidebar();
-      } else {
-        toast(data.error || 'Could not update the setting', 'error');
+    },
+    async clearLocation() {
+      try {
+        const data = await weatherApi('PUT', '/location', { location: '' });
+        if (data.success) {
+          toast('Sidebar weather turned off', 'success');
+          setLocation('');
+          void load();
+          rebootSidebar();
+        } else {
+          toast(data.error || 'Could not clear the location', 'error');
+        }
+      } catch (error) {
+        toast('Could not clear location: ' + message(error), 'error');
       }
-    } catch (error) {
-      toast('Could not update the setting: ' + message(error), 'error');
-    }
-  };
-
-  const toggleHolidays = async (next: boolean) => {
-    setHolidays(next);
-    try {
-      await fetch('/api/weather/holidays', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ enabled: next }),
-      });
-    } catch {
-      // the sidebar is re-read either way and shows what the server holds
-    } finally {
-      rebootSidebar();
-    }
-  };
-
-  const toggleUnits = async (next: boolean) => {
-    setCelsius(next);
-    try {
-      const data = await weatherApi('PUT', '/units', { use_celsius: next });
-      if (data.success) {
-        toast(`Using °${next ? 'C' : 'F'}`, 'success');
-        void load();
-        rebootSidebar();
-      } else {
-        toast(data.error || 'Could not update units', 'error');
+    },
+    async toggleEnabled(next: boolean) {
+      setEnabled(next);
+      setLine((l) => (l ? { ...l, enabled: next } : l));
+      try {
+        const data = await weatherApi('PUT', '/display', { enabled: next });
+        if (data.success) {
+          toast(next ? 'Sidebar weather on' : 'Sidebar weather off', 'success');
+          rebootSidebar();
+        } else {
+          toast(data.error || 'Could not update the setting', 'error');
+        }
+      } catch (error) {
+        toast('Could not update the setting: ' + message(error), 'error');
       }
-    } catch (error) {
-      toast('Could not update units: ' + message(error), 'error');
-    }
+    },
+    async toggleHolidays(next: boolean) {
+      setHolidays(next);
+      try {
+        await fetch('/api/weather/holidays', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({ enabled: next }),
+        });
+      } catch {
+        // the sidebar is re-read either way and shows what the server holds
+      } finally {
+        rebootSidebar();
+      }
+    },
+    async toggleUnits(next: boolean) {
+      setCelsius(next);
+      try {
+        const data = await weatherApi('PUT', '/units', { use_celsius: next });
+        if (data.success) {
+          toast(`Using °${next ? 'C' : 'F'}`, 'success');
+          void load();
+          rebootSidebar();
+        } else {
+          toast(data.error || 'Could not update units', 'error');
+        }
+      } catch (error) {
+        toast('Could not update units: ' + message(error), 'error');
+      }
+    },
   };
+}
 
-  const inline = { display: 'flex', alignItems: 'center', gap: '8px' } as const;
+type Weather = ReturnType<typeof useWeather>;
 
+function WeatherCard({ weather }: { weather: Weather }) {
   return (
-    <>
-      <div
-        className="settings-section-header collapsed"
-        data-stg={TAB}
-        onClick={toggleSection}
-        role="button"
-        tabIndex={0}
-        aria-expanded="false"
+    <Card
+      title="Sidebar weather"
+      hint="Time, temperature and a forecast line in the sidebar. Each change saves at once."
+    >
+      <Row
+        wide
+        label="Location"
+        htmlFor="sw-location"
+        help="A ZIP or a city. No API key and no other setup: the server looks the place up and fetches the forecast."
+        more="The forecast comes from Open-Meteo and is kept for 30 minutes. Clear turns the feature off."
       >
-        <span className="settings-section-arrow">&#9660;</span>
-        <h3>Sidebar Weather</h3>
-        <span className="settings-section-hint">Time, temp &amp; forecast line</span>
-      </div>
-      <div className="settings-section-body collapsed" data-stg={TAB} style={{ display: 'none' }}>
-        <div className="settings-group" data-stg={TAB}>
-          <div className="form-group">
-            <label>Location:</label>
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <input
-                type="text"
-                id="sw-location"
-                placeholder="ZIP or city, e.g. 97501 or Medford"
-                ref={input}
-                value={location}
-                onChange={(event) => setLocation(event.target.value)}
-              />
-              <button className="test-button" onClick={() => void saveLocation()}>
-                Save
-              </button>
-              <button className="test-button" onClick={() => void clearLocation()}>
-                Clear
-              </button>
-            </div>
-            <div className="help-text">
-              No API keys, no setup beyond this — the server looks up the location and fetches the
-              forecast (Open-Meteo, cached 30 min). Clear to turn the feature off.
-            </div>
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="sw-enabled" style={inline}>
-              <input
-                type="checkbox"
-                id="sw-enabled"
-                checked={enabled}
-                onChange={(event) => void toggleEnabled(event.target.checked)}
-              />
-              Show weather in the sidebar
-            </label>
-          </div>
-          <div className="help-text">
-            Master switch for the weather line, forecast popover and particle scene. The scene also
-            respects your OS "reduce motion" setting.
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="sw-holidays" style={inline}>
-              <input
-                type="checkbox"
-                id="sw-holidays"
-                checked={holidays}
-                onChange={(event) => void toggleHolidays(event.target.checked)}
-              />
-              Holiday decorations
-            </label>
-          </div>
-          <div className="help-text">
-            Halloween, Thanksgiving, Christmas, New Year's and Lunar New Year in the sidebar around
-            each, by your location's date. Christmas Day always snows.
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="sw-celsius" style={inline}>
-              <input
-                type="checkbox"
-                id="sw-celsius"
-                checked={celsius}
-                onChange={(event) => void toggleUnits(event.target.checked)}
-              />
-              Use &deg;C instead of &deg;F
-            </label>
-          </div>
-          <div className="help-text">
-            Auto-detected from the location (&deg;F for US, &deg;C elsewhere) — flip it here if you
-            prefer the other.
-          </div>
-
-          <div className="form-group">
-            <label>Status:</label>
-            <span id="sw-status" className="readonly-field">
-              {status}
-            </span>
-          </div>
-        </div>
-      </div>
-    </>
+        <FieldLine>
+          <TextField
+            full
+            id="sw-location"
+            placeholder="ZIP or city, like 97501 or Medford"
+            ref={weather.input}
+            value={weather.location}
+            onChange={(event) => weather.setLocation(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') void weather.saveLocation();
+            }}
+          />
+          <Btn small kind="primary" onClick={() => void weather.saveLocation()}>
+            Save
+          </Btn>
+          <Btn small kind="ghost" onClick={() => void weather.clearLocation()}>
+            Clear
+          </Btn>
+        </FieldLine>
+        <Say id="sw-status" tone={weather.failed ? 'bad' : undefined}>
+          {weather.status}
+        </Say>
+      </Row>
+      <Row
+        label="Show weather in the sidebar"
+        htmlFor="sw-enabled"
+        help="The weather line, the forecast popover and the particle scene. The scene also follows your system's reduce motion setting."
+      >
+        <Switch
+          id="sw-enabled"
+          checked={weather.enabled}
+          onChange={(event) => void weather.toggleEnabled(event.target.checked)}
+        />
+      </Row>
+      <Row
+        label="Holiday decorations"
+        htmlFor="sw-holidays"
+        help="Halloween, Thanksgiving, Christmas, New Year's and Lunar New Year in the sidebar around each, by your location's date."
+        more="Christmas Day always snows."
+      >
+        <Switch
+          id="sw-holidays"
+          checked={weather.holidays}
+          onChange={(event) => void weather.toggleHolidays(event.target.checked)}
+        />
+      </Row>
+      <Row
+        label="Use °C instead of °F"
+        htmlFor="sw-celsius"
+        help="Picked from the location: °F in the US, °C elsewhere. Flip it if you prefer the other."
+      >
+        <Switch
+          id="sw-celsius"
+          checked={weather.celsius}
+          onChange={(event) => void weather.toggleUnits(event.target.checked)}
+        />
+      </Row>
+    </Card>
   );
 }
 
+// ── the look ──
+
+/** the accent presets as swatches, one pick of eight. The select it was:
+ *  same values, same key */
+function AccentSwatches({
+  value,
+  custom,
+  onPick,
+}: {
+  value: string;
+  custom: string;
+  onPick: (value: string) => void;
+}) {
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const step =
+      event.key === 'ArrowRight' || event.key === 'ArrowDown'
+        ? 1
+        : event.key === 'ArrowLeft' || event.key === 'ArrowUp'
+          ? -1
+          : 0;
+    if (!step) return;
+    event.preventDefault();
+    const at = ACCENT_PRESETS.findIndex((o) => o.value === value);
+    const next = ACCENT_PRESETS[(at + step + ACCENT_PRESETS.length) % ACCENT_PRESETS.length];
+    onPick(next.value);
+    event.currentTarget
+      .querySelector<HTMLElement>(`[data-value="${CSS.escape(next.value)}"]`)
+      ?.focus();
+  };
+  return (
+    <div
+      id="accent-preset"
+      className={s.swatches}
+      role="radiogroup"
+      aria-label="Accent color"
+      data-value={value}
+      onKeyDown={onKeyDown}
+    >
+      {ACCENT_PRESETS.map((option) => {
+        const on = option.value === value;
+        const isCustom = option.value === 'custom';
+        return (
+          <button
+            key={option.value}
+            type="button"
+            role="radio"
+            aria-checked={on}
+            aria-label={option.label}
+            title={option.label}
+            tabIndex={on ? 0 : -1}
+            data-value={option.value}
+            className={isCustom ? s.swatchCustom : s.swatch}
+            onClick={() => onPick(option.value)}
+          >
+            <span
+              className={s.swatchDot}
+              style={{ background: isCustom ? custom : option.value }}
+            />
+            {isCustom ? 'Custom' : null}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function LookCard({ store }: { store: SettingsStore }) {
+  const { state } = useValues(store);
+  const values = resolveAppearance(state.settings);
+  const changed = (key: string) => useChanged(store, 'ui_appearance', key); // eslint-disable-line react-hooks/rules-of-hooks
+
+  const pickPreset = (preset: string) => {
+    window.applyAccentColor?.(preset === 'custom' ? values.custom : preset);
+    store.set('ui_appearance', 'accent_preset', preset);
+  };
+  const pickCustom = (hex: string) => {
+    window.applyAccentColor?.(hex);
+    store.set('ui_appearance', 'accent_color', hex);
+  };
+
+  return (
+    <Card title="Look" hint="The color of the app and what plays on the sidebar">
+      <Row
+        field
+        label="Accent color"
+        changed={changed('accent_preset')}
+        help="The color of what is picked, switched on and pressed, across the whole app. It changes as you pick."
+      >
+        <AccentSwatches value={values.preset} custom={values.custom} onPick={pickPreset} />
+      </Row>
+      <Row
+        sub
+        id="custom-color-group"
+        hidden={values.preset !== 'custom'}
+        label="Custom color"
+        htmlFor="accent-custom-color"
+        changed={changed('accent_color')}
+        help="Any color you like: the app follows it as you move."
+      >
+        <input
+          type="color"
+          id="accent-custom-color"
+          className={s.colorPick}
+          value={values.custom}
+          onChange={(event) => pickCustom(event.target.value)}
+        />
+      </Row>
+      <Row
+        field
+        label="Sidebar visualizer"
+        htmlFor="sidebar-visualizer-type"
+        changed={changed('sidebar_visualizer')}
+        help="An audio-reactive visualizer on the sidebar's edge while music plays."
+      >
+        <Select
+          id="sidebar-visualizer-type"
+          value={values.visualizer}
+          options={VISUALIZERS.map((o) => ({ ...o }))}
+          // media-player.js hears the same change event and swaps the visualizer
+          onChange={(event) => store.set('ui_appearance', 'sidebar_visualizer', event.target.value)}
+        />
+      </Row>
+    </Card>
+  );
+}
+
+function EffectsCard({ store, reread }: { store: SettingsStore; reread: () => void }) {
+  useValues(store);
+  const flags = effectFlags();
+  const max = flags.maxPerformance;
+  const effect = (
+    key: 'particles' | 'workerOrbs' | 'reduceEffects' | 'maxPerformance',
+    setting: string,
+    apply: ((enabled: boolean) => void) | undefined,
+    enabled: boolean,
+  ) => {
+    apply?.(enabled);
+    store.set('ui_appearance', setting, savedEffectValue(key));
+    reread();
+  };
+  const locked = 'Off while max performance is on. It comes back as it was.';
+  const device = (
+    <Tag>
+      <span title="Kept by this browser; another device keeps its own">This device</span>
+    </Tag>
+  );
+
+  return (
+    <Card
+      title="Effects"
+      hint="What moves and glows. The last two are kept per device, so a slow machine can go light on its own."
+    >
+      <Row
+        off={max}
+        label="Background particles"
+        htmlFor="particles-enabled"
+        help={
+          max ? locked : 'Animated particles behind each page. Off by default; they use the GPU.'
+        }
+      >
+        <Switch
+          id="particles-enabled"
+          checked={flags.particles}
+          disabled={max}
+          onChange={(event) =>
+            effect(
+              'particles',
+              'particles_enabled',
+              window.applyParticlesSetting,
+              event.target.checked,
+            )
+          }
+        />
+      </Row>
+      <Row
+        off={max}
+        label="Worker orbs"
+        htmlFor="worker-orbs-enabled"
+        help={
+          max
+            ? locked
+            : 'The Dashboard header buttons float as orbs; hover the header to open them. Desktop only.'
+        }
+      >
+        <Switch
+          id="worker-orbs-enabled"
+          checked={flags.workerOrbs}
+          disabled={max}
+          onChange={(event) =>
+            effect(
+              'workerOrbs',
+              'worker_orbs_enabled',
+              window.applyWorkerOrbsSetting,
+              event.target.checked,
+            )
+          }
+        />
+      </Row>
+      <Row
+        off={max}
+        label={<>Reduce visual effects {device}</>}
+        htmlFor="reduce-effects-enabled"
+        help={
+          max
+            ? locked
+            : 'Turns off backdrop blur and shadows, the GPU-heavy parts. Loading spinners keep moving. Good for low-end devices.'
+        }
+      >
+        <Switch
+          id="reduce-effects-enabled"
+          checked={flags.reduceEffects}
+          disabled={max}
+          onChange={(event) =>
+            effect(
+              'reduceEffects',
+              'reduce_effects',
+              window.applyReduceEffects,
+              event.target.checked,
+            )
+          }
+        />
+      </Row>
+      <Row
+        label={<>Max performance {device}</>}
+        htmlFor="max-performance-enabled"
+        help="For setups with no GPU, like Docker or remote desktop: orbs, particles, blur, shadows and every animation go, loading spinners included."
+        more="It overrides the three above while it is on, and they come back as they were when it goes off."
+      >
+        <Switch
+          id="max-performance-enabled"
+          checked={max}
+          onChange={(event) =>
+            effect(
+              'maxPerformance',
+              'max_performance',
+              window.applyMaxPerformance,
+              event.target.checked,
+            )
+          }
+        />
+      </Row>
+    </Card>
+  );
+}
+
+/** what shows in the app (#1909). per profile, so it lives in the picker:
+ *  this is a door to it */
+function FeaturesCard() {
+  return (
+    <Card
+      title="Show only what you use"
+      hint="Hide the parts of SoulSync you don't use, like podcasts, audiobooks or the video side. They keep working and come back with one switch. Each profile picks its own."
+      actions={
+        <Btn small id="settings-open-feature-picker" onClick={() => window.openFeaturePicker?.()}>
+          Customize SoulSync
+        </Btn>
+      }
+    >
+      {null}
+    </Card>
+  );
+}
+
+export function AppearancePage({ store, opened }: SettingsTabProps) {
+  const state = useNav();
+  const here = state.tab === TAB;
+  // the effect switches live in window flags the appliers own: re-read after each
+  const [, reread] = useReducer((n: number) => n + 1, 0);
+  const weather = useWeather(opened);
+  // an admin set what this profile shows and locked it: no door to the picker (#2164)
+  const featuresLocked = useFeaturesLocked();
+
+  return (
+    <div data-stg-new={TAB} hidden={!here}>
+      <ViewPanel tab={TAB} view="all" open={here}>
+        <div className={s.cards}>
+          {featuresLocked ? null : <FeaturesCard />}
+          <LookCard store={store} />
+          <EffectsCard store={store} reread={reread} />
+          <WeatherCard weather={weather} />
+          <VideoPagesCard />
+        </div>
+      </ViewPanel>
+    </div>
+  );
+}
+
+/** the Appearance tab: one page (settings-bic phase 5) */
 export function AppearanceTab(props: SettingsTabProps) {
-  return props.part === 'weather' ? <SidebarWeather {...props} /> : <UiAppearance {...props} />;
+  if (props.part === 'page') return <AppearancePage {...props} />;
+  return null;
 }

@@ -81,6 +81,14 @@ def is_open_profile_path(path: str, method: str) -> bool:
     method = (method or 'GET').upper()
     if path.startswith('/api/invite/') and method in ('GET', 'POST'):
         return True
+    # a device redeeming its pairing code (the code is the credential, an
+    # admin minted it; api/devices.py redeem_code)
+    if path == '/api/devices/redeem' and method == 'POST':
+        return True
+    # the reachability check's one-time URL (the nonce only lives in this
+    # process and the answer is the nonce itself; api/devices.py)
+    if method == 'GET' and path.startswith('/api/devices/reachability/'):
+        return True
     # the video calendar's iCal feed: calendar apps fetch it with no cookie, and
     # the token in the path is the credential (the route refuses unknown ones)
     from core.video.calendar_feed import is_feed_path
@@ -99,6 +107,11 @@ def no_profile_request_is_blocked(path: str, method: str) -> bool:
         return False
     # key-authed public api: the key is the credential there
     if path.startswith('/api/v1/') and not path.startswith('/api/v1/api-keys-internal'):
+        return False
+    # signed short-lived Chromecast stream endpoints: HMAC ?ct= token is the credential there
+    if method in ('GET', 'OPTIONS') and (
+        path.startswith('/api/player/cast-stream/') or path.startswith('/api/player/cast-hls/')
+    ):
         return False
     if method == 'GET' and path in _ALLOWED_GET:
         return False

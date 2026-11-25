@@ -18,6 +18,7 @@ import {
   getFeatures,
   installFeatures,
   isFeatureOn,
+  LOCKED_ATTR,
   renderOffer,
   loadFeatures,
   resetSideMemory,
@@ -68,6 +69,7 @@ afterEach(() => {
   server.resetHandlers();
   document.body.innerHTML = '';
   document.documentElement.removeAttribute('data-features-off');
+  document.documentElement.removeAttribute(LOCKED_ATTR);
 });
 
 describe('the sidebar filter', () => {
@@ -181,6 +183,7 @@ describe('load and save', () => {
     expect(JSON.parse(localStorage.getItem(FEATURES_CACHE_KEY)!)).toEqual({
       off: ['chat'],
       pages: ['chat', 'video-chat'],
+      locked: false,
     });
   });
 
@@ -320,7 +323,11 @@ describe('#2157: switching a part back on brings the sidebar back', () => {
     server.use(http.post('*/api/profiles/me/features', () => HttpResponse.json(payload([], []))));
     localStorage.setItem(FEATURES_CACHE_KEY, JSON.stringify({ off: ['chat'], pages: ['chat'] }));
     await saveFeatures({ off: [] });
-    expect(JSON.parse(localStorage.getItem(FEATURES_CACHE_KEY)!)).toEqual({ off: [], pages: [] });
+    expect(JSON.parse(localStorage.getItem(FEATURES_CACHE_KEY)!)).toEqual({
+      off: [],
+      pages: [],
+      locked: false,
+    });
   });
 });
 
@@ -336,17 +343,44 @@ describe('#2157: a profile an admin locked', () => {
       <div class="sidebar-customize"><button class="sidebar-customize-btn"></button></div>`;
   });
 
-  it('says so on the Customize button and offers nothing', async () => {
+  it('#2164: Customize goes away, no offer either, and comes back on unlock', async () => {
     server.use(http.get('*/api/profiles/me/features', () => HttpResponse.json(locked([], []))));
     await loadFeatures();
-    const btn = document.querySelector('.sidebar-customize-btn')!;
-    expect(btn.hasAttribute('data-locked')).toBe(true);
-    expect(btn.getAttribute('title')).toBe('Set by an admin');
+    const box = document.querySelector<HTMLElement>('.sidebar-customize')!;
+    expect(box.hidden).toBe(true);
+    expect(document.documentElement.hasAttribute(LOCKED_ATTR)).toBe(true);
     expect(document.querySelector('.sidebar-customize-offer')).toBeNull();
+    // the next page load hides it before paint too
+    expect(JSON.parse(localStorage.getItem(FEATURES_CACHE_KEY)!).locked).toBe(true);
 
     server.use(http.get('*/api/profiles/me/features', () => HttpResponse.json(payload([], []))));
     await loadFeatures();
-    expect(btn.hasAttribute('data-locked')).toBe(false);
+    expect(box.hidden).toBe(false);
+    expect(document.documentElement.hasAttribute(LOCKED_ATTR)).toBe(false);
+    expect(JSON.parse(localStorage.getItem(FEATURES_CACHE_KEY)!).locked).toBe(false);
+  });
+
+  it('#2164: the pre-paint replay hides Customize from the cache', () => {
+    const html = readFileSync(resolve(__dirname, '../../index.html'), 'utf8');
+    const start = html.indexOf("JSON.parse(localStorage.getItem('ss_features')");
+    const source = html.slice(
+      html.lastIndexOf('<script>', start) + '<script>'.length,
+      html.indexOf('</script>', start),
+    );
+    localStorage.setItem('ss_features', JSON.stringify({ off: [], pages: [], locked: true }));
+    new Function(source)();
+    expect(document.documentElement.hasAttribute(LOCKED_ATTR)).toBe(true);
+    document.documentElement.removeAttribute(LOCKED_ATTR);
+    localStorage.setItem('ss_features', JSON.stringify({ off: [], pages: [] }));
+    new Function(source)();
+    expect(document.documentElement.hasAttribute(LOCKED_ATTR)).toBe(false);
+  });
+
+  it('#2164: the stylesheet hides Customize while the attribute is on', () => {
+    const css = readFileSync(resolve(__dirname, '../../static/style.css'), 'utf8');
+    expect(css).toMatch(
+      new RegExp(`html\\[${LOCKED_ATTR}\\] \\.sidebar-customize \\{ display: none; \\}`),
+    );
   });
 
   it("the hidden page note has no 'show it' button", async () => {

@@ -2,9 +2,9 @@
  * The Settings page's own behaviour (SETTINGS_PORT.md step V4b): what was left
  * of settings.js once every tab was React. Opening the page (load, the first
  * tab), the tab switch, the search, the save status button and its save, the
- * keyboard on the section headers, Ctrl/Cmd+K, the password managers kept off
- * the credential fields, the masked secrets, and the Sources helpers other
- * pages call.
+ * keyboard on the section headers, / for the search, the password managers
+ * kept off the credential fields, the masked secrets, and the Sources helpers
+ * other pages call.
  *
  * The markup is still index.html's until the route is React (step V4c), so
  * this works on it exactly as settings.js did. It is in the shell bundle
@@ -15,7 +15,16 @@
  * them through window.SoulSyncSettings, as settings.js did.
  */
 
-type SaveState = 'idle' | 'pending' | 'saving' | 'saved' | 'error';
+// rest: nothing changed or saved yet this visit (#2187)
+// blocked: something is held back until its field is fixed (a naming
+// template that would not work is not saved; a MusicBrainz address holds
+// every save)
+type SaveState = 'rest' | 'idle' | 'pending' | 'saving' | 'saved' | 'error' | 'blocked';
+
+/** what is held back: the words (the host knows where the field is) */
+interface Blocker {
+  message: string;
+}
 
 interface Shell {
   _settingsPayload?: unknown;
@@ -26,9 +35,15 @@ interface Shell {
     hydrate: (settings: unknown) => void;
     show: (tab: string) => void;
     flush: () => Promise<boolean>;
-    templateErrors: () => string[];
-    playlistItemError: () => string | null;
     musicbrainzError: () => string | null;
+    /** how many changed settings wait to be saved */
+    pendingCount?: () => number;
+    /** what is held back right now */
+    blockers?: () => Blocker[];
+    /** go to the field the first of them is about */
+    showBlocker?: () => void;
+    /** what the server said when the last save failed */
+    lastError?: () => string | null;
   };
   openSourceModal?: (id: string) => void;
   checkQobuzAuthStatus?: () => unknown;
@@ -49,13 +64,17 @@ const toast = (message: string, type: string, tag?: string) =>
 // settings save themselves. the old Save Settings button and an "auto-saved"
 // toast after every keystroke told two stories; the button is now the one
 // quiet status, and still saves right away when clicked (the video side
-// hangs its own saves on that click)
+// hangs its own saves on that click). at rest, before anything changed or
+// saved, the music side shows nothing: "all changes saved" on a page that
+// was only opened read as a notice from nowhere (#2187)
 export const SETTINGS_SAVE_LABELS: Record<SaveState, string> = {
+  rest: 'All changes saved',
   idle: 'All changes saved',
   pending: 'Save now',
   saving: 'Saving…',
   saved: 'Saved',
   error: 'Retry save',
+  blocked: 'Something to fix',
 };
 let savedTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -67,15 +86,39 @@ export function setSettingsSaveState(state: SaveState) {
     savedTimer = null;
   }
   btn.dataset.state = state;
-  const label = btn.querySelector('span');
+  // the words sit in the button's last span (the first may hold its icon)
+  const spans = btn.querySelectorAll(':scope > span');
+  const label = spans[spans.length - 1] ?? null;
   const manual = shell()._settingsAutosaveOff === true;
-  if (label)
-    label.textContent =
-      manual && state === 'pending' ? 'Save changes' : SETTINGS_SAVE_LABELS[state];
-  if (manual) btn.title = state === 'pending' ? 'Autosave is off. Click to save your changes.' : '';
+  const host = shell().SoulSyncSettings;
+  const count = host?.pendingCount?.() ?? 0;
+  const blockers = state === 'blocked' ? (host?.blockers?.() ?? []) : [];
+  // what holds the save, or what the server said when it failed
+  const note =
+    state === 'blocked'
+      ? (blockers[0]?.message ?? '')
+      : state === 'error'
+        ? (host?.lastError?.() ?? '')
+        : '';
+  let words = SETTINGS_SAVE_LABELS[state];
+  if (state === 'pending') {
+    // how many, when the store can say (#1909 said only "Save now")
+    words =
+      count > 0 ? `Save ${count} change${count === 1 ? '' : 's'}` : manual ? 'Save changes' : words;
+  } else if (state === 'blocked' && blockers.length) {
+    words = `${blockers.length} thing${blockers.length === 1 ? '' : 's'} to fix`;
+  }
+  if (label) label.textContent = words;
+  // the page's note under the button and its phone bar follow this
+  window.dispatchEvent(
+    new CustomEvent('ss:settings-save-state', { detail: { state, count, note } }),
+  );
+  if (state === 'blocked') btn.title = note ? `${note} Click to go to it.` : '';
+  else if (manual)
+    btn.title = state === 'pending' ? 'Autosave is off. Click to save your changes.' : '';
   else
     btn.title =
-      state === 'idle' || state === 'saved'
+      state === 'rest' || state === 'idle' || state === 'saved'
         ? 'Settings save as you go. Click to save again now.'
         : '';
   if (state === 'saved') savedTimer = setTimeout(() => setSettingsSaveState('idle'), 2000);
@@ -86,7 +129,8 @@ export function setSettingsSaveState(state: SaveState) {
 /**
  * The save button's save, and the one the pages' own code asks for. Every
  * control is React and saves through the store; this still refuses while
- * the settings never loaded or a rule says no, still posts the page's
+ * the settings never loaded or the MusicBrainz address would not work,
+ * says what a naming template held back (only that key waits), still posts the page's
  * sections that have nothing left in them (the server re-reads its services
  * on a settings save), and flushes the store.
  */
@@ -105,21 +149,16 @@ export async function saveSettings(quiet = false): Promise<void> {
   // would not work
   const mbErr = host?.musicbrainzError?.();
   if (mbErr) {
-    if (!quiet) toast(mbErr, 'error');
+    // the save status says so, and a click goes to the field
+    setSettingsSaveState('blocked');
+    if (!quiet) {
+      toast(mbErr, 'error');
+      host?.showBlocker?.();
+    }
     return;
   }
-  // a naming template that would not work (the Organization card)
-  const validationErrors = host?.templateErrors?.() || [];
-  if (validationErrors.length > 0) {
-    if (!quiet) toast('Template validation failed: ' + validationErrors.join(', '), 'error');
-    return;
-  }
-  // the optional Playlist File Naming template: toasted even when quiet
-  const plItemErr = host?.playlistItemError?.();
-  if (plItemErr) {
-    toast(plItemErr, 'error');
-    return;
-  }
+  // a naming template that would not work no longer holds the save back:
+  // the store keeps only that key waiting, and the status says so below
 
   // what saveSettings still posted once every control was React: the
   // sections with nothing left in them
@@ -156,7 +195,15 @@ export async function saveSettings(quiet = false): Promise<void> {
       setSettingsSaveState('error');
       toast('Some settings failed to save', 'error', 'set-services');
     } else if (result.success) {
-      setSettingsSaveState('saved');
+      // everything else saved; a template that would not work did not
+      const held = host?.blockers?.() ?? [];
+      if (held.length) {
+        setSettingsSaveState('blocked');
+        if (!quiet) {
+          toast(held[0].message, 'error');
+          host?.showBlocker?.();
+        }
+      } else setSettingsSaveState('saved');
       shell()._forceServiceStatusRefresh?.();
     } else {
       setSettingsSaveState('error');
@@ -229,15 +276,17 @@ export async function loadSettingsData(): Promise<void> {
       );
     }
     shell()._settingsLoadFailed = false;
+    window.dispatchEvent(new CustomEvent('ss:settings-load', { detail: { failed: false } }));
     shell()._settingsPayload = settings;
     shell().SoulSyncSettings?.hydrate(settings);
 
     // autosave, on unless switched off. the form was just reloaded, so an
-    // unsaved mark left over from a manual-save visit is stale
+    // unsaved mark left over from a manual-save visit is stale, and nothing
+    // was saved in it
     const appearance = settings.ui_appearance as { settings_autosave?: boolean } | undefined;
     shell()._settingsAutosaveOff = !(appearance?.settings_autosave !== false);
     if (document.getElementById('save-settings')?.dataset.state === 'pending')
-      setSettingsSaveState('idle');
+      setSettingsSaveState('rest');
 
     // dev mode: the Hydrabase page's link, and the dashboard's orb and the
     // System tab follow the event
@@ -259,6 +308,12 @@ export async function loadSettingsData(): Promise<void> {
     console.error('Error loading settings:', error);
     // #879: a failed load blocks saves until the next good one
     shell()._settingsLoadFailed = true;
+    // the page says so where the settings would be, with a way to try again
+    window.dispatchEvent(
+      new CustomEvent('ss:settings-load', {
+        detail: { failed: true, message: error instanceof Error ? error.message : '' },
+      }),
+    );
     toast(
       'Failed to load settings — reload the page before saving (your saved config is untouched)',
       'error',
@@ -303,9 +358,13 @@ export async function openSettingsPage() {
   w._suppressSettingsAutoSave = true;
   try {
     initializeSettings();
-    const tab = pendingTab ?? 'connections';
-    pendingTab = null;
-    switchSettingsTab(tab);
+    // the address says which tab (nav.ts); a tab asked for before the page
+    // was on screen outranks it
+    if (pendingTab) {
+      const tab = pendingTab;
+      pendingTab = null;
+      switchSettingsTab(tab);
+    }
     await loadSettingsData();
     (w.loadBlacklistCount as (() => void) | undefined)?.();
   } finally {
@@ -318,133 +377,55 @@ export async function openSettingsPage() {
 export const TAB_TITLES: Record<string, { title: string; sub: string }> = {
   connections: {
     title: 'Connections',
-    sub: 'Media servers, accounts, Soulseek, MetaSync and notifications',
+    sub: 'Media servers, accounts, MetaSync and notifications',
   },
-  sources: { title: 'Sources', sub: 'Configure and prioritize acquisition sources and indexers' },
   downloads: {
     title: 'Downloads',
-    sub: 'Queue behavior, retries, publishing, and what gets filtered out',
+    sub: 'Where downloads come from, in what order, and what gets skipped',
   },
-  quality: { title: 'Quality', sub: 'Audio and video formats, release profiles, and ladders' },
-  library: { title: 'Library', sub: 'Folders, file organization, tagging, and import' },
+  quality: { title: 'Quality', sub: 'Audio and video formats, release profiles and ladders' },
+  library: {
+    title: 'Library',
+    sub: 'Where your files live, how they are named and tagged, and what happens on import',
+  },
   discovery: {
     title: 'Discovery',
     sub: 'Playlists, listening stats, recommendations and import lists',
   },
+  people: {
+    title: 'People',
+    sub: 'Who uses SoulSync here, templates, the global policy and invites',
+  },
+  devices: {
+    title: 'Devices',
+    sub: 'Pair music apps, the addresses they use and whether outside can reach this server',
+  },
   appearance: {
     title: 'Appearance',
-    sub: 'Visual themes, accents, animations, and the sidebar weather',
+    sub: 'Accent color, effects and the sidebar weather',
   },
   advanced: {
     title: 'System',
-    sub: 'Security, database tools, caches, logging, the API and experimental features',
+    sub: 'Security, the database, caches, the API, developer tools and logs',
   },
-  logs: { title: 'Logs', sub: 'Live streaming logs and real-time operational diagnostics' },
 };
 
+/**
+ * Open a Settings tab. The page owns where it is (nav.ts, through the host):
+ * this hands the key over, old keys included ('sources' is Downloads >
+ * Sources now, 'logs' is System > Logs). Asked for while the page is not on
+ * screen, the page opens on it.
+ */
 export function switchSettingsTab(tab: string) {
-  if (!document.getElementById('settings-page')) {
+  const host = shell().SoulSyncSettings;
+  if (!document.getElementById('settings-page') || !host) {
     pendingTab = tab;
     return;
   }
-  const search = document.getElementById('stg-search-input') as HTMLInputElement | null;
-  const results = document.getElementById('stg-search-results');
-  if (search) search.value = '';
-  if (results) results.hidden = true;
-  if (tab === 'library') document.dispatchEvent(new CustomEvent('soulsync:library-settings-shown'));
-  for (const t of document.querySelectorAll<HTMLElement>('#settings-page .stg-tab')) {
-    const active = t.dataset.tab === tab;
-    t.classList.toggle('active', active);
-    if (active) t.setAttribute('aria-current', 'page');
-    else t.removeAttribute('aria-current');
-  }
-  // the tabs render their [data-stg] blocks into their slots before the
-  // blocks are shown and hidden by tab just below (host.tsx)
   try {
-    shell().SoulSyncSettings?.show(tab);
+    host.show(tab);
   } catch (error) {
-    console.error('settings tab mount failed', error);
-  }
-  for (const g of document.querySelectorAll<HTMLElement>('#settings-page [data-stg]'))
-    g.style.display = g.dataset.stg === tab ? '' : 'none';
-  // a tab switch resets inline display: collapsed bodies stay collapsed
-  for (const b of document.querySelectorAll<HTMLElement>(
-    '#settings-page .settings-section-body.collapsed',
-  ))
-    b.style.display = 'none';
-  // a column with nothing to show on this tab goes too
-  for (const col of document.querySelectorAll<HTMLElement>(
-    '#settings-page .settings-left-column, #settings-page .settings-right-column, #settings-page .settings-third-column',
-  )) {
-    const visible = [...col.querySelectorAll<HTMLElement>('.settings-group[data-stg]')].some(
-      (g) => g.style.display !== 'none',
-    );
-    col.style.display = visible ? '' : 'none';
-  }
-  const titleEl = document.getElementById('stg-active-title');
-  const subEl = document.getElementById('stg-active-sub');
-  if (titleEl && TAB_TITLES[tab]) titleEl.textContent = TAB_TITLES[tab].title;
-  if (subEl && TAB_TITLES[tab]) subEl.textContent = TAB_TITLES[tab].sub;
-}
-
-// ── the search ──
-
-/** labels and help only, never saved values or credentials. a result opens
- *  its tab rather than showing hidden, unloaded forms */
-export function filterSettings(query: string) {
-  const results = document.getElementById('stg-search-results');
-  if (!results) return;
-  const q = (query || '').trim().toLowerCase();
-  results.replaceChildren();
-  results.hidden = !q;
-  if (!q) return;
-  const matches: HTMLElement[] = [];
-  for (const section of document.querySelectorAll<HTMLElement>(
-    '#settings-page .settings-group[data-stg], #settings-page .settings-section-body[data-stg]',
-  )) {
-    if (!(section.textContent || '').toLowerCase().includes(q)) continue;
-    if (matches.some((item) => item.contains(section))) continue;
-    matches.push(section);
-  }
-  if (!matches.length) {
-    const empty = document.createElement('p');
-    empty.setAttribute('role', 'status');
-    empty.textContent = 'No settings found. Try a service name, folder, or feature.';
-    results.append(empty);
-  }
-  for (const section of matches.slice(0, 10)) {
-    const category = section.dataset.stg || '';
-    const tab = document.querySelector(`#settings-page .stg-tab[data-tab="${category}"]`);
-    const heading =
-      section.querySelector('h3') || section.previousElementSibling?.querySelector('h3');
-    const title = heading?.textContent?.trim() || category;
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.textContent = `${tab?.textContent?.trim() || category} — ${title}`;
-    button.addEventListener('click', () => {
-      switchSettingsTab(category);
-      if (section.classList.contains('settings-section-body')) {
-        section.classList.remove('collapsed');
-        section.style.display = '';
-        const header = section.previousElementSibling;
-        header?.classList.remove('collapsed');
-        header?.setAttribute('aria-expanded', 'true');
-      }
-      const label = [...section.querySelectorAll('label, h4')].find((l) =>
-        (l.textContent || '').toLowerCase().includes(q),
-      );
-      const panel = label?.closest('[role="tabpanel"]');
-      if (panel) {
-        // the Library media cards are React: a click moves their own state
-        document.querySelector<HTMLElement>(`[aria-controls="${panel.id}"]`)?.click();
-      }
-      section.tabIndex = -1;
-      section.focus({ preventScroll: true });
-      section.scrollIntoView({ block: 'start', behavior: 'auto' });
-      section.classList.add('stg-search-target');
-      window.setTimeout(() => section.classList.remove('stg-search-target'), 2000);
-    });
-    results.append(button);
+    console.error('settings tab switch failed', error);
   }
 }
 
@@ -496,7 +477,7 @@ export function toggleSourceCard(header: HTMLElement | null) {
 // ── keyboard ──
 
 /** the section headers are role="button": Enter and Space toggle them, and
- *  aria-expanded follows; Ctrl/Cmd+K goes to the search */
+ *  aria-expanded follows; / goes to the search */
 function wireKeyboard() {
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
@@ -520,15 +501,47 @@ function wireKeyboard() {
       ),
     );
   });
-  document.addEventListener('keydown', (e) => {
-    if (!(e.ctrlKey || e.metaKey) || (e.key || '').toLowerCase() !== 'k') return;
-    const page = document.getElementById('settings-page');
-    const input = document.getElementById('stg-search-input') as HTMLInputElement | null;
-    if (!page || !input || !page.offsetParent) return;
-    e.preventDefault();
-    input.focus();
-    input.select();
-  });
+  document.addEventListener('keydown', onSettingsSearchKey);
+}
+
+function typingIn(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null;
+  if (!el || !el.tagName) return false;
+  return (
+    el.tagName === 'INPUT' ||
+    el.tagName === 'TEXTAREA' ||
+    el.tagName === 'SELECT' ||
+    el.isContentEditable
+  );
+}
+
+/** on screen and taking clicks: not hidden, not display:none, not faded out
+ *  with its clicks off (the track detail overlay at rest) */
+function showing(el: HTMLElement): boolean {
+  for (let node: HTMLElement | null = el; node; node = node.parentElement) {
+    if (node.hidden) return false;
+    const style = getComputedStyle(node);
+    if (style.display === 'none' || style.visibility === 'hidden') return false;
+  }
+  return getComputedStyle(el).pointerEvents !== 'none';
+}
+
+/** `/` on the Settings page goes to its search. Ctrl/Cmd K is the help
+ *  palette's everywhere, Settings included (features/help/host.tsx), and the
+ *  palette finds settings too. */
+export function onSettingsSearchKey(e: KeyboardEvent) {
+  if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey || e.defaultPrevented) return;
+  if (typingIn(e.target)) return;
+  const page = document.getElementById('settings-page');
+  const input = document.getElementById('stg-search-input') as HTMLInputElement | null;
+  if (!page || !input || !page.offsetParent) return;
+  // a modal on top (a service or source sheet) keeps its own keys. The
+  // closed sheets stay in the page with aria-modal, hidden, so only one that
+  // is showing counts
+  if ([...document.querySelectorAll<HTMLElement>('[aria-modal="true"]')].some(showing)) return;
+  e.preventDefault();
+  input.focus();
+  input.select();
 }
 
 // ── at load ──

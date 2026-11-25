@@ -95,6 +95,7 @@ import { fetchRotationPreview, rotationConfirmMessage } from '../-sync.rotation'
 import { SYNC_SOURCES } from '../-sync.sources';
 import { asString } from '../-sync.url-tabs';
 import { useExportJobs } from '../-sync.use-export';
+import { restoreOriginalCover } from '../../../features/playlists/cover-art';
 import { playPlaylist } from '../../../features/playlists/play-playlist';
 import {
   copyMirrorToUserPlaylist,
@@ -104,6 +105,7 @@ import {
   pinLikedFirst,
   removeFromUserPlaylist,
   reorderUserPlaylist,
+  uploadPlaylistCover,
 } from '../../../features/playlists/user-playlists';
 import { AutoSyncWeeklyEditor } from './autosync-weekly';
 import { CoverArtSheet } from './cover-art-sheet';
@@ -1727,6 +1729,32 @@ export function MirroredTab({
             setEditingRef(settingsRow);
           }}
           onGenerateCover={() => setCoverArtFor(settingsRow)}
+          onUploadCover={(file) => {
+            uploadPlaylistCover(settingsRow.id, file)
+              .then(() => {
+                window.showToast?.('Cover updated', 'success');
+                reload();
+              })
+              .catch((err: unknown) =>
+                window.showToast?.(
+                  err instanceof Error ? err.message : 'Could not use that image',
+                  'error',
+                ),
+              );
+          }}
+          onRestoreCover={() => {
+            restoreOriginalCover(settingsRow.id)
+              .then(() => {
+                window.showToast?.('Cover restored', 'success');
+                reload();
+              })
+              .catch((err: unknown) =>
+                window.showToast?.(
+                  err instanceof Error ? err.message : 'Could not restore the cover',
+                  'error',
+                ),
+              );
+          }}
           onClear={
             (settingsRow.discovered_count || 0) > 0 && !isUserPlaylist(settingsRow)
               ? () => {
@@ -1813,6 +1841,10 @@ export function MirroredTab({
           onRunPipeline={() => {
             setDetail(null);
             void pipeline.run(detail.playlistId, detail.data.name ?? '');
+          }}
+          onSyncOnly={() => {
+            setDetail(null);
+            void pipeline.run(detail.playlistId, detail.data.name ?? '', { skipWishlist: true });
           }}
           onRefreshFromSource={() => {
             setDetail(null);

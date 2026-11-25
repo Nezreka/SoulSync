@@ -130,6 +130,17 @@ def process_one(row: Dict[str, Any], db: Any = None, auto_grab: bool = True) -> 
     # on every pass.
     profile_id = int(row.get("profile_id") or 1)
 
+    # the pass runs as the system, so it asks about the row's owner, now:
+    # downloads switched off after the add mean no grab. the row stays wanted
+    # (untouched, no backoff) for when they're switched back on. "getting
+    # books" is its own permission (books.get), apart from music (#2166). an
+    # owner who asks first gets the books an admin approved (#2188)
+    from core.requests.media import may_get_book
+    if not may_get_book(profile_id, asin):
+        outcome["error"] = "Downloads are disabled for this profile."
+        outcome["skipped"] = True
+        return outcome
+
     # Already on disk — the usual reason is that it was imported by hand, or the
     # library scan found a copy. Searching indexers for a book we have is waste,
     # and grabbing it would be worse.
@@ -291,7 +302,7 @@ def run_pass(db: Any = None, limit: Optional[int] = None, due_only: bool = True)
 
     database = db if db is not None else get_audiobook_db()
     summary = {"checked": 0, "found": 0, "grabbed": 0, "errors": 0,
-               "freed": 0, "unstuck": 0, "already_owned": 0}
+               "freed": 0, "unstuck": 0, "already_owned": 0, "skipped": 0}
 
     # Self-healing, at the start of every pass rather than only at boot: a pass
     # that died mid-search leaves rows claimed as "searching", and the retry
@@ -348,6 +359,10 @@ def run_pass(db: Any = None, limit: Optional[int] = None, due_only: bool = True)
 
     for row in due:
         result = process_one(row, db=database)
+        if result.get("skipped"):
+            # an owner with downloads off: not looked for, not an error
+            summary["skipped"] += 1
+            continue
         summary["checked"] += 1
         summary["found"] += result["found"]
         summary["grabbed"] += 1 if result["grabbed"] else 0

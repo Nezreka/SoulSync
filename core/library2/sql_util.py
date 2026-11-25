@@ -133,14 +133,12 @@ _OWNED = {
               "         JOIN lib2_track_files owned_f ON owned_f.track_id = owned_t.id"
               "        WHERE owned_t.album_id = {alias}.id AND " + _LIVE_FILE + ")"),
     # a release of their own on disk, by the artist page's rule
-    # (queries._own_release_ids): the album's primary artist, or the lead
-    # credit on more than half its tracks (a joint album). Not a guest.
-    #
-    # The album junction's 'primary' role is not that rule: plex-era rows
-    # carry it for guests on compilations and on other people's albums (876
-    # extra artists on a 7k-artist library), and the page files those
-    # releases under Appears On. #2142: a 2pac library listed nate dogg,
-    # outlawz, dr. dre beside him.
+    # (queries._own_release_ids): filed under them (the album's primary
+    # artist), or the co-artist of a joint album (co_lead_sql). Not a
+    # guest, and not the lead of a track on a release filed under someone
+    # else: #2142's first fix let that in, and a one-track row of 16BL's dj
+    # mix or of 12th Planet's PhaseOne single made Rampa and PhaseOne
+    # release artists.
     #
     # Two EXISTS, never one with an OR inside: "primary_artist_id = x OR a
     # credit row names x" can't use either index, so SQLite walked every album
@@ -156,20 +154,13 @@ _OWNED = {
                        "              JOIN lib2_tracks owned_lt ON owned_lt.id = owned_ta.track_id"
                        "              JOIN lib2_albums owned_la ON owned_la.id = owned_lt.album_id"
                        "             WHERE owned_ta.artist_id = {alias}.id"
-                       "               AND owned_la.primary_artist_id <> {alias}.id"
                        "               AND owned_ta.role = 'primary'"
+                       "               AND owned_la.primary_artist_id <> {alias}.id"
                        "               AND EXISTS (SELECT 1 FROM lib2_tracks owned_t"
                        "                   JOIN lib2_track_files owned_f ON owned_f.track_id = owned_t.id"
                        "                  WHERE owned_t.album_id = owned_la.id"
                        "                    AND " + _LIVE_FILE + ")"
-                       "               AND 2 * (SELECT COUNT(*) FROM lib2_tracks owned_ct"
-                       "                   JOIN lib2_track_artists owned_ca"
-                       "                     ON owned_ca.track_id = owned_ct.id"
-                       "                    AND owned_ca.artist_id = {alias}.id"
-                       "                    AND owned_ca.role = 'primary'"
-                       "                  WHERE owned_ct.album_id = owned_la.id)"
-                       "                 > (SELECT COUNT(*) FROM lib2_tracks owned_nt"
-                       "                     WHERE owned_nt.album_id = owned_la.id)))"),
+                       "               AND {co_lead}))"),
     # Either credit counts: the album's primary artist and a featured credit on
     # the track are both in the library.
     "artist": ("(EXISTS (SELECT 1 FROM lib2_tracks owned_t"
@@ -462,7 +453,45 @@ def owned_sql(entity_type: str, alias: str, *, scope=_AMBIENT) -> str:
     key = str(entity_type or "").strip().lower().rstrip("s")
     if key not in _OWNED:
         raise ValueError(f"Unknown entity type: {entity_type!r}")
-    return _OWNED[key].format(alias=alias, owner=owner_clause(scope))
+    return _OWNED[key].format(alias=alias, owner=owner_clause(scope),
+                              co_lead=co_lead_sql(f"{alias}.id", "owned_la", "owned"))
+
+
+def co_lead_sql(artist: str, album: str, prefix: str) -> str:
+    """``artist`` (an id expression, used several times) co-leads ``album``:
+    the lead credit on more than half its tracks, each one either shared
+    with the album's own artist (both credited primary, "A & B") or backed
+    by an album credit marked primary. The album's size is the larger of the
+    rows we hold and what the provider says, so one track held of a
+    17-track mix is not most of it.
+
+    A joint album is theirs too; a guest's tracks are not (#2142). Leading a
+    track alone is a guest: Rampa leads track 8 of 16BL's mix, PhaseOne
+    leads the single 12th Planet's album artist tag files under 12th Planet.
+    An album credit marked primary alone is a guest too: plex-era rows carry
+    it (Nate Dogg on a 2Pac album). ``prefix`` keeps the inner aliases apart
+    from the caller's."""
+    for name in (album, prefix):
+        if not _VALID_IDENTIFIER.match(name):
+            raise ValueError(f"Invalid alias: {name!r}")
+    p = prefix
+    return (f"2 * (SELECT COUNT(*) FROM lib2_tracks {p}_ct"
+            f"       JOIN lib2_track_artists {p}_ca"
+            f"         ON {p}_ca.track_id = {p}_ct.id"
+            f"        AND {p}_ca.artist_id = {artist}"
+            f"        AND {p}_ca.role = 'primary'"
+            f"      WHERE {p}_ct.album_id = {album}.id"
+            f"        AND (EXISTS (SELECT 1 FROM lib2_track_artists {p}_cp"
+            f"                      WHERE {p}_cp.track_id = {p}_ct.id"
+            f"                        AND {p}_cp.artist_id = {album}.primary_artist_id"
+            f"                        AND {p}_cp.role = 'primary')"
+            f"             OR EXISTS (SELECT 1 FROM lib2_album_artists {p}_cb"
+            f"                         WHERE {p}_cb.album_id = {album}.id"
+            f"                           AND {p}_cb.artist_id = {artist}"
+            f"                           AND {p}_cb.role = 'primary')))"
+            f" > MAX((SELECT COUNT(*) FROM lib2_tracks {p}_nt"
+            f"         WHERE {p}_nt.album_id = {album}.id),"
+            f"       COALESCE({album}.expected_track_count, 0))")
 
 
 def separated(scope):

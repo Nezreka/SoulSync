@@ -25,6 +25,7 @@ from core.api_validation import parse_strict_bool, parse_strict_int
 from core.playlists import user_playlists as _up
 from core.profile_context import get_current_profile_id
 from utils.logging_config import get_logger
+from core.permissions import requires
 
 logger = get_logger("web_server")
 
@@ -150,7 +151,162 @@ def _invalidate_mirror_sync_fingerprint(playlist_id):
         logger.debug("Could not invalidate sync fingerprint for %s: %s", key, e)
 
 
+@bp.route('/api/mirrored-playlists/overview', methods=['GET'])
+@requires("music.access")
+def mirrored_playlists_overview_endpoint():
+    """Centralized playlist synchronization overview (#2273) with schedule status,
+    pause state (#2272), destination, and latest execution summary (#2271)."""
+    try:
+        database = get_database()
+        profile_id = _mirror_scope_profile_id()
+        playlists = database.get_mirrored_playlists(profile_id=profile_id) or []
+
+        # Index scheduled playlist automations by mirrored_playlist_id
+        auto_by_pl: dict = {}
+        try:
+            conn = database._get_connection()
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT id, name, enabled, trigger_type, trigger_config, action_config,
+                       last_run_at, next_run_at
+                FROM automations
+                WHERE action_type IN ('sync_playlist', 'playlist_pipeline')
+                """
+            )
+            for row in cur.fetchall():
+                try:
+                    ac = json.loads(row['action_config']) if isinstance(row['action_config'], str) else (row['action_config'] or {})
+                except Exception:
+                    ac = {}
+                pid = ac.get('mirrored_playlist_id') or ac.get('playlist_id')
+                if pid is not None:
+                    try:
+                        auto_by_pl[int(pid)] = dict(row)
+                    except (TypeError, ValueError):
+                        pass
+        except Exception as e:
+            logger.debug("couldn't read the playlist automations: %s", e)
+
+        items = []
+        active_server = config_manager.get('active_media_server', 'plex') or 'plex'
+        default_mode = config_manager.get('playlist_sync.mode', 'append') or 'append'
+        for p in playlists:
+            pid = int(p['id'])
+            auto = auto_by_pl.get(pid)
+            if auto is None:
+                status = 'unscheduled'
+            elif auto.get('enabled'):
+                status = 'enabled'
+            else:
+                status = 'paused'
+
+            # Latest sync history execution for this playlist
+            latest = None
+            try:
+                for key in (f"auto_mirror_{pid}", str(p.get('source_playlist_id') or ''), str(pid)):
+                    if not key:
+                        continue
+                    h = database.get_latest_sync_history_by_playlist(key, profile_id=profile_id)
+                    if h:
+                        latest = {
+                            'id': h.get('id'),
+                            'started_at': h.get('started_at'),
+                            'completed_at': h.get('completed_at'),
+                            'total_tracks': h.get('total_tracks') or 0,
+                            'tracks_found': h.get('tracks_found') or 0,
+                            'tracks_downloaded': h.get('tracks_downloaded') or 0,
+                            'tracks_failed': h.get('tracks_failed') or 0,
+                            'trigger': h.get('source_page') or 'manual',
+                        }
+                        break
+            except Exception:
+                latest = None
+
+            items.append({
+                'id': pid,
+                'name': p.get('custom_name') or p.get('name') or 'Untitled Playlist',
+                'source': p.get('source') or 'unknown',
+                'destination': p.get('server_playlist_name') or active_server,
+                'destination_server': active_server,
+                'sync_mode': p.get('sync_mode') or default_mode,
+                'track_count': p.get('track_count') or 0,
+                'status': status,
+                'automation_id': auto.get('id') if auto else None,
+                'trigger_type': auto.get('trigger_type') if auto else None,
+                'trigger_config': auto.get('trigger_config') if auto else None,
+                'last_run_at': (auto.get('last_run_at') if auto else None) or (latest.get('started_at') if latest else None),
+                'next_run_at': auto.get('next_run_at') if (auto and status == 'enabled') else None,
+                'last_result': latest,
+            })
+
+        return jsonify({'success': True, 'items': items, 'total': len(items)})
+    except Exception as e:
+        logger.error(f"Error building playlist sync overview: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@bp.route('/api/mirrored-playlists/<int:playlist_id>/auto-sync/toggle', methods=['POST'])
+@requires("music.access")
+def toggle_mirrored_playlist_autosync_endpoint(playlist_id):
+    """Pause or resume automatic sync for a mirrored playlist (#2272) without
+    deleting its schedule, settings, or history. Manual sync remains available."""
+    try:
+        database = get_database()
+        playlist = _owned_mirrored_playlist(database, playlist_id)
+        if not playlist:
+            # (the same words as every other gated route here: a playlist that
+            # isn't yours answers exactly as one that doesn't exist)
+            return jsonify({'success': False, "error": "Playlist not found"}), 404
+
+        data = request.get_json(silent=True) or {}
+        conn = database._get_connection()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT id, enabled, action_config
+            FROM automations
+            WHERE action_type IN ('sync_playlist', 'playlist_pipeline')
+            """
+        )
+        target = None
+        for row in cur.fetchall():
+            try:
+                ac = json.loads(row['action_config']) if isinstance(row['action_config'], str) else (row['action_config'] or {})
+            except Exception:
+                ac = {}
+            pid = ac.get('mirrored_playlist_id') or ac.get('playlist_id')
+            if pid is not None and int(pid) == int(playlist_id):
+                target = row
+                break
+
+        if not target:
+            return jsonify({'success': False, 'error': 'No automatic sync schedule configured for this playlist'}), 404
+
+        if 'enabled' in data:
+            new_enabled = bool(data['enabled'])
+        else:
+            new_enabled = not bool(target['enabled'])
+
+        cur.execute(
+            "UPDATE automations SET enabled = ? WHERE id = ?",
+            (1 if new_enabled else 0, target['id']),
+        )
+        conn.commit()
+        return jsonify({
+            'success': True,
+            'playlist_id': int(playlist_id),
+            'automation_id': target['id'],
+            'enabled': new_enabled,
+            'status': 'enabled' if new_enabled else 'paused',
+        })
+    except Exception as e:
+        logger.error(f"Error toggling auto-sync for playlist {playlist_id}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @bp.route('/api/mirrored-playlists/list', methods=['GET'])
+@requires("music.access")
 def get_mirrored_playlists_list():
     """Return simple list of mirrored playlists for automation config dropdowns."""
     try:
@@ -167,6 +323,7 @@ def get_mirrored_playlists_list():
 
 
 @bp.route('/api/mirrored-playlists', methods=['GET'])
+@requires("music.access")
 def get_mirrored_playlists_endpoint():
     """List all mirrored playlists for the active profile."""
     try:
@@ -257,13 +414,25 @@ def _stamp_track_statuses(database, playlist):
     """where each track stands, on the track, plus the totals (#1721).
     best effort: the tracks still show without it."""
     try:
-        from core.playlists.track_status import status_counts, track_status, wishlist_ids
+        from core.playlists.track_status import (
+            parse_extra, placement_counts, server_placement, status_counts, track_status,
+            wishlist_ids)
         tracks = playlist.get('tracks') or []
         ids = {i for t in tracks for i in wishlist_ids(t)}
         wishlisted = database.get_wishlisted_ids(ids, profile_id=playlist.get('profile_id'))
         for t in tracks:
             t['status'] = track_status(t, wishlisted)
+            # in the library is not on the server playlist (#2235)
+            t['server_placement'] = server_placement(t, t['status'])
+            _with = parse_extra(t.get('extra_data')).get('server_placement_with')
+            if t['server_placement'] == 'duplicate' and _with:
+                t['server_placement_with'] = _with
         playlist['status_counts'] = status_counts(t['status'] for t in tracks)
+        playlist['placement_counts'] = placement_counts(t['server_placement'] for t in tracks)
+        try:
+            playlist['server_type'] = config_manager.get_active_media_server() if config_manager else None
+        except Exception:  # noqa: BLE001 - the label falls back to "your server"
+            playlist['server_type'] = None
         # how many the detail's library check should look at (#1910): the
         # unchecked ones plus its own stale misses
         from core.playlists.library_check import unchecked_rows
@@ -273,6 +442,7 @@ def _stamp_track_statuses(database, playlist):
 
 
 @bp.route('/api/mirrored-playlists/<int:playlist_id>/check-library', methods=['POST'])
+@requires("music.access")
 def check_mirrored_playlist_library_endpoint(playlist_id):
     """check the tracks nobody has checked against the library yet (#1910).
 
@@ -299,6 +469,7 @@ def check_mirrored_playlist_library_endpoint(playlist_id):
 
 
 @bp.route('/api/mirrored-playlists/<int:playlist_id>', methods=['GET'])
+@requires("music.access")
 def get_mirrored_playlist_endpoint(playlist_id):
     """Get a mirrored playlist with its tracks."""
     try:
@@ -323,6 +494,7 @@ def get_mirrored_playlist_endpoint(playlist_id):
         return jsonify({"error": str(e)}), 500
 
 @bp.route('/api/mirrored-playlists/<int:playlist_id>/source-ref', methods=['PATCH'])
+@requires("music.access")
 def update_mirrored_playlist_source_ref_endpoint(playlist_id):
     """Update the upstream source link/id for a mirrored playlist."""
     try:
@@ -374,6 +546,7 @@ def update_mirrored_playlist_source_ref_endpoint(playlist_id):
 
 
 @bp.route('/api/mirrored-playlists/<int:playlist_id>/custom-name', methods=['PATCH'])
+@requires("music.access")
 def update_mirrored_playlist_custom_name_endpoint(playlist_id):
     """Set or clear a user alias (custom display + sync name) for a mirrored
     playlist. A blank/missing custom_name CLEARS the alias (falls back to the
@@ -411,6 +584,7 @@ def _cover_art_error(err):
 
 
 @bp.route('/api/mirrored-playlists/<int:playlist_id>/cover-art', methods=['POST'])
+@requires("music.access")
 def generate_mirrored_cover_art(playlist_id):
     """make one cover from what the playlist sounds like. it's a preview,
     the playlist keeps its cover until /apply."""
@@ -436,6 +610,7 @@ def generate_mirrored_cover_art(playlist_id):
 
 
 @bp.route('/api/mirrored-playlists/<int:playlist_id>/cover-art/preview', methods=['GET'])
+@requires("music.access")
 def get_mirrored_cover_art_preview(playlist_id):
     from core.playlists import cover_art
     try:
@@ -454,6 +629,7 @@ def get_mirrored_cover_art_preview(playlist_id):
 
 
 @bp.route('/api/mirrored-playlists/<int:playlist_id>/cover-art/name', methods=['POST'])
+@requires("music.access")
 def set_mirrored_cover_art_name(playlist_id):
     """the playlist's name on the preview, or off it. redraws the same image,
     so it never spends the free tier's one image every 45s."""
@@ -475,6 +651,7 @@ def set_mirrored_cover_art_name(playlist_id):
 
 
 @bp.route('/api/mirrored-playlists/<int:playlist_id>/cover-art/apply', methods=['POST'])
+@requires("music.access")
 def apply_mirrored_cover_art(playlist_id):
     from core.playlists import cover_art
     try:
@@ -492,6 +669,7 @@ def apply_mirrored_cover_art(playlist_id):
 
 
 @bp.route('/api/mirrored-playlists/<int:playlist_id>/cover-art', methods=['DELETE'])
+@requires("music.access")
 def restore_mirrored_cover_art(playlist_id):
     """back to the source's own cover. a preview that was never used goes too."""
     from core.playlists import cover_art
@@ -503,8 +681,8 @@ def restore_mirrored_cover_art(playlist_id):
         cover_art.discard_preview(playlist_id, _cover_base_dir())
         if request.args.get('preview_only') == '1':
             return jsonify({"success": True})
-        if _up.is_user_playlist(playlist) or not playlist.get('custom_cover'):
-            return jsonify({"error": "No generated cover to undo"}), 400
+        if not playlist.get('custom_cover'):
+            return jsonify({"error": "This playlist already has its original cover"}), 400
         cover_art.restore_original(database, playlist, base_dir=_cover_base_dir())
         return jsonify({"success": True})
     except Exception as e:
@@ -513,6 +691,7 @@ def restore_mirrored_cover_art(playlist_id):
 
 
 @bp.route('/api/mirrored-playlists/<int:playlist_id>/preferences', methods=['PATCH'])
+@requires("music.access")
 def update_mirrored_playlist_preferences_endpoint(playlist_id):
     """Update per-playlist download preferences (e.g. organize by playlist folder)."""
     try:
@@ -643,6 +822,7 @@ def _ensure_cleaner_enabled():
 
 
 @bp.route('/api/mirrored-playlists/<int:playlist_id>/rotation', methods=['GET'])
+@requires("music.access")
 def mirrored_playlist_rotation_endpoint(playlist_id):
     """what rotating does for this playlist right now (#2039): how many of
     its downloads have left it, how many would be removed and why the rest
@@ -663,6 +843,7 @@ def mirrored_playlist_rotation_endpoint(playlist_id):
 
 
 @bp.route('/api/mirrored-playlists/<int:playlist_id>/copy-to-request-list', methods=['POST'])
+@requires("music.access")
 def copy_to_request_list_endpoint(playlist_id):
     """Clone an existing mirrored playlist as a new Request List."""
     try:
@@ -681,6 +862,12 @@ def copy_to_request_list_endpoint(playlist_id):
             return jsonify({"error": "Failed to copy playlist to request list"}), 500
 
         created = _owned_mirrored_playlist(database, new_id) or {}
+        if created:
+            try:
+                _up.carry_cover_file(database, playlist_id, created, base_dir=_cover_base_dir())
+                created = _owned_mirrored_playlist(database, new_id) or created
+            except Exception as e:
+                logger.warning(f"Couldn't copy the cover to request list {new_id}: {e}")
         return jsonify({"success": True, "new_playlist_id": new_id, "playlist": created})
     except Exception as e:
         logger.error(f"Error copying playlist {playlist_id} to request list: {e}")
@@ -688,6 +875,7 @@ def copy_to_request_list_endpoint(playlist_id):
 
 
 @bp.route('/api/mirrored-playlists/<int:playlist_id>/request-list-settings', methods=['PATCH'])
+@requires("music.access")
 def update_request_list_settings_endpoint(playlist_id):
     """Update settings for a request list (e.g. auto_remove_fulfilled)."""
     try:
@@ -744,6 +932,7 @@ def _resolve_spotify_public_alias(database, playlist_ref, profile_id):
 
 
 @bp.route('/api/mirrored-playlists/resolve', methods=['GET'])
+@requires("music.access")
 def resolve_mirrored_playlist_endpoint():
     """Resolve mirrored playlist by numeric id or upstream source id (e.g. Spotify playlist id)."""
     try:
@@ -939,6 +1128,7 @@ def _run_mirrored_playlist_pipeline_for_ui(playlist_id, skip_wishlist=False, pro
 
 
 @bp.route('/api/mirrored-playlists/<int:playlist_id>/pipeline/run', methods=['POST'])
+@requires("music.access")
 def run_mirrored_playlist_pipeline_endpoint(playlist_id):
     """Run the all-in-one mirrored playlist pipeline from the playlist UI."""
     try:
@@ -994,6 +1184,7 @@ def run_mirrored_playlist_pipeline_endpoint(playlist_id):
 
 
 @bp.route('/api/mirrored-playlists/<int:playlist_id>/pipeline/status', methods=['GET'])
+@requires("music.access")
 def get_mirrored_playlist_pipeline_status_endpoint(playlist_id):
     """Return the latest manual pipeline progress for a mirrored playlist."""
     try:
@@ -1020,6 +1211,7 @@ def get_mirrored_playlist_pipeline_status_endpoint(playlist_id):
 
 
 @bp.route('/api/playlist-pipeline/history', methods=['GET'])
+@requires("music.access")
 def get_playlist_pipeline_history_endpoint():
     """Return persisted run history for mirrored playlist pipeline executions."""
     try:
@@ -1050,6 +1242,7 @@ def get_playlist_pipeline_history_endpoint():
         return jsonify({"error": str(e)}), 500
 
 @bp.route('/api/mirrored-playlists/<int:playlist_id>', methods=['DELETE'])
+@requires("music.access")
 def delete_mirrored_playlist_endpoint(playlist_id):
     """Delete a mirrored playlist."""
     try:
@@ -1063,6 +1256,7 @@ def delete_mirrored_playlist_endpoint(playlist_id):
         return jsonify({"error": str(e)}), 500
 
 @bp.route('/api/mirrored-playlists/batch-delete', methods=['POST'])
+@requires("music.access")
 def batch_delete_mirrored_playlists_endpoint():
     """delete many mirrors in one call (#1219). the reporter had four tidal
     playlists sharing a name, deleted three upstream, and was left clicking
@@ -1097,6 +1291,7 @@ def batch_delete_mirrored_playlists_endpoint():
         return jsonify({"error": str(e)}), 500
 
 @bp.route('/api/mirrored-playlists/<int:playlist_id>/server-link', methods=['POST'])
+@requires("music.access")
 def link_mirrored_playlist_server_endpoint(playlist_id):
     """Record which server playlist this mirror corresponds to.
 
@@ -1133,6 +1328,7 @@ def link_mirrored_playlist_server_endpoint(playlist_id):
         return jsonify({"error": str(e)}), 500
 
 @bp.route('/api/mirrored-playlists/<int:playlist_id>/clear-discovery', methods=['POST'])
+@requires("music.access")
 def clear_mirrored_discovery_endpoint(playlist_id):
     """Clear discovery data for all tracks in a mirrored playlist, including discovery cache."""
     try:
@@ -1184,6 +1380,7 @@ def clear_mirrored_discovery_endpoint(playlist_id):
 # ==================== Discovery Pool ====================
 
 @bp.route('/api/discovery-pool', methods=['GET'])
+@requires("music.access")
 def get_discovery_pool():
     """List matched and failed discovery tracks, optionally filtered by playlist."""
     try:
@@ -1210,6 +1407,7 @@ def get_discovery_pool():
         return jsonify({"error": str(e)}), 500
 
 @bp.route('/api/wing-it-pool', methods=['GET'])
+@requires("music.access")
 def get_wing_it_pool():
     """List Wing It auto-matched tracks (unverified best-effort guesses), optionally per-playlist.
 
@@ -1241,6 +1439,7 @@ def get_wing_it_pool():
         return jsonify({"error": str(e)}), 500
 
 @bp.route('/api/discovery-pool/fix', methods=['POST'])
+@requires("music.access")
 def fix_discovery_pool_track():
     """Manually fix a failed discovery by linking a mirrored track to a Spotify/iTunes result."""
     try:
@@ -1319,6 +1518,7 @@ def fix_discovery_pool_track():
         return jsonify({"error": str(e)}), 500
 
 @bp.route('/api/discovery-pool/cache', methods=['DELETE'])
+@requires("music.access")
 def clear_discovery_pool_cache():
     """Clear cached discovery matches, optionally scoped to one playlist (?playlist_id=)."""
     try:
@@ -1340,6 +1540,7 @@ def clear_discovery_pool_cache():
         return jsonify({"error": str(e)}), 500
 
 @bp.route('/api/discovery-pool/cache/<int:entry_id>', methods=['DELETE'])
+@requires("music.access")
 def delete_discovery_pool_cache_entry(entry_id):
     """Remove a single entry from the discovery match cache."""
     try:
@@ -1357,6 +1558,7 @@ def _picked_source(track) -> str:
 
 
 @bp.route('/api/discovery-pool/rematch', methods=['POST'])
+@requires("music.access")
 def rematch_discovery_pool_track():
     """Replace a discovery cache entry with a new match chosen by the user."""
     try:
@@ -1419,6 +1621,7 @@ def rematch_discovery_pool_track():
         return jsonify({"error": str(e)}), 500
 
 @bp.route('/api/mirrored-playlists/<int:playlist_id>/prepare-discovery', methods=['POST'])
+@requires("music.access")
 def prepare_mirrored_discovery(playlist_id):
     """Register a mirrored playlist into youtube_playlist_states so the YouTube discovery pipeline can run."""
     try:
@@ -1614,6 +1817,7 @@ def prepare_mirrored_discovery(playlist_id):
         return jsonify({"error": str(e)}), 500
 
 @bp.route('/api/mirrored-playlists/<int:playlist_id>/retry-failed-discovery', methods=['POST'])
+@requires("music.access")
 def retry_failed_mirrored_discovery(playlist_id):
     """Re-run discovery only for tracks that failed or are pending in a mirrored playlist."""
     try:
@@ -1685,6 +1889,7 @@ def retry_failed_mirrored_discovery(playlist_id):
         return jsonify({"error": str(e)}), 500
 
 @bp.route('/api/mirrored-playlists/discovery-states', methods=['GET'])
+@requires("music.access")
 def get_mirrored_discovery_states():
     """Return discovery states for any mirrored playlists that have active/completed discoveries."""
     try:

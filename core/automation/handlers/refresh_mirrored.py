@@ -126,6 +126,11 @@ def auto_refresh_mirrored(config: Dict[str, Any], deps: AutomationDeps) -> Dict[
                 {'source_skipped': meta_extra['source_skipped']}
                 if 'source_skipped' in meta_extra else {}
             )
+            # #2279: the source's current poster. a custom cover on the row
+            # stays put (the upsert keeps it), the original behind it updates
+            meta_image = getattr(detail.meta, 'image_url', None)
+            if meta_image:
+                mirror_kwargs['source_image_url'] = meta_image
             refreshed += _commit_refresh(
                 pl, source, source_id, tracks, db, deps, auto_id, mirror_kwargs,
                 identify=not skip_discovery,
@@ -322,7 +327,7 @@ def _commit_refresh(
         profile_id=pl.get('profile_id', 1),
         description=pl.get('description'),
         owner=pl.get('owner'),
-        image_url=pl.get('image_url'),
+        image_url=(mirror_kwargs or {}).get('source_image_url') or pl.get('image_url'),
         **(mirror_kwargs or {}),
     )
     if identify and saved_id:
@@ -354,14 +359,16 @@ def _commit_refresh(
         )
         try:
             if deps.engine:
-                deps.engine.emit('playlist_changed', {
+                from core.automation.owners import owned
+                # the mirror's owner (a system refresh walks everyone's)
+                deps.engine.emit('playlist_changed', owned({
                     'playlist_name': pl.get('name', ''),
                     'playlist_id': str(pl.get('id', '')),
                     'old_count': str(len(old_ids)),
                     'new_count': str(len(new_ids)),
                     'added': str(added),
                     'removed': str(removed),
-                })
+                }, pl.get('profile_id') or 1))
         except Exception as e:
             deps.logger.debug("playlist_synced automation emit failed: %s", e)
     else:

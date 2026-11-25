@@ -18,7 +18,7 @@ function renderSheet() {
   const onRoute = vi.fn();
   const onClose = vi.fn();
   const { unmount } = render(<AddPlaylistSheet onRoute={onRoute} onClose={onClose} />);
-  const input = screen.getByLabelText('Paste a link') as HTMLInputElement;
+  const input = screen.getByLabelText('Paste a link or search by name') as HTMLInputElement;
   const type = (value: string) => fireEvent.change(input, { target: { value } });
   const add = () => fireEvent.click(screen.getByRole('button', { name: 'Add' }));
   return { onRoute, onClose, input, type, add, unmount };
@@ -106,7 +106,8 @@ describe('what it says while you type', () => {
 
   it('clears the error once you start editing again', () => {
     const { type, add } = renderSheet();
-    type('nonsense');
+    // a link we can't read (plain words are a search now, #2305)
+    type('https://tidal.com/browse/playlist/abc');
     add();
     expect(screen.getByText(/not one we can read/)).toBeInTheDocument();
     type('https://open.spotify.com/playlist/abc');
@@ -209,5 +210,83 @@ describe('every source wears its own logo', () => {
       expect(tile.querySelector('.tab-icon'), s.tab).not.toBeNull();
     }
     expect(container.querySelector('.tab-icon.ytmusic-icon')).not.toBeNull();
+  });
+});
+
+// #2305: words that aren't a link search public playlists
+describe('searching public playlists by name', () => {
+  it('tells words from a link', async () => {
+    const { looksLikeSearch } = await import('./add-playlist-sheet');
+    expect(looksLikeSearch('lofi beats')).toBe(true);
+    expect(looksLikeSearch('a')).toBe(false);
+    expect(looksLikeSearch('https://open.spotify.com/playlist/x')).toBe(false);
+    expect(looksLikeSearch('deezer.com/playlist/1')).toBe(false);
+    expect(looksLikeSearch('open.spotify')).toBe(false);
+  });
+});
+
+describe('words are a search, not a bad link (#2305)', () => {
+  it('enter on words shows no link error and routes nowhere', () => {
+    const { onRoute, type, add } = renderSheet();
+    type('lofi beats');
+    add();
+    expect(screen.queryByText(/not one we can read/)).toBeNull();
+    expect(screen.getByText('Searching public playlists…')).toBeInTheDocument();
+    expect(onRoute).not.toHaveBeenCalled();
+  });
+});
+
+describe('looking at a public playlist before adding it (#2305)', () => {
+  const found = [
+    {
+      id: '908622995',
+      title: 'Road Trip',
+      creator: 'Deezer',
+      track_count: 60,
+      image_url: '',
+      link: 'https://www.deezer.com/playlist/908622995',
+      source: 'deezer',
+    },
+  ];
+  let urls: string[] = [];
+  beforeEach(() => {
+    urls = [];
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string) => {
+        urls.push(url);
+        const body = url.includes('public-preview')
+          ? { songs: [{ title: 'Drive', artist: 'Incubus' }], total: 60 }
+          : { playlists: found };
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(body) });
+      }),
+    );
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it('filters by source, shows the songs, and adds the playlist from there', async () => {
+    const { onRoute, type } = renderSheet();
+    type('road trip');
+    await act(async () => {
+      vi.advanceTimersByTime(400);
+    });
+    fireEvent.click(await screen.findByRole('button', { name: 'Deezer' }));
+    await act(async () => {
+      vi.advanceTimersByTime(400);
+    });
+    expect(urls.some((u) => u.includes('source=deezer'))).toBe(true);
+    fireEvent.click(await screen.findByRole('button', { name: 'Look at Road Trip' }));
+    expect(await screen.findByText('Drive')).toBeInTheDocument();
+    expect(screen.getByText('and 59 more')).toBeInTheDocument();
+    expect(onRoute).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Add this playlist' }));
+    expect(onRoute).toHaveBeenCalledWith(
+      'deezer-link',
+      'https://www.deezer.com/playlist/908622995',
+    );
   });
 });

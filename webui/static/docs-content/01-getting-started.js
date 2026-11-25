@@ -1,10 +1,12 @@
 registerDocsSection({
     id: 'getting-started',
+    needs: 'admin',
     title: 'Getting Started',
     icon: '🚀',
     pages: [
         {
             id: 'gs-overview',
+            needs: 'everyone',
             title: 'Overview',
             lede: 'SoulSync is a self-hosted platform that downloads, syncs, and manages your music and video libraries — all from one app.',
             body: `
@@ -12,7 +14,7 @@ registerDocsSection({
 
 SoulSync connects to **Spotify**, **Apple Music/iTunes**, **Deezer**, **Discogs**, **Tidal**, **Qobuz**, **YouTube**, and **Beatport** for metadata, and downloads from **Soulseek**, **YouTube**, **Tidal**, **Qobuz**, **HiFi**, and **Deezer**. Your library is served through **Plex**, **Jellyfin/Emby**, or **Navidrome**. It also manages **movies, TV shows, and YouTube channels** on its dedicated video side.
 
-![SoulSync dashboard overview](gs-overview.jpg)
+![The dashboard home: the greeting hero with the worker orbs, a disconnected-Plex alert, the Finish setting up checklist, and Playlist Sync at 98%](gs-overview.jpg)
 
 ::: cards
 ### 🎵 Download Music
@@ -72,7 +74,7 @@ The first time you open SoulSync, setup takes over the screen. While the welcome
 
 To see setup again without touching your install, open **Settings → System → Developer → Setup preview**. It runs the real flow, saves nothing, and keeps a Preview tag in the corner.
 
-![Settings page first-time setup](gs-first-setup.jpg)
+![The Finish setting up checklist on the dashboard, with the five first-run steps](gs-first-setup.jpg)
 
 ## The four things SoulSync needs
 
@@ -122,7 +124,7 @@ If you skipped the wizard (or want to double-check), open **Settings** and confi
 | **AcoustID** | Audio fingerprint verification of downloads | API Key |
 | **ListenBrainz** | Listening history and recommendations | Token |
 
-![Service credentials connected](gs-connecting.jpg)
+![The Services panel in Settings: a card for every integration, each showing whether it is configured, not set up, or needs no key](gs-connecting.jpg)
 
 > [!NOTE]
 > Enrichment workers run automatically in the background once services are connected. Hover the worker orbs in the dashboard header to see what each one is doing — see [Enrichment Workers](#dash-workers).
@@ -138,6 +140,7 @@ If you skipped the wizard (or want to double-check), open **Settings** and confi
         },
         {
             id: 'gs-interface',
+            needs: 'everyone',
             title: 'Understanding the Interface',
             lede: 'How SoulSync is laid out and where everything lives.',
             body: `
@@ -145,7 +148,7 @@ If you skipped the wizard (or want to double-check), open **Settings** and confi
 
 SoulSync uses a **sidebar navigation** layout. The left sidebar holds links to every page, a media player at the bottom, and service status indicators. The main content area changes with the selected page. A **music/video toggle** in the sidebar switches between the two sides of the app.
 
-![SoulSync interface layout](gs-interface.jpg)
+![App layout with the sidebar navigation, media player, and main content area](gs-interface.jpg)
 
 ## Music side pages
 
@@ -182,12 +185,12 @@ That's a lot of pages, and most people use a few. **Customize**, at the bottom o
 Click the **version number** in the sidebar footer to open the **What's New** modal with release notes for every feature and fix. SoulSync automatically checks for updates by comparing your running version against the latest GitHub commit — the version button glows when an update is available (green for routine, yellow for major, red for critical). Docker users are notified when a new image is available.
 
 > [!TIP]
-> Press \`?\` anywhere to open the interactive helper menu, and \`Ctrl+K\` for helper search. The floating **?** button toggles click-anything help overlays.
+> Press \`?\` or \`F1\` anywhere, or click the **?** at the bottom right, to open help beside the page you are on. \`Ctrl K\` searches help, settings, pages and actions from anywhere. See [The Help Button](#ts-help).
 `
         },
         {
             id: 'gs-folders',
-            title: 'Folder Setup (Downloads & Transfer)',
+            title: 'Folder Setup (Downloads & Music Library)',
             lede: 'The three folders SoulSync uses — and the Docker pitfalls that cause most setup issues.',
             body: `
 ## The three folders
@@ -200,15 +203,15 @@ SoulSync uses **three folders** to manage your music files. **Most setup issues 
 > **Step 1:** Map your volumes in \`docker-compose.yml\` — this makes folders *accessible* to the container.
 > **Step 2:** Configure the paths in **SoulSync Settings → Library → Folders** — this tells the app *where to look*.
 >
-> Setting up docker-compose volumes alone is **not enough**. If you skip Step 2, downloads will complete but nothing will transfer, post-processing will fail silently, and tracks will re-download repeatedly.
+> Setting up docker-compose volumes alone is **not enough**. If you skip Step 2, downloads will complete but nothing will reach your music library folder, post-processing will fail silently, and tracks will re-download repeatedly.
 
 | Folder | Default (Docker) | Purpose |
 |--------|------------------|---------|
-| **Download Folder (input)** | \`/app/downloads\` | Where slskd/YouTube/Tidal/Qobuz initially saves files. A **temporary holding area** — files should not stay here. |
-| **Music Library Folder (output)** | \`/app/Transfer\` | Where post-processed files are moved after tagging and renaming. This **must** be the folder your media server monitors. |
+| **Download folder** | \`/app/downloads\` | Where slskd/YouTube/Tidal/Qobuz initially saves files. A **temporary holding area** — files should not stay here. |
+| **Music library folder** | \`/app/Transfer\` | Where post-processed files are moved after tagging and renaming. This **must** be the folder your media server monitors. In Docker this is the \`/app/Transfer\` mount. |
 | **Import Folder** | \`/app/Staging\` | For the Import feature only. Drop audio files here to import them via the Import page. |
 
-![Download settings folder configuration](gs-folders.jpg)
+![Settings folder paths for downloads, library output, and import](gs-folders.jpg)
 
 ## How files flow
 
@@ -217,17 +220,17 @@ SoulSync uses **three folders** to manage your music files. **Most setup issues 
 >
 > **1.** You search for music in SoulSync and click download
 > **2.** SoulSync tells slskd to download the file → slskd saves it to its download folder
-> **3.** SoulSync detects the completed download in the **Download Folder (input)**
+> **3.** SoulSync detects the completed download in the **Download folder**
 > **4.** Post-processing runs: AcoustID verification → metadata tagging → cover art embedding → lyrics fetch
 > **5.** File is renamed and organized (e.g. \`Artist/Album/01 - Title.flac\`)
-> **6.** File is moved from **Download Folder (input)** → **Music Library Folder (output)**
+> **6.** File is moved from **Download folder** → **Music library folder**
 > **7.** Media server scan is triggered → file appears in your library
 >
-> **If any step fails, the pipeline stops.** The most common failure point is Step 3 — SoulSync can't find the file because the Download Folder (input) doesn't match where slskd actually saved it.
+> **If any step fails, the pipeline stops.** The most common failure point is Step 3 — SoulSync can't find the file because the Download folder doesn't match where slskd actually saved it.
 
 ## Docker: the full picture
 
-![Docker folder mapping](gs-folder-docker.jpg)
+![Docker volume mapping note inside the folder settings](gs-folder-docker.jpg)
 
 In Docker, every app runs in its own isolated container with its own filesystem. **Volume mounts** in docker-compose create "bridges" between your host folders and the container — but SoulSync doesn't automatically know where those bridges go. You tell it via the Settings page.
 
@@ -245,21 +248,21 @@ In Docker, every app runs in its own isolated container with its own filesystem.
 > \`/app/Transfer/\` ← same files as \`/mnt/media/music/\`
 >
 > **SoulSync Settings (what you enter in the app)**
-> Download Folder (input): \`/app/downloads\` · Music Library Folder (output): \`/app/Transfer\`
+> Download folder: \`/app/downloads\` · Music library folder: \`/app/Transfer\`
 
 ## The #1 mistake: not configuring app settings
 
 Many users set up docker-compose volumes correctly but **never open SoulSync Settings to configure the paths**. The app defaults may not match your volume mounts. Go to **Settings → Library → Folders** and verify:
 
-- **Download Folder (input)** matches where slskd puts completed files *inside the container* (usually \`/app/downloads\`)
-- **Music Library Folder (output)** matches where you mounted your media library *inside the container* (usually \`/app/Transfer\`)
+- **Download folder** matches where slskd puts completed files *inside the container* (usually \`/app/downloads\`)
+- **Music library folder** matches where you mounted your media library *inside the container* (usually \`/app/Transfer\`)
 
 > [!WARNING]
 > "I set up my docker-compose but nothing transfers" almost always means the app settings weren't configured. Docker-compose makes the folders accessible. The app settings tell SoulSync where to look. **Both are required.**
 
-## The #2 mistake: Download Folder (input) doesn't match slskd
+## The #2 mistake: Download folder doesn't match slskd
 
-The **Download Folder (input)** in SoulSync must point to the **exact same physical folder** where slskd saves its completed downloads.
+The **Download folder** in SoulSync must point to the **exact same physical folder** where slskd saves its completed downloads.
 
 > [!NOTE]
 > **Both SoulSync and slskd must see the same input folder.**
@@ -270,7 +273,7 @@ The **Download Folder (input)** in SoulSync must point to the **exact same physi
 >
 > **SoulSync container:**
 > - SoulSync docker-compose: \`- /mnt/data/slskd-downloads:/app/downloads\` (same host folder!)
-> - SoulSync Setting: Download Folder (input) = \`/app/downloads\`
+> - SoulSync Setting: Download folder = \`/app/downloads\`
 >
 > **The key:** both containers mount the **same host folder** (\`/mnt/data/slskd-downloads\`). The container-internal paths can differ — what matters is they point to the same physical directory on your server.
 
@@ -285,17 +288,21 @@ In Docker, paths entered in SoulSync's Settings must be **container-side paths**
 | ❌ | \`/mnt/data/slskd-downloads\` | Wrong — host path (left side of \`:\`), doesn't exist in the container |
 | ❌ | \`./downloads\` | Wrong — relative path, use the full container path |
 
-## Music Library Folder (output) = your media server's music folder
+## Music library folder = your media server's music folder
 
-Your Music Library Folder (output) must ultimately point to the same physical directory your media server monitors.
+Your Music library folder must ultimately point to the same physical directory your media server monitors.
 
 > [!TIP]
 > **Example with Plex:**
 > - Plex monitors \`/mnt/media/music\` on the host
 > - SoulSync docker-compose: \`- /mnt/media/music:/app/Transfer:rw\`
-> - SoulSync Settings: Music Library Folder (output) = \`/app/Transfer\`
+> - SoulSync Settings: Music library folder = \`/app/Transfer\`
 >
 > **Result:** SoulSync writes to \`/app/Transfer\` in the container → appears at \`/mnt/media/music\` on the host → Plex sees it and adds it to your library.
+
+## Moving the music library folder
+
+To move it (say from \`/app/Transfer\` to \`/music\`), change both halves: the volume mount in docker-compose and **Settings → Library → Folders → Music library folder**. Restart the container. Your files keep playing straight away, but the library still remembers the old locations until you run **Tools → Update File Locations** (check, then update). A library scan also catches up on its own once the old folder is gone. Only the library's records change, never the files, and a run can be undone from the same card.
 
 ## Complete docker-compose example (slskd + SoulSync)
 
@@ -322,11 +329,9 @@ services:
       - soulsync_database:/app/data
 
 # Then in SoulSync Settings:
-# Download Folder (input): /app/downloads
-# Music Library Folder (output): /app/Transfer
+# Download folder: /app/downloads
+# Music library folder: /app/Transfer
 \`\`\`
-
-![Docker compose configuration](gs-docker.jpg)
 
 ## Setup checklist
 
@@ -334,19 +339,19 @@ Go through every item — if you miss any single one, the pipeline breaks:
 
 ::: steps
 1. **slskd's folder is mounted in SoulSync's container** — both containers must mount the **same host directory**. The host paths (left side of \`:\`) must be identical.
-2. **Media server's music folder is mounted as Output** — mount the folder your Plex/Jellyfin/Navidrome monitors as \`/app/Transfer\` with \`:rw\` permissions.
-3. **SoulSync Settings are configured** — open **Settings → Library → Folders**. Set Download Folder (input) to \`/app/downloads\` and Music Library Folder (output) to \`/app/Transfer\` (or whatever container paths you used on the right side of \`:\`).
-4. **slskd URL and API key are set** — in **Settings → Sources**, open the **Soulseek** source panel and enter your slskd URL (e.g. \`http://slskd:5030\`) and API key.
+2. **Media server's music folder is mounted as your music library folder** — mount the folder your Plex/Jellyfin/Navidrome monitors as \`/app/Transfer\` with \`:rw\` permissions.
+3. **SoulSync Settings are configured** — open **Settings → Library → Folders**. Set Download folder to \`/app/downloads\` and Music library folder to \`/app/Transfer\` (or whatever container paths you used on the right side of \`:\`).
+4. **slskd URL and API key are set** — in **Settings → Downloads → Sources**, open **Soulseek** and enter your slskd URL (e.g. \`http://slskd:5030\`) and API key.
 5. **PUID/PGID match your host user** — run \`id\` on your host and set those values in docker-compose. Both slskd and SoulSync should use the same PUID/PGID.
-6. **Test with one track** — download a single track and watch the logs. If it downloads but doesn't transfer, the paths are wrong.
+6. **Test with one track** — download a single track and watch the logs. If it downloads but never reaches your music library folder, the paths are wrong.
 :::
 
 ## Permissions
 
-If paths are correct but files still won't transfer, it's usually permissions. SoulSync needs **read + write** access to all three folders.
+If paths are correct but files still won't move into your music library folder, it's usually permissions. SoulSync needs **read + write** access to all three folders.
 
 - Set \`PUID\` and \`PGID\` in docker-compose to match the user owning your music folders (run \`id\` on your host — usually 1000/1000)
-- Ensure the output folder is writable: \`chmod -R 755 /mnt/media/music\` (your actual host path)
+- Ensure the music library folder is writable: \`chmod -R 755 /mnt/media/music\` (your actual host path)
 - If using multiple containers (slskd + SoulSync), both must use the **same PUID/PGID**
 - NFS/CIFS mounts may need extra permissions — test with a local folder first to isolate the issue
 
@@ -354,9 +359,9 @@ If paths are correct but files still won't transfer, it's usually permissions. S
 
 ::: steps
 1. **Verify downloads are visible:** \`docker exec soulsync ls -la /app/downloads\` — you should see slskd's files. If empty or "No such file or directory", the volume mount is wrong.
-2. **Verify Transfer is writable:** \`docker exec soulsync touch /app/Transfer/test.txt && echo "OK"\` — then confirm \`test.txt\` appears in your media server's music folder on the host. Delete it after.
+2. **Verify the music library folder is writable:** \`docker exec soulsync touch /app/Transfer/test.txt && echo "OK"\` — then confirm \`test.txt\` appears in your media server's music folder on the host. Delete it after.
 3. **Verify permissions:** \`docker exec soulsync id\` — uid/gid should match your PUID/PGID.
-4. **Verify app settings:** open Settings → Library → Folders. Confirm Download Folder (input) and Music Library Folder (output) show container paths (like \`/app/downloads\`), not host paths.
+4. **Verify app settings:** open Settings → Library → Folders. Confirm Download folder and Music library folder show container paths (like \`/app/downloads\`), not host paths.
 5. **Test a single download** — search for a track, download it, watch the logs. Enable DEBUG logging in Settings for full detail.
 :::
 
@@ -364,13 +369,14 @@ If paths are correct but files still won't transfer, it's usually permissions. S
 
 | Symptom | Likely cause | Fix |
 |---------|--------------|-----|
-| Files download but never transfer | App settings not configured — volumes are set but Settings still have defaults | Open **Settings → Library → Folders** and set Input + Output paths to your **container-side** mount paths |
-| Post-processing log is empty | Download Folder (input) doesn't match where slskd saves files in the container | Run \`docker exec soulsync ls /app/downloads\` — the Download Folder (input) in Settings must match exactly |
-| Same tracks downloading repeatedly | Post-processing fails so SoulSync thinks the track never completed | Fix folder paths first; once post-processing works, files move to output and are recognized |
-| Files not renamed properly | Post-processing isn't running (path mismatch) or organization disabled | Verify File Organization is enabled in **Settings → Library → Organization**; fix the Download Folder (input) first |
-| Permission denied in logs | Container user can't write to the output folder | Set PUID/PGID to match the host owner; \`chmod -R 755\` the output host folder |
-| Media server doesn't see new files | Music Library Folder (output) doesn't map to the monitored folder | Ensure the **host path** in your SoulSync volume mount is the folder Plex/Jellyfin/Navidrome watches |
-| slskd works alone but not via SoulSync | slskd's folder and SoulSync's Download Folder (input) are different physical locations | Both containers must mount the **same host directory** — check the left side of \`:\` in both |
+| Files download but never reach the music library folder | App settings not configured — volumes are set but Settings still have defaults | Open **Settings → Library → Folders** and set the Download Folder and Music Library Folder to your **container-side** mount paths |
+| Post-processing log is empty | Download folder doesn't match where slskd saves files in the container | Run \`docker exec soulsync ls /app/downloads\` — the Download folder in Settings must match exactly |
+| Same tracks downloading repeatedly | Post-processing fails so SoulSync thinks the track never completed | Fix folder paths first; once post-processing works, files move to the music library folder and are recognized |
+| Files not renamed properly | Post-processing isn't running (path mismatch) or organization disabled | Verify file organization is on in **Settings → Library → Naming**; fix the Download folder first |
+| Permission denied in logs | Container user can't write to the music library folder | Set PUID/PGID to match the host owner; \`chmod -R 755\` the music library folder on the host |
+| Media server doesn't see new files | Music library folder doesn't map to the monitored folder | Ensure the **host path** in your SoulSync volume mount is the folder Plex/Jellyfin/Navidrome watches |
+| File paths still show the old folder after moving the library | The library remembers where files were, not where they are now | Run **Tools → Update File Locations**: check, then update. See [Moving the music library folder](#gs-folders) |
+| slskd works alone but not via SoulSync | slskd's folder and SoulSync's Download folder are different physical locations | Both containers must mount the **same host directory** — check the left side of \`:\` in both |
 
 > [!TIP]
 > **Still stuck?** Enable DEBUG logging in Settings, download a single track, and check \`logs/app.log\`. If the post-processing log is empty, the issue is almost certainly a path mismatch — SoulSync never found the file to process.
@@ -452,7 +458,7 @@ Requires Python 3.11.
 | Staging | \`/app/Staging\` | (Optional) Drop files here for the Import feature |
 | Config | \`/app/config\` | \`config.json\` — persists settings |
 | Logs | \`/app/logs\` | \`app.log\`, post-processing logs |
-| Database | \`/app/data\` | database + \`.encryption_key\` (sits next to the db, not in config) — **Named volume only** — never a host path |
+| Database | \`/app/data\` | database + \`.encryption_key\` + \`server_key\` (sit next to the db, not in config) — **Named volume only** — never a host path |
 
 > [!WARNING]
 > **Database volume:** always use a named volume (\`soulsync_database:/app/data\`), never a host path mount. Host path mounts can cause SQLite corruption, especially on networked filesystems or when permissions don't align.

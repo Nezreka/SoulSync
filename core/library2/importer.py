@@ -30,6 +30,7 @@ import uuid
 from contextlib import closing
 from typing import Any, Callable, Dict, Iterable, List, NamedTuple, Optional, Set, Tuple
 
+from core.various_artists_ids import is_various_artists_id
 from utils.logging_config import get_logger
 
 from .profile_lookup import default_quality_profile_id
@@ -651,7 +652,8 @@ class _ArtistResolver:
         for source, value in (ids or {}).items():
             src = str(source).strip().lower()
             val = str(value).strip() if value not in (None, "") else ""
-            if src and val:
+            # "Various Artists" is a credit, never an artist's id (#2229)
+            if src and val and not is_various_artists_id(val, src):
                 out[src] = val
         return out
 
@@ -3172,6 +3174,8 @@ def seed_wishlist_tracks(cursor, resolver: _ArtistResolver,
             # itunes id on those payloads), namespaced like the primary above;
             # filed as spotify it minted twins and wrong spotify ids
             payload_artist_id = _artist_spotify_from_payload(artist_payload)
+            if is_various_artists_id(payload_artist_id, provider):
+                payload_artist_id = None   # a credit, not an artist (#2229)
             aid = resolver.get_or_create_by_name(
                 name, provider_ids=({provider: payload_artist_id} if payload_artist_id else None))
             spotify_id = payload_artist_id if provider == "spotify" else None

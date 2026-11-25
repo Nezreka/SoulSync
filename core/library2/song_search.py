@@ -142,21 +142,39 @@ def matching_ids(conn, folded_query: str) -> Optional[List[int]]:
     # the dirty-track branch folds live through _fold_sql's norm_text
     conn.create_function("norm_text", 1, lambda x: normalize_for_comparison(x) if x else "",
                          deterministic=True)
-    like = f"%{folded_query}%"
+    tokens = [t for t in folded_query.split() if t]
+    if len(tokens) > 1:
+        fts_clauses = []
+        dirty_clauses = []
+        params: dict = {}
+        for idx, tok in enumerate(tokens):
+            k = f"tok_{idx}"
+            params[k] = f"%{tok}%"
+            fts_clauses.append(f"(title LIKE :{k} OR track_artist LIKE :{k} OR artist LIKE :{k})")
+            dirty_clauses.append(
+                f"({_fold_sql('t.title')} LIKE :{k} OR {_fold_sql('t.track_artist')} LIKE :{k} OR {_fold_sql('ar.name')} LIKE :{k})"
+            )
+        fts_where = " AND ".join(fts_clauses)
+        dirty_where = " AND ".join(dirty_clauses)
+    else:
+        params = {"like": f"%{folded_query}%"}
+        fts_where = "(title LIKE :like OR track_artist LIKE :like OR artist LIKE :like)"
+        dirty_where = (
+            f"({_fold_sql('t.title')} LIKE :like OR {_fold_sql('t.track_artist')} LIKE :like"
+            f" OR {_fold_sql('ar.name')} LIKE :like)"
+        )
     try:
         rows = conn.execute(
             f"""SELECT rowid FROM {TABLE}
-                 WHERE (title LIKE :like OR track_artist LIKE :like OR artist LIKE :like)
+                 WHERE {fts_where}
                    AND rowid NOT IN (SELECT track_id FROM {_DIRTY})
                 UNION
                 SELECT t.id FROM {_DIRTY} d
                   JOIN lib2_tracks t ON t.id = d.track_id
                   JOIN lib2_albums al ON al.id = t.album_id
                   LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id
-                 WHERE {_fold_sql('t.title')} LIKE :like
-                    OR {_fold_sql('t.track_artist')} LIKE :like
-                    OR {_fold_sql('ar.name')} LIKE :like""",
-            {"like": like}).fetchall()
+                 WHERE {dirty_where}""",
+            params).fetchall()
     except Exception as exc:  # noqa: BLE001 - fall back, never fail a search
         logger.debug("songs search index read failed: %s", exc)
         return None

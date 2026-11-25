@@ -17,6 +17,14 @@ import type { CSSProperties, ReactNode } from 'react';
 import { memo, useEffect, useRef, useState } from 'react';
 
 import { greetingForHour } from '../-dash.hello';
+import { useWorkerSheet, WorkerSheet } from '../-ui/worker-sheet';
+
+/** the tap's action on a video worker (video-enrichment.js toggle): paused
+ *  resumes, anything else pauses, a switched-off one does nothing */
+export function videoWorkerAction(button: HTMLElement) {
+  if (button.classList.contains('disabled')) return null;
+  return { label: button.classList.contains('paused') ? 'Resume' : 'Pause' };
+}
 
 interface VideoWorker {
   svc: string;
@@ -215,6 +223,9 @@ const OrbButtons = memo(function OrbButtons() {
 function OrbStage() {
   const ref = useRef<HTMLDivElement | null>(null);
   const busy = useBusyWorkers(ref);
+  // on a phone a tap opens the worker's sheet (#2180). the sheet portals out,
+  // so the memoized buttons the vanilla writes into are never re-rendered
+  const sheet = useWorkerSheet(ref);
   return (
     <div className="orb-stage" data-video-orb-stage="" data-foreign-orbs="" ref={ref}>
       <OrbButtons />
@@ -222,6 +233,12 @@ function OrbStage() {
         <span className={busy > 0 ? 'orb-stage-dot orb-stage-dot--busy' : 'orb-stage-dot'}></span>
         {busy === 0 ? 'Workers resting' : busy === 1 ? '1 worker busy' : `${busy} workers busy`}
       </div>
+      <WorkerSheet
+        button={sheet.button}
+        describe={videoWorkerAction}
+        onClose={sheet.close}
+        onManage={() => document.dispatchEvent(new CustomEvent('soulsync:video-open-workers'))}
+      />
     </div>
   );
 }
@@ -242,14 +259,18 @@ export interface HeroNumberView {
   value: string;
 }
 
+/** `workers` (the orb stage, its sheet and Manage Workers) is the admins'
+ *  (#2196): a member's hero is the greeting, the numbers and the library. */
 export function VideoHero({
   numbers,
   onNumber,
   library,
+  workers,
 }: {
   numbers: HeroNumberView[];
   onNumber: () => void;
   library: ReactNode;
+  workers: boolean;
 }) {
   const profileName = useProfileName();
   const greeting = greetingForHour(new Date().getHours());
@@ -261,7 +282,13 @@ export function VideoHero({
   const question = greeting.endsWith('?');
   const lead = question ? greeting.slice(0, -1) : greeting;
   return (
-    <div className="dashboard-header dash-hero" data-video-hero="" data-foreign-orbs="">
+    <div
+      className={
+        workers ? 'dashboard-header dash-hero' : 'dashboard-header dash-hero dash-hero--solo'
+      }
+      data-video-hero=""
+      data-foreign-orbs=""
+    >
       <div className="dashboard-header-sweep" aria-hidden="true">
         <span></span>
       </div>
@@ -299,7 +326,7 @@ export function VideoHero({
         ) : null}
         {library}
       </div>
-      <OrbStage />
+      {workers ? <OrbStage /> : null}
     </div>
   );
 }

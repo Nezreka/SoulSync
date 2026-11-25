@@ -1,5 +1,7 @@
 import { useState } from 'react';
 
+import { usePermNotOff } from '@/platform/shell/my-permissions';
+
 import type { ArtistPool, RelatedArtist } from '../-discover.your-artists-actions';
 import type { SourceLogos } from './your-artists-shelf';
 
@@ -298,6 +300,9 @@ function WatchToggleButton({
   onToggleWatchlist: () => void;
 }) {
   const [clicked, setClicked] = useState(false);
+  // no watchlist part, no watch button (#2209)
+  const mayWatch = usePermNotOff('music.watchlist');
+  if (!mayWatch) return null;
   return (
     <button
       type="button"

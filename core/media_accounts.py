@@ -2,8 +2,9 @@
 music side.
 
 a profile linked to its own Plex account (Connect with Plex, or a linked Plex
-Home user) has that account's server token stored on its profile row. the
-video side reads it to keep each member's own watch state (#1941); it reaches
+Home user) has that account's server token stored on its profile row, and a
+profile set to its own Jellyfin user has that user's id. the video side reads
+them to keep each member's own watch state (#1941); it reaches
 it through here, the same way it reaches profiles through core.profile_context,
 so core/video never imports the music database itself.
 """
@@ -55,6 +56,29 @@ def plex_linked_profiles() -> List[Tuple[int, str]]:
     return out
 
 
+def jellyfin_linked_profiles() -> List[Tuple[int, str]]:
+    """(profile id, jellyfin user id) for every profile set to its own
+    Jellyfin user. a profile whose setting can't be read is skipped."""
+    try:
+        db = _db()
+        profiles = db.get_all_profiles() or []
+    except Exception:   # noqa: BLE001
+        logger.debug("listing profiles failed", exc_info=True)
+        return []
+    out = []
+    for p in profiles:
+        pid = p.get("id")
+        if pid is None:
+            continue
+        try:
+            uid = (db.get_profile_server_library(int(pid)) or {}).get("jellyfin_user_id")
+        except Exception:   # noqa: BLE001
+            uid = None
+        if uid:
+            out.append((int(pid), str(uid)))
+    return out
+
+
 def profile_names() -> Tuple[dict, Optional[str]]:
     """({profile id: name}, the admin profile's name) -- labels for jobs that
     say WHO did something. Empty and None when the profiles can't be read."""
@@ -67,3 +91,14 @@ def profile_names() -> Tuple[dict, Optional[str]]:
              for p in profiles if p.get("id") is not None}
     admins = sorted(int(p["id"]) for p in profiles if p.get("id") is not None and p.get("is_admin"))
     return names, (names.get(admins[0]) if admins else None)
+
+
+def admin_profile_ids() -> List[int]:
+    """ids of the admin profiles -- whose watching the server account's own
+    columns hold. empty when the profiles can't be read."""
+    try:
+        profiles = _db().get_all_profiles() or []
+    except Exception:   # noqa: BLE001
+        logger.debug("listing profiles failed", exc_info=True)
+        return []
+    return sorted(int(p["id"]) for p in profiles if p.get("id") is not None and p.get("is_admin"))

@@ -164,9 +164,11 @@ def enqueue_tracks(conn, track_ids: List[int], monitored: bool, *,
     Runs on the CALLER's connection so the outbox rows commit atomically with
     the monitor-flag change. Returns the created outbox row ids.
     """
-    from core.library2.wishlist_mirror import track_wishlist_payload
+    from core.library2.wishlist_mirror import track_wishlist_payload, track_wishlist_release
     from core.library_scope import library_scope, library_scope_for_profile
 
+    # a withdrawal only needs the row's ids (#2200)
+    build = track_wishlist_payload if monitored else track_wishlist_release
     outbox_ids: List[int] = []
     for tid in track_ids:
         # Payload construction is part of the authoritative monitor mutation's
@@ -174,7 +176,7 @@ def enqueue_tracks(conn, track_ids: List[int], monitored: bool, *,
         # instead of committing a flag change with no retryable outbox intent.
         # Judged in the library this profile's wishlist fills (#1199).
         with library_scope(library_scope_for_profile(profile_id)):
-            payload = track_wishlist_payload(conn, tid)
+            payload = build(conn, tid)
         if not payload:
             continue
         stype = "single" if payload.pop("_album_type", "") == "single" else "album"
@@ -330,14 +332,32 @@ def enqueue_artist_watchlist(conn, artist_id: int, monitored: bool, *,
 # ---------------------------------------------------------------------------
 
 
+def music_asks_first(db, profile) -> bool:
+    """Does this profile row only ask for music (its wishlist rows are
+    requests an admin approves)? The answer is music.get from its effective
+    permissions under the global policy (core.permission_store.music_rights),
+    so a policy cap holds even for a member whose cached can_download column
+    still says yes (#2166). Admins and profile 1 never ask. A map that can't
+    be built asks (music_rights fails closed). A database without the
+    permission tables (an old test double) answers from the column."""
+    from core.permissions import is_admin_row, profile_can_download
+    if not profile:
+        return False
+    if is_admin_row(profile):
+        return False
+    if not hasattr(db, "get_permission_inputs"):
+        return not profile_can_download(profile)
+    from core.permission_store import music_rights
+    return music_rights(db, profile)["mode"] != "download"
+
+
 def profile_asks_first(db, profile_id) -> bool:
     """Is this a profile whose wishlist rows are requests (no download rights,
     upstream core/requests/music.py)? Profile 1 never is."""
-    from core.permissions import profile_can_download
     try:
         if not profile_id or int(profile_id) == 1:
             return False
-        return not profile_can_download(db.get_profile(int(profile_id)))
+        return music_asks_first(db, db.get_profile(int(profile_id)))
     except Exception:  # noqa: BLE001 - unreadable: treat the row as an ordinary add
         return False
 
@@ -499,6 +519,88 @@ _RETRY_DUE = ("(attempts = 0 OR processed_at IS NULL OR processed_at <= "
               "datetime('now', '-' || MIN(30 * (1 << MIN(attempts - 1, 7)), 3600) || ' seconds'))")
 
 
+def _drain_row(db, row: Dict[str, Any]) -> tuple:
+    """Replay one outbox row and record how it went. ``(done, failed)``."""
+    try:
+        data = json.loads(row["payload"] or "{}")
+        _execute_op(db, row["op"], data, row["profile_id"],
+                    bool(row["user_initiated"]))
+        error: Optional[str] = None
+    except Exception as e:  # noqa: BLE001
+        error = str(e) or e.__class__.__name__
+    with closing(db._get_connection()) as conn:
+        if error is None:
+            conn.execute(
+                "UPDATE lib2_mirror_outbox SET status='done', "
+                "attempts=attempts+1, last_error=NULL, "
+                "processed_at=CURRENT_TIMESTAMP WHERE id=?", (row["id"],))
+        else:
+            next_status = ("failed" if row["attempts"] + 1 >= MAX_ATTEMPTS
+                           else "pending")
+            conn.execute(
+                "UPDATE lib2_mirror_outbox SET status=?, attempts=attempts+1, "
+                "last_error=?, processed_at=CURRENT_TIMESTAMP WHERE id=?",
+                (next_status, error, row["id"]))
+            logger.warning("mirror outbox op %s (row %s) failed (attempt %d): %s",
+                           row["op"], row["id"], row["attempts"] + 1, error)
+        conn.commit()
+    return (1, 0) if error is None else (0, 1)
+
+
+def _release_remove(row: Dict[str, Any]) -> Optional[tuple]:
+    """``(track, album)`` when the row withdraws exactly one release."""
+    if row["op"] != "wishlist_remove":
+        return None
+    try:
+        data = json.loads(row["payload"] or "{}")
+    except (TypeError, ValueError):
+        return None
+    if not data.get("album_id"):
+        return None
+    return data.get("id"), data.get("album_id")
+
+
+def _release_remove_run(rows: List[Dict[str, Any]], start: int) -> List[Dict[str, Any]]:
+    """The release withdrawals for one profile that follow each other from
+    ``start``. the drain keeps the queue's order, so only rows next to each
+    other go in one write (#2200)."""
+    run: List[Dict[str, Any]] = []
+    for row in rows[start:]:
+        if _release_remove(row) is None or (run and row["profile_id"] != run[0]["profile_id"]):
+            break
+        run.append(row)
+    return run
+
+
+def _drain_release_removes(db, run: List[Dict[str, Any]]) -> Optional[int]:
+    """Withdraw a run of releases on one connection and one commit.
+
+    removing many watchlist artists queues one withdrawal per track: a
+    connection, a commit and an outbox update each took 70 s for 57 artists
+    (#2200). same deletes in the same order, written at once. None when the
+    database has no bulk call or the write failed; the caller then replays
+    the rows one by one, exactly as before."""
+    bulk = getattr(db, "remove_releases_from_wishlist", None)
+    if bulk is None:
+        return None
+    profile_id = run[0]["profile_id"]
+    try:
+        bulk([_release_remove(row) for row in run], profile_id,
+             raise_on_error=True)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("mirror outbox: %d release withdrawals failed together, "
+                       "retrying one by one: %s", len(run), e)
+        return None
+    with closing(db._get_connection()) as conn:
+        conn.execute(
+            "UPDATE lib2_mirror_outbox SET status='done', attempts=attempts+1, "
+            "last_error=NULL, processed_at=CURRENT_TIMESTAMP "
+            "WHERE id IN (SELECT value FROM json_each(?))",
+            (json.dumps([int(row["id"]) for row in run]),))
+        conn.commit()
+    return len(run)
+
+
 def drain(db, *, limit: int = 500, ids: Optional[Iterable[int]] = None) -> Dict[str, int]:
     """Process pending outbox rows. Returns ``{"done": n, "failed": m}``.
 
@@ -547,32 +649,24 @@ def drain(db, *, limit: int = 500, ids: Optional[Iterable[int]] = None) -> Dict[
                 superseded,
             )
             rows = [r for r in rows if r["id"] not in obsolete]
-        for row in rows:
-            try:
-                data = json.loads(row["payload"] or "{}")
-                _execute_op(db, row["op"], data, row["profile_id"],
-                            bool(row["user_initiated"]))
-                error: Optional[str] = None
-            except Exception as e:  # noqa: BLE001
-                error = str(e) or e.__class__.__name__
-            with closing(db._get_connection()) as conn:
-                if error is None:
-                    conn.execute(
-                        "UPDATE lib2_mirror_outbox SET status='done', "
-                        "attempts=attempts+1, last_error=NULL, "
-                        "processed_at=CURRENT_TIMESTAMP WHERE id=?", (row["id"],))
-                    done += 1
-                else:
-                    next_status = ("failed" if row["attempts"] + 1 >= MAX_ATTEMPTS
-                                   else "pending")
-                    conn.execute(
-                        "UPDATE lib2_mirror_outbox SET status=?, attempts=attempts+1, "
-                        "last_error=?, processed_at=CURRENT_TIMESTAMP WHERE id=?",
-                        (next_status, error, row["id"]))
-                    failed += 1
-                    logger.warning("mirror outbox op %s (row %s) failed (attempt %d): %s",
-                                   row["op"], row["id"], row["attempts"] + 1, error)
-                conn.commit()
+        position = 0
+        while position < len(rows):
+            run = _release_remove_run(rows, position)
+            if len(run) > 1:
+                position += len(run)
+                bulk_done = _drain_release_removes(db, run)
+                if bulk_done is not None:
+                    done += bulk_done
+                    continue
+                # the bulk write failed: each row on its own, as always
+                retry = run
+            else:
+                retry = [rows[position]]
+                position += 1
+            for row in retry:
+                done_delta, failed_delta = _drain_row(db, row)
+                done += done_delta
+                failed += failed_delta
 
     # iss29-D11: prune here, on the path that actually runs.
     #

@@ -31,6 +31,7 @@ def client(tmp_path):
         g.profile_id = int(request.headers.get("X-Test-Profile", 1))
         g.profile_name = "Tester %s" % g.profile_id
         g.can_download = True
+        g.request_limit = 0   # web_server stamps it for every member (0 = no limit)
         g.is_admin = g.profile_id == 1 or request.headers.get("X-Test-Admin") == "1"
 
     try:

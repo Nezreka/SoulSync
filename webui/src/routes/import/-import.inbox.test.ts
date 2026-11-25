@@ -13,6 +13,7 @@ import {
   importOutcomeLines,
   inboxActions,
   secondsToNextScan,
+  siblingRelease,
   sortInbox,
   timeAgo,
 } from './-import.inbox';
@@ -260,5 +261,48 @@ describe('what an import did', () => {
       ['1', 'First', 'skipped_owned', 'already in the library'],
       ['2', 'Second', 'failed', 'AcoustID mismatch'],
     ]);
+  });
+
+  it('lists the files a run left in Import with the reason (#2220)', () => {
+    const row = item({
+      status: 'failed',
+      match: {
+        matched_count: 1,
+        total_tracks: 15,
+        matches: [line('First', 1, 'completed')],
+        left_behind: [
+          { file: '16 - Bonus.flac', why: 'not on T.R.U. (15 tracks)' },
+          { file: '17 - Other.flac', why: '' },
+        ],
+      },
+    });
+    expect(importOutcomeLines(row).map((l) => [l.track, l.outcome, l.why])).toEqual([
+      ['First', 'completed', ''],
+      ['16 - Bonus.flac', 'left_behind', 'not on T.R.U. (15 tracks)'],
+      ['17 - Other.flac', 'left_behind', 'not matched to a track on this release'],
+    ]);
+  });
+
+  it('opens Fix match on the release the rest of the folder went to (#2220)', () => {
+    const leftover = item({
+      status: 'failed',
+      album_id: 'std',
+      guessed_name: 'T.R.U.',
+      match: {
+        matched_count: 1,
+        total_tracks: 15,
+        source: 'deezer',
+        matches: [line('First', 1, 'completed')],
+      },
+    });
+    expect(siblingRelease(leftover)).toMatchObject({ id: 'std', source: 'deezer', name: 'T.R.U.' });
+    // a guess nothing was imported to is only a guess
+    const guess = item({
+      status: 'needs_identify',
+      album_id: 'x',
+      match: { matched_count: 0, total_tracks: 0, source: 'deezer', matches: [] },
+    });
+    expect(siblingRelease(guess)).toBeNull();
+    expect(siblingRelease({ ...guess, identification_method: 'sibling_release' })).not.toBeNull();
   });
 });

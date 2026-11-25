@@ -5,6 +5,7 @@ import type { AdlBatch, AdlBatchHistoryEntry, AdlDownload, AdlFilter } from './-
 
 import { fetchBatchHistory, fetchDownloads } from './-adl.api';
 import { isTerminalPhase } from './-adl.batch';
+import { isUpgradeRow } from './-adl.helpers';
 import {
   ADL_BATCH_HISTORY_POLL_MS,
   ADL_FILTER_STATUSES,
@@ -13,6 +14,7 @@ import {
   ADL_REVIEW_STATUSES,
   BATCH_FADE_SECONDS,
 } from './-adl.types';
+import { musicDownloadsFeed } from './-dl.feed';
 
 export interface AdlDownloadsState {
   downloads: AdlDownload[];
@@ -104,6 +106,8 @@ export function useAdlDownloads({
 
   const refresh = useCallback(async () => {
     const data = await fetchDownloads();
+    // the help sheet's Downloads answers read this poll instead of their own
+    if (data.downloads) musicDownloadsFeed.publish(data);
     setState((prev) => ({
       ...prev,
       // A failed poll returns {} — keep what is on screen rather than blanking
@@ -120,6 +124,7 @@ export function useAdlDownloads({
   }, []);
 
   useEffect(() => {
+    const detach = musicDownloadsFeed.attach(() => void refresh());
     void refresh();
     void refreshHistory();
 
@@ -143,6 +148,7 @@ export function useAdlDownloads({
     }, ADL_BATCH_HISTORY_POLL_MS);
 
     return () => {
+      detach();
       clearInterval(downloadsTimer);
       clearInterval(historyTimer);
     };
@@ -178,6 +184,7 @@ export function useAdlDownloads({
           ADL_REVIEW_STATUSES.includes(String(d.verification_status)),
       );
     }
+    if (state.filter === 'upgrades') return rows.filter(isUpgradeRow);
     const statuses = ADL_FILTER_STATUSES[state.filter];
     return statuses ? rows.filter((d) => statuses.includes(d.status)) : rows;
   }, [state.downloads, state.filter, state.filterBatchId]);

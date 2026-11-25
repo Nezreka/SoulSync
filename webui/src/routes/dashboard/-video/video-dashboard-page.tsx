@@ -37,7 +37,8 @@ export function VideoDashboardPage({
   canDownload: boolean;
 }) {
   const stats = useQuery(statsQuery());
-  const scan = useQuery(scanQuery());
+  // when the library was scanned and the scan itself are the admin's (#2207)
+  const scan = useQuery({ ...scanQuery(), enabled: isAdmin });
   const issues = useQuery(issuesQuery());
   const findings = useQuery(findingsQuery(isAdmin));
 
@@ -55,11 +56,13 @@ export function VideoDashboardPage({
   );
 
   // the orbs and the worker buttons are vanilla: point them at the stage
-  // this page just mounted
+  // this page just mounted. a member has no stage and never asks the
+  // workers' status (#2196)
   useEffect(() => {
+    if (!isAdmin) return;
     window.videoWorkerOrbs?.refresh();
     window.videoEnrichmentPrime?.();
-  }, []);
+  }, [isAdmin]);
 
   const autoOn = week.data?.automations?.airing?.enabled ?? true;
   const recent = stats.data?.recent;
@@ -74,6 +77,7 @@ export function VideoDashboardPage({
         numbers={videoHeroNumbers(stats.data)}
         onNumber={() => goVideo('video-library')}
         library={<VideoLibraryStrip stats={stats.data} scan={scan.data} isAdmin={isAdmin} />}
+        workers={isAdmin}
       />
       {/* What you came to watch, first thing under the hero and the full
           width of the page: what airs next, then where you left off. */}

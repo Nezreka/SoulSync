@@ -6412,6 +6412,9 @@
             var status = (res.ok && res.body.status) || {};
             var hist = (res.ok && res.body.history) || null;
             var note = (res.ok && typeof res.body.note === 'string') ? res.body.note : '';
+            // notes belong to the shared soulseek account: only shown to who
+            // may act as it (the server leaves note_editable off otherwise)
+            var noteEditable = !!(res.ok && res.body.note_editable);
             var rows = [];
             var pres = status.presence || status.status ||
                 (status.isOnline === true ? 'Online' : (status.isOnline === false ? 'Offline' : null));
@@ -6447,7 +6450,7 @@
                         '</div>';
                 }
                 // private local note ("great jazz rips") — never leaves this install
-                html += '<div class="chat-card-note">' +
+                if (noteEditable) html += '<div class="chat-card-note">' +
                     '<textarea class="chat-card-note-input" data-chat-card-note ' +
                         'placeholder="Private note about ' + attr(name) + '\u2026" ' +
                         'maxlength="2000" rows="2">' + esc(note) + '</textarea>' +
@@ -11540,7 +11543,18 @@
         });
     }
 
+    // Chat & Arcade isn't part of every profile (chat.use). the server only
+    // pushes to the ones that have it (#2191); this is the same answer here,
+    // for a socket that joined before an admin turned it off, so a push never
+    // makes the page ask /api/chat and toast the refusal
+    function _chatAllowed() {
+        var p = window.SoulSyncPerms;
+        if (!p || typeof p.live !== 'function' || !p.live()) return true;
+        return !!p.on('chat.use');
+    }
+
     function onRoomProtocol(d) {
+        if (!_chatAllowed()) return;
         if (!d || d.room !== state.room) return;
         _ingestProtocol(d.events || []);
     }
@@ -13085,6 +13099,7 @@
     }
 
     function onRoomMessages(d) {
+        if (!_chatAllowed()) return;
         _ensureSelf();
         // a mention pings you wherever you are in the app (Discord behavior)
         var mentioned = (d && d.messages || []).filter(function (m) {
@@ -13113,6 +13128,7 @@
     }
 
     function onUnread(d) {
+        if (!_chatAllowed()) return;
         unread.pms = (d && d.pms) || 0;
         // Only a RISING count toasts (server sets grew; reads clearing the flag
         // stay quiet) — showToast journals it into the bell + history for free.

@@ -1,7 +1,7 @@
 /**
  * The music size cap (MB per minute) loads and saves the way settings.js did.
- * Filtering is React now (src/features/settings/tabs/downloads-tab.tsx,
- * SETTINGS_PORT.md step 5): it was settings.js's load line and collector.
+ * It is on Downloads > Filtering (src/features/settings/tabs/downloads/
+ * filtering-view.tsx); it was settings.js's load line and collector.
  */
 
 import { fireEvent, render, waitFor } from '@testing-library/react';
@@ -10,7 +10,7 @@ import { expect, it } from 'vitest';
 import type { SettingsPayload } from '@/features/settings/settings-store';
 
 import { createSettingsStore } from '@/features/settings/settings-store';
-import { DownloadsTab } from '@/features/settings/tabs/downloads-tab';
+import { FilteringView } from '@/features/settings/tabs/downloads/filtering-view';
 
 function tab(saved: SettingsPayload) {
   const posted: SettingsPayload[] = [];
@@ -22,7 +22,7 @@ function tab(saved: SettingsPayload) {
     delay: 0,
   });
   store.hydrate(saved);
-  render(<DownloadsTab store={store} part="filtering" opened={1} active />);
+  render(<FilteringView store={store} />);
   const input = document.getElementById('music-max-mb-per-minute') as HTMLInputElement;
   return { store, posted, input };
 }

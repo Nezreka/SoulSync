@@ -299,6 +299,42 @@ def _credited_artists(conn, track_id: int) -> List[str]:
     return [n for n in (names.get(int(r["id"]), r["name"]) for r in rows) if n]
 
 
+def _track_performers(conn, track_id: int, album_artist: str) -> List[str]:
+    """who $artist names: the track's performer, the same credit the ARTIST
+    tag carries. a compilation track is credited to its album artist first
+    ("Various Artists", then the performer), and the planner took that first
+    credit, so a reorganize renamed "10 - Super Frika - Love Satisfaction"
+    to "10 - Various Artists - Love Satisfaction" (pertti). the album artist
+    stays $albumartist."""
+    from core.imports.compilation import is_various_artists_name
+    from core.library2.retag import _performers
+
+    credited = _credited_artists(conn, track_id)
+    row = conn.execute("SELECT track_artist FROM lib2_tracks WHERE id=?",
+                       (int(track_id),)).fetchone()
+    own = str((row[0] if row else "") or "").strip()
+    performers = _performers(credited, album_artist, own)
+    # "various artists" is never a performer when the track names one
+    performers = [a for a in performers if not is_various_artists_name(a)] or performers
+    if own and not is_various_artists_name(own) and all(
+            is_various_artists_name(a) for a in performers):
+        # credited to the various-artists name alone, the file's own artist
+        # tag names who sings it
+        return [own]
+    return performers
+
+
+def _templates_use_quality() -> bool:
+    """any naming template uses $quality (#2195). True when the templates
+    can't be read: a slower plan beats a name without its quality."""
+    try:
+        from core.imports.paths import _get_config_manager
+        templates = _get_config_manager().get("file_organization.templates", {}) or {}
+        return any("$quality" in str(t or "") for t in templates.values())
+    except Exception:  # noqa: BLE001 - see docstring
+        return True
+
+
 def _flag(value: Any) -> Optional[bool]:
     if value is None or value == "":
         return None
@@ -360,6 +396,7 @@ def plan_album_reorganize(
         _is_in_deleted_quarantine, _same_physical_file, _trim_to_transfer,
     )
 
+    wants_quality = _templates_use_quality()
     album_row = _album_row(conn, album_id)
     if album_row is None:
         return {"success": False, "status": "no_album", "source": None,
@@ -532,7 +569,7 @@ def plan_album_reorganize(
             _uncatalogued_lossy_twins(conn, resolved, item['sibling_files'],
                                       resolve_file_path_fn))
 
-        artists = _credited_artists(conn, track["id"]) or [artist_name]
+        artists = _track_performers(conn, track["id"], artist_name) or [artist_name]
         context = _build_post_process_context(
             _as_provider_album({**album, "title": track['album_title'], "album_type": filing["type"],
                                 "duration_ms": filing.get("duration_ms") or 0},
@@ -559,6 +596,12 @@ def plan_album_reorganize(
             record_type=filing["type"],
             type_source=filing["source"],
         )
+        if wants_quality and resolved and os.path.isfile(resolved):
+            # #2195: $quality comes from the file itself, as a download fills
+            # it. the planner never set it, so a rename dropped it from the
+            # name. read only when a template uses it: it opens every file
+            from core.imports.file_ops import get_audio_quality_string
+            context["_audio_quality"] = get_audio_quality_string(resolved)
         if filing["locked"] is not None:
             # reproduce the download's decision exactly: its source and its
             # lock, not the context builder's own guess from the source name

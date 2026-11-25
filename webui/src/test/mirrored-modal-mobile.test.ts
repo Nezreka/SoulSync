@@ -230,6 +230,23 @@ describe('the modal takes more of the phone', () => {
     expect(modal.indexOf('100vh')).toBeLessThan(modal.indexOf('100dvh'));
   });
 
+  // #2282: the hero pinned and the list scrolled in the strip under it,
+  // so on a phone the tracks were cut off. the panel scrolls as one page
+  it('scrolls the whole panel, not just the list', () => {
+    expect(finalValue('.mirrored-modal', 'overflow-y')).toBe('auto');
+    expect(finalValue('.mm-as-page .mirrored-modal', 'overflow-y')).toBe('auto');
+    expect(finalValue('.mm-list', 'overflow-y')).toBe('visible');
+    expect(finalValue('.mm-list', 'flex')).toBe('0 0 auto');
+    expect(finalValue('.mm-actions', 'position')).toBe('sticky');
+  });
+
+  // #2282: the 38px touch floor stretched the 36px close button into an oval
+  it('keeps the close button out of the touch floor', () => {
+    const floor = MOBILE.match(/button(?::not\([^)]*\))+\s*\{\s*min-height:\s*38px/);
+    expect(floor).not.toBeNull();
+    expect(floor![0]).toContain(':not(.mm-close)');
+  });
+
   it('returns the hero info width only where the hero is stacked', () => {
     // at 641-768px the hero is still a row and the base 44px
     // padding-right is the close button's clearance
@@ -256,10 +273,17 @@ describe('floating chrome while the mirrored modal is open', () => {
       '#notif-bell-btn',
       '#helper-float-btn',
       '#activity-float-btn',
-      '.hamburger-btn',
     ]) {
       expect(block).toContain(`body:has(#mirrored-track-modal) ${target}`);
     }
     expect(block).toMatch(/\{\s*display:\s*none\s*!important;\s*\}/);
+  });
+
+  // #2181: from the Playlists page the detail is a page (.mm-as-page) over
+  // the whole screen. hiding the hamburger there left a phone with no menu
+  it('keeps the hamburger when the detail is a page, and clears it', () => {
+    expect(block).toContain('body:has(#mirrored-track-modal:not(.mm-as-page)) .hamburger-btn');
+    expect(block).not.toContain('body:has(#mirrored-track-modal) .hamburger-btn');
+    expect(rule('.mm-as-page .mm-hero', PHONE)).toMatch(/padding-top:\s*76px/);
   });
 });

@@ -26,6 +26,7 @@ import type { RefObject } from 'react';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { getShellBridge } from '@/platform/shell/bridge';
 import { fetchReviewQueueSummary } from '@/routes/active-downloads/-adl.api';
 
 import type { ServiceStatusPayload } from '../-dash.api';
@@ -220,9 +221,9 @@ export function useLibraryCard() {
     const confirmed = await window.showConfirmDialog?.({
       title: 'Deep Scan Library',
       message:
-        'A deep scan re-checks every track in your media server library.\n\n' +
-        '• Adds any new tracks that were missed\n' +
-        '• Removes tracks no longer on your server\n' +
+        'A deep scan re-checks every track in your library.\n\n' +
+        '• Catches what the regular scans missed\n' +
+        '• Removes tracks that are no longer there\n' +
         '• Preserves all existing metadata and enrichment data\n\n' +
         'This may take a while for large libraries. Continue?',
     });
@@ -358,13 +359,83 @@ export function useDismiss(open: boolean, close: () => void, ref: RefObject<HTML
 }
 
 /**
+ * The hero's library line. An admin's is the server's status and its
+ * management; a member's is only the pages they may open from it (#2207).
+ */
+export function LibraryCard({ admin }: { admin: boolean }) {
+  return admin ? <AdminLibraryCard /> : <MemberLibraryCard />;
+}
+
+/**
+ * A member's library line (#2207). The server's name and state, the
+ * database's size, the scans and the review queue are the admin's: what is
+ * left is a way into the pages this member may open. They get the size of
+ * their own library for the hero from /api/database/stats (the counts and
+ * nothing else, for a member), once: the live db-stats push is the admins'.
+ * Nothing they may open, no line at all.
+ */
+function MemberLibraryCard() {
+  const bridge = getShellBridge();
+  const libraryAllowed = bridge?.isPageAllowed('library') ?? false;
+  // Repair opens Tools, which an admin can give a member
+  const toolsAllowed = bridge?.isPageAllowed('tools') ?? false;
+
+  useEffect(() => {
+    let live = true;
+    void fetchDatabaseStats().then((stats) => {
+      if (live && stats) publishDbStats(stats as DbStats);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  if (!libraryAllowed && !toolsAllowed) return null;
+  return (
+    <div className="dash-hero-library" data-card="library">
+      <div className="library-status-card" id="library-status-card">
+        <div className="library-status-header">
+          <div className="library-status-info">
+            {/* no status dot: the server's state is the admin's */}
+            <h4 className="library-status-title" id="library-status-title">
+              Library
+            </h4>
+          </div>
+          <div className="library-status-actions" id="library-status-actions">
+            {libraryAllowed ? (
+              <button
+                className="library-status-btn"
+                id="library-status-browse-btn"
+                onClick={() => void window.navigateToPage?.('library')}
+              >
+                <span>Browse library</span>
+              </button>
+            ) : null}
+            {toolsAllowed ? (
+              <button
+                className="library-status-btn"
+                id="library-status-repair-btn"
+                title="Open the Tools maintenance center"
+                onClick={() => void window.navigateToPage?.('tools')}
+              >
+                <span>Repair</span>
+              </button>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
  * The library, as the hero's status line: whose library, how fresh, one
  * primary action (Scan) and everything else behind "⋯". The page links that
  * only repeated the sidebar (wishlist, downloads, discover, sync) are gone.
  * Every id the state machine and the scan flows write into is kept; the menu
  * stays mounted (just hidden) so those ids always resolve.
  */
-export function LibraryCard() {
+function AdminLibraryCard() {
   const { dbStats, dbStatsSeen, status, scanning, progress, scan, deepScan } = useLibraryCard();
   const reviewCount = useReviewCount();
   const view = dbStatsSeen ? libraryCardView(dbStats, status, scanning, new Date()) : CHECKING;

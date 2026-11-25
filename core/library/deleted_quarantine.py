@@ -142,6 +142,8 @@ def quarantine_mover(transfer_folder: str, source: str):
             dest = f"{base}_{n}{ext}"
             n += 1
         os.makedirs(os.path.dirname(dest), exist_ok=True)
+        from core.library import own_writes
+        own_writes.note(path, dest)
         shutil.move(path, dest)
         record_deleted_entry(deleted_root, dest, path, source)
     return _move

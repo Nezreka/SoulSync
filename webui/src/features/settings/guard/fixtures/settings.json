@@ -1,0 +1,306 @@
+{
+  "_environment": {
+    "windows": true
+  },
+  "_source_status": {
+    "qobuz": false
+  },
+  "acoustid": {
+    "api_key": "",
+    "enabled": true,
+    "require_verified": false
+  },
+  "active_media_server": "plex",
+  "album_downloads": {
+    "atomic_publish": true,
+    "atomic_recover_orphans": true
+  },
+  "audiobooks": {
+    "completeness_tolerance": 0.85,
+    "download_path": "/data/books",
+    "download_source": {
+      "hybrid_order": ["usenet", "torrent"],
+      "mode": "hybrid"
+    },
+    "embed_artwork": false,
+    "marketplace": "uk",
+    "merge_m4b": true,
+    "prowlarr_categories": [3030, 3035],
+    "quality": {
+      "allow_dramatized": false,
+      "allowed_formats": ["mp3", "m4b"],
+      "file_layout": "single",
+      "format_order": ["mp3", "m4b"],
+      "max_bitrate_kbps": 0,
+      "min_bitrate_kbps": 32
+    },
+    "recycle_keep_days": 3,
+    "staging_days": 10,
+    "torrent_category": "books",
+    "usenet_category": "books"
+  },
+  "beatport": {
+    "search_all_tracks": true
+  },
+  "concerts": {
+    "country": "gb",
+    "ticketmaster_api_key": "tm"
+  },
+  "content_filter": {
+    "allow_explicit": false,
+    "exclude_clean": false,
+    "prefer_explicit": true
+  },
+  "deezer": {
+    "app_id": "dz",
+    "app_secret": ""
+  },
+  "deezer_download": {
+    "arl": "__redacted_unchanged__"
+  },
+  "discogs": {
+    "token": ""
+  },
+  "discover": {
+    "adventurousness": 0.6
+  },
+  "download_source": {
+    "hybrid_order": ["soulseek", "youtube", "qobuz"],
+    "max_concurrent": 5,
+    "max_mb_per_minute": 12.5,
+    "mode": "hybrid",
+    "source_search_timeout": 25,
+    "stream_source": "active",
+    "torrent_min_seeders": 0,
+    "torrent_stall_timeout_seconds": 1200,
+    "youtube_album_bundle": true
+  },
+  "experimental": {
+    "bandcamp_enabled": false,
+    "jiosaavn_enabled": true
+  },
+  "fanart": {
+    "api_key": "fa"
+  },
+  "file_organization": {
+    "collab_artist_mode": "all",
+    "disc_label": "CD",
+    "enabled": true,
+    "templates": {
+      "album_path": "$albumartist/$album ($year)/$track - $title",
+      "audiobook_path": "$author/$title",
+      "playlist_item": "$position - $title",
+      "single_path": "$artist/$artist - $title/$title"
+    },
+    "unicode_substitution": true
+  },
+  "genius": {
+    "access_token": ""
+  },
+  "genre_whitelist": {
+    "enabled": true,
+    "genres": ["ambient", "jazz", "shoegaze"]
+  },
+  "hydrabase": {
+    "api_key": "__redacted_unchanged__",
+    "auto_connect": true,
+    "url": "ws://hydra:4545"
+  },
+  "image_cache": {
+    "max_cache_mb": 512,
+    "thumbnails": true
+  },
+  "import": {
+    "folder_artist_override": false
+  },
+  "itunes": {
+    "country": "GB"
+  },
+  "jellyfin": {
+    "api_key": "",
+    "api_timeout": 90,
+    "base_url": "http://jf:8096"
+  },
+  "lastfm": {
+    "api_key": "__redacted_unchanged__",
+    "scrobble_enabled": true,
+    "session_key": "sk",
+    "username": "boulder"
+  },
+  "library": {
+    "audiobooks_additional_paths": ["/mnt/oldbooks"],
+    "redownload_externally_deleted": false,
+    "watch_folders": true,
+    "watch_poll_minutes": 15,
+    "watch_root_modes": {},
+    "write_artist_nfo": true
+  },
+  "lidarr_compat": {
+    "enabled": false,
+    "profile_id": 1
+  },
+  "lidarr_download": {
+    "api_key": "__redacted_unchanged__",
+    "url": "http://lidarr:8686"
+  },
+  "listenbrainz": {
+    "base_url": "",
+    "scrobble_enabled": false,
+    "token": "",
+    "username": ""
+  },
+  "listening_stats": {
+    "enabled": true,
+    "poll_interval": 45
+  },
+  "logging": {
+    "level": "INFO",
+    "path": "logs/app.log"
+  },
+  "lossy_copy": {
+    "bitrate": "256",
+    "codec": "mp3",
+    "downsample_hires": false,
+    "enabled": true
+  },
+  "m3u_export": {
+    "enabled": true,
+    "library_enabled": false,
+    "library_path": "/m3u"
+  },
+  "mcp": {
+    "enabled": true
+  },
+  "metadata": {
+    "fallback_source": "deezer",
+    "library_discography_source": "itunes",
+    "spotify_free_enrichment": false
+  },
+  "metadata_enhancement": {
+    "album_art_order": ["itunes", "caa"],
+    "embed_album_art": false,
+    "enabled": true,
+    "single_to_album": true,
+    "tags": {
+      "artist_separator": " & ",
+      "feat_in_title": true,
+      "genre_merge": false
+    }
+  },
+  "music_assistant": {
+    "base_url": "http://ma:8095",
+    "source_folder": "/media",
+    "token": "__redacted_unchanged__"
+  },
+  "musicbrainz": {
+    "base_url": "http://mb:5000",
+    "embed_tags": true,
+    "request_interval": 0.1,
+    "tags": {
+      "isrc": false
+    },
+    "use_original_date_for_date": true
+  },
+  "navidrome": {
+    "base_url": "http://nd:4533",
+    "password": "__redacted_unchanged__",
+    "username": "nd"
+  },
+  "playlist_sync": {
+    "create_backup": false,
+    "mode": "append",
+    "wishlist_missing_tracks": true
+  },
+  "plex": {
+    "base_url": "http://plex:32400",
+    "token": "__redacted_unchanged__"
+  },
+  "podcasts": {
+    "media_format": "both"
+  },
+  "pollinations": {},
+  "post_processing": {
+    "accept_version_mismatch_fallback": false,
+    "audio_completeness_check": true,
+    "duration_tolerance_seconds": 4.5,
+    "replaygain_enabled": true,
+    "retries_per_query": 7,
+    "retry_exhaustive": true,
+    "retry_next_candidate_on_mismatch": true,
+    "verify_flac_decode": true,
+    "version_mismatch_min_count": 3
+  },
+  "prowlarr": {
+    "api_key": "__redacted_unchanged__",
+    "search_min_gap_seconds": 0,
+    "url": "http://prowlarr:9696"
+  },
+  "security": {
+    "cors_origins": "https://ok.example",
+    "oidc_client_secret": "__redacted_unchanged__",
+    "oidc_issuer": "https://id.example",
+    "oidc_signin": true,
+    "plex_signin": true,
+    "require_login": false,
+    "require_pin_on_launch": false,
+    "signup_request_limit": 5,
+    "signup_sides": "both"
+  },
+  "soulseek": {
+    "api_key": "__redacted_unchanged__",
+    "cleanup_scope": "all",
+    "download_timeout": 900,
+    "max_peer_queue": 20,
+    "min_observed_download_speed_kbps": 0,
+    "preferred_version": "live",
+    "search_timeout": 45,
+    "slskd_url": "http://slskd:5030"
+  },
+  "spotify": {
+    "client_id": "cid",
+    "client_secret": "__redacted_unchanged__",
+    "embed_tags": false,
+    "redirect_uri": "",
+    "tags": {
+      "album_id": false
+    }
+  },
+  "tidal": {
+    "client_id": "tid",
+    "redirect_uri": "http://127.0.0.1:8889/tidal/callback"
+  },
+  "torrent_client": {
+    "password": "__redacted_unchanged__",
+    "seed_mode": "client",
+    "seed_ratio_goal": 1.5,
+    "type": "deluge",
+    "url": "http://deluge:8112"
+  },
+  "ui_appearance": {
+    "accent_color": "#1db954",
+    "accent_preset": "#8b5cf6",
+    "max_performance": false,
+    "particles_enabled": false,
+    "reduce_effects": false,
+    "settings_autosave": true,
+    "sidebar_visualizer": "wave",
+    "worker_orbs_enabled": true
+  },
+  "usenet_client": {
+    "remove_completed": "files",
+    "type": "nzbget",
+    "url": "http://nzbget:6789",
+    "username": "boulder"
+  },
+  "wishlist": {
+    "ignore_ttl_days": 14,
+    "wing_it_guesses": true
+  },
+  "youtube": {
+    "cookies_browser": "custom",
+    "cookies_file": "/config/cookies.txt",
+    "download_delay": 5,
+    "transcode_bitrate": "320",
+    "transcode_codec": "opus"
+  }
+}

@@ -57,6 +57,22 @@ def test_resolves_when_only_the_album_folder_differs(library):
     assert resolved == str(track)
 
 
+
+def test_sibling_search_ignores_deleted_quarantine(library):
+    root, track = library
+    quarantine = track.parent.with_name(".deleted")
+    quarantine.mkdir()
+    deleted = quarantine / track.name
+    deleted.write_bytes(b"quarantined audio")
+    config = _Config(str(root))
+
+    assert resolve_library_file_path(str(deleted), config_manager=config) is None
+    assert resolve_library_file_path(
+        r"Beck\.deleted\01-01 - E-Pro.flac", config_manager=config) is None
+    assert resolve_library_file_path(
+        "Beck/Guero/01-01 - E-Pro.flac", config_manager=config) == str(track)
+
+
 def test_resolves_an_absolute_media_server_path_too(library):
     """Navidrome/Plex may report an absolute path under their own root."""
     root, track = library

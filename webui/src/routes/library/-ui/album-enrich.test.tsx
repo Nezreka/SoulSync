@@ -141,3 +141,25 @@ describe('enrich with all reports failures (review 5 W3-TL-2)', () => {
     expect(toast.mock.calls.filter(([, kind]) => kind === 'error')).toEqual([]);
   });
 });
+
+describe('album menu enrich on a phone (#2183)', () => {
+  it('a tap opens the provider list and it stays open', () => {
+    renderMenu();
+    fireEvent.click(screen.getByTitle('More actions'));
+    const enrich = screen.getByRole('button', { name: /Enrich/ });
+    // a tap: the browser's compat mouseenter lands just before the click.
+    // hover used to open the list on it and the click's toggle shut it again
+    fireEvent.mouseEnter(enrich.parentElement as HTMLElement);
+    fireEvent.mouseOver(enrich);
+    fireEvent.click(enrich);
+    expect(screen.getByRole('button', { name: 'Enrich with all' })).toBeInTheDocument();
+  });
+
+  it('a touch pointer entering does not open it on its own', () => {
+    renderMenu();
+    fireEvent.click(screen.getByTitle('More actions'));
+    const enrich = screen.getByRole('button', { name: /Enrich/ });
+    fireEvent.pointerEnter(enrich.parentElement as HTMLElement, { pointerType: 'touch' });
+    expect(screen.queryByRole('button', { name: 'Enrich with all' })).toBeNull();
+  });
+});

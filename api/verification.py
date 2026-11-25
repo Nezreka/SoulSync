@@ -19,6 +19,7 @@ from core.profile_context import admin_only, get_current_profile_id
 from core.search import stream as _search_stream
 from utils.async_helpers import run_async
 from utils.logging_config import get_logger
+from core.permissions import requires
 
 logger = get_logger("api.verification")
 
@@ -101,6 +102,7 @@ def _resolve_history_audio_path(row):
 
 
 @bp.route('/api/verification/<int:history_id>/stream', methods=['GET'])
+@requires("music.access")
 def stream_verification_item(history_id):
     """Stream a completed download for the verification review queue (listen
     before approving). Path comes ONLY from the history row — no client paths."""
@@ -122,6 +124,7 @@ def stream_verification_item(history_id):
 
 
 @bp.route('/api/verification/<int:history_id>/entry', methods=['GET'])
+@requires("music.access")
 def get_verification_entry(history_id):
     """Full library_history row for one review-queue item — feeds the Audit
     Trail modal when opened from the Downloads page (where the history-page
@@ -137,6 +140,7 @@ def get_verification_entry(history_id):
 
 
 @bp.route('/api/verification/config', methods=['GET'])
+@requires("music.access")
 def get_verification_config():
     """Whether AcoustID/download-verification is enabled — if not, the review
     queue collapses to quarantine-only in the UI."""
@@ -189,6 +193,7 @@ def _set_review_play_session(file_path, title, artist, album, mimetype=None):
 
 
 @bp.route('/api/verification/<int:history_id>/play', methods=['POST'])
+@requires("music.access")
 def play_verification_item(history_id):
     """Load the downloaded file into the media player (review queue ▶)."""
     try:
@@ -212,6 +217,7 @@ def play_verification_item(history_id):
 
 
 @bp.route('/api/verification/<int:history_id>/compare-stream', methods=['POST'])
+@requires("music.access")
 def compare_stream_verification_item(history_id):
     """Find the expected track on Soulseek/streaming sources for an A/B
     comparison — the SAME pipeline as the /search page play button, but fed

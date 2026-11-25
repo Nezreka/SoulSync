@@ -874,3 +874,56 @@ def test_preview_says_whether_the_page_can_be_framed(preview_net, headers, frame
     pages, _ = preview_net
     pages["https://public.example/f"] = _FakeResp(headers=headers)
     assert chat_api._fetch_link_preview("https://public.example/f")["frameable"] is frameable
+
+
+# ── S20 (nov 17 review): private messages and notes are the shared account's ──
+
+class _NoteDb:
+    def __init__(self):
+        self.notes = {}
+
+    def set_chat_user_note(self, username, note):
+        self.notes[username] = note
+        return True
+
+    def get_chat_user_note(self, username):
+        return self.notes.get(username, "")
+
+    def get_user_download_stats(self, username):
+        return {}
+
+
+class TestSharedAccountPrivacy:
+    def _member(self, chat_app, send=False):
+        http, state = chat_app
+        state["admin"] = False
+        state["config"]["soulseek.chat_member_send"] = send
+        db = _NoteDb()
+        chat_api.configure(client_getter=lambda: state["client"],
+                           run_async=lambda v, timeout=None: v,
+                           config_get=lambda k, d=None: state["config"].get(k, d),
+                           db_getter=lambda: db)
+        return http, state, db
+
+    def test_a_member_does_not_read_the_admins_messages(self, chat_app):
+        http, _state, _db = self._member(chat_app)
+        assert http.get("/api/chat/conversations").get_json()["conversations"] == []
+        assert http.get("/api/chat/conversations/alice").status_code == 403
+
+    def test_a_member_does_not_read_or_write_the_shared_notes(self, chat_app):
+        http, _state, db = self._member(chat_app)
+        db.notes["alice"] = "admin's note"
+        assert http.post("/api/chat/user/alice/note", json={"note": "x"}).status_code == 403
+        card = http.get("/api/chat/user/alice").get_json()
+        assert "note" not in card and card["note_editable"] is False
+        assert db.notes["alice"] == "admin's note"
+
+    def test_a_member_the_admin_lets_send_may_use_the_account(self, chat_app):
+        http, _state, db = self._member(chat_app, send=True)
+        assert http.get("/api/chat/conversations/alice").status_code == 200
+        assert http.post("/api/chat/user/alice/note", json={"note": "ok"}).status_code == 200
+        assert db.notes["alice"] == "ok"
+
+    def test_the_admin_reads_the_messages(self, chat_app):
+        http, _state = chat_app
+        assert http.get("/api/chat/conversations/alice").status_code == 200

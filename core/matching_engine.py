@@ -22,6 +22,137 @@ from core.text.track_prefix import strip_track_prefix
 
 logger = get_logger("matching_engine")
 
+# Compact Traditional -> Simplified Chinese folding table for CJK matching & search (#2249).
+# If `opencc` is installed, it is used first; this built-in table covers the most common
+# Traditional characters encountered in CJK music metadata with zero extra dependencies.
+_TRAD_TO_SIMP_TABLE = str.maketrans({
+    '無': '无', '變': '变', '臨': '临', '燈': '灯', '愛': '爱', '夢': '梦', '風': '风',
+    '雲': '云', '華': '华', '樂': '乐', '國': '国', '時': '时', '間': '间', '門': '门',
+    '開': '开', '關': '关', '聲': '声', '聽': '听', '見': '见', '說': '说', '話': '话',
+    '語': '语', '詞': '词', '詩': '诗', '書': '书', '畫': '画', '點': '点', '線': '线',
+    '體': '体', '實': '实', '現': '现', '當': '当', '經': '经', '過': '过', '來': '来',
+    '動': '动', '運': '运', '轉': '转', '傳': '传', '統': '统', '紀': '纪', '錄': '录',
+    '選': '选', '擇': '择', '錯': '错', '對': '对', '與': '与', '為': '为', '從': '从',
+    '進': '进', '還': '还', '這': '这', '個': '个', '們': '们', '後': '后', '裡': '里',
+    '邊': '边', '頭': '头', '發': '发', '覺': '觉', '會': '会', '讓': '让', '給': '给',
+    '紅': '红', '藍': '蓝', '綠': '绿', '黃': '黄', '銀': '银', '鐵': '铁', '鋼': '钢',
+    '電': '电', '腦': '脑', '機': '机', '車': '车', '飛': '飞', '鳥': '鸟', '魚': '鱼',
+    '龍': '龙', '鳳': '凤', '馬': '马', '貓': '猫', '雙': '双', '單': '单', '萬': '万',
+    '億': '亿', '歲': '岁', '節': '节', '氣': '气', '淚': '泪', '淵': '渊', '島': '岛',
+    '嶺': '岭', '嵐': '岚', '櫻': '樱', '葉': '叶', '藥': '药', '劍': '剑', '戰': '战',
+    '勝': '胜', '敗': '败', '傷': '伤', '歸': '归', '離': '离', '別': '别', '戀': '恋',
+    '憶': '忆', '願': '愿', '嘆': '叹', '響': '响', '韻': '韵', '調': '调', '號': '号',
+    '題': '题', '場': '场', '廣': '广', '廳': '厅', '館': '馆', '園': '园', '鄉': '乡',
+    '鄰': '邻', '遠': '远', '連': '连', '達': '达', '遊': '游', '戲': '戏', '劇': '剧',
+    '鏡': '镜', '鐘': '钟', '鑰': '钥', '鎖': '锁', '階': '阶', '陽': '阳', '陰': '阴',
+    '隊': '队', '險': '险', '隨': '随', '隱': '隐', '霧': '雾', '靜': '静', '顏': '颜',
+    '類': '类', '飄': '飘', '飲': '饮', '飯': '饭', '餘': '余', '騎': '骑', '騙': '骗',
+    '驚': '惊', '鳴': '鸣', '麗': '丽', '齊': '齐', '齒': '齿', '齡': '龄', '長': '长',
+    '東': '东', '買': '买', '賣': '卖', '亞': '亚', '產': '产', '親': '亲', '僅': '仅',
+    '優': '优', '偽': '伪', '價': '价', '儀': '仪', '償': '偿', '儲': '储', '兒': '儿',
+    '兩': '两', '冊': '册', '寫': '写', '軍': '军', '農': '农', '決': '决', '凍': '冻',
+    '淨': '净', '涼': '凉', '準': '准', '擊': '击', '創': '创', '劉': '刘', '勢': '势',
+    '勵': '励', '勸': '劝', '區': '区', '醫': '医', '協': '协', '衛': '卫', '卻': '却',
+    '廠': '厂', '歷': '历', '壓': '压', '厭': '厌', '參': '参', '叢': '丛', '團': '团',
+    '圍': '围', '圓': '圆', '圖': '图', '聖': '圣', '執': '执', '堅': '坚', '報': '报',
+    '塊': '块', '塵': '尘', '壞': '坏', '壯': '壮', '壺': '壶', '夠': '够', '奪': '夺',
+    '奮': '奋', '獎': '奖', '奧': '奥', '學': '学', '寧': '宁', '寶': '宝', '導': '导',
+    '將': '将', '專': '专', '尋': '寻', '層': '层', '屬': '属', '崗': '岗', '峽': '峡',
+    '帶': '带', '師': '师', '帳': '帐', '幣': '币', '幫': '帮', '幹': '干', '慶': '庆',
+    '應': '应', '廢': '废', '張': '张', '強': '强', '彈': '弹', '彎': '弯', '總': '总',
+    '懸': '悬', '戶': '户', '擁': '拥', '擔': '担', '據': '据', '擠': '挤', '擬': '拟',
+    '擴': '扩', '攝': '摄', '擺': '摆', '斷': '断', '舊': '旧', '曉': '晓', '極': '极',
+    '榮': '荣', '構': '构', '槍': '枪', '樣': '样', '標': '标', '樹': '树', '橋': '桥',
+    '權': '权', '歡': '欢', '殘': '残', '殺': '杀', '漢': '汉', '漲': '涨', '漸': '渐',
+    '潔': '洁', '潛': '潜', '濁': '浊', '濃': '浓', '濟': '济', '濤': '涛', '灣': '湾',
+    '滅': '灭', '靈': '灵', '燦': '灿', '爛': '烂', '爭': '争', '爾': '尔', '牆': '墙',
+    '獨': '独', '獄': '狱', '獵': '猎', '獸': '兽', '獻': '献', '環': '环', '異': '异',
+    '瘋': '疯', '盡': '尽', '監': '监', '盤': '盘', '盧': '卢', '眾': '众', '確': '确',
+    '碼': '码', '禮': '礼', '稱': '称', '種': '种', '積': '积', '穩': '稳', '競': '竞',
+    '筆': '笔', '築': '筑', '簡': '简', '簽': '签', '籃': '篮', '約': '约', '級': '级',
+    '純': '纯', '紙': '纸', '紛': '纷', '細': '细', '終': '终', '組': '组', '結': '结',
+    '絕': '绝', '絡': '络', '絲': '丝', '綜': '综', '維': '维', '網': '网', '緊': '紧',
+    '緒': '绪', '緣': '缘', '編': '编', '緩': '缓', '練': '练', '織': '织', '繞': '绕',
+    '繪': '绘', '繼': '继', '續': '续', '羅': '罗', '罰': '罚', '義': '义', '習': '习',
+    '聞': '闻', '聯': '联', '聰': '聪', '職': '职', '肅': '肃', '脈': '脉', '腳': '脚',
+    '脫': '脱', '臉': '脸', '騰': '腾', '臺': '台', '興': '兴', '舉': '举', '艦': '舰',
+    '著': '着', '藝': '艺', '蘇': '苏', '蘭': '兰', '處': '处', '虛': '虚', '虧': '亏',
+    '蟲': '虫', '術': '术', '衝': '冲', '補': '补', '裝': '装', '製': '制', '複': '复',
+    '襲': '袭', '規': '规', '視': '视', '覽': '览', '觀': '观', '觸': '触', '計': '计',
+    '訂': '订', '訊': '讯', '討': '讨', '訓': '训', '託': '托', '記': '记', '訪': '访',
+    '設': '设', '許': '许', '訴': '诉', '診': '诊', '評': '评', '詢': '询', '試': '试',
+    '該': '该', '詳': '详', '誇': '夸', '認': '认', '誕': '诞', '誘': '诱', '誠': '诚',
+    '誤': '误', '誰': '谁', '課': '课', '談': '谈', '請': '请', '論': '论', '諸': '诸',
+    '諾': '诺', '謀': '谋', '謂': '谓', '謎': '谜', '講': '讲', '謝': '谢', '證': '证',
+    '識': '识', '譜': '谱', '譯': '译', '議': '议', '護': '护', '譽': '誉', '讀': '读',
+    '讚': '赞', '貝': '贝', '貞': '贞', '負': '负', '財': '财', '貢': '贡', '貧': '贫',
+    '貨': '货', '貪': '贪', '貫': '贯', '責': '责', '貴': '贵', '貸': '贷', '費': '费',
+    '貼': '贴', '賀': '贺', '資': '资', '賓': '宾', '賜': '赐', '賞': '赏', '賠': '赔',
+    '賢': '贤', '賦': '赋', '質': '质', '賭': '赌', '賴': '赖', '賺': '赚', '購': '购',
+    '賽': '赛', '贊': '赞', '贈': '赠', '贏': '赢', '趕': '赶', '趙': '赵', '趨': '趋',
+    '躍': '跃', '軌': '轨', '軒': '轩', '軟': '软', '較': '较', '載': '载', '輔': '辅',
+    '輕': '轻', '輛': '辆', '輝': '辉', '輩': '辈', '輪': '轮', '輯': '辑', '輸': '输',
+    '轟': '轰', '辭': '辞', '辯': '辩', '邁': '迈', '違': '违', '遲': '迟', '適': '适',
+    '遺': '遗', '遙': '遥', '鄧': '邓', '郵': '邮', '鄭': '郑', '釋': '释', '針': '针',
+    '釣': '钓', '鈴': '铃', '鋪': '铺', '銷': '销', '鋒': '锋', '錢': '钱', '錦': '锦',
+    '鍵': '键', '鍾': '钟', '鎮': '镇', '鑑': '鉴', '閃': '闪', '閉': '闭', '問': '问',
+    '閒': '闲', '悶': '闷', '閣': '阁', '閱': '阅', '闡': '阐', '陣': '阵', '際': '际',
+    '陸': '陆', '陳': '陈', '難': '难', '頁': '页', '頂': '顶', '項': '项', '順': '顺',
+    '須': '须', '預': '预', '頑': '顽', '頓': '顿', '領': '领', '頻': '频', '顆': '颗',
+    '顛': '颠', '顧': '顾', '顯': '显', '飾': '饰', '養': '养', '駐': '驻', '駕': '驾',
+    '駛': '驶', '騷': '骚', '驅': '驱', '驗': '验', '髮': '发', '鬆': '松', '鬧': '闹',
+    '鬱': '郁', '魯': '鲁', '鮮': '鲜', '鴨': '鸭', '鴻': '鸿', '鵝': '鹅', '鷹': '鹰',
+    '鹽': '盐', '麥': '麦', '麵': '面', '黨': '党', '龜': '龟',
+})
+_OPENCC_T2S = None
+
+
+def _fold_traditional_chinese(text: str) -> str:
+    """Fold Traditional Chinese characters to Simplified for matching & query variants (#2249)."""
+    global _OPENCC_T2S
+    if not text:
+        return text
+    if _OPENCC_T2S is None:
+        try:
+            import opencc  # type: ignore
+            _OPENCC_T2S = opencc.OpenCC('t2s')
+        except Exception:
+            _OPENCC_T2S = False
+    if _OPENCC_T2S:
+        try:
+            return _OPENCC_T2S.convert(text)
+        except Exception:  # noqa: BLE001, S110 - opencc failing falls back to the table below
+            pass
+    return text.translate(_TRAD_TO_SIMP_TABLE)
+
+
+def _collapse_spaced_characters(title: str) -> Optional[str]:
+    """Collapse stylized single-character-spaced titles like 'モ　ミ　ア　ゲ' -> 'モミアゲ' (#2248)."""
+    if not title:
+        return None
+    core = re.split(r'\s+(?:feat\.?|ft\.?)\s+|\s*[\(\[]|\s+-\s+', title.strip(), maxsplit=1, flags=re.IGNORECASE)[0].strip()
+    tokens = [t for t in re.split(r'[\s\u3000]+', core) if t]
+    if len(tokens) >= 4 and sum(1 for t in tokens if len(t) == 1) >= max(4, int(len(tokens) * 0.8)):
+        return ''.join(tokens)
+    return None
+
+
+def _raw_short_title(title: str) -> str:
+    """Shorten a title (drop trailing ' - ...', '(...)', '[...]', 'feat. ...') while preserving its
+    original non-Latin script (#2248)."""
+    if not title:
+        return ""
+    s = title.strip()
+    s = re.sub(r'\s+(?:feat\.?|ft\.?)\s+.*$', '', s, flags=re.IGNORECASE).strip()
+    s = re.sub(r'\s*[\(\[].*?[\)\]]', '', s).strip()
+    if ' - ' in s:
+        head, tail = s.split(' - ', 1)
+        tail_l = tail.lower()
+        keep = ('remix', 'mix', 'edit', 'acoustic', 'live', 'instrumental', 'slowed', 'sped up')
+        if head.strip() and not any(k in tail_l for k in keep):
+            s = head.strip()
+    return s.strip(' -–—')
+
 @dataclass
 class MatchResult:
     spotify_track: SpotifyTrack
@@ -155,8 +286,14 @@ class MusicMatchingEngine:
             for c in text
         )
         if has_cjk:
-            # CJK detected — just lowercase, don't transliterate
-            text = text.lower()
+            # CJK detected: fold Traditional -> Simplified Chinese (#2249) and keep CJK
+            # characters intact while transliterating non-CJK spans around them (#2246).
+            text = _fold_traditional_chinese(text)
+            text = re.sub(
+                r'[^\u2e80-\u9fff\u3040-\u30ff\uff00-\uffef\uac00-\ud7af]+',
+                lambda m: unidecode(m.group()),
+                text,
+            ).lower()
         else:
             text = unidecode(text)
             text = text.lower()
@@ -330,8 +467,15 @@ class MusicMatchingEngine:
             extra_normalized = extra_content.lower().strip(' -()[]')
 
             # Check for remasters first - apply light penalty (might still match)
+            # ...unless the extra also names another recording. "Hotel
+            # California - Live; 1994 Remaster" is a live cut that was later
+            # remastered, and the remaster word alone made it 0.75, a match
+            # for the studio track: owning one counted as owning the other.
+            _another_recording = any(
+                re.search(r'\b' + re.escape(k) + r'\b', extra_normalized)
+                for k in different_version_keywords)
             for keyword in remaster_keywords:
-                if keyword in extra_normalized:
+                if keyword in extra_normalized and not _another_recording:
                     # Light penalty for remasters (same song, different mastering)
                     # 0.75 = 75% match - likely still matches with 0.70 threshold
                     # With 50/50 title/artist split: 0.75 * 0.5 + 1.0 * 0.5 = 0.875 > 0.7 threshold
@@ -395,6 +539,46 @@ class MusicMatchingEngine:
 
         return standard_ratio
     
+    # words that make a folder a tribute or karaoke act's, not the artist's.
+    # narrower than derivative_artist_keywords on purpose: this is read off a
+    # folder name, where "orchestra", "covers" and "instrumental" are honest
+    # album words ("S&M with the San Francisco Symphony Orchestra").
+    _DERIVATIVE_ACT_WORDS = ('tribute', 'karaoke', 'soundalike', 'sound alike', 'cover band',
+                             'backing track', 'backing tracks', 'salute to', 'parody',
+                             'in the style of', 'made famous by', 'originally performed by')
+
+    def _segment_is_derivative_act(self, artist_norm: str, segment_norm: str) -> bool:
+        """a path segment that names the artist AND a tribute/karaoke word the
+        artist's own name doesn't have"""
+        if not artist_norm or not segment_norm:
+            return False
+        if not re.search(r'\b' + re.escape(artist_norm) + r'\b', segment_norm):
+            return False
+        return any(re.search(r'\b' + re.escape(word) + r'\b', segment_norm)
+                   and not re.search(r'\b' + re.escape(word) + r'\b', artist_norm)
+                   for word in self._DERIVATIVE_ACT_WORDS)
+
+    @staticmethod
+    def duration_is_another_recording(wanted_ms, candidate_ms) -> bool:
+        """both lengths known, and the candidate is far shorter (a clip, an
+        edit: over 15% and 10 seconds short) or far longer (an extended mix,
+        a medley: over 25% and 30 seconds long)"""
+        try:
+            wanted, candidate = int(wanted_ms or 0), int(candidate_ms or 0)
+        except (TypeError, ValueError):
+            return False
+        if wanted <= 0 or candidate <= 0:
+            return False
+        # a result whose length came in seconds (some callers and fixtures do
+        # that) is read as seconds. a real ten-second clip of a song is still
+        # caught: read either way it is nowhere near the length asked for.
+        if candidate < 10_000 and wanted >= 30_000:
+            candidate *= 1000
+        diff = candidate - wanted
+        if diff < 0:
+            return -diff > max(10_000, 0.15 * wanted)
+        return diff > max(30_000, 0.25 * wanted)
+
     def duration_similarity(self, duration1: Optional[int], duration2: Optional[int]) -> float:
         """Calculates similarity score based on track duration (in ms)."""
         if not duration1 or not duration2:
@@ -479,9 +663,36 @@ class MusicMatchingEngine:
         candidate_title_cleaned = self.clean_title(candidate_title)
 
         title_score = self.similarity_score(source_title_cleaned, candidate_title_cleaned)
+        # #2254: a suffix BOTH titles carry ("- Piano Version", "(Remastered)")
+        # must never lift two different songs by one artist into a match:
+        # "Mele Kalikimaka - Piano Version" vs "Someday At Christmas - Piano
+        # Version" scored 0.80 on the shared words alone. so when both have a
+        # suffix, the part before it is compared on its own and the lower
+        # score counts.
+        #
+        # only then. the first cut of this also compared every pair's bare
+        # letters and capped any title under 0.65, which undid clean_title:
+        # "Stay (feat. Justin Bieber)" vs "Stay" fell from 1.00 to 0.55,
+        # "Song 2 - 2012 Remaster" vs "Song 2" from 0.85 to 0.55, both under
+        # the 0.70 a library match needs, so owned tracks read as missing.
+        _suffix_split = r'\s+[-–—]\s+|\s*[\(\[]'
+        _src_parts = re.split(_suffix_split, source_title.strip(), maxsplit=1)
+        _cand_parts = re.split(_suffix_split, candidate_title.strip(), maxsplit=1)
+        _bases_disagree = False
+        if len(_src_parts) > 1 and len(_cand_parts) > 1:
+            _src_base = self.normalize_string(_src_parts[0])
+            _cand_base = self.normalize_string(_cand_parts[0])
+            if _src_base and _cand_base:
+                base_title_score = self.similarity_score(_src_base, _cand_base)
+                title_score = min(title_score, base_title_score)
+                _bases_disagree = base_title_score < 0.65
         duration_score = self.duration_similarity(source_duration_ms, candidate_duration_ms)
 
         confidence = (title_score * 0.60) + (artist_score * 0.30) + (duration_score * 0.10)
+        # two suffixed titles whose own names clearly differ stay under the 0.70
+        # a library match needs, even when artist and duration agree fully
+        if _bases_disagree:
+            confidence = min(confidence, 0.55)
 
         # Apply duration penalty when there is a significant duration mismatch (>15s and >15%)
         if significant_duration_mismatch:
@@ -757,11 +968,41 @@ class MusicMatchingEngine:
 
         return ' '.join(stripped.split()).strip(' -–—')
 
+    _APOSTROPHES = re.compile(r"[\u2019\u2018'`\u00b4]")
+
+    def _with_apostrophes_as_spaces(self, track):
+        """a copy of the track for building search text: its title, artists
+        and album with each apostrophe turned into a space. the track itself
+        is untouched (scoring still sees the real names)."""
+        import copy
+        fix = lambda v: self._APOSTROPHES.sub(' ', v) if isinstance(v, str) else v  # noqa: E731
+        try:
+            clone = copy.copy(track)
+            for attr in ('name', 'album', 'album_name', 'album_title'):
+                if isinstance(getattr(clone, attr, None), str):
+                    object.__setattr__(clone, attr, fix(getattr(clone, attr)))
+            artists = getattr(clone, 'artists', None)
+            if isinstance(artists, (list, tuple)):
+                object.__setattr__(clone, 'artists', type(artists)(fix(a) for a in artists))
+            return clone
+        except Exception:  # noqa: BLE001 - a track that can't be copied is searched as it is
+            return track
+
     def generate_download_queries(self, spotify_track: SpotifyTrack) -> List[str]:
         """
         Generate multiple search query variations for better matching.
         Returns queries in order of preference (cleaned titles first, then original).
         """
+        # an apostrophe is sent as a space. every query here is built from
+        # normalised text, and normalising DELETES apostrophes: "Don't Stop
+        # Believin'" was searched as "dont stop believin". measured against
+        # slskd (Nov 25 2026, "journey ..."): "dont" 0 files, "don't" 610,
+        # "don t" 1,104. soulseek matches whole words and peers' file names
+        # keep the apostrophe, which splits the word, so "dont" is a word
+        # almost no file has. every title with a contraction or a possessive
+        # had been coming back empty from all but the last-resort queries.
+        spotify_track = self._with_apostrophes_as_spaces(spotify_track)
+
         queries = []
 
         if not spotify_track.artists:
@@ -787,6 +1028,28 @@ class MusicMatchingEngine:
             raw_query = f"{raw_artist} {raw_title}".strip()
             queries.append(raw_query)
             logger.debug(f"NON-ASCII: Raw original query: '{raw_query}'")
+
+            # #2248: Shortened query in the original script (e.g. Cyrillic title before " - " / "(...)")
+            raw_short = _raw_short_title(raw_title)
+            if raw_short and raw_short != raw_title:
+                queries.append(f"{raw_artist} {raw_short}".strip())
+                if len(raw_short) >= 4:
+                    queries.append(raw_short)
+
+            # #2249: Traditional -> Simplified Chinese query variant
+            simp_artist = _fold_traditional_chinese(raw_artist)
+            simp_title = _fold_traditional_chinese(raw_short or raw_title)
+            if simp_title != (raw_short or raw_title) or simp_artist != raw_artist:
+                queries.append(f"{simp_artist} {simp_title}".strip())
+                if len(simp_title) >= 2:
+                    queries.append(simp_title)
+
+        # #2248: Stylized titles with spaces between single characters (e.g. "モ　ミ　ア　ゲ...")
+        collapsed = _collapse_spaced_characters(raw_title)
+        if collapsed:
+            if raw_artist:
+                queries.append(f"{raw_artist} {collapsed}".strip())
+            queries.append(collapsed)
 
         artist = self.clean_artist(spotify_track.artists[0])
         original_title = spotify_track.name
@@ -1022,8 +1285,23 @@ class MusicMatchingEngine:
         # Calculate full-string similarity ratio (0.0 to 1.0) like Soularr does
         title_ratio = SequenceMatcher(None, spotify_cleaned_title, slskd_filename_norm).ratio()
 
-        # Boost score if title appears as a complete word in filename
-        has_word_boundary = bool(re.search(r'\b' + re.escape(spotify_cleaned_title) + r'\b', slskd_filename_norm))
+        # Boost score if title appears as a complete word in the file's own
+        # name. it was looked for in the whole path, album folder included, so
+        # on a self-titled album every track got it: asked for "Paranoid",
+        # ".../Paranoid/02 - Planet Caravan.flac" scored 0.67 and "Iron Man"
+        # 0.69, both over the bar, and the wrong song was downloaded.
+        _song_norm = self.normalize_string(self._candidate_song_text(candidate_text))
+        # the file's name as the WHOLE path's normalising left it, too: a
+        # path with CJK in it keeps other scripts as they are, where the file
+        # name normalised on its own would transliterate them (#2246)
+        _folders_norm = self.normalize_string(
+            ' '.join(re.split(r'[/\\]', candidate_text)[:-1])) if not is_youtube else ''
+        _file_in_path_norm = (slskd_filename_norm[len(_folders_norm):]
+                              if _folders_norm and slskd_filename_norm.startswith(_folders_norm)
+                              else '')
+        _title_word = r'\b' + re.escape(spotify_cleaned_title) + r'\b'
+        has_word_boundary = bool(spotify_cleaned_title) and bool(
+            re.search(_title_word, _song_norm) or re.search(_title_word, _file_in_path_norm))
 
         if has_word_boundary:
             # Title exists as complete word - significant bonus
@@ -1079,6 +1357,22 @@ class MusicMatchingEngine:
 
         # 3. Duration Score: Increased weight for better accuracy
         duration_score = self.duration_similarity(spotify_track.duration_ms, slskd_track.duration if slskd_track.duration else 0)
+        # a length that is far off is another recording, not a weak match.
+        # duration was only a weight here (15%), so a ten-minute extended mix
+        # of a four-minute song scored 0.66 and a half-length clip could pass
+        # too. the streaming sources have had a hard limit all along. generous
+        # on purpose: a peer's listed length and the catalogue's can honestly
+        # differ by a fade or a gap.
+        # (a file that SAYS it is an extended or long version is not judged
+        # here: that is a version, weighed and preferred or not below)
+        if not is_youtube and not re.search(
+                r'\b(?:extended|full\s*version|long\s*version|12\s*(?:inch|"))\b', candidate_text.lower()) \
+                and self.duration_is_another_recording(
+                    spotify_track.duration_ms, slskd_track.duration):
+            logger.debug(f"Duration reject: '{spotify_track.name}' wants "
+                         f"{spotify_track.duration_ms}ms, '{slskd_track.filename[:60]}' is "
+                         f"{slskd_track.duration}ms")
+            return 0.0
 
         # 4. Quality Bonus: Reduced to prevent boosting bad matches
         quality_bonus = 0.0
@@ -1141,13 +1435,31 @@ class MusicMatchingEngine:
         _JUNK_ARTISTS = {'various artists', 'va', 'unknown artist', 'unknown album',
                          'various artist'}
         if not is_youtube:
+            # ...unless the file's own name carries the artist: a compilation
+            # filed the way beets and most rippers file one ("Various Artists/
+            # Now 80s/05 - a-ha - Take On Me.flac") names its artist exactly
+            # where it can be trusted, and a song that only ever came out on a
+            # soundtrack or a compilation could not be found at all.
+            _artist_in_song = any(
+                a and re.search(r'\b' + re.escape(a) + r'\b', _song_norm) for a in spotify_artists_norm)
             for seg_norm in _artist_segments_norm:
-                if seg_norm in _JUNK_ARTISTS:
+                if seg_norm in _JUNK_ARTISTS and not _artist_in_song:
                     logger.debug(
                         f"Junk artist reject: '{spotify_track.name}' — path segment "
                         f"'{seg_norm}' in '{slskd_track.filename[:80]}'"
                     )
                     return 0.0
+            # a tribute or karaoke act is not the artist it is named after.
+            # "Queen Tribute Band/Greatest Hits/01 - Bohemian Rhapsody.flac"
+            # holds the word "queen", which was all the artist check asked
+            # for: it scored 1.00.
+            for artist in spotify_artists_norm:
+                for seg_norm in _artist_segments_norm:
+                    if self._segment_is_derivative_act(artist, seg_norm):
+                        logger.debug(
+                            f"Derivative artist reject: '{spotify_track.name}' — "
+                            f"'{seg_norm}' is not {artist!r}")
+                        return 0.0
 
         # --- Minimum Title Gate ---
         # Reject matches where the title has almost no resemblance to the target.
@@ -1256,6 +1568,56 @@ class MusicMatchingEngine:
 
         return confident_results
     
+    # a version asked for in a TITLE: the word sits where a qualifier does
+    # (brackets, after a dash, "live at"), not inside the song's name
+    _ASKED_VERSION_PATTERNS = {
+        'live': (r'[\(\[][^\)\]]*\blive\b[^\)\]]*[\)\]]', r'[-–—:]\s*live\b',
+                 r'\blive\s+(?:at|from|in|version|recording)\b'),
+        'remix': (r'[\(\[][^\)\]]*\b(?:remix|rmx)\b[^\)\]]*[\)\]]', r'[-–—:]\s*[^-–—:]*\b(?:remix|rmx)\b\s*$'),
+        'acoustic': (r'[\(\[][^\)\]]*\b(?:acoustic|unplugged)\b[^\)\]]*[\)\]]',
+                     r'[-–—:]\s*(?:acoustic|unplugged)\b', r'\bacoustic\s+version\b'),
+        'instrumental': (r'[\(\[][^\)\]]*\binstrumental\b[^\)\]]*[\)\]]',
+                         r'[-–—:]\s*instrumental\b', r'\binstrumental\s+version\b'),
+    }
+
+    def _title_asks_for_version(self, title: str) -> Optional[str]:
+        """'live', 'remix', 'acoustic' or 'instrumental' when the title asks
+        for that cut ("Wonderwall (Live)", "Song - Acoustic"); None for a
+        title that only contains the word ("Live Forever")."""
+        lowered = str(title or '').lower()
+        for version, patterns in self._ASKED_VERSION_PATTERNS.items():
+            if any(re.search(p, lowered) for p in patterns):
+                return version
+        return None
+
+    def _version_scan_text(self, candidate_text: str, spotify_track) -> str:
+        """the candidate's text with the asked-for title, album and artist
+        names taken out: what is left is where a version word means a
+        version. the title comes out of the file's own name only (its base
+        name, without any "(...)" of its own), the album and artists out of
+        the whole path."""
+        text = str(candidate_text or '').lower()
+        title = re.split(r'\s*[\(\[]|\s+[-–—]\s+', str(getattr(spotify_track, 'name', '') or '').strip(),
+                         maxsplit=1)[0].lower().strip()
+        names = [str(getattr(spotify_track, 'album', '') or '').lower().strip()]
+        names += [str(a or '').lower().strip() for a in (getattr(spotify_track, 'artists', None) or [])]
+        if not title or len(title) < 3:
+            title = str(getattr(spotify_track, 'name', '') or '').lower().strip()
+        for name in [title] + names:
+            if len(name) >= 3:
+                text = re.sub(r'(?<!\w)' + re.escape(name) + r'(?!\w)', ' ', text)
+        return text
+
+    def _path_has_album(self, candidate_text: str, album: Optional[str]) -> bool:
+        """a folder of the candidate's path is the asked-for album"""
+        album_norm = self.normalize_string(str(album or ''))
+        if len(album_norm) < 3:
+            return False
+        folders = re.split(r'[/\\]', str(candidate_text or ''))[:-1]
+        return any(album_norm == self.normalize_string(f) or
+                   re.search(r'\b' + re.escape(album_norm) + r'\b', self.normalize_string(f))
+                   for f in folders if f.strip())
+
     def detect_version_type(self, filename: str) -> Tuple[str, float]:
         """
         Detect version type from filename and return (version_type, penalty).
@@ -1354,7 +1716,13 @@ class MusicMatchingEngine:
         # Detect version type in Soulseek result
         candidate_text = self._candidate_text(slskd_track)
         is_youtube = getattr(slskd_track, 'username', None) == 'youtube'
-        version_type, penalty = self.detect_version_type(candidate_text)
+        # a version word only says "this is another version" when it is not
+        # part of what was asked for. the whole path was read for the words,
+        # so Oasis' "Live Forever", "Live and Let Die", every track in the
+        # albums "Stripped" and "Live Through This", and "Tour de France"
+        # were all rejected as live or acoustic cuts: 0.00, never downloaded.
+        version_type, penalty = self.detect_version_type(
+            self._version_scan_text(candidate_text, spotify_track))
 
         # --- Base-title veto (#1626) ---
         # A shared version qualifier inflates whole-path similarity enough to
@@ -1419,6 +1787,16 @@ class MusicMatchingEngine:
         # below only reject a versioned candidate, so the plain studio file
         # scored 0.73 for "Devil Eyes - Slowed" and got imported as it.
         _wanted_version = self.detect_version_type(spotify_track.name)[0]
+        # the other direction: a live, remix, acoustic or instrumental cut was
+        # asked for and this file is none of those. only the candidate's own
+        # version was ever checked, so asking for "Wonderwall (Live)" took the
+        # studio track at 0.71. the streaming sources halve such a match; so
+        # does this. a file in the asked-for album's own folder is that
+        # album's track, marked or not (a live album's files rarely say live).
+        _asked_version = self._title_asks_for_version(spotify_track.name)
+        if (_asked_version and version_type != _asked_version and not _wanted_on_purpose
+                and not self._path_has_album(candidate_text, getattr(spotify_track, 'album', None))):
+            base_confidence *= 0.5
         if ((version_type in self.TEMPO_EDITS or _wanted_version in self.TEMPO_EDITS)
                 and version_type != _wanted_version):
             return 0.0, 'rejected_version_mismatch'

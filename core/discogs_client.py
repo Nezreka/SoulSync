@@ -114,6 +114,18 @@ def _tag_discogs_album_id(raw_id: Any, kind: str) -> str:
     return f"{'m' if kind == 'master' else 'r'}{s}"
 
 
+def _discogs_credit(artist: Any) -> Optional[Dict[str, str]]:
+    if not isinstance(artist, dict):
+        return None
+    name = _clean_discogs_artist_name(artist.get('anv') or artist.get('name'))
+    if not name:
+        return None
+    credit = {'name': name}
+    if artist.get('id'):
+        credit['id'] = str(artist['id'])
+    return credit
+
+
 def _discogs_album_endpoints(album_id: Any) -> List[str]:
     """Map a (possibly tagged) album ID to the API path(s) to try, in order.
 
@@ -695,9 +707,9 @@ class DiscogsClient:
             for artist in entry.get('artists') or release.get('artists') or []:
                 if not isinstance(artist, dict):
                     continue
-                name = _clean_discogs_artist_name(artist.get('anv') or artist.get('name'))
-                if name and artist.get('id'):
-                    credits.append({'id': str(artist['id']), 'name': name})
+                credit = _discogs_credit(artist)
+                if credit and 'id' in credit:
+                    credits.append(credit)
             answers.append(credits)
         if any(a != answers[0] for a in answers[1:]):
             return None
@@ -1035,13 +1047,7 @@ class DiscogsClient:
         }
 
         # Get artists
-        artists_list = []
-        if data.get('artists'):
-            artists_list = [
-                {'name': _clean_discogs_artist_name(a.get('name', ''))}
-                for a in data['artists']
-                if a.get('name') and _clean_discogs_artist_name(a.get('name', ''))
-            ]
+        artists_list = [credit for a in data.get('artists') or [] if (credit := _discogs_credit(a))]
         if not artists_list:
             artists_list = [{'name': 'Unknown Artist'}]
 
@@ -1071,9 +1077,7 @@ class DiscogsClient:
             track_artists = artists_list
             if t.get('artists'):
                 track_artists = [
-                    {'name': _clean_discogs_artist_name(a.get('name', ''))}
-                    for a in t['artists']
-                    if a.get('name') and _clean_discogs_artist_name(a.get('name', ''))
+                    credit for a in t['artists'] if (credit := _discogs_credit(a))
                 ]
 
             tracks.append({

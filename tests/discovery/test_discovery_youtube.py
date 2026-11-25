@@ -114,7 +114,7 @@ def _build_deps(
         spotify_rate_limited=lambda: rate_limited,
         discovery_score_candidates=lambda *args, **kw: score_candidates_result,
         get_metadata_cache=lambda: _FakeMetadataCache(),
-        build_discovery_wing_it_stub=lambda title, artist, dur: {
+        build_discovery_wing_it_stub=lambda title, artist, dur, **_kw: {
             'name': title, 'artists': [artist], 'duration_ms': dur, 'wing_it': True
         },
         get_database=lambda: db,
@@ -624,3 +624,11 @@ def test_preseeded_counter_does_not_double_count_cached_tracks():
     state = states['h1']
     assert state['spotify_matches'] == 2
     assert len(state['discovery_results']) == 2
+
+
+def test_a_wing_it_stub_keeps_its_video(monkeypatch):
+    """#2306: a youtube song no catalogue knows keeps the video it came from"""
+    from api.source_playlists import _build_discovery_wing_it_stub
+    stub = _build_discovery_wing_it_stub("A Song Only Here", "Some Channel", 0, source_video_id="dQw4w9WgXcQ")
+    assert stub["youtube_video_id"] == "dQw4w9WgXcQ"
+    assert "youtube_video_id" not in _build_discovery_wing_it_stub("A Song", "Someone", 0)

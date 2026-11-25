@@ -158,6 +158,10 @@ class AlbumResult:
     upload_speed: int = 0
     queue_length: int = 0
     result_type: str = "album"
+    # True for a Soulseek (user, folder) group built from loose search hits.
+    # Its files are still single-track candidates (#2228); release-level
+    # albums (torrent, usenet, lidarr, amazon) are not.
+    grouped_hits: bool = False
 
     @property
     def audio_quality(self) -> AudioQuality:
@@ -269,3 +273,28 @@ class DownloadStatus:
     error: Optional[str] = None
     # Explicit verification failures differ from failed retrieval/transfer.
     failure_kind: Optional[str] = None
+
+
+def track_candidates(tracks, albums) -> List[TrackResult]:
+    """Every file a single-track search can use: the loose tracks plus the
+    files inside Soulseek folder groups.
+
+    Soulseek search turns any (user, folder) with 2+ hits into an
+    ``AlbumResult`` and drops those files from the track list, so a single
+    shared next to its instrumental was never a candidate for that single
+    (#2228). Each file keeps its own username + path, so picking one downloads
+    just that file, never the folder. Duplicates (same user + path) are kept
+    once.
+    """
+    out = list(tracks or [])
+    seen = {(getattr(t, 'username', None), getattr(t, 'filename', None)) for t in out}
+    for album in albums or []:
+        if not getattr(album, 'grouped_hits', False):
+            continue
+        for track in getattr(album, 'tracks', None) or []:
+            key = (getattr(track, 'username', None), getattr(track, 'filename', None))
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(track)
+    return out

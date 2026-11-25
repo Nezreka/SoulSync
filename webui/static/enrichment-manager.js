@@ -155,7 +155,18 @@ function _emRelativeTime(value) {
 
 // ── Open / close ──────────────────────────────────────────────────────────
 
+// the workers are the admins' (#2196): the routes refuse a member, and no
+// member-facing button opens this, but a stray call never shows the modal
+function _emViewerIsAdmin() {
+    let ctx = null;
+    try {
+        ctx = typeof getCurrentProfileContext === 'function' ? getCurrentProfileContext() : null;
+    } catch (e) { ctx = null; }
+    return !!ctx && (ctx.isAdmin === true || ctx.profileId === 1);
+}
+
 async function openEnrichmentManager(workerId) {
+    if (!_emViewerIsAdmin()) return;
     let overlay = document.getElementById('enrichment-manager-overlay');
     if (!overlay) {
         overlay = document.createElement('div');

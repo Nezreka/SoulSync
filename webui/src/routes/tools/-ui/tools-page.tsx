@@ -6,15 +6,15 @@
  * `.page { display: none }` and only adds `.active` to vanilla pages, so a
  * React page carrying it renders invisible with every test still passing.
  *
- * The `#tools-page` id IS kept: helper.js's search walks up the DOM matching
- * HELPER_CONTENT selectors, and its page hint is 'tools'.
+ * The `#tools-page` id IS kept: style.css scopes the cards' rules under it.
  */
 
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 
 import type { ToolsMedia } from '../-tools.media';
 
 import { setToolsMedia, ToolsMediaContext } from '../-tools.media';
+import { FileLocationsCard } from './file-locations-card';
 import {
   BlacklistCard,
   ConfigMigrationCard,
@@ -25,6 +25,7 @@ import {
 import { MaintenanceHero } from './maintenance-hero';
 import { DbUpdaterCard, DuplicateCleanerCard, ReconcileIdsCard } from './scanning-cards';
 import { BackupManagerCard, MediaScanCard, MetadataUpdaterCard } from './server-cards';
+import { TagFillsCard } from './tag-fills-card';
 import { ToolsSection } from './tool-card';
 import {
   VideoBackupsCard,
@@ -76,33 +77,6 @@ function ToolsPageBody({ media, isAdmin }: { media: ToolsMedia; isAdmin: boolean
   /** where the maintenance switch renders: the header is the page's, the
    *  switch's state is the maintenance surface's */
   const [headerSlot, setHeaderSlot] = useState<HTMLDivElement | null>(null);
-
-  /* Anything that jumps straight to a tool card - the helper's search, the
-     onboarding checklist's "Run First Library Scan" - finds it MOUNTED but
-     hidden once the cards live behind a tab, and helper.js decides an element
-     with no offsetParent is not on this page. It then scrolls to nothing and
-     anchors a popover to an invisible node.
-     So the page publishes a way to ask for the right tab. Returns true when it
-     actually had to switch, which is the caller's cue to wait a frame for the
-     panel to paint before measuring anything. */
-  useEffect(() => {
-    const reveal = (selector: string): boolean => {
-      if (!selector) return false;
-      const target = document.querySelector(selector);
-      if (!target) return false;
-      const panel = target.closest<HTMLElement>('[role="tabpanel"]');
-      if (!panel || !panel.hidden) return false;
-      const wanted = panel.id.replace('tools-panel-', '');
-      if (wanted !== 'findings' && wanted !== 'jobs' && wanted !== 'history' && wanted !== 'tools')
-        return false;
-      setTab(wanted);
-      return true;
-    };
-    window.revealToolsTabFor = reveal;
-    return () => {
-      if (window.revealToolsTabFor === reveal) delete window.revealToolsTabFor;
-    };
-  }, []);
 
   /* the white pill slides from one tab to the next instead of blinking
      between them. the tab list measures the selected tab and hands its box to
@@ -240,7 +214,7 @@ function ToolsPageBody({ media, isAdmin }: { media: ToolsMedia; isAdmin: boolean
               ) : null}
             </>
           ) : (
-            <MusicToolSections />
+            <MusicToolSections isAdmin={isAdmin} />
           )}
         </div>
       </div>
@@ -248,7 +222,21 @@ function ToolsPageBody({ media, isAdmin }: { media: ToolsMedia; isAdmin: boolean
   );
 }
 
-function MusicToolSections() {
+/* the scans, the cleaner, the updater, backups, the cache and the download
+   blacklist change the whole install, so the server keeps them for an admin.
+   everyone else gets the tools they may use. */
+function MusicToolSections({ isAdmin }: { isAdmin: boolean }) {
+  if (!isAdmin) {
+    return (
+      <ToolsSection
+        title="Metadata &amp; Cache"
+        blurb="Enriching what SoulSync knows, and fixing what it got wrong."
+      >
+        <DiscoveryPoolCard />
+        <ManualLibraryMatchCard />
+      </ToolsSection>
+    );
+  }
   return (
     <>
       <ToolsSection
@@ -259,6 +247,7 @@ function MusicToolSections() {
         <ReconcileIdsCard />
         <DuplicateCleanerCard />
         <MediaScanCard />
+        <FileLocationsCard />
       </ToolsSection>
 
       <ToolsSection
@@ -266,6 +255,7 @@ function MusicToolSections() {
         blurb="Enriching what SoulSync knows, and fixing what it got wrong."
       >
         <MetadataUpdaterCard />
+        <TagFillsCard />
         <DiscoveryPoolCard />
         <ManualLibraryMatchCard />
       </ToolsSection>

@@ -1,25 +1,40 @@
 /**
- * The Quality tab's video sections (SETTINGS_PORT.md, video pass V1): Video
- * Quality (the named profiles, each kind's default, the ladder, the cutoff,
- * the rejects, the tie-breakers, the audio language, the library, the size
- * guards, the seeders floor), Custom Formats and YouTube Quality. Was
- * video-settings.js; they still save through /api/video/downloads/quality*,
- * every change at once, and load each time the video settings page is shown.
+ * Quality > Movies and TV and Quality > YouTube (SETTINGS_PORT.md, video pass
+ * V1; on the settings parts in settings-bic phase 3): the named profiles and
+ * each kind's default, the ladder on the shared order list (a switch per
+ * quality), the cutoff, the rejects, the tie-breakers, the audio language,
+ * the library, the size guards, the seeders floor, custom formats; and the
+ * YouTube profile. They still save through /api/video/downloads/quality*,
+ * every change at once, and load each time the video settings page is shown
+ * (or its pill opens on the music side).
  *
  * The fields a person types in commit on the browser's change event (a text
  * field on leaving it, a slider on letting go), as the page did, not on each
  * keystroke: useCommit wires that.
  */
 
-import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
+import {
+  Btn,
+  Card,
+  Chips,
+  FieldLine,
+  NumberField,
+  OrderList,
+  Row,
+  SectionLabel,
+  Segmented,
+  Select,
+  Switch,
+  TextField,
+} from '../ui';
+import s from '../ui/settings.module.css';
 import { useCommit } from './commit';
-import { Section } from './parts';
 import { onVideoSave, useVideoShown } from './video-shown';
 
 const QUALITY_URL = '/api/video/downloads/quality';
 const YT_QUALITY_URL = '/api/video/downloads/youtube-quality';
-const TAB = 'quality';
 
 type Shell = Window & {
   showToast?: (message: string, type?: string) => void;
@@ -104,7 +119,17 @@ interface Named {
   id: number;
   name: string;
   profile: VideoProfile;
+  /** what it's for (#2168): movie, tv, or null for both */
+  media_type?: 'movie' | 'tv' | null;
+  tags?: string[];
 }
+
+/** "Used for" choices: the request dialog only offers a profile for its kind */
+const USED_FOR: Array<[string, string]> = [
+  ['movie', 'Movies'],
+  ['tv', 'TV'],
+  ['both', 'Both'],
+];
 interface Format {
   id: number;
   name: string;
@@ -167,67 +192,13 @@ const sizeLabel = (v: number) => (v ? `${v} GB` : 'No limit');
 const prefLabel = (v: number) => (v ? `Around ${v} GB` : 'Off');
 const seedersLabel = (raw: unknown) => {
   const n = parseInt(String(raw), 10) || 0;
-  return n <= 0 ? 'No minimum — grab dead swarms too' : `At least ${n} seeder${n === 1 ? '' : 's'}`;
+  return n <= 0 ? 'No minimum: dead swarms too' : `At least ${n} seeder${n === 1 ? '' : 's'}`;
 };
 /** absent from a profile stored before the gate existed means the default 1 */
 const seedersOf = (p: VideoProfile) =>
   p.min_seeders === undefined || p.min_seeders === null ? 1 : p.min_seeders;
 
-/** a row of buttons, one lit (settings.js _vqSeg) */
-function Seg({
-  id,
-  attr,
-  value,
-  choices,
-  pick,
-}: {
-  id: string;
-  attr: string;
-  value: string | undefined;
-  choices: Array<[string, ReactNode]>;
-  pick: (v: string) => void;
-}) {
-  return (
-    <div className="vq-seg" id={id}>
-      {choices.map(([v, label], i) => (
-        <SegButton key={v} attr={attr} v={v} on={v === value} pick={pick} space={i > 0}>
-          {label}
-        </SegButton>
-      ))}
-    </div>
-  );
-}
-function SegButton({
-  attr,
-  v,
-  on,
-  pick,
-  space,
-  children,
-}: {
-  attr: string;
-  v: string;
-  on: boolean;
-  pick: (v: string) => void;
-  space: boolean;
-  children: ReactNode;
-}) {
-  return (
-    <>
-      {space ? ' ' : null}
-      <button
-        type="button"
-        {...{ [attr]: v }}
-        className={on ? 'active' : undefined}
-        onClick={() => pick(v)}
-      >
-        {children}
-      </button>
-    </>
-  );
-}
-
-/** a slider whose label follows the drag and which saves on letting go */
+/** a slider whose words follow the drag and which saves on letting go */
 function Slider({
   id,
   min,
@@ -258,25 +229,24 @@ function Slider({
   });
   const shown = dragging ?? value;
   return (
-    <div className="vq-block" style={{ margin: 0 }}>
-      <div className="vq-label">
-        {title}{' '}
-        <span className="vq-hint" id={labelId}>
+    <Row sub label={title} htmlFor={id}>
+      <span className={s.rangeLine}>
+        <span className={s.rangeSay} id={labelId}>
           {label(shown)}
         </span>
-      </div>
-      <input
-        type="range"
-        id={id}
-        className="vq-slider"
-        min={min}
-        max={max}
-        step={step}
-        ref={ref}
-        value={shown}
-        onChange={(event) => setDragging(parse(event.target.value))}
-      />
-    </div>
+        <input
+          type="range"
+          id={id}
+          className={s.range}
+          min={min}
+          max={max}
+          step={step}
+          ref={ref}
+          value={shown}
+          onChange={(event) => setDragging(parse(event.target.value))}
+        />
+      </span>
+    </Row>
   );
 }
 
@@ -439,6 +409,42 @@ export function VideoQualitySections() {
     if (ok) void remove();
   }
 
+  /** what a named profile is for (#2168): movies, tv or both */
+  async function setUsedFor(raw: string) {
+    const id = latest.current.selectedId;
+    if (id <= 0) return;
+    const mediaType = raw === 'both' ? null : raw;
+    try {
+      const r = await fetch(`${QUALITY_URL}/profiles/${id}/media-type`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ media_type: mediaType }),
+      });
+      const d = (await r.json()) as {
+        success?: boolean;
+        media_type?: string | null;
+        error?: string;
+      };
+      if (!r.ok || !d.success) {
+        toast(d?.error || 'Couldn’t save what it’s for', 'error');
+        return;
+      }
+      setProfiles((all) =>
+        all.map((p) =>
+          p.id === id ? { ...p, media_type: (d.media_type as Named['media_type']) ?? null } : p,
+        ),
+      );
+      toast(
+        mediaType === null
+          ? 'Offered for movies and TV'
+          : `Offered only for ${mediaType === 'movie' ? 'movies' : 'TV'}`,
+        'success',
+      );
+    } catch {
+      toast('Couldn’t save what it’s for', 'error');
+    }
+  }
+
   async function setKindDefault(kind: string, raw: string, label: string) {
     setDefaultsBusy(kind);
     try {
@@ -469,23 +475,25 @@ export function VideoQualitySections() {
   const langMode = p?.audio_language_mode || 'off';
   const langs = p?.audio_languages || [];
   const profileOptions = profiles.length ? profiles : [{ id: 0, name: 'Default', profile: {} }];
+  const tierName = (key: string) => TIER_LABEL[key] || key;
 
   return (
-    <>
-      <Section tab={TAB} title="Video Quality" hint="Ladder, cutoff, rejects & tie-breakers">
-        <div className="settings-group" data-stg={TAB}>
-          <div className="setting-help-text">
-            Profiles apply <strong>per title</strong>: pick one in a title's Get or Manual search,
-            or its Manage panel. A title with none uses its kind's default below. Quality is read
-            from the release name — pick the ladder you'll accept, where to stop upgrading, what to
-            reject outright, then the soft tie-breakers.
-          </div>
-          <div
-            className="form-group"
-            style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}
-          >
-            <select
-              className="library-source-filter-select"
+    <div data-video-quality="">
+      <SectionLabel
+        title="Profiles"
+        hint="A title uses the profile picked for it, else its kind's default below."
+      />
+      <Card>
+        <Row
+          label="Profile you're editing"
+          htmlFor="vq-profile-select"
+          field
+          help="Pick one for a title in its Get or Manual search, or its Manage panel."
+          more="Quality is read from the release name: pick the qualities you will accept, where to stop upgrading, what to reject outright, then the soft tie-breakers."
+        >
+          <FieldLine>
+            <Select
+              id="vq-profile-select"
               data-vq-profile-select=""
               title="Which profile you're editing"
               value={String(selectedId)}
@@ -496,402 +504,377 @@ export function VideoQualitySections() {
                   {o.name}
                 </option>
               ))}
-            </select>{' '}
-            <input
-              type="text"
-              className={named ? undefined : 'hidden'}
-              data-vq-profile-name=""
-              placeholder="Profile name"
-              style={{ maxWidth: '180px' }}
-              key={`name-${rows}-${selectedId}`}
-              defaultValue={named ? selected?.name || '' : ''}
-              ref={(el) => {
-                nameField.current = el;
-                nameRef(el);
-              }}
-            />{' '}
-            <button
-              className="test-button"
-              type="button"
+            </Select>
+            <Btn
+              small
+              icon="plus"
               data-vq-profile-new=""
               title="Duplicate what's on screen as a new named profile"
               onClick={() => void newProfile()}
             >
-              + New profile
-            </button>{' '}
-            <button
-              className={named ? 'test-button' : 'test-button hidden'}
-              type="button"
-              data-vq-profile-delete=""
-              style={{ background: '#663333' }}
-              onClick={() => void deleteProfile()}
-            >
-              Delete
-            </button>
-          </div>
-          <div
-            className="form-group"
-            data-vq-kind-defaults=""
-            style={{ display: 'flex', gap: '14px', alignItems: 'center', flexWrap: 'wrap' }}
-          >
-            {(
-              [
-                [
-                  'movie',
-                  'New movies use',
-                  "The profile a movie gets when you haven't picked one for it",
-                ],
-                [
-                  'show',
-                  'New shows use',
-                  "The profile a show gets when you haven't picked one for it",
-                ],
-              ] as const
-            ).map(([kind, words, title], i) => (
-              <KindDefault
-                key={kind}
-                space={i > 0}
-                kind={kind}
-                words={words}
-                title={title}
-                value={String((defaults && defaults[kind]) || 0)}
-                options={profileOptions}
-                busy={defaultsBusy === kind}
-                pick={(raw, label) => void setKindDefault(kind, raw, label)}
-              />
-            ))}
-          </div>
-          <div className="vq-block">
-            <div className="vq-label">
-              Quality ladder{' '}
-              <span className="vq-hint">
-                toggle what you'll accept · rank best→worst with the arrows
-              </span>
-            </div>
-            <div className="hybrid-source-list" id="vq-tier-rows">
-              {tiers.map((t, i) => (
-                <div
-                  key={t.key}
-                  className={t.enabled ? 'hybrid-source-item' : 'hybrid-source-item disabled'}
-                >
-                  <span className="hybrid-source-arrows">
-                    <button
-                      type="button"
-                      className="hybrid-arrow-btn"
-                      data-vq-tier-move={t.key}
-                      data-dir="-1"
-                      disabled={i === 0}
-                      title="Move up"
-                      onClick={() => change((cur) => moveTier(cur, t.key, -1))}
-                    >
-                      ▲
-                    </button>
-                    <button
-                      type="button"
-                      className="hybrid-arrow-btn"
-                      data-vq-tier-move={t.key}
-                      data-dir="1"
-                      disabled={i === tiers.length - 1}
-                      title="Move down"
-                      onClick={() => change((cur) => moveTier(cur, t.key, 1))}
-                    >
-                      ▼
-                    </button>
-                  </span>
-                  <span className="hybrid-source-name">{TIER_LABEL[t.key] || t.key}</span>
-                  <span className="hybrid-source-priority">{i + 1}</span>
-                  <label className="hybrid-source-toggle">
-                    <input
-                      type="checkbox"
-                      data-vq-tier-toggle={t.key}
-                      checked={!!t.enabled}
-                      onChange={(event) => {
-                        const on = event.target.checked;
-                        change((cur) => ({
-                          ...cur,
-                          tiers: (cur.tiers || []).map((x) =>
-                            x.key === t.key ? { ...x, enabled: on } : x,
-                          ),
-                        }));
-                      }}
-                    />
-                    <span className="toggle-track"></span>
-                  </label>
-                </div>
-              ))}
-            </div>
-          </div>
-          <div className="vq-block">
-            <div className="vq-label">
-              Upgrade until{' '}
-              <span className="vq-hint">
-                once you have this resolution (or better) stop chasing upgrades
-              </span>
-            </div>
-            <select
-              id="vq-cutoff"
-              className="vq-select"
-              value={p ? (p.cutoff_resolution == null ? '1080p' : p.cutoff_resolution) : '2160p'}
-              onChange={(event) => {
-                const v = event.target.value;
-                change((cur) => ({ ...cur, cutoff_resolution: v }));
-              }}
-            >
-              <option value="2160p">4K · 2160p</option>
-              <option value="1080p">1080p</option>
-              <option value="720p">720p</option>
-              <option value="480p">480p (SD)</option>
-              <option value="">Best available — never stop upgrading</option>
-            </select>
-          </div>
-          <div className="vq-block">
-            <div className="vq-label">
-              Never grab{' '}
-              <span className="vq-hint">hard rejects — skipped no matter what else matches</span>
-            </div>
-            <div className="vq-chips" id="vq-rejects">
-              {p
-                ? REJECT_ORDER.map((k) => {
-                    const on = (p.rejects || []).includes(k);
-                    return (
-                      <button
-                        key={k}
-                        type="button"
-                        className={on ? 'vq-chip on' : 'vq-chip'}
-                        data-vq-reject={k}
-                        onClick={() => change((cur) => ({ ...cur, rejects: flip(cur.rejects, k) }))}
-                      >
-                        {REJECT_LABEL[k] || k}
-                      </button>
-                    );
-                  })
-                : null}
-            </div>
-          </div>
-          <div className="vq-block">
-            <div className="vq-label">
-              Preferences{' '}
-              <span className="vq-hint">
-                soft tie-breakers — they rank candidates, they never reject on their own
-              </span>
-            </div>
-            <div className="vq-prefs">
-              <div className="vq-pref-row">
-                <span className="vq-pref-name">Codec</span>
-                <Seg
-                  id="vq-codec"
-                  attr="data-vq-codec"
-                  value={p?.prefer_codec}
-                  choices={[
-                    ['any', 'Any'],
-                    ['hevc', 'HEVC / x265'],
-                    ['av1', 'AV1'],
-                  ]}
-                  pick={(v) => change((cur) => ({ ...cur, prefer_codec: v }))}
-                />
-              </div>
-              <div className="vq-pref-row">
-                <span className="vq-pref-name">HDR</span>
-                <Seg
-                  id="vq-hdr"
-                  attr="data-vq-hdr"
-                  value={p?.prefer_hdr}
-                  choices={[
-                    ['off', "Don't care"],
-                    ['prefer', 'Prefer'],
-                    ['require', 'Require'],
-                  ]}
-                  pick={(v) => change((cur) => ({ ...cur, prefer_hdr: v }))}
-                />
-              </div>
-              <div className="vq-pref-row">
-                <span className="vq-pref-name">Audio</span>
-                <Seg
-                  id="vq-audio"
-                  attr="data-vq-audio"
-                  value={p?.prefer_audio}
-                  choices={[
-                    ['any', 'Any'],
-                    ['surround', 'Surround'],
-                    ['lossless', 'Lossless'],
-                    ['atmos', 'Atmos'],
-                  ]}
-                  pick={(v) => change((cur) => ({ ...cur, prefer_audio: v }))}
-                />
-              </div>
-            </div>
-            <label className="vq-check" style={{ marginTop: '12px' }}>
-              <input
-                type="checkbox"
-                id="vq-prefer-repack"
-                checked={!!p?.prefer_repack}
-                onChange={(event) => {
-                  const on = event.target.checked;
-                  change((cur) => ({ ...cur, prefer_repack: on }));
-                }}
-              />{' '}
-              <span className="vq-check-box"></span> <span>Prefer REPACK / PROPER re-releases</span>
-            </label>
-          </div>
-          <div className="vq-block">
-            <div className="vq-label">
-              Audio language{' '}
-              <span className="vq-hint">
-                for dubbed or MULTI releases. a release with no language tag is the original audio
-              </span>
-            </div>
-            <Seg
-              id="vq-lang-mode"
-              attr="data-vq-lang-mode"
-              value={p ? langMode : undefined}
-              choices={[
-                ['off', "Don't care"],
-                ['prefer', 'Prefer'],
-                ['require', 'Require'],
-              ]}
-              pick={(v) => change((cur) => ({ ...cur, audio_language_mode: v }))}
-            />
-            <div
-              className="vq-chips"
-              id="vq-langs"
-              style={{ marginTop: '10px' }}
-              hidden={!p || langMode === 'off'}
-            >
-              {p
-                ? LANG_ORDER.map((k) => {
-                    const on = langs.includes(k);
-                    // vq-chip--pick: a language you want, not a tag you reject
-                    return (
-                      <button
-                        key={k}
-                        type="button"
-                        className={on ? 'vq-chip vq-chip--pick on' : 'vq-chip vq-chip--pick'}
-                        data-vq-lang={k}
-                        aria-pressed={on ? 'true' : 'false'}
-                        onClick={() =>
-                          change((cur) => ({
-                            ...cur,
-                            audio_languages: flip(cur.audio_languages, k),
-                          }))
-                        }
-                      >
-                        {LANG_LABEL[k] || k}
-                      </button>
-                    );
-                  })
-                : null}
-            </div>
-          </div>
-          <div className="vq-block">
-            <div className="vq-label">
-              Save to{' '}
-              <span className="vq-hint">
-                which library new titles on this profile are filed in. the 4K library is used once
-                its folder is switched on in Settings &gt; Folders, until then they go to the main
-                one. titles you already have stay put
-              </span>
-            </div>
-            <Seg
-              id="vq-library"
-              attr="data-vq-library"
-              value={p ? (p.library === '4k' ? '4k' : 'main') : undefined}
-              choices={[
-                ['main', 'Main library'],
-                ['4k', '4K library'],
-              ]}
-              pick={(v) => change((cur) => ({ ...cur, library: v }))}
-            />
-          </div>
-          <div className="vq-block">
-            <div className="vq-label">
-              Max size{' '}
-              <span className="vq-hint">
-                skip anything bigger — set per type so a movie and an episode aren't judged the same
-              </span>
-            </div>
-            <div className="vq-grid">
-              <Slider
-                key={`mv-${rows}`}
-                id="vq-movie-size"
-                labelId="vq-movie-label"
-                title="Movie"
-                min="0"
-                max="200"
-                step="1"
-                value={p?.max_movie_gb || 0}
-                label={sizeLabel}
-                parse={(raw) => parseInt(raw, 10) || 0}
-                commit={(v) => change((cur) => ({ ...cur, max_movie_gb: v }))}
-              />
-              <Slider
-                key={`ep-${rows}`}
-                id="vq-episode-size"
-                labelId="vq-episode-label"
-                title="TV episode"
-                min="0"
-                max="200"
-                step="1"
-                value={p?.max_episode_gb || 0}
-                label={sizeLabel}
-                parse={(raw) => parseInt(raw, 10) || 0}
-                commit={(v) => change((cur) => ({ ...cur, max_episode_gb: v }))}
-              />
-            </div>
-          </div>
-          <div className="vq-block">
-            <div className="vq-label">
-              Preferred size{' '}
-              <span className="vq-hint">
-                a tie-break only: among releases equal on quality and custom formats, the one
-                closest to this size ranks first. off at 0, never past the max size
-              </span>
-            </div>
-            <div className="vq-grid">
-              <Slider
-                key={`mp-${rows}`}
-                id="vq-movie-pref"
-                labelId="vq-movie-pref-label"
-                title="Movie"
-                min="0"
-                max="100"
-                step="0.5"
-                value={p?.preferred_movie_gb || 0}
-                label={prefLabel}
-                parse={(raw) => parseFloat(raw) || 0}
-                commit={(v) => change((cur) => ({ ...cur, preferred_movie_gb: v }))}
-              />
-              <Slider
-                key={`epp-${rows}`}
-                id="vq-episode-pref"
-                labelId="vq-episode-pref-label"
-                title="TV episode"
-                min="0"
-                max="10"
-                step="0.1"
-                value={p?.preferred_episode_gb || 0}
-                label={prefLabel}
-                parse={(raw) => parseFloat(raw) || 0}
-                commit={(v) => change((cur) => ({ ...cur, preferred_episode_gb: v }))}
-              />
-            </div>
-          </div>
-          <Seeders
-            key={`sd-${rows}`}
-            value={p ? seedersOf(p) : 1}
-            commit={(v) => change((cur) => ({ ...cur, min_seeders: v }))}
+              New profile
+            </Btn>
+          </FieldLine>
+        </Row>
+        <Row
+          sub
+          field
+          hidden={!named}
+          label="Name"
+          htmlFor="vq-profile-name"
+          help="Saved when you leave the field."
+        >
+          <TextField
+            id="vq-profile-name"
+            data-vq-profile-name=""
+            placeholder="Profile name"
+            key={`name-${rows}-${selectedId}`}
+            defaultValue={named ? selected?.name || '' : ''}
+            ref={(el: HTMLInputElement | null) => {
+              nameField.current = el;
+              nameRef(el);
+            }}
           />
+        </Row>
+        {named ? (
+          <Row
+            sub
+            label="Used for"
+            htmlFor="vq-used-for"
+            help="Members asking for a movie only see Movies and Both profiles; for a show, TV and Both."
+          >
+            <span data-vq-used-for="">
+              <Segmented
+                id="vq-used-for"
+                label="Used for"
+                itemAttr="data-vq-used-for-pick"
+                value={selected?.media_type || 'both'}
+                options={USED_FOR.map(([value, label]) => ({ value, label }))}
+                onChange={(v) => void setUsedFor(v)}
+              />
+            </span>
+          </Row>
+        ) : null}
+        <Row
+          sub
+          hidden={!named}
+          label="Delete this profile"
+          help="Titles using it go back to Default."
+        >
+          <Btn small kind="danger" data-vq-profile-delete="" onClick={() => void deleteProfile()}>
+            Delete
+          </Btn>
+        </Row>
+        <div data-vq-kind-defaults="">
+          {(
+            [
+              [
+                'movie',
+                'New movies use',
+                "The profile a movie gets when you haven't picked one for it",
+              ],
+              [
+                'show',
+                'New shows use',
+                "The profile a show gets when you haven't picked one for it",
+              ],
+            ] as const
+          ).map(([kind, words, title]) => (
+            <KindDefault
+              key={kind}
+              kind={kind}
+              words={words}
+              title={title}
+              value={String((defaults && defaults[kind]) || 0)}
+              options={profileOptions}
+              busy={defaultsBusy === kind}
+              pick={(raw, label) => void setKindDefault(kind, raw, label)}
+            />
+          ))}
         </div>
-        <CustomFormats
-          formats={formats}
-          setFormats={setFormats}
-          rows={rows}
-          bump={() => setRows((n) => n + 1)}
-          profile={p}
-          change={change}
+      </Card>
+
+      <SectionLabel
+        title="Quality ladder"
+        hint="Switch on what you will accept. First is best. Drag to reorder."
+      />
+      <Card>
+        <div className={s.cardPad} id="vq-tier-rows" data-ui="">
+          {tiers.length ? (
+            <OrderList
+              label={`Quality ladder for ${selected?.name || 'Default'}`}
+              items={tiers.map((t) => ({
+                id: t.key,
+                name: tierName(t.key),
+                mark: null,
+                keepAction: true,
+                action: (
+                  <Switch
+                    data-vq-tier-toggle={t.key}
+                    aria-label={`Accept ${tierName(t.key)}`}
+                    checked={!!t.enabled}
+                    onChange={(event) => {
+                      const enabled = event.target.checked;
+                      change((cur) => ({
+                        ...cur,
+                        tiers: (cur.tiers || []).map((x) =>
+                          x.key === t.key ? { ...x, enabled } : x,
+                        ),
+                      }));
+                    }}
+                  />
+                ),
+              }))}
+              role={(id) =>
+                tiers.find((t) => t.key === id)?.enabled
+                  ? 'Accepted'
+                  : 'Switched off: never grabbed'
+              }
+              dropText={(_id, index) => `Drop here: place ${index + 1}`}
+              onChange={(next) =>
+                change((cur) => {
+                  const all = cur.tiers || [];
+                  return {
+                    ...cur,
+                    tiers: next
+                      .map((key) => all.find((t) => t.key === key))
+                      .filter((t): t is Tier => !!t),
+                  };
+                })
+              }
+              minItems={tiers.length}
+              removeLabel="Remove"
+              keepText="Switch it off instead"
+            />
+          ) : (
+            <p className={s.listEmpty}>{p ? 'This profile has no qualities.' : 'Loading...'}</p>
+          )}
+        </div>
+        <Row
+          label="Upgrade until"
+          htmlFor="vq-cutoff"
+          field
+          help="Once you have this resolution or better, upgrades stop."
+        >
+          <Select
+            id="vq-cutoff"
+            value={p ? (p.cutoff_resolution == null ? '1080p' : p.cutoff_resolution) : '2160p'}
+            onChange={(event) => {
+              const v = event.target.value;
+              change((cur) => ({ ...cur, cutoff_resolution: v }));
+            }}
+            options={[
+              { value: '2160p', label: '4K · 2160p' },
+              { value: '1080p', label: '1080p' },
+              { value: '720p', label: '720p' },
+              { value: '480p', label: '480p (SD)' },
+              { value: '', label: 'Best available, never stop upgrading' },
+            ]}
+          />
+        </Row>
+        <Row label="Never grab" stack help="Hard rejects: skipped whatever else matches.">
+          <Chips
+            id="vq-rejects"
+            label="Never grab"
+            itemAttr="data-vq-reject"
+            options={p ? REJECT_ORDER.map((k) => ({ key: k, label: REJECT_LABEL[k] || k })) : []}
+            value={p?.rejects || []}
+            onToggle={(k) => change((cur) => ({ ...cur, rejects: flip(cur.rejects, k) }))}
+          />
+        </Row>
+      </Card>
+
+      <SectionLabel
+        title="Preferences"
+        hint="Soft tie-breakers: they rank releases, they never reject on their own"
+      />
+      <Card>
+        <Row label="Codec" htmlFor="vq-codec">
+          <Segmented
+            id="vq-codec"
+            label="Codec"
+            itemAttr="data-vq-codec"
+            value={p?.prefer_codec ?? ''}
+            options={[
+              { value: 'any', label: 'Any' },
+              { value: 'hevc', label: 'HEVC / x265' },
+              { value: 'av1', label: 'AV1' },
+            ]}
+            onChange={(v) => change((cur) => ({ ...cur, prefer_codec: v }))}
+          />
+        </Row>
+        <Row
+          label="HDR"
+          htmlFor="vq-hdr"
+          help={p?.prefer_hdr === 'require' ? 'Require rejects a release without HDR.' : undefined}
+        >
+          <Segmented
+            id="vq-hdr"
+            label="HDR"
+            itemAttr="data-vq-hdr"
+            value={p?.prefer_hdr ?? ''}
+            options={[
+              { value: 'off', label: "Don't care" },
+              { value: 'prefer', label: 'Prefer' },
+              { value: 'require', label: 'Require' },
+            ]}
+            onChange={(v) => change((cur) => ({ ...cur, prefer_hdr: v }))}
+          />
+        </Row>
+        <Row label="Audio" htmlFor="vq-audio">
+          <Segmented
+            id="vq-audio"
+            label="Audio"
+            itemAttr="data-vq-audio"
+            value={p?.prefer_audio ?? ''}
+            options={[
+              { value: 'any', label: 'Any' },
+              { value: 'surround', label: 'Surround' },
+              { value: 'lossless', label: 'Lossless' },
+              { value: 'atmos', label: 'Atmos' },
+            ]}
+            onChange={(v) => change((cur) => ({ ...cur, prefer_audio: v }))}
+          />
+        </Row>
+        <Row label="Prefer REPACK / PROPER re-releases" htmlFor="vq-prefer-repack">
+          <Switch
+            id="vq-prefer-repack"
+            checked={!!p?.prefer_repack}
+            onChange={(event) => {
+              const yes = event.target.checked;
+              change((cur) => ({ ...cur, prefer_repack: yes }));
+            }}
+          />
+        </Row>
+        <Row
+          label="Audio language"
+          htmlFor="vq-lang-mode"
+          help="For dubbed or MULTI releases. A release with no language tag is the original audio."
+        >
+          <Segmented
+            id="vq-lang-mode"
+            label="Audio language"
+            itemAttr="data-vq-lang-mode"
+            value={p ? langMode : ''}
+            options={[
+              { value: 'off', label: "Don't care" },
+              { value: 'prefer', label: 'Prefer' },
+              { value: 'require', label: 'Require' },
+            ]}
+            onChange={(v) => change((cur) => ({ ...cur, audio_language_mode: v }))}
+          />
+        </Row>
+        <Row sub stack label="Languages" hidden={!p || langMode === 'off'}>
+          <Chips
+            id="vq-langs"
+            label="Audio languages"
+            itemAttr="data-vq-lang"
+            options={p ? LANG_ORDER.map((k) => ({ key: k, label: LANG_LABEL[k] || k })) : []}
+            value={langs}
+            onToggle={(k) =>
+              change((cur) => ({ ...cur, audio_languages: flip(cur.audio_languages, k) }))
+            }
+          />
+        </Row>
+        <Row
+          label="Save to"
+          htmlFor="vq-library"
+          help="Which library new titles on this profile are filed in."
+          more="The 4K library is used once its folder is switched on in Settings, Library, Folders; until then they go to the main one. Titles you already have stay where they are."
+        >
+          <Segmented
+            id="vq-library"
+            label="Save to"
+            itemAttr="data-vq-library"
+            value={p ? (p.library === '4k' ? '4k' : 'main') : ''}
+            options={[
+              { value: 'main', label: 'Main library' },
+              { value: '4k', label: '4K library' },
+            ]}
+            onChange={(v) => change((cur) => ({ ...cur, library: v }))}
+          />
+        </Row>
+      </Card>
+
+      <SectionLabel title="Size and seeders" hint="Saved when you let go" />
+      <Card>
+        <Row
+          label="Max size"
+          help="Skip anything bigger. Set per type, so a movie and an episode are not judged the same."
         />
-      </Section>
-      <YoutubeQuality shown={shown} />
-    </>
+        <Slider
+          key={`mv-${rows}`}
+          id="vq-movie-size"
+          labelId="vq-movie-label"
+          title="Movie"
+          min="0"
+          max="200"
+          step="1"
+          value={p?.max_movie_gb || 0}
+          label={sizeLabel}
+          parse={(raw) => parseInt(raw, 10) || 0}
+          commit={(v) => change((cur) => ({ ...cur, max_movie_gb: v }))}
+        />
+        <Slider
+          key={`ep-${rows}`}
+          id="vq-episode-size"
+          labelId="vq-episode-label"
+          title="TV episode"
+          min="0"
+          max="200"
+          step="1"
+          value={p?.max_episode_gb || 0}
+          label={sizeLabel}
+          parse={(raw) => parseInt(raw, 10) || 0}
+          commit={(v) => change((cur) => ({ ...cur, max_episode_gb: v }))}
+        />
+        <Row
+          label="Preferred size"
+          help="A tie-break only: among releases equal on quality and custom formats, the one closest to this size ranks first."
+          more="Off at 0, and never past the max size."
+        />
+        <Slider
+          key={`mp-${rows}`}
+          id="vq-movie-pref"
+          labelId="vq-movie-pref-label"
+          title="Movie"
+          min="0"
+          max="100"
+          step="0.5"
+          value={p?.preferred_movie_gb || 0}
+          label={prefLabel}
+          parse={(raw) => parseFloat(raw) || 0}
+          commit={(v) => change((cur) => ({ ...cur, preferred_movie_gb: v }))}
+        />
+        <Slider
+          key={`epp-${rows}`}
+          id="vq-episode-pref"
+          labelId="vq-episode-pref-label"
+          title="TV episode"
+          min="0"
+          max="10"
+          step="0.1"
+          value={p?.preferred_episode_gb || 0}
+          label={prefLabel}
+          parse={(raw) => parseFloat(raw) || 0}
+          commit={(v) => change((cur) => ({ ...cur, preferred_episode_gb: v }))}
+        />
+        <Seeders
+          key={`sd-${rows}`}
+          value={p ? seedersOf(p) : 1}
+          commit={(v) => change((cur) => ({ ...cur, min_seeders: v }))}
+        />
+      </Card>
+
+      <CustomFormats
+        formats={formats}
+        setFormats={setFormats}
+        rows={rows}
+        bump={() => setRows((n) => n + 1)}
+        profile={p}
+        change={change}
+      />
+    </div>
   );
 }
 
@@ -903,17 +886,7 @@ function flip(list: string[] | undefined, k: string) {
   return arr;
 }
 
-function moveTier(p: VideoProfile, key: string, dir: number): VideoProfile {
-  const arr = [...(p.tiers || [])];
-  const i = arr.findIndex((t) => t.key === key);
-  const j = i + dir;
-  if (i < 0 || j < 0 || j >= arr.length) return p;
-  [arr[i], arr[j]] = [arr[j], arr[i]];
-  return { ...p, tiers: arr };
-}
-
 function KindDefault({
-  space,
   kind,
   words,
   title,
@@ -922,7 +895,6 @@ function KindDefault({
   busy,
   pick,
 }: {
-  space: boolean;
   kind: string;
   words: string;
   title: string;
@@ -932,28 +904,24 @@ function KindDefault({
   pick: (raw: string, label: string) => void;
 }) {
   return (
-    <>
-      {space ? ' ' : null}
-      <label style={{ display: 'inline-flex', gap: '8px', alignItems: 'center' }}>
-        <span>{words}</span>{' '}
-        <select
-          className="library-source-filter-select"
-          data-vq-kind-default={kind}
-          title={title}
-          value={value}
-          disabled={busy}
-          onChange={(event) =>
-            pick(event.target.value, event.target.options[event.target.selectedIndex]?.text || '')
-          }
-        >
-          {options.map((o) => (
-            <option key={o.id} value={o.id}>
-              {o.name}
-            </option>
-          ))}
-        </select>
-      </label>
-    </>
+    <Row label={words} htmlFor={`vq-kind-default-${kind}`} field help={title}>
+      <Select
+        id={`vq-kind-default-${kind}`}
+        data-vq-kind-default={kind}
+        title={title}
+        value={value}
+        disabled={busy}
+        onChange={(event) =>
+          pick(event.target.value, event.target.options[event.target.selectedIndex]?.text || '')
+        }
+      >
+        {options.map((o) => (
+          <option key={o.id} value={o.id}>
+            {o.name}
+          </option>
+        ))}
+      </Select>
+    </Row>
   );
 }
 
@@ -964,37 +932,36 @@ function Seeders({ value, commit }: { value: number; commit: (v: number) => void
     commit(parseInt(el.value, 10) || 0);
   });
   return (
-    <div className="vq-block">
-      <div className="vq-label">
-        Minimum seeders{' '}
-        <span className="vq-hint" id="vq-seeders-label">
+    <Row
+      label="Minimum seeders"
+      htmlFor="vq-min-seeders"
+      help="A torrent nobody is seeding never finishes. Set 0 to grab regardless."
+      more="It parks on downloading metadata or stalls at 0% and quietly fills your client with dead entries. Usenet and Soulseek have no seeders and are never affected."
+    >
+      <span className={s.rangeLine}>
+        <span className={s.rangeSay} id="vq-seeders-label">
           {seedersLabel(dragging ?? value)}
         </span>
-      </div>
-      <input
-        type="range"
-        id="vq-min-seeders"
-        className="vq-slider"
-        min="0"
-        max="100"
-        step="1"
-        ref={ref}
-        value={dragging ?? value}
-        onChange={(event) => setDragging(event.target.value)}
-      />
-      <div className="setting-help-text">
-        A torrent nobody is seeding never finishes — it parks on "downloading metadata" or stalls at
-        0% and quietly fills your client with dead entries. Set 0 to grab regardless. Usenet and
-        Soulseek have no seeders and are never affected.
-      </div>
-    </div>
+        <input
+          type="range"
+          id="vq-min-seeders"
+          className={s.range}
+          min="0"
+          max="100"
+          step="1"
+          ref={ref}
+          value={dragging ?? value}
+          onChange={(event) => setDragging(event.target.value)}
+        />
+      </span>
+    </Row>
   );
 }
 
 // ── custom formats ──
 
-const split = (s: string) =>
-  s
+const split = (str: string) =>
+  str
     .split(',')
     .map((x) => x.trim())
     .filter(Boolean);
@@ -1110,96 +1077,118 @@ function CustomFormats({
   }
 
   return (
-    <div className="settings-group" data-stg={TAB}>
-      <h3>Custom Formats</h3>
-      <div className="setting-help-text">
-        Score releases by their <strong>name</strong> — prefer trusted groups, bury x265, chase
-        freeleech, anything a pattern can see. Terms are plain substrings, or regex written{' '}
-        <code>/x265|hevc/</code>. A format matches when <em>all</em> "match" terms hit and{' '}
-        <em>no</em> "never" term does; matching formats add their score to a release's rank
-        (negative buries without rejecting). The "this profile" column overrides a format's score
-        for the profile selected above.
-      </div>
-      <div id="vq-format-rows" ref={host}>
-        {formats.length ? (
-          formats.map((f) => {
-            const ov = overrides[String(f.id)];
-            return (
-              <div className="vq-fmt-row" data-vq-fmt={f.id} key={`${f.id}-${rows}`}>
-                <input
-                  className="vq-fmt-in"
-                  data-vq-fmt-f="name"
-                  defaultValue={f.name}
-                  placeholder="Name"
-                />
-                <input
-                  className="vq-fmt-in"
-                  data-vq-fmt-f="include"
-                  defaultValue={(f.include || []).join(', ')}
-                  placeholder="match: term, /regex/"
-                />
-                <input
-                  className="vq-fmt-in"
-                  data-vq-fmt-f="exclude"
-                  defaultValue={(f.exclude || []).join(', ')}
-                  placeholder="never: term, /regex/"
-                />
-                <input
-                  className="vq-fmt-in vq-fmt-num"
-                  data-vq-fmt-f="score"
-                  type="number"
-                  defaultValue={f.score}
-                  title="Default score"
-                />
-                <input
-                  className="vq-fmt-in vq-fmt-num"
-                  data-vq-fmt-f="override"
-                  type="number"
-                  defaultValue={ov == null ? '' : ov}
-                  placeholder="—"
-                  title="Score for the selected profile (blank = default)"
-                />
-                <button
-                  className="vq-fmt-del"
-                  type="button"
-                  data-vq-fmt-del={f.id}
-                  title="Delete format"
-                  onClick={() => void remove(f.id)}
-                >
-                  ✕
-                </button>
-              </div>
-            );
-          })
-        ) : rows ? (
-          <div className="settings-hint" style={{ padding: '6px 0' }}>
-            No custom formats yet — releases rank purely by the ladder + tie-breakers.
-          </div>
-        ) : null}
-      </div>
-      <button
-        className="test-button"
-        type="button"
-        data-vq-format-add=""
-        onClick={() => void add()}
-      >
-        + Add format
-      </button>
-      <div className="form-group" style={{ marginTop: '10px' }}>
-        <label>Minimum format score (this profile):</label>
-        <input
-          type="number"
-          id="vq-min-format-score"
-          style={{ maxWidth: '120px' }}
-          key={`min-${rows}`}
-          defaultValue={(profile && profile.min_format_score) || 0}
-          ref={minRef}
+    <>
+      <SectionLabel
+        title="Custom formats"
+        hint="Score releases by their name: trusted groups, x265, freeleech, anything a pattern can see"
+      />
+      <Card data-custom-formats="">
+        <Row
+          label="How a format scores"
+          help="A format matches when all its match terms hit and no never term does; matching formats add their score to a release's rank."
+          more={
+            <>
+              Terms are plain text, or a regex written <code>/x265|hevc/</code>. A negative score
+              buries a release without rejecting it. The "this profile" field overrides a format's
+              score for the profile picked above. Formats are shared by every profile.
+            </>
+          }
         />
-        <small className="settings-hint">
-          Releases whose summed format score falls below this are rejected outright. 0 = off.
-        </small>
-      </div>
-    </div>
+        <div className={s.cardPad} id="vq-format-rows" ref={host}>
+          {formats.length ? (
+            <>
+              <div className={s.fmtHead} aria-hidden="true">
+                <span>Name</span>
+                <span>Match</span>
+                <span>Never</span>
+                <span>Score</span>
+                <span>This profile</span>
+                <span />
+              </div>
+              {formats.map((f) => {
+                const ov = overrides[String(f.id)];
+                return (
+                  <div className={s.fmtRow} data-vq-fmt={f.id} key={`${f.id}-${rows}`}>
+                    <TextField
+                      full
+                      data-vq-fmt-f="name"
+                      aria-label="Format name"
+                      defaultValue={f.name}
+                      placeholder="Name"
+                    />
+                    <TextField
+                      full
+                      mono
+                      data-vq-fmt-f="include"
+                      aria-label={`${f.name}: match terms`}
+                      defaultValue={(f.include || []).join(', ')}
+                      placeholder="term, /regex/"
+                    />
+                    <TextField
+                      full
+                      mono
+                      data-vq-fmt-f="exclude"
+                      aria-label={`${f.name}: never terms`}
+                      defaultValue={(f.exclude || []).join(', ')}
+                      placeholder="term, /regex/"
+                    />
+                    <TextField
+                      full
+                      type="number"
+                      data-vq-fmt-f="score"
+                      aria-label={`${f.name}: score`}
+                      defaultValue={f.score}
+                      title="Default score"
+                    />
+                    <TextField
+                      full
+                      type="number"
+                      data-vq-fmt-f="override"
+                      aria-label={`${f.name}: score for this profile`}
+                      defaultValue={ov == null ? '' : ov}
+                      placeholder="Same"
+                      title="Score for the selected profile (empty: the format's own)"
+                    />
+                    <Btn
+                      kind="ghost"
+                      small
+                      iconOnly
+                      icon="x"
+                      data-vq-fmt-del={f.id}
+                      aria-label={`Delete ${f.name}`}
+                      title="Delete format"
+                      onClick={() => void remove(f.id)}
+                    />
+                  </div>
+                );
+              })}
+            </>
+          ) : rows ? (
+            <p className={s.listEmpty}>
+              No custom formats yet: releases rank by the ladder and the tie-breakers alone.
+            </p>
+          ) : null}
+          <div>
+            <Btn small icon="plus" data-vq-format-add="" onClick={() => void add()}>
+              Add format
+            </Btn>
+          </div>
+        </div>
+        <Row
+          label="Minimum format score"
+          htmlFor="vq-min-format-score"
+          field
+          help="For this profile: a release whose formats add up to less is rejected. 0 is off."
+        >
+          <NumberField
+            id="vq-min-format-score"
+            key={`min-${rows}`}
+            defaultValue={(profile && profile.min_format_score) || 0}
+            ref={minRef}
+          />
+        </Row>
+      </Card>
+    </>
   );
 }
 
@@ -1229,7 +1218,8 @@ interface YtProfile {
   [key: string]: unknown;
 }
 
-function YoutubeQuality({ shown }: { shown: number }) {
+/** Quality > YouTube: one simple profile for the channels you follow */
+export function YoutubeQuality({ shown }: { shown: number }) {
   const [p, setP] = useState<YtProfile | null>(null);
   const latest = useRef(p);
   latest.current = p;
@@ -1263,106 +1253,87 @@ function YoutubeQuality({ shown }: { shown: number }) {
   }
 
   return (
-    <Section
-      tab={TAB}
-      title="YouTube Quality"
-      hint="Resolution ceiling, codec & container for followed channels"
-    >
-      <div className="settings-group" data-stg={TAB}>
-        <div className="setting-help-text">
-          A separate, simpler profile for the channels you follow — YouTube is grabbed with yt-dlp,
-          so it's just a resolution ceiling, a codec preference and a container.
-        </div>
-        <div className="vq-block">
-          <div className="vq-label">
-            Max resolution{' '}
-            <span className="vq-hint">
-              the most yt-dlp will grab — it steps down to the next available below this
-            </span>
-          </div>
-          <select
+    <div data-youtube-quality="">
+      <SectionLabel
+        title="Followed channels"
+        hint="YouTube is grabbed with yt-dlp, so this is a ceiling, a codec and a container"
+      />
+      <Card>
+        <Row
+          label="Max resolution"
+          htmlFor="yq-resolution"
+          field
+          help="The most yt-dlp will grab. It steps down to the next one available below this."
+        >
+          <Select
             id="yq-resolution"
-            className="vq-select"
             value={p ? p.max_resolution || '1080p' : 'best'}
             onChange={(event) => {
               const v = event.target.value;
               change((cur) => ({ ...cur, max_resolution: v }));
             }}
-          >
-            <option value="best">Best available</option>
-            <option value="4320p">8K · 4320p</option>
-            <option value="2160p">4K · 2160p</option>
-            <option value="1440p">1440p</option>
-            <option value="1080p">1080p</option>
-            <option value="720p">720p</option>
-            <option value="480p">480p</option>
-            <option value="360p">360p</option>
-          </select>
-        </div>
-        <div className="vq-block">
-          <div className="vq-label">
-            Preferences{' '}
-            <span className="vq-hint">
-              codec is a soft preference; container is the final muxed file
-            </span>
-          </div>
-          <div className="vq-prefs">
-            <div className="vq-pref-row">
-              <span className="vq-pref-name">Codec</span>
-              <Seg
-                id="yq-codec"
-                attr="data-yq-codec"
-                value={p?.video_codec}
-                choices={[
-                  ['any', 'Best'],
-                  ['av1', 'AV1'],
-                  ['vp9', 'VP9'],
-                  ['h264', 'H.264'],
-                ]}
-                pick={(v) => change((cur) => ({ ...cur, video_codec: v }))}
-              />
-            </div>
-            <div className="vq-pref-row">
-              <span className="vq-pref-name">Container</span>
-              <Seg
-                id="yq-container"
-                attr="data-yq-container"
-                value={p?.container}
-                choices={[
-                  ['mp4', 'MP4'],
-                  ['mkv', 'MKV'],
-                  ['webm', 'WebM'],
-                ]}
-                pick={(v) => change((cur) => ({ ...cur, container: v }))}
-              />
-            </div>
-          </div>
-          <label className="vq-check" style={{ marginTop: '12px' }}>
-            <input
-              type="checkbox"
-              id="yq-60fps"
-              checked={!!p?.prefer_60fps}
-              onChange={(event) => {
-                const on = event.target.checked;
-                change((cur) => ({ ...cur, prefer_60fps: on }));
-              }}
-            />{' '}
-            <span className="vq-check-box"></span> <span>Prefer 60fps when available</span>
-          </label>{' '}
-          <label className="vq-check" style={{ marginTop: '10px' }}>
-            <input
-              type="checkbox"
-              id="yq-hdr"
-              checked={!!p?.allow_hdr}
-              onChange={(event) => {
-                const on = event.target.checked;
-                change((cur) => ({ ...cur, allow_hdr: on }));
-              }}
-            />{' '}
-            <span className="vq-check-box"></span> <span>Allow HDR (off = always grab SDR)</span>
-          </label>
-        </div>
-      </div>
-    </Section>
+            options={[
+              { value: 'best', label: 'Best available' },
+              { value: '4320p', label: '8K · 4320p' },
+              { value: '2160p', label: '4K · 2160p' },
+              { value: '1440p', label: '1440p' },
+              { value: '1080p', label: '1080p' },
+              { value: '720p', label: '720p' },
+              { value: '480p', label: '480p' },
+              { value: '360p', label: '360p' },
+            ]}
+          />
+        </Row>
+        <Row label="Codec" htmlFor="yq-codec" help="A preference, not a rule.">
+          <Segmented
+            id="yq-codec"
+            label="Codec"
+            itemAttr="data-yq-codec"
+            value={p?.video_codec ?? ''}
+            options={[
+              { value: 'any', label: 'Best' },
+              { value: 'av1', label: 'AV1' },
+              { value: 'vp9', label: 'VP9' },
+              { value: 'h264', label: 'H.264' },
+            ]}
+            onChange={(v) => change((cur) => ({ ...cur, video_codec: v }))}
+          />
+        </Row>
+        <Row label="Container" htmlFor="yq-container" help="The file it is saved as.">
+          <Segmented
+            id="yq-container"
+            label="Container"
+            itemAttr="data-yq-container"
+            value={p?.container ?? ''}
+            options={[
+              { value: 'mp4', label: 'MP4' },
+              { value: 'mkv', label: 'MKV' },
+              { value: 'webm', label: 'WebM' },
+            ]}
+            onChange={(v) => change((cur) => ({ ...cur, container: v }))}
+          />
+        </Row>
+        <Row label="Prefer 60fps when available" htmlFor="yq-60fps">
+          <Switch
+            id="yq-60fps"
+            checked={!!p?.prefer_60fps}
+            onChange={(event) => {
+              const yes = event.target.checked;
+              change((cur) => ({ ...cur, prefer_60fps: yes }));
+            }}
+          />
+        </Row>
+        <Row label="Allow HDR" htmlFor="yq-hdr" help="Off always grabs SDR.">
+          <Switch
+            id="yq-hdr"
+            checked={!!p?.allow_hdr}
+            onChange={(event) => {
+              const yes = event.target.checked;
+              change((cur) => ({ ...cur, allow_hdr: yes }));
+            }}
+          />
+        </Row>
+      </Card>
+    </div>
   );
 }

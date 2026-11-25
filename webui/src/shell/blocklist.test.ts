@@ -181,7 +181,6 @@ describe('the window contract', () => {
       'connectMyAccount',
       'deleteSelectedOriginEntries',
       'disconnectMyAccount',
-      'filterSettings',
       'getWeatherPreview',
       'initOidcAdminStatus',
       'initSidebarWeather',

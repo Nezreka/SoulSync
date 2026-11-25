@@ -344,6 +344,8 @@ def test_purging_forgets_the_entry_it_removed(library):
     entry = list_bin()[0]["name"]
     assert entry in _manifest_read(trash)
 
+    import time
+    time.sleep(0.05)      # older than the cutoff below on any machine (flaked on dev CI)
     purge_old(days=0.0000001)
 
     assert entry not in _manifest_read(trash)

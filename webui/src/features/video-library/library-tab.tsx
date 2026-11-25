@@ -44,6 +44,7 @@ import {
   wishlistEpisodes,
   wishlistMovie,
 } from './api';
+import { Extras } from './extras';
 import { FixMatchDialog } from './fix-match-dialog';
 import {
   audioLabel,
@@ -114,11 +115,11 @@ export function refreshPage(): void {
   (b.refreshPage ?? b.reloadPage)?.();
 }
 
-function toast(message: string, type: 'success' | 'error' | 'info' | 'warning' = 'success') {
+export function toast(message: string, type: 'success' | 'error' | 'info' | 'warning' = 'success') {
   window.showToast?.(message, type);
 }
 
-async function confirm(options: {
+export async function confirm(options: {
   title: string;
   message: string;
   confirmText: string;
@@ -132,7 +133,7 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? o
 
 /* ── small pieces ─────────────────────────────────────────────────────────── */
 
-function ResBadge({ label, size = 'md' }: { label: string; size?: 'md' | 'lg' }) {
+export function ResBadge({ label, size = 'md' }: { label: string; size?: 'md' | 'lg' }) {
   return (
     <span className={s.res} data-tone={resolutionTone(label)} data-size={size}>
       {label || '—'}
@@ -140,7 +141,7 @@ function ResBadge({ label, size = 'md' }: { label: string; size?: 'md' | 'lg' })
   );
 }
 
-function Chip({
+export function Chip({
   tone = 'muted',
   children,
   title,
@@ -180,7 +181,7 @@ function MenuButton({ label, items }: { label: string; items: ActionMenuItem[] }
   );
 }
 
-async function copyText(text: string) {
+export async function copyText(text: string) {
   try {
     await navigator.clipboard.writeText(text);
     toast('Path copied');
@@ -205,7 +206,7 @@ function folderName(path: string | null | undefined): string {
 
 /* ── what needs attention ─────────────────────────────────────────────────── */
 
-interface Issue {
+export interface Issue {
   key: string;
   tone: 'warn' | 'info';
   title: string;
@@ -213,7 +214,7 @@ interface Issue {
   action?: { label: string; onClick: () => void; busy?: boolean };
 }
 
-function Attention({ issues }: { issues: Issue[] }) {
+export function Attention({ issues }: { issues: Issue[] }) {
   // a healthy title shows no section at all: the page is just the page
   if (!issues.length) return null;
   return (
@@ -420,6 +421,11 @@ function FileCard({
             <span className={s.fileTitle}>
               {named || [codec, f.resolution_label].filter(Boolean).join(' ') || 'File'}
             </span>
+            {f.edition ? (
+              <span className={s.extra} data-edition="">
+                {f.edition}
+              </span>
+            ) : null}
             {f.best ? <span className={s.best}>Best copy</span> : null}
             {extra && !f.best ? <span className={s.extra}>Extra copy</span> : null}
           </div>
@@ -976,6 +982,8 @@ function MovieView({
         <FileCards files={data.files} actions={actions} label="File" />
       </section>
 
+      <Extras kind="movie" id={data.id} extras={data.extras} />
+
       {fileDialogs}
       <TitleDialogs
         kind="movie"
@@ -1048,7 +1056,8 @@ function ShowView({
   const [job, setJob] = useState<ConsolidateState | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const sm = data.summary;
-  const aired = sm.owned + sm.missing;
+  // every aired episode, hunted or not: the unmonitored gaps are still gaps
+  const aired = sm.owned + sm.missing + (sm.missing_unmonitored ?? 0);
   const q = data.quality;
   const tmdb = data.identity.tmdb_id;
 
@@ -1086,17 +1095,33 @@ function ShowView({
       ),
     [data],
   );
-  const missing = useMemo(
-    () =>
-      data.seasons
-        .filter((season) => season.season_number !== 0)
-        .flatMap((season) =>
-          season.episodes
-            .filter((ep) => !ep.has_file && ep.aired)
-            .map((ep) => wishOf(data.id, season, ep)),
-        ),
-    [data],
-  );
+  // #2177: missing is what SoulSync hunts, like sonarr's: aired, no file and
+  // monitored. a gap in a season you turned off is still said, quieter, and
+  // Get missing never grabs it
+  const { missing, unmonitored } = useMemo(() => {
+    const want: WishEpisode[] = [];
+    const off = { count: 0, inOffSeasons: true };
+    for (const season of data.seasons) {
+      // #2284: specials count when they are monitored (the Monitor Specials
+      // setting, or the season's own switch), as the show's card counts
+      // them. they were skipped here whatever the switch said, so the card
+      // showed a gap this page never mentioned. unmonitored specials are the
+      // normal case and are not a gap worth saying.
+      const special = season.season_number === 0;
+      for (const ep of season.episodes) {
+        if (ep.has_file || !ep.aired) continue;
+        if (ep.monitored) {
+          want.push(wishOf(data.id, season, ep));
+        } else if (special) {
+          continue;
+        } else {
+          off.count += 1;
+          if (season.monitored) off.inOffSeasons = false;
+        }
+      }
+    }
+    return { missing: want, unmonitored: off };
+  }, [data]);
 
   const run = async (key: string, episodes: WishEpisode[], what: string) => {
     setBusy(key);
@@ -1172,7 +1197,13 @@ function ShowView({
       key: 'missing',
       tone: 'warn',
       title: `${plural(missing.length, 'aired episode')} missing`,
-      detail: 'Getting them puts each on the wishlist and searches now.',
+      detail: `Getting them puts each on the wishlist and searches now.${
+        unmonitored.count
+          ? unmonitored.inOffSeasons
+            ? ` ${unmonitored.count} more in unmonitored seasons are left alone.`
+            : ` ${unmonitored.count} more aren’t monitored, so they’re left alone.`
+          : ''
+      }`,
       action: tmdb
         ? {
             label: 'Get missing',
@@ -1286,6 +1317,12 @@ function ShowView({
       <span className={s.libCount}>
         <b>{sm.owned}</b> of {aired || sm.total} aired episodes
       </span>
+      {unmonitored.count ? (
+        <span className={s.libDim} data-part="unmonitored">
+          {unmonitored.count}{' '}
+          {unmonitored.inOffSeasons ? 'in unmonitored seasons' : 'not monitored'}
+        </span>
+      ) : null}
       <span className={s.libFact}>{formatBytes(sm.size_bytes) || 'no files'}</span>
       {sm.res_mix.length ? (
         <span className={s.libMix}>
@@ -1393,6 +1430,7 @@ function ShowView({
     <div className={s.tab} data-layout="page">
       {page.hero ? createPortal(line, page.hero) : line}
       <Attention issues={issues} />
+      <Extras kind="show" id={data.id} extras={data.extras} />
       {page.foot ? createPortal(folders, page.foot) : folders}
       {dialogs}
       <TitleDialogs

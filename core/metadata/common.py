@@ -159,7 +159,25 @@ def _raw_audio_save(audio_file: Any, symbols: Any, target: Any = None) -> None:
         kwargs = {'v2_version': 4} if isinstance(audio_file, (AIFF, WAVE)) else {'v1': 0, 'v2_version': 4}
         audio_file.save(**kwargs) if target is None else audio_file.save(target, **kwargs)
     elif isinstance(audio_file, symbols.FLAC):
-        audio_file.save(deleteid3=True) if target is None else audio_file.save(target, deleteid3=True)
+        # Mutagen removes the last 128 bytes when deleteid3=True
+        # and they begin with TAG. This can conflict with atomic
+        # audio integrity verification and may truncate audio if
+        # the signature occurs naturally in the stream.
+        path = target if target is not None else audio_file.filename
+        deleteid3 = True
+        try:
+            with open(path, "rb") as f:
+                f.seek(-128, 2)
+                if f.read(3) == b"TAG":
+                    deleteid3 = False
+        except (OSError, TypeError, ValueError):
+            # If we cannot inspect the footer, avoid deleting it.
+            deleteid3 = False
+
+        if target is None:
+            audio_file.save(deleteid3=deleteid3)
+        else:
+            audio_file.save(target, deleteid3=deleteid3)
     else:
         audio_file.save() if target is None else audio_file.save(target)
 
@@ -324,6 +342,10 @@ def save_audio_file(audio_file: Any, symbols: Any) -> bool:
         path = None
     if path and _locked_against_tag_writes(path):
         return False
+    if path:
+        # the folder watcher leaves a file SoulSync is retagging alone
+        from core.library import own_writes
+        own_writes.note(path)
     if not path or not os.path.isfile(path):
         _raw_audio_save(audio_file, symbols)
         return True
@@ -338,14 +360,20 @@ def save_audio_file(audio_file: Any, symbols: Any) -> bool:
         shutil.copy2(path, tmp)               # snapshot original (audio + tags)
         _raw_audio_save(audio_file, symbols, target=tmp)  # write new tags into the copy
 
-        check = symbols.File(tmp)             # 1) still a parseable audio file?
+        # The staging filename ends in .sstmp, which can cause
+        # Mutagen's format detection to misidentify valid FLAC files.
+        # Reuse the known FLAC parser without changing the staging suffix.
+        flac_cls = getattr(symbols, "FLAC", None)
+        if flac_cls is not None and isinstance(audio_file, flac_cls):
+            check = flac_cls(tmp)
+        else:
+            check = symbols.File(tmp)
         if check is None:
             raise _AudioIntegrityError("temp is not a parseable audio file")
 
         # 2) audio stream intact? FLAC → exact frame byte-compare (definitive,
         #    and robust to legit unknown-length STREAMINFO); other formats →
         #    structural signature + duration vs the ORIGINAL.
-        flac_cls = getattr(symbols, "FLAC", None)
         if flac_cls is not None and isinstance(audio_file, flac_cls):
             identical = _flac_audio_identical(path, tmp)
             if identical is False:
@@ -396,8 +424,40 @@ def save_audio_file(audio_file: Any, symbols: Any) -> bool:
         # those behave exactly as before #819.
         logger.warning("[Atomic Save] atomic path failed (%s) — in-place fallback for %s",
                        atomic_err, os.path.basename(path))
-        _raw_audio_save(audio_file, symbols)
+        try:
+            _raw_audio_save(audio_file, symbols)
+        except PermissionError as denied:
+            # #2295: "Permission denied" on a share that looks writable. it is
+            # nearly always who SoulSync runs as: the container drops to
+            # PUID:PGID (1000:1000 unless set), while `docker exec` is root and
+            # can write anything. say so, with the numbers, where the person
+            # reads the error.
+            hint = permission_hint(path)
+            logger.error("[Atomic Save] cannot write %s: %s", path, hint)
+            raise PermissionError(denied.errno or 13, f"Permission denied. {hint}", path) from denied
         return True
+
+
+def permission_hint(path: str) -> str:
+    """who SoulSync runs as, who owns the file, and what to change: the three
+    facts a "permission denied" on a music folder comes down to."""
+    getuid, getgid = getattr(os, "getuid", None), getattr(os, "getgid", None)
+    if getuid is None or getgid is None:
+        return "SoulSync could not write to this file; check that it is not read-only or open elsewhere."
+    me = f"{getuid()}:{getgid()}"
+    try:
+        info = os.stat(path)
+        folder = os.stat(os.path.dirname(path) or ".")
+        owner = f"{info.st_uid}:{info.st_gid}"
+        facts = (f"SoulSync runs as user {me}; the file belongs to {owner} (mode {info.st_mode & 0o777:o}) "
+                 f"and its folder to {folder.st_uid}:{folder.st_gid} (mode {folder.st_mode & 0o777:o}).")
+    except OSError:
+        owner, facts = "", f"SoulSync runs as user {me}."
+    fix = ("Set the container's PUID and PGID to the owner of your music"
+           + (f" (PUID={owner.split(':')[0]} PGID={owner.split(':')[1]})" if owner and owner != me else "")
+           + ", or make the folder writable by that user. `docker exec` runs as root, so a test there "
+             "passes even when SoulSync itself cannot write.")
+    return facts + " " + fix
 
 
 def get_image_dimensions(data: bytes):

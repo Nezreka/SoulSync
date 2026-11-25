@@ -25,6 +25,16 @@
         return document.body.getAttribute('data-side') === 'video';
     }
 
+    // the workers are the admins' (#2196): a member has no buttons, and the
+    // status routes refuse them, so this never asks
+    function viewerIsAdmin() {
+        var ctx = null;
+        try {
+            ctx = typeof getCurrentProfileContext === 'function' ? getCurrentProfileContext() : null;
+        } catch (e) { ctx = null; }
+        return !!ctx && (ctx.isAdmin === true || ctx.profileId === 1);
+    }
+
     function btn(svc) { return document.querySelector('[data-video-enrich="' + svc + '"]'); }
 
     function setText(root, sel, text) {
@@ -80,7 +90,7 @@
     // request per service (the load-time flood fix); per-service only as a
     // fallback when the bundle fails.
     function primeOnce() {
-        if (!onVideoSide() || document.hidden) return;
+        if (!onVideoSide() || document.hidden || !viewerIsAdmin()) return;
         fetch('/api/video/enrichment/status-all', { headers: { 'Accept': 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (b) {

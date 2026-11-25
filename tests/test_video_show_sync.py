@@ -166,6 +166,67 @@ def test_plex_rekey_heals_the_row_instead_of_deleting(seeded, monkeypatch, _quie
         conn.close()
 
 
+def test_rekey_keeps_the_ids_and_year_the_new_read_lacks(seeded, monkeypatch, _quiet_scanner):
+    # plex's one-show read can come back without the imdb id or year the old
+    # row had: the healed row keeps them (and an anime choice made by hand)
+    db, show_id = seeded
+    conn = db._get_connection()
+    conn.execute("UPDATE shows SET imdb_id='tt0105559', tvdb_id=80009, year=1992, "
+                 "series_type='anime' WHERE id=?", (show_id,))
+    conn.commit()
+    conn.close()
+    new_tree = dict(_tree(server_id="sh1-NEW"), tmdb_id=43004, tvdb_id=99999)
+    _use_source(monkeypatch, _Source(tree=new_tree))
+    res = sync_show(db, show_id)
+    assert res["rekeyed"] is True
+    conn = db._get_connection()
+    try:
+        row = dict(conn.execute("SELECT tmdb_id, tvdb_id, imdb_id, year, series_type FROM shows "
+                                "WHERE id=?", (res["show_id"],)).fetchone())
+    finally:
+        conn.close()
+    # what the server sent wins; what it left out comes from the old row
+    assert row == {"tmdb_id": 43004, "tvdb_id": 99999, "imdb_id": "tt0105559",
+                   "year": 1992, "series_type": "anime"}
+
+
+def test_rekey_keeps_what_the_user_locked_and_chose(seeded, monkeypatch, _quiet_scanner):
+    # a fix-match locks the ids and title; a padlock, an unfollow and a
+    # quality profile are the user's too. the new row is only the server's
+    # read, so all of it comes over, and a locked id beats the server's
+    import json
+    db, show_id = seeded
+    conn = db._get_connection()
+    conn.execute("INSERT INTO genres (name) VALUES ('Anime')")
+    gid = conn.execute("SELECT id FROM genres WHERE name='Anime'").fetchone()[0]
+    conn.execute("INSERT INTO show_genres (show_id, genre_id) VALUES (?, ?)", (show_id, gid))
+    profile = (conn.execute("INSERT INTO quality_profiles (name) VALUES ('Anime 1080p')").lastrowid,)
+    conn.execute("UPDATE shows SET title='Tenchi Muyo!', tmdb_id=43004, imdb_id='tt0105559', "
+                 "hands_off=1, monitored=0, quality_profile_id=?, manual_aliases='[\"Tenchi\"]', "
+                 "locked_fields=? WHERE id=?",
+                 (profile[0],
+                  json.dumps(["genres", "imdb_id", "title", "tmdb_id"]), show_id))
+    conn.commit()
+    conn.close()
+    new_tree = dict(_tree(server_id="sh1-NEW"), tmdb_id=99999, imdb_id="tt9999999")
+    _use_source(monkeypatch, _Source(tree=new_tree))
+    res = sync_show(db, show_id)
+    assert res["rekeyed"] is True
+    conn = db._get_connection()
+    try:
+        row = dict(conn.execute("SELECT * FROM shows WHERE id=?", (res["show_id"],)).fetchone())
+        genres = [r[0] for r in conn.execute("SELECT genre_id FROM show_genres WHERE show_id=?",
+                                             (res["show_id"],))]
+    finally:
+        conn.close()
+    assert (row["title"], row["tmdb_id"], row["imdb_id"]) == ("Tenchi Muyo!", 43004, "tt0105559")
+    assert set(json.loads(row["locked_fields"])) >= {"genres", "imdb_id", "title", "tmdb_id"}
+    assert (row["hands_off"], row["monitored"]) == (1, 0)
+    assert row["manual_aliases"] == '["Tenchi"]'
+    assert row["quality_profile_id"] == profile[0]
+    assert genres == [gid]
+
+
 def test_sync_triggers_a_scoped_episode_list_refresh(seeded, monkeypatch, _quiet_scanner):
     # the server only knows about FILES; the aired-episode schedule comes from
     # enrichment — sync asks TMDB for the recent seasons so schedule holes
@@ -226,10 +287,14 @@ def test_jellyfin_gone_requires_a_live_server():
 
 def test_endpoint_and_admin_gate():
     api = (_ROOT / "api" / "video" / "detail.py").read_text(encoding="utf-8", errors="replace")
-    gate = (_ROOT / "api" / "video" / "__init__.py").read_text(encoding="utf-8", errors="replace")
     assert '"/detail/show/<int:show_id>/sync"' in api
     assert '"/detail/movie/<int:movie_id>/sync"' in api
-    assert '"/sync"' in gate
+    # the gate's admin rules moved to api/video/access.py with the
+    # permissions overhaul; ask the table itself, not a file's text
+    from api.video.access import route_access
+    for rule in ("/api/video/detail/show/<int:show_id>/sync",
+                 "/api/video/detail/movie/<int:movie_id>/sync"):
+        assert route_access(rule, "POST") == ("admin", None), rule
 
 
 def test_ui_button_and_handler():

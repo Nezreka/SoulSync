@@ -28,6 +28,7 @@ from datetime import date, timedelta
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from core.automation.deps import AutomationDeps
+from core.owner_gate import OwnerGate, quality_kw
 from core.video.discovery_gaps import filmography_gaps
 # Reuse the people scan's generic date helpers (forward-only cutoff + release check + the
 # 1-year look-ahead horizon) so the two scans share one definition of the wishlist window.
@@ -178,13 +179,19 @@ def _default_wishlisted_status() -> Dict[int, str]:
     return get_video_db().wishlisted_movie_status(profile_id=_profile())
 
 
-def _default_add_movie(tmdb_id, title, *, year, poster_url, status, detail_json) -> bool:
+def _default_add_movie(tmdb_id, title, *, year, poster_url, status, detail_json,
+                       quality_profile_id=None) -> bool:
     from api.video import get_video_db
     from core.video.sources import resolve_video_server
     return get_video_db().add_movie_to_wishlist(
         tmdb_id, title, year=year, poster_url=poster_url, status=status,
         detail_json=detail_json, server_source=resolve_video_server(),
-        profile_id=_profile())
+        profile_id=_profile(), quality_profile_id=quality_profile_id)
+
+
+def _default_video_db():
+    from api.video import get_video_db
+    return get_video_db()
 
 
 def auto_video_scan_watchlist_studios(
@@ -199,6 +206,8 @@ def auto_video_scan_watchlist_studios(
     wishlisted_status: Optional[Callable[[], Dict[int, str]]] = None,
     add_movie: Optional[Callable[..., bool]] = None,
     today_fn: Optional[Callable[[], str]] = None,
+    gate: Optional[OwnerGate] = None,
+    request_db: Optional[Callable[[], Any]] = None,
 ) -> Dict[str, Any]:
     """Scan every followed studio's catalog and wishlist the movies the user is missing.
 
@@ -213,6 +222,10 @@ def auto_video_scan_watchlist_studios(
     wishlisted_status = wishlisted_status or _default_wishlisted_status
     add_movie = add_movie or _default_add_movie
     today_fn = today_fn or (lambda: date.today().isoformat())
+    # the owner's rights, asked before every add (#2166): no access or can't
+    # request adds nothing, ask first files a request, the rating cap holds
+    gate = gate or OwnerGate.for_current(label='studio scan')
+    request_db = request_db or _default_video_db
     automation_id = config.get('_automation_id')
 
     try:
@@ -230,7 +243,7 @@ def auto_video_scan_watchlist_studios(
         ignored = ignored_ids() or []
         wished: Dict[int, str] = dict(wishlisted_status() or {})
 
-        added = upcoming = promoted = 0
+        added = upcoming = promoted = requested = skipped = 0
         total = len(studios)
         for i, studio in enumerate(studios):
             sid = studio.get('tmdb_id')
@@ -258,6 +271,10 @@ def auto_video_scan_watchlist_studios(
                     # Already wishlisted (maybe via another studio/person) — only action left
                     # is promoting a monitored row that's since been released.
                     if existing == 'monitored' and want == 'wanted':
+                        # a promotion makes it downloadable: only while the owner may
+                        if not gate.want('movie', tmdb_id=tid, part='video.watchlist',
+                                         title=g.get('title')).add:
+                            continue
                         if add_movie(tid, g.get('title'), year=g.get('year'),
                                      poster_url=g.get('poster'), status='wanted', detail_json=None):
                             wished[tid] = 'wanted'
@@ -268,6 +285,33 @@ def auto_video_scan_watchlist_studios(
                                 % (g.get('title') or tid))
                     continue
 
+                w = gate.want('movie', tmdb_id=tid, part='video.watchlist', title=g.get('title'))
+
+                if w.skip:
+
+                    skipped += 1
+
+                    continue
+
+                if w.request:
+
+                    # ask first: an admin's OK instead of a download, once per title
+
+                    wished[tid] = 'requested'
+
+                    if gate.file_video_request(
+
+                            request_db(), kind='movie', tmdb_id=tid, title=g.get('title') or str(tid),
+
+                            year=g.get('year'), poster_url=g.get('poster'),
+
+                            quality_profile_id=w.quality_profile_id) == 'filed':
+
+                        requested += 1
+
+                    continue
+
+
                 try:
                     detail = fetch_detail(tid)
                 except Exception:   # noqa: BLE001 - degrade to the cheap catalog fields
@@ -275,7 +319,7 @@ def auto_video_scan_watchlist_studios(
                 blob = build_detail_blob(detail, g, studio)
                 if add_movie(tid, g.get('title') or blob.get('title'), year=g.get('year'),
                              poster_url=blob.get('poster_url') or g.get('poster'),
-                             status=want, detail_json=blob):
+                             status=want, detail_json=blob, **quality_kw(w)):
                     wished[tid] = want
                     if want == 'wanted':
                         added += 1
@@ -289,12 +333,15 @@ def auto_video_scan_watchlist_studios(
             parts.append('%d upcoming' % upcoming)
         if promoted:
             parts.append('%d promoted' % promoted)
+        if requested:
+            parts.append('%d sent for approval' % requested)
         done = ('Wishlisted ' + ', '.join(parts) + ' across %d followed studio(s)' % total) \
             if parts else ('Watchlist is up to date — nothing new across %d studio(s)' % total)
         deps.update_progress(automation_id, status='finished', progress=100, phase='Complete',
                              log_line=done, log_type='success')
         return {'status': 'completed', 'studios': total, 'movies_added': added,
-                'upcoming': upcoming, 'promoted': promoted, '_manages_own_progress': True}
+                'upcoming': upcoming, 'promoted': promoted, 'requested': requested,
+                'skipped': skipped, '_manages_own_progress': True}
     except Exception as e:  # noqa: BLE001
         deps.update_progress(automation_id, status='error', phase='Error', log_line=str(e), log_type='error')
         return {'status': 'error', 'error': str(e), '_manages_own_progress': True}

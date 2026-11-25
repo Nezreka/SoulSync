@@ -10,10 +10,20 @@ your own automations.
 
 - an admin may do anything;
 - a profile may read, change and run its own automations;
-- a system automation may be read and run by anyone (running one is "do this
-  now", for the profile that asked), and changed only by an admin;
+- a system automation may be read by anyone, and run or changed only by an
+  admin (S4: running one reached past your own things, "empty the recycle
+  bin" for everyone);
 - the run_script action starts a program on the server, so only an admin may
-  save an automation that uses it.
+  save an automation that uses it;
+- a member's own automations are personal (decision 4): their action is one
+  of core.permissions.PERSONAL_AUTOMATION_ACTIONS (playlist pulls, their own
+  watchlist scan, listening imports) and their steps only send notes. no
+  run_script, no fire_signal (a signal wakes the install's automations), and
+  owned_by is theirs to set only as "auto_sync" (the sync page's schedules).
+- an auto_sync row is part of Playlist sync, not of "Their own automations":
+  a member keeps (and runs) their auto-sync schedules while they have
+  music.playlist_sync, whatever automations.personal says, and loses them
+  when playlist sync is off (permission_for).
 
 Pure decisions: the route layer passes in the row and the caller.
 """
@@ -24,6 +34,16 @@ from typing import Any, Iterable, Mapping, Optional
 
 DENIED = "This automation belongs to another profile or to the system. Ask an admin."
 SCRIPT_DENIED = "Only an admin can save an automation that runs a script."
+NOT_PERSONAL = ("Your own automations can pull playlists, scan your watchlist and send you notes. "
+                "That one is an admin's.")
+OWNER_DENIED = "That automation can't be filed under that owner."
+
+# the steps a member's automation may take after its action: notes, nothing else
+NOTE_STEPS = frozenset({"discord_webhook", "pushbullet", "telegram", "ntfy", "gotify", "webhook"})
+# owned_by: who a row is filed under. "system:*" rows are the engine's own
+AUTO_SYNC = "auto_sync"
+MEMBER_OWNERS = frozenset({"", AUTO_SYNC})
+ADMIN_OWNERS = frozenset({"", "auto_sync", "video", "music"})
 
 
 def _owner(automation: Mapping[str, Any]) -> Optional[int]:
@@ -47,7 +67,9 @@ def may_read(automation: Optional[Mapping[str, Any]], profile_id: Any, is_admin:
 
 
 def may_run(automation: Optional[Mapping[str, Any]], profile_id: Any, is_admin: bool) -> bool:
-    return may_read(automation, profile_id, is_admin)
+    if is_admin or not automation:
+        return True
+    return not automation.get("is_system") and _same(profile_id, _owner(automation))
 
 
 def may_change(automation: Optional[Mapping[str, Any]], profile_id: Any, is_admin: bool) -> bool:
@@ -72,4 +94,75 @@ def uses_run_script(data: Optional[Mapping[str, Any]]) -> bool:
                for step in then)
 
 
-__all__ = ["DENIED", "SCRIPT_DENIED", "may_read", "may_run", "may_change", "uses_run_script"]
+def _steps(data: Mapping[str, Any]) -> list:
+    then = data.get("then_actions")
+    if isinstance(then, str):
+        import json
+        try:
+            then = json.loads(then or "[]")
+        except ValueError:
+            return [None]   # unreadable steps are not notes
+    if then is None:
+        then = []
+    if not isinstance(then, (list, tuple)):
+        return [None]   # unreadable steps are not notes
+    out = [str(step.get("type") or "").strip().lower() if isinstance(step, Mapping) else None
+           for step in then]
+    notify = str(data.get("notify_type") or "").strip().lower()
+    if notify and not out:
+        out.append(notify)
+    return out
+
+
+def personal_refusal(data: Optional[Mapping[str, Any]]) -> Optional[str]:
+    """None when a member may keep this automation (its action is personal
+    and its steps only send notes), else the reason. ``data`` is a create
+    body or a stored row (then_actions as a list or its json)."""
+    from core.permissions import PERSONAL_AUTOMATION_ACTIONS
+    if not isinstance(data, Mapping):
+        return NOT_PERSONAL
+    action = str(data.get("action_type") or "").strip().lower()
+    if action not in PERSONAL_AUTOMATION_ACTIONS:
+        return NOT_PERSONAL
+    if any(step not in NOTE_STEPS for step in _steps(data)):
+        return NOT_PERSONAL
+    return None
+
+
+def owner_refusal(data: Optional[Mapping[str, Any]], is_admin: bool) -> Optional[str]:
+    """None when owned_by (if the body sets it) is one this caller may file
+    a row under, else the reason."""
+    if not isinstance(data, Mapping) or "owned_by" not in data:
+        return None
+    raw = data.get("owned_by")
+    if raw is not None and not isinstance(raw, str):
+        return OWNER_DENIED
+    value = (raw or "").strip()
+    return None if value in (ADMIN_OWNERS if is_admin else MEMBER_OWNERS) else OWNER_DENIED
+
+
+def permission_for(data: Optional[Mapping[str, Any]]) -> str:
+    """the permission a member needs for this row or create body: the sync
+    page's auto-sync schedules follow Playlist sync, everything else is
+    "Their own automations"."""
+    owner = data.get("owned_by") if isinstance(data, Mapping) else None
+    if isinstance(owner, str) and owner.strip() == AUTO_SYNC:
+        return "music.playlist_sync"
+    return "automations.personal"
+
+
+def merged(stored: Optional[Mapping[str, Any]], body: Optional[Mapping[str, Any]]) -> dict:
+    """what a row would be after an update body lands on it (the fields the
+    personal check reads)."""
+    out = dict(stored or {})
+    for key in ("action_type", "then_actions", "notify_type", "owned_by"):
+        if isinstance(body, Mapping) and key in body:
+            out[key] = body[key]
+    if isinstance(body, Mapping) and "then_actions" in body and "notify_type" not in body:
+        out["notify_type"] = None
+    return out
+
+
+__all__ = ["DENIED", "SCRIPT_DENIED", "NOT_PERSONAL", "OWNER_DENIED", "NOTE_STEPS", "may_read", "may_run",
+           "may_change", "uses_run_script", "personal_refusal", "owner_refusal", "merged", "AUTO_SYNC",
+           "permission_for"]

@@ -1,17 +1,19 @@
-**SoulSync 3.6.7 is out** :musical_note:
+**SoulSync 3.6.9 is out** :musical_note:
 
-The Settings page has been rebuilt in React. It works the same and saves only what you changed.
+**Heads up.** The auth proxy header is now ignored until you add your proxy's address under Settings > System > Security > Trusted proxy addresses. Until then people get the PIN screen.
 
-SoulSync can now answer as a Seerr server, so Litefin and other Seerr apps can discover and request movies and shows through the video side (thanks Thibs, #2151). Turn it on under Settings, System, SoulSync API.
+**The player.** Open the player from the sidebar and everything you own plays in one full-screen app: music, movies, TV, YouTube, audiobooks and podcasts. A home each profile arranges, a TV guide of channels made from your library, SoulSync's own playlists with Get what you don't have, transcoding for files a browser can't play, synced lyrics, watching now and a watchlist.
 
-Albums get an Other versions picker in their menu, listing the release's editions with track count, year and label, with a preview before it switches (thanks wolf39us, #2145). Popular tracks get a flame on the album page (#2144), the artist page shows which albums a rename would move (#2141), and locking an album keeps you on the artist page (#2143).
+**Settings, rebuilt.** Nine tabs with pills, side sheets for every source and service, one search over every label, and a save status that says what's holding a save.
 
-Band names with an "&" like Above & Beyond now stay one artist in tags, credits and folders, and Group Therapy style numbered releases no longer cross (thanks SeadogsBooty, #2131, #2133 to #2136). Release types go by length too, so Wish You Were Here is an album again.
+**Music apps.** Any Subsonic or OpenSubsonic app can play from SoulSync as one profile, with conversion for mobile data. Pair it from the new Settings > Devices.
 
-For request users, video posters show where a title stands, from Requested to In Library, Discover always loads with a cleaner layout, members land on a page they can open, and admins can set and lock what each profile shows (thanks SeadogsBooty, #2154 to #2160).
+**Folder watching.** Off by default. Turn it on in Settings > Library > Folders: local disks are watched live, network shares on a timer.
 
-Thanks to nstrelow (#2140: one unfingerprintable file no longer stops AcoustID scans), PapaBearDoes (#2152: the video library table keeps its columns in view) and ginevra-70 (#2115: Music Assistant scans follow their own task) for their contributions.
+**Library and listening.** A coverage check for your media server's folders, Spotify history import, your own plays on every artist page, a full Discover for new profiles, Your Year extras, blends that need consent and filled tags.
 
-Also: Jellyfin playlists are private (#2148), Apple Music mirrors refresh again (#2147), K/DA stays whole in Split Artists (#2150), artist.nfo lands in the artist folder with poster and background art (#2138), guest artists no longer fill the Library list (#2142), Asked for and Got are the right way round in review, a library upgrade no longer stops at an old track with no id, and a video import folder (#2129).
+**Downloads.** Downloads wait out a lost Soulseek login, near-misses clear themselves, and Lidarr gets album requests as one album (thanks savemosca, #2219, #2225, #2226).
+
+**Fixes.** Releases stay whole under their first artist (thanks Ericsson, #2239, #2240), manual search for TV shows (thanks Thibs, #2233), the move a track dialog (thanks Vidariondr, #2241), dead files and playlist readback (thanks carlosjfcasero), the download chain and streaming imports (thanks PfannkuchenWolf), Greek and Cyrillic names (thanks selimovd), big wishlists (thanks xcrittpm), and more. First loads are about 3 MB instead of 16.
 
 Full notes on GitHub.

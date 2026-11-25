@@ -9,7 +9,9 @@ import {
   filterRequestItems,
   itemImage,
   itemKey,
+  itemKind,
   itemTitle,
+  kindLabel,
   parseServerTime,
   quotaLine,
   relativeTime,
@@ -76,7 +78,13 @@ describe('requests helpers', () => {
     const items = buildRequestItems(list);
     expect(
       items.map((i) =>
-        i.source === 'pending' ? i.group.key : i.source === 'history' ? i.row.id : i.video.id,
+        i.source === 'pending'
+          ? i.group.key
+          : i.source === 'history'
+            ? i.row.id
+            : 'video' in i
+              ? i.video.id
+              : i.media.id,
       ),
     ).toEqual(['album:blue', 2, 3, 1, 4]);
   });
@@ -151,7 +159,9 @@ describe('requests helpers', () => {
   });
 
   it('only numbers the tabs that need attention', () => {
-    const [waiting, onTheWay, available] = REQUEST_TABS;
+    const [waiting, onTheWay, available] = ['waiting', 'on-the-way', 'available'].map((id) =>
+      REQUEST_TABS.find((t) => t.id === id),
+    );
     expect(tabLabel(waiting!, 3)).toBe('Waiting · 3');
     expect(tabLabel(waiting!, 0)).toBe('Waiting');
     expect(tabLabel(onTheWay!, 2)).toBe('On the way · 2');
@@ -190,30 +200,60 @@ describe('requests helpers', () => {
 describe('quotaLine', () => {
   it('says what is left in the window', () => {
     expect(quotaLine({ limit: 3, days: 7, used: 1, remaining: 2 })).toBe(
-      '2 of 3 requests left this week',
+      '2 of 3 music requests left this week',
     );
     expect(quotaLine({ limit: 1, days: 1, used: 0, remaining: 1 })).toBe(
-      '1 of 1 request left today',
+      '1 of 1 music request left today',
     );
     expect(quotaLine({ limit: 5, days: 30, used: 2, remaining: 3 })).toBe(
-      '3 of 5 requests left this month',
+      '3 of 5 music requests left this month',
     );
     expect(quotaLine({ limit: 4, days: 14, used: 0, remaining: 4 })).toBe(
-      '4 of 4 requests left in the last 14 days',
+      '4 of 4 music requests left in the last 14 days',
     );
   });
 
   it('says when it is used up', () => {
     expect(quotaLine({ limit: 3, days: 7, used: 3, remaining: 0 })).toBe(
-      'You’ve used all 3 requests this week',
+      'You’ve used all 3 music requests this week',
     );
     expect(quotaLine({ limit: 1, days: 1, used: 1, remaining: 0 })).toBe(
-      'You’ve used your request today',
+      'You’ve used your music request today',
     );
   });
 
   it('is empty with no limit', () => {
     expect(quotaLine(null)).toBe('');
     expect(quotaLine(undefined)).toBe('');
+  });
+});
+
+// #2302: the songs a playlist sync asked for are one request
+describe('a playlist request', () => {
+  const item = {
+    source: 'pending',
+    status: 'pending',
+    group: {
+      key: 'playlist:pl42',
+      profile_id: 3,
+      requester_name: 'Kid',
+      kind: 'playlist',
+      title: 'Road Trip',
+      artist: '',
+      track_ids: ['t1', 't2', 't3'],
+      tracks: [
+        { id: 't1', title: 'One', artist: 'A' },
+        { id: 't2', title: 'Two', artist: 'B' },
+        { id: 't3', title: 'Three', artist: 'A' },
+      ],
+      track_count: 3,
+      created_at: '2026-11-25 10:00:00',
+    },
+  } as unknown as Parameters<typeof itemKind>[0];
+
+  it('is labelled a playlist and says how many songs were asked for', () => {
+    expect(itemKind(item)).toBe('playlist');
+    expect(kindLabel('playlist')).toBe('Playlist');
+    expect(subLine(item)).toBe('3 songs from this playlist');
   });
 });

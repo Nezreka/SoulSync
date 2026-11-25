@@ -23,6 +23,7 @@ from core.imports.staging import (
     get_primary_source as _get_primary_source,
     get_primary_source_label as _get_primary_source_label,
     get_staging_path as _get_staging_path,
+    lookup_import_album_link as _lookup_import_album_link,
     read_staging_file_metadata as _read_staging_file_metadata,
     refresh_import_suggestions_cache as _refresh_import_suggestions_cache,
     search_import_albums as _search_import_albums,
@@ -128,6 +129,7 @@ class ImportRouteRuntime:
     get_primary_source: Callable[[], str] = _get_primary_source
     get_primary_source_label: Callable[[], str] = _get_primary_source_label
     search_import_albums: Callable[..., list] = _search_import_albums
+    lookup_album_link: Callable[[str], Optional[Dict[str, Any]]] = _lookup_import_album_link
     search_import_tracks: Callable[..., list] = _search_import_tracks
     build_album_import_match_payload: Callable[..., Dict[str, Any]] = build_album_import_match_payload
     resolve_album_artist_context: Callable[..., Any] = resolve_album_artist_context
@@ -1156,6 +1158,14 @@ def search_albums(runtime: ImportRouteRuntime, query: str, limit: int = 12,
             return {"success": False, "error": "Missing query parameter"}, 400
 
         limit = min(int(limit), 50)
+        # #2203: a pasted release link or MBID is looked up by id, on the
+        # source the link names (the picker doesn't apply to a link)
+        linked = runtime.lookup_album_link(query)
+        if linked is not None:
+            return {"success": True, "albums": linked["albums"][:50],
+                    "primary_source": runtime.get_primary_source_label(),
+                    "source_override": None,
+                    "link": {"source": linked["source"], "message": linked["message"]}}, 200
         source_override = (source or "").strip().lower() or None
         primary_source = runtime.get_primary_source()
         if not source_override and primary_source == "hydrabase" and runtime.hydrabase_worker and runtime.dev_mode_enabled:
@@ -1177,10 +1187,41 @@ def search_sources() -> tuple[Dict[str, Any], int]:
     a live client, the primary one flagged 'active'. Same shape as
     /api/reidentify/sources (core.imports.rematch_search.available_sources)."""
     try:
-        return {"success": True, "sources": _available_import_sources()}, 200
+        sources = _available_import_sources()
+        return {"success": True, "sources": sources,
+                "default_source": import_default_search_source(sources)}, 200
     except Exception as exc:
         module_logger.error("Error listing import search sources: %s", exc)
         return {"success": False, "error": str(exc), "sources": []}, 500
+
+
+DEFAULT_SEARCH_SOURCE_KEY = "import.default_search_source"
+
+
+def import_default_search_source(sources: Optional[list] = None) -> str:
+    """The source the import matcher's picker opens on (#2203): '' is Any
+    source. A saved source that has no live client right now reads as ''
+    too, so the picker never opens on a choice it can't show."""
+    from core.settings import config_manager
+
+    saved = str(config_manager.get(DEFAULT_SEARCH_SOURCE_KEY, "") or "").strip().lower()
+    if not saved:
+        return ""
+    if sources is None:
+        sources = _available_import_sources()
+    return saved if any(s.get("source") == saved for s in sources) else ""
+
+
+def set_import_default_search_source(source: Any) -> tuple[Dict[str, Any], int]:
+    """Save the import matcher's default search source; '' is Any source."""
+    from core.metadata.registry import METADATA_SOURCE_PRIORITY
+    from core.settings import config_manager
+
+    value = str(source or "").strip().lower()
+    if value and value not in METADATA_SOURCE_PRIORITY:
+        return {"success": False, "error": f"Unknown source: {value}"}, 400
+    config_manager.set(DEFAULT_SEARCH_SOURCE_KEY, value)
+    return {"success": True, "default_source": value}, 200
 
 
 def _get_import_db(runtime) -> Any:
@@ -2075,6 +2116,12 @@ def finalize_manual_rematch_replace(runtime, staged_path: str, context: Dict[str
                     hint.replace_track_id)
         consume_hint(cursor, hint.id)
         conn.commit()
+        if hint.replace_track_id:
+            try:
+                from core.library2.mirror_outbox import drain_soon
+                drain_soon(get_database())
+            except Exception as exc:  # noqa: BLE001 - the outbox catches up later
+                runtime.logger.debug("outbox drain after re-identify skipped: %s", exc)
     except Exception as exc:
         runtime.logger.warning("Manual re-identify cleanup failed (import still succeeded): %s", exc)
     finally:

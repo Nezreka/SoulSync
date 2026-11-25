@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import socket
 import threading
@@ -28,7 +29,9 @@ from core.imports.context import (
 )
 from core.imports.collab_artist import collab_primary, library_has_artist, library_has_identified_artist
 from core.imports.compilation import VARIOUS_ARTIST_NAMES
+from core.imports.library_names import library_names, swap_credit, swap_names
 from core.metadata.artist_resolution import resolve_track_artists
+from core.metadata import tagfields
 from core.metadata.registry import get_itunes_client
 from database.music_database import get_database
 from core.metadata.common import (
@@ -358,6 +361,28 @@ def _isrc_tag_value(audio) -> Optional[str]:
     return None
 
 
+def _audio_file_path(audio_file) -> Optional[str]:
+    """the path of the file a probe was handed: a path, or the OPENED
+    mutagen file enrichment passes (its ``filename``). never ``str()`` of an
+    opened file: that is its tag list, not its path, so the probe opened
+    nothing and the #1509 duration gate and the #1705 ISRC lookup were both
+    dead from the day they shipped."""
+    if isinstance(audio_file, (str, os.PathLike)):
+        return os.fspath(audio_file)
+    name = getattr(audio_file, "filename", None)
+    return os.fspath(name) if isinstance(name, (str, os.PathLike)) else None
+
+
+def _length_ms(audio) -> Optional[int]:
+    length = getattr(getattr(audio, "info", None), "length", None)
+    try:
+        if length and float(length) > 0:
+            return int(float(length) * 1000)
+    except (TypeError, ValueError):
+        pass
+    return None
+
+
 def _audio_file_probes(audio_file):
     """(isrc, duration_ms) for the MusicBrainz pass from ONE parse.
 
@@ -365,21 +390,27 @@ def _audio_file_probes(audio_file):
     parsing it twice (once per probe) doubled the mutagen I/O on every
     post-processed download. Same fail-soft contract as the individual
     probes: (None, None) when anything is unknown or unreadable.
+
+    The file is read from DISK: by the time this runs enrichment has cleared
+    the opened file's tags in memory and not yet saved, so the file on disk
+    is the only place the download's own ISRC still is.
     """
-    if not audio_file:
+    # (`is None`, never `not`: an opened file whose tags were just cleared is
+    # an empty mapping, and empty is falsy. that alone kept this from running.)
+    if audio_file is None or audio_file == "":
         return None, None
     try:
         symbols = get_mutagen_symbols()
         if not symbols:
             return None, None
-        audio = symbols.File(str(audio_file))
+        path = _audio_file_path(audio_file)
+        if not path:
+            # an opened file with no path behind it: its length is still known
+            return None, _length_ms(audio_file)
+        audio = symbols.File(path)
         if audio is None:
             return None, None
-        duration_ms = None
-        length = getattr(getattr(audio, "info", None), "length", None)
-        if length and float(length) > 0:
-            duration_ms = int(float(length) * 1000)
-        return _isrc_tag_value(audio), duration_ms
+        return _isrc_tag_value(audio), _length_ms(audio)
     except Exception:  # noqa: BLE001, S110 — probe failure means 'unknown', never a reject
         return None, None
 
@@ -390,19 +421,60 @@ def _audio_file_duration_ms(audio_file) -> Optional[int]:
     simply doesn't apply. Never raises: mutagen may be missing and files may
     be unreadable; either way the match falls back to name/identity only.
     """
-    if not audio_file:
+    if audio_file is None or audio_file == "":
         return None
     try:
         symbols = get_mutagen_symbols()
         if not symbols:
             return None
-        audio = symbols.File(str(audio_file))
-        length = getattr(getattr(audio, "info", None), "length", None)
-        if length and float(length) > 0:
-            return int(float(length) * 1000)
+        path = _audio_file_path(audio_file)
+        if not path:
+            return _length_ms(audio_file)
+        return _length_ms(symbols.File(path))
     except Exception:  # noqa: BLE001, S110 — probe failure means 'unknown', never a reject
         pass
     return None
+
+
+def _mb_artist_lookup_names(metadata: dict, artist_name: str) -> list:
+    """the names to ask MusicBrainz for the track's artist, in order.
+
+    the artist list says who the first artist is, so it is asked for as it
+    is: "Tyler, The Creator" is one artist, "The Weeknd, Daft Punk" is two.
+    without a list the display string is all there is: it is asked whole
+    first, and only when that finds nobody is its first comma part tried.
+    the string used to be cut at its first comma outright, so Tyler was
+    looked up as "Tyler" and Earth, Wind & Fire as "Earth", and the artist
+    that came back gated the recording match (#1509) on the wrong identity."""
+    listed = [str(n).strip() for n in (metadata.get("_artists_list") or []) if str(n or "").strip()]
+    if listed:
+        return [listed[0]]
+    name = str(metadata.get("artist") or artist_name or "").strip()
+    if not name:
+        return []
+    names = [name]
+    if ", " in name:
+        first = name.split(", ")[0].strip()
+        if first and first not in names:
+            names.append(first)
+    return names
+
+
+def _resolve_mb_artist_named(mb_service, metadata: dict, artist_name: str) -> tuple:
+    """``(match, the name it was found under)`` for the track's artist: the
+    first of the lookup names MusicBrainz has. ``(None, first name)`` when it
+    has none of them."""
+    names = _mb_artist_lookup_names(metadata, artist_name)
+    for name in names:
+        result = _cached_mb_artist(mb_service, name)
+        if result and result.get("mbid"):
+            return result, name
+    return None, (names[0] if names else artist_name)
+
+
+def _resolve_mb_artist(mb_service, metadata: dict, artist_name: str) -> Optional[Dict[str, Any]]:
+    """the track artist's MusicBrainz match, by the first name that has one"""
+    return _resolve_mb_artist_named(mb_service, metadata, artist_name)[0]
 
 
 def _process_musicbrainz_source(pp: dict, metadata: dict, cfg, runtime, track_title: str, artist_name: str, audio_file=None) -> None:
@@ -421,10 +493,12 @@ def _process_musicbrainz_source(pp: dict, metadata: dict, cfg, runtime, track_ti
     # Resolve the artist identity FIRST: the recording lookup below takes it
     # as a hard gate (#1509 — a same-named band's recording can otherwise
     # outscore the real artist's on printed-credit text alone).
-    track_artist_name = metadata.get("artist", "") or artist_name
-    if ", " in track_artist_name:
-        track_artist_name = track_artist_name.split(", ")[0]
-    artist_result = None if pinned_release else _cached_mb_artist(mb_service, track_artist_name)
+    # (the name the artist MBID belongs to: the release-by-artist check below
+    # compares a release's credits against it)
+    track_artist_name = (_mb_artist_lookup_names(metadata, artist_name) or [artist_name])[0]
+    artist_result = None
+    if not pinned_release:
+        artist_result, track_artist_name = _resolve_mb_artist_named(mb_service, metadata, artist_name)
     if artist_result and artist_result.get("mbid"):
         pp["artist_mbid"] = artist_result["mbid"]
         pp["id_tags"]["MUSICBRAINZ_ARTIST_ID"] = pp["artist_mbid"]
@@ -620,12 +694,45 @@ def _process_musicbrainz_source(pp: dict, metadata: dict, cfg, runtime, track_ti
 
     if pp["release_mbid"] and release_detail:
         from core.metadata.musicbrainz_tags import release_tags, credit_tags
+        # #2259: When a release has an explicit release-level artist-credit (e.g.
+        # "12th Planet" on an EP where track 2 is by "DJ Evol"), ensure album_artist
+        # reflects the release artist rather than leaking the track artist into
+        # ALBUMARTIST.
+        _rel_ac = [c for c in (release_detail.get("artist-credit") or []) if isinstance(c, dict)]
+        # #1510's sort names follow the album artist(s) the PRIMARY source
+        # settled on, so they're read before #2259 can replace the album artist
+        # with the release's credit (a credit string matches no single artist,
+        # which silently dropped ALBUMARTISTSORT)
+        _primary_album_names = [n for n in dict.fromkeys(
+            [metadata.get("album_artist")] + list(metadata.get("_album_artists_list") or [])) if n]
+        if _rel_ac:
+            _rel_parts = []
+            for _c in _rel_ac:
+                _cname = (_c.get("artist") or {}).get("name") or _c.get("name") or ""
+                if _cname:
+                    _rel_parts.append(_cname + (_c.get("joinphrase") or ""))
+            _rel_artist = "".join(_rel_parts).strip()
+            _cur_aa = (metadata.get("album_artist") or "").strip()
+            _cur_tr = (metadata.get("artist") or "").strip()
+            # the album artist is only a LEAK of the track artist when the
+            # track's artist isn't one of the release's own artists (DJ Evol
+            # on 12th Planet's EP). when it is one of them (Duquesa on
+            # "Duquesa & Jovem Dex"), the primary source chose the release's
+            # primary artist on purpose, and #1510's sort names follow it:
+            # replacing it with the whole credit dropped ALBUMARTISTSORT.
+            _rel_names = {str((_c.get("artist") or {}).get("name") or _c.get("name") or "").casefold()
+                          for _c in _rel_ac}
+            if _rel_artist and _rel_artist.casefold() != "various artists":
+                _leaked = (_cur_tr and _cur_aa.casefold() == _cur_tr.casefold()
+                           and _cur_tr.casefold() not in _rel_names
+                           and _rel_artist.casefold() != _cur_tr.casefold())
+                if not _cur_aa or _leaked:
+                    metadata["album_artist"] = _rel_artist
         # #1510: ALBUMARTISTSORT names the sort names of the album artist(s)
         # the primary source settled on (album_artist, plus the full list when
         # the album context names more than one) — or is left out entirely
         # when no credit matches, instead of sorting under the whole credit.
-        album_names = [n for n in dict.fromkeys(
-            [metadata.get("album_artist")] + list(metadata.get("_album_artists_list") or [])) if n]
+        album_names = _primary_album_names
         pp["id_tags"].update(release_tags(release_detail, album_artist_names=album_names or None))
         # Recording details must correspond to the final release recording,
         # not the earlier name-search result (which can be a different version).
@@ -1080,15 +1187,7 @@ def _process_beatport_source(pp: dict, metadata: dict, cfg, runtime, track_title
 
 
 def _write_initial_key(audio_file, key: str, symbols) -> None:
-    if isinstance(audio_file.tags, symbols.ID3):
-        factory = getattr(symbols, "TKEY", None)
-        if factory is None:
-            from mutagen.id3 import TKEY as factory
-        audio_file.tags.add(factory(encoding=3, text=[key]))
-    elif is_vorbis_like(audio_file, symbols):
-        audio_file["INITIALKEY"] = [key]
-    elif isinstance(audio_file, symbols.MP4):
-        audio_file["----:com.apple.iTunes:initialkey"] = [symbols.MP4FreeForm(key.encode("utf-8"))]
+    tagfields.write(audio_file, symbols, "key", key)
 
 
 def _process_source_enrichment(source_name: str, pp: dict, metadata: dict, cfg, runtime, track_title: str, artist_name: str, provenance=None, audio_file=None, track_artist_name: str = None) -> None:
@@ -1574,13 +1673,136 @@ def _write_genre_frame(audio_file, genres: list[str], cfg, symbols, source: str 
     genre_string = ", ".join(genres)
     from core.metadata.multi_value import genre_values
     genres_out = genre_values(genres, bool(cfg.get("metadata_enhancement.tags.write_multi_artist", False)))
-    if isinstance(audio_file.tags, symbols.ID3):
-        audio_file.tags.add(symbols.TCON(encoding=3, text=genres_out))
-    elif is_vorbis_like(audio_file, symbols):
-        audio_file["GENRE"] = genres_out
-    elif isinstance(audio_file, symbols.MP4):
-        audio_file["\xa9gen"] = genres_out
+    tagfields.write(audio_file, symbols, "genre", genres_out)
     logger.info("Genres %s: %s", source, genre_string)
+
+
+# every post-process value _write_embedded_metadata turns into a tag. the
+# early return in embed_source_ids used to list a dozen of these by hand, and
+# the rest (Last.fm genres and url, the Genius url, Qobuz/Tidal/HiFi ISRC,
+# copyright and label, the MusicBrainz ISRC and genres, the release year, a
+# Bandcamp label, the AudioDB genre) were fetched and then dropped whenever a
+# download had no ids to embed: a Soulseek or YouTube track nothing matched.
+_WRITABLE_PP_FIELDS = (
+    "id_tags", "mb_genres", "depot_genres", "isrc", "mb_isrcs", "release_year",
+    "deezer_bpm", "deezer_isrc", "tidal_bpm", "tidal_isrc", "tidal_copyright",
+    "hifi_bpm", "hifi_isrc", "hifi_copyright",
+    "qobuz_isrc", "qobuz_copyright", "qobuz_label",
+    "audiodb_mood", "audiodb_style", "audiodb_genre",
+    "lastfm_tags", "lastfm_url", "genius_url",
+    "bandcamp_url", "bandcamp_tags", "bandcamp_label", "beatport",
+)
+
+
+def _has_embedded_metadata_to_write(pp: dict, metadata: dict, fallback_enabled: bool) -> bool:
+    """is there anything for _write_embedded_metadata to write? the artist
+    genre fallback (opt-in) may find genres with nothing else enriched, and a
+    depot consult has marks to record, so either keeps the writer running."""
+    if fallback_enabled or pp.get("_depot") is not None:
+        return True
+    return any(pp.get(field) for field in _WRITABLE_PP_FIELDS)
+
+
+_GENRE_ACRONYMS = {
+    "edm": "EDM", "idm": "IDM", "ebm": "EBM", "uk": "UK", "us": "US", "ost": "OST", "mpb": "MPB",
+    "dj": "DJ", "dnb": "DnB", "d&b": "D&B", "r&b": "R&B", "rnb": "RnB", "nyc": "NYC", "la": "LA",
+    "j-pop": "J-Pop", "k-pop": "K-Pop", "c-pop": "C-Pop", "j-rock": "J-Rock", "k-rock": "K-Rock",
+    "lo-fi": "Lo-Fi", "hi-nrg": "Hi-NRG", "nu-disco": "Nu-Disco", "aor": "AOR", "nwobhm": "NWOBHM",
+    "ccm": "CCM", "opm": "OPM", "2-step": "2-Step", "uk-garage": "UK-Garage",
+}
+_GENRE_SMALL_WORDS = {"n", "'n'", "and", "of", "the", "de", "la", "&"}
+
+
+def _genre_case(genre) -> str:
+    """a genre with the capitals it should have.
+
+    str.title() made "EDM" into "Edm", "UK Garage" into "Uk Garage", "DnB"
+    into "Dnb" and "80's" into "80'S". a genre that arrives in mixed case
+    was written by someone who knew ("DnB", "UK Garage", "Hip-Hop"): it is
+    kept. one in all lower or all upper case is cased word by word, with the
+    names that are initials kept as initials."""
+    text = " ".join(str(genre or "").split())
+    if not text:
+        return ""
+    if text.casefold() in _GENRE_ACRONYMS:
+        return _GENRE_ACRONYMS[text.casefold()]
+    if text != text.lower() and text != text.upper():
+        return text                                     # mixed case: as written
+
+    def word(w: str, first: bool) -> str:
+        low = w.lower()
+        if low in _GENRE_ACRONYMS:
+            return _GENRE_ACRONYMS[low]
+        if not first and low in _GENRE_SMALL_WORDS:
+            return low
+        # each hyphenated part gets its own capital; nothing after an
+        # apostrophe does ("80's", "rock 'n' roll")
+        return "-".join((p[:1].upper() + p[1:].lower()) if p else p for p in low.split("-"))
+
+    return " ".join(word(w, i == 0) for i, w in enumerate(text.split(" ")))
+
+
+# a featuring credit in a title: "(feat. X)", "[ft X]", "(featuring X)", or
+# after a space with its full stop or spelled out, "... ft. X", "... feat. X",
+# "... featuring X". the bare words don't count: "6 ft Under" and "A Feat of
+# Strength" were read as already crediting someone, so the guest was not
+# added to the title while still being taken out of the artist, and was gone
+# from both.
+_FEATURING_IN_TITLE = re.compile(
+    r"[\(\[]\s*(?:feat\.?|ft\.?|featuring)\s+\S"
+    r"|\S\s+(?:feat\.|ft\.|featuring)\s+\S",
+    re.IGNORECASE)
+
+
+def _title_has_featuring(title, featured=()) -> bool:
+    """does the title already credit its guests? ``featured`` are the guests
+    about to be added: a bare "ft" or "feat" (no brackets, no full stop) only
+    counts when one of them follows it, so "Song ft Daft Punk" is a credit
+    and "6 ft Under" is not."""
+    text = str(title or "")
+    if _FEATURING_IN_TITLE.search(text):
+        return True
+    for name in featured or ():
+        name = str(name or "").strip()
+        if name and re.search(r"\b(?:feat|ft|featuring)\.?\s+" + re.escape(name), text, re.IGNORECASE):
+            return True
+    return False
+
+
+def _guests_missing_from_title(title, featured) -> list:
+    """the guests the title doesn't already credit: the ones to add.
+
+    none when the title has a featuring credit of its own. otherwise a guest
+    named inside brackets is credited already, however it is worded: "Song
+    (with Rihanna)" and "Song (Rihanna Remix)" each became "... (feat.
+    Rihanna)" as well. a name loose in the title is not a credit: the guest
+    Future is not credited by "Back to the Future"."""
+    text = str(title or "")
+    guests = [str(g).strip() for g in (featured or ()) if str(g or "").strip()]
+    if _title_has_featuring(text, guests):
+        return []
+    bracketed = " ".join(re.findall(r"[\(\[]([^\)\]]*)[\)\]]", text))
+    return [g for g in guests
+            if not re.search(r"(?<!\w)" + re.escape(g) + r"(?!\w)", bracketed, re.IGNORECASE)]
+
+
+def _apply_metadata_reference(metadata: dict, reference: dict) -> None:
+    """a metadata reference (a release the person pointed this file at)
+    overrides the names and numbers. an artist it replaces takes the list
+    written beside it too: the per-artist list (TXXX:Artists, ARTISTS, an
+    M4A's artist atom) went on naming the artists the reference had replaced."""
+    for key, ref_key in (('title', 'title'), ('artist', 'track_artist'), ('album', 'album_title'),
+                         ('album_artist', 'artist_name')):
+        if reference.get(ref_key):
+            metadata[key] = reference[ref_key]
+    if reference.get('track_artist'):
+        metadata['_artists_list'] = [reference['track_artist']]
+    if reference.get('artist_name'):
+        metadata['_album_artists_list'] = [reference['artist_name']]
+    metadata.update(track_number=reference.get('track_number') or metadata['track_number'],
+                    total_tracks=reference.get('track_count'),
+                    disc_number=reference.get('disc_number') or metadata['disc_number'],
+                    total_discs=reference.get('total_discs') or metadata.get('total_discs'))
 
 
 def _write_embedded_metadata(audio_file, metadata: dict, pp: dict, cfg, symbols):
@@ -1634,12 +1856,7 @@ def _write_embedded_metadata(audio_file, metadata: dict, pp: dict, cfg, symbols)
 
     if release_year and not metadata.get("date"):
         metadata["date"] = release_year
-        if isinstance(audio_file.tags, symbols.ID3):
-            audio_file.tags.add(symbols.TDRC(encoding=3, text=[release_year]))
-        elif is_vorbis_like(audio_file, symbols):
-            audio_file["date"] = [release_year]
-        elif isinstance(audio_file, symbols.MP4):
-            audio_file["\xa9day"] = [release_year]
+        tagfields.write(audio_file, symbols, "date", release_year)
         logger.info("Date tag: %s", release_year)
 
     beatport = pp.get("beatport") or {}
@@ -1676,12 +1893,7 @@ def _write_embedded_metadata(audio_file, metadata: dict, pp: dict, cfg, symbols)
                 bpm_source, bpm_int = cand_source, stored
                 break
         if bpm_int is not None:
-            if isinstance(audio_file.tags, symbols.ID3):
-                audio_file.tags.add(symbols.TBPM(encoding=3, text=[str(bpm_int)]))
-            elif is_vorbis_like(audio_file, symbols):
-                audio_file["BPM"] = [str(bpm_int)]
-            elif isinstance(audio_file, symbols.MP4):
-                audio_file["tmpo"] = [bpm_int]
+            tagfields.write(audio_file, symbols, "bpm", bpm_int)
             logger.info("BPM (%s): %s", bpm_source, bpm_int)
 
     if beatport.get("key") and _tag_enabled(cfg, "beatport.tags.key"):
@@ -1692,20 +1904,10 @@ def _write_embedded_metadata(audio_file, metadata: dict, pp: dict, cfg, symbols)
             logger.info("Key (Beatport): %s", initial_key)
 
     if _tag_enabled(cfg, "audiodb.tags.mood") and pp["audiodb_mood"]:
-        if isinstance(audio_file.tags, symbols.ID3):
-            audio_file.tags.add(symbols.TXXX(encoding=3, desc="MOOD", text=[pp["audiodb_mood"]]))
-        elif is_vorbis_like(audio_file, symbols):
-            audio_file["MOOD"] = [pp["audiodb_mood"]]
-        elif isinstance(audio_file, symbols.MP4):
-            audio_file["----:com.apple.iTunes:MOOD"] = [symbols.MP4FreeForm(pp["audiodb_mood"].encode("utf-8"))]
+        tagfields.write(audio_file, symbols, "MOOD", pp["audiodb_mood"])
 
     if _tag_enabled(cfg, "audiodb.tags.style") and pp["audiodb_style"]:
-        if isinstance(audio_file.tags, symbols.ID3):
-            audio_file.tags.add(symbols.TXXX(encoding=3, desc="STYLE", text=[pp["audiodb_style"]]))
-        elif is_vorbis_like(audio_file, symbols):
-            audio_file["STYLE"] = [pp["audiodb_style"]]
-        elif isinstance(audio_file, symbols.MP4):
-            audio_file["----:com.apple.iTunes:STYLE"] = [symbols.MP4FreeForm(pp["audiodb_style"].encode("utf-8"))]
+        tagfields.write(audio_file, symbols, "STYLE", pp["audiodb_style"])
 
     if _tag_enabled(cfg, "metadata_enhancement.tags.genre_merge"):
         enrichment_genres = []
@@ -1728,7 +1930,11 @@ def _write_embedded_metadata(audio_file, metadata: dict, pp: dict, cfg, symbols)
             from core.genre_filter import filter_genres as _filter_genres
             from core.genre_filter import _normalize_for_match
 
-            enrichment_genres = _filter_genres(enrichment_genres, cfg)
+            enrichment_genres = _filter_genres(
+                enrichment_genres,
+                cfg,
+                artist_names=[metadata.get("artist"), metadata.get("album_artist")],
+            )
             source_genres = [g.strip() for g in str(metadata.get("genre", "")).split(",") if g.strip()]
             seen = set()
             merged = []
@@ -1742,7 +1948,7 @@ def _write_embedded_metadata(audio_file, metadata: dict, pp: dict, cfg, symbols)
                 key = _normalize_for_match(genre)
                 if key and key not in seen:
                     seen.add(key)
-                    merged.append(genre.strip().title())
+                    merged.append(_genre_case(genre))
                 if len(merged) >= 5:
                     break
             if merged:
@@ -1766,7 +1972,7 @@ def _write_embedded_metadata(audio_file, metadata: dict, pp: dict, cfg, symbols)
                     key = genre.strip().lower()
                     if key and key not in seen:
                         seen.add(key)
-                        merged_fallback.append(genre.strip().title())
+                        merged_fallback.append(_genre_case(genre))
                     if len(merged_fallback) >= 5:
                         break
                 if merged_fallback:
@@ -1798,12 +2004,7 @@ def _write_embedded_metadata(audio_file, metadata: dict, pp: dict, cfg, symbols)
         copyright_candidates.append(("HiFi", pp["hifi_copyright"]))
     if copyright_candidates:
         copyright_source, final_copyright = copyright_candidates[0]
-        if isinstance(audio_file.tags, symbols.ID3):
-            audio_file.tags.add(symbols.TCOP(encoding=3, text=[final_copyright]))
-        elif is_vorbis_like(audio_file, symbols):
-            audio_file["COPYRIGHT"] = [final_copyright]
-        elif isinstance(audio_file, symbols.MP4):
-            audio_file["cprt"] = [final_copyright]
+        tagfields.write(audio_file, symbols, "copyright", final_copyright)
         logger.info("Copyright (%s): %s", copyright_source, final_copyright[:60])
 
     label_candidates = []
@@ -1819,29 +2020,14 @@ def _write_embedded_metadata(audio_file, metadata: dict, pp: dict, cfg, symbols)
         # "a;b;c" from a provider is three labels, written as three values (#1305)
         from core.metadata.multi_value import split_values
         label_values = split_values(final_label) or [final_label]
-        if isinstance(audio_file.tags, symbols.ID3):
-            audio_file.tags.add(symbols.TPUB(encoding=3, text=label_values))
-        elif is_vorbis_like(audio_file, symbols):
-            audio_file["LABEL"] = label_values
-        elif isinstance(audio_file, symbols.MP4):
-            audio_file["----:com.apple.iTunes:LABEL"] = [symbols.MP4FreeForm(v.encode("utf-8")) for v in label_values]
+        tagfields.write(audio_file, symbols, "label", label_values)
         logger.info("Label (%s): %s", label_source, final_label)
 
     if _tag_enabled(cfg, "lastfm.tags.url") and pp["lastfm_url"]:
-        if isinstance(audio_file.tags, symbols.ID3):
-            audio_file.tags.add(symbols.TXXX(encoding=3, desc="LASTFM_URL", text=[pp["lastfm_url"]]))
-        elif is_vorbis_like(audio_file, symbols):
-            audio_file["LASTFM_URL"] = [pp["lastfm_url"]]
-        elif isinstance(audio_file, symbols.MP4):
-            audio_file["----:com.apple.iTunes:LASTFM_URL"] = [symbols.MP4FreeForm(pp["lastfm_url"].encode("utf-8"))]
+        tagfields.write(audio_file, symbols, "LASTFM_URL", pp["lastfm_url"])
 
     if _tag_enabled(cfg, "genius.tags.url") and pp["genius_url"]:
-        if isinstance(audio_file.tags, symbols.ID3):
-            audio_file.tags.add(symbols.TXXX(encoding=3, desc="GENIUS_URL", text=[pp["genius_url"]]))
-        elif is_vorbis_like(audio_file, symbols):
-            audio_file["GENIUS_URL"] = [pp["genius_url"]]
-        elif isinstance(audio_file, symbols.MP4):
-            audio_file["----:com.apple.iTunes:GENIUS_URL"] = [symbols.MP4FreeForm(pp["genius_url"].encode("utf-8"))]
+        tagfields.write(audio_file, symbols, "GENIUS_URL", pp["genius_url"])
 
     if (beatport.get("catalog_number") and "CATALOGNUMBER" not in filtered_tags
             and _tag_enabled(cfg, "beatport.tags.catalog_number")):
@@ -1852,12 +2038,7 @@ def _write_embedded_metadata(audio_file, metadata: dict, pp: dict, cfg, symbols)
         write_tag(audio_file, "BEATPORT_TRACK_ID", str(beatport["beatport_id"]), symbols)
 
     if _tag_enabled(cfg, "bandcamp.tags.url") and pp["bandcamp_url"]:
-        if isinstance(audio_file.tags, symbols.ID3):
-            audio_file.tags.add(symbols.TXXX(encoding=3, desc="BANDCAMP_URL", text=[pp["bandcamp_url"]]))
-        elif is_vorbis_like(audio_file, symbols):
-            audio_file["BANDCAMP_URL"] = [pp["bandcamp_url"]]
-        elif isinstance(audio_file, symbols.MP4):
-            audio_file["----:com.apple.iTunes:BANDCAMP_URL"] = [symbols.MP4FreeForm(pp["bandcamp_url"].encode("utf-8"))]
+        tagfields.write(audio_file, symbols, "BANDCAMP_URL", pp["bandcamp_url"])
 
     return release_year
 
@@ -2405,6 +2586,39 @@ def evaluate_batch_album_distrust(original_search, track_info, album_ctx, explic
     }
 
 
+def album_artist_override(verdict: dict):
+    """``(name, artists)`` when the track's own album artist outranks the
+    explicit artist context (#1316): the two name different artists and the
+    album context is trusted. None otherwise.
+
+    The ALBUMARTIST tag and the folder both take it (#2222): the tag used to
+    follow this rule while the folder kept the explicit context, so a
+    wishlist download asked for as "Δέσποινα Βανδή" on an album credited to
+    "Despina Vandi" was tagged Despina Vandi and filed under a greek folder.
+    """
+    if not isinstance(verdict, dict):
+        return None
+    explicit = str(verdict.get("explicit_name") or "").strip()
+    own = str(verdict.get("own_album_artist") or "").strip()
+    if (explicit and own and own.casefold() != explicit.casefold()
+            and not verdict.get("ctx_artist_untrusted")):
+        return own, verdict.get("own_album_artists")
+    return None
+
+
+def _known_total_discs(album_info: Any, album_ctx: Any, disc_number: Any) -> int:
+    """the release's disc count as far as the import knows it, 1 when it
+    doesn't. a track on disc 3 proves at least three."""
+    def _int(value: Any) -> int:
+        try:
+            return int(value or 0)
+        except (TypeError, ValueError):
+            return 0
+    found = [_int(source.get("total_discs")) for source in (album_info, album_ctx)
+             if isinstance(source, dict)]
+    return max([1, _int(disc_number), *found])
+
+
 def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> dict:
     if album_info is None:
         album_info = {}
@@ -2464,6 +2678,10 @@ def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> di
     # track object). Deezer-direct contexts populate `original_search.artists`
     # directly. Pure helper handles all three shapes.
     all_artists = resolve_track_artists(original_search, track_info, artist_dict)
+    # #2165: the library's name for each artist it knows by another one (the
+    # source says "Machine Gun Kelly", the library, which finds them by id,
+    # "mgk"). the same names the folder was built with
+    library_artist_names = library_names(context, artist_dict)
     if all_artists:
         # Deezer upgrade path: Deezer's `/search` endpoint only returns
         # the primary artist for each track. The full contributors
@@ -2498,6 +2716,7 @@ def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> di
         # "artists" key for Vorbis) when `write_multi_artist` is on.
         # Without this assignment the field was always empty and the
         # multi-artist write path silently no-op'd.
+        all_artists = swap_names(list(all_artists), library_artist_names)
         metadata["_artists_list"] = list(all_artists)
 
         # `feat_in_title` (when true): pull featured artists out of the
@@ -2524,14 +2743,10 @@ def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> di
             # (no period, brackets), etc. Word-boundary regex catches
             # `feat`, `feat.`, `featuring`, `ft`, `ft.` regardless of
             # surrounding punctuation. Case-insensitive.
-            import re as _feat_re
-            already_has_feat = bool(_feat_re.search(
-                r'\b(?:feat|feat\.|featuring|ft|ft\.)\b',
-                existing_title,
-                _feat_re.IGNORECASE,
-            ))
-            if existing_title and not already_has_feat:
-                metadata["title"] = f"{existing_title} (feat. {', '.join(featured)})"
+            # only the guests the title doesn't credit yet are added
+            _to_add = _guests_missing_from_title(existing_title, featured)
+            if existing_title and _to_add:
+                metadata["title"] = f"{existing_title} (feat. {', '.join(_to_add)})"
             logger.info(
                 "Metadata: feat_in_title — primary='%s', featured=%s, title='%s'",
                 metadata["artist"], featured, metadata["title"],
@@ -2543,7 +2758,8 @@ def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> di
                 artist_separator, metadata["artist"],
             )
     else:
-        metadata["artist"] = artist_dict.get("name", "") or get_import_clean_artist(context)
+        metadata["artist"] = swap_credit(
+            artist_dict.get("name", "") or get_import_clean_artist(context), library_artist_names)
         logger.info("Metadata: Using primary artist: '%s'", metadata["artist"])
 
     raw_album_artist = artist_dict.get("name", "") or metadata["artist"]
@@ -2583,16 +2799,17 @@ def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> di
         # unless the "track's own album artist" is itself an uncorroborated
         # stranger from the batch context (wire 3 above fired), in which
         # case the batch context is poisoned and gets quarantined below.
+        # The folder takes the same answer (core/imports/paths.py, #2222).
         if (own_album_artist
                 and own_album_artist.strip().casefold() != explicit_name.strip().casefold()):
-            if not _ctx_artist_untrusted:
+            _override = album_artist_override(_verdict)
+            if _override:
                 logger.warning(
                     "Metadata: explicit artist context '%s' disagrees with the track's "
                     "own album artist '%s' — trusting the track data (#1316)",
                     explicit_name, own_album_artist,
                 )
-                raw_album_artist = own_album_artist
-                album_artists_for_collab = own_album_artists
+                raw_album_artist, album_artists_for_collab = _override
             # (wire 3 fired: quarantine below overrides raw_album_artist)
         else:
             raw_album_artist = explicit_name
@@ -2655,11 +2872,12 @@ def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> di
                             raw_album_artist = resolved
                 except Exception as e:
                     logger.debug("itunes primary artist resolve failed: %s", e)
-    metadata["album_artist"] = raw_album_artist
+    metadata["album_artist"] = swap_credit(raw_album_artist, library_artist_names)
     # every album artist, for the multi-value ALBUMARTISTS tag. only from an
     # album context that names more than one. track artists aren't album
     # artists, a feature doesn't make it a collab album
-    metadata["_album_artists_list"] = _album_artist_names(album_artists_for_collab)
+    metadata["_album_artists_list"] = swap_names(
+        _album_artist_names(album_artists_for_collab), library_artist_names)
 
     # 'Unknown Album' in any slot is the no-album placeholder, not a name —
     # tracks from paste-link playlists / discovery-pool rows / TXT imports
@@ -2746,13 +2964,18 @@ def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> di
     # as disc-less and ungroup the track in Jellyfin/Plex).
     from core.imports.track_number import resolve_disc_for_track
     metadata["disc_number"] = resolve_disc_for_track(original_search, album_info)
+    # the disc total the import already knows (the album context, or the path
+    # builder that filed this track under "Disc 1"): it was never handed to
+    # the tag writer, so every multi-disc import wrote "1" with no total and
+    # Library Re-tag filed "Disc total: empty -> 3" for each track (#2217).
+    # a one-disc release writes none, as before: there is nothing missing
+    total_discs = _known_total_discs(
+        album_info, {} if batch_album_distrusted else album_ctx, metadata["disc_number"])
+    if total_discs > 1:
+        metadata["total_discs"] = total_discs
     reference = context.get('_metadata_reference')
     if reference:
-        for key, ref_key in (('title', 'title'), ('artist', 'track_artist'), ('album', 'album_title'), ('album_artist', 'artist_name')):
-            if reference.get(ref_key):
-                metadata[key] = reference[ref_key]
-        metadata.update(track_number=reference.get('track_number') or metadata['track_number'], total_tracks=reference.get('track_count'),
-                        disc_number=reference.get('disc_number') or metadata['disc_number'], total_discs=reference.get('total_discs'))
+        _apply_metadata_reference(metadata, reference)
 
     if album_ctx and album_ctx.get("release_date") and not batch_album_distrusted:
         release_date = _normalize_release_date_tag(album_ctx.get("release_date"))
@@ -2776,7 +2999,11 @@ def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> di
     if genres:
         from core.genre_filter import filter_genres
 
-        filtered = filter_genres(list(genres[:2]), cfg)
+        filtered = filter_genres(
+            list(genres[:2]),
+            cfg,
+            artist_names=[metadata.get("artist"), metadata.get("album_artist")],
+        )
         if filtered:
             metadata["genre"] = ", ".join(filtered)
 
@@ -2895,7 +3122,19 @@ def _blank_post_process_state() -> dict:
     }
 
 
-def embed_source_ids(audio_file, metadata: dict, context: dict = None, runtime=None):
+def embed_source_ids(audio_file, metadata: dict, context: dict = None, runtime=None, on_resolved=None):
+    """ask every metadata source about this track, then write what they said.
+
+    two halves. the first only LOOKS: it fills ``pp`` and corrects
+    ``metadata`` (the album artist a release really has, a fuller date).
+    the second only WRITES ``pp`` into the file. ``on_resolved`` is called
+    between them, exactly once, whether or not the lookups worked: the
+    tagger writes its core tags there, from metadata as the sources left it.
+    it used to write them first, and a correction made here stayed in memory
+    while the file kept the value from before it (#2259).
+
+    an error in ``on_resolved`` is the caller's and is raised to it; an
+    error in either half is logged and tagging goes on."""
     cfg = get_config_manager()
     symbols = get_mutagen_symbols()
     if not symbols:
@@ -3041,9 +3280,20 @@ def embed_source_ids(audio_file, metadata: dict, context: dict = None, runtime=N
             pp["_lf_client_for_genre_fallback"] = lastfm_worker.client if lastfm_worker else None
             pp["_artist_name_for_genre_fallback"] = artist_name
 
+    except Exception as exc:
+        logger.error("Error embedding source IDs (non-fatal): %s", exc)
+        if on_resolved is not None:
+            on_resolved()
+        return
+
+    # everything the sources had to say is in `metadata` and `pp` now
+    if on_resolved is not None:
+        on_resolved()
+
+    try:
         # Skip the early return when the genre fallback is on — there may be
         # genres to write even if no other metadata was enriched.
-        if not fallback_enabled and not pp["id_tags"] and not pp["deezer_bpm"] and not pp["deezer_isrc"] and not pp["tidal_bpm"] and not pp["hifi_bpm"] and not pp["hifi_copyright"] and not pp["audiodb_mood"] and not pp["audiodb_style"] and not pp["bandcamp_url"] and not pp["bandcamp_tags"] and not pp["beatport"] and not pp.get("_depot"):
+        if not _has_embedded_metadata_to_write(pp, metadata, fallback_enabled):
             return
 
         # §2.4 network marks, recorded BEFORE the tag write below:

@@ -77,6 +77,12 @@ export interface AdlDownload {
   /** In-flight rows only — what the engine is doing right now (#1156). */
   live_detail?: AdlLiveDetail;
 
+  /**
+   * Live rows started by a quality upgrade: the file it replaces, as it is
+   * now (core/downloads/upgrade_rows.py). `label` is short, "MP3 320".
+   */
+  upgrade_of?: AdlUpgradeOf | null;
+
   /** The artist's photo from the library or watchlist (core/downloads/row_art.py). */
   artist_image?: string;
   /** History rows only: 'download' | 'podcast' (library_history.event_type). */
@@ -273,6 +279,16 @@ export interface AdlQuarantineEntry {
   actual_length_s?: number | null;
 }
 
+/** the file a quality upgrade replaces, as it is now */
+export interface AdlUpgradeOf {
+  format?: string;
+  bitrate?: number | null;
+  bit_depth?: number | null;
+  sample_rate?: number | null;
+  label?: string;
+  lib2_track_id?: number;
+}
+
 // ── Filters ───────────────────────────────────────────────────────────────
 
 export const ADL_FILTERS = [
@@ -281,6 +297,8 @@ export const ADL_FILTERS = [
   { value: 'queued', label: 'Queued' },
   { value: 'completed', label: 'Completed' },
   { value: 'failed', label: 'Failed' },
+  // across every status: the rows replacing a file you already have
+  { value: 'upgrades', label: 'Upgrades' },
 ] as const;
 
 export type AdlFilter = (typeof ADL_FILTERS)[number]['value'] | 'unverified' | 'clients';

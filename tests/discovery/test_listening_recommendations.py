@@ -80,8 +80,38 @@ def test_recency_boost_reorders_toward_current_taste():
     recent = {"newfav": 60}
     seeds = build_recency_weighted_seeds(lifetime, recent, recency_factor=1.5)
     by = {s["name"]: s["weight"] for s in seeds}
-    assert by["OldFav"] == 100.0                   # no recent plays -> unchanged
-    assert by["NewFav"] == 40 + 1.5 * 60           # 130 -> now outranks OldFav
+    assert by["NewFav"] > by["OldFav"] > 0
+
+
+def test_years_of_plays_do_not_swamp_this_month():
+    """4,000 plays since 2019 against 60 this month used to be 4,000 against
+    90: recent taste never showed. the artist of this month leads now."""
+    lifetime = [{"name": "Since2019", "play_count": 4000}, {"name": "ThisMonth", "play_count": 60}]
+    seeds = build_recency_weighted_seeds(lifetime, {"ThisMonth": 60, "Since2019": 4})
+    by = {s["name"]: s["weight"] for s in seeds}
+    assert by["ThisMonth"] > by["Since2019"]
+    # and the old favourite is still a seed, not forgotten
+    assert by["Since2019"] > by["ThisMonth"] / 4
+
+
+def test_an_artist_played_only_this_month_is_a_seed():
+    """recent counts were looked up for the lifetime list's names only, so an
+    artist outside the all-time top N was no seed however much you played
+    them this month"""
+    lifetime = [{"name": "A", "play_count": 500}]
+    seeds = build_recency_weighted_seeds(lifetime, {"New Discovery": 40, "a": 2})
+    by = {s["name"]: s["weight"] for s in seeds}
+    assert "New Discovery" in by                   # by the name as written
+    assert by["New Discovery"] > by["A"]
+
+
+def test_the_most_played_artists_do_not_decide_everything():
+    """a score is the sum of seed weight x similarity, and the weight was the
+    raw play count: three artists with 10x the plays had 10x the say. ten
+    times the plays is about three times the pull."""
+    lifetime = [{"name": "Top", "play_count": 1000}, {"name": "Mid", "play_count": 100}]
+    by = {s["name"]: s["weight"] for s in build_recency_weighted_seeds(lifetime, {"top": 10, "mid": 1})}
+    assert 2.5 < by["Top"] / by["Mid"] < 4
 
 
 def test_recency_factor_zero_is_pure_lifetime():
@@ -92,7 +122,7 @@ def test_recency_factor_zero_is_pure_lifetime():
 
 def test_recency_seeds_skip_blank_names_and_tolerate_missing_recent():
     seeds = build_recency_weighted_seeds([{"name": ""}, {"name": "A", "play_count": 3}])
-    assert seeds == [{"name": "A", "weight": 3.0}]
+    assert seeds == [{"name": "A", "weight": 100.0}]        # the only artist: the full share
 
 
 # ── rank_recommended_artists ─────────────────────────────────────────────────

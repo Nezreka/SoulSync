@@ -1,0 +1,47 @@
+name: Bug report
+description: Something in SoulSync isn't working. The ? button's "Report a problem" fills most of this in.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. The fastest way: in SoulSync, click **?** then **Report a problem**. It fills in the version and platform, and downloads a diagnostics file with secrets removed that you can drag into the box at the bottom.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+      placeholder: Lateralus downloads but never shows up in Jellyfin. The files stay in /downloads.
+    validations:
+      required: true
+  - type: input
+    id: where
+    attributes:
+      label: Where
+      description: The page or feature, e.g. Downloads, Music.
+  - type: input
+    id: version
+    attributes:
+      label: SoulSync version
+      description: Bottom of the ? menu, or the version button in the sidebar.
+      placeholder: 3.6.7
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      placeholder: Linux 6.6, Docker, Python 3.12
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: |
+        A short health summary. Drag the downloaded soulsync-diagnostics file in here too.
+        Please check it for anything private first; keys, tokens and passwords are already shown as ***.
+      render: text
+  - type: textarea
+    id: logs
+    attributes:
+      label: Anything else
+      description: Screenshots, steps to reproduce, or log lines. Never paste raw logs from outside SoulSync without removing tokens.

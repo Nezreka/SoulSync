@@ -1,0 +1,626 @@
+/* now playing, full screen, for what you listen to */
+
+.view {
+  --amb: var(--amb-rgb, var(--accent-rgb));
+  --amb2: var(--amb2-rgb, var(--amb));
+  /* how strongly the visuals show over the cover's colours */
+  --viz-opacity: 0.75;
+
+  position: fixed;
+  inset: 0;
+  z-index: 9;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--pl-bg);
+  color: var(--pl-text);
+  isolation: isolate;
+  animation: viewIn var(--dur-slow) var(--pl-ease) both;
+}
+
+@keyframes viewIn {
+  from {
+    opacity: 0;
+    transform: translateY(calc(var(--u) * 2));
+  }
+}
+
+/* ── the background: the cover's colour, its picture blurred, the visuals ── */
+
+.bg {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+}
+
+.bgTint {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 80% 70% at 18% 20%, rgba(var(--amb), 0.55), transparent 65%),
+    radial-gradient(ellipse 70% 60% at 85% 85%, rgba(var(--amb2), 0.4), transparent 60%),
+    var(--pl-bg);
+  transition: background var(--dur-slow) ease;
+}
+
+.bgArt {
+  position: absolute;
+  inset: -10%;
+  width: 120%;
+  height: 120%;
+  object-fit: cover;
+  opacity: 0.28;
+  filter: blur(calc(var(--u) * 5)) saturate(1.3);
+  transform: scale(1.1);
+}
+
+.bgCanvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: var(--viz-opacity);
+  mix-blend-mode: screen;
+}
+
+/* a vignette, so words and controls read over any visual */
+.bg::after {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(
+      to bottom,
+      var(--black-a60),
+      transparent 18%,
+      transparent 70%,
+      var(--black-a80)
+    ),
+    radial-gradient(ellipse at center, transparent 40%, var(--black-a60));
+  content: '';
+}
+
+/* ── the top: back to the bar, where it's playing from, visuals, close ── */
+
+.top {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 1);
+  padding: calc(var(--u) * 1.2) calc(var(--u) * 1.6);
+}
+
+.round {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: calc(var(--u) * 2.6);
+  height: calc(var(--u) * 2.6);
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-circle);
+  background: var(--white-a10);
+  color: var(--pl-text);
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  transition: background var(--dur-fast) ease;
+}
+
+.round:hover {
+  background: var(--white-a20);
+}
+
+.round svg {
+  width: calc(var(--u) * 1.3);
+  height: calc(var(--u) * 1.3);
+}
+
+.from {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  min-width: 0;
+  text-align: center;
+}
+
+.fromLabel {
+  color: var(--pl-text-2);
+  font-size: calc(var(--u) * 0.7);
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.fromName {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--pl-text);
+  font-weight: 700;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+a.fromName:hover {
+  text-decoration: underline;
+}
+
+.topEnd {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: calc(var(--u) * 0.5);
+}
+
+/* ── the stage: the song on the left, lyrics and what's next on the right ── */
+
+.stage {
+  display: grid;
+  flex: 1;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: center;
+  gap: clamp(calc(var(--u) * 2), 5vw, calc(var(--u) * 6));
+  min-height: 0;
+  padding: 0 clamp(calc(var(--u) * 1.5), 5vw, calc(var(--u) * 6)) calc(var(--u) * 2);
+}
+
+.now {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: calc(var(--u) * 1.2);
+  width: 100%;
+  max-width: calc(var(--u) * 30);
+  justify-self: center;
+}
+
+.art {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  aspect-ratio: 1;
+  border-radius: var(--radius-lg);
+  background: var(--white-a06);
+  box-shadow:
+    0 calc(var(--u) * 1.5) calc(var(--u) * 4) var(--black-a60),
+    0 0 calc(var(--u) * 6) rgba(var(--amb), 0.25);
+  transform: scale(0.94);
+  transition:
+    transform var(--dur-slow) var(--pl-ease),
+    box-shadow var(--dur-slow) ease;
+}
+
+/* playing: the cover comes forward; paused, it settles back */
+.art[data-playing='true'] {
+  transform: none;
+}
+
+.art img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.artBlank {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(135deg, rgba(var(--amb), 0.5), var(--white-a06));
+}
+
+.meta {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 0.8);
+}
+
+.titles {
+  flex: 1;
+  min-width: 0;
+}
+
+.title {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  font-size: clamp(calc(var(--u) * 1.4), 2.4vw, calc(var(--u) * 2.2));
+  font-weight: 850;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.sub {
+  margin-top: calc(var(--u) * 0.2);
+  overflow: hidden;
+  color: var(--pl-text-2);
+  font-size: calc(var(--u) * 1);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sub a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.sub a:hover {
+  color: var(--pl-text);
+  text-decoration: underline;
+}
+
+.loading {
+  margin-top: calc(var(--u) * 0.3);
+  color: var(--pl-text-3);
+  font-size: calc(var(--u) * 0.85);
+}
+
+.error {
+  margin-top: calc(var(--u) * 0.3);
+  color: var(--danger-light);
+  font-size: calc(var(--u) * 0.85);
+}
+
+.seek {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 0.3);
+}
+
+.transport {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 calc(var(--u) * 0.5);
+}
+
+.side,
+.skip,
+.play {
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-circle);
+  background: none;
+  color: var(--pl-text);
+  cursor: pointer;
+  transition:
+    transform var(--dur-fast) ease,
+    background var(--dur-fast) ease;
+}
+
+.side {
+  width: calc(var(--u) * 2.6);
+  height: calc(var(--u) * 2.6);
+  color: var(--pl-text-2);
+}
+
+.side[aria-pressed='true'] {
+  color: var(--accent);
+}
+
+.side:hover,
+.skip:hover {
+  background: var(--white-a10);
+  color: var(--pl-text);
+}
+
+.side svg {
+  width: calc(var(--u) * 1.25);
+  height: calc(var(--u) * 1.25);
+}
+
+.skip {
+  width: calc(var(--u) * 3.2);
+  height: calc(var(--u) * 3.2);
+}
+
+.skip svg {
+  width: calc(var(--u) * 1.6);
+  height: calc(var(--u) * 1.6);
+}
+
+.play {
+  width: calc(var(--u) * 4.4);
+  height: calc(var(--u) * 4.4);
+  background: var(--pl-text);
+  color: var(--pl-bg);
+  box-shadow: 0 calc(var(--u) * 0.6) calc(var(--u) * 1.6) var(--black-a40);
+}
+
+.play:hover {
+  transform: scale(1.05);
+}
+
+.play:active,
+.skip:active,
+.side:active {
+  transform: scale(0.94);
+}
+
+.play svg {
+  width: calc(var(--u) * 1.9);
+  height: calc(var(--u) * 1.9);
+}
+
+.extras {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: calc(var(--u) * 0.6);
+}
+
+/* ── the panel: lyrics, chapters, up next ────────────────────────────── */
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  height: min(100%, calc(var(--u) * 40));
+  min-height: 0;
+}
+
+.tabs {
+  display: flex;
+  flex: none;
+  gap: calc(var(--u) * 0.4);
+  margin-bottom: calc(var(--u) * 0.8);
+}
+
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--u) * 0.45);
+  height: calc(var(--u) * 2.2);
+  padding: 0 calc(var(--u) * 0.95);
+  border: none;
+  border-radius: var(--radius-pill);
+  background: var(--white-a08);
+  color: var(--pl-text-2);
+  font: inherit;
+  font-size: calc(var(--u) * 0.85);
+  font-weight: 700;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+}
+
+.tab svg {
+  width: calc(var(--u) * 1);
+  height: calc(var(--u) * 1);
+}
+
+.tab:hover {
+  color: var(--pl-text);
+}
+
+.tab[aria-selected='true'] {
+  background: var(--pl-text);
+  color: var(--pl-bg);
+}
+
+.panelBody {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+/* lyrics: big, the line being sung lit, the rest dimmed */
+.lyrics {
+  height: 100%;
+  overflow-y: auto;
+  padding: 30% 0;
+  scrollbar-width: none;
+  mask-image: linear-gradient(to bottom, transparent, black 18%, black 82%, transparent);
+}
+
+.lyrics::-webkit-scrollbar {
+  display: none;
+}
+
+.lyricsLines {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: calc(var(--u) * 0.5);
+}
+
+.lyricsLine {
+  padding: calc(var(--u) * 0.15) 0;
+  border: none;
+  background: none;
+  color: var(--white-a50);
+  font: inherit;
+  font-size: clamp(calc(var(--u) * 1.3), 2.2vw, calc(var(--u) * 2));
+  font-weight: 800;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+  text-align: left;
+  cursor: pointer;
+  transform-origin: left center;
+  transition:
+    color var(--dur-moderate) ease,
+    opacity var(--dur-moderate) ease,
+    transform var(--dur-moderate) var(--pl-ease);
+}
+
+.lyricsLine:hover {
+  color: var(--white-a85);
+}
+
+.lyricsLine[data-state='sung'] {
+  opacity: 0.55;
+}
+
+.lyricsLine[data-state='now'] {
+  color: var(--pl-text);
+  text-shadow: 0 0 calc(var(--u) * 1.2) rgba(var(--amb), 0.55);
+  transform: scale(1.03);
+}
+
+.lyricsLine[data-gap='true'] {
+  color: var(--white-a25);
+}
+
+.lyricsPlain {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 1.4);
+  color: var(--white-a85);
+  font-size: calc(var(--u) * 1.15);
+  font-weight: 650;
+  line-height: 1.6;
+}
+
+.lyricsPlain p {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+}
+
+.lyricsSource {
+  margin-top: calc(var(--u) * 2.5);
+  color: var(--pl-text-3);
+  font-size: calc(var(--u) * 0.78);
+}
+
+.lyricsEmpty {
+  display: flex;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: calc(var(--u) * 0.6);
+  color: var(--pl-text-2);
+  font-size: calc(var(--u) * 1.05);
+  text-align: center;
+}
+
+.lyricsLoading {
+  width: calc(var(--u) * 1.1);
+  height: calc(var(--u) * 1.1);
+  border: 2px solid var(--white-a20);
+  border-top-color: var(--pl-text);
+  border-radius: var(--radius-circle);
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* up next and chapters */
+.upNext {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.upNextRow {
+  display: grid;
+  grid-template-columns: calc(var(--u) * 2.8) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: calc(var(--u) * 0.8);
+  width: 100%;
+  padding: calc(var(--u) * 0.4);
+  border: none;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--pl-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.upNextRow:hover,
+.upNextRow:focus-visible {
+  background: var(--white-a08);
+}
+
+.upNextRow[data-now='true'] {
+  background: rgba(var(--amb), 0.2);
+}
+
+.upNextRow img,
+.upNextRow > span:first-child {
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: var(--radius-sm);
+  background: var(--white-a06);
+  object-fit: cover;
+}
+
+.chapterNum {
+  display: grid;
+  place-items: center;
+  color: var(--pl-text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.upNextRow > .chapterNum {
+  background: none;
+}
+
+.upNextText {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.upNextTitle,
+.upNextSub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.upNextTitle {
+  font-weight: 650;
+}
+
+.upNextSub {
+  color: var(--pl-text-3);
+  font-size: calc(var(--u) * 0.8);
+}
+
+.upNextTime {
+  color: var(--pl-text-3);
+  font-size: calc(var(--u) * 0.8);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── a phone, or a narrow window: one column, the panel under the song ── */
+
+@media (max-width: 900px) {
+  .stage {
+    grid-template-columns: minmax(0, 1fr);
+    align-content: start;
+    padding-bottom: calc(var(--u) * 1);
+    overflow-y: auto;
+  }
+
+  .now {
+    max-width: calc(var(--u) * 24);
+  }
+
+  .panel {
+    height: calc(var(--u) * 26);
+  }
+
+  .lyrics {
+    padding: 20% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .view,
+  .art,
+  .lyricsLine {
+    animation: none;
+    transition: none;
+  }
+}

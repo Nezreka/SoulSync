@@ -12,6 +12,7 @@ from core.repair_jobs.empty_lookup_memory import EmptyLookupMemory
 from core.repair_jobs.base import (
     JobContext, JobResult, RepairJob, whole_library_run,
 )
+from core.repair_jobs.cover_art_state import library_picture
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_job.cover_art")
@@ -66,6 +67,52 @@ def _artist_art_by_name(artist_name, source_order=None):
     return None, None
 
 
+def _has_photo(url) -> bool:
+    """the library holds a real picture for this artist, not a blank or a
+    provider's placeholder"""
+    url = str(url or '').strip()
+    if not url:
+        return False
+    try:
+        from core.metadata.artist_image import is_placeholder_artist_image
+        return not is_placeholder_artist_image(url)
+    except Exception:  # noqa: BLE001 - no checker, a url is a photo
+        return True
+
+
+def _source_words(source) -> str:
+    return {'library': "the library's own cover",
+            'embedded': 'the cover inside the files'}.get(str(source or ''), str(source or 'a source'))
+
+
+def _resolve_complete(db, job_id, album_ids) -> int:
+    """#2202: an album the scan found complete has nothing left to fill. its
+    open finding, filed before a check was fixed or a cover was added by
+    hand, stayed open with nothing to change"""
+    ids = [f"lib2:{int(album_id)}" for album_id in album_ids if album_id is not None]
+    if not ids:
+        return 0
+    resolved = 0
+    conn = db._get_connection()
+    try:
+        for start in range(0, len(ids), 500):
+            chunk = ids[start:start + 500]
+            resolved += conn.execute(
+                "UPDATE repair_findings SET status = 'resolved', user_action = 'obsolete', "
+                "resolved_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP "
+                "WHERE job_id = ? AND status = 'pending' AND finding_type = 'missing_cover_art' "
+                f"AND entity_type = 'album' AND entity_id IN ({','.join('?' for _ in chunk)})",
+                [job_id, *chunk]).rowcount or 0
+        conn.commit()
+        if resolved:
+            logger.info("[Cover Art Filler] closed %d finding(s) for albums that have every cover", resolved)
+    except Exception as exc:  # noqa: BLE001 - tidying old rows never fails a scan
+        logger.debug("[Cover Art Filler] closing complete findings failed: %s", exc)
+    finally:
+        conn.close()
+    return resolved
+
+
 def _drop_hand_tagged_albums(context, albums):
     from core.library2.maintenance_subjects import active_file_subjects
     from core.repair_jobs.base import hand_tagged_path_keys, is_hand_tagged_path
@@ -84,13 +131,27 @@ class MissingCoverArtJob(RepairJob):
     display_name = 'Cover Art Filler'
     description = 'Finds albums missing artwork and locates art from metadata sources'
     help_text = (
-        'Scans your library for albums that have no cover art stored in the database. '
-        'For each missing cover, it searches for matching artwork using the album name '
-        'and artist. If you have configured cover-art sources (Settings > metadata '
-        'enhancement art order), those are used first; otherwise it falls back to '
-        'Prefer Source (if set) or the primary metadata source.\n\n'
-        'When artwork is found, a finding is created with the image URL so you can review '
-        'and apply it. The job does not download or embed artwork automatically.\n\n'
+        'Checks three places for every album: the cover saved in the library, the cover '
+        'inside the audio files (only when embedding art is on in Settings), and a cover '
+        'file such as cover.jpg in the album folder (only when cover.jpg downloads are on). '
+        'An album missing a cover in any of them gets a finding that shows all three side '
+        'by side.\n\n'
+        'Where the cover comes from: when the library already has one, no source is '
+        'asked. When it has none, your cover-art sources '
+        '(Settings > metadata enhancement art order) are searched by album and artist, '
+        'then Prefer Source (if set) or the primary metadata source, and the finding says '
+        'which source answered.\n\n'
+        'A cover file counts by any usual name in any case (cover, folder, front, album, '
+        'albumart; jpg, jpeg, png, webp), and a Disc 1 / CD2 folder counts the one in the '
+        'release folder above it. A saved library cover that no longer loads counts as '
+        'missing. An album that has every cover closes its old finding on the next scan.\n\n'
+        'Every cover on a finding can be picked: the library\'s, the folder\'s, the one inside '
+        'the files or the found one. The best one starts picked. Apply Art only fills the '
+        'places that are missing a cover with it. A cover you have is kept, and a cover you '
+        'picked yourself wins, unless you pick the found cover over it. Change cover on a '
+        'finding opens the same picker as the album page, so you can choose any other cover. '
+        'An artist with no photo at all also gets a suggested photo, applied only when '
+        'you press Use for artist.\n\n'
         'Settings:\n'
         '- Prefer Source: Optional source to try first; otherwise the primary metadata source is used\n'
         '- Remember Empty Lookups: When on, an album no source had art for is not searched '
@@ -160,6 +221,7 @@ class MissingCoverArtJob(RepairJob):
         from core.library2.tag_cache import observe_file_tags
         from core.library2.validation import artwork_checks
 
+        complete, flagged = set(), set()
         for index, subject in enumerate(albums):
             if context.check_stop() or (index % 10 == 0 and context.wait_if_paused()):
                 return False
@@ -179,12 +241,30 @@ class MissingCoverArtJob(RepairJob):
                                     tags, context.config_manager or {})
             db_missing, embed_missing, sidecar_missing = (checks[key] == 'missing' for key in ('artwork_database', 'cover', 'artwork_sidecar'))
             if not (db_missing or embed_missing or sidecar_missing):
+                # #2202: nothing missing, so a finding filed before (a check
+                # that has since been fixed, a cover added by hand) closes
+                complete.add(subject['album_id'])
                 result.skipped += 1
                 continue
+            flagged.add(subject['album_id'])
+
+            # #2202: a saved cover counts only when it is a picture. a link
+            # that no longer loads said "the library has a cover to copy"
+            # over an empty tile, and Apply Art had nothing to copy
+            library_broken = not db_missing and not library_picture(
+                context.db, context.config_manager, subject['album_id'],
+                subject.get('album_image'))
+            if library_broken:
+                db_missing = True
+                checks = {**checks, 'artwork_database': 'missing'}
 
             key = str(subject['album_id'])
             signature = self._lookup_signature(subject, source_order)
-            if memory and memory.recently_empty(key, signature):
+            # #2169: a library that already has a cover gives it to the files
+            # and the folder. asking a source for another one only showed a
+            # picture apply never used
+            library_cover = not db_missing
+            if library_cover or (memory and memory.recently_empty(key, signature)):
                 provider_result = None
             else:
                 failures_before = health.count
@@ -200,15 +280,21 @@ class MissingCoverArtJob(RepairJob):
                 elif memory and health.count == failures_before and not self._spotify_rate_limited(context):
                     memory.remember(key, signature)
             sidecar_from_embedded = sidecar_missing and embedded
-            if provider_result is None and not sidecar_from_embedded:
+            # #2202: any cover the album already has can fill the places
+            # without one: the folder's fills the files too
+            folder_cover = embed_missing and sidecar
+            if provider_result is None and not (sidecar_from_embedded or folder_cover or library_cover):
                 result.skipped += 1
                 continue
-            artist_result = fetch_artwork_url(
+            # #2169: an artist photo is only suggested for an artist with no
+            # photo at all. offering one beside a photo they have put avatars
+            # in a cover tool, often the same picture twice
+            artist_result = None if _has_photo(subject.get("artist_image")) else fetch_artwork_url(
                 "artist",
                 artist_name=subject.get("artist_name") or "",
                 source_ids=subject.get("artist_source_ids") or {},
             )
-            if artist_result is None:
+            if artist_result is None and not _has_photo(subject.get("artist_image")):
                 # no provider id reaches this artist: search by name, as 3.6.1 did
                 url, source = _artist_art_by_name(subject.get("artist_name"))
                 if url:
@@ -222,7 +308,12 @@ class MissingCoverArtJob(RepairJob):
                 "artist": subject.get("artist_name"),
                 "artist_id": subject.get("artist_id"),
                 "found_artwork_url": provider_result.url if provider_result else None,
-                "artwork_source": provider_result.source if provider_result else "embedded",
+                "artwork_source": (provider_result.source if provider_result
+                                   else "library" if library_cover
+                                   else "embedded" if sidecar_from_embedded
+                                   else "folder" if folder_cover else "library"),
+                "library_has_cover": library_cover,
+                "library_cover_broken": library_broken,
                 "artwork_source_id": (
                     provider_result.provider_entity_id if provider_result else None
                 ),
@@ -256,8 +347,9 @@ class MissingCoverArtJob(RepairJob):
                     description=(
                         f'Artwork for "{subject.get("title")}" by '
                         f'{subject.get("artist_name") or "Unknown"} can be repaired '
-                        f'from {details["artwork_source"]}. Missing: '
+                        f'from {_source_words(details["artwork_source"])}. Missing: '
                         + ', '.join(name for name, missing in (('database image', db_missing), ('embedded image', embed_missing), ('cover file', sidecar_missing)) if missing)
+                        + ('. The saved library cover no longer loads' if library_broken else '')
                     ),
                     details=details,
                 )
@@ -265,6 +357,9 @@ class MissingCoverArtJob(RepairJob):
                     result.findings_created += 1
                 else:
                     result.findings_skipped_dedup += 1
+        # an album listed twice (one row per library) closes only when no
+        # row of it is missing anything
+        _resolve_complete(context.db, self.job_id, complete - flagged)
         return True
 
     @staticmethod

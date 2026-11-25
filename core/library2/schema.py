@@ -320,6 +320,12 @@ _INDEXES = (
     "CREATE INDEX IF NOT EXISTS idx_lib2_track_files_track ON lib2_track_files(track_id)",
     "CREATE INDEX IF NOT EXISTS idx_lib2_track_files_hash ON lib2_track_files(content_hash)",
     "CREATE INDEX IF NOT EXISTS idx_lib2_track_files_path ON lib2_track_files(path)",
+    # a file is known by its name and its byte size when its path is not the
+    # one on record: the media server's view of a mount, a library that moved
+    # (core/library2/media_server_sync.owned_track_by_file_twin). the size
+    # narrows it to a handful of rows; without this every such lookup read
+    # the whole table.
+    "CREATE INDEX IF NOT EXISTS idx_lib2_track_files_size ON lib2_track_files(size)",
     # upstream 0ca4b0dc5: lookups ask `LOWER(title) = LOWER(?)` (playable check,
     # exports, stats, history importers); LOWER() on the column skips a plain
     # index, so each one read the whole table. Same rows match.
@@ -680,6 +686,11 @@ _ADDED_COLUMNS = (
     # Not secondary_types, which path templates read: see release_group_types.
     ("lib2_albums", "release_group_types",
      "ALTER TABLE lib2_albums ADD COLUMN release_group_types TEXT"),
+    # The MusicBrainz statuses (official, bootleg, ...) of the group's
+    # releases, with the group they were read from (#2175). Read by the
+    # watchlist's release status filter. See core/release_statuses.py.
+    ("lib2_albums", "release_statuses",
+     "ALTER TABLE lib2_albums ADD COLUMN release_statuses TEXT"),
     # The last automatic upgrade attempt for a track (#2060): when, how many
     # in a row found nothing, and against which file. See upgrade_attempts.
     ("lib2_tracks", "upgrade_attempt",
@@ -1670,6 +1681,12 @@ def ensure_library_v2_schema(connection: Any, *, run_backfills: bool = True) -> 
     # what each file that imported without a match most likely is
     from core.library2.unmatched_identify import ensure_unmatched_match_schema
     ensure_unmatched_match_schema(cursor)
+    # #2229: no artist row keeps a provider's "Various Artists" id
+    try:
+        from core.library2.various_artists_guard import ensure_various_artists_guard
+        ensure_various_artists_guard(cursor)
+    except Exception as e:  # noqa: BLE001
+        logger.error("Various Artists id guard failed (will retry next start): %s", e)
     if run_backfills:
         run_library_v2_backfills(connection)
     logger.debug("Library schema ensured")
@@ -1796,6 +1813,24 @@ def run_library_v2_backfills(connection: Any, *, commit: bool = False,
                 _commit()
         except Exception as e:  # noqa: BLE001
             logger.error("release kind by runtime repair failed (will retry next start): %s", e)
+
+    if not _stopped():
+        # #2229: a compilation's "Various Artists" id stored on a real artist
+        # pulled every later compilation track in under them. once: the
+        # trigger keeps it off from here
+        try:
+            if not _done_once(cursor, "various_artists_ids_v1"):
+                from core.library2.various_artists_guard import heal_various_artists_ids
+                healed = heal_various_artists_ids(connection)
+                stats["various_artists_ids"] = healed
+                if healed.get("artists"):
+                    logger.info("Took the Various Artists id off %d artists, gave %d tracks "
+                                "back to their own artist, %d files queued for findings",
+                                healed["artists"], healed["tracks"], healed["files"])
+                _mark_done(cursor, "various_artists_ids_v1")
+                _commit()
+        except Exception as e:  # noqa: BLE001
+            logger.error("Various Artists id heal failed (will retry next start): %s", e)
 
     if not _stopped():
         # A provider's 0 ("no BPM", "no length") was stored as a value: the

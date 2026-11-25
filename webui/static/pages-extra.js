@@ -1492,6 +1492,12 @@ let _rateLimitCountdownInterval = null;
 let _rateLimitExpiresAt = 0;
 
 function handleSpotifyRateLimit(rateLimitInfo) {
+    // the ban, its modal and the restored toast are the admin's (#2208).
+    // every path that raises the modal comes through here
+    if (typeof _statusViewerIsAdmin === 'function' && !_statusViewerIsAdmin()) {
+        if (_spotifyRateLimitShown) { _spotifyRateLimitShown = false; closeRateLimitModal(); }
+        return;
+    }
     if (!rateLimitInfo || !rateLimitInfo.active) {
         if (_spotifyRateLimitShown) {
             _spotifyRateLimitShown = false;
@@ -1524,6 +1530,13 @@ function handleSpotifyRateLimit(rateLimitInfo) {
 function showRateLimitModal(rateLimitInfo) {
     const overlay = document.getElementById('rate-limit-modal-overlay');
     if (!overlay) return;
+
+    // disconnecting spotify is install-wide, so the button is the admin's
+    const disconnectBtn = overlay.querySelector('.rate-limit-disconnect-btn');
+    if (disconnectBtn) {
+        const admin = typeof currentProfile === 'undefined' || !currentProfile || !!currentProfile.is_admin;
+        disconnectBtn.style.display = admin ? '' : 'none';
+    }
 
     // Populate details
     const banDuration = document.getElementById('rate-limit-ban-duration');

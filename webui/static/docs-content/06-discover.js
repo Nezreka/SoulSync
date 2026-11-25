@@ -1,5 +1,6 @@
 registerDocsSection({
     id: 'discover',
+    needs: 'music.discover',
     title: 'Discover Artists',
     icon: '✨',
     pages: [
@@ -16,6 +17,23 @@ The hero showcases **recommended artists** based on your library. Each slide say
 - **See all picks**: see 50+ similar artists with enrichment data
 
 ![Featured artist hero slider](disc-hero.jpg)
+
+**Adventurousness dial**: drag it from safe to deep cuts and the recommended artists re-rank live. The dial is yours alone: on a shared server, turning it changes your Discover and nobody else's. A profile that never touched it follows the default an admin sets in Settings, Discovery.
+`
+        },
+        {
+            id: 'disc-new-profile',
+            title: 'A New Profile',
+            lede: 'Discover is full on day one, and five artists you pick make it yours right away.',
+            body: `
+Until a profile has told SoulSync about **five artists** (played a couple of times each, on its watchlist, or picked by hand), Discover doesn't wait for a watchlist scan to have something to show:
+
+- **Trending picks**: the hero and Recommended Artists fill from charts SoulSync already reads, Deezer's genre charts, SoulSync Charts from the network, and Beatport when it has been opened. Every pick says where it came from, for example *Trending from Deezer's Rock chart*. Artists you already own are left out.
+- **Make Discover yours**: a banner at the top offers the quickest ways in. **Pick artists you love** opens a picker: search, or browse what's popular by genre, and choose five or more. **Connect ListenBrainz** and **Connect Last.fm** open My Accounts (an account you already linked isn't offered again). **Import Spotify history** shows up once that import is on your server.
+
+Picked artists count as artists you chose, exactly like your library and watchlist. Their similar artists are fetched the moment you save, the banner shows the progress, and the hero and Recommended Artists fill as each one lands, with the reason *Because you picked …*. The next watchlist scan builds on them like any other seed.
+
+The banner is per profile. Hide it with **×** and it stays hidden; once a profile has enough history it never shows again.
 `
         },
         {
@@ -54,13 +72,23 @@ A mix is mostly songs you own (so it plays straight away): your artists first, a
 
 The mixes are rebuilt every day, shortly after midnight. Favourites usually make the cut and deep cuts sometimes do, and anything a mix played in the last three days is less likely to come back, so each day sounds like the same taste with different songs. Mix numbers stay with their artists, so a synced Daily Mix 2 keeps its flavour on your server. Blocking an artist, or saying more or less like this, rebuilds them straight away.
 
+## What you love counts too
+
+Your taste isn't only what you play. Three things you said you love feed the same seeds, per profile:
+
+- **Liked Songs**: every song you hearted counts for its artist (up to four songs' worth per artist).
+- **Server favourites**: songs you starred or rated 4 or 5 on Plex or Navidrome (and Jellyfin users linked to a profile), as read for the Expired Download Cleaner's keep list.
+- **Your Watchlist**: an artist you follow, more so in the first three months after you add them.
+
+Each one is weighed against your own play counts, so a liked artist sits among the artists you play rather than above your real favourites, and someone with few plays still gets seeds from what they liked. Artists you love but never play add at most 25 seeds, strongest first, so a long Watchlist can't crowd out what you actually listen to. Daily Mixes, Discover recommendations, Recommended Stations and the taste behind the Discover playlists all use them.
+
 ## Jump back in
 
 The top of Discover greets you and puts what you go back to in one grid: **Flow**, On Repeat, your first Daily Mixes, the mood that suits the hour, and Repeat Rewind.
 
 - **Flow** is one tap for endless-feeling listening: your favourites woven with the tracks of theirs you never play and their neighbours in your library. Every press is a fresh draw, and every track is one you own.
 - **On Repeat** is what you've played most in the last 30 days. **Repeat Rewind** is what you had on repeat 2 to 12 months ago and then stopped playing.
-- **Blend** mixes two people's listening into one playlist, leading with what you both play. It appears once another profile has its own ListenBrainz or Last.fm listening history.
+- **Blend** mixes two people's listening into one playlist, leading with what you both play. It needs both of you to have your own listening history and **Share my listening** on (My Account → Your listening; Discover asks once). You get up to three, with the people whose taste is closest to yours.
 
 ## Moods
 
@@ -76,7 +104,7 @@ Further down, a **spotlight** puts one new release from the artist you've played
 
 A row of genre pills in the **Explore & Build** zone near the bottom of the Discover page. Each pill shows an artist count and whether the genre has been explored — click one to open a **Genre Deep Dive** of that genre's artists.
 
-![Genre browser](disc-genre-browser.jpg)
+![The Genre Map graph with its genre clusters and top-artists panel](disc-genre-browser.jpg)
 
 ## Because You Listen To
 
@@ -91,7 +119,7 @@ Stations turn an artist into endless radio. **Library Radio**, the first card, d
 
 ## Inbox
 
-New & Missing opens with your inbox: new releases from artists you watch, what's coming out, and concerts. Concerts need a Ticketmaster key; set **Concerts near you** in Settings > Concerts (two letters, like US) to keep them to your country.
+New & Missing opens with your inbox: new releases from artists you watch, what's coming out, and concerts. Concerts need a Ticketmaster key; set **Concerts near you** in Settings, Connections (the Concerts service) (two letters, like US) to keep them to your country.
 
 ## ListenBrainz Playlists
 
@@ -105,7 +133,7 @@ If ListenBrainz is configured, the Discover page also shows personalized playlis
             body: `
 Search for 1–5 seed artists, select them, and click **Generate**. SoulSync finds similar artists, pulls their albums, and assembles a 50-track playlist mixing your picks with new discoveries. You can then download the generated playlist or sync it to your media server.
 
-![Build custom playlist](disc-build-playlist.jpg)
+![The Build a mix modal with seed artists, genres, tags and mix sliders](disc-build-playlist.jpg)
 
 > [!TIP]
 > Mixing artists from adjacent genres is a great way to build party or workout playlists that stay coherent but varied.
@@ -131,8 +159,6 @@ Both can be synced to your media server with live progress tracking.
             body: `
 Browse discovery pool content by **decade** — a **Decades** shelf of mix cards from the 1950s through the 2020s. Each decade pulls top tracks from pool artists active in that era.
 
-![Time Machine decade browser](disc-time-machine.jpg)
-
 > [!TIP]
 > Time Machine is perfect for themed listening — throw on the 70s mix for a dinner party or the 90s mix for a nostalgia trip.
 `
@@ -148,17 +174,22 @@ Three interactive canvas-based visualization modes for exploring artist relation
 - **Genre Map** — browse all artists by genre with a sidebar picker. Ring-packed clusters, no artist cap. Great for exploring genres you don't normally listen to
 - **Artist Explorer** — deep-dive any artist. Ring 1 shows direct similar artists, Ring 2 shows the extended network. Exploring an unknown artist fetches similar artists in real-time and caches them
 
+![The Explore and Build hub with the Artist Map mode panels and Artist Web](disc-artist-map.jpg)
+
 **Controls:** mouse wheel to zoom, click to explore, hover for tooltips with genre tags. Keyboard shortcuts: **F** / **0** to fit the view, **S** to focus search, **D** to toggle the perf overlay, **H** to toggle similar artists, **+** / **-** to zoom, **Esc** to close.
 `
         },
         {
             id: 'disc-stats',
+            needs: 'music.stats',
             title: 'Listening Stats',
             lede: 'Analytics about your library and listening activity.',
             body: `
 The Stats page shows analytics about your music library and listening activity, split into two tabs: **Listening** and **Library**.
 
-Listening data requires **Listening Stats** to be enabled in Settings → Library ("Enable listening stats collection from media server") — it polls play history from your active media server (Plex, Jellyfin, or Navidrome).
+![Listening Stats with the activity chart, listening heatmap and top artists, albums and tracks](disc-stats.jpg)
+
+Listening data requires **Listening Stats** to be enabled in Settings → Discovery → Recommendations ("Collect listening stats from your media server") — it polls play history from your active media server (Plex, Jellyfin, or Navidrome).
 
 - **Overview** — total plays, listening time, and unique artists, albums, and tracks
 - **Top artists, albums, and tracks** — ranked by play count
@@ -174,6 +205,7 @@ The **Library** tab shows operational facts instead: Library Health, Library Dis
 
 registerDocsSection({
     id: 'chat-jukebox',
+    needs: 'chat.use',
     title: 'Chat & Jukebox',
     icon: '💬',
     pages: [
@@ -183,6 +215,8 @@ registerDocsSection({
             lede: 'Soulseek chat rooms and the community room, proxied through your slskd connection.',
             body: `
 Open **Chat** in the sidebar — "Soulseek rooms & private messages". Everything here rides on your Soulseek connection: if slskd isn't configured, the page says **"Soulseek (slskd) isn't configured — set it up in Settings to join the chat."** and there is nothing to join yet.
+
+![The Chat page with its Friends, Blocklist and Bookmarks entries and the Direct Messages section](chat-rooms.jpg)
 
 ## Layout
 
@@ -255,6 +289,8 @@ Room and profile settings save to the server; mention sound and now-playing shar
             title: 'Private Messages',
             lede: 'One-to-one Soulseek conversations, with unread tracking that follows you around the app.',
             body: `
+![The Chat sidebar's Direct Messages section, where private conversations are listed](chat-pm.jpg)
+
 ## Starting a conversation
 
 - Click a username anywhere → user card → **Message**
@@ -280,7 +316,7 @@ The open-PM head shows the username (plus a ⭐ Friend badge when applicable), t
 PMs are **plain-text only** — the formatting toolbar, GIF, poll, now-playing, and wanted buttons are room-only. Emoji and file attach still work in PMs.
 
 > [!NOTE]
-> PMs use the same Soulseek connection as rooms, so the slskd prerequisite and the admin / "Let other profiles send" rules apply identically.
+> PMs use the same Soulseek connection as rooms, so the slskd prerequisite and the admin / "Let other profiles send" rules apply identically. The same rule decides who reads them: without "Let other profiles send", other profiles see no Direct Messages and no private notes on users.
 `
         },
         {
@@ -289,6 +325,8 @@ PMs are **plain-text only** — the formatting toolbar, GIF, poll, now-playing, 
             lede: 'A room-wide YouTube jukebox: queue tracks, vote on what plays next, and let Auto-DJ keep it fed.',
             body: `
 The Jukebox lives in the Chat page header and the right-rail panel (toggled by the room-head **♫ Jukebox** button — "Room jukebox — listen together, vote on what plays next"). Everything is YouTube-based, and jukebox state is derived from the room's protocol events, so every SoulSync client in the room agrees on the queue.
+
+![The community room head with the Jukebox and Watch Together buttons](chat-jukebox.jpg)
 
 The headbar shows the **♫ Jukebox** brand, **♪ N listening**, the **📻 Auto-DJ** toggle ("Auto-DJ: when the queue runs dry, keep the music going with related tracks"), an **Add a song or paste a YouTube link…** input (200 chars) with an **Add** button, and a results dropdown.
 
@@ -323,7 +361,7 @@ The DJ is the lexicographically-smallest protocol-capable SoulSync username in t
 Flip the **📻 Auto-DJ** headbar toggle (a shared room toggle — latest sender wins; toast: "📻 Auto-DJ on — the queue keeps itself fed"). When the queue runs dry and at least one listener is tuned in, the DJ requests a pick with the seed title and an avoid-list of recently played tracks: Last.fm similar tracks first, then similar artists, then your local similar-artist graph, falling back to searching the seed title. Auto picks queue marked **📻 auto** with a "why" credit ("similar to X") and stay vote- and skip-able. Cooldown is 25 seconds, and it never runs in an empty, unwatched room — "Auto-DJ is on, but it needs a starting point — add one song and it takes over from there."
 
 > [!TIP]
-> Jukebox needs the same Soulseek connection as chat. If the page shows the "slskd isn't configured" notice, neither rooms nor the Jukebox will work until Settings → Sources is set up.
+> Jukebox needs the same Soulseek connection as chat. If the page shows the "slskd isn't configured" notice, neither rooms nor the Jukebox will work until Soulseek is set up under Settings → Downloads → Sources.
 `
         },
     ]

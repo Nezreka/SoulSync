@@ -24,6 +24,7 @@ from __future__ import annotations
 from flask import Blueprint, jsonify, request
 
 from core.profile_context import admin_only
+from core.permissions import requires
 
 bp = Blueprint("audiobook_routes", __name__)
 
@@ -33,6 +34,7 @@ def create_blueprint():
 
 
 @bp.route("/api/audiobook-routes", methods=["GET"])
+@requires("music.access")
 def list_routed_artists():
     from core.audiobook_routing import audiobook_folder_configured, list_routes
     return jsonify({"success": True, "artists": list_routes(),
@@ -56,6 +58,7 @@ def route_artist():
 
 
 @bp.route("/api/audiobook-routes/check", methods=["POST"])
+@requires("music.access")
 def check_routed_artists():
     """Which of these names are routed. One round trip for a whole list of cards."""
     from core.audiobook_routing import routed_names

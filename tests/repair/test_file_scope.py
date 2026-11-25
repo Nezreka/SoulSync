@@ -209,6 +209,7 @@ def test_a_job_that_cannot_honour_a_file_scope_refuses_it(tmp_path):
     worker._force_run_lock = __import__("threading").Lock()
     worker._force_run_scopes = {}
     worker._force_run_queue = []
+    worker._background_runs = set()
 
     scope = {"artist_name": "A", "file_paths": ["/music/a.flac"]}
     assert worker.run_job_now("scoped", scope=scope) is True

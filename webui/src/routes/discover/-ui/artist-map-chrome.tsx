@@ -1,5 +1,7 @@
 import { useEffect, useLayoutEffect, useRef } from 'react';
 
+import { usePermNotOff } from '@/platform/shell/my-permissions';
+
 import type { ArtMapNode } from '../-discover.artist-map';
 import type { ArtMapContextMenu, ArtMapTooltip } from '../-discover.artist-map.panel';
 
@@ -143,6 +145,8 @@ export function ArtMapContextMenuView({
   onClose,
   buildDetailPath,
 }: ArtMapContextMenuViewProps) {
+  // no watchlist part, no watch item in the menu (#2209)
+  const mayWatch = usePermNotOff('music.watchlist');
   // Closes on the NEXT click anywhere, once. The vanilla delays binding by a
   // tick so the very click that opened the menu does not immediately close it.
   useEffect(() => {
@@ -198,16 +202,18 @@ export function ArtMapContextMenuView({
         <span>💿</span> View Discography
       </a>
 
-      <button
-        type="button"
-        className="artmap-ctx-item"
-        onClick={() => {
-          onClose();
-          onToggleWatchlist(node, menu);
-        }}
-      >
-        <span>👁</span> {menu.watchLabel}
-      </button>
+      {mayWatch ? (
+        <button
+          type="button"
+          className="artmap-ctx-item"
+          onClick={() => {
+            onClose();
+            onToggleWatchlist(node, menu);
+          }}
+        >
+          <span>👁</span> {menu.watchLabel}
+        </button>
+      ) : null}
     </div>
   );
 }

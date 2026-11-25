@@ -168,6 +168,9 @@ def resolve_video_server(db=None):
         return "plex"
     if pref == "jellyfin" and jelly_ok:
         return "jellyfin"
+    if pref == "soulsync":
+        # soulsync scans its own folders (core/video/disk_source.py)
+        return "soulsync"
     # Fully INDEPENDENT of the music 'active server' — only an explicit video pick
     # or the configured server(s) decide, so changing the music server NEVER
     # changes video (and vice-versa). Auto-pick the single configured one; default
@@ -178,7 +181,29 @@ def resolve_video_server(db=None):
         return "jellyfin"
     if plex_ok and jelly_ok:
         return "plex"
-    return None
+    # no media server at all: soulsync's own folder scan is the library, when
+    # there are folders to scan and no server's library is already here (an
+    # install whose server is only unconfigured for now keeps its rows as is)
+    return "soulsync" if _standalone_ready(db) else None
+
+
+def _standalone_ready(db) -> bool:
+    if db is None:
+        return False
+    try:
+        if not (db.get_setting("movies_path") or db.get_setting("tv_path")):
+            return False
+        conn = db._get_connection()
+        try:
+            for table in ("movies", "shows"):
+                if conn.execute(f"SELECT 1 FROM {table} WHERE server_source IN ('plex', 'jellyfin') "
+                                "LIMIT 1").fetchone():
+                    return False
+        finally:
+            conn.close()
+        return True
+    except Exception:   # noqa: BLE001 - unreadable: as before, no server
+        return False
 
 
 def _video_jellyfin_source(cfg, movies_lib=None, tv_lib=None):
@@ -253,13 +278,15 @@ def video_jellyfin_test(cfg):
     return True, "Connected to %s" % name
 
 
-def _build_source(movies_lib=None, tv_lib=None, *, interactive=False):
+def _build_source(movies_lib=None, tv_lib=None, *, interactive=False, server=None):
     """Build a media source for the VIDEO server (see resolve_video_server),
     restricted to the named Movies/TV libraries when given. Uses VIDEO's OWN
     effective connection config (its creds, or inherited from music) — never the
-    music side's live connection, so the two stay independent."""
+    music side's live connection, so the two stay independent. ``server``
+    names one outright ('plex' | 'jellyfin'): the other server, for
+    core/video/server_links.py."""
     db = _vdb()
-    server = resolve_video_server(db)
+    server = server or resolve_video_server(db)
 
     if server == "plex":
         cfg = video_plex_config(db)
@@ -289,6 +316,11 @@ def _build_source(movies_lib=None, tv_lib=None, *, interactive=False):
 
     if server == "jellyfin":
         return _video_jellyfin_source(video_jellyfin_config(db), movies_lib, tv_lib)
+
+    if server == "soulsync" and db is not None:
+        from core.video.disk_source import DiskVideoSource
+        from core.video.file_identity import hash_lookup
+        return DiskVideoSource(db, hash_lookup=hash_lookup(db))
 
     return None
 
@@ -345,6 +377,44 @@ def scan_video_source():
             except Exception:
                 logger.debug("video: library auto-pick failed", exc_info=True)
     return _build_source(sel.get("movies") or None, _tv_pick(sel))
+
+
+def source_for_server(server: str):
+    """a source for a NAMED server, whichever one is the video server: its
+    picked libraries, and for a kind never picked there, every library of
+    that kind it has. None when it isn't connected. the second server is only
+    ever read to find the same titles (core/video/server_links.py), so
+    reading all of a kind's libraries is what matching wants."""
+    db = _vdb()
+    if server not in ("plex", "jellyfin") or db is None:
+        return None
+    sel = db.get_library_selection(server) or {}
+    movies, tv = sel.get("movies") or None, _tv_pick(sel)
+    if sel.get("movies") is None or sel.get("tv") is None:
+        probe = _build_source(server=server)
+        if probe is None:
+            return None
+        try:
+            libs = probe.available_libraries() or {}
+        except Exception:   # noqa: BLE001 - unreachable: not connected for now
+            logger.debug("video: couldn't list %s libraries", server, exc_info=True)
+            return None
+        if sel.get("movies") is None:
+            movies = [x["title"] for x in libs.get("movies") or [] if x.get("title")] or None
+        if sel.get("tv") is None:
+            tv = [x["title"] for x in libs.get("tv") or [] if x.get("title")] or None
+    return _build_source(movies, tv, server=server)
+
+
+def configured_video_servers(db=None) -> list:
+    """the media servers the video side has a connection for"""
+    db = _vdb(db)
+    out = []
+    if video_plex_config(db).get("base_url"):
+        out.append("plex")
+    if video_jellyfin_config(db).get("base_url"):
+        out.append("jellyfin")
+    return out
 
 
 def normalize_media_type(media_type) -> str:
@@ -633,8 +703,10 @@ class PlexVideoSource:
         raise so a hiccup never deletes local state. Plex ids can be re-keyed,
         so fall back to title/TMDB search before giving up."""
         from plexapi.exceptions import NotFound
+        from core.video.owned_ids import is_owned
         try:
-            item = self._server.fetchItem(int(server_id))
+            # a row soulsync made has no plex key yet: straight to the search
+            item = None if is_owned(server_id) else self._server.fetchItem(int(server_id))
         except NotFound:
             item = None
         if item is not None and getattr(item, "type", "") == "movie":
@@ -702,8 +774,9 @@ class PlexVideoSource:
         from the search carries the NEW server_id; the caller heals the row).
         Any other failure raises, so a server hiccup can't delete anything."""
         from plexapi.exceptions import NotFound
+        from core.video.owned_ids import is_owned
         try:
-            item = self._server.fetchItem(int(server_id))
+            item = None if is_owned(server_id) else self._server.fetchItem(int(server_id))
         except NotFound:
             item = None
         if item is not None and getattr(item, "type", "") == "show":
@@ -1233,6 +1306,8 @@ class PlexVideoSource:
             "play_count": int(getattr(m, "viewCount", 0) or 0),
             "last_viewed_at": _iso_dt(getattr(m, "lastViewedAt", None)),
             "view_offset_ms": int(getattr(m, "viewOffset", 0) or 0),   # resume position
+            # when it went into Plex (immutable), not when SoulSync first saw it
+            "server_added_at": _iso_dt(getattr(m, "addedAt", None)),
             "genres": self._tags(getattr(m, "genres", None)),
             "runtime_minutes": int(dur / 60000) if dur else None,
             "files": self._part_files(m),
@@ -1326,7 +1401,7 @@ class PlexVideoSource:
 
 # ── Jellyfin ────────────────────────────────────────────────────────────────
 _JF_MOVIE_FIELDS = ("Overview,Path,MediaSources,ProductionYear,OfficialRating,RunTimeTicks,Studios,"
-                    "ProviderIds,Genres,Taglines,CommunityRating,CriticRating,UserData")
+                    "ProviderIds,Genres,Taglines,CommunityRating,CriticRating,DateCreated,UserData")
 _JF_EP_FIELDS = ("Overview,Path,MediaSources,PremiereDate,RunTimeTicks,IndexNumber,ParentIndexNumber,"
                  "ProviderIds,CommunityRating,DateCreated,UserData")
 _JF_SHOW_FIELDS = ("Overview,ProductionYear,OfficialRating,ProviderIds,Genres,Taglines,CommunityRating,"
@@ -1780,7 +1855,7 @@ class JellyfinVideoSource:
                     return True
                 try:
                     r = requests.get(base + "/Shows/" + str(sid) + "/Episodes", headers=headers,
-                                     timeout=10, params={"season": int(sn)})
+                                     timeout=10, params={"season": int(sn), "IsMissing": "false"})
                     eps = (r.json() or {}).get("Items", []) if r.ok else []
                     if any(int(e.get("IndexNumber") or -1) == int(en) for e in eps):
                         return True
@@ -1793,7 +1868,7 @@ class JellyfinVideoSource:
         def total(view, itype):
             resp = self._req(f"/Users/{self.uid}/Items", {
                 "ParentId": view["Id"], "IncludeItemTypes": itype,
-                "Recursive": "true", "Limit": "0"}) or {}
+                "Recursive": "true", "CollapseBoxSetItems": "false", "Limit": "0"}) or {}
             return int(resp.get("TotalRecordCount", 0) or 0)
         m = sum(total(v, "Movie") for v in self._scan_views("movies", self._movies_lib))
         sh = sum(total(v, "Series") for v in self._scan_views("tvshows", self._tv_lib))
@@ -1875,8 +1950,11 @@ class JellyfinVideoSource:
     def iter_movies(self, incremental=False, since=None):
         path = f"/Users/{self.uid}/Items"
         for view in self._scan_views("movies", self._movies_lib):
+            # with "group movies into collections" on, jellyfin answers a query
+            # that doesn't say otherwise with one BoxSet in place of the films in it
             params = {"ParentId": view["Id"], "IncludeItemTypes": "Movie",
-                      "Recursive": "true", "Fields": _JF_MOVIE_FIELDS}
+                      "Recursive": "true", "CollapseBoxSetItems": "false",
+                      "Fields": _JF_MOVIE_FIELDS}
             if incremental and since is not None:
                 # Delta: DateLastSaved bumps when metadata is (re-)saved — a re-match or
                 # edit on an EXISTING movie — so MinDateLastSaved catches changes, not
@@ -1945,6 +2023,8 @@ class JellyfinVideoSource:
             "last_viewed_at": _iso_dt((it.get("UserData") or {}).get("LastPlayedDate")),
             # JF ticks are 100ns units → ms
             "view_offset_ms": int(((it.get("UserData") or {}).get("PlaybackPositionTicks") or 0) // 10_000),
+            # when it went into Jellyfin, not when SoulSync first saw it
+            "server_added_at": _iso_dt(it.get("DateCreated")),
             "genres": it.get("Genres") or [],
             "runtime_minutes": int(ticks / 600_000_000) if ticks else None,
             "files": self._files(it),
@@ -1974,8 +2054,10 @@ class JellyfinVideoSource:
     def iter_shows(self, incremental=False, since=None):
         path = f"/Users/{self.uid}/Items"
         for view in self._scan_views("tvshows", self._tv_lib):
+            # same for "group shows into collections" (see iter_movies)
             params = {"ParentId": view["Id"], "IncludeItemTypes": "Series",
-                      "Recursive": "true", "Fields": _JF_SHOW_FIELDS}
+                      "Recursive": "true", "CollapseBoxSetItems": "false",
+                      "Fields": _JF_SHOW_FIELDS}
             if incremental and since is not None:
                 # Delta: metadata (re-)saved since the last scan — catches re-matches + edits.
                 params.update({"MinDateLastSaved": since.isoformat()})
@@ -2007,8 +2089,10 @@ class JellyfinVideoSource:
         series_id = str(it["Id"])
         seasons = []
         try:
+            # an api-key request gets jellyfin's virtual (missing) episodes too,
+            # each with a media source but no file. they are not owned
             eps_resp = self._req(f"/Shows/{series_id}/Episodes", {
-                "UserId": self.uid, "Fields": _JF_EP_FIELDS}) or {}
+                "UserId": self.uid, "IsMissing": "false", "Fields": _JF_EP_FIELDS}) or {}
             by_season: dict[int, list] = {}
             for ep in eps_resp.get("Items", []):
                 enum = ep.get("IndexNumber")

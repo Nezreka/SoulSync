@@ -25,6 +25,7 @@ from typing import Any, Callable, Optional
 
 from core.runtime_state import download_batches, download_tasks, tasks_lock
 from core.spotify_client import Track as SpotifyTrack
+from core.download_plugins.types import track_candidates
 from utils.logging_config import get_logger
 
 # Must live under the soulsync.* namespace — handlers only attach there. The
@@ -152,6 +153,13 @@ def _candidate_ordering(track_info: Optional[dict] = None):
     return False, None
 
 
+# a task keeps the candidates it found for a retry until its whole batch is
+# cleaned up. a popular track can pass hundreds of peers' copies, and a long
+# residual batch kept every one for every finished task (#2242). a retry walks
+# a handful at most; the best fifty are plenty
+CACHED_CANDIDATES_KEPT = 50
+
+
 def _seed_from_preflight_pool(task_id, batch_id, track):
     """A quarantine retry with nothing cached of its own takes its candidates
     from what the batch's album search already found: the other files in the
@@ -186,7 +194,7 @@ def _seed_from_preflight_pool(task_id, batch_id, track):
     with tasks_lock:
         task = download_tasks.get(task_id)
         if task is not None and not task.get('cached_candidates'):
-            task['cached_candidates'] = fits[:50]
+            task['cached_candidates'] = fits[:CACHED_CANDIDATES_KEPT]
     logger.info("[Modal Worker] Retry: %d candidate(s) from the album search for task %s",
                 min(len(fits), 50), task_id)
 
@@ -246,6 +254,41 @@ def _try_cached_candidates(task_id, batch_id, track, deps):
     return deps.attempt_download_with_candidates(
         task_id, remaining, track, batch_id, quality_first=_qf, quality_targets=_qt,
     )
+
+
+def _try_source_video(task_id, batch_id, track, deps):
+    """a song from a YouTube playlist that no catalogue knows: its own video
+    first (#2306). True when a download started; False to search as usual
+    (not a stub, no video known, YouTube not set up, or the video failed)."""
+    from core.downloads import source_video
+    with tasks_lock:
+        task = download_tasks.get(task_id) or {}
+        track_info = task.get('track_info')
+        tried = bool(task.get('_source_video_tried'))
+        if task:
+            task['_source_video_tried'] = True
+    if tried or not source_video.stub_id_of(track_info):
+        return False
+    client = source_video.youtube_client(deps)
+    if client is None:
+        return False
+    db = None
+    try:
+        from database.music_database import get_database
+        db = get_database()
+    except Exception:  # noqa: BLE001
+        db = None
+    video_id = source_video.video_id_for(track_info, db)
+    if not video_id:
+        return False
+    logger.info(f"[Modal Worker] '{getattr(track, 'name', '')}' is a YouTube playlist's own song: "
+                f"taking its video {video_id} before searching (task {task_id})")
+    try:
+        return bool(deps.attempt_download_with_candidates(
+            task_id, [source_video.candidate_for(video_id, track_info)], track, batch_id))
+    except Exception as e:  # noqa: BLE001 - the usual search still runs
+        logger.info(f"[Modal Worker] the playlist's own video failed for task {task_id}: {e}")
+        return False
 
 
 def _private_album_bundle_staging_miss_reason(batch_id: Optional[str], deps: Any) -> Optional[str]:
@@ -365,7 +408,7 @@ def _attempt_with_tier_fallthrough(deps, task_id, batch_id, track, results, cand
                     f"trying {len(candidates)} candidate(s) from the next tier (task {task_id})")
         with tasks_lock:
             if task_id in download_tasks:
-                download_tasks[task_id]['cached_candidates'] = candidates
+                download_tasks[task_id]['cached_candidates'] = candidates[:CACHED_CANDIDATES_KEPT]
 
 
 def _record_decision(deps, task_id, pool, outcome, track, profile_id, merge=False,
@@ -549,6 +592,43 @@ def _find_owning_sibling(task_id: str, track: SpotifyTrack):
     return None, None
 
 
+LOGIN_WAIT_POLL_SECONDS = 5.0
+
+
+def _wait_for_soulseek_login(task_id: str, deps: Any, exclude: list) -> str:
+    """Hold a task while slskd is logged out of Soulseek.
+
+    Returns ``'search'`` (go ahead), ``'skip'`` (search without Soulseek:
+    another source comes first, or the wait ran past its deadline and a
+    next source exists) or ``'gone'`` (the task was cancelled or removed
+    while it waited). Waiting spends no query and no retry: the task sits
+    in ``searching`` with "Waiting for Soulseek login" and picks up where
+    it was once slskd is back.
+    """
+    import time as _time
+    from core import soulseek_session
+
+    orchestrator = getattr(deps, 'download_orchestrator', None)
+    while True:
+        plan = soulseek_session.search_plan(orchestrator, exclude)
+        with tasks_lock:
+            task = download_tasks.get(task_id)
+            if task is None or task.get('status') == 'cancelled':
+                return 'gone'
+            if plan != 'wait':
+                soulseek_session.should_wait(task)   # clears a finished wait's mark
+                if task.get('_soulseek_login_gave_up') and soulseek_session.is_logged_out():
+                    return 'skip'
+                return plan
+            waiting = soulseek_session.should_wait(task)
+            gave_up = bool(task.get('_soulseek_login_gave_up'))
+        if not waiting:
+            # past the deadline: the next source, when there is one
+            mode = str(getattr(orchestrator, 'mode', '') or '').lower()
+            return 'skip' if gave_up and mode == 'hybrid' else 'search'
+        _time.sleep(LOGIN_WAIT_POLL_SECONDS)
+
+
 def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorkerDeps) -> None:
     """Run one task under the library its batch fills (#1199).
 
@@ -718,6 +798,13 @@ def _download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWork
                 _seed_from_preflight_pool(task_id, batch_id, track)
             except Exception as _seed_err:  # noqa: BLE001 - a missed seed just means a fresh search
                 logger.debug("preflight pool seed failed for %s: %s", task_id, _seed_err)
+        if not cached_first and _try_source_video(task_id, batch_id, track, deps):
+            with tasks_lock:
+                used_filename = download_tasks.get(task_id, {}).get('filename')
+                used_username = download_tasks.get(task_id, {}).get('username')
+            if used_filename and used_username:
+                deps.store_batch_source(batch_id, used_username, used_filename)
+            return
         if cached_first and _try_cached_candidates(task_id, batch_id, track, deps):
             if getattr(deps, 'evaluate_candidates', None) is not None:
                 from core.downloads import decision_log
@@ -872,20 +959,33 @@ def _download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWork
                 # torrent and rely on the auto-import sweep to clean up.
                 _exclude_for_hybrid_album = None
                 try:
-                    _batch_is_album = False
+                    _b = None
                     if batch_id:
                         from core.runtime_state import download_batches as _db
                         _b = _db.get(batch_id)
-                        if isinstance(_b, dict):
-                            _batch_is_album = bool(_b.get('is_album_download'))
-                    if _batch_is_album and getattr(deps.download_orchestrator, 'mode', '') == 'hybrid':
-                        _exclude_for_hybrid_album = ['torrent', 'usenet']
+                    from core.downloads.album_bundle_dispatch import per_track_exclusions
+                    from core.downloads.master import _resolve_album_bundle_sources
+                    from core.settings import config_manager as _cfg
+                    _exclude_for_hybrid_album = per_track_exclusions(
+                        _b, _cfg.get,
+                        hybrid=getattr(deps.download_orchestrator, 'mode', '') == 'hybrid',
+                        bundle_sources=_resolve_album_bundle_sources(_cfg),
+                    )
                 except Exception as _exc_filter_err:
                     logger.debug("[Modal Worker] album-source-exclusion check failed: %s", _exc_filter_err)
                 # Fold in budget-exhausted sources (per-source quarantine retry).
                 _exclude_sources = list(_exhausted_sources)
                 if _exclude_for_hybrid_album:
                     _exclude_sources.extend(_exclude_for_hybrid_album)
+                # slskd logged out of Soulseek (a server ban, a reconnect):
+                # wait for the login instead of spending this query, or leave
+                # Soulseek out when another source comes first. A task that
+                # waited past the deadline moves on to its next source.
+                _login = _wait_for_soulseek_login(task_id, deps, _exclude_sources)
+                if _login == 'gone':
+                    return
+                if _login == 'skip' and 'soulseek' not in _exclude_sources:
+                    _exclude_sources.append('soulseek')
                 # Live search ticker (#1156): slskd's poller fires this on every
                 # response tick — the hook existed through the whole plugin chain
                 # but the download path never passed one.
@@ -927,9 +1027,11 @@ def _download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWork
                     _search_kwargs['quality_profile_id'] = _profile_id
                 if _track_hint:
                     _search_kwargs['track_hint'] = _track_hint
-                tracks_result, _ = deps.run_async(
+                tracks_result, _albums_result = deps.run_async(
                     deps.download_orchestrator.search(query, **_search_kwargs)
                 )
+                # files inside soulseek folder groups are candidates too (#2228)
+                tracks_result = track_candidates(tracks_result, _albums_result)
                 logger.debug(f"Search completed for task {task_id}, got {len(tracks_result) if tracks_result else 0} results")
 
                 # CRITICAL: Check cancellation immediately after search returns
@@ -999,7 +1101,7 @@ def _download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWork
                             # Store candidates for retry fallback (like GUI). A
                             # later quarantine retry walks these via cached-first
                             # and skips re-searching this query (searched_queries).
-                            download_tasks[task_id]['cached_candidates'] = candidates
+                            download_tasks[task_id]['cached_candidates'] = candidates[:CACHED_CANDIDATES_KEPT]
 
                         # Try to download with these candidates
                         success = _attempt_with_tier_fallthrough(
@@ -1096,8 +1198,9 @@ def _download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWork
                                 download_tasks[task_id]['current_source'] = fallback_source
                                 download_tasks[task_id]['current_query'] = fb_query
                                 download_tasks[task_id].pop('search_live', None)
-                            fb_results, _ = deps.run_async(_search_fallback_source(
+                            fb_results, _fb_albums = deps.run_async(_search_fallback_source(
                                 fb_client, fb_query, _track_hint, _profile_id))
+                            fb_results = track_candidates(fb_results, _fb_albums)
                             with tasks_lock:
                                 if task_id not in download_tasks or download_tasks[task_id]['status'] == 'cancelled':
                                     return
@@ -1114,7 +1217,7 @@ def _download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWork
                                 with tasks_lock:
                                     if task_id not in download_tasks or download_tasks[task_id]['status'] == 'cancelled':
                                         return
-                                    download_tasks[task_id]['cached_candidates'] = fb_candidates
+                                    download_tasks[task_id]['cached_candidates'] = fb_candidates[:CACHED_CANDIDATES_KEPT]
                                 success = _attempt_with_tier_fallthrough(
                                     deps, task_id, batch_id, track, fb_results, fb_candidates,
                                     fb_query, _profile_id, decision_pool,

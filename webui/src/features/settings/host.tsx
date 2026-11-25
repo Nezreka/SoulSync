@@ -12,8 +12,9 @@
 
 import type { ComponentType } from 'react';
 
-import { pageTabs } from './page-tabs';
+import { nav, resolveTab } from './nav';
 import { settingsStore, type SettingsPayload, type SettingsStore } from './settings-store';
+import { landHit } from './shell/search';
 import { applyAppearanceOnLoad } from './tabs/appearance';
 import { AppearanceTab } from './tabs/appearance-tab';
 import { checkQobuzAuthStatus } from './tabs/connections';
@@ -21,15 +22,30 @@ import { musicbrainzError, syncMetadataSourceSelection } from './tabs/connection
 import { testConnection } from './tabs/connections-servers';
 import { servicesModel } from './tabs/connections-services';
 import { ConnectionsTab } from './tabs/connections-tab';
-import { DiscoveryTab } from './tabs/discovery-tab';
+import { DevicesTab } from './tabs/devices/devices-tab';
+import { DiscoveryTab } from './tabs/discovery/discovery-page';
 import { DownloadsTab } from './tabs/downloads-tab';
-import { LibraryTab } from './tabs/library-folders';
-import { LogsTab } from './tabs/logs-tab';
-import { playlistItemError, templateErrors } from './tabs/organization';
+import { LibraryTab } from './tabs/library/library-page';
+import {
+  type TemplateKey,
+  playlistItemError,
+  templateErrors,
+  templateFieldErrors,
+  templateWaits,
+} from './tabs/organization';
+
+/** a template's name, as its field says it */
+const TEMPLATE_NAMES: Partial<Record<TemplateKey, string>> = {
+  album_path: 'The album path template',
+  single_path: 'The single path template',
+  playlist_path: 'The old playlist path template',
+  podcast_path: 'The podcast path template',
+  sample_path: 'The sample path template',
+};
+import { PeopleTab, openPeopleSettings } from './tabs/people/people-tab';
 import { QualityTab } from './tabs/quality-tab';
 import { sourcesModel } from './tabs/sources-model';
-import { SourcesTab } from './tabs/sources-tab';
-import { SystemTab } from './tabs/system-tab';
+import { SystemTab } from './tabs/system/system-page';
 
 export type SettingsTabKey =
   | 'connections'
@@ -38,6 +54,8 @@ export type SettingsTabKey =
   | 'quality'
   | 'library'
   | 'discovery'
+  | 'people'
+  | 'devices'
   | 'appearance'
   | 'advanced'
   | 'logs';
@@ -62,14 +80,23 @@ export interface SoulSyncSettingsApi {
   /** a vanilla field that writes a React tab's key (the Connections tab's
    *  Deezer ARL mirrors the Deezer source panel's) */
   set: (section: string, key: string, value: unknown) => void;
-  /** what is wrong with the naming templates (the Library tab's
-   *  Organization card): the page save refuses while any is set, and says so */
+  /** what is wrong with the naming templates (Library > Naming): a
+   *  template that would not work is not saved, everything else is */
   templateErrors: () => string[];
-  /** the Playlist File Naming rule, which the page save toasts on its own */
+  /** the Playlist File Naming rule: held back the same way */
   playlistItemError: () => string | null;
   /** what is wrong with the MusicBrainz server fields (Connections): the
    *  page save refuses while it is set, and says so */
   musicbrainzError: () => string | null;
+  /** how many changed settings wait to be saved (the save status counts them) */
+  pendingCount: () => number;
+  /** what is held back right now, in words: a template not saved, or a
+   *  MusicBrainz address holding every save */
+  blockers: () => Array<{ message: string }>;
+  /** go to the field the first blocker is about, and light it */
+  showBlocker: () => void;
+  /** what the server said when the last save failed */
+  lastError: () => string | null;
 }
 
 declare global {
@@ -86,9 +113,9 @@ export const SETTINGS_TABS: Partial<Record<SettingsTabKey, ComponentType<Setting
   discovery: DiscoveryTab,
   downloads: DownloadsTab,
   library: LibraryTab,
-  logs: LogsTab,
+  people: PeopleTab,
+  devices: DevicesTab,
   quality: QualityTab,
-  sources: SourcesTab,
 };
 
 /** What opening Settings applies whatever tab it opens on. settings.js did
@@ -108,27 +135,83 @@ export function createSettingsHost({
   effects?: Array<(settings: SettingsPayload) => void>;
   store?: SettingsStore;
 } = {}): SoulSyncSettingsApi {
-  // a naming template that would not work holds every save back, as the old
-  // page refused its whole save (validateFileOrganizationTemplates)
+  // a naming template that would not work is not saved: only that key is
+  // held back, every other setting saves as usual (the old page refused the
+  // whole save). its field says why and the save status goes to it
   const errors = () => (tabs.library ? templateErrors(store.getState().settings) : []);
   const itemError = () => (tabs.library ? playlistItemError(store.getState().settings) : null);
-  store.block(() => {
-    if (errors().length > 0) return true;
-    // the Playlist File Naming rule says why on every save it holds, the
-    // autosave's too, as saveSettings did even when quiet
-    const item = itemError();
-    if (item) window.showToast?.(item, 'error');
-    return !!item;
+  const badTemplates = (): TemplateKey[] => {
+    if (!tabs.library) return [];
+    const settings = store.getState().settings;
+    const keys = Object.keys(templateFieldErrors(settings)) as TemplateKey[];
+    if (playlistItemError(settings)) keys.push('playlist_item');
+    return keys;
+  };
+  store.hold(() => {
+    const bad = badTemplates();
+    if (!bad.length) return [];
+    // the whole dict, when something set it in one go, is held with them
+    return [
+      { section: 'file_organization', key: 'templates' },
+      ...bad.map((key) => ({ section: 'file_organization', key: `templates.${key}` })),
+    ];
   });
+  /** said after a template's problem when its new value waits, unsaved */
+  const unsaved = (key: TemplateKey) =>
+    templateWaits(store, key) ? ' It is not saved until it is fixed.' : '';
   // nor would a MusicBrainz server address that does not work
   const mbError = () => (tabs.connections ? musicbrainzError() : null);
   store.block(() => !!mbError());
 
-  /** the tab the shell opened: the page (settings-page.tsx) renders every
-   *  tab and tells each whether it is the open one and how often it was
-   *  opened (step V4c; the host rendered them into the vanilla page's slots) */
+  /** a tab asked for by key, from anywhere (window.switchSettingsTab): where
+   *  the page is lives in nav.ts, and old keys are aliases there */
   function show(tab: string) {
-    pageTabs.show(tab);
+    nav.go(tab);
+  }
+
+  /** where each thing that can hold a save is, so the save status can go there */
+  function blockers() {
+    const found: Array<{
+      message: string;
+      tab: string;
+      id: string;
+      service?: string;
+      view?: string;
+      kind?: string;
+    }> = [];
+    const mb = mbError();
+    if (mb)
+      found.push({
+        message: mb,
+        tab: 'connections',
+        id: 'musicbrainz-base-url',
+        service: 'musicbrainz',
+      });
+    // each template that would not work is its own thing to fix, and goes
+    // to its own field (Library > Naming, on its kind)
+    if (tabs.library)
+      for (const [key, problems] of Object.entries(
+        templateFieldErrors(store.getState().settings),
+      )) {
+        const name = TEMPLATE_NAMES[key as TemplateKey] ?? 'A naming template';
+        found.push({
+          message: `${name} would not work: ${(problems ?? []).join('. ')}.${unsaved(key as TemplateKey)}`,
+          tab: 'library',
+          view: 'naming',
+          kind: key === 'podcast_path' ? 'podcasts' : 'music',
+          id: `template-${key.replace('_', '-')}`,
+        });
+      }
+    const item = itemError();
+    if (item)
+      found.push({
+        message: `${item}${unsaved('playlist_item')}`,
+        tab: 'library',
+        view: 'naming',
+        kind: 'music',
+        id: 'template-playlist-item',
+      });
+    return found;
   }
 
   return {
@@ -151,6 +234,26 @@ export function createSettingsHost({
     templateErrors: errors,
     playlistItemError: itemError,
     musicbrainzError: mbError,
+    pendingCount: () => store.pendingCount(),
+    blockers: () => blockers().map(({ message }) => ({ message })),
+    showBlocker() {
+      const first = blockers()[0];
+      if (!first) return;
+      // a template's kind first, so its field is the one on screen
+      if (first.view) nav.go(first.tab, first.view, first.kind ? { kind: first.kind } : undefined);
+      void landHit({
+        key: `blocker:${first.id}`,
+        label: first.message,
+        path: '',
+        words: '',
+        tab: resolveTab(first.tab).tab,
+        view: first.view,
+        curated: true,
+        open: first.service ? { service: first.service } : undefined,
+        anchor: { id: first.id },
+      });
+    },
+    lastError: () => store.getState().error,
   };
 }
 
@@ -179,6 +282,9 @@ export function mountSettingsHost(): void {
   shell.closeServiceModal = () => servicesModel.close();
   // every card's Test button, React's and the video side's vanilla ones
   shell.testConnection = (service: string) => testConnection(service);
+  // Settings > People, from Manage profiles and anywhere else that sends
+  // someone to people and access
+  shell.openPeopleSettings = openPeopleSettings;
   // this bundle is a deferred module: the shell (shell.ts, in the shell
   // bundle) may have loaded the settings before it ran
   const payload = (window as Window & { _settingsPayload?: unknown })._settingsPayload;

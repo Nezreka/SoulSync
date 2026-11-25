@@ -291,13 +291,27 @@ export function ServerSearchOverlay({
               const bitrate = searchBitrateText(searchTrack.bitrate);
               const duration = formatDurationMs(searchTrack.duration);
               const isPending = pendingId === id;
+              // #2235: the server has no id for this one yet, so its id is
+              // the library row's and the server would drop it or play
+              // something else. shown, so nobody wonders where it went, but
+              // it can't be picked
+              const offServer = searchTrack.on_server === false;
               return (
                 <div
                   key={`${id}-${index}`}
                   className="server-search-result"
                   // 863: the rows cascade in — the delay is per-index inline.
-                  style={{ animationDelay: `${index * 0.03}s` }}
-                  onClick={() => void select(searchTrack)}
+                  style={{
+                    animationDelay: `${index * 0.03}s`,
+                    ...(offServer ? { opacity: 0.55, cursor: 'default' } : null),
+                  }}
+                  aria-disabled={offServer || undefined}
+                  title={
+                    offServer
+                      ? 'In your library but not on your server yet. Scan the library on the server, then in SoulSync.'
+                      : undefined
+                  }
+                  onClick={offServer ? undefined : () => void select(searchTrack)}
                 >
                   <div className="server-search-result-art">
                     {searchTrack.album_thumb_url ? (
@@ -325,8 +339,12 @@ export function ServerSearchOverlay({
                     {bitrate ? <span className="server-search-bitrate">{bitrate}</span> : null}
                     {duration ? <span className="server-search-dur">{duration}</span> : null}
                   </div>
-                  <button type="button" className="server-search-select-btn" disabled={isPending}>
-                    {isPending ? '...' : 'Select'}
+                  <button
+                    type="button"
+                    className="server-search-select-btn"
+                    disabled={isPending || offServer}
+                  >
+                    {offServer ? 'Not on server yet' : isPending ? '...' : 'Select'}
                   </button>
                 </div>
               );

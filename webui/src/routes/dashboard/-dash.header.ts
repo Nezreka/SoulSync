@@ -222,6 +222,31 @@ const TOGGLE_LABELS: Partial<Record<EnrichEventId, string>> = {
   similar_artists: 'Similar Artists',
 };
 
+/**
+ * What a tap on an orb does, as the label of the button that does it in the
+ * phone's worker sheet (#2180): onOrbClick below, read for the pill's state
+ * now. null where the tap does nothing worth a button: SoulID is display
+ * only, Bandcamp waits on Settings, and an idle or unknown worker would only
+ * be "resumed" into the same idle.
+ */
+export function orbSheetAction(
+  id: HeaderPillId,
+  stateClass: HeaderPill['stateClass'],
+): { label: string; closes?: boolean } | null {
+  if (id === 'repair') return { label: 'Open Library Maintenance', closes: true };
+  if (id === 'soulid') return null;
+  if (id === 'hydrabase') return { label: stateClass === 'active' ? 'Stop' : 'Start' };
+  if (id === 'discogs') {
+    // the inverted read: paused or complete resumes, anything else pauses
+    if (stateClass === 'paused' || stateClass === 'complete') return { label: 'Resume' };
+    return stateClass === 'active' ? { label: 'Pause' } : null;
+  }
+  if (id !== 'spotify' && id !== 'bandcamp' && !TOGGLE_LABELS[id]) return null;
+  if (stateClass === 'active') return { label: 'Pause' };
+  if (stateClass === 'paused') return { label: 'Resume' };
+  return null;
+}
+
 function materialize(previous: HeaderPill, view: PillView): HeaderPill {
   const next: HeaderPill = {
     stateClass: view.stateClass,
@@ -258,7 +283,13 @@ export interface DashboardHeaderState {
   wishlistCount: number | null;
 }
 
-export function useDashboardHeader(): DashboardHeaderState {
+/**
+ * `workers` is false for a member (#2196): the workers are server maintenance,
+ * the admins'. The orbs don't render, so nothing here asks the worker
+ * endpoints (they refuse a member) or reads dev mode for the Hydrabase orb.
+ * The watchlist/wishlist counts are everyone's.
+ */
+export function useDashboardHeader({ workers }: { workers: boolean }): DashboardHeaderState {
   const [pills, setPills] = useState<Record<HeaderPillId, HeaderPill>>(PILL_DEFAULTS);
   const [repairBadge, setRepairBadge] = useState({ count: 0, visible: false });
   const [jiosaavnVisible, setJiosaavnVisible] = useState<boolean>(
@@ -297,6 +328,11 @@ export function useDashboardHeader(): DashboardHeaderState {
   // ── Fallback polling (socket-down safety net; see the header comment) ──────
   useEffect(() => {
     mountedRef.current = true;
+    if (!workers) {
+      return () => {
+        mountedRef.current = false;
+      };
+    }
 
     const enrichTick = async () => {
       // Same gates as the vanilla poller twins: the socket push owns live
@@ -330,7 +366,7 @@ export function useDashboardHeader(): DashboardHeaderState {
       mountedRef.current = false;
       clearInterval(enrichTimer);
     };
-  }, [applyFrame]);
+  }, [applyFrame, workers]);
 
   // ── Refetch-own-provider after a toggle (`await update<X>Status()`) ────────
   const refreshProvider = useCallback(
@@ -447,6 +483,7 @@ export function useDashboardHeader(): DashboardHeaderState {
   );
   useDevModeEvent(useCallback((frame) => setHydrabaseVisible(frame.enabled === true), []));
   useEffect(() => {
+    if (!workers) return undefined;
     let cancelled = false;
     void fetchDevMode().then((enabled) => {
       if (!cancelled && enabled) setHydrabaseVisible(true);
@@ -454,7 +491,7 @@ export function useDashboardHeader(): DashboardHeaderState {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [workers]);
 
   // ── Quick-nav counts ───────────────────────────────────────────────────────
   const applyWatchlist = useCallback(

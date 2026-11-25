@@ -5,8 +5,8 @@
  * answer, hides what's off in the sidebar, and tells the React pages through
  * window.SoulSyncFeatures + an event. It's a preference, not access: a hidden
  * page still opens from a link, permissions stay in init.js. An admin can
- * set it for a profile and lock it (#2157); a locked profile sees its choice
- * read only.
+ * set it for a profile and lock it (#2157); a locked profile gets no
+ * Customize at all, there's nothing for it to change (#2164).
  *
  * The last answer is cached in localStorage so the inline script under the
  * sidebar can hide the same items before first paint. Without that every
@@ -18,6 +18,8 @@ import { refreshHiddenPageNote, watchHiddenPageNote } from './hidden-page-note';
 export const FEATURES_CHANGED_EVENT = 'ss:features-changed';
 export const FEATURES_CACHE_KEY = 'ss_features';
 const HIDDEN = 'nav-feature-hidden';
+/** on <html> while an admin has this profile locked: css drops Customize */
+export const LOCKED_ATTR = 'data-features-locked';
 
 export interface FeatureDef {
   id: string;
@@ -36,6 +38,12 @@ export interface FeaturesPayload {
   follows_default?: boolean;
   /** the switches worth showing this profile (the server's call) */
   offered?: string[];
+  /** admin view only (#2164): what the admin set, what a lock shows */
+  set_off?: string[];
+  /** admin view only: the admin saved a set for this profile */
+  admin_set?: boolean;
+  /** admin view only: the member's own pick, null when they never made one */
+  own_off?: string[] | null;
   /** admins only: podcasts / audiobooks jobs, paused and hidden-by-everyone */
   background?: Record<string, { paused: boolean; everyone_hid: boolean }>;
   features: FeatureDef[];
@@ -70,22 +78,23 @@ type SideGlobals = {
   profileAllowedSides?: () => string;
 };
 
-function readCache(): { off: string[]; pages: string[] } {
+function readCache(): { off: string[]; pages: string[]; locked: boolean } {
   try {
     const raw = JSON.parse(localStorage.getItem(FEATURES_CACHE_KEY) || 'null') as {
       off?: unknown;
       pages?: unknown;
+      locked?: unknown;
     } | null;
     const list = (v: unknown) => (Array.isArray(v) ? v.map(String) : []);
-    return { off: list(raw?.off), pages: list(raw?.pages) };
+    return { off: list(raw?.off), pages: list(raw?.pages), locked: raw?.locked === true };
   } catch {
-    return { off: [], pages: [] };
+    return { off: [], pages: [], locked: false };
   }
 }
 
-function writeCache(off: string[], pages: string[]): void {
+function writeCache(off: string[], pages: string[], locked: boolean): void {
   try {
-    localStorage.setItem(FEATURES_CACHE_KEY, JSON.stringify({ off, pages }));
+    localStorage.setItem(FEATURES_CACHE_KEY, JSON.stringify({ off, pages, locked }));
   } catch {
     /* storage blocked: the sidebar just flashes once per load */
   }
@@ -152,16 +161,13 @@ export function resetSideMemory(): void {
   movedOffVideo = false;
 }
 
-/** a locked profile's Customize button says who sets it */
+/** a locked profile has nothing to change, so Customize goes away (#2164).
+ *  the attribute on <html> also covers the button in Settings and the
+ *  pre-paint replay in index.html sets it from the cache. */
 export function renderCustomizeLock(locked: boolean, root: Document = document): void {
-  const btn = root.querySelector<HTMLElement>('.sidebar-customize-btn');
-  if (!btn) return;
-  btn.toggleAttribute('data-locked', locked);
-  btn.title = locked ? 'Set by an admin' : 'Choose what shows in SoulSync';
-  btn.setAttribute(
-    'aria-label',
-    locked ? 'Customize SoulSync, set by an admin' : 'Customize SoulSync',
-  );
+  root.documentElement.toggleAttribute(LOCKED_ATTR, locked);
+  const box = root.querySelector<HTMLElement>('.sidebar-customize');
+  if (box) box.hidden = locked;
 }
 
 function publish(payload: FeaturesPayload): void {
@@ -169,7 +175,7 @@ function publish(payload: FeaturesPayload): void {
   state.payload = payload;
   state.off = payload.off.slice();
   state.hiddenPages = payload.hidden_pages.slice();
-  writeCache(state.off, state.hiddenPages);
+  writeCache(state.off, state.hiddenPages, !!payload.locked);
   applyFeatures(state.off, state.hiddenPages);
   refreshNote();
   // a locked profile has nothing to choose, so no offer either
@@ -242,6 +248,7 @@ export function primeFromCache(): void {
   state.hiddenPages = cached.pages;
   if (document.documentElement) {
     document.documentElement.setAttribute('data-features-off', cached.off.join(' '));
+    document.documentElement.toggleAttribute(LOCKED_ATTR, cached.locked);
   }
 }
 

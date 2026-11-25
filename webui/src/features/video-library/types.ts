@@ -31,6 +31,8 @@ export interface LibraryFile {
   audio_channels: number | null;
   dynamic_range: string | null;
   atmos: boolean;
+  /** "Director's Cut", "Extended": read off the file name by soulsync's folder scan */
+  edition?: string | null;
   /** the file's audio languages ('ja', 'en'); null until soulsync has read them */
   audio_languages?: string[] | null;
   /** its embedded subtitle tracks' languages, same shape */
@@ -97,6 +99,15 @@ export interface QualityBlock {
   below_cutoff?: number;
 }
 
+/** a trailer, featurette or deleted scene in the title's own folder */
+export interface Extra {
+  key: string;
+  kind: string;
+  name: string;
+  filename: string;
+  size_bytes: number | null;
+}
+
 export interface MovieLibrary {
   kind: 'movie';
   id: number;
@@ -116,6 +127,7 @@ export interface MovieLibrary {
   copies: { count: number; roots: string[]; spans_drives: boolean; same_resolution: boolean };
   extra_copies?: ExtraCopies;
   files: LibraryFile[];
+  extras?: Extra[];
   /** the padlock: automation leaves this title and its files alone */
   locked?: boolean;
   recycle: boolean;
@@ -145,7 +157,10 @@ export interface LibrarySeason {
   title: string;
   owned: number;
   total: number;
+  /** aired, no file and monitored: what SoulSync hunts (#2177) */
   missing: number;
+  /** aired, no file, nobody hunting it */
+  missing_unmonitored?: number;
   upcoming: number;
   size_bytes: number;
   monitored: boolean;
@@ -160,10 +175,14 @@ export interface ShowLibrary {
   title: string;
   year: number | null;
   identity: Identity;
+  extras?: Extra[];
   summary: {
     owned: number;
     total: number;
+    /** aired, no file and monitored: what SoulSync hunts (#2177) */
     missing: number;
+    /** aired, no file, nobody hunting it */
+    missing_unmonitored?: number;
     upcoming: number;
     specials_owned: number;
     files: number;

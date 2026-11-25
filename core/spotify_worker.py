@@ -897,7 +897,10 @@ class SpotifyWorker:
             )
             if entity_type == 'album':
                 # The authoritative expected total for the Album Completeness job.
-                set_expected_track_count(conn, entity_id, total_tracks)
+                set_expected_track_count(
+                    conn, entity_id, total_tracks,
+                    source='spotify', provider_id=provider_id,
+                )
             record_attempt(conn, entity_type=entity_type, entity_id=entity_id,
                            service='spotify', status='matched')
             # every artist Spotify credits, not just the one it is filed under

@@ -13,6 +13,7 @@ import {
   searchReassignArtists,
 } from '../-artist-detail.reassign';
 import { fetchReidentifySources } from '../-artist-detail.reidentify';
+import { BodyPortal } from './portal';
 
 /**
  * Reassign an album to a different artist.
@@ -74,7 +75,6 @@ export function ReassignModal({
   const [album, setAlbum] = useState<ReassignAlbum | null>(null);
 
   const [preview, setPreview] = useState<ReassignPreview | null>(null);
-  const [replace, setReplace] = useState(true);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -148,7 +148,9 @@ export function ReassignModal({
         artist_id: artist.id,
         artist_name: artist.name,
         album_type: album.album_type ?? null,
-        replace,
+        // #2193: a reassign moves the files. it never leaves the originals
+        // behind as a second copy of the album
+        replace: true,
         // Only ever true because the preview above showed the user exactly
         // which tracks would be left behind.
         allow_partial: (preview?.unmapped_count ?? 0) > 0,
@@ -177,235 +179,232 @@ export function ReassignModal({
     step === 'preview' && !busy && Boolean(preview?.success) && Boolean(preview?.mapped_count);
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="reid-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="reid-hero">
-          <div className="reid-hero-decor">
-            <div
-              className="reid-hero-bg"
-              style={imageUrl ? { backgroundImage: cssUrl(imageUrl) } : undefined}
-            />
-            <div className="reid-hero-overlay" />
-          </div>
-          <span className="reid-close" onClick={onClose}>
-            ×
-          </span>
-          <div className="reid-hero-content">
-            <div
-              className={`reid-hero-art${imageUrl ? '' : ' empty'}`}
-              style={imageUrl ? { backgroundImage: cssUrl(imageUrl) } : undefined}
-            />
-            <div className="reid-hero-meta">
-              <div className="reid-hero-eyebrow">Reassign album</div>
-              <div className="reid-hero-title">{albumTitle || 'Album'}</div>
-              <div className="reid-hero-sub">currently filed under {currentArtist}</div>
-            </div>
-          </div>
-        </div>
-
-        {/* Where you are in the flow. Three steps is enough to lose your place
-            in, and the release/review steps have no other chrome. */}
-        <div className="reassign-steps">
-          {STEP_ORDER.map((s, index) => (
-            <div
-              key={s}
-              className={`reassign-step${index === stepIndex ? ' active' : ''}${
-                index < stepIndex ? ' done' : ''
-              }`}
-            >
-              <span className="reassign-step-num">{index < stepIndex ? '✓' : index + 1}</span>
-              {STEP_LABELS[s]}
-            </div>
-          ))}
-        </div>
-
-        {step === 'artist' ? (
-          <>
-            <div className="reid-tabs">
-              {sources && sources.length === 0 ? (
-                <span className="reid-tab active">No metadata sources available</span>
-              ) : (
-                (sources ?? []).map((s) => (
-                  <div
-                    key={s.id}
-                    className={`reid-tab${s.id === source ? ' active' : ''}`}
-                    onClick={() => setSource(s.id)}
-                  >
-                    {s.label}
-                  </div>
-                ))
-              )}
-            </div>
-
-            <div className="reid-search">
-              <svg className="reid-search-icon" viewBox="0 0 24 24" width="18" height="18">
-                <path
-                  fill="currentColor"
-                  d="M15.5 14h-.79l-.28-.27a6.5 6.5 0 1 0-.7.7l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0A4.5 4.5 0 1 1 14 9.5 4.5 4.5 0 0 1 9.5 14z"
-                />
-              </svg>
-              <input
-                type="text"
-                className="reid-search-input"
-                placeholder="Search for the correct artist…"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') void runSearch();
-                }}
+    <BodyPortal>
+      <div className="modal-overlay" onClick={onClose}>
+        <div className="reid-modal" onClick={(e) => e.stopPropagation()}>
+          <div className="reid-hero">
+            <div className="reid-hero-decor">
+              <div
+                className="reid-hero-bg"
+                style={imageUrl ? { backgroundImage: cssUrl(imageUrl) } : undefined}
               />
-              <button type="button" className="reid-search-btn" onClick={() => void runSearch()}>
-                Search
-              </button>
+              <div className="reid-hero-overlay" />
             </div>
-          </>
-        ) : null}
-
-        <div className="reid-results">
-          {step === 'artist' && busy ? (
-            <div className="reid-state">
-              <div className="reid-spinner" />
-            </div>
-          ) : null}
-
-          {step === 'artist' && !busy && artists === null ? (
-            <div className="reid-state">
-              <div className="reid-state-icon">🎤</div>
-              <p>
-                Search for the artist this album should belong to — a featured artist is often
-                picked up as the album artist by mistake.
-              </p>
-            </div>
-          ) : null}
-
-          {step === 'artist' && !busy && artists?.length === 0 ? (
-            <div className="reid-state">
-              <div className="reid-state-icon">🔍</div>
-              <p>No artists matched that search on this source.</p>
-            </div>
-          ) : null}
-
-          {step === 'artist' && !busy
-            ? (artists ?? []).map((row) => (
-                <div key={row.id} className="reid-result" onClick={() => void pickArtist(row)}>
-                  <div
-                    className={`reid-result-art${row.image_url ? '' : ' empty'}`}
-                    style={row.image_url ? { backgroundImage: cssUrl(row.image_url) } : undefined}
-                  />
-                  <div className="reid-result-info">
-                    <div className="reid-result-title">{row.name}</div>
-                    <div className="reid-result-release">Pick to see their releases</div>
-                  </div>
-                  <div className="reid-result-meta">
-                    <span className="reid-result-check" />
-                  </div>
-                </div>
-              ))
-            : null}
-
-          {step === 'album' && busy ? (
-            <div className="reid-state">
-              <div className="reid-spinner" />
-            </div>
-          ) : null}
-
-          {step === 'album' && !busy && albums?.length === 0 ? (
-            <div className="reid-state">
-              <div className="reid-state-icon">💿</div>
-              <p>No releases found for {artist?.name} on this source.</p>
-            </div>
-          ) : null}
-
-          {step === 'album' && !busy
-            ? (albums ?? []).map((row) => (
-                <div key={row.id} className="reid-result" onClick={() => void pickAlbum(row)}>
-                  <div
-                    className={`reid-result-art${row.image_url ? '' : ' empty'}`}
-                    style={row.image_url ? { backgroundImage: cssUrl(row.image_url) } : undefined}
-                  />
-                  <div className="reid-result-info">
-                    <div className="reid-result-title">{row.name}</div>
-                    <div className="reid-result-release">{albumBits(row) || 'release'}</div>
-                  </div>
-                  <div className="reid-result-meta">
-                    <span className="reid-result-check" />
-                  </div>
-                </div>
-              ))
-            : null}
-
-          {step === 'preview' && busy ? (
-            <div className="reid-state">
-              <div className="reid-spinner" />
-            </div>
-          ) : null}
-
-          {step === 'preview' && !busy && preview && !preview.success ? (
-            <div className="reid-state">
-              <div className="reid-state-icon">⚠️</div>
-              <p>{preview.error}</p>
-            </div>
-          ) : null}
-
-          {step === 'preview' && !busy && preview?.success ? (
-            <>
-              <div className={`reassign-summary${preview.unmapped_count ? ' warn' : ''}`}>
-                {describeMapping(preview)}
+            <span className="reid-close" onClick={onClose}>
+              ×
+            </span>
+            <div className="reid-hero-content">
+              <div
+                className={`reid-hero-art${imageUrl ? '' : ' empty'}`}
+                style={imageUrl ? { backgroundImage: cssUrl(imageUrl) } : undefined}
+              />
+              <div className="reid-hero-meta">
+                <div className="reid-hero-eyebrow">Reassign album</div>
+                <div className="reid-hero-title">{albumTitle || 'Album'}</div>
+                <div className="reid-hero-sub">currently filed under {currentArtist}</div>
               </div>
-              {(preview.pairings ?? []).map((p, index) => (
-                <div
-                  key={`${String(p.local_id)}-${index}`}
-                  className={`reassign-row${p.mapped ? '' : ' unmapped'}`}
-                >
-                  <span className="reassign-row-local">
-                    {p.local_track_number ? `${p.local_track_number}. ` : ''}
-                    {p.local_title}
-                  </span>
-                  <span className="reassign-row-arrow">{p.mapped ? '→' : '✕'}</span>
-                  <span className="reassign-row-target">
-                    {p.mapped ? p.target_title : 'stays with the current artist'}
-                  </span>
-                  <span className="reassign-row-why">{describeMatch(p)}</span>
-                </div>
-              ))}
+            </div>
+          </div>
+
+          {/* Where you are in the flow. Three steps is enough to lose your place
+            in, and the release/review steps have no other chrome. */}
+          <div className="reassign-steps">
+            {STEP_ORDER.map((s, index) => (
+              <div
+                key={s}
+                className={`reassign-step${index === stepIndex ? ' active' : ''}${
+                  index < stepIndex ? ' done' : ''
+                }`}
+              >
+                <span className="reassign-step-num">{index < stepIndex ? '✓' : index + 1}</span>
+                {STEP_LABELS[s]}
+              </div>
+            ))}
+          </div>
+
+          {step === 'artist' ? (
+            <>
+              <div className="reid-tabs">
+                {sources && sources.length === 0 ? (
+                  <span className="reid-tab active">No metadata sources available</span>
+                ) : (
+                  (sources ?? []).map((s) => (
+                    <div
+                      key={s.id}
+                      className={`reid-tab${s.id === source ? ' active' : ''}`}
+                      onClick={() => setSource(s.id)}
+                    >
+                      {s.label}
+                    </div>
+                  ))
+                )}
+              </div>
+
+              <div className="reid-search">
+                <svg className="reid-search-icon" viewBox="0 0 24 24" width="18" height="18">
+                  <path
+                    fill="currentColor"
+                    d="M15.5 14h-.79l-.28-.27a6.5 6.5 0 1 0-.7.7l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0A4.5 4.5 0 1 1 14 9.5 4.5 4.5 0 0 1 9.5 14z"
+                  />
+                </svg>
+                <input
+                  type="text"
+                  className="reid-search-input"
+                  placeholder="Search for the correct artist…"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') void runSearch();
+                  }}
+                />
+                <button type="button" className="reid-search-btn" onClick={() => void runSearch()}>
+                  Search
+                </button>
+              </div>
             </>
           ) : null}
-        </div>
 
-        <div className="reid-footer">
-          <label className="reid-replace">
-            <input
-              type="checkbox"
-              checked={replace}
-              onChange={(e) => setReplace(e.target.checked)}
-            />
-            <span className="reid-replace-box" />
-            <span className="reid-replace-text">Replace the originals after the re-import</span>
-          </label>
-          <div className="reid-footer-actions">
-            {step !== 'artist' ? (
+          <div className="reid-results">
+            {step === 'artist' && busy ? (
+              <div className="reid-state">
+                <div className="reid-spinner" />
+              </div>
+            ) : null}
+
+            {step === 'artist' && !busy && artists === null ? (
+              <div className="reid-state">
+                <div className="reid-state-icon">🎤</div>
+                <p>
+                  Search for the artist this album should belong to — a featured artist is often
+                  picked up as the album artist by mistake.
+                </p>
+              </div>
+            ) : null}
+
+            {step === 'artist' && !busy && artists?.length === 0 ? (
+              <div className="reid-state">
+                <div className="reid-state-icon">🔍</div>
+                <p>No artists matched that search on this source.</p>
+              </div>
+            ) : null}
+
+            {step === 'artist' && !busy
+              ? (artists ?? []).map((row) => (
+                  <div key={row.id} className="reid-result" onClick={() => void pickArtist(row)}>
+                    <div
+                      className={`reid-result-art${row.image_url ? '' : ' empty'}`}
+                      style={row.image_url ? { backgroundImage: cssUrl(row.image_url) } : undefined}
+                    />
+                    <div className="reid-result-info">
+                      <div className="reid-result-title">{row.name}</div>
+                      <div className="reid-result-release">Pick to see their releases</div>
+                    </div>
+                    <div className="reid-result-meta">
+                      <span className="reid-result-check" />
+                    </div>
+                  </div>
+                ))
+              : null}
+
+            {step === 'album' && busy ? (
+              <div className="reid-state">
+                <div className="reid-spinner" />
+              </div>
+            ) : null}
+
+            {step === 'album' && !busy && albums?.length === 0 ? (
+              <div className="reid-state">
+                <div className="reid-state-icon">💿</div>
+                <p>No releases found for {artist?.name} on this source.</p>
+              </div>
+            ) : null}
+
+            {step === 'album' && !busy
+              ? (albums ?? []).map((row) => (
+                  <div key={row.id} className="reid-result" onClick={() => void pickAlbum(row)}>
+                    <div
+                      className={`reid-result-art${row.image_url ? '' : ' empty'}`}
+                      style={row.image_url ? { backgroundImage: cssUrl(row.image_url) } : undefined}
+                    />
+                    <div className="reid-result-info">
+                      <div className="reid-result-title">{row.name}</div>
+                      <div className="reid-result-release">{albumBits(row) || 'release'}</div>
+                    </div>
+                    <div className="reid-result-meta">
+                      <span className="reid-result-check" />
+                    </div>
+                  </div>
+                ))
+              : null}
+
+            {step === 'preview' && busy ? (
+              <div className="reid-state">
+                <div className="reid-spinner" />
+              </div>
+            ) : null}
+
+            {step === 'preview' && !busy && preview && !preview.success ? (
+              <div className="reid-state">
+                <div className="reid-state-icon">⚠️</div>
+                <p>{preview.error}</p>
+              </div>
+            ) : null}
+
+            {step === 'preview' && !busy && preview?.success ? (
+              <>
+                <div className={`reassign-summary${preview.unmapped_count ? ' warn' : ''}`}>
+                  {describeMapping(preview)}
+                </div>
+                {(preview.pairings ?? []).map((p, index) => (
+                  <div
+                    key={`${String(p.local_id)}-${index}`}
+                    className={`reassign-row${p.mapped ? '' : ' unmapped'}`}
+                  >
+                    <span className="reassign-row-local">
+                      {p.local_track_number ? `${p.local_track_number}. ` : ''}
+                      {p.local_title}
+                    </span>
+                    <span className="reassign-row-arrow">{p.mapped ? '→' : '✕'}</span>
+                    <span className="reassign-row-target">
+                      {p.mapped ? p.target_title : 'stays with the current artist'}
+                    </span>
+                    <span className="reassign-row-why">{describeMatch(p)}</span>
+                  </div>
+                ))}
+              </>
+            ) : null}
+          </div>
+
+          <div className="reid-footer">
+            <span className="reid-replace-text">
+              The files move to the new release, nothing is copied. For one song that belongs on an
+              album you already have, use Move a track here on that album&apos;s missing row.
+            </span>
+            <div className="reid-footer-actions">
+              {step !== 'artist' ? (
+                <button
+                  type="button"
+                  className="btn btn--secondary"
+                  onClick={() => setStep(step === 'preview' ? 'album' : 'artist')}
+                >
+                  Back
+                </button>
+              ) : null}
+              <button type="button" className="btn btn--secondary" onClick={onClose}>
+                Cancel
+              </button>
               <button
                 type="button"
-                className="btn btn--secondary"
-                onClick={() => setStep(step === 'preview' ? 'album' : 'artist')}
+                className="btn btn--primary"
+                disabled={!canApply}
+                onClick={() => void apply()}
               >
-                Back
+                {busy ? 'Working…' : 'Reassign'}
               </button>
-            ) : null}
-            <button type="button" className="btn btn--secondary" onClick={onClose}>
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="btn btn--primary"
-              disabled={!canApply}
-              onClick={() => void apply()}
-            >
-              {busy ? 'Working…' : 'Reassign'}
-            </button>
+            </div>
           </div>
         </div>
       </div>
-    </div>
+    </BodyPortal>
   );
 }

@@ -510,14 +510,15 @@ def _record_pack_episode(db, ep_dl, patch):
             k: ep_dl.get(k) for k in
             ("kind", "title", "release_title", "source", "username", "filename",
              "size_bytes", "quality_label", "target_dir", "media_id", "media_source",
-             "year", "poster_url", "search_ctx", "quality_profile_id")
+             "year", "poster_url", "search_ctx", "quality_profile_id", "profile_id")
         } | {"status": "completed", "attempts": 0})
         db.update_video_download(child, dest_path=patch.get("dest_path"),
                                  progress=100.0, completed_at=_now(),
                                  quality_label=patch.get("quality_label") or ep_dl.get("quality_label"))
         row = {**ep_dl, "id": child}
+        _own_landed(db, row, patch)
         _archive_history(db, row, patch)
-        _publish_terminal(row, patch)
+        _publish_terminal(row, patch, _owners(db, row))
         return child
     except Exception:
         logger.exception("pack: failed to record the row for %s", ep_dl.get("filename"))
@@ -1099,6 +1100,46 @@ def _walk(root: str):
             yield os.path.join(dirpath, f)
 
 
+# Soulseek logged out (core.soulseek_session): download id -> when its wait
+# began. Held rows spend no retry and no stall time; a transfer the logout
+# broke is asked for again from the same peer once the login is back.
+_login_hold: dict = {}
+
+
+def _hold_for_soulseek_login(db, dl, transfers) -> bool:
+    """True when this slskd row is held for the Soulseek login this tick."""
+    from core import soulseek_session
+    dl_id = dl.get("id")
+    if soulseek_session.is_logged_out():
+        started = _login_hold.setdefault(dl_id, time.time())
+        if time.time() - started >= soulseek_session.wait_seconds():
+            return False          # waited long enough: the normal path takes it
+        try:
+            # the stall clock holds still while nobody can download anything
+            db.update_video_download(dl_id, progress_at=_now())
+        except Exception:  # noqa: BLE001 - a missed clock bump is harmless
+            logger.debug("video download %s: stall clock hold failed", dl_id)
+        return True
+    started = _login_hold.pop(dl_id, None)
+    if started is None:
+        return False
+    t = find_transfer(transfers, dl.get("username"), dl.get("filename"))
+    if not t or classify_state(t.get("state")) != "failed":
+        # it rode out the logout, or slskd forgot it (the normal path checks
+        # whether the file landed before it counts that as a miss)
+        return False
+    again = start_download(dl.get("username"), dl.get("filename"), dl.get("size_bytes") or 0)
+    if not again.get("ok"):
+        return False              # the normal path retries or fails it
+    logger.info("video download %s: Soulseek login back, asked %s again", dl_id, dl.get("username"))
+    _misses.pop(dl_id, None)
+    try:
+        db.update_video_download(dl_id, status="queued", error=None, progress_at=_now())
+    except Exception:  # noqa: BLE001
+        logger.debug("video download %s: requeue persist failed", dl_id)
+    return True
+
+
 _GIVE_UP_AFTER = 8       # consecutive 'transfer gone, no file' polls before failing it
 _misses: dict = {}       # download id -> consecutive missing polls
 # A usenet job SAB has just been handed first sits as a 'Grabbing' placeholder
@@ -1285,6 +1326,14 @@ def _search_again_now(db, dl, *, wait: bool = False) -> bool:
             handled = True
             break
     return handled if wait else True
+
+
+def _own_landed(db, dl, upd) -> None:
+    """the placed file is in the library now, not at the server's next scan
+    (core/video/library_ingest.py). best effort."""
+    if upd.get("dest_path"):
+        from core.video.library_ingest import ingest_landed
+        ingest_landed(db, dl, upd["dest_path"], replaced=upd.get("_replaced"))
 
 
 def _archive_history(db, dl, upd) -> None:
@@ -1633,6 +1682,11 @@ def _blocklist_release(db, dl, reason) -> None:
         logger.exception("video download %s: blocklist write failed", dl.get("id"))
 
 
+def _owners(db, dl) -> list:
+    from core.video.download_events import download_owners
+    return download_owners(db, dl)
+
+
 def _event_payload(dl, upd=None) -> dict:
     """The event-bus variables for one download — shared by every terminal
     outcome so trigger conditions/templates see one consistent shape."""
@@ -1649,7 +1703,7 @@ def _event_payload(dl, upd=None) -> dict:
             "source": dl.get("source") or "", "dest_path": upd.get("dest_path") or ""}
 
 
-def _publish_terminal(dl, upd) -> None:
+def _publish_terminal(dl, upd, owners=None) -> None:
     """Relay a terminal outcome to the automation event bus (best-effort).
     completed → 'video_download_completed' (+ 'video_upgrade_completed' when the
     import REPLACED a library copy); import_failed → 'video_import_failed'."""
@@ -1660,15 +1714,16 @@ def _publish_terminal(dl, upd) -> None:
     if (upd or {}).get("_pack_imported"):
         return
     try:
-        from core.video.download_events import publish
+        from core.video.download_events import owned, publish
         st = upd.get("status")
+        # the download's people: who grabbed it, else who wished for it
         if st == "completed":
-            publish("video_download_completed", _event_payload(dl, upd))
+            publish("video_download_completed", owned(_event_payload(dl, upd), owners))
             if upd.get("_upgraded"):
-                publish("video_upgrade_completed", _event_payload(dl, upd))
+                publish("video_upgrade_completed", owned(_event_payload(dl, upd), owners))
         elif st == "import_failed":
             publish("video_import_failed",
-                    {**_event_payload(dl, upd), "error": upd.get("error") or ""})
+                    owned({**_event_payload(dl, upd), "error": upd.get("error") or ""}, owners))
     except Exception:
         logger.exception("video download %s: event publish failed", dl.get("id"))
 
@@ -1712,6 +1767,13 @@ def _fail_or_retry(db, dl, error_msg, *, allow_retry: bool = True,
     the item searched again at once, so the next release the profile ranks is
     grabbed instead of the item waiting hours for the wishlist's next pass."""
     from core.video.retry import plan_retry
+    if allow_retry and _held_for_pick(db, dl):
+        # a release picked for a request held for a pick (#2199): trying the
+        # next candidate, a requery or the next ranked release would be the
+        # automatic choice the admin turned off. it fails, the row stays
+        # held, and the Requests page offers the pick again
+        logger.info("video download %s: held for a release pick, no automatic retry", dl.get("id"))
+        allow_retry = False
     plan = plan_retry(dl, blocked=_blocked_pairs(db), blocked_users=_blocked_users(db)) \
         if allow_retry else {"action": "fail"}
     if plan["action"] == "candidate" and _apply_candidate(db, dl["id"], dl, plan["candidate"], plan["rest"]):
@@ -1743,13 +1805,25 @@ def _fail_or_retry(db, dl, error_msg, *, allow_retry: bool = True,
         # isn't something to come and fix
         _spawn_next_release(db, dl, err)
         return
-    _publish_failed(dl, err)
+    _publish_failed(dl, err, _owners(db, dl))
 
 
-def _publish_failed(dl, err) -> None:
+def _held_for_pick(db, dl) -> bool:
+    """is this download's item held for a release pick on someone's wishlist?"""
     try:
-        from core.video.download_events import publish
-        publish("video_download_failed", {**_event_payload(dl), "error": err})
+        kind, tmdb_id, sn, en, _ctx = _wishlist_ids(db, dl)
+        if kind == "youtube" or not tmdb_id or not hasattr(db, "wishlist_held"):
+            return False
+        return bool(db.wishlist_held(kind, int(tmdb_id), season_number=sn, episode_number=en))
+    except Exception:  # noqa: BLE001 - unknown: retry as before
+        logger.debug("video download %s: held check failed", dl.get("id"), exc_info=True)
+        return False
+
+
+def _publish_failed(dl, err, owners=None) -> None:
+    try:
+        from core.video.download_events import owned, publish
+        publish("video_download_failed", owned({**_event_payload(dl), "error": err}, owners))
     except Exception:
         logger.exception("video download %s: failed-event publish failed", dl.get("id"))
 
@@ -1845,7 +1919,7 @@ def _next_release_now(db, dl, err) -> bool:
         db.update_video_download(dl["id"], error=final)
     except Exception:  # noqa: BLE001
         logger.debug("video download %s: final error not saved", dl.get("id"), exc_info=True)
-    _publish_failed(dl, final)
+    _publish_failed(dl, final, _owners(db, dl))
     return False
 
 
@@ -2026,13 +2100,16 @@ def settle_outcome(db, dl, upd) -> None:
     db.update_video_download(dl["id"], **upd)
     # A wished item that just landed: remove its row when it MEETS the
     # quality cutoff, keep it when below (upgrade-until semantics).
+    # whose it is, read before the wishlist lets go of it
+    owners = _owners(db, dl) if upd.get("status") in _TERMINAL else []
     if upd.get("status") == "completed":
+        _own_landed(db, dl, upd)
         _wishlist_obtained(db, dl, upd)
     # Snapshot terminal outcomes into the permanent history (survives the
     # queue cleanup; powers the History modal + smart post-download scan).
     if upd.get("status") in _TERMINAL:
         _archive_history(db, dl, upd)
-        _publish_terminal(dl, upd)     # event triggers (completed/upgrade/import-failed)
+        _publish_terminal(dl, upd, owners)     # event triggers (completed/upgrade/import-failed)
 
 
 def _tick(db) -> bool:
@@ -2084,6 +2161,8 @@ def _tick(db) -> bool:
     from core.video.client_download import process_active_client_download
     for dl in active:
         live_ids.add(dl["id"])
+        if dl.get("source") not in ("torrent", "usenet") and _hold_for_soulseek_login(db, dl, transfers):
+            continue
         if dl.get("source") in ("torrent", "usenet"):
             # torrent/usenet grabs are tracked via the shared client (by client_ref), not slskd.
             upd = process_active_client_download(dl, organizer=organizer,

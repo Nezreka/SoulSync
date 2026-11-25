@@ -36,9 +36,9 @@ describe('library v2 monitoring mutations', () => {
 
     renderWithQueryClient(<MirrorStatusBanner />, false);
 
-    const retry = await screen.findByRole('button', { name: 'Retry' });
-    expect(retry).toBeDisabled();
-    fireEvent.click(retry);
+    // the notice still says it; the retry is the admin's and isn't drawn
+    await screen.findByText(/1 wishlist sync operation failed/);
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
     expect(writes).toBe(0);
   });
 

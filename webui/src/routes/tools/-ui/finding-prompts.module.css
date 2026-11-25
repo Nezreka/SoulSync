@@ -12,6 +12,11 @@
   padding: 28px;
   width: 90%;
   text-align: center;
+  /* never taller than the screen: a long prompt scrolls inside its box instead
+     of running its buttons off a phone (#2186) */
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .box380 {
@@ -50,4 +55,145 @@
   width: 90%;
   color: var(--text-primary);
   font-family: inherit;
+}
+
+/* #2179 Keep Best over many duplicates: what goes through, what needs you */
+.keepBest {
+  max-width: 520px;
+  text-align: left;
+}
+
+.keepLead {
+  margin: 0 0 16px;
+  font-size: 0.88em;
+  color: var(--text-2);
+  line-height: 1.45;
+}
+
+.keepTally {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.keepCount {
+  padding: 4px 12px;
+  border-radius: var(--radius-pill);
+  background: var(--white-a08);
+  font-size: 0.86em;
+  color: var(--text-2);
+}
+
+.keepCount b {
+  color: var(--text-1);
+}
+
+.keepHeld {
+  background: rgba(var(--warning-rgb), 0.12);
+  color: var(--warning);
+}
+
+.keepHeld b {
+  color: var(--warning);
+}
+
+.keepReasons {
+  margin: 0 0 16px;
+  padding-left: 18px;
+  font-size: 0.84em;
+  color: var(--text-2);
+  line-height: 1.5;
+}
+
+.keepOption {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin: 0 0 14px;
+  padding: 12px;
+  border: 1px solid var(--white-a10);
+  border-radius: var(--radius-md);
+  background: var(--white-a03);
+  font-size: 0.88em;
+  color: var(--text-1);
+  cursor: pointer;
+}
+
+.keepOption input {
+  margin-top: 3px;
+  flex: none;
+}
+
+.keepNote {
+  display: block;
+  margin-top: 4px;
+  font-size: 0.86em;
+  color: var(--text-3);
+  line-height: 1.4;
+}
+
+.keepPairs {
+  margin-bottom: 4px;
+}
+
+.keepPairsHead {
+  margin-bottom: 6px;
+  font-size: 0.8em;
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.keepPairList {
+  margin: 0 0 10px;
+  padding: 0;
+  list-style: none;
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid var(--white-a08);
+  border-radius: var(--radius-md);
+}
+
+.keepPair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  padding: 8px 12px;
+  font-size: 0.84em;
+}
+
+.keepPair + .keepPair {
+  border-top: 1px solid var(--white-a06);
+}
+
+.keepPairCopy {
+  min-width: 0;
+}
+
+.keepPairTitle {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-1);
+}
+
+/* the box scrolls on a phone (reasons, pairs, both options): the buttons stay
+   pinned to its bottom edge, over the box's own padding (#2186) */
+.keepActions {
+  position: sticky;
+  bottom: -28px;
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  margin: 8px -28px -28px;
+  padding: 12px 28px 28px;
+  background: var(--bg-secondary);
+}
+
+@media (max-width: 560px) {
+  .keepPair {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
 }

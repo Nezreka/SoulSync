@@ -657,6 +657,8 @@ def _owned_tracks_for(database, artist_names: Sequence[str],
         count = plays.get(str(tid), 0) if plays else int(server_plays or 0)
         copies.setdefault(song_key(artist, title), []).append({
             "name": title,
+            # the library track, so a music app plays this exact copy
+            "lib2_track_id": int(tid),
             "artists": [{"name": artist}],
             # the art resolves only for tracks that make a mix (see _clean):
             # doing it here registered every owned track's thumb
@@ -864,10 +866,14 @@ def generate_daily_mixes(database, profile_id: int = 1, *,
     owner = listening_owner(database, profile_id)
     top = database.get_top_artists('all', 200, profile_id=profile_id) or []
     recent_plays = database.get_top_artists('30d', 200, profile_id=profile_id) or []
+    from core.discovery.favorite_seeds import favorite_artist_units
+    favorites = favorite_artist_units(database, profile_id)
     seeds = build_recency_weighted_seeds(
         top, {a['name']: a.get('play_count', 0) for a in recent_plays})
     if not seeds:
         seeds = _library_seeds(database, MAX_SEEDS)
+    # liked songs, server stars and watchlist adds weigh in on top
+    seeds = build_recency_weighted_seeds(seeds, {}, recency_factor=0, favorites=favorites)
     # a blocked artist founds no mix and names none (the subtitle is text the
     # response filter can't reach); cut before the seed cap so it costs no slot
     blocked = _blocked_artists(database, profile_id)

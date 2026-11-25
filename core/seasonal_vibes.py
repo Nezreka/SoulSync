@@ -131,6 +131,14 @@ def real_months_for(active_months: List[int], hemisphere: str, holiday: bool) ->
     return list(active_months)
 
 
+def _shelf_piles(database) -> List[int]:
+    """the seasonal shelves are the whole install's, so they read the shared
+    pile plus the own piles of people who share their listening, never a
+    private one (core.personalized.listening_privacy)"""
+    from core.personalized.listening_privacy import global_shelf_piles
+    return global_shelf_piles(database)
+
+
 def rewind_tracks(database, months: List[int], limit: int = 60) -> List[Dict[str, Any]]:
     """the user's most-played tracks during these calendar months, any year.
     art and duration come from the library when the track is owned.
@@ -145,16 +153,18 @@ def rewind_tracks(database, months: List[int], limit: int = 60) -> List[Dict[str
             # fetch deep, then diversify: the raw top of the window is a
             # handful of heavy-rotation artists, and 60 tracks by 10 artists
             # collapses to 30 after the artist cap downstream
+            piles = _shelf_piles(database)
             cursor.execute(f"""
                 SELECT artist, title, album, COUNT(*) AS plays
                 FROM listening_history
                 WHERE CAST(strftime('%m', played_at, 'localtime') AS INTEGER) IN ({placeholders})
+                  AND +profile_id IN ({",".join("?" for _ in piles)})
                   AND artist IS NOT NULL AND artist != ''
                   AND title IS NOT NULL AND title != ''
                 GROUP BY LOWER(artist), LOWER(title)
                 ORDER BY plays DESC
                 LIMIT 400
-            """, months)
+            """, [*months, *piles])
             candidates = cursor.fetchall()
             per_artist_seen: Dict[str, int] = {}
             plays_rows = []
@@ -286,16 +296,18 @@ def vibe_library_albums(database, season_key: str, months: List[int], source: st
             # history first and join through the artist set in python - a
             # LOWER() join of history against albums is quadratic.
             placeholders = ",".join("?" for _ in months)
+            piles = _shelf_piles(database)
             cursor.execute(f"""
                 SELECT artist, album, COUNT(*) AS plays
                 FROM listening_history
                 WHERE CAST(strftime('%m', played_at, 'localtime') AS INTEGER) IN ({placeholders})
+                  AND +profile_id IN ({",".join("?" for _ in piles)})
                   AND album IS NOT NULL AND album != ''
                   AND artist IS NOT NULL AND artist != ''
                 GROUP BY LOWER(artist), LOWER(album)
                 ORDER BY plays DESC
                 LIMIT 300
-            """, months)
+            """, [*months, *piles])
             played = cursor.fetchall()
 
             # review 5 R5-A-1: the stored name_key fold, not sqlite's
@@ -499,9 +511,12 @@ def lastfm_tag_tracks(database, lastfm_client, season_key: str,
                       limit: int = 20) -> List[Dict[str, Any]]:
     """fresh-artist leg: lastfm tag top artists the library does not have,
     their top tracks. art is borrowed from the pool when the artist shows
-    up there; artless rows are dropped rather than shipped as grey circles."""
-    if not lastfm_client:
-        return []
+    up there; artless rows are dropped rather than shipped as grey circles.
+
+    last.fm first. with no last.fm (not set up, or the key refused without
+    pro from 1 december 2026) the tag's artists come from deezer's playlists
+    for it, and their top tracks from deezer too."""
+    from core import lastfm_fallback
     tags = SEASON_LASTFM_TAGS.get(season_key, [])
     if not tags:
         return []
@@ -519,11 +534,16 @@ def lastfm_tag_tracks(database, lastfm_client, season_key: str,
         from core.library2.importer import normalize_name
         out = []
         for tag in tags:
-            artists = lastfm_client.get_tag_top_artists(tag, limit=12) or []
+            artists, tag_source = lastfm_fallback.tag_top_artists(tag, limit=12, lastfm=lastfm_client)
             fresh = [a.get("name") for a in artists
                      if a.get("name") and normalize_name(a["name"]) not in known][:5]
+            # deezer's tag artists take deezer's top tracks: no musicbrainz
+            # lookup per artist for a background shelf
+            free = ("listenbrainz", "deezer") if tag_source == "lastfm" else ("deezer",)
             for name in fresh:
-                for track in (lastfm_client.get_artist_top_tracks(name, limit=2) or []):
+                top, _src = lastfm_fallback.artist_top_tracks(
+                    name, limit=2, lastfm=lastfm_client, free_sources=free)
+                for track in top:
                     title = track.get("name")
                     if not title:
                         continue

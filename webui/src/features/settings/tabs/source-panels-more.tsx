@@ -1,36 +1,67 @@
 /**
- * The last four Sources panels (SETTINGS_PORT.md, step 7g): YouTube with its
- * yt-dlp updater, Prowlarr, the torrent client and the usenet client. Same
- * markup, classes and ids as the vanilla panels, same load and save rules.
+ * The last four source panels: YouTube with its yt-dlp updater, Prowlarr, the
+ * torrent client and the usenet client, on the settings parts (see
+ * source-panels.tsx). Same ids, keys and save rules as before.
  *
- * The torrent and usenet panels hold three blocks the VIDEO side owns: the
- * torrent seeding goals with their per-indexer rows, and the usenet
- * remove-completed and redownload-failed settings. They are React too
- * (video-source-blocks.tsx, SETTINGS_PORT.md video pass V2a), keys of the
- * video downloads config.
+ * The torrent and usenet panels each have a "For music" and a "For video"
+ * group: the video side's seeding goals with their per-indexer rows, and what
+ * happens to a usenet job once imported, are keys of the video downloads
+ * config (video-source-blocks.tsx).
+ *
+ * The torrent and usenet clients are tested by the sheet's own Test (the same
+ * request their Test Connection buttons sent); their connection light follows
+ * what that test said.
  */
 
-import { type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { type ReactNode, useEffect, useState, useSyncExternalStore } from 'react';
 
 import type { SettingsTabProps } from '../host';
 import type { SettingsStore } from '../settings-store';
 
-import { HelpIcon, SecretInput, helpBits, useDraft, useHelp } from './parts';
 import {
-  BAD,
+  ActionRow,
+  Btn,
+  FieldNote,
+  Item,
+  Items,
+  More,
+  Note,
+  Pre,
+  Row,
+  Say,
+  SecretField,
+  Select,
+  SheetField,
+  SheetGroup,
+  StatusWords,
+  Switch,
+  TextArea,
+  TextField,
+  type Tone,
+  Value,
+  itemClass,
+} from '../ui';
+import { useDraft } from './parts';
+import {
   CHECKING,
-  NumberField,
-  OK,
+  DraftNumber,
   Panel,
   type Status,
   json,
+  secretNote,
   text,
   toast,
   useOnOpen,
   useSettings,
 } from './source-panels';
 import { type SourcesModel, sourcesModel } from './sources-model';
-import { VideoSeedingGoals, VideoUsenetBlocks } from './video-source-blocks';
+import {
+  SEED_MODES,
+  SEED_MORE,
+  USENET_REMOVE,
+  VideoSeedingGoals,
+  VideoUsenetBlocks,
+} from './video-source-blocks';
 
 type ShellTools = Window & { saveSettings?: () => Promise<void> };
 
@@ -39,13 +70,8 @@ async function saveFirst() {
   await (window as ShellTools).saveSettings?.();
 }
 
-/** a status line's style */
-const statusStyle = (status: Status) => ({
-  marginLeft: '8px',
-  ...(status.color ? { color: status.color } : {}),
-});
-
-/** the connection dot in the corner of the *arr-style panels */
+/** the connection light of the *arr-style panels: kept by id for anything
+ *  that reads it; the sheet's head says the same thing in words */
 type Dot = 'unknown' | 'connected' | 'error';
 const DOT_TITLE: Record<Dot, string> = {
   unknown: 'Not tested',
@@ -53,65 +79,23 @@ const DOT_TITLE: Record<Dot, string> = {
   error: 'Connection failed',
 };
 function StatusDot({ id, dot }: { id: string; dot: Dot }) {
-  return <span className={`ind-status-dot ind-status-dot-${dot}`} id={id} title={DOT_TITLE[dot]} />;
-}
-
-/** an *arr-style frame's title row and its help, which has no help line */
-function FrameTitle({ title, kind, help }: { title: string; kind: string; help: ReactNode }) {
-  const state = useHelp();
   return (
-    <>
-      <div className="setting-row" style={{ padding: '14px 18px' }}>
-        <h4
-          className={`service-title ${kind}-title`}
-          // the markup had these !important (they beat the card's own title
-          // rules); a style object cannot say important, setProperty can
-          ref={(el) => {
-            if (!el) return;
-            for (const prop of ['padding', 'border', 'margin'])
-              el.style.setProperty(prop, '0', 'important');
-          }}
-          style={{ flex: 1 }}
-        >
-          ⬢ {title}
-        </h4>
-        <HelpIcon {...state} />
-      </div>
-      <div
-        className="setting-help-text setting-help-body"
-        style={{ marginBottom: '14px' }}
-        hidden={!state.open}
-      >
-        {help}
-      </div>
-    </>
+    <span
+      className={`ind-status-dot ind-status-dot-${dot}`}
+      id={id}
+      title={DOT_TITLE[dot]}
+      hidden
+    />
   );
 }
 
-/** a labelled field with an optional help text under it */
-function Field({
-  label,
-  help,
-  id,
-  style,
-  children,
-}: {
-  label: ReactNode;
-  help?: ReactNode;
-  id?: string;
-  style?: Record<string, string>;
-  children: ReactNode;
-}) {
-  return (
-    <div className="form-group" id={id} style={style}>
-      <label>{label}</label>
-      {children}
-      {help ? <div className="setting-help-text">{help}</div> : null}
-    </div>
-  );
+/** the light from the sources model: what the sheet's Test last said */
+function useModelDot(model: SourcesModel, id: string): Dot {
+  const state = useSyncExternalStore(model.subscribe, () => model.getState().status[id]);
+  return state === 'ok' || state === 'warn' ? 'connected' : state === 'fail' ? 'error' : 'unknown';
 }
 
-/** a Test Connection row: save the page, ask the server, colour the dot */
+/** Prowlarr's own Test: save the page, ask the server, light the dot */
 function useConnectionTest(service: string) {
   const [status, setStatus] = useState<Status>({ text: '' });
   const [dot, setDot] = useState<Dot>('unknown');
@@ -125,15 +109,15 @@ function useConnectionTest(service: string) {
         body: JSON.stringify({ service }),
       });
       if (data.success) {
-        setStatus({ text: text(data.message) || 'Connected', color: OK });
+        setStatus({ text: text(data.message) || 'Connected', tone: 'ok' });
         setDot('connected');
         after?.();
       } else {
-        setStatus({ text: text(data.error) || 'Connection failed', color: BAD });
+        setStatus({ text: text(data.error) || 'Connection failed', tone: 'bad' });
         setDot('error');
       }
     } catch {
-      setStatus({ text: 'Connection error', color: BAD });
+      setStatus({ text: 'Connection error', tone: 'bad' });
       setDot('error');
     }
   }
@@ -160,11 +144,19 @@ interface Indexer {
   enable?: boolean;
 }
 
-export function ProwlarrPanel({ store }: { store: SettingsStore }) {
+export function ProwlarrPanel({
+  store,
+  model = sourcesModel,
+}: {
+  store: SettingsStore;
+  model?: SourcesModel;
+}) {
   const settings = useSettings(store);
   const p = (settings.prowlarr || {}) as Record<string, unknown>;
   const set = (key: string, value: unknown) => store.set('prowlarr', key, value);
   const test = useConnectionTest('prowlarr');
+  const sheetDot = useModelDot(model, 'prowlarr');
+  const key = str(p.api_key);
   const [list, setList] = useState<
     | null
     | { state: 'loading' }
@@ -194,173 +186,157 @@ export function ProwlarrPanel({ store }: { store: SettingsStore }) {
   let indexers: ReactNode;
   if (!list) {
     indexers = (
-      <>
-        Connect to Prowlarr and click <strong>Refresh Indexer List</strong> to see the indexers
-        SoulSync can search.
-      </>
+      <FieldNote>
+        Test and load indexers to see the indexers SoulSync can search through Prowlarr.
+      </FieldNote>
     );
   } else if (list.state === 'loading') {
-    indexers = <em>Loading…</em>;
+    indexers = <FieldNote>Loading…</FieldNote>;
   } else if (list.state === 'error') {
-    indexers = <em style={{ color: BAD }}>{list.text}</em>;
+    indexers = <StatusWords tone="bad">{list.text}</StatusWords>;
   } else if (list.state === 'empty') {
-    indexers = <em>No indexers configured in Prowlarr yet. Add some in Prowlarr → Indexers.</em>;
+    indexers = <FieldNote>No indexers in Prowlarr yet. Add some there, under Indexers.</FieldNote>;
   } else {
     indexers = list.rows.map((idx, i) => (
-      <div
-        key={`${text(idx.id)}-${i}`}
-        className={idx.enable ? 'ind-indexer-card' : 'ind-indexer-card ind-indexer-card-disabled'}
-      >
-        <span className="ind-indexer-card-id">#{text(idx.id)}</span>
-        <span className="ind-indexer-card-name">{text(idx.name)}</span>
-        {idx.privacy ? <span className="ind-indexer-card-privacy">{idx.privacy}</span> : null}
-        <span
-          className={`ind-indexer-card-proto ${idx.protocol === 'usenet' ? 'ind-indexer-card-proto-usenet' : 'ind-indexer-card-proto-torrent'}`}
-        >
-          {idx.protocol === 'usenet' ? 'Usenet' : 'Torrent'}
-        </span>
-      </div>
+      <Item key={`${text(idx.id)}-${i}`} off={!idx.enable} data-indexer="">
+        <span className={itemClass.dim}>#{text(idx.id)}</span>
+        <span className={itemClass.main}>{text(idx.name)}</span>
+        {idx.privacy ? <span className={itemClass.dim}>{idx.privacy}</span> : null}
+        <span className={itemClass.dim}>{idx.protocol === 'usenet' ? 'Usenet' : 'Torrent'}</span>
+      </Item>
     ));
   }
 
   return (
     <Panel id="prowlarr-settings-container">
-      <StatusDot id="prowlarr-status-dot" dot={test.dot} />
-      <div className="settings-group">
-        <div className="api-service-frame">
-          <FrameTitle
-            title="Prowlarr"
-            kind="prowlarr"
-            help={
-              <>
-                Prowlarr manages your Usenet and torrent indexers and exposes them through one API.
-                SoulSync uses Prowlarr to search across every indexer at once for the Torrent and
-                Usenet download sources.
-                <br />
-                <br />
-                Don't have it? Grab Prowlarr from <code>prowlarr.com</code> (or your *arr stack).
-                You point Prowlarr at your indexers, then point SoulSync at Prowlarr.
-              </>
-            }
+      <StatusDot id="prowlarr-status-dot" dot={test.dot !== 'unknown' ? test.dot : sheetDot} />
+      <SheetGroup title="Connection" />
+      <SheetField
+        label="Prowlarr URL"
+        htmlFor="prowlarr-url"
+        help="The full address of your Prowlarr, for example http://192.168.1.100:9696."
+        more={
+          <>
+            Prowlarr keeps your usenet and torrent indexers in one place. SoulSync searches every
+            indexer at once through it, for the Torrent and Usenet sources. No Prowlarr yet? Get it
+            from <code>prowlarr.com</code> (or your *arr stack), point it at your indexers, then
+            point SoulSync at Prowlarr.
+          </>
+        }
+      >
+        <TextField
+          full
+          id="prowlarr-url"
+          placeholder="http://localhost:9696"
+          value={str(p.url)}
+          onChange={(event) => set('url', event.target.value)}
+        />
+      </SheetField>
+      <SheetField
+        label="API key"
+        htmlFor="prowlarr-api-key"
+        help={secretNote(key, 'In Prowlarr: Settings, General, Security, API Key.')}
+      >
+        <SecretField
+          id="prowlarr-api-key"
+          placeholder="Your Prowlarr API key"
+          value={key}
+          onChange={(value) => set('api_key', value)}
+        />
+      </SheetField>
+      <SheetField
+        label="FlareSolverr URL"
+        htmlFor="flaresolverr-url"
+        help="For the sites behind a browser check: EXT.to (Fresh Releases and its search) and Beatport when it blocks."
+        more="FlareSolverr, or a compatible solver such as Byparr, opens those pages in a real browser. Often the same one your Prowlarr uses for its Cloudflare-protected indexers."
+      >
+        <TextField
+          full
+          id="flaresolverr-url"
+          placeholder="http://localhost:8191"
+          value={str((settings.flaresolverr as Record<string, unknown> | undefined)?.url)}
+          onChange={(event) => store.set('flaresolverr', 'url', event.target.value)}
+        />
+      </SheetField>
+
+      <SheetGroup title="Indexers" />
+      <ActionRow label="Indexers" help="Tests the connection, then lists what Prowlarr searches.">
+        <StatusWords id="prowlarr-connection-status" tone={test.status.tone} live>
+          {test.status.text}
+        </StatusWords>
+        <Btn id="prowlarr-test-btn" small onClick={() => void test.run(() => void loadIndexers())}>
+          Test and load indexers
+        </Btn>
+        <Btn
+          id="prowlarr-refresh-indexers-btn"
+          small
+          kind="ghost"
+          onClick={() => void loadIndexers()}
+        >
+          Refresh Indexer List
+        </Btn>
+      </ActionRow>
+      <Items id="prowlarr-indexer-list">{indexers}</Items>
+
+      <SheetGroup title="Searching" />
+      {/* #2061: the pacing was always there (core/prowlarr_throttle.py), with
+          no way to turn it down for a strict tracker. ?? not ||: 0 is off */}
+      <Row
+        field
+        label="Seconds between searches"
+        htmlFor="prowlarr-search-min-gap"
+        help="The shortest wait between two searches sent to Prowlarr, music and video together. Default 2. Raise it if a tracker answers 429 Too Many Requests or Prowlarr marks an indexer unhealthy: a tracker that asks for 11 seconds wants 12 or more here. 0 turns the wait off."
+      >
+        <DraftNumber
+          store={store}
+          id="prowlarr-search-min-gap"
+          unit="seconds"
+          min="0"
+          max="600"
+          step="0.5"
+          placeholder="2"
+          value={text(p.search_min_gap_seconds ?? 2)}
+          save={(raw) => set('search_min_gap_seconds', float(raw, 2))}
+        />
+      </Row>
+      <Row
+        field
+        label="Searches per minute, at most"
+        htmlFor="prowlarr-max-searches-per-minute"
+        help="A ceiling on top of the wait above, so a long Wishlist run cannot keep up a fast pace for hours. Default 20. 0 turns the ceiling off. A search you start by hand waits its turn behind background searches."
+      >
+        <DraftNumber
+          store={store}
+          id="prowlarr-max-searches-per-minute"
+          unit="a minute"
+          min="0"
+          max="600"
+          step="1"
+          placeholder="20"
+          value={text(p.max_searches_per_minute ?? 20)}
+          save={(raw) => set('max_searches_per_minute', integer(raw, 20))}
+        />
+      </Row>
+      <More count={1} names="only search some indexers">
+        <SheetField
+          label="Restrict to indexer IDs (optional)"
+          htmlFor="prowlarr-indexer-ids"
+          help="Comma-separated Prowlarr indexer IDs. Leave it blank to search every enabled indexer. Restrict it when you have a private tracker you want to put first, or a noisy public one to leave out."
+        >
+          <TextField
+            full
+            id="prowlarr-indexer-ids"
+            placeholder="e.g. 1,3,7 (blank = all enabled indexers)"
+            value={str(p.indexer_ids)}
+            onChange={(event) => set('indexer_ids', event.target.value)}
           />
-          <Field
-            label="Prowlarr URL:"
-            help={
-              <>
-                Full URL to your Prowlarr instance (e.g. <code>http://192.168.1.100:9696</code>).
-              </>
-            }
-          >
-            <input
-              type="text"
-              id="prowlarr-url"
-              placeholder="http://localhost:9696"
-              value={str(p.url)}
-              onChange={(event) => set('url', event.target.value)}
-            />
-          </Field>
-          <Field
-            label="API Key:"
-            help="Found in Prowlarr → Settings → General → Security → API Key."
-          >
-            <SecretInput
-              id="prowlarr-api-key"
-              placeholder="Your Prowlarr API key"
-              value={str(p.api_key)}
-              onChange={(value) => set('api_key', value)}
-            />
-          </Field>
-          <Field
-            label="Restrict to indexer IDs (optional):"
-            help="Comma-separated Prowlarr indexer IDs. Leave blank to search every enabled indexer. Restrict when you have a private tracker you want to prioritise or a noisy public one to exclude."
-          >
-            <input
-              type="text"
-              id="prowlarr-indexer-ids"
-              placeholder="e.g. 1,3,7 (blank = all enabled indexers)"
-              value={str(p.indexer_ids)}
-              onChange={(event) => set('indexer_ids', event.target.value)}
-            />
-          </Field>
-          {/* #2061: the pacing was always there (core/prowlarr_throttle.py), with
-              no way to turn it down for a strict tracker. ?? not ||: 0 is off */}
-          <Field
-            label="Seconds between searches:"
-            help="The shortest wait between two searches sent to Prowlarr, music and video together. Default 2. Raise it if a tracker answers 429 Too Many Requests or Prowlarr marks an indexer unhealthy: a tracker that asks for 11 seconds wants 12 or more here. 0 turns the wait off."
-          >
-            <NumberField
-              store={store}
-              id="prowlarr-search-min-gap"
-              min="0"
-              max="600"
-              step="0.5"
-              placeholder="2"
-              value={text(p.search_min_gap_seconds ?? 2)}
-              save={(raw) => set('search_min_gap_seconds', float(raw, 2))}
-            />
-          </Field>
-          <Field
-            label="Searches per minute, at most:"
-            help="A ceiling on top of the wait above, so a long wishlist run cannot keep up a fast pace for hours. Default 20. 0 turns the ceiling off. A manual search waits its turn behind background searches."
-          >
-            <NumberField
-              store={store}
-              id="prowlarr-max-searches-per-minute"
-              min="0"
-              max="600"
-              step="1"
-              placeholder="20"
-              value={text(p.max_searches_per_minute ?? 20)}
-              save={(raw) => set('max_searches_per_minute', integer(raw, 20))}
-            />
-          </Field>
-          <Field label="Status:">
-            <div className="form-actions" style={{ marginTop: '4px' }}>
-              <button
-                className="test-button"
-                id="prowlarr-test-btn"
-                onClick={() => void test.run(() => void loadIndexers())}
-              >
-                Test Connection
-              </button>
-              <button
-                className="test-button"
-                id="prowlarr-refresh-indexers-btn"
-                onClick={() => void loadIndexers()}
-                style={{ marginLeft: '6px' }}
-              >
-                Refresh Indexer List
-              </button>
-              <span
-                id="prowlarr-connection-status"
-                className="setting-help-text"
-                style={statusStyle(test.status)}
-              >
-                {test.status.text}
-              </span>
-            </div>
-          </Field>
-          <Field label="Configured Indexers:">
-            <div id="prowlarr-indexer-list" className="ind-indexer-list">
-              {indexers}
-            </div>
-          </Field>
-        </div>
-      </div>
+        </SheetField>
+      </More>
     </Panel>
   );
 }
 
 // ── the torrent client ──
-
-const SEED_HINT = (
-  <>
-    Both at 0 = never remove (the old behavior). <strong>SoulSync</strong>: SS polls the client and
-    removes when a goal is hit (your imported library copy is separate and never touched).{' '}
-    <strong>Torrent client</strong>: SS writes the ratio/time limit into the client (arr-style) and
-    lets it enforce — it shows up in the client's share-limit dialog and works even when SS is off.
-  </>
-);
 
 /** a client's category: what is typed stays on screen (emptied, it stays
  *  empty while the next one is typed); blank saves the default, as _cfgStr's
@@ -380,8 +356,8 @@ function CategoryInput({
   const draft = useDraft(value, (raw) => save(raw || 'soulsync'));
   useEffect(() => draft.reset(), [loads]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
-    <input
-      type="text"
+    <TextField
+      full
       id={id}
       placeholder="soulsync"
       value={draft.value}
@@ -390,448 +366,426 @@ function CategoryInput({
   );
 }
 
-export function TorrentPanel({ store }: { store: SettingsStore }) {
+export function TorrentPanel({
+  store,
+  model = sourcesModel,
+}: {
+  store: SettingsStore;
+  model?: SourcesModel;
+}) {
   const settings = useSettings(store);
   const t = (settings.torrent_client || {}) as Record<string, unknown>;
   const d = (settings.download_source || {}) as Record<string, unknown>;
   const set = (key: string, value: unknown) => store.set('torrent_client', key, value);
   const setSource = (key: string, value: unknown) => store.set('download_source', key, value);
-  const test = useConnectionTest('torrent_client');
+  const dot = useModelDot(model, 'torrent');
+  const password = str(t.password);
 
   const stall = d.torrent_stall_timeout_seconds;
   const minSeeders = d.torrent_min_seeders;
 
   return (
     <Panel id="torrent-client-settings-container">
-      <StatusDot id="torrent-client-status-dot" dot={test.dot} />
-      <div className="settings-group">
-        <div className="api-service-frame">
-          <FrameTitle
-            title="Torrent Downloader"
-            kind="torrent"
-            help="Where SoulSync sends torrents once Prowlarr finds them. Pick the client you already use — only one can be active at a time. Add the URL of the client's WebUI, log in if it asks for credentials, and hit Test Connection."
+      <StatusDot id="torrent-client-status-dot" dot={dot} />
+      <SheetGroup title="Connection" />
+      <SheetField
+        label="Client"
+        htmlFor="torrent-client-type"
+        more="Where SoulSync sends torrents once Prowlarr finds them. Pick the client you already use; one can be active at a time. Add the address of the client's WebUI, sign in if it asks, and Test connection."
+      >
+        <Select
+          id="torrent-client-type"
+          value={str(t.type, 'qbittorrent')}
+          onChange={(event) => set('type', event.target.value || 'qbittorrent')}
+          options={[
+            { value: 'qbittorrent', label: 'qBittorrent' },
+            { value: 'transmission', label: 'Transmission' },
+            { value: 'deluge', label: 'Deluge 2.x' },
+            { value: 'aria2', label: 'Aria2 (RPC)' },
+          ]}
+        />
+        <FieldNote id="torrent-client-help">
+          qBittorrent: WebUI port (default 8080). Transmission: RPC port (default 9091). Deluge:
+          WebUI port (default 8112). Aria2: RPC port (default 6800); leave Username blank and put
+          your <code>--rpc-secret</code> in Password.
+        </FieldNote>
+      </SheetField>
+      <SheetField label="WebUI URL" htmlFor="torrent-client-url">
+        <TextField
+          full
+          id="torrent-client-url"
+          placeholder="http://localhost:8080"
+          value={str(t.url)}
+          onChange={(event) => set('url', event.target.value)}
+        />
+      </SheetField>
+      <SheetField
+        label="Username"
+        htmlFor="torrent-client-username"
+        id="torrent-client-username-group"
+        help="qBittorrent and Transmission use a username and password. Deluge uses the password only."
+      >
+        <TextField
+          full
+          id="torrent-client-username"
+          placeholder="leave blank if WebUI doesn't require auth"
+          value={str(t.username)}
+          onChange={(event) => set('username', event.target.value)}
+        />
+      </SheetField>
+      <SheetField label="Password" htmlFor="torrent-client-password" help={secretNote(password)}>
+        <SecretField
+          id="torrent-client-password"
+          placeholder="WebUI password"
+          value={password}
+          onChange={(value) => set('password', value)}
+        />
+      </SheetField>
+      <More count={3} names="category, save folder, start torrents">
+        <SheetField
+          label="Category or label"
+          htmlFor="torrent-client-category"
+          help="SoulSync tags every torrent it adds with this, so it is easy to spot in your client. Deluge needs the Label plugin for it to stick."
+        >
+          <CategoryInput
+            id="torrent-client-category"
+            store={store}
+            value={str(t.category, 'soulsync')}
+            save={(value) => set('category', value)}
           />
-          <div className="form-group">
-            <label>Client Type:</label>
-            <select
-              id="torrent-client-type"
-              className="form-select"
-              value={str(t.type, 'qbittorrent')}
-              onChange={(event) => set('type', event.target.value || 'qbittorrent')}
-            >
-              <option value="qbittorrent">qBittorrent</option>
-              <option value="transmission">Transmission</option>
-              <option value="deluge">Deluge 2.x</option>
-              <option value="aria2">Aria2 (RPC)</option>
-            </select>
-            <div className="setting-help-text" id="torrent-client-help">
-              qBittorrent: WebUI port (default 8080). Transmission: RPC port (default 9091). Deluge:
-              WebUI port (default 8112). Aria2: RPC port (default 6800) — leave Username blank and
-              put your <code>--rpc-secret</code> in the Password field.
-            </div>
-          </div>
-          <Field label="WebUI URL:">
-            <input
-              type="text"
-              id="torrent-client-url"
-              placeholder="http://localhost:8080"
-              value={str(t.url)}
-              onChange={(event) => set('url', event.target.value)}
-            />
-          </Field>
-          <Field
-            label="Username:"
-            id="torrent-client-username-group"
-            help="qBittorrent and Transmission use username + password. Deluge uses password only — paste it in the password field below."
-          >
-            <input
-              type="text"
-              id="torrent-client-username"
-              placeholder="leave blank if WebUI doesn't require auth"
-              value={str(t.username)}
-              onChange={(event) => set('username', event.target.value)}
-            />
-          </Field>
-          <Field label="Password:">
-            <SecretInput
-              id="torrent-client-password"
-              placeholder="WebUI password"
-              value={str(t.password)}
-              onChange={(value) => set('password', value)}
-            />
-          </Field>
-          <Field
-            label="Category / Label:"
-            help="SoulSync tags every torrent it adds with this label so it's easy to spot in your client. Deluge needs the Label plugin installed for this to stick."
-          >
-            <CategoryInput
-              id="torrent-client-category"
-              store={store}
-              value={str(t.category, 'soulsync')}
-              save={(value) => set('category', value)}
-            />
-          </Field>
-          <Field
-            label="Save Path (optional):"
-            help={
-              <>
-                Override where the torrent client writes downloads. This path is on the{' '}
-                <strong>torrent client's</strong> machine, not SoulSync's.
-              </>
-            }
-          >
-            <input
-              type="text"
-              id="torrent-client-save-path"
-              placeholder="leave blank to use the client's default"
-              value={str(t.save_path)}
-              onChange={(event) => set('save_path', event.target.value)}
-            />
-          </Field>
-          <div className="form-group">
-            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
-              <input
-                type="checkbox"
-                id="torrent-client-start-torrents"
-                checked={t.start_torrents === true}
-                onChange={(event) => set('start_torrents', event.target.checked)}
-              />
-              Start the torrents SoulSync adds
-            </label>
-            <div className="setting-help-text">
-              qBittorrent only. Turn this on if your qBittorrent is set to add torrents stopped, or
-              to stop them once the metadata is in. SoulSync's torrents then start anyway, and
-              everything other apps add keeps your qBittorrent setting.
-            </div>
-          </div>
-          <Field
-            label="Completed Downloads Path — in SoulSync (optional):"
-            help={
-              <>
-                Where <strong>SoulSync</strong> can read finished torrents — its own in-container
-                path. Set this when your client saves to a category folder (e.g. a "Music" category
-                at <code>/data/downloads/music</code>) that's mounted here at a different path.
-                SoulSync finds the release by name under this folder. Blank = use the Soulseek
-                download/transfer folders.
-              </>
-            }
-          >
-            <input
-              type="text"
-              id="torrent-download-path"
-              placeholder="leave blank for the shared-volume default"
-              value={str(d.torrent_download_path)}
-              onChange={(event) => setSource('torrent_download_path', event.target.value)}
-            />
-          </Field>
-          <Field
-            label="Minimum seeders:"
-            help={
-              <>
-                Skip releases the indexer reports as having fewer seeders than this, instead of
-                queueing something nobody is serving and waiting for it to time out. Releases that
-                report <strong>no</strong> seeder count (usenet, and indexers that omit the field)
-                are never skipped. <strong>0 disables</strong>.
-              </>
-            }
-          >
-            <NumberField
-              store={store}
-              id="torrent-min-seeders"
-              min="0"
-              step="1"
-              placeholder="1"
-              value={text(minSeeders === undefined || minSeeders === null ? 1 : Number(minSeeders))}
-              // #1139: blank or junk is 1; 0 stays 0 (gate off)
-              save={(raw) => {
-                const n = parseInt(raw, 10);
-                setSource('torrent_min_seeders', Number.isFinite(n) && n >= 0 ? n : 1);
-              }}
-            />
-          </Field>
-          <Field
-            label="Stalled torrent timeout (minutes):"
-            help={
-              <>
-                Give up on a torrent that makes <strong>zero download progress</strong> for this
-                long — a dead magnet stuck on "downloading metadata", or a swarm with no seeders.
-                Without this, a dud torrent ties up a download slot for the full 6-hour limit.{' '}
-                <strong>0 disables</strong> (wait the full limit).
-              </>
-            }
-          >
-            <NumberField
-              store={store}
-              id="torrent-stall-timeout"
-              min="0"
-              step="1"
-              placeholder="10"
-              // stored in seconds, shown in minutes
-              value={text(
-                stall === undefined || stall === null ? 10 : Math.round(Number(stall) / 60),
-              )}
-              save={(raw) => {
-                const m = parseInt(raw, 10);
-                setSource(
-                  'torrent_stall_timeout_seconds',
-                  (Number.isFinite(m) && m >= 0 ? m : 10) * 60,
-                );
-              }}
-            />
-          </Field>
-          <Field
-            label="When a torrent stalls:"
-            help="Abandon frees the slot so the next source can try. Pause keeps the torrent in your client so you can inspect or resume it manually."
-          >
-            <select
-              id="torrent-stall-action"
-              className="form-select"
-              value={str(d.torrent_stall_action, 'abandon')}
-              onChange={(event) =>
-                setSource('torrent_stall_action', event.target.value || 'abandon')
-              }
-            >
-              <option value="abandon">
-                Abandon — remove it &amp; its partial data, fail the download
-              </option>
-              <option value="pause">Pause — pause it in the client, leave it for me</option>
-            </select>
-          </Field>
-          {/* seeding lifecycle, torrent grabs only. Music twin of the video side */}
-          <div className="form-group" id="music-seeding-goals">
-            <label>Seeding goals (torrents):</label>
-            <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
-              <span className="settings-hint">Ratio</span>
-              <NumberField
-                store={store}
-                id="music-seed-ratio"
-                min="0"
-                step="0.1"
-                style={{ maxWidth: '90px' }}
-                placeholder="0"
-                value={text(t.seed_ratio_goal ?? 0)}
-                save={(raw) => set('seed_ratio_goal', float(raw, 0))}
-              />
-              <span className="settings-hint">or hours seeded</span>
-              <NumberField
-                store={store}
-                id="music-seed-hours"
-                min="0"
-                step="1"
-                style={{ maxWidth: '90px' }}
-                placeholder="0"
-                value={text(t.seed_time_goal_hours ?? 0)}
-                save={(raw) => set('seed_time_goal_hours', integer(raw, 0))}
-              />
-              <label
-                style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12.5px' }}
-              >
-                <input
-                  type="checkbox"
-                  id="music-seed-remove-data"
-                  checked={t.seed_remove_data !== false}
-                  onChange={(event) => set('seed_remove_data', event.target.checked)}
-                />{' '}
-                also delete the client's copy
-              </label>
-            </div>
-            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '8px' }}>
-              <span className="settings-hint">Enforced by</span>
-              <select
-                id="music-seed-mode"
-                className="form-select"
-                style={{ maxWidth: '260px' }}
-                value={str(t.seed_mode, 'soulsync')}
-                onChange={(event) => set('seed_mode', event.target.value || 'soulsync')}
-              >
-                <option value="soulsync">SoulSync (watches the client + removes)</option>
-                <option value="client">Torrent client (writes its own seed limit)</option>
-              </select>
-            </div>
-            <small className="settings-hint">{SEED_HINT}</small>
-          </div>
-          <Field label="Status:">
-            <div className="form-actions" style={{ marginTop: '4px' }}>
-              <button
-                className="test-button"
-                id="torrent-client-test-btn"
-                onClick={() => void test.run()}
-              >
-                Test Connection
-              </button>
-              <span
-                id="torrent-client-connection-status"
-                className="setting-help-text"
-                style={statusStyle(test.status)}
-              >
-                {test.status.text}
-              </span>
-            </div>
-          </Field>
-        </div>
+        </SheetField>
+        <SheetField
+          label="Save path (optional)"
+          htmlFor="torrent-client-save-path"
+          help="Where the torrent client writes downloads, if not its own default."
+          more={
+            <>
+              Overrides where the torrent client writes downloads. This path is on the{' '}
+              <strong>torrent client's</strong> machine, not SoulSync's.
+            </>
+          }
+        >
+          <TextField
+            full
+            mono
+            id="torrent-client-save-path"
+            placeholder="leave blank to use the client's default"
+            value={str(t.save_path)}
+            onChange={(event) => set('save_path', event.target.value)}
+          />
+        </SheetField>
+        <Row
+          label="Start the torrents SoulSync adds"
+          htmlFor="torrent-client-start-torrents"
+          help="qBittorrent only. Turn it on if your qBittorrent adds torrents stopped, or stops them once the metadata is in. SoulSync's torrents then start anyway, and what other apps add keeps your qBittorrent setting."
+        >
+          <Switch
+            id="torrent-client-start-torrents"
+            checked={t.start_torrents === true}
+            onChange={(event) => set('start_torrents', event.target.checked)}
+          />
+        </Row>
+      </More>
+
+      <SheetGroup title="For music" />
+      <Row
+        field
+        label="Minimum seeders"
+        htmlFor="torrent-min-seeders"
+        help="Skip a release with fewer seeders than this instead of waiting on something nobody is serving. A release that reports no seeder count (usenet, and indexers that leave it out) is never skipped. 0 turns it off."
+      >
+        <DraftNumber
+          store={store}
+          id="torrent-min-seeders"
+          min="0"
+          step="1"
+          placeholder="1"
+          value={text(minSeeders === undefined || minSeeders === null ? 1 : Number(minSeeders))}
+          // #1139: blank or junk is 1; 0 stays 0 (gate off)
+          save={(raw) => {
+            const n = parseInt(raw, 10);
+            setSource('torrent_min_seeders', Number.isFinite(n) && n >= 0 ? n : 1);
+          }}
+        />
+      </Row>
+      <Row
+        field
+        label="Stalled torrent timeout"
+        htmlFor="torrent-stall-timeout"
+        help="Give up on a torrent that makes no download progress for this long."
+        more={
+          <>
+            Give up on a torrent that makes <strong>no download progress</strong> for this long: a
+            dead magnet stuck on "downloading metadata", or a swarm with no seeders. Without it, a
+            dud torrent holds a download slot for the full 6-hour limit.{' '}
+            <strong>0 turns it off</strong> (wait the full limit).
+          </>
+        }
+      >
+        <DraftNumber
+          store={store}
+          id="torrent-stall-timeout"
+          unit="minutes"
+          min="0"
+          step="1"
+          placeholder="10"
+          // stored in seconds, shown in minutes
+          value={text(stall === undefined || stall === null ? 10 : Math.round(Number(stall) / 60))}
+          save={(raw) => {
+            const m = parseInt(raw, 10);
+            setSource(
+              'torrent_stall_timeout_seconds',
+              (Number.isFinite(m) && m >= 0 ? m : 10) * 60,
+            );
+          }}
+        />
+      </Row>
+      <Row
+        field
+        label="When a torrent stalls"
+        htmlFor="torrent-stall-action"
+        help="Abandon frees the slot so the next source can try; it and its partial data are removed and the download fails. Pause keeps the torrent in your client so you can look at it or resume it yourself."
+      >
+        <Select
+          id="torrent-stall-action"
+          value={str(d.torrent_stall_action, 'abandon')}
+          onChange={(event) => setSource('torrent_stall_action', event.target.value || 'abandon')}
+          options={[
+            { value: 'abandon', label: 'Abandon and remove it' },
+            { value: 'pause', label: 'Pause it in the client' },
+          ]}
+        />
+      </Row>
+      {/* seeding lifecycle, torrent grabs only. Music twin of the video side */}
+      <div id="music-seeding-goals">
+        <Row
+          field
+          label="Seed until a ratio of"
+          htmlFor="music-seed-ratio"
+          help="Remove a finished torrent once it reaches this ratio or the hours below, whichever comes first."
+          more={SEED_MORE}
+        >
+          <DraftNumber
+            store={store}
+            id="music-seed-ratio"
+            min="0"
+            step="0.1"
+            placeholder="0"
+            value={text(t.seed_ratio_goal ?? 0)}
+            save={(raw) => set('seed_ratio_goal', float(raw, 0))}
+          />
+        </Row>
+        <Row field sub label="Or hours seeded" htmlFor="music-seed-hours">
+          <DraftNumber
+            store={store}
+            id="music-seed-hours"
+            unit="hours"
+            min="0"
+            step="1"
+            placeholder="0"
+            value={text(t.seed_time_goal_hours ?? 0)}
+            save={(raw) => set('seed_time_goal_hours', integer(raw, 0))}
+          />
+        </Row>
+        <Row sub label="Also delete the client's copy" htmlFor="music-seed-remove-data">
+          <Switch
+            id="music-seed-remove-data"
+            checked={t.seed_remove_data !== false}
+            onChange={(event) => set('seed_remove_data', event.target.checked)}
+          />
+        </Row>
+        <Row field sub label="Enforced by" htmlFor="music-seed-mode">
+          <Select
+            id="music-seed-mode"
+            value={str(t.seed_mode, 'soulsync')}
+            onChange={(event) => set('seed_mode', event.target.value || 'soulsync')}
+            options={SEED_MODES}
+          />
+        </Row>
       </div>
+      <More count={1} names="where SoulSync reads finished torrents">
+        <SheetField
+          label="Completed downloads folder, as SoulSync sees it (optional)"
+          htmlFor="torrent-download-path"
+          help="Where SoulSync reads finished torrents, in its own (container) path."
+          more={
+            <>
+              Where <strong>SoulSync</strong> can read finished torrents, in its own in-container
+              path. Set it when your client saves to a category folder (a "Music" category at{' '}
+              <code>/data/downloads/music</code>) that is mounted here at a different path. SoulSync
+              finds the release by name under this folder. Blank uses the Soulseek download folder
+              and the music library folder.
+            </>
+          }
+        >
+          <TextField
+            full
+            mono
+            id="torrent-download-path"
+            placeholder="leave blank for the shared-volume default"
+            value={str(d.torrent_download_path)}
+            onChange={(event) => setSource('torrent_download_path', event.target.value)}
+          />
+        </SheetField>
+      </More>
+
+      <SheetGroup title="For video" />
       {/* the video side's seeding goals (video-source-blocks.tsx) */}
-      <div>
-        <VideoSeedingGoals />
-      </div>
+      <VideoSeedingGoals />
     </Panel>
   );
 }
 
 // ── the usenet client ──
 
-export function UsenetPanel({ store }: { store: SettingsStore }) {
+export function UsenetPanel({
+  store,
+  model = sourcesModel,
+}: {
+  store: SettingsStore;
+  model?: SourcesModel;
+}) {
   const settings = useSettings(store);
   const u = (settings.usenet_client || {}) as Record<string, unknown>;
   const d = (settings.download_source || {}) as Record<string, unknown>;
   const set = (key: string, value: unknown) => store.set('usenet_client', key, value);
-  const test = useConnectionTest('usenet_client');
+  const dot = useModelDot(model, 'usenet');
   const type = str(u.type, 'sabnzbd');
-  const frame = useRef<HTMLDivElement>(null);
+  const key = str(u.api_key);
+  const password = str(u.password);
 
   return (
     <Panel id="usenet-client-settings-container">
-      <StatusDot id="usenet-client-status-dot" dot={test.dot} />
-      <div className="settings-group">
-        <div className="api-service-frame" ref={frame}>
-          <FrameTitle
-            title="Usenet Downloader"
-            kind="usenet"
-            help="Where SoulSync sends NZBs once Prowlarr finds them. Pick one usenet downloader. SABnzbd uses an API key for auth; NZBGet uses a username + password."
+      <StatusDot id="usenet-client-status-dot" dot={dot} />
+      <SheetGroup title="Connection" />
+      <SheetField
+        label="Client"
+        htmlFor="usenet-client-type"
+        help="SABnzbd: default WebUI port 8080. NZBGet: default WebUI port 6789."
+        more="Where SoulSync sends NZBs once Prowlarr finds them. Pick one usenet downloader. SABnzbd signs in with an API key; NZBGet with a username and password. SABnzbd: default WebUI port 8080. NZBGet: default WebUI port 6789."
+      >
+        <Select
+          id="usenet-client-type"
+          value={type}
+          onChange={(event) => set('type', event.target.value || 'sabnzbd')}
+          options={[
+            { value: 'sabnzbd', label: 'SABnzbd' },
+            { value: 'nzbget', label: 'NZBGet' },
+          ]}
+        />
+      </SheetField>
+      <SheetField label="WebUI URL" htmlFor="usenet-client-url">
+        <TextField
+          full
+          id="usenet-client-url"
+          placeholder="http://localhost:8080"
+          value={str(u.url)}
+          onChange={(event) => set('url', event.target.value)}
+        />
+      </SheetField>
+      {/* SABnzbd signs in with a key, NZBGet with a login */}
+      <SheetField
+        label="API key"
+        htmlFor="usenet-client-api-key"
+        id="usenet-apikey-group"
+        hidden={type !== 'sabnzbd'}
+        help={secretNote(key, 'In SABnzbd: Config, General, API Key. SABnzbd only.')}
+      >
+        <SecretField
+          id="usenet-client-api-key"
+          placeholder="SABnzbd API key"
+          value={key}
+          onChange={(value) => set('api_key', value)}
+        />
+      </SheetField>
+      <SheetField
+        label="Username"
+        htmlFor="usenet-client-username"
+        id="usenet-username-group"
+        hidden={type === 'sabnzbd'}
+      >
+        <TextField
+          full
+          id="usenet-client-username"
+          placeholder="NZBGet WebUI username"
+          value={str(u.username)}
+          onChange={(event) => set('username', event.target.value)}
+        />
+      </SheetField>
+      <SheetField
+        label="Password"
+        htmlFor="usenet-client-password"
+        id="usenet-password-group"
+        hidden={type === 'sabnzbd'}
+        help={secretNote(password)}
+      >
+        <SecretField
+          id="usenet-client-password"
+          placeholder="NZBGet WebUI password"
+          value={password}
+          onChange={(value) => set('password', value)}
+        />
+      </SheetField>
+      <More count={1} names="category">
+        <SheetField
+          label="Category or label"
+          htmlFor="usenet-client-category"
+          help="SoulSync tags every NZB with this category, so it lands in a predictable post-processing folder."
+        >
+          <CategoryInput
+            id="usenet-client-category"
+            store={store}
+            value={str(u.category, 'soulsync')}
+            save={(value) => set('category', value)}
           />
-          <Field
-            label="Client Type:"
-            help="SABnzbd: default WebUI port 8080. NZBGet: default WebUI port 6789."
-          >
-            <select
-              id="usenet-client-type"
-              className="form-select"
-              value={type}
-              onChange={(event) => set('type', event.target.value || 'sabnzbd')}
-            >
-              <option value="sabnzbd">SABnzbd</option>
-              <option value="nzbget">NZBGet</option>
-            </select>
-          </Field>
-          <Field label="WebUI URL:">
-            <input
-              type="text"
-              id="usenet-client-url"
-              placeholder="http://localhost:8080"
-              value={str(u.url)}
-              onChange={(event) => set('url', event.target.value)}
-            />
-          </Field>
-          {/* SABnzbd authenticates with a key, NZBGet with a login */}
-          <Field
-            label="API Key:"
-            id="usenet-apikey-group"
-            style={{ display: type === 'sabnzbd' ? '' : 'none' }}
-            help="SABnzbd → Config → General → API Key. Used by SABnzbd only."
-          >
-            <SecretInput
-              id="usenet-client-api-key"
-              placeholder="SABnzbd API key"
-              value={str(u.api_key)}
-              onChange={(value) => set('api_key', value)}
-            />
-          </Field>
-          <Field
-            label="Username:"
-            id="usenet-username-group"
-            style={{ display: type === 'sabnzbd' ? 'none' : '' }}
-          >
-            <input
-              type="text"
-              id="usenet-client-username"
-              placeholder="NZBGet WebUI username"
-              value={str(u.username)}
-              onChange={(event) => set('username', event.target.value)}
-            />
-          </Field>
-          <Field
-            label="Password:"
-            id="usenet-password-group"
-            style={{ display: type === 'sabnzbd' ? 'none' : '' }}
-          >
-            <SecretInput
-              id="usenet-client-password"
-              placeholder="NZBGet WebUI password"
-              value={str(u.password)}
-              onChange={(value) => set('password', value)}
-            />
-          </Field>
-          <Field
-            label="Category / Label:"
-            help="SoulSync tags every NZB with this category so it ends up in a predictable post-processing folder."
-          >
-            <CategoryInput
-              id="usenet-client-category"
-              store={store}
-              value={str(u.category, 'soulsync')}
-              save={(value) => set('category', value)}
-            />
-          </Field>
-          <Field
-            label="Completed Downloads Path — in SoulSync (optional):"
-            help={
-              <>
-                Where <strong>SoulSync</strong> can read finished NZB downloads — its own
-                in-container path. Set this when SABnzbd/NZBGet writes that category to a folder
-                (e.g. <code>/data/downloads/music</code>) mounted here at a different path. SoulSync
-                finds the release by name under this folder. Blank = use the Soulseek
-                download/transfer folders.
-              </>
+        </SheetField>
+      </More>
+
+      <SheetGroup title="For music" />
+      <Row
+        stack
+        id="music-usenet-remove-completed-group"
+        label="When a download has imported"
+        htmlFor="music-usenet-remove-completed"
+        help="Music grabs copy the audio out, so without this the whole release stays in your client's completed folder. Only downloads SoulSync has imported are touched: an album goes once every track in it imported, and a failed or unmatched download stays for you."
+      >
+        <Select
+          id="music-usenet-remove-completed"
+          value={str(u.remove_completed, 'off')}
+          onChange={(event) => set('remove_completed', event.target.value || 'off')}
+          options={USENET_REMOVE}
+        />
+      </Row>
+      <More count={1} names="where SoulSync reads finished downloads">
+        <SheetField
+          label="Completed downloads folder, as SoulSync sees it (optional)"
+          htmlFor="usenet-download-path"
+          help="Where SoulSync reads finished NZB downloads, in its own (container) path."
+          more={
+            <>
+              Where <strong>SoulSync</strong> can read finished NZB downloads, in its own
+              in-container path. Set it when SABnzbd or NZBGet writes that category to a folder (
+              <code>/data/downloads/music</code>) mounted here at a different path. SoulSync finds
+              the release by name under this folder. Blank uses the Soulseek download folder and the
+              music library folder.
+            </>
+          }
+        >
+          <TextField
+            full
+            mono
+            id="usenet-download-path"
+            placeholder="leave blank for the shared-volume default"
+            value={str(d.usenet_download_path)}
+            onChange={(event) =>
+              store.set('download_source', 'usenet_download_path', event.target.value)
             }
-          >
-            <input
-              type="text"
-              id="usenet-download-path"
-              placeholder="leave blank for the shared-volume default"
-              value={str(d.usenet_download_path)}
-              onChange={(event) =>
-                store.set('download_source', 'usenet_download_path', event.target.value)
-              }
-            />
-          </Field>
-          <Field label="Status:">
-            <div className="form-actions" style={{ marginTop: '4px' }}>
-              <button
-                className="test-button"
-                id="usenet-client-test-btn"
-                onClick={() => void test.run()}
-              >
-                Test Connection
-              </button>
-              <span
-                id="usenet-client-connection-status"
-                className="setting-help-text"
-                style={statusStyle(test.status)}
-              >
-                {test.status.text}
-              </span>
-            </div>
-          </Field>
-          <Field
-            label="When a usenet download has imported (music):"
-            id="music-usenet-remove-completed-group"
-            help="Music grabs copy the audio out, so without this the whole release stays in your client's completed folder. Only downloads SoulSync has imported are touched: an album goes once every track in it imported, and a failed or unmatched download stays for you."
-          >
-            <select
-              id="music-usenet-remove-completed"
-              className="form-select"
-              value={str(u.remove_completed, 'off')}
-              onChange={(event) => set('remove_completed', event.target.value || 'off')}
-            >
-              <option value="off">Leave it in the client</option>
-              <option value="history">Remove it from the client's history</option>
-              <option value="files">Remove it and delete what's left in its folder</option>
-            </select>
-          </Field>
-          {/* the video side's two blocks follow the music ones (see the top) */}
-          <VideoUsenetBlocks />
-        </div>
-      </div>
+          />
+        </SheetField>
+      </More>
+
+      <SheetGroup title="For video" />
+      <VideoUsenetBlocks />
     </Panel>
   );
 }
@@ -852,61 +806,21 @@ const COOKIE_BROWSERS: Array<[string, string]> = [
   ['custom', 'Paste cookies.txt (server / Docker)'],
 ];
 
-/** a setting-row: a tick box and its "i", the help under it, then its line */
-function CheckRow({
-  id,
-  label,
-  checked,
-  onChange,
-  help,
-}: {
-  id: string;
-  label: string;
-  checked: boolean;
-  onChange: (checked: boolean) => void;
-  help: ReactNode;
-}) {
-  const state = useHelp();
-  const bits = helpBits(help, state);
-  return (
-    <div className="form-group">
-      <div className="setting-row">
-        <label className="checkbox-label">
-          <input
-            type="checkbox"
-            id={id}
-            checked={checked}
-            onChange={(event) => onChange(event.target.checked)}
-          />
-          {label}
-        </label>
-        {bits.icon}
-      </div>
-      <div className="setting-help-body" hidden={!state.open}>
-        {help}
-      </div>
-      {bits.line}
-    </div>
-  );
-}
-
 interface YtdlpState {
   installed: string;
-  installedColor: string;
+  installedWarn: boolean;
   latest: string;
-  latestColor: string;
+  latestWarn: boolean;
   badge: { hidden: boolean; title: string };
 }
 
 const YTDLP_LOADING: YtdlpState = {
   installed: 'Loading...',
-  installedColor: '',
+  installedWarn: false,
   latest: 'Loading...',
-  latestColor: '',
+  latestWarn: false,
   badge: { hidden: true, title: '' },
 };
-
-const AMBER = '#ffb300';
 
 export function YoutubePanel({
   store,
@@ -938,9 +852,7 @@ export function YoutubePanel({
   const [channel, setChannel] = useState('nightly');
   const [ytdlp, setYtdlp] = useState<YtdlpState>(YTDLP_LOADING);
   const [updating, setUpdating] = useState(false);
-  const [update, setUpdate] = useState<{ text: string; color: string; background: string } | null>(
-    null,
-  );
+  const [update, setUpdate] = useState<{ text: string; tone: Tone } | null>(null);
   const [detail, setDetail] = useState('');
   const loads = useSyncExternalStore(store.subscribe, () => store.getState().loads);
 
@@ -955,18 +867,18 @@ export function YoutubePanel({
       const pending = !!data.restart_pending;
       setYtdlp({
         installed: pending
-          ? `${text(data.installed)} running — ${text(data.on_disk)} installed, restart to finish`
+          ? `${text(data.installed)} running, ${text(data.on_disk)} installed. Restart to finish.`
           : text(data.installed) || 'Not installed',
-        installedColor: pending ? AMBER : '',
+        installedWarn: pending,
         // a PyPI outage is not "up to date"
         latest:
           text(data.latest) ||
-          (data.lookup_error ? "Couldn't check — no connection to PyPI" : 'Unknown'),
-        latestColor: data.behind ? AMBER : '',
+          (data.lookup_error ? "Couldn't check: no connection to PyPI" : 'Unknown'),
+        latestWarn: !!data.behind,
         badge: {
           hidden: !(data.behind || pending),
           title: pending
-            ? 'yt-dlp is updated on disk — restart SoulSync to use it'
+            ? 'yt-dlp is updated on disk. Restart SoulSync to use it'
             : data.behind
               ? 'A newer yt-dlp is available'
               : '',
@@ -988,9 +900,8 @@ export function YoutubePanel({
     setUpdating(true);
     setDetail('');
     setUpdate({
-      text: 'Installing the newest ' + channel + ' build — this can take a minute...',
-      color: 'rgba(255,255,255,0.6)',
-      background: 'rgba(255,255,255,0.04)',
+      text: 'Installing the newest ' + channel + ' build. This can take a minute...',
+      tone: 'idle',
     });
     try {
       const data = await json('/api/ytdlp/update', {
@@ -1000,28 +911,23 @@ export function YoutubePanel({
       });
       setUpdate({
         text: text(data.message) || (data.success ? 'Done.' : 'Update failed.'),
-        color: data.success ? (data.restart_required ? AMBER : OK) : '#ff5252',
-        background: 'rgba(255,255,255,0.04)',
+        tone: data.success ? (data.restart_required ? 'warn' : 'ok') : 'bad',
       });
       // pip's own words: each failure needs a different fix, and they say which
       if (data.detail) setDetail(text(data.detail));
       if (data.success) {
         toast(
           data.restart_required
-            ? 'yt-dlp updated — restart SoulSync to use it'
+            ? 'yt-dlp updated. Restart SoulSync to use it'
             : text(data.message) || 'Already up to date',
           data.restart_required ? 'info' : 'success',
         );
       } else {
-        toast('yt-dlp update failed — see Settings for details', 'error');
+        toast('yt-dlp update failed. See Settings for details', 'error');
       }
       void loadYtdlp();
     } catch (error) {
-      setUpdate({
-        text: 'Update request failed: ' + String(error),
-        color: '#ff5252',
-        background: 'rgba(255,255,255,0.04)',
-      });
+      setUpdate({ text: 'Update request failed: ' + String(error), tone: 'bad' });
       toast('yt-dlp update failed', 'error');
     } finally {
       setUpdating(false);
@@ -1033,18 +939,27 @@ export function YoutubePanel({
 
   const abe = windows && ABE_BROWSERS.includes(browser);
   const browserLabel = COOKIE_BROWSERS.find(([v]) => v === browser)?.[1] || browser;
-  const channelHelp = useHelp();
-  const channelText =
-    "YouTube changes how it serves video far more often than yt-dlp cuts a stable release, so nightly is what actually keeps downloads working. Stable is there if you'd rather move slowly.";
-  const channelBits = helpBits(channelText, channelHelp);
 
   return (
     <Panel id="youtube-settings-container" model={model}>
-      <div className="form-group">
-        <label>YouTube Browser Cookies:</label>
-        <select
+      <SheetGroup title="Cookies" />
+      <SheetField
+        label="Browser cookies"
+        htmlFor="youtube-cookies-browser"
+        help="Only needed for private playlists, your Liked Music, age-gated videos and Premium audio. Public videos download fine with None."
+        more={
+          <>
+            Only needed for private playlists, your Liked Music, age-gated videos and Premium audio
+            qualities. Public videos download fine with <strong>None</strong>. Reading a browser
+            only works when that browser is on the same machine as SoulSync, so on a server or in
+            Docker choose <strong>Paste cookies.txt</strong>. On Windows, Chrome and the other
+            Chromium browsers seal their cookies in a way yt-dlp cannot read at all: use{' '}
+            <strong>Firefox</strong> or <strong>Paste cookies.txt</strong>.
+          </>
+        }
+      >
+        <Select
           id="youtube-cookies-browser"
-          className="form-select"
           value={browser}
           onChange={(event) => set('cookies_browser', event.target.value)}
         >
@@ -1053,39 +968,38 @@ export function YoutubePanel({
               {/* marked, not disabled: a selected disabled option reads as ''
                   and the next save would wipe the setting */}
               {windows && ABE_BROWSERS.includes(value)
-                ? `${label} — not supported on Windows`
+                ? `${label} (not supported on Windows)`
                 : label}
             </option>
           ))}
-        </select>
-        <div
-          className="setting-warning"
-          id="youtube-cookie-abe-warning"
-          role="status"
-          hidden={!abe}
-        >
-          {abe
-            ? `${browserLabel} seals its cookies with App-Bound Encryption on Windows, which yt-dlp cannot read. This will not work. Choose "Paste cookies.txt" instead, or "None" if you only download public videos.`
-            : null}
-        </div>
-        <div className="setting-help-text">
-          Only needed for private playlists, your Liked Music, age-gated videos and Premium audio
-          qualities &mdash; public videos download fine with <strong>None</strong>. Reading a
-          browser only works when that browser is on the same machine as SoulSync, so on a server or
-          in Docker choose <strong>Paste cookies.txt</strong>. On Windows, Chrome and the other
-          Chromium browsers seal their cookies in a way yt-dlp cannot read at all &mdash; use{' '}
-          <strong>Firefox</strong> or <strong>Paste cookies.txt</strong>.
-        </div>
+        </Select>
+      </SheetField>
+      <div id="youtube-cookie-abe-warning" role="status" hidden={!abe}>
+        {abe ? (
+          <Note>
+            {`${browserLabel} seals its cookies with App-Bound Encryption on Windows, which yt-dlp cannot read. This will not work. Choose "Paste cookies.txt" instead, or "None" if you only download public videos.`}
+          </Note>
+        ) : null}
       </div>
-      <div
-        className="form-group"
+      <SheetField
+        label="Paste cookies.txt"
+        htmlFor="youtube-cookies-paste"
         id="youtube-cookies-paste-group"
-        style={{ display: browser === 'custom' ? '' : 'none' }}
+        hidden={browser !== 'custom'}
+        help="For a server or Docker install with no browser on it. Paste the whole Netscape cookies.txt file."
+        more={
+          <>
+            For server and Docker installs with no local browser. Paste a Netscape/Mozilla{' '}
+            <code>cookies.txt</code>. Export it with a "Get cookies.txt LOCALLY" extension and paste
+            the whole file: the <code># Netscape HTTP Cookie File</code> header alone is not enough.
+            Needed for private playlists like your <strong>Liked Music</strong>, and for Premium
+            audio. Cookies expire now and then: paste again if YouTube stops working.
+          </>
+        }
       >
-        <label>Paste cookies.txt:</label>
-        <textarea
+        <TextArea
           id="youtube-cookies-paste"
-          className="form-input"
+          mono
           rows={6}
           // the saved file is never sent back (a secret, kept in a file): say
           // one is there, so a blank save is not mistaken for a wipe
@@ -1100,20 +1014,19 @@ export function YoutubePanel({
             set('cookies_paste', event.target.value);
           }}
         />
-        <div className="setting-help-text">
-          For server/Docker installs with no local browser. Paste a Netscape/Mozilla{' '}
-          <code>cookies.txt</code>. Export with a "Get cookies.txt LOCALLY" extension and paste the
-          whole file &mdash; the <code># Netscape HTTP Cookie File</code> header alone is not
-          enough. Required for private playlists like your <strong>Liked Music</strong>, and for
-          Premium audio itags. Cookies expire periodically &mdash; re-paste if YouTube stops
-          working.
-        </div>
-      </div>
-      <div className="form-group">
-        <label>YouTube Download Delay:</label>
-        <NumberField
+      </SheetField>
+
+      <SheetGroup title="Downloading" />
+      <Row
+        field
+        label="Download delay"
+        htmlFor="youtube-download-delay"
+        help="Time between YouTube downloads, so YouTube does not take SoulSync for a bot. Default 3."
+      >
+        <DraftNumber
           store={store}
           id="youtube-download-delay"
+          unit="seconds"
           min="0"
           max="30"
           step="1"
@@ -1121,29 +1034,35 @@ export function YoutubePanel({
           value={text(y.download_delay ?? 3)}
           save={(raw) => set('download_delay', parseInt(raw, 10) || 3)}
         />
-        <div className="setting-help-text">
-          Seconds between YouTube downloads to avoid bot detection. Default: 3
-        </div>
-      </div>
-      <CheckRow
-        id="youtube-album-bundle"
+      </Row>
+      <Row
         label="Download whole albums from YouTube Music"
-        // #1851: it lives in download_source because the album flow reads it
-        checked={d.youtube_album_bundle === true}
-        onChange={(checked) => store.set('download_source', 'youtube_album_bundle', checked)}
+        htmlFor="youtube-album-bundle"
         help="For an album, find the album itself on YouTube Music and download its playlist, instead of searching for each song. Helps with albums whose songs never show up in a song search. The artist and album title must both match; if they don't, SoulSync searches track by track as usual. Some albums need YouTube Music Premium cookies. Off by default."
-      />
-      <CheckRow
-        id="youtube-transcode"
+      >
+        {/* #1851: it lives in download_source because the album flow reads it */}
+        <Switch
+          id="youtube-album-bundle"
+          checked={d.youtube_album_bundle === true}
+          onChange={(event) =>
+            store.set('download_source', 'youtube_album_bundle', event.target.checked)
+          }
+        />
+      </Row>
+      <Row
         label="Re-encode YouTube audio"
-        checked={transcode}
-        onChange={(checked) => set('transcode', checked)}
+        htmlFor="youtube-transcode"
         help="YouTube serves Opus or AAC, not FLAC or MP3. With this on, the quality list must include the converted format (default MP3 320). With it off, add Opus or AAC to the list, or turn Fallback on."
-      />
-      <div id="youtube-transcode-options" style={{ display: transcode ? 'block' : 'none' }}>
-        <div className="form-group">
-          <label>Codec:</label>
-          <select
+      >
+        <Switch
+          id="youtube-transcode"
+          checked={transcode}
+          onChange={(event) => set('transcode', event.target.checked)}
+        />
+      </Row>
+      <div id="youtube-transcode-options" hidden={!transcode}>
+        <Row field sub label="Codec" htmlFor="youtube-transcode-codec">
+          <Select
             id="youtube-transcode-codec"
             value={codec}
             onChange={(event) => {
@@ -1155,124 +1074,88 @@ export function YoutubePanel({
                 transcode_bitrate: next === 'opus' && bitrate === '320' ? '256' : bitrate,
               });
             }}
-          >
-            <option value="mp3">MP3</option>
-            <option value="opus">Opus</option>
-            <option value="aac">AAC (M4A)</option>
-          </select>
-        </div>
-        <div className="form-group">
-          <label>Bitrate:</label>
-          <select
+            options={[
+              { value: 'mp3', label: 'MP3' },
+              { value: 'opus', label: 'Opus' },
+              { value: 'aac', label: 'AAC (M4A)' },
+            ]}
+          />
+        </Row>
+        <Row field sub label="Bitrate" htmlFor="youtube-transcode-bitrate">
+          <Select
             id="youtube-transcode-bitrate"
             value={bitrate}
             onChange={(event) => set('transcode_bitrate', event.target.value || '320')}
-          >
-            <option value="320" disabled={codec === 'opus'}>
-              320 kbps
-            </option>
-            <option value="256">256 kbps</option>
-            <option value="192">192 kbps</option>
-            <option value="128">128 kbps</option>
-          </select>
-        </div>
+            options={[
+              { value: '320', label: '320 kbps', disabled: codec === 'opus' },
+              { value: '256', label: '256 kbps' },
+              { value: '192', label: '192 kbps' },
+              { value: '128', label: '128 kbps' },
+            ]}
+          />
+        </Row>
       </div>
+
       {/* the yt-dlp updater lives with YouTube: it is what breaks YouTube
           downloads when it goes stale */}
-      <h4 className="settings-subheading">
-        yt-dlp{' '}
+      <SheetGroup title="yt-dlp">
         <span
           id="ytdlp-hint-badge"
           hidden={ytdlp.badge.hidden}
-          style={{ color: AMBER }}
           title={ytdlp.badge.title || undefined}
         >
-          &#9679;
+          <StatusWords tone="warn">{ytdlp.badge.title ? 'Needs a look' : ''}</StatusWords>
         </span>
-      </h4>
-      <div className="settings-group">
-        <div className="form-group">
-          <label>Installed:</label>
-          <span
-            id="ytdlp-installed"
-            className="readonly-field"
-            style={ytdlp.installedColor ? { color: ytdlp.installedColor } : undefined}
-          >
-            {ytdlp.installed}
-          </span>
-        </div>
-        <div className="form-group">
-          <label>Newest available:</label>
-          <span
-            id="ytdlp-latest"
-            className="readonly-field"
-            style={ytdlp.latestColor ? { color: ytdlp.latestColor } : undefined}
-          >
-            {ytdlp.latest}
-          </span>
-        </div>
-        <div className="form-group">
-          <label>Release channel:</label>
-          <select
-            id="ytdlp-channel"
-            value={channel}
-            onChange={(event) => {
-              setChannel(event.target.value);
-              void loadYtdlp(event.target.value);
-            }}
-          >
-            <option value="nightly">Nightly (recommended)</option>
-            <option value="stable">Stable</option>
-          </select>
-          {channelBits.icon}
-          {channelBits.line}
-        </div>
-        <div className="help-text setting-help-body" hidden={!channelHelp.open}>
-          {channelText}
-        </div>
-        <div className="form-actions" style={{ flexWrap: 'wrap' }}>
-          <button
-            className="test-button"
-            id="ytdlp-update-btn"
-            disabled={updating}
-            onClick={() => void runUpdate()}
-          >
-            {updating ? 'Updating...' : 'Update yt-dlp'}
-          </button>
-        </div>
-        <div className="help-text">
-          When YouTube downloads start failing with <strong>403 Forbidden</strong>, an out-of-date
-          yt-dlp is nearly always the cause.{' '}
-          <strong>An update only takes effect after you restart SoulSync</strong> &mdash; the
-          running process keeps using the version it loaded at startup.
-        </div>
-        <div
-          id="ytdlp-status"
-          style={{
-            display: update ? 'block' : 'none',
-            marginTop: '8px',
-            padding: '8px 12px',
-            borderRadius: '8px',
-            fontSize: '0.85em',
-            ...(update ? { color: update.color, background: update.background } : {}),
+      </SheetGroup>
+      <Row label="Installed">
+        <Value id="ytdlp-installed" tone={ytdlp.installedWarn ? 'warn' : undefined}>
+          {ytdlp.installed}
+        </Value>
+      </Row>
+      <Row label="Newest available">
+        <Value id="ytdlp-latest" tone={ytdlp.latestWarn ? 'warn' : undefined}>
+          {ytdlp.latest}
+        </Value>
+      </Row>
+      <Row
+        field
+        label="Release channel"
+        htmlFor="ytdlp-channel"
+        help="YouTube changes how it serves video far more often than yt-dlp cuts a stable release, so nightly is what actually keeps downloads working. Stable is there if you'd rather move slowly."
+      >
+        <Select
+          id="ytdlp-channel"
+          value={channel}
+          onChange={(event) => {
+            setChannel(event.target.value);
+            void loadYtdlp(event.target.value);
           }}
+          options={[
+            { value: 'nightly', label: 'Nightly (recommended)' },
+            { value: 'stable', label: 'Stable' },
+          ]}
+        />
+      </Row>
+      <ActionRow
+        label="Update yt-dlp"
+        help="When YouTube downloads start failing with 403 Forbidden, an out-of-date yt-dlp is nearly always why. An update takes effect only after you restart SoulSync: the running process keeps the version it loaded at startup."
+      >
+        <Btn
+          id="ytdlp-update-btn"
+          small
+          busy={updating}
+          disabled={updating}
+          onClick={() => void runUpdate()}
         >
-          {update?.text}
-        </div>
-        <pre
-          id="ytdlp-detail"
-          style={{
-            display: detail ? 'block' : 'none',
-            marginTop: '8px',
-            maxHeight: '220px',
-            overflow: 'auto',
-            fontSize: '0.75em',
-            whiteSpace: 'pre-wrap',
-          }}
-        >
-          {detail}
-        </pre>
-      </div>
+          {updating ? 'Updating...' : 'Update yt-dlp'}
+        </Btn>
+      </ActionRow>
+      <Say id="ytdlp-status" hidden={!update} tone={update?.tone}>
+        {update?.text}
+      </Say>
+      <Pre id="ytdlp-detail" hidden={!detail}>
+        {detail}
+      </Pre>
     </Panel>
   );
 }

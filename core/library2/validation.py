@@ -93,13 +93,68 @@ def import_reference(context):
         return _db_data_for_row(conn, rows[0]) if rows else None
 
 
-def refresh_imported_metadata(database, paths):
-    """Read the final published files, including retained companion copies."""
+#: the tags an import fills from the library when the file came out blank:
+#: the ones the tag check compares (status.EXPECTED_TAGS), never a cover
+#: (the import embeds its own) and never a value the file already has
+IMPORT_FILL_FIELDS = ('title', 'artist', 'album', 'album_artist', 'year', 'genre',
+                      'track_number', 'disc_number', 'total_tracks', 'total_discs')
+
+
+def fill_known_blanks(database, file_ids, config=None) -> int:
+    """Write what the library knows into the tags an import left blank.
+
+    The tag writer works from the download's metadata; the library row is
+    made after it, from more than that (the artist's genres already on file,
+    the edition's disc count). Every blank the library could fill was then
+    filed by the import's own tag check as a Library Re-tag finding, a
+    hundred and more per import (#2217). This is the write "Fix all safe"
+    would make, done as part of the import: blanks only, the hand-tagged
+    files left alone, and only when post-processing writes tags at all.
+    Returns how many files were written. Never raises."""
+    try:
+        if config is None:
+            from core.metadata.common import get_config_manager
+            config = get_config_manager()
+        # post-processing off, or "Fill empty tags automatically" set to Off:
+        # SoulSync writes nothing into the file on its own
+        from core.library2.tag_fill import fill_mode
+        if fill_mode(config) == 'off':
+            return 0
+        from contextlib import closing
+        with closing(database._get_connection()) as conn:
+            marks = ','.join('?' for _ in file_ids)
+            tracks = sorted({int(r[0]) for r in conn.execute(
+                f'SELECT track_id FROM lib2_track_files WHERE id IN ({marks}) AND track_id IS NOT NULL',
+                list(file_ids))}) if file_ids else []
+        if not tracks:
+            return 0
+        from core.library2.retag import write_tags
+        stats = write_tags(database, tracks, embed_cover=False, protect_hand_tagged=True,
+                           file_ids=list(file_ids),
+                           options={'mode': 'fill_missing', 'cover_art': 'skip', 'lyrics': 'skip',
+                                    'fields': list(IMPORT_FILL_FIELDS)})
+        if stats.get('failed'):
+            logging.getLogger(__name__).debug('import blank-tag fill: %s', stats.get('errors'))
+        return int(stats.get('written') or 0)
+    except Exception:  # noqa: BLE001 - the import is done; a fill is a bonus
+        logging.getLogger(__name__).debug('import blank-tag fill failed', exc_info=True)
+        return 0
+
+
+def refresh_imported_metadata(database, paths, *, fill_blanks: bool = False):
+    """Read the final published files, including retained companion copies.
+
+    ``fill_blanks`` is for an import that just tagged these files: what the
+    library knows and the file left blank is written first
+    (``fill_known_blanks``). A re-index (full refresh, a media server's file)
+    never writes a file, so it leaves it off."""
     from contextlib import closing
     from core.library2.scan import rescan_files
     from core.library2.status import _coerce_tags
     with closing(database._get_connection()) as conn:
         ids = [row[0] for path in paths for row in conn.execute('SELECT id FROM lib2_track_files WHERE path=?', (str(path),))]
+    if ids and fill_blanks:
+        fill_known_blanks(database, ids)
     rescan_files(database, file_ids=ids, source='import')
     with closing(database._get_connection()) as conn:
         states = [(_coerce_tags(row[0]).get('_validation') or {}).get('status', 'unknown') for fid in ids
@@ -561,6 +616,30 @@ def finding_summary(conn, file, findings=None):
             | {'category': 'check' if f['finding_type'] in audio_types or f['finding_type'].startswith('quality_') else 'metadata'} for f in findings]
 
 
+def _diff_rows(details):
+    """a re-tag finding's changed rows, by the name finding_verified checks them under"""
+    return {('albumartist' if d.get('file_key') == 'album_artist' else 'cover' if d.get('file_key') == 'cover_art'
+             else d.get('file_key')): d for d in (details.get('diff') or []) if d.get('changed')}
+
+
+def _tag_now_matches(tags, key, wanted) -> bool:
+    """is ``wanted`` what the file's tag snapshot holds for this row? source
+    ids sit under ``source_ids``; everything else is a top-level tag. text is
+    compared as text, a number as a number (a BPM of 120 and "120.0")."""
+    have = (tags.get('source_ids') or {}).get(key)
+    if have in (None, ''):
+        have = tags.get(key) if tags.get(key) not in (None, '') else tags.get(str(key).lower())
+    if have in (None, '') or wanted in (None, ''):
+        return False
+    a, b = str(have).strip(), str(wanted).strip()
+    if a.casefold() == b.casefold():
+        return True
+    try:
+        return round(float(a)) == round(float(b))
+    except (TypeError, ValueError):
+        return False
+
+
 def finding_verified(conn, finding, files):
     """Only close a supported issue on positive evidence, never on a skipped read."""
     kind = finding['finding_type']
@@ -581,10 +660,29 @@ def finding_verified(conn, finding, files):
             if not required:
                 return None
             # 'differs': a difference the settings say to leave alone
-            if any(checks.get(k) not in ('correct', 'not_required', 'differs') for k in required):
-                return False
+            for k in required:
+                state = checks.get(k)
+                if state is None and k in _diff_rows(details):
+                    # #2292: a row the validator has no check for (ISRC, a
+                    # source id, BPM). the check list only knows the core
+                    # fields, so these read as "unverified" forever and a
+                    # finding that only wrote them could never close: 1,536
+                    # of one library's 1,749. they are confirmed the direct
+                    # way, by what is in the file now.
+                    if not _tag_now_matches(tags, k, _diff_rows(details)[k].get('db_value')):
+                        return False
+                    continue
+                if state not in ('correct', 'not_required', 'differs'):
+                    return False
         elif kind == 'missing_cover_art':
-            if any(checks.get(k) not in ('correct', 'not_required') for k in ('artwork_database', 'cover', 'artwork_sidecar')):
+            # #2169: judge only what apply can fill. with no cover in the
+            # library and none found, apply writes the files' own cover to
+            # the folder and has nothing to save, so the finding never closed
+            details = finding.get('details') or {}
+            keys = ('cover', 'artwork_sidecar')
+            if details.get('found_artwork_url') or not details.get('db_missing', True):
+                keys += ('artwork_database',)
+            if any(checks.get(k) not in ('correct', 'not_required') for k in keys):
                 return False
         elif kind == 'track_number_mismatch':
             # Judge only what the fix wrote: requiring a correct disc tag the

@@ -23,6 +23,7 @@ from __future__ import annotations
 import logging
 import re
 from typing import Callable, Optional
+from core.download_plugins.types import track_candidates
 
 logger = logging.getLogger(__name__)
 
@@ -161,9 +162,11 @@ def stream_search_track(
         logger.info(f"Stream query {query_index + 1}/{len(queries)}: '{query}'")
         try:
             if use_direct_client:
-                tracks_result, _ = run_async(stream_client.search(query, timeout=search_timeout))
+                tracks_result, albums_result = run_async(stream_client.search(query, timeout=search_timeout))
             else:
-                tracks_result, _ = run_async(download_orchestrator.search(query, timeout=search_timeout))
+                tracks_result, albums_result = run_async(download_orchestrator.search(query, timeout=search_timeout))
+            # files inside soulseek folder groups are candidates too (#2228)
+            tracks_result = track_candidates(tracks_result, albums_result)
 
             if not tracks_result:
                 logger.info(f"No results for query '{query}', trying next...")

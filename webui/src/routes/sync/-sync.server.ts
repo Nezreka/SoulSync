@@ -601,6 +601,9 @@ export interface LibrarySearchTrack {
   file_path?: string;
   bitrate?: number;
   duration?: number;
+  /** false: the media server has no id for it yet, so it can't go on a
+   *  server playlist (#2235). absent on older servers: treat as on it */
+  on_server?: boolean;
 }
 
 export interface LibrarySearchResponse {

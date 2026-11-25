@@ -114,6 +114,96 @@ html[data-sidebar="collapsed"] .side-toggle-btn .side-toggle-icon {
     height: 16px;
 }
 
+/* ── The way into the player, under the toggle ───────────────────────────
+   its own card: a lit play key, what it is in words, an arrow. a full row,
+   but one that reads as the door to the other half of the app. */
+.open-player {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 10px;
+    padding: 8px 10px 8px 8px;
+    border: 1px solid rgba(var(--accent-rgb), 0.32);
+    border-radius: 12px;
+    background: linear-gradient(135deg,
+        rgba(var(--accent-rgb), 0.2),
+        rgba(var(--accent-rgb), 0.06));
+    color: var(--text-primary);
+    text-decoration: none;
+    transition: border-color var(--dur-base) ease, background var(--dur-base) ease, transform var(--dur-base) ease;
+}
+.open-player:hover,
+.open-player:focus-visible {
+    border-color: rgba(var(--accent-rgb), 0.6);
+    background: linear-gradient(135deg,
+        rgba(var(--accent-rgb), 0.3),
+        rgba(var(--accent-rgb), 0.1));
+}
+.open-player:active {
+    transform: scale(0.98);
+}
+.open-player-key {
+    display: grid;
+    flex: none;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    border-radius: 9px;
+    background: linear-gradient(135deg, rgb(var(--accent-rgb)), rgba(var(--accent-rgb), 0.8));
+    box-shadow: 0 3px 10px rgba(var(--accent-rgb), 0.4);
+    color: var(--text-primary);
+}
+.open-player-icon {
+    width: 13px;
+    height: 13px;
+    margin-left: 2px;
+}
+.open-player-text {
+    display: grid;
+    flex: 1;
+    min-width: 0;
+    line-height: 1.2;
+}
+.open-player-label {
+    overflow: hidden;
+    font-size: 13px;
+    font-weight: 700;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.open-player-sub {
+    color: var(--text-secondary);
+    font-size: 11px;
+}
+.open-player-chevron {
+    width: 14px;
+    height: 14px;
+    flex: none;
+    color: var(--text-secondary);
+    transition: transform var(--dur-base) ease;
+}
+.open-player:hover .open-player-chevron {
+    transform: translateX(2px);
+}
+html[data-sidebar="collapsed"] .open-player {
+    justify-content: center;
+    width: 46px;
+    margin-left: auto;
+    margin-right: auto;
+    padding: 0;
+    border: 0;
+    background: none;
+}
+html[data-sidebar="collapsed"] .open-player-key {
+    width: 40px;
+    height: 40px;
+    border-radius: 12px;
+}
+html[data-sidebar="collapsed"] .open-player-text,
+html[data-sidebar="collapsed"] .open-player-chevron {
+    display: none;
+}
+
 /* ── Nav swap: music nav vs video nav ──────────────────────────────────── */
 /* The video nav reuses .sidebar-nav layout (same class) — only visibility
    differs. Hidden by default (music side); shown when data-side="video". */
@@ -675,6 +765,37 @@ body[data-side="video"] .dashboard-header-sweep {
     display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
     margin: 0 0 14px; max-width: 780px;
 }
+/* Shelf Life on the detail page (admins only): score or gate, reasons, Keep */
+.vd-shelf {
+    margin: 0 0 14px; max-width: 780px; padding: 10px 12px; border-radius: var(--radius-md);
+    background: var(--black-a45); border: 1px solid var(--white-a12); backdrop-filter: blur(8px);
+    color: var(--white-a75); font-size: 13px;
+}
+.vd-shelf-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.vd-shelf-label { font-weight: 700; color: var(--text-bright); }
+.vd-shelf-chip {
+    display: inline-flex; align-items: center; min-height: 22px; padding: 1px 9px; border-radius: var(--radius-pill);
+    font-weight: 800; border: 1px solid var(--white-a18); background: var(--black-a70);
+}
+.vd-shelf-chip--low { color: var(--danger-soft); border-color: rgba(var(--danger-soft-rgb), 0.5); }
+.vd-shelf-chip--mid { color: var(--gold); border-color: rgba(var(--gold-rgb), 0.45); }
+.vd-shelf-chip--ok { color: var(--success); border-color: rgba(var(--success-strong-rgb), 0.4); }
+.vd-shelf-chip--gate { font-weight: 600; }
+.vd-shelf-chip--gate svg { width: 1em; height: 1em; vertical-align: -0.125em; }
+.vd-shelf-flag { color: var(--danger-soft); }
+.vd-shelf-when { color: var(--white-a50); font-size: 12px; }
+.vd-shelf-keep {
+    margin-left: auto; padding: 4px 14px; border-radius: var(--radius-pill); cursor: pointer; font: inherit;
+    font-weight: 600; color: rgb(var(--success-strong-rgb)); background: rgba(var(--success-strong-rgb), 0.16);
+    border: 1px solid rgba(var(--success-strong-rgb), 0.35);
+}
+.vd-shelf-keep:hover { background: rgba(var(--success-strong-rgb), 0.26); }
+.vd-shelf-keep--on { color: var(--bg-primary); background: rgb(var(--success-strong-rgb)); border-color: rgb(var(--success-strong-rgb)); }
+.vd-shelf-keep--on:hover { background: rgba(var(--success-strong-rgb), 0.85); }
+.vd-shelf-keep:disabled { opacity: 0.5; cursor: default; }
+.vd-shelf-note { margin-top: 6px; color: var(--white-a60); }
+.vd-shelf-reasons { margin: 6px 0 0; padding-left: 18px; }
+.vd-shelf-reasons li { margin: 2px 0; }
 .vd-health-chip {
     display: inline-flex; align-items: center; gap: 7px; min-height: 28px; max-width: 100%;
     padding: 5px 10px; border-radius: var(--radius-md);
@@ -2351,6 +2472,8 @@ body[data-side="video"] .settings-group[data-svc-side="music"].svc-side-active #
 .vreq-status--available { color: rgb(var(--accent-light-rgb)); }
 .vreq-status--denied { color: rgba(252, 165, 165, 0.8); }
 .vreq-status--partial { color: rgba(147, 197, 253, 0.85); }
+/* approved, held until an admin picks the release (#2199): a sentence, so it wraps */
+.vreq-status--held { color: rgb(var(--gold-rgb)); white-space: normal; max-width: 200px; text-align: right; line-height: 1.35; }
 .vreq-status--failed { color: rgba(253, 186, 116, 0.85); }
 /* a show still arriving: episodes here out of everything asked for */
 .vreq-progress { height: 3px; max-width: 220px; margin-top: 8px; border-radius: var(--radius-pill); overflow: hidden;
@@ -2410,6 +2533,60 @@ body[data-side="video"] .settings-group[data-svc-side="music"].svc-side-active #
     font: inherit; font-size: 13px; border: 1px solid var(--white-a12); background: var(--black-a30); color: #fff; }
 .vreq-sheet-select:focus-visible { outline: none; border-color: rgba(var(--accent-rgb), 0.7); }
 .vreq-sheet-select option { background: #18181c; color: #fff; }
+/* the member's ask (#2168): the title as art, then plain facts: the quality
+   (a line when there is one, a short radio list when there are more), who
+   gets asked or "starts downloading", and the quota with its meter */
+.vreq-sheet--ask { max-width: 440px; padding: 0; overflow: hidden auto; max-height: calc(100dvh - 32px);
+    overscroll-behavior: contain; }
+.vreq-ask-art { position: relative; min-height: 136px; display: flex; align-items: flex-end; padding: 16px 20px;
+    background: radial-gradient(120% 130% at 80% 0%, rgba(var(--accent-rgb), 0.5) 0%,
+        rgba(var(--accent-rgb), 0.12) 45%, var(--black-a60) 90%); }
+.vreq-ask-art.has-art { background-image: linear-gradient(180deg, var(--black-a10) 15%, var(--black-a85) 100%),
+    var(--vreq-art); background-size: cover; background-position: center 22%; }
+.vreq-ask-art-in { position: relative; min-width: 0; }
+.vreq-ask-title { font-size: 20px; font-weight: 700; letter-spacing: -0.015em; line-height: 1.2;
+    overflow-wrap: anywhere; }
+.vreq-ask-meta { font-size: 12.5px; color: var(--white-a70); margin-top: 3px; }
+.vreq-ask-body { padding: 14px 20px 20px; }
+.vreq-ask-body .vreq-choices { margin-bottom: 6px; }
+.vreq-ask-fact { display: flex; gap: 12px; align-items: flex-start; padding: 11px 0; font-size: 13.5px;
+    line-height: 1.45; border-top: 1px solid var(--white-a06); }
+.vreq-ask-body > .vreq-ask-fact:first-child { border-top: 0; }
+.vreq-ask-fact > svg { flex: none; width: 18px; height: 18px; margin-top: 1px; fill: none; stroke: var(--white-a60);
+    stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.vreq-ask-fact b { font-weight: 650; }
+.vreq-ask-soft { color: var(--white-a60); }
+.vreq-ask-grow { flex: 1; min-width: 0; }
+.vreq-qpick { margin-top: 8px; border: 1px solid var(--white-a08); border-radius: var(--radius-control); overflow: hidden; }
+.vreq-qopt { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 10px; align-items: center;
+    width: 100%; padding: 10px 12px; border: 0; border-top: 1px solid var(--white-a06); background: transparent;
+    color: inherit; font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.vreq-qopt:first-child { border-top: 0; }
+.vreq-qopt:hover { background: var(--white-a04); }
+.vreq-qopt[aria-checked="true"] { background: var(--white-a05); }
+.vreq-qopt:focus-visible { outline: 2px solid rgba(var(--accent-rgb), 0.7); outline-offset: -2px; }
+.vreq-qrad { width: 16px; height: 16px; border-radius: var(--radius-circle); border: 1.5px solid var(--white-a40);
+    position: relative; box-sizing: border-box; }
+.vreq-qopt[aria-checked="true"] .vreq-qrad { border-color: rgb(var(--accent-rgb)); }
+.vreq-qopt[aria-checked="true"] .vreq-qrad::after { content: ""; position: absolute; inset: 3px;
+    border-radius: var(--radius-circle); background: rgb(var(--accent-rgb)); }
+.vreq-qname { min-width: 0; overflow-wrap: anywhere; }
+.vreq-qtag { font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: var(--radius-pill); white-space: nowrap;
+    color: rgb(var(--success-rgb)); background: rgba(var(--success-rgb), 0.14); }
+.vreq-qtag--ask { color: rgb(var(--warning-rgb)); background: rgba(var(--warning-rgb), 0.14); }
+.vreq-ask-quota { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--white-a50);
+    min-height: 4px; }
+.vreq-ask-quota:empty { display: none; }
+.vreq-ask-meter { flex: 1; height: 5px; border-radius: 3px; background: var(--white-a08); overflow: hidden; }
+.vreq-ask-meter i { display: block; height: 100%; border-radius: 3px; background: rgb(var(--accent-rgb)); }
+.vreq-sheet--ask .vreq-sheet-foot { margin-top: 18px; }
+@media (max-width: 640px) {
+    .vreq-sheet-overlay:has(.vreq-sheet--ask) { align-items: flex-end; padding: 0; }
+    .vreq-sheet--ask { max-width: none; max-height: calc(100dvh - 24px);
+        border-radius: var(--radius-xl) var(--radius-xl) 0 0; }
+    .vreq-sheet--ask .vreq-ask-body { padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px)); }
+    .vreq-sheet--ask .vreq-sheet-foot .vreq-btn { flex: 1; padding: 11px 14px; }
+}
 /* cards, for profiles that ask instead of download: the quick Request
    action (same shape as the get button) and the Requested / Available ribbon */
 .vreq-card-btn { width: 30px; height: 30px; border-radius: 9px; padding: 0;
@@ -4967,6 +5144,29 @@ body[data-side="video"] #gsearch-aura {
 .vms-query-btn { flex-shrink: 0; padding: 8px 16px; border-radius: var(--radius-md); border: 1px solid var(--white-a12);
     background: var(--white-a10); color: var(--text-1); font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
 .vms-query-btn:hover { background: var(--white-a14); }
+/* a show's scope: whole series, a season, or one episode (#2233) */
+.vms-scopes { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
+.vms-seg { display: inline-flex; padding: 3px; gap: 2px; border-radius: var(--radius-pill);
+    background: var(--white-a06); border: 1px solid var(--white-a10); }
+.vms-seg-btn { border: 0; background: none; color: var(--white-a70); font: inherit; font-size: 12.5px; font-weight: 700;
+    padding: 6px 14px; min-height: 32px; border-radius: var(--radius-pill); cursor: pointer;
+    transition: background var(--dur-fast), color var(--dur-fast); }
+.vms-seg-btn:hover { color: var(--text-1); background: var(--white-a06); }
+.vms-seg-btn[aria-pressed="true"] { color: var(--text-1); background: rgba(var(--accent-rgb), 0.28);
+    box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.55); }
+.vms-seg-btn:focus-visible, .vms-scope-sel:focus-visible { outline: 2px solid var(--white-a50); outline-offset: 2px; }
+.vms-scope-sel { appearance: none; -webkit-appearance: none; max-width: 100%; min-height: 34px; padding: 6px 30px 6px 12px;
+    border-radius: var(--radius-pill); border: 1px solid var(--white-a12); color: var(--text-1);
+    font: inherit; font-size: 12.5px; font-weight: 700; cursor: pointer;
+    background: var(--white-a08) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23fff' stroke-width='1.6' fill='none' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat right 11px center; }
+.vms-scope-sel:hover { background-color: var(--white-a14); }
+.vms-scope-sel[hidden] { display: none; }
+.vms-scope-sel option { background: var(--bg-raised); color: var(--text-1); }
+@media (max-width: 620px) {
+    .vms-seg { display: flex; width: 100%; }
+    .vms-seg-btn { flex: 1 1 0; padding: 8px 6px; min-height: 40px; }
+    .vms-scope-sel { flex: 1 1 0; min-width: 0; min-height: 40px; }
+}
 /* the title's quality profile picker (Get + Manual search) */
 .vdl-prof { display: inline-flex; align-items: center; gap: 8px; padding: 3px 4px 3px 12px;
     border-radius: var(--radius-pill); background: var(--white-a06); border: 1px solid var(--white-a12); }
@@ -4999,6 +5199,12 @@ body[data-side="video"] #gsearch-aura {
 .vdl-pack .vdl-r-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .vdl-pack-meta { font-size: 12px; font-weight: 600; color: var(--white-a55); white-space: nowrap; flex: 0 0 auto; }
 .vdl-pack-get { flex: 0 0 auto; }
+/* on a phone the name keeps its own line; what it covers and GET PACK wrap under it */
+@media (max-width: 620px) {
+    .vdl-pack .vdl-pack-head { flex-wrap: wrap; row-gap: 8px; }
+    .vdl-pack .vdl-r-title { flex: 1 1 calc(100% - 110px); }
+    .vdl-pack .vdl-pack-get { margin-left: auto; }
+}
 .vdl-pack-list {
     display: none; padding: 4px 12px 12px 30px; flex-direction: column; gap: 3px;
     border-top: 1px solid var(--white-a05);
@@ -5008,6 +5214,16 @@ body[data-side="video"] #gsearch-aura {
 .vdl-pack-ep-tag { flex: 0 0 auto; width: 54px; font-weight: 700; color: rgb(var(--accent-light-rgb)); font-family: ui-monospace, monospace; }
 .vdl-pack-ep-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--white-a70); }
 .vdl-pack-ep-sz { flex: 0 0 auto; color: var(--white-a40); font-variant-numeric: tabular-nums; }
+/* what a result covers that you already have (#2233) */
+.vdl-pack-ep--have .vdl-pack-ep-name { color: var(--white-a45); }
+.vdl-pack-ep-have { flex: 0 0 auto; font-size: 10.5px; font-weight: 700; color: rgb(var(--success-strong-rgb)); }
+.vdl-cover { flex: 0 0 auto; font-size: 10.5px; font-weight: 800; letter-spacing: 0.02em; white-space: nowrap;
+    padding: 2px 8px; border-radius: var(--radius-pill); color: var(--white-a70);
+    background: var(--white-a06); border: 1px solid var(--white-a10); }
+.vdl-cover--some { color: rgb(var(--warning-strong-rgb)); border-color: rgba(var(--warning-strong-rgb), 0.4); }
+.vdl-cover--all { color: rgb(var(--success-strong-rgb)); border-color: rgba(var(--success-strong-rgb), 0.4); }
+.vdl-r-ep { flex: 0 0 auto; font-size: 11px; font-weight: 800; font-family: ui-monospace, monospace;
+    color: rgb(var(--accent-light-rgb)); }
 
 /* Manual override — let the user GET a below-profile release they picked themselves.
    Brighten the otherwise-dimmed rejected card when it carries an override button,
@@ -5098,6 +5314,10 @@ body[data-side="video"] #gsearch-aura {
     color: rgb(var(--accent-rgb));
 }
 .vrf-chip--got { background: rgba(80,200,120,0.14); border-color: rgba(80,200,120,0.4); color: #6fdb96; }
+/* Shelf Life signal pills: red argues for cutting, green for keeping */
+.vrf-chip--sl-low { background: rgba(var(--danger-soft-rgb), 0.14); border-color: rgba(var(--danger-soft-rgb), 0.45); color: var(--danger-soft); }
+.vrf-chip--sl-mid { background: rgba(var(--gold-rgb), 0.14); border-color: rgba(var(--gold-rgb), 0.45); color: var(--gold); }
+.vrf-chip--sl-high { background: rgba(var(--success-rgb), 0.14); border-color: rgba(var(--success-rgb), 0.4); color: var(--success); }
 .vrf-show-overview {
     font-size: 12.5px; color: var(--white-a60); line-height: 1.55; margin: 8px 0 0;
     display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;

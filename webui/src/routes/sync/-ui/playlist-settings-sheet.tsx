@@ -44,6 +44,10 @@ export interface PlaylistSettingsSheetProps {
   onToggleAutoRemove?: () => void;
   onEditSource?: () => void;
   onGenerateCover?: () => void;
+  /** a photo of your own as the cover; absent hides the row (#2280) */
+  onUploadCover?: (file: File) => void;
+  /** back to the source's cover (or the collage); absent hides the row (#2281) */
+  onRestoreCover?: () => void;
   onClear?: () => void;
   onDelete: () => void;
   onClose: () => void;
@@ -63,6 +67,8 @@ export function PlaylistSettingsSheet({
   onToggleAutoRemove,
   onEditSource,
   onGenerateCover,
+  onUploadCover,
+  onRestoreCover,
   onClear,
   onDelete,
   onClose,
@@ -191,6 +197,47 @@ export function PlaylistSettingsSheet({
               </div>
               <button type="button" className={styles.link} onClick={onGenerateCover}>
                 Generate cover art
+              </button>
+            </div>
+          ) : null}
+          {onUploadCover ? (
+            <div className={styles.row}>
+              <div className={styles.rowText}>
+                <div className={styles.rowTitle}>Your own cover</div>
+                <div className={styles.rowDesc}>A JPG, PNG or WebP from this device</div>
+              </div>
+              {/* the cover menu on the playlist had this; Settings, where the
+                  other two cover actions are, did not */}
+              <label className={styles.link}>
+                Upload artwork
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  hidden
+                  aria-label="Upload artwork"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    event.target.value = '';
+                    if (file) onUploadCover(file);
+                  }}
+                />
+              </label>
+            </div>
+          ) : null}
+          {onRestoreCover && row.custom_cover ? (
+            <div className={styles.row}>
+              <div className={styles.rowText}>
+                <div className={styles.rowTitle}>
+                  {row.source_image_url ? 'Original cover' : 'Your cover'}
+                </div>
+                <div className={styles.rowDesc}>
+                  {row.source_image_url
+                    ? 'Put back the cover it came with'
+                    : 'Back to the collage of its songs'}
+                </div>
+              </div>
+              <button type="button" className={styles.link} onClick={onRestoreCover}>
+                {row.source_image_url ? 'Restore original' : 'Remove cover'}
               </button>
             </div>
           ) : null}

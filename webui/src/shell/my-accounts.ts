@@ -16,13 +16,23 @@
  *
  * Backend: GET /api/profiles/me/connections, the per-service save/OAuth
  * routes, POST /api/profiles/me/connections/<service>/disconnect, and the
- * media-server routes the old My Settings used, and GET/DELETE
- * /api/profiles/me/oidc for the sign-in card.
+ * media-server routes the old My Settings used, GET/DELETE
+ * /api/profiles/me/oidc for the sign-in card, and /api/weather for your own
+ * sidebar weather (#2163: the server answers each profile with its own).
  */
 
+import {
+  type CanDoRow,
+  describePermissions,
+  loadAdminName,
+  LIMIT_KINDS,
+  type LimitKind,
+  requestLimit,
+} from '@/platform/shell/my-permissions-core';
 import { appURL } from '@/platform/url-base';
 
 import { escapeHtml, toast } from './html';
+import { PERMS_CHANGED_EVENT, getMyPermissions, loadMyPermissions } from './my-permissions';
 
 type ServiceId = 'spotify' | 'tidal' | 'listenbrainz' | 'lastfm';
 
@@ -110,6 +120,15 @@ interface OidcStatus {
   last?: { connected?: boolean; error?: string | null } | null;
 }
 
+/** GET /api/weather as a member sees it: their own place, never the admin's */
+interface MaWeather {
+  enabled?: boolean;
+  units?: 'celsius' | 'fahrenheit';
+  holidays?: boolean;
+  location?: { query?: string; name?: string } | null;
+  snapshot?: { current?: { temp?: number | null; condition?: string | null } | null } | null;
+}
+
 export const OIDC_CONNECT_URL = '/api/profiles/me/oidc-connect/start';
 
 interface ImportStatus {
@@ -168,6 +187,16 @@ const SERVER_META: Record<ServerModel['type'], { name: string; logo: string }> =
   none: { name: 'Media server', logo: '' },
 };
 
+/** GET /api/profiles/me/listening-privacy: share listening (blends) and the
+ * private session, the caller's own */
+export interface MaPrivacy {
+  share_listening?: boolean;
+  asked?: boolean;
+  ask?: boolean;
+  private_session?: boolean;
+  private_until?: string | null;
+}
+
 // init.js fires this when the signed-in profile is known or changes (the same
 // name as SHELL_PROFILE_CONTEXT_CHANGED_EVENT; the shell bundle keeps its own copy)
 const PROFILE_CONTEXT_CHANGED_EVENT = 'ss:webui-profile-context-changed';
@@ -178,6 +207,13 @@ const _ma: {
   oidc: OidcStatus | null;
   imports: Partial<Record<'listenbrainz' | 'lastfm', ImportStatus>>;
   scrobbling: MaScrobbling | null;
+  weather: MaWeather | null;
+  privacy: MaPrivacy | null;
+  /** asks used in each limited kind's window, for "5 asks a week, 2 used" */
+  asksUsed: Partial<Record<LimitKind, number>> | null;
+  adminName: string;
+  /** what this person could ask an admin to switch on, and what they have (#2304) */
+  features: { requestable: { key: string; label: string }[]; pending: string[] } | null;
   open: string | null;
   poll: ReturnType<typeof setTimeout> | null;
 } = {
@@ -186,6 +222,11 @@ const _ma: {
   oidc: null,
   imports: {},
   scrobbling: null,
+  weather: null,
+  privacy: null,
+  asksUsed: null,
+  adminName: '',
+  features: null,
   open: null,
   poll: null,
 };
@@ -264,7 +305,14 @@ export function openMyAccountsModal(): void {
   // beat the shell to knowing who is signed in, so the header redraws when it
   // finds out instead of staying on "?"
   window.addEventListener(PROFILE_CONTEXT_CHANGED_EVENT, _maRefreshHeader);
+  // an admin's change reaches the open card
+  window.addEventListener(PERMS_CHANGED_EVENT, _maRefreshCanDo);
   void _maLoad();
+}
+
+function _maRefreshCanDo(): void {
+  const box = document.getElementById('ma-cando');
+  if (box) box.outerHTML = _maCanDoSection();
 }
 
 function _maRefreshHeader(): void {
@@ -277,6 +325,7 @@ export function closeMyAccountsModal(): void {
   if (o) o.classList.add('hidden');
   document.removeEventListener('keydown', _maOnKeydown);
   window.removeEventListener(PROFILE_CONTEXT_CHANGED_EVENT, _maRefreshHeader);
+  window.removeEventListener(PERMS_CHANGED_EVENT, _maRefreshCanDo);
   _maStopPoll();
 }
 
@@ -302,16 +351,21 @@ async function _maJson<T>(url: string): Promise<T | null> {
 }
 
 async function _maLoad(): Promise<void> {
-  const [data, server, oidc, scrobbling] = await Promise.all([
+  const [data, server, oidc, scrobbling, weather, privacy] = await Promise.all([
     _maJson<MaConnections>('/api/profiles/me/connections'),
     _maLoadServer(),
     _maJson<OidcStatus>('/api/profiles/me/oidc'),
     _maJson<MaScrobbling>('/api/profiles/me/scrobbling'),
+    _maJson<MaWeather>('/api/weather'),
+    _maJson<MaPrivacy>('/api/profiles/me/listening-privacy'),
+    _maLoadCanDo(),
   ]);
   _ma.data = data || { connections: {}, is_admin: false };
   _ma.server = server;
   _ma.oidc = oidc;
   _ma.scrobbling = scrobbling;
+  _ma.weather = weather;
+  _ma.privacy = privacy;
   _maRefreshHeader();
   _maRender();
   const last = oidc?.last;
@@ -324,6 +378,36 @@ async function _maLoad(): Promise<void> {
     else toast(last.error || 'Connecting failed. Try again.', 'error');
   }
   await _maLoadImports();
+}
+
+/** what you can do (#2166): the server's map, fresh, and how many asks the
+ * window has used when there's a limit */
+async function _maLoadCanDo(): Promise<void> {
+  const [perms, admin] = await Promise.all([
+    loadMyPermissions({ force: true }).catch(() => getMyPermissions()),
+    loadAdminName(),
+  ]);
+  _ma.adminName = admin;
+  _ma.asksUsed = null;
+  if (!perms.isAdmin) {
+    const f = await _maJson<{
+      requestable?: { key: string; label: string }[];
+      pending?: string[];
+    }>('/api/profiles/me/feature-requests');
+    _ma.features = f ? { requestable: f.requestable ?? [], pending: f.pending ?? [] } : null;
+  }
+  if (LIMIT_KINDS.some((k) => requestLimit(perms, k))) {
+    // music, movies and TV each count on their own (/api/profiles/me/asks)
+    const q = await _maJson<{ asks?: Partial<Record<LimitKind, { used?: number }>> }>(
+      '/api/profiles/me/asks',
+    );
+    const used: Partial<Record<LimitKind, number>> = {};
+    for (const k of LIMIT_KINDS) {
+      const n = q?.asks?.[k]?.used;
+      if (typeof n === 'number') used[k] = n;
+    }
+    _ma.asksUsed = used;
+  }
 }
 
 /** who you are on the media server. the ACTIVE server decides the card, a
@@ -460,10 +544,11 @@ function _maRender(): void {
   const body = document.getElementById('ma-body');
   if (!body || !_ma.data) return;
   if (_ma.data.is_admin) {
-    body.innerHTML = `<div class="ma-empty">Your accounts are the app's own. They're set up in Settings.</div>${_maSignInSection()}`;
+    body.innerHTML = `<div class="ma-empty">Your accounts are the app's own. They're set up in Settings.</div>${_maPrivacySection()}${_maSignInSection()}`;
     return;
   }
   body.innerHTML = `
+    ${_maCanDoSection()}
     ${_maListeningCard()}
     <section class="ma-section" aria-labelledby="ma-server-h">
       <h4 class="ma-section-title" id="ma-server-h">Media server</h4>
@@ -473,11 +558,84 @@ function _maRender(): void {
       <h4 class="ma-section-title" id="ma-services-h">Music services</h4>
       <div class="ma-group">${_MA_SERVICES.map(_maServiceRow).join('')}</div>
     </section>
+    ${_maPrivacySection()}
+    ${_maWeatherSection()}
     ${_maSignInSection()}
     <p class="ma-foot">The app's own accounts are set up by the admin in Settings. Anything you change here only affects you.</p>`;
   for (const s of ['listenbrainz', 'lastfm'] as const) _maPaintImport(s);
   const focus = body.querySelector<HTMLElement>('.ma-row.is-open input, .ma-row.is-open select');
   focus?.focus();
+}
+
+const _CAN_ICONS: Record<CanDoRow['id'], string> = {
+  music:
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>',
+  movies:
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="3" width="20" height="18" rx="2"/><path d="M7 3v18M17 3v18M2 9h5M17 9h5M2 15h5M17 15h5"/></svg>',
+  tv: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M17 2l-5 5-5-5"/></svg>',
+  books:
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5z"/><path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5"/></svg>',
+  requests:
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.5 5.1 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.5-6.9A2 2 0 0 0 16.8 4H7.2a2 2 0 0 0-1.7 1.1z"/></svg>',
+};
+
+/** what you can do (#2166): the same plain-words summary the admin's editor
+ * shows, read-only, with who to ask when something is off. built from the
+ * server's map, so it is the truth, not a copy of a form */
+export function _maCanDoSection(): string {
+  const perms = getMyPermissions();
+  if (perms.isAdmin) return '';
+  const can = describePermissions(perms, { used: _ma.asksUsed, forMember: true });
+  const rows = can.rows
+    .map((r) => {
+      const lead = r.strong
+        ? `<b>${escapeHtml(r.lead)}</b>`
+        : r.off
+          ? `<span class="ma-can-off">${escapeHtml(r.lead)}</span>`
+          : escapeHtml(r.lead);
+      const detail = r.detail.map((d) => ` · ${escapeHtml(d)}`).join('');
+      return `
+        <div class="ma-can-row" data-can="${r.id}">
+          <span class="ma-can-icon">${_CAN_ICONS[r.id]}</span>
+          <div class="ma-can-text">
+            <div class="ma-can-k">${escapeHtml(r.label)}</div>
+            <div class="ma-can-v">${lead}${detail}</div>
+          </div>
+        </div>`;
+    })
+    .join('');
+  const who = escapeHtml(_ma.adminName || 'your admin');
+  // what else there is, as something to ask for, not a list of what is denied
+  // (#2303), each with a button that asks (#2304). when the list of what can
+  // be asked for didn't load, the names alone, as before.
+  const askable = _ma.features?.requestable ?? [];
+  const waiting = new Set(_ma.features?.pending ?? []);
+  const never = askable.length
+    ? `<div class="ma-can-never"><b>There's more you can ask ${who} for:</b>
+        <div class="ma-can-asks">${askable
+          .map((f) =>
+            waiting.has(f.key)
+              ? `<span class="ma-can-ask-chip" data-asked="true">${escapeHtml(f.label)} · asked</span>`
+              : `<button type="button" class="ma-can-ask-chip" data-ma="ask-feature" data-id="${escapeHtml(f.key)}" aria-label="Ask for ${escapeHtml(f.label)}">${escapeHtml(f.label)} · Ask</button>`,
+          )
+          .join('')}</div></div>`
+    : can.never.length
+      ? `<div class="ma-can-never"><b>There's more you can ask ${who} for:</b> ${escapeHtml(can.never.join(', '))}.</div>`
+      : '';
+  const ask =
+    can.anyOff && !can.never.length
+      ? `<p class="ma-can-ask">Something you'd like that isn't here? Ask ${who}.</p>`
+      : '';
+  return `
+    <section class="ma-section" id="ma-cando" aria-labelledby="ma-cando-h">
+      <h4 class="ma-section-title" id="ma-cando-h">What you can do</h4>
+      <div class="ma-can">
+        <p class="ma-can-lead">${escapeHtml(can.sentence)}</p>
+        ${rows}
+        ${never}
+        ${ask}
+      </div>
+    </section>`;
 }
 
 /** sign in with oidc: connect this profile to your account at the provider,
@@ -505,6 +663,146 @@ export function _maSignInSection(): string {
             </div>
             ${trailing}
           </div>
+        </div>
+      </div>
+    </section>`;
+}
+
+const _SUN = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>`;
+
+/** what the weather row says: your place and its sky, or how to turn it on */
+export function _maWeatherLine(w: MaWeather | null): string {
+  const loc = w?.location;
+  if (!loc) return 'Off. Add your town to see its weather and time in the sidebar.';
+  const name = loc.name || loc.query || 'Your place';
+  if (w?.enabled === false) return `${name}. Hidden from the sidebar.`;
+  const cur = w?.snapshot?.current;
+  if (!cur || typeof cur.temp !== 'number') return `${name}. Forecast on its way.`;
+  const unit = w?.units === 'celsius' ? 'C' : 'F';
+  const sky = cur.condition ? `, ${cur.condition.toLowerCase()}` : '';
+  return `${name}, ${Math.round(cur.temp)}°${unit}${sky}`;
+}
+
+/** "ends at 9:40 PM" for a private session's stamp (stored in utc) */
+export function _maPrivateUntil(until: string | null | undefined): string {
+  if (!until) return '';
+  const when = new Date(until.replace(' ', 'T') + 'Z');
+  if (Number.isNaN(when.getTime())) return '';
+  return when.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
+
+/** who sees your listening: blends only when you say yes, and a private
+ * session that keeps plays out of everything for a few hours */
+export function _maPrivacySection(): string {
+  const p = _ma.privacy;
+  if (!p) return '';
+  const row = (key: string, name: string, sub: string, on: boolean) => `
+        <div class="ma-row">
+          <div class="ma-row-main">
+            <span class="ma-logo ma-logo-key">${_PULSE}</span>
+            <div class="ma-row-text">
+              <div class="ma-row-name">${name}</div>
+              <div class="ma-row-sub" id="ma-sub-${key}">${escapeHtml(sub)}</div>
+            </div>
+            <label class="ma-switch">
+              <input type="checkbox" data-ma-privacy="${key}" aria-label="${name}"${on ? ' checked' : ''}>
+              <span></span>
+            </label>
+          </div>
+        </div>`;
+  const ends = _maPrivateUntil(p.private_until);
+  return `
+    <section class="ma-section" aria-labelledby="ma-privacy-h">
+      <h4 class="ma-section-title" id="ma-privacy-h">Your listening</h4>
+      <div class="ma-group">
+        ${row(
+          'share',
+          'Share my listening',
+          p.share_listening
+            ? 'On. Blends mix your plays with people here who also share theirs.'
+            : 'Off. Nobody else on this server gets a blend made from your plays.',
+          !!p.share_listening,
+        )}
+        ${row(
+          'private',
+          'Private session',
+          p.private_session
+            ? `On${ends ? ` until ${ends}` : ''}. What you play now isn't saved, scrobbled or used for your mixes.`
+            : "Plays in a private session aren't saved, scrobbled or used for your mixes. It turns itself off after 6 hours.",
+          !!p.private_session,
+        )}
+      </div>
+    </section>`;
+}
+
+async function _maPrivacyCall(body: Record<string, boolean>, said: (p: MaPrivacy) => string) {
+  try {
+    const res = await fetch('/api/profiles/me/listening-privacy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = (await res.json().catch(() => null)) as (MaPrivacy & { success?: boolean }) | null;
+    if (!res.ok || !data || data.success === false) throw new Error('save failed');
+    _ma.privacy = data;
+    toast(said(data), 'success');
+  } catch {
+    toast("Couldn't save that. Try again.", 'error');
+  }
+  _maRender();
+}
+
+/** your own sidebar weather (#2163). the admin's lives in Settings and is
+ * never shown here: the server answers each profile with its own */
+function _maWeatherSection(): string {
+  const w = _ma.weather;
+  if (!w) return '';
+  const open = _ma.open === 'weather';
+  const loc = w.location;
+  const trailing = open
+    ? ''
+    : `<button type="button" class="ma-btn ma-btn-outline" data-ma="toggle" data-id="weather" aria-expanded="false">${loc ? 'Change' : 'Set up'}</button>`;
+  const sw = (key: string, label: string, on: boolean) => `
+    <div class="ma-scrobble">
+      <span>${label}</span>
+      <label class="ma-switch">
+        <input type="checkbox" data-ma-weather="${key}" aria-label="${label}"${on ? ' checked' : ''}>
+        <span></span>
+      </label>
+    </div>`;
+  const panel = open
+    ? `
+      <div class="ma-panel">
+        ${_maField(
+          'ma-wx-loc',
+          'Your town',
+          `<input class="ma-input" id="ma-wx-loc" type="text" autocomplete="off" spellcheck="false"
+             placeholder="ZIP or city, e.g. 97501 or Berlin" value="${escapeHtml(loc?.query || '')}" data-submit="weather">`,
+          'Only you see this. The sidebar shows its weather and its local time.',
+        )}
+        ${loc ? sw('celsius', 'Use °C', w.units === 'celsius') : ''}
+        ${loc ? sw('holidays', 'Holiday decorations', w.holidays !== false) : ''}
+        <div class="ma-actions">
+          <button type="button" class="ma-btn ma-btn-quiet" data-ma="toggle" data-id="weather">Cancel</button>
+          ${loc ? '<button type="button" class="ma-btn ma-btn-quiet" data-ma="wx-clear">Turn off</button>' : ''}
+          <button type="button" class="ma-btn ma-btn-primary" data-ma="wx-save">Save</button>
+        </div>
+      </div>`
+    : '';
+  return `
+    <section class="ma-section" aria-labelledby="ma-weather-h">
+      <h4 class="ma-section-title" id="ma-weather-h">Sidebar weather</h4>
+      <div class="ma-group">
+        <div class="ma-row${open ? ' is-open' : ''}">
+          <div class="ma-row-main">
+            <span class="ma-logo ma-logo-key">${_SUN}</span>
+            <div class="ma-row-text">
+              <div class="ma-row-name">Weather</div>
+              <div class="ma-row-sub" id="ma-sub-weather">${escapeHtml(_maWeatherLine(w))}</div>
+            </div>
+            ${trailing}
+          </div>
+          ${panel}
         </div>
       </div>
     </section>`;
@@ -918,6 +1216,27 @@ function _maAgo(stamp: string | null | undefined): string {
 
 // ── events ──────────────────────────────────────────────────────────────────
 
+/** ask an admin to switch a feature on (#2304) */
+async function askForFeature(feature: string): Promise<void> {
+  try {
+    const res = await fetch('/api/profiles/me/feature-requests', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ feature }),
+    });
+    const data = (await res.json()) as { success?: boolean; error?: string };
+    if (!res.ok || !data.success) {
+      toast(data.error || 'Could not send that. Try again.', 'error');
+      return;
+    }
+    if (_ma.features && !_ma.features.pending.includes(feature)) _ma.features.pending.push(feature);
+    toast(`Asked ${_ma.adminName || 'your admin'}. You'll hear when it's answered.`, 'success');
+    _maRender();
+  } catch {
+    toast('Could not send that. Try again.', 'error');
+  }
+}
+
 function _maOnClick(e: Event): void {
   const overlay = e.currentTarget as HTMLElement;
   if (e.target === overlay) {
@@ -937,6 +1256,9 @@ function _maOnClick(e: Event): void {
       break;
     case 'oauth':
       connectMyAccount(id);
+      break;
+    case 'ask-feature':
+      void askForFeature(id);
       break;
     case 'save':
       void saveMyAccountToken(id);
@@ -1006,6 +1328,20 @@ function _maOnClick(e: Event): void {
     case 'scrobble-signin':
       void _maLastfmScrobbleSignIn(btn);
       break;
+    case 'wx-save': {
+      const place = _maValue('ma-wx-loc');
+      if (!place) {
+        toast('Type your town or ZIP first', 'info');
+        break;
+      }
+      void _maWeatherCall('/location', { location: place }, (w) =>
+        w.location?.name ? `Weather set to ${w.location.name}` : 'Weather saved',
+      );
+      break;
+    }
+    case 'wx-clear':
+      void _maWeatherCall('/location', { location: '' }, () => 'Sidebar weather turned off');
+      break;
     case 'scrobble-stop':
       void _maScrobbleCall(
         '/api/profiles/me/lastfm/scrobble',
@@ -1031,6 +1367,34 @@ function _maOnClick(e: Event): void {
 
 function _maOnChange(e: Event): void {
   const el = e.target as HTMLElement;
+  if (el instanceof HTMLInputElement && el.dataset.maPrivacy) {
+    const on = el.checked;
+    if (el.dataset.maPrivacy === 'share') {
+      void _maPrivacyCall({ share_listening: on }, () =>
+        on ? 'Sharing your listening for blends' : 'Your listening is just yours now',
+      );
+    } else {
+      void _maPrivacyCall({ private_session: on }, (p) => {
+        const ends = _maPrivateUntil(p.private_until);
+        return on ? `Private session on${ends ? ` until ${ends}` : ''}` : 'Private session off';
+      });
+    }
+    return;
+  }
+  if (el instanceof HTMLInputElement && el.dataset.maWeather) {
+    const on = el.checked;
+    if (el.dataset.maWeather === 'celsius') {
+      void _maWeatherCall('/units', { use_celsius: on }, () => `Using °${on ? 'C' : 'F'}`, true);
+    } else {
+      void _maWeatherCall(
+        '/holidays',
+        { enabled: on },
+        () => (on ? 'Holiday decorations on' : 'Holiday decorations off'),
+        true,
+      );
+    }
+    return;
+  }
   if (el instanceof HTMLInputElement && el.dataset.maScrobble === 'listenbrainz') {
     void _maScrobbleCall(
       '/api/profiles/me/listenbrainz/scrobble',
@@ -1052,6 +1416,10 @@ function _maOnFieldKey(e: KeyboardEvent): void {
   const el = e.target as HTMLElement;
   if (e.key !== 'Enter' || !el.dataset.submit) return;
   e.preventDefault();
+  if (el.dataset.submit === 'weather') {
+    (document.querySelector('[data-ma="wx-save"]') as HTMLElement | null)?.click();
+    return;
+  }
   void saveMyAccountToken(el.dataset.submit);
 }
 
@@ -1324,6 +1692,48 @@ export async function _maPlexConnect(
       btn.textContent = label;
     }
   }
+}
+
+/**
+ * change your own sidebar weather, then redraw the row from what the server
+ * holds and let the sidebar pick it up without a reload. keepOpen leaves the
+ * panel open (a switch flipped inside it).
+ */
+async function _maWeatherCall(
+  path: string,
+  body: Record<string, unknown>,
+  done: (w: MaWeather) => string,
+  keepOpen = false,
+): Promise<boolean> {
+  let ok = false;
+  try {
+    const res = await fetch('/api/weather' + path, {
+      method: 'PUT',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = (await res.json().catch(() => ({}))) as MaWeather & {
+      success?: boolean;
+      error?: string;
+    };
+    if (!res.ok || data.success === false) {
+      toast(_maError(data as Record<string, unknown>, "Couldn't save the weather"), 'error');
+    } else {
+      ok = true;
+      if (!keepOpen) _ma.open = null;
+      _ma.weather = (await _maJson<MaWeather>('/api/weather')) || _ma.weather;
+      toast(done(_ma.weather || data), 'success');
+    }
+  } catch {
+    toast("Couldn't save the weather", 'error');
+  }
+  _maRender();
+  try {
+    void Promise.resolve(window.bootSidebarWeather?.()).catch(() => {});
+  } catch {
+    // the sidebar catches up on the next page load
+  }
+  return ok;
 }
 
 /** change where your plays scrobble, then redraw from what the server says */

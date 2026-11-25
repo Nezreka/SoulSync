@@ -158,15 +158,15 @@ def _strength(kind: str) -> int:
 
 def sure_parts(credit: Any) -> List[str]:
     """the pieces a credit's sure separators make (feat., ft., featuring, a
-    spaced lowercase x, ×, ;, |, a spaced /), each as written. What only
-    may be a list (",", "&", "and", "+", "with", "vs." ...) stays inside its
-    piece for the evidence to decide."""
+    spaced lowercase x, ×, ;, |), each as written. Commas, ampersands,
+    slashes and joining words stay inside their piece for the evidence to
+    decide."""
     names, seps = tokens(credit)
     if not names:
         return []
     out, start = [], 0
-    for k, (kind, _raw) in enumerate(seps):
-        if kind in SURE:
+    for k, (kind, raw) in enumerate(seps):
+        if kind in SURE and raw.strip() not in ("/", "／"):
             out.append(_join(names, seps, start, k))
             start = k + 1
     out.append(_join(names, seps, start, len(names) - 1))
@@ -329,9 +329,8 @@ def credits_confirm(parts: Iterable[Any], evidence: Iterable[Evidence]) -> bool:
     wanted = {name_key(p) for p in parts or ()} - {""}
     if len(wanted) < 2:
         return False
-    credited = {name_key(n) for via, names in evidence or ()
-                if not str(via).startswith("catalogue") for n in _names_of(names)}
-    return wanted <= credited
+    return any(wanted <= {name_key(n) for n in _names_of(names)}
+               for via, names in evidence or () if not str(via).startswith("catalogue"))
 
 
 def credits_cover(name: Any, credits: Iterable[Any]) -> Optional[List[str]]:

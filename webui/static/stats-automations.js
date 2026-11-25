@@ -2059,7 +2059,7 @@ const VIDEO_HUB_REFERENCE = {
         },
         {
             group: 'Library', items: [
-                { type: 'video_scan_server', label: 'Scan Video Server', desc: 'Ask the server to index new downloads, wait for it' },
+                { type: 'video_scan_server', label: 'Index New Video Files', desc: 'Make sure new downloads are in your library (asks your media server to index them and waits)' },
                 { type: 'video_update_database', label: 'Update Video Database', desc: 'Read the server\'s library into SoulSync' },
                 { type: 'video_deep_scan_movies', label: 'Deep Scan Movies', desc: 'Full movie-library reconcile' },
                 { type: 'video_deep_scan_tv', label: 'Deep Scan TV', desc: 'Full TV-library reconcile' },
@@ -2132,6 +2132,7 @@ const _autoIcons = {
     database_update_completed: '\uD83D\uDDC4\uFE0F', download_failed: '\u274C',
     download_quarantined: '\u26A0\uFE0F', wishlist_item_added: '\u2795',
     deezer_signin_failed: '\uD83D\uDEAB', deezer_signin_restored: '\u2705',
+    soulseek_logged_out: '\uD83D\uDD0C', soulseek_logged_in: '\u2705',
     watchlist_artist_added: '\uD83D\uDC64', watchlist_artist_removed: '\uD83D\uDC64',
     import_completed: '\uD83D\uDCE5', import_needs_attention: '\uD83D\uDCE5', audiobook_grab_started: '\u2B07\uFE0F', audiobook_download_failed: '\u274C', audiobook_import_needs_attention: '\u26A0\uFE0F', audiobook_wishlist_item_added: '\u2795', audiobook_wishlist_processing_completed: '\u2705', audiobook_new_release: '\uD83D\uDD14', audiobook_watchlist_scan_completed: '\u2705', audiobook_author_followed: '\uD83D\uDC64', audiobook_author_unfollowed: '\uD83D\uDC64', audiobook_library_scan_completed: '\uD83C\uDFA7', mirrored_playlist_created: '\uD83D\uDCC2',
     quality_scan_completed: '\uD83D\uDCCA', duplicate_scan_completed: '\uD83D\uDDC2\uFE0F', library_scan_completed: '\uD83D\uDCE1',
@@ -2500,6 +2501,8 @@ const AUTO_HUB_REFERENCE = {
                 { type: 'download_quarantined', label: 'File Quarantined', desc: 'Fires when a downloaded file is quarantined for quality issues' },
                 { type: 'deezer_signin_failed', label: 'Deezer Sign-in Failed', desc: 'Fires once when Deezer rejects the ARL (expired or signed out)' },
                 { type: 'deezer_signin_restored', label: 'Deezer Sign-in Restored', desc: 'Fires when an ARL signs in again after a failure, or a new ARL signs in' },
+                { type: 'soulseek_logged_out', label: 'Soulseek Logged Out', desc: 'Fires once when slskd loses its Soulseek login; Soulseek downloads wait for it' },
+                { type: 'soulseek_logged_in', label: 'Soulseek Logged Back In', desc: 'Fires when slskd is logged in again after a logout' },
             ]
         },
         {
@@ -3804,6 +3807,7 @@ function _autoFormatTrigger(type, config) {
         database_update_completed: 'Database Updated', download_failed: 'Download Failed',
         download_quarantined: 'File Quarantined', wishlist_item_added: 'Wishlist Item Added',
         deezer_signin_failed: 'Deezer Sign-in Failed', deezer_signin_restored: 'Deezer Sign-in Restored',
+        soulseek_logged_out: 'Soulseek Logged Out', soulseek_logged_in: 'Soulseek Logged Back In',
         watchlist_artist_added: 'Artist Watched', watchlist_artist_removed: 'Artist Unwatched',
         import_completed: 'Import Complete', mirrored_playlist_created: 'Playlist Mirrored',
         quality_scan_completed: 'Quality Scan Done', duplicate_scan_completed: 'Duplicate Scan Done',
@@ -3846,7 +3850,7 @@ function _autoFormatAction(type) {
         full_cleanup: 'Full Cleanup',
         playlist_pipeline: 'Playlist Pipeline',
         // Video side
-        video_scan_library: 'Scan Video Library', video_scan_server: 'Scan Video Server',
+        video_scan_library: 'Scan Video Library', video_scan_server: 'Index New Video Files',
         video_update_database: 'Update Video Database', video_update_database_hourly: 'Update Video Database (Hourly)',
         video_add_airing_episodes: 'Wishlist Airing Episodes',
         video_deep_scan_movies: 'Deep Scan Movie Library', video_deep_scan_tv: 'Deep Scan TV Library',

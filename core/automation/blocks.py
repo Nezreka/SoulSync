@@ -117,6 +117,14 @@ TRIGGERS: list[dict] = [
      "description": "When Deezer takes an ARL again after a failure, or a new ARL signs in",
      "available": True, "scope": "music",
      "variables": ["user", "tier"]},
+    {"type": "soulseek_logged_out", "label": "Soulseek Logged Out", "icon": "x-circle",
+     "description": "When slskd loses its Soulseek login (a server ban, a reconnect). Soulseek downloads wait for it. Once per logout.",
+     "available": True, "scope": "music",
+     "variables": ["reason"]},
+    {"type": "soulseek_logged_in", "label": "Soulseek Logged Back In", "icon": "check-circle",
+     "description": "When slskd is logged in to Soulseek again after a logout, and waiting downloads resume",
+     "available": True, "scope": "music",
+     "variables": ["was_out_minutes"]},
     {"type": "wishlist_item_added", "label": "Wishlist Item Added", "icon": "plus-circle",
      "description": "When a track is added to wishlist", "available": True,
      "has_conditions": True, "condition_fields": ["artist", "title"],
@@ -163,7 +171,7 @@ TRIGGERS: list[dict] = [
      "variables": ["title", "author", "series", "asin"]},
     {"type": "audiobook_wishlist_processing_completed", "label": "Audiobook Wishlist Processed", "icon": "check-circle",
      "description": "After an audiobook wishlist pass that searched for at least one book", "available": True,
-     "variables": ["checked", "found", "grabbed", "errors", "freed", "unstuck", "already_owned"]},
+     "variables": ["checked", "found", "grabbed", "errors", "freed", "unstuck", "already_owned", "skipped"]},
     {"type": "audiobook_new_release", "label": "Audiobook New Release Found", "icon": "bell",
      "description": "When a followed author, narrator or series has new audiobooks", "available": True,
      "has_conditions": True, "condition_fields": ["artist", "role"],
@@ -494,7 +502,7 @@ ACTIONS: list[dict] = [
     # Tagged scope='video' so they appear ONLY on the video automation
     # builder, never the music one. Their handlers bridge into core.video.
     {"type": "video_scan_library", "label": "Scan Video Library", "icon": "refresh", "scope": "video",
-     "description": "Tell the media server to rescan your selected movie/TV sections, then read what it found into SoulSync", "available": True,
+     "description": "Read your movie/TV library into SoulSync: your media server is asked to rescan first; with Standalone, SoulSync reads your own folders", "available": True,
      "config_fields": [
          {"key": "mode", "type": "select", "label": "Mode",
           "options": [{"value": "full", "label": "Full (add + refresh)"},
@@ -509,8 +517,8 @@ ACTIONS: list[dict] = [
      ]},
     # Post-download chain actions (two stages, like music's scan_library +
     # start_database_update). Stage 1 nudges the server; stage 2 reads it in.
-    {"type": "video_scan_server", "label": "Scan Video Server", "icon": "refresh", "scope": "video",
-     "description": "Get the server to index new downloads (skips the scan if it already has them), waits until it finishes, then fires 'Video Library Scan Done'", "available": True,
+    {"type": "video_scan_server", "label": "Index New Video Files", "icon": "refresh", "scope": "video",
+     "description": "Make sure new downloads are in your library: your media server is asked to index them (skipped when it already has them) and SoulSync waits for it; with Standalone they are already in. Then fires 'Video Library Scan Done'", "available": True,
      "config_fields": [
          {"key": "media_type", "type": "select", "label": "Library",
           "options": [{"value": "all", "label": "Movies + TV"},
@@ -642,6 +650,7 @@ ACTIONS: list[dict] = [
                       {"value": "wishlist_audit", "label": "Wishlist Audit"},
                       {"value": "youtube_ghosts", "label": "YouTube Ghost Files"},
                       {"value": "watched_cleanup", "label": "Watched Cleanup"},
+                      {"value": "shelf_life", "label": "Shelf Life"},
                       {"value": "naming_conformance", "label": "Naming Conformance"},
                       {"value": "missing_subtitles", "label": "Missing Subtitles"}],
           "default": "all"}
@@ -712,7 +721,7 @@ _CATEGORY_RULES: list[tuple[str, tuple[str, ...]]] = [
     ("Playlists", ("playlist", "mirrored", "discover", "collections", "personalized",
                    # MetaSync's SIN charts arrive as playlists
                    "metasync")),
-    ("Downloads", ("download", "grab", "batch", "import", "rss", "seeding", "deezer_signin",
+    ("Downloads", ("download", "grab", "batch", "import", "rss", "seeding", "deezer_signin", "soulseek_logged",
                    "quarantine", "request", "search_and", "upgrade")),
     ("Library", ("scan", "database", "library", "enrich", "airing", "retag", "youtube", "issue",
                  # filling out albums you already own (#1711)

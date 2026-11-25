@@ -871,6 +871,18 @@ def enrich_native_entity_for_service(
     from core.library2.match_status import (
         ProviderIdentityConflict, set_library_v2_match,
     )
+    if canonical == "album" and hit:
+        # #2110: the search matched by name. when the artist owns several
+        # albums of this name, a release of another year than this album's
+        # files is another one of them (weezer 1994 is not weezer 2016)
+        from core.library2.release_split import refuses_release
+        dated = hit.get("release_date") or str(hit.get("extra") or "").rpartition("·")[2]
+        if refuses_release(conn, int(entity_id), actual_source, provider_id, dated):
+            return {
+                "success": False, "attempted": True,
+                "entity_type": canonical, "entity_id": int(entity_id),
+                "reason": "ambiguous", "source": actual_source,
+            }
     try:
         # a search's pick, not the user's: labelled automatic, and never
         # relabels a match the user made by hand

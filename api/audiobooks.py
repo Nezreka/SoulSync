@@ -32,6 +32,12 @@ Acquisition (all scoped to the audiobook subsystem):
   - DELETE /api/audiobooks/watchlist/<name>:  stop following them.
   - POST   /api/audiobooks/watchlist/scan:    check followed authors now.
 
+Who may (#2198 #2201, held by tests/test_member_audiobook_routes.py): browsing,
+the wishlist and follows are books.access. anything that searches indexers, grabs
+or reads the download list is books.get on download. the library's files,
+matching, delete and the recycle bin are the admin's, and a member's library
+read comes back without paths, provenance or match details.
+
 Purely additive. Every route lives under /api/audiobooks, every write goes to the
 audiobook subsystem's OWN database file, and nothing here touches the music worker pool,
 the music wishlist, the music download batches, or any music table.
@@ -45,6 +51,8 @@ tell which half of the app asked.
 """
 
 from __future__ import annotations
+
+from core.connect.device_access import device_playback
 
 import os
 from concurrent.futures import ThreadPoolExecutor
@@ -63,6 +71,8 @@ from core.audiobook_client import (
 )
 from core.audiobook_database import get_audiobook_db
 from utils.logging_config import get_logger
+from core.permissions import requires
+from core.profile_context import admin_only, is_admin_request
 
 logger = get_logger("audiobooks.api")
 
@@ -176,9 +186,48 @@ def _download_denied():
     is right for picking whose wishlist to read and wrong for deciding what
     they may do. The permission comes from the session.
     """
-    from .helpers import download_permission_error
+    from .helpers import media_download_error
 
-    return download_permission_error()
+    return media_download_error("books.get")
+
+
+def _asks_first() -> bool:
+    """this profile asks before getting books (#2188): a wish becomes a
+    request for an admin instead of a download."""
+    from .helpers import media_asks_first
+
+    return media_asks_first("books.get")
+
+
+def _requested_asins(profile_id: int) -> List[str]:
+    """the books this profile asked for and is still waiting on, so their
+    buttons say Requested. best effort: an unreadable list costs the label."""
+    try:
+        from core.requests.media import requested_books
+
+        return requested_books(profile_id)
+    except Exception as exc:                                # noqa: BLE001
+        logger.debug("Could not read the requested audiobooks: %s", exc)
+        return []
+
+
+def _request_book(book: Dict[str, Any], narrator_mode: str):
+    """file an Ask first profile's wish as a book request (#2188)."""
+    from core.profile_context import get_current_profile_id
+    from core.requests.media import file_book_request
+
+    pid = get_current_profile_id()
+    asin = str(book.get("asin") or "")
+    if get_audiobook_db().is_owned(asin):
+        return jsonify({"success": False, "in_library": True,
+                        "error": "That book is already in the library."}), 409
+    rid, why = file_book_request(pid, book, narrator_mode)
+    if not rid:
+        if why == "already":
+            return jsonify({"success": True, "requested": True, "already": True, "wishlisted": False})
+        return jsonify({"success": False, "error": "Couldn't save the request"}), 500
+    logger.info("audiobook request %s filed by profile %s: %s", rid, pid, asin)
+    return jsonify({"success": True, "requested": True, "id": rid, "wishlisted": False})
 
 
 def _owned_asins() -> set:
@@ -206,6 +255,24 @@ def _mark_owned(payloads: List[Dict[str, Any]], owned: Optional[set] = None) -> 
     for payload in payloads:
         payload["owned"] = str(payload.get("asin") or "") in owned
     return payloads
+
+
+_MEMBER_LIBRARY_FIELDS = ("asin", "title", "author", "narrator", "series_title",
+                          "series_sequence", "runtime_minutes", "imported_at")
+_SETTLED_MATCHES = ("identifier", "automatic", "confirmed")
+
+
+def _member_library_row(row: Dict[str, Any]) -> Dict[str, Any]:
+    """one library book as a member sees it (#2201): an allowlist, so a column
+    added later stays the admin's until someone decides otherwise. the
+    catalogue asin only rides along once the match is settled, as the link
+    to the book's page."""
+    out = {key: row.get(key) for key in _MEMBER_LIBRARY_FIELDS}
+    settled = row.get("match_status") in _SETTLED_MATCHES
+    out["catalog_asin"] = str(row.get("catalog_asin") or "") if settled else ""
+    out["cover_url"] = (row.get("cover_url") or (row.get("catalog_book") or {}).get("cover_url")
+                        or url_for("audiobooks_api.library_cover", asin=row["asin"]))
+    return out
 
 
 def _items(items: List[AudiobookItem]) -> List[Dict[str, Any]]:
@@ -296,6 +363,7 @@ def create_audiobooks_blueprint() -> Blueprint:
     # ------------------------------------------------------------------
 
     @bp.route("/search", methods=["GET"])
+    @requires("books.access")
     def search():
         """Search audiobooks, Audible first with an Apple fallback.
 
@@ -334,6 +402,7 @@ def create_audiobooks_blueprint() -> Blueprint:
     # ------------------------------------------------------------------
 
     @bp.route("/book/<asin>", methods=["GET"])
+    @requires("books.access")
     def book_detail(asin: str):
         """Full metadata for one ASIN."""
         item = get_audiobook_client().get_book(asin, marketplace=_marketplace())
@@ -342,6 +411,7 @@ def create_audiobooks_blueprint() -> Blueprint:
         return jsonify({"success": True, "book": _mark_owned([item.to_dict()])[0]})
 
     @bp.route("/similar/<asin>", methods=["GET"])
+    @requires("books.access")
     def similar(asin: str):
         """Audible's own recommendations for an ASIN."""
         items = get_audiobook_client().get_similar(
@@ -354,6 +424,7 @@ def create_audiobooks_blueprint() -> Blueprint:
     # ------------------------------------------------------------------
 
     @bp.route("/series", methods=["GET"])
+    @requires("books.access")
     def series():
         """Every book in a series, in reading order.
 
@@ -372,6 +443,7 @@ def create_audiobooks_blueprint() -> Blueprint:
         return jsonify({"success": True, "series": name, "results": _items(items)})
 
     @bp.route("/author", methods=["GET"])
+    @requires("books.access")
     def author():
         """An author's bibliography."""
         name = (request.args.get("name") or "").strip()
@@ -383,6 +455,7 @@ def create_audiobooks_blueprint() -> Blueprint:
         return jsonify({"success": True, "author": name, "results": _items(items)})
 
     @bp.route("/narrator", methods=["GET"])
+    @requires("books.access")
     def narrator():
         """Everything a narrator has performed."""
         name = (request.args.get("name") or "").strip()
@@ -394,6 +467,7 @@ def create_audiobooks_blueprint() -> Blueprint:
         return jsonify({"success": True, "narrator": name, "results": _items(items)})
 
     @bp.route("/person", methods=["GET"])
+    @requires("books.access")
     def person():
         """The grouped bibliography behind an author or narrator page.
 
@@ -439,6 +513,7 @@ def create_audiobooks_blueprint() -> Blueprint:
     # ------------------------------------------------------------------
 
     @bp.route("/browse", methods=["GET"])
+    @requires("books.access")
     def browse():
         """One shelf: the catalog sorted, optionally narrowed to a genre.
 
@@ -464,6 +539,7 @@ def create_audiobooks_blueprint() -> Blueprint:
         })
 
     @bp.route("/bestsellers", methods=["GET"])
+    @requires("books.access")
     def bestsellers():
         """Top sellers, overall or within one genre."""
         items = get_audiobook_client().get_bestsellers(
@@ -475,6 +551,7 @@ def create_audiobooks_blueprint() -> Blueprint:
         return jsonify({"success": True, "results": _items(items)})
 
     @bp.route("/new-releases", methods=["GET"])
+    @requires("books.access")
     def new_releases():
         """Newest first, overall or within one genre."""
         items = get_audiobook_client().get_new_releases(
@@ -486,6 +563,7 @@ def create_audiobooks_blueprint() -> Blueprint:
         return jsonify({"success": True, "results": _items(items)})
 
     @bp.route("/categories", methods=["GET"])
+    @requires("books.access")
     def categories():
         """The genre tree, for real navigation rather than hardcoded search terms."""
         return jsonify({
@@ -494,6 +572,7 @@ def create_audiobooks_blueprint() -> Blueprint:
         })
 
     @bp.route("/home", methods=["GET"])
+    @requires("books.access")
     def home():
         """The whole browse page in one round trip.
 
@@ -558,6 +637,7 @@ def create_audiobooks_blueprint() -> Blueprint:
     # ------------------------------------------------------------------
 
     @bp.route("/wishlist", methods=["GET"])
+    @requires("books.access")
     def wishlist():
         """Everything wanted, with counts and the state of the search worker.
 
@@ -571,6 +651,10 @@ def create_audiobooks_blueprint() -> Blueprint:
             "items": db.get_wishlist(_profile()),
             "counts": db.wishlist_counts(_profile()),
         }
+        # books this profile asked an admin for (#2188), so they read Requested
+        if _asks_first():
+            from core.profile_context import get_current_profile_id
+            payload["requested"] = _requested_asins(get_current_profile_id())
         try:
             from core.audiobook_wishlist_worker import schedule_status
             payload["worker"] = schedule_status()
@@ -580,6 +664,7 @@ def create_audiobooks_blueprint() -> Blueprint:
         return jsonify(payload)
 
     @bp.route("/wishlist", methods=["POST"])
+    @requires("books.access")
     def wishlist_add():
         """Want a book.
 
@@ -592,6 +677,14 @@ def create_audiobooks_blueprint() -> Blueprint:
         the reading this ASIN is, "any" accepts another narrator's edition. It
         is never a list — a book is always exactly one narrator.
         """
+        # a wanted book is grabbed by the wishlist pass, so wanting one is a
+        # download. a profile that asks first files a request instead
+        # (#2188); one that can't request books can't add one
+        asks = _asks_first()
+        denied = None if asks else _download_denied()
+        if denied is not None:
+            return denied
+
         body = request.get_json(silent=True) or {}
         asin = str(body.get("asin") or "").strip()
         if not asin:
@@ -604,6 +697,8 @@ def create_audiobooks_blueprint() -> Blueprint:
         book = get_audiobook_client().get_book(asin, marketplace=_marketplace())
         if book is None:
             return jsonify({"success": False, "error": f"No audiobook found for {asin}"}), 404
+        if asks:
+            return _request_book(book.to_dict(), narrator_mode)
 
         added = get_audiobook_db().add_to_wishlist(
             book.to_dict(), narrator_mode=narrator_mode, profile_id=_profile(),
@@ -616,6 +711,7 @@ def create_audiobooks_blueprint() -> Blueprint:
         })
 
     @bp.route("/wishlist/<asin>", methods=["PATCH"])
+    @requires("books.access")
     def wishlist_update(asin: str):
         """Change how strictly a wanted book must match its narrator.
 
@@ -648,18 +744,21 @@ def create_audiobooks_blueprint() -> Blueprint:
         return jsonify({"success": True, "narrator_mode": narrator_mode})
 
     @bp.route("/wishlist", methods=["DELETE"])
+    @requires("books.access")
     def wishlist_clear():
         """Clear all books from the wishlist for this profile."""
         cleared = get_audiobook_db().clear_wishlist(_profile())
         return jsonify({"success": True, "cleared": cleared, "wishlisted": False})
 
     @bp.route("/wishlist/<asin>", methods=["DELETE"])
+    @requires("books.access")
     def wishlist_remove(asin: str):
         """Stop wanting a book."""
         removed = get_audiobook_db().remove_from_wishlist(asin, _profile())
         return jsonify({"success": True, "removed": removed, "wishlisted": False})
 
     @bp.route("/wishlist/search", methods=["POST"])
+    @requires("books.get", "download")
     def wishlist_search():
         """Run a wishlist pass right now.
 
@@ -687,6 +786,7 @@ def create_audiobooks_blueprint() -> Blueprint:
         return jsonify({"success": True, "summary": summary})
 
     @bp.route("/wishlist/<asin>/search", methods=["POST"])
+    @requires("books.get", "download")
     def wishlist_search_book(asin: str):
         """Search and attempt to grab one specific wishlisted book immediately."""
         from core.audiobook_wishlist_worker import search_single_book
@@ -709,12 +809,14 @@ def create_audiobooks_blueprint() -> Blueprint:
     # ------------------------------------------------------------------
 
     @bp.route("/watchlist", methods=["GET"])
+    @requires("books.access")
     def watchlist():
         """Authors, narrators and series being followed, newest release counts included."""
         return jsonify({"success": True,
                         "authors": get_audiobook_db().get_watchlist(_profile())})
 
     @bp.route("/watchlist", methods=["POST"])
+    @requires("books.access")
     def watchlist_follow():
         """Follow an author, narrator or series so new releases get wishlisted.
 
@@ -726,6 +828,11 @@ def create_audiobooks_blueprint() -> Blueprint:
         right away, so the missing volumes are on the wishlist when this returns
         rather than after the next daily pass.
         """
+        # following wishlists new releases, which the wishlist pass grabs
+        denied = _download_denied()
+        if denied is not None:
+            return denied
+
         body = request.get_json(silent=True) or {}
         name = str(body.get("name") or "").strip()
         if not name:
@@ -764,6 +871,7 @@ def create_audiobooks_blueprint() -> Blueprint:
         return jsonify(payload)
 
     @bp.route("/watchlist/<path:name>", methods=["PATCH"])
+    @requires("books.access")
     def watchlist_update(name: str):
         """Change one follow's settings from its card."""
         body = request.get_json(silent=True) or {}
@@ -780,6 +888,7 @@ def create_audiobooks_blueprint() -> Blueprint:
         return jsonify({"success": True, "changed": changed})
 
     @bp.route("/watchlist/<path:name>", methods=["DELETE"])
+    @requires("books.access")
     def watchlist_unfollow(name: str):
         role = _watch_role(request.args.get("role"))
         if role is None:
@@ -788,6 +897,7 @@ def create_audiobooks_blueprint() -> Blueprint:
         return jsonify({"success": True, "removed": removed, "watching": False})
 
     @bp.route("/watchlist/scan", methods=["POST"])
+    @requires("books.get", "download")
     def watchlist_scan():
         """Check followed authors right now.
 
@@ -809,6 +919,7 @@ def create_audiobooks_blueprint() -> Blueprint:
     # ------------------------------------------------------------------
 
     @bp.route("/releases/<asin>", methods=["GET"])
+    @requires("books.get", "download")
     def releases(asin: str):
         """What the configured indexers actually have for this book.
 
@@ -856,6 +967,7 @@ def create_audiobooks_blueprint() -> Blueprint:
         return (stored or {}).get("narrator_mode") or "exact"
 
     @bp.route("/releases/<asin>/start", methods=["POST"])
+    @requires("books.get", "download")
     def releases_start(asin: str):
         """Begin a search and hand back an id to poll.
 
@@ -890,6 +1002,7 @@ def create_audiobooks_blueprint() -> Blueprint:
         })
 
     @bp.route("/releases/poll", methods=["GET"])
+    @requires("books.get", "download")
     def releases_poll():
         """The ranked pool so far for an in-flight search.
 
@@ -907,6 +1020,7 @@ def create_audiobooks_blueprint() -> Blueprint:
         return jsonify({"success": True, **state})
 
     @bp.route("/releases/poll", methods=["DELETE"])
+    @requires("books.get", "download")
     def releases_cancel():
         """Stop caring about a search the user walked away from."""
         from core.audiobook_search_job import forget
@@ -914,6 +1028,7 @@ def create_audiobooks_blueprint() -> Blueprint:
         return jsonify({"success": True, "dropped": forget(request.args.get("id") or "")})
 
     @bp.route("/releases/contents", methods=["POST"])
+    @requires("books.get", "download")
     def release_contents():
         """What is inside one release, before committing to it.
 
@@ -945,13 +1060,22 @@ def create_audiobooks_blueprint() -> Blueprint:
     # ------------------------------------------------------------------
 
     @bp.route("/library", methods=["GET"])
+    @device_playback
+    @requires("books.access")
     def library():
-        """Indexed local books and the most recent folder scan."""
+        """Indexed local books and the most recent folder scan.
+
+        a member gets the shelf, not the plumbing (#2201): title, people,
+        series, cover and runtime. paths, files, where a book came from, how
+        it was matched and the scan are the admin's, stripped here so the
+        page can't leak what it doesn't draw."""
         from core.audiobook_library_scan import scan_status
         from core.audiobook_organizer import library_root
 
         db = get_audiobook_db()
         rows = db.get_library()
+        if not is_admin_request():
+            return jsonify({"success": True, "books": [_member_library_row(r) for r in rows]})
         history = db.library_download_history()
         for row in rows:
             row["download"] = history.get(row.get("download_id"))
@@ -967,6 +1091,7 @@ def create_audiobooks_blueprint() -> Blueprint:
         })
 
     @bp.route("/library/<asin>/matches", methods=["GET"])
+    @admin_only
     def library_matches(asin: str):
         from core.audiobook_library_matching import candidates_for, score_candidate
         from core.audiobook_library_metadata import ASIN_RE
@@ -989,6 +1114,7 @@ def create_audiobooks_blueprint() -> Blueprint:
             return jsonify({"success": False, "error": str(exc)}), 503
 
     @bp.route("/library/<asin>/match", methods=["PATCH"])
+    @admin_only
     def library_match(asin: str):
         from core.audiobook_library_matching import compact
         from core.audiobook_library_metadata import ASIN_RE
@@ -1032,6 +1158,8 @@ def create_audiobooks_blueprint() -> Blueprint:
         return jsonify({"success": True, "book": db.get_library_entry(asin)})
 
     @bp.route("/library/<asin>/cover", methods=["GET"])
+    @device_playback
+    @requires("books.access")
     def library_cover(asin: str):
         row = get_audiobook_db().get_library_entry(asin)
         cover = _library_cover(row) if row else None
@@ -1050,6 +1178,7 @@ def create_audiobooks_blueprint() -> Blueprint:
         return jsonify({"success": False, "error": "No local cover"}), 404
 
     @bp.route("/library/<asin>", methods=["DELETE"])
+    @admin_only
     def library_delete(asin: str):
         """Remove one book from disk and from the record.
 
@@ -1091,6 +1220,7 @@ def create_audiobooks_blueprint() -> Blueprint:
         })
 
     @bp.route("/library/recycle", methods=["GET"])
+    @admin_only
     def library_recycle():
         """What is still recoverable, and for how long."""
         from core.audiobook_recycle import keep_days, list_bin
@@ -1098,6 +1228,7 @@ def create_audiobooks_blueprint() -> Blueprint:
         return jsonify({"success": True, "entries": list_bin(), "keep_days": keep_days()})
 
     @bp.route("/library/recycle/<path:name>", methods=["POST"])
+    @admin_only
     def library_restore(name: str):
         from core.audiobook_recycle import restore
 
@@ -1108,6 +1239,7 @@ def create_audiobooks_blueprint() -> Blueprint:
                         "error": outcome.get("error", "")}), status
 
     @bp.route("/library/recycle/<path:name>", methods=["DELETE"])
+    @admin_only
     def library_purge_one(name: str):
         """Erase one recycled book now, without waiting for the keep window."""
         from core.audiobook_recycle import purge_entry
@@ -1118,6 +1250,7 @@ def create_audiobooks_blueprint() -> Blueprint:
                         "error": outcome.get("error", "")}), status
 
     @bp.route("/library/recycle", methods=["DELETE"])
+    @admin_only
     def library_empty_bin():
         """Erase everything in the bin now."""
         from core.audiobook_recycle import empty_bin
@@ -1130,12 +1263,14 @@ def create_audiobooks_blueprint() -> Blueprint:
     # ------------------------------------------------------------------
 
     @bp.route("/blocklist", methods=["GET"])
+    @requires("books.access")
     def blocklist():
         """Releases that will never be offered or grabbed again."""
         return jsonify({"success": True,
                         "blocked": get_audiobook_db().get_blocklist(_profile())})
 
     @bp.route("/blocklist", methods=["POST"])
+    @requires("books.get", "download")
     def blocklist_add():
         """Block one release.
 
@@ -1157,16 +1292,19 @@ def create_audiobooks_blueprint() -> Blueprint:
         return jsonify({"success": True, "blocked": blocked})
 
     @bp.route("/blocklist/<path:key>", methods=["DELETE"])
+    @requires("books.access")
     def blocklist_remove(key: str):
         return jsonify({"success": True,
                         "removed": get_audiobook_db().unblock_release(key, _profile())})
 
     @bp.route("/blocklist", methods=["DELETE"])
+    @requires("books.access")
     def blocklist_clear():
         return jsonify({"success": True,
                         "removed": get_audiobook_db().clear_blocklist(_profile())})
 
     @bp.route("/grab", methods=["POST"])
+    @requires("books.get", "download")
     def grab():
         """Send one chosen release to the download client.
 
@@ -1255,6 +1393,7 @@ def create_audiobooks_blueprint() -> Blueprint:
             return False
 
     @bp.route("/adopt", methods=["POST"])
+    @requires("books.get", "download")
     def adopt():
         """Match & import from the clients tab: follow a torrent or NZB that is
         already in the download client, as if it had been grabbed here.
@@ -1338,6 +1477,7 @@ def create_audiobooks_blueprint() -> Blueprint:
         return jsonify({"success": True, "ref": ref})
 
     @bp.route("/downloads", methods=["GET"])
+    @requires("books.get", "download")
     def downloads():
         """Everything grabbed, in flight or finished.
 
@@ -1365,6 +1505,7 @@ def create_audiobooks_blueprint() -> Blueprint:
     # ------------------------------------------------------------------
 
     @bp.route("/sample-proxy", methods=["GET"])
+    @requires("books.access")
     def sample_proxy():
         """Stream an audio preview through the server, with range support.
 

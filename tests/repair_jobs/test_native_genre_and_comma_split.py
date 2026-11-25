@@ -293,6 +293,7 @@ def test_comma_split_fix_heals_the_catalogue_and_asks_retag(comma_db):
     out = worker._fix_comma_artist_split('artist', 'lib2:1', None, {
         'combined_name': 'Camellia, Toby Fox', 'library_v2_native': True,
         'split_artists': ['Camellia', 'Toby Fox'],
+        '_explicit_single_fix': True,
     })
 
     assert out['success'] is True and out['action'] == 'artists_split', out

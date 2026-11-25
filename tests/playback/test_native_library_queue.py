@@ -260,7 +260,7 @@ def test_native_completion_links_exact_original_track_and_polling_returns_it(run
     monkeypatch.setattr('database.music_database.get_database', lambda: db)
     monkeypatch.setattr(autolink, '_warm_new_artwork', lambda *args: None)
     monkeypatch.setattr('core.imports.file_ops.probe_audio_quality', lambda _: AudioQuality('flac', bit_depth=16, sample_rate=44100))
-    monkeypatch.setattr('core.library2.validation.refresh_imported_metadata', lambda *args: {})
+    monkeypatch.setattr('core.library2.validation.refresh_imported_metadata', lambda *args, **kwargs: {})
     file_id = autolink.link_download_into_library_v2({
         '_final_processed_path': str(path), 'track_info': task['track_info'],
         'library_owner_id': None, 'username': 'fixture',

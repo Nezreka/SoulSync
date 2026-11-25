@@ -43,6 +43,8 @@ export interface DownloadsValues {
   retriesPerQuery: string;
   versionFallback: boolean;
   versionMinCount: string;
+  clearNearMisses: boolean;
+  reviewRejectDays: string;
   atomicPublish: boolean;
   atomicRecover: boolean;
   allowExplicit: boolean;
@@ -74,6 +76,9 @@ export function resolveDownloads(settings: SettingsPayload): DownloadsValues {
     retriesPerQuery: text(pp.retries_per_query, 5),
     versionFallback: pp.accept_version_mismatch_fallback === true,
     versionMinCount: text(pp.version_mismatch_min_count, 2),
+    // on unless switched off; 0 days = never auto-reject
+    clearNearMisses: pp.clear_near_misses_on_success !== false,
+    reviewRejectDays: text(pp.review_auto_reject_days, 0),
     atomicPublish: albums.atomic_publish === true,
     // on unless switched off: an absent value means recover
     atomicRecover: albums.atomic_recover_orphans !== false,

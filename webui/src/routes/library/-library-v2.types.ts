@@ -1,5 +1,9 @@
 import { z } from 'zod';
 
+import type { ReleaseStatus } from '@/components/release-statuses';
+
+import type { ArtistAbout } from '../artist-detail/-artist-detail.types';
+
 // Single route `/library` with the current view driven by search params:
 //   - artist set -> artist detail (albums expand inline)
 //   - album set  -> directly addressable album detail
@@ -76,7 +80,8 @@ const libraryV2SearchObject = z.object({
     .catch(false),
   /** 'upgradable' (could be better; artists and songs) or 'lossless' (songs) */
   quality: z.enum(['', 'lossless', 'upgradable']).default('').catch(''),
-  /** #2046: artists whose albums are all reviewed and locked, or not yet */
+  /** #2046: artists whose albums are all reviewed and locked, or not yet;
+   *  #2223: on the album list, locked albums or unlocked ones */
   review: z.enum(['', 'reviewed', 'unreviewed']).default('').catch(''),
   view: z.enum(['table', 'cards', 'discovery']).default('cards').catch('cards'),
   /** #2107: turn the artist sort around */
@@ -335,6 +340,9 @@ export interface LibraryV2AlbumSummary {
   mood: string | null;
   track_count: number;
   tracks_present: number;
+  /** #2194: tracks with a file on this release itself. tracks_present also
+   *  counts audio held under another release, which a rename here can't move. */
+  own_files_present?: number;
   tracks_missing: number;
   /** I8: sum of each present track's primary file size, in bytes. */
   total_size_bytes: number;
@@ -357,6 +365,8 @@ export interface LibraryV2ArtistDetail {
   /** Independent recognition mappings; never Library ownership. */
   media_server_sources?: string[];
   summary: string | null;
+  /** bio, tags and numbers from whichever source has them, last.fm first */
+  about?: ArtistAbout | null;
   /** §48 rich-metadata-edit fields — provider baseline overlaid with any admin override. */
   style: string | null;
   mood: string | null;
@@ -412,6 +422,10 @@ export interface LibraryV2ArtistSettings {
   include_compilations: boolean;
   include_instrumentals: boolean;
   include_other_artists: boolean;
+  /** #2175: the artist's own MusicBrainz release statuses, null = the library's */
+  release_statuses?: ReleaseStatus[] | null;
+  /** #2175: the library-wide statuses it follows when it has none of its own */
+  library_release_statuses?: ReleaseStatus[];
   auto_download: boolean;
   lookback_days: number | null;
   preferred_metadata_source: string | null;
@@ -682,6 +696,8 @@ export interface LibraryV2Track {
   is_missing?: boolean;
   /** #2144: one of the album's most played tracks on Last.fm (album detail only). */
   popular?: boolean;
+  /** whose play counts ranked it: Last.fm, or ListenBrainz when Last.fm knows too little */
+  popular_source?: 'lastfm' | 'listenbrainz' | null;
   /** Quality vs the album's profile (null when missing or not measurable). */
   meets_profile?: boolean | null;
   upgrade_candidate?: boolean | null;

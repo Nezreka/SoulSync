@@ -199,3 +199,26 @@ def test_a_track_that_now_checks_out_has_its_old_finding_resolved(subjects, monk
     with sqlite3.connect(path) as conn:
         status = dict(conn.execute("SELECT entity_id, status FROM repair_findings"))
     assert status == {"lib2:1": "resolved", "lib2:2": "pending"}
+
+
+def test_a_findings_only_run_files_findings_even_with_auto_apply_on(subjects, monkeypatch):
+    """#2229: the heal hands the files it gave back to their own artist to
+    this job. a person's auto apply must not rewrite them unasked: what the
+    file says wrong is a finding to apply"""
+    _preview(monkeypatch, {1: _entry(1, diff=[_row("Artists")]), 2: _entry(2, diff=[])})
+    monkeypatch.setattr(
+        "core.library2.retag.write_tags",
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("must not write")))
+    monkeypatch.setattr("core.library2.tag_fill.fill_mode", lambda _cfg: "fill")
+    monkeypatch.setattr(
+        LibraryRetagJob, "_fill",
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("must not fill")))
+    ctx, findings = _context(scope={"file_paths": ["/music/A/Alb/01 - One.flac"],
+                                    "findings_only": True})
+    ctx.config_manager.get.side_effect = lambda key, default=None: (
+        {"auto_apply": True} if key == "repair.jobs.library_retag.settings" else default)
+
+    result = LibraryRetagJob().scan(ctx)
+
+    assert result.findings_created == 1
+    assert findings[0]["details"]["retag_options"]["auto_apply"] is False

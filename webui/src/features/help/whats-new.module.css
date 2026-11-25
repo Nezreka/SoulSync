@@ -1,0 +1,106 @@
+/* What's new (mockup scrap/help/mockup.html, the whatsnew view). tokens only. */
+
+.head {
+  position: relative;
+  padding: 16px;
+  overflow: hidden;
+  border: 1px solid var(--white-a06);
+  border-radius: var(--radius-card);
+  background:
+    radial-gradient(120% 160% at 100% 0%, rgba(var(--accent-rgb), 0.18), transparent 60%),
+    var(--white-a03);
+}
+
+.version {
+  margin: 0;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.headline {
+  margin: 4px 0;
+  font-size: 18px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+}
+
+.lede {
+  margin: 0;
+  color: var(--white-a65);
+  font-size: 13px;
+}
+
+.items {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.item {
+  margin-left: 6px;
+  padding: 12px 2px 12px 14px;
+  border-left: 2px solid var(--white-a08);
+}
+
+.item[data-new] {
+  border-left-color: var(--accent);
+}
+
+.item[data-earlier] {
+  color: var(--white-a70);
+}
+
+.itemTitle {
+  display: block;
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.itemDesc {
+  margin: 3px 0 0;
+  color: var(--white-a65);
+  font-size: 12.5px;
+}
+
+.showMe {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 26px;
+  margin: 4px 0 -4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.showMe:hover {
+  color: var(--accent-light);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.showMe:focus-visible {
+  border-radius: var(--radius-sm);
+  outline: 2px solid rgba(var(--accent-rgb), 0.7);
+  outline-offset: 2px;
+}
+
+.more {
+  margin-top: 14px;
+}
+
+@media (max-width: 768px) {
+  .showMe {
+    height: 44px;
+    margin: 0 0 -10px;
+  }
+}

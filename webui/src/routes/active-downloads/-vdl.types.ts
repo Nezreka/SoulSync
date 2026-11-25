@@ -25,6 +25,8 @@ export interface VdlDownload {
   /** #2029: the video library it files into (by its target folder). */
   video_library_name?: string | null;
   id: number;
+  /** may this viewer cancel it: an admin any, a member only a grab they started. */
+  can_cancel?: boolean;
   kind?: string | null;
   title?: string | null;
   year?: number | string | null;
@@ -120,6 +122,8 @@ export interface VdlSearchCtx {
   channel_id?: string | null;
   published_at?: string | null;
   description?: string | null;
+  /** the title's TMDB id, when the grab knew it (wishlist grabs, show-page grabs) */
+  tmdb_id?: number | null;
 }
 
 /* ── filters ───────────────────────────────────────────────────────────── */

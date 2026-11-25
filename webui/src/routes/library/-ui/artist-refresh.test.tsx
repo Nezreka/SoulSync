@@ -85,6 +85,7 @@ describe('library v2 artist refresh mutation', () => {
             missing_confirmed: 1,
             missing_suspected: 0,
             recovered: 0,
+            tracks_renumbered: 1,
           },
         }),
       ),
@@ -105,7 +106,7 @@ describe('library v2 artist refresh mutation', () => {
     await waitFor(() => expect(toast).toHaveBeenCalled());
     expect(toast).toHaveBeenCalledWith(
       'Refresh & Scan: 9 files scanned, 1 renamed file relinked, 1 now missing, ' +
-        '1 needing review in Stale Index Paths.',
+        '1 track number fixed from the file, 1 needing review in Stale Index Paths.',
       'success',
     );
   });

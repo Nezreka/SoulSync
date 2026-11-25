@@ -55,7 +55,8 @@ def extra_profiles(owner: int, followers: Iterable[int]) -> List[int]:
 
 
 _SUMMED = ('people', 'studios', 'channels', 'playlists', 'shows', 'movies_added',
-           'upcoming', 'promoted', 'videos_added', 'episodes_added', 'shows_pruned')
+           'upcoming', 'promoted', 'videos_added', 'episodes_added', 'shows_pruned',
+           'requested', 'skipped')
 
 
 def _merge(results: List[Dict[str, Any]]) -> Dict[str, Any]:

@@ -1186,6 +1186,8 @@ def rename_to_basename_result(
             logger.warning("Target path already exists, skipping rename: %s", new_path)
             return None, f'a different file already occupies {new_filename}'
 
+        from core.library import own_writes
+        own_writes.note(file_path, new_path)
         os.rename(file_path, new_path)
         logger.info("Renamed: %s → %s", filename, new_filename)
 

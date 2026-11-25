@@ -304,8 +304,10 @@ class PersonalizedPlaylistsService:
         try:
             top = self.database.get_top_artists('all', 200, profile_id=pid) or []
             recent = self.database.get_top_artists('30d', 200, profile_id=pid) or []
+            from core.discovery.favorite_seeds import favorite_artist_units
             seeds = build_recency_weighted_seeds(
-                top, {a['name']: a.get('play_count', 0) for a in recent})
+                top, {a['name']: a.get('play_count', 0) for a in recent},
+                favorites=favorite_artist_units(self.database, pid))
             similars, _owned = _seed_edges(
                 self.database, [str(s['name']).strip().lower() for s in seeds], pid)
             artists = artist_affinity(seeds, similars)
@@ -337,13 +339,19 @@ class PersonalizedPlaylistsService:
         try:
             with self.database._get_connection() as conn:
                 _ensure_owned_ids(conn)
-                ids = conn.execute(
-                    f"""SELECT id, {near_sql} FROM discovery_pool
+                # one row, not one per pool entry: sqlite3 takes the GIL back
+                # for every row it hands to Python, and next to busy threads
+                # each take waits for the switch interval. 15.5k (id, near)
+                # rows took 185-370 s live, the same pairs as one JSON array
+                # 25 ms. same pairs, same order (rng.sample depends on it)
+                packed = conn.execute(
+                    f"""SELECT json_group_array(json_array(id, {near_sql})) FROM discovery_pool
                         {self._POOL_WHERE}
                           {self._OWNED_CLAUSE}
                           {extra_where}""",
                     tuple(near_names) + (source, profile, profile) + tuple(extra_params),
-                ).fetchall()
+                ).fetchone()
+                ids = json.loads(packed[0]) if packed and packed[0] else []
         except Exception as e:
             logger.error(f"Error drawing pool candidates (source={source}): {e}")
             return []

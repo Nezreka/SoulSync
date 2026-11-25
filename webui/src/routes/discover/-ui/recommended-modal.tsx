@@ -1,5 +1,7 @@
 import { useState } from 'react';
 
+import { usePermNotOff } from '@/platform/shell/my-permissions';
+
 import type { RecommendedArtist } from '../-discover.recommended';
 
 import { explanationLine, explanationTitle } from '../-discover.explanation';
@@ -60,6 +62,8 @@ export function RecommendedModal({
   onAddAll,
 }: RecommendedModalProps) {
   const [query, setQuery] = useState('');
+  // add all writes the watchlist too (#2209)
+  const mayWatchAll = usePermNotOff('music.watchlist');
 
   // The count is of EVERYTHING, not of what survives the filter — it is the
   // size of the recommendation set, which typing does not change.
@@ -96,15 +100,17 @@ export function RecommendedModal({
                 onChange={(e) => setQuery(e.target.value)}
               />
             </div>
-            <button
-              type="button"
-              className="recommended-add-all-btn"
-              id="recommended-add-all-btn"
-              disabled={addingAll}
-              onClick={onAddAll}
-            >
-              {REC_MODAL_ADD_ALL}
-            </button>
+            {mayWatchAll ? (
+              <button
+                type="button"
+                className="recommended-add-all-btn"
+                id="recommended-add-all-btn"
+                disabled={addingAll}
+                onClick={onAddAll}
+              >
+                {REC_MODAL_ADD_ALL}
+              </button>
+            ) : null}
           </div>
           <div className="recommended-artists-grid" id="recommended-artists-grid">
             {artists
@@ -153,6 +159,8 @@ function ModalCard({
   const name = artist.artist_name ?? '';
   const image = imageOverride || artist.image_url;
   const clickable = recWatchlistClickable(id, name);
+  // no watchlist part, no watch button (#2209)
+  const mayWatch = usePermNotOff('music.watchlist');
 
   if (hidden) return null;
 
@@ -163,36 +171,38 @@ function ModalCard({
       data-artist-id={id}
       data-artist-source={artistSource}
     >
-      <button
-        type="button"
-        className={
-          watching
-            ? 'recommended-card-watchlist-btn ya-watchlist-btn watching active'
-            : 'recommended-card-watchlist-btn ya-watchlist-btn'
-        }
-        data-artist-id={id}
-        data-artist-name={name}
-        title={watching ? 'On watchlist' : 'Add to watchlist'}
-        aria-label={watching ? 'On watchlist' : 'Add to watchlist'}
-        disabled={!clickable || watching}
-        onClick={(e) => {
-          e.stopPropagation();
-          onAddToWatchlist(id, name);
-        }}
-      >
-        <svg
-          width="14"
-          height="14"
-          viewBox="0 0 24 24"
-          fill={watching ? 'currentColor' : 'none'}
-          stroke="currentColor"
-          strokeWidth="2"
+      {mayWatch ? (
+        <button
+          type="button"
+          className={
+            watching
+              ? 'recommended-card-watchlist-btn ya-watchlist-btn watching active'
+              : 'recommended-card-watchlist-btn ya-watchlist-btn'
+          }
+          data-artist-id={id}
+          data-artist-name={name}
+          title={watching ? 'On watchlist' : 'Add to watchlist'}
+          aria-label={watching ? 'On watchlist' : 'Add to watchlist'}
+          disabled={!clickable || watching}
+          onClick={(e) => {
+            e.stopPropagation();
+            onAddToWatchlist(id, name);
+          }}
         >
-          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-          <circle cx="12" cy="12" r="3" />
-        </svg>
-        <span className="sr-only">{watching ? REC_WATCH_ON_LABEL : REC_WATCH_ADD_LABEL}</span>
-      </button>
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill={watching ? 'currentColor' : 'none'}
+            stroke="currentColor"
+            strokeWidth="2"
+          >
+            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+            <circle cx="12" cy="12" r="3" />
+          </svg>
+          <span className="sr-only">{watching ? REC_WATCH_ON_LABEL : REC_WATCH_ADD_LABEL}</span>
+        </button>
+      ) : null}
       {name ? (
         <FeedbackMenu
           entity={{ type: 'artist', name, ids: recommendedIds(artist) }}

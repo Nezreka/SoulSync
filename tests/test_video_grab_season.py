@@ -111,7 +111,8 @@ def test_the_word_boundary_guard_is_present():
 def test_torrent_packs_reach_the_pack_card():
     """The gate used to be r.files.length > 1, which only slskd ever satisfies."""
     src = _js()
-    assert "if (_isSeasonPack(r)) return _packCardHTML(r, i);" in src
+    card = src[src.index("function resultCardHTML"):src.index("var TRACK_LABEL")]
+    assert "if (_isSeasonPack(r) ||" in card and "return _packCardHTML(r, i);" in card
     assert "if (r.files && r.files.length > 1) return _packCardHTML" not in src
 
 
@@ -122,7 +123,8 @@ def test_a_torrent_pack_is_grabbed_as_one_season_scoped_row():
     src = _js()
     fn = src[src.index("function _grabPack"):src.index("// Shared expandable-pack")]
     assert "'/api/video/downloads/grab-pack'" in fn, "soulseek keeps its fan-out"
-    assert "payload.search_ctx.scope = 'season'" in fn
+    # a season pack as its season; a complete series stays a series (#2233)
+    assert "payload.search_ctx.scope = series ? 'series' : 'season'" in fn
     assert "payload.search_ctx.episode = null" in fn, "a pack names no single episode"
 
 

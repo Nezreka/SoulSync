@@ -14,15 +14,20 @@ import { ServerConnections } from './connections-servers';
 import { ServicesPart } from './connections-services';
 import { VideoApiGroup } from './connections-video-api';
 import { VideoServerConnection } from './connections-video-server';
-import { NotificationsSection } from './video-row-lists';
+import { ConnectionsPage } from './connections/connections-page';
+import { NotificationsCard } from './video-row-lists';
 
-export function ConnectionsTab({ store, part, opened }: SettingsTabProps) {
+export function ConnectionsTab(props: SettingsTabProps) {
+  const { store, part, opened } = props;
+  // settings-bic: the tab's own page (pills, hero, server, services)
+  if (part === 'page') return <ConnectionsPage {...props} />;
   if (part === 'metadata') return <MetadataSourceGroup store={store} />;
   if (part === 'services') return <ServicesPart opened={opened} />;
   if (part === 'api-music') return <MusicApiGroup store={store} />;
   if (part === 'api-video') return <VideoApiGroup />;
   if (part === 'video-server') return <VideoServerConnection />;
-  if (part === 'notifications') return <NotificationsSection />;
+  if (part === 'notifications') return <NotificationsCard />;
+  // Server Activity moved to System > Server Activity (settings-bic phase 3)
   if (part === 'servers') return <ServerConnections store={store} />;
   if (part === 'metasync') return <MetaSyncSection opened={opened} />;
   return null;

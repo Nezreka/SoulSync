@@ -8,13 +8,14 @@ import { act, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createSettingsStore, type SettingsPayload, type SettingsStore } from '../settings-store';
-import { shape, vanilla, withHelpLines } from './__fixtures__/shape';
+import { shape, vanilla } from './__fixtures__/shape';
 import { hydrabaseLink, musicbrainzKeys, musicbrainzRate } from './connections';
 import {
-  ExperimentalSection,
+  ExperimentalCard,
   musicbrainzError,
   syncMetadataSourceSelection,
 } from './connections-metadata';
+import { serviceActions } from './connections-services';
 import { ConnectionsTab } from './connections-tab';
 
 type Shell = Window & Record<string, unknown>;
@@ -95,32 +96,116 @@ function status(frame: unknown) {
 const loaded = (settings: SettingsPayload) => act(() => store.hydrate(settings));
 
 describe('each part is the markup it replaced', () => {
-  it('the metadata source group, with the discography source under the picker', () => {
+  it('the metadata source: two rows, named without a colon, the long help behind the "i"', () => {
     const { container } = part('metadata');
-    const old = vanilla('connections-metadata.vanilla.html', { afterInit: true });
-    // library-discography-source.ts slipped this in after the picker's row
-    old
-      .querySelector('#metadata-fallback-source')!
-      .closest('.form-group')!
-      .insertAdjacentHTML(
-        'afterend',
-        '<div id="library-discography-source-group" class="form-group"><label for="library-discography-source">Library discography source:</label><select id="library-discography-source" class="form-select"><option value="primary">Use primary metadata source</option><option value="automatic">Automatic commercial catalogue</option><option value="itunes">iTunes</option><option value="deezer">Deezer</option><option value="musicbrainz">MusicBrainz</option><option value="spotify">Spotify</option></select><small class="settings-hint">Controls album, EP and single catalogues shown in Library artist views. Automatic tries iTunes, then Deezer.</small></div>',
-      );
-    expect(shape(container)).toEqual(shape(old));
+    const rows = [...container.querySelectorAll<HTMLElement>('[data-row]')];
+    expect(rows.map((r) => r.querySelector('label')!.textContent)).toEqual([
+      'Primary metadata source',
+      'Library discography source',
+    ]);
+    expect(rows[0].querySelector('#metadata-fallback-source')).not.toBeNull();
+    expect(rows[1].id).toBe('library-discography-source-group');
+    expect(rows[1].querySelector('#library-discography-source')).not.toBeNull();
+    // one line of help; the source list is behind the "i", closed
+    expect(rows[0].textContent).toContain('Spotify and Discogs need their account connected');
+    const info = rows[0].querySelector<HTMLButtonElement>(
+      '[aria-label="More about this setting"]',
+    )!;
+    const rest = document.getElementById(info.getAttribute('aria-controls')!)!;
+    expect(rest.hidden).toBe(true);
+    expect(rest.textContent).toContain('Spotify (no auth)');
+    expect(rest.textContent).not.toContain('—');
+    // music only, as it was
+    expect(container.querySelector('[data-music-only]')).not.toBeNull();
+    expect(
+      [...container.querySelectorAll<HTMLOptionElement>('#library-discography-source option')].map(
+        (o) => o.value,
+      ),
+    ).toEqual(['primary', 'automatic', 'itunes', 'deezer', 'musicbrainz', 'spotify']);
   });
 
-  it('the music API Configuration group, every card in it', () => {
+  it('the music API Configuration group: every card on the parts, its Test for the sheet, no emoji, no colon', () => {
     const { container } = part('api-music');
-    expect(shape(unwrapped(container))).toEqual(
-      shape(withHelpLines(vanilla('connections-api-music.vanilla.html'))),
-    );
+    const cards = [...unwrapped(container).querySelectorAll<HTMLElement>('[data-service]')];
+    expect(cards.map((c) => c.getAttribute('data-service'))).toEqual([
+      'spotify',
+      'itunes',
+      'deezer',
+      'discogs',
+      'tidal',
+      'qobuz',
+      'concerts',
+      'lastfm',
+      'genius',
+      'pollinations',
+      'artist-fanart',
+      'musicbrainz',
+      'acoustid',
+      'listenbrainz',
+      'hydrabase',
+    ]);
+    for (const id of [
+      'spotify-client-id',
+      'spotify-client-secret',
+      'spotify-redirect-uri',
+      'spotify-disconnect-btn',
+      'metadata-spotify-free-enrichment',
+      'itunes-country',
+      'deezer-app-id',
+      'deezer-app-secret',
+      'deezer-redirect-uri',
+      'deezer-connection-arl',
+      'discogs-token',
+      'tidal-client-id',
+      'tidal-client-secret',
+      'tidal-redirect-uri',
+      'lastfm-api-key',
+      'lastfm-username',
+      'genius-access-token',
+      'listenbrainz-token',
+      'listenbrainz-username',
+    ])
+      expect(document.getElementById(id), id).not.toBeNull();
+    // every card but Hydrabase (its Connect is its check) gives the sheet a Test;
+    // none keeps a button of its own for it
+    const tested = cards
+      .map((c) => c.getAttribute('data-service')!)
+      .filter((id) => serviceActions.get(`music:${id}`)?.test);
+    expect(tested).toHaveLength(14);
+    expect(serviceActions.get('music:hydrabase')?.test).toBeUndefined();
+    expect(container.querySelector('[data-svc-test], .test-button, .form-group')).toBeNull();
+    // the old page's look is gone: every card's fields are the parts'
+    for (const c of cards) expect(c.querySelector('[data-ui]'), c.dataset.service).not.toBeNull();
+    for (const b of container.querySelectorAll('button'))
+      expect(b.textContent, b.textContent ?? '').not.toMatch(/[\u{1F300}-\u{1FAFF}]/u);
+    for (const l of container.querySelectorAll('label'))
+      expect(l.textContent, l.textContent ?? '').not.toMatch(/:\s*$/);
   });
 
-  it('Experimental, and its confirm in the page body', () => {
-    const { container } = render(<ExperimentalSection store={store} />);
-    expect(shape(container)).toEqual(
-      shape(vanilla('connections-experimental.vanilla.html', { afterInit: true })),
-    );
+  it("Spotify's Disconnect shows while /status says it is signed in (it never could before)", () => {
+    part('api-music');
+    const button = () => document.getElementById('spotify-disconnect-btn') as HTMLButtonElement;
+    expect(button().hidden).toBe(true);
+    status({ spotify: { authenticated: true } });
+    expect(button().hidden).toBe(false);
+    expect(button().textContent).toBe('Disconnect');
+    status({ spotify: { authenticated: false } });
+    expect(button().hidden).toBe(true);
+  });
+
+  it('Experimental: a card of two switches, music side only; its confirm unchanged in the page body', () => {
+    const { container } = render(<ExperimentalCard store={store} />);
+    const card = container.querySelector('[data-card="Experimental"]')!;
+    expect(card.hasAttribute('data-music-only')).toBe(true);
+    for (const id of ['experimental-jiosaavn-enabled', 'experimental-bandcamp-enabled']) {
+      expect(el(id).getAttribute('role')).toBe('switch');
+      expect(card.contains(el(id))).toBe(true);
+    }
+    expect([...card.querySelectorAll('label')].map((l) => l.textContent)).toEqual([
+      'JioSaavn metadata source',
+      'Bandcamp search and enrichment',
+    ]);
+    expect(card.querySelector('.form-group, .settings-section-header')).toBeNull();
     const modal = document.createElement('div');
     modal.append(el('experimental-enable-modal-overlay').cloneNode(true));
     expect(shape(modal)).toEqual(shape(vanilla('connections-experimental-modal.vanilla.html')));
@@ -229,7 +314,7 @@ describe('Experimental', () => {
   it('JioSaavn waits for the confirm; turning it off takes the picker off it', async () => {
     render(
       <>
-        <ExperimentalSection store={store} />
+        <ExperimentalCard store={store} />
         <ConnectionsTab store={store} part="metadata" opened={0} active={false} />
       </>,
     );
@@ -259,7 +344,7 @@ describe('Experimental', () => {
   });
 
   it('Cancel leaves Bandcamp off; switching off needs no confirm', async () => {
-    render(<ExperimentalSection store={store} />);
+    render(<ExperimentalCard store={store} />);
     loaded({ experimental: { bandcamp_enabled: false } });
     fireEvent.click(el('experimental-bandcamp-enabled'));
     expect(el('experimental-enable-modal-title').textContent).toBe('Enable Bandcamp');
@@ -276,7 +361,7 @@ describe('Experimental', () => {
 });
 
 describe('the service cards', () => {
-  it('each field saves its key; the redirect line follows the field', async () => {
+  it('each field saves its key; the redirect uri is shown once', async () => {
     part('api-music');
     loaded({
       spotify: { client_id: 'a', client_secret: '__redacted_unchanged__' },
@@ -287,15 +372,15 @@ describe('the service cards', () => {
       tidal: {},
     });
     expect(el('spotify-redirect-uri').value).toBe('http://127.0.0.1:8888/callback');
-    expect(el('spotify-callback-display').textContent).toBe('http://127.0.0.1:8888/callback');
-    // emptied, it stays empty while the new one is typed; the shown callback
-    // falls back to the default, as #spotify-callback-display did
+    // the address is on screen once: the field, no copy line under it
+    const sheet = el('spotify-redirect-uri').closest<HTMLElement>('[data-field]')!.parentElement!;
+    expect(sheet.textContent!.split('http://127.0.0.1:8888/callback').length).toBe(1);
+    expect(document.querySelector('[data-copy]')).toBeNull();
+    // emptied, it stays empty while the new one is typed
     fireEvent.change(el('spotify-redirect-uri'), { target: { value: '' } });
     expect(el('spotify-redirect-uri').value).toBe('');
-    expect(el('spotify-callback-display').textContent).toBe('http://127.0.0.1:8888/callback');
     fireEvent.change(el('spotify-redirect-uri'), { target: { value: 'https://me.example/cb' } });
     expect(el('spotify-redirect-uri').value).toBe('https://me.example/cb');
-    expect(el('spotify-callback-display').textContent).toBe('https://me.example/cb');
     fireEvent.change(el('spotify-client-id'), { target: { value: 'b' } });
     fireEvent.click(el('metadata-spotify-free-enrichment'));
     fireEvent.change(el('itunes-country'), { target: { value: 'GB' } });
@@ -315,24 +400,54 @@ describe('the service cards', () => {
     });
   });
 
-  it('the Spotify dot turns amber when it needs attention (the tiles read it)', () => {
+  it('sign-in is the sheet’s main action: it saves first, then opens the sign-in', async () => {
     part('api-music');
-    const dot = () =>
-      document.querySelector<HTMLElement>('[data-service="spotify"] .stg-service-dot')!;
-    expect(dot().style.color).toBe('rgb(29, 185, 84)');
-    status({ spotify: { authenticated: true, post_ban_cooldown: 30 } });
-    expect(dot().style.color).toBe('rgb(241, 196, 15)');
+    const open = vi.spyOn(window, 'open').mockImplementation(() => null);
+    for (const [id, path] of [
+      ['spotify', '/auth/spotify'],
+      ['tidal', '/auth/tidal'],
+      ['deezer', '/auth/deezer'],
+    ]) {
+      const primary = serviceActions.get(`music:${id}`)!.primary!;
+      expect(primary.label).toBe('Authenticate');
+      await act(async () => {
+        await primary.onClick();
+      });
+      expect(open).toHaveBeenLastCalledWith(path, '_blank');
+    }
+    expect(shell.saveSettings).toHaveBeenCalledTimes(3);
+    // signed in, Spotify's says so
     status({ spotify: { authenticated: true } });
-    expect(dot().style.color).toBe('rgb(29, 185, 84)');
+    expect(serviceActions.get('music:spotify')!.primary!.label).toBe('Sign in again');
+    open.mockRestore();
+  });
+
+  it('the redirect uri field has its own copy button, copying what is typed', async () => {
+    part('api-music');
+    loaded({ spotify: {}, deezer: {}, tidal: {} });
+    const writeText = vi.fn(() => Promise.resolve());
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    const copyOf = (id: string) =>
+      el(id).parentElement!.querySelector<HTMLButtonElement>('[data-copy-btn]')!;
+    fireEvent.click(copyOf('tidal-redirect-uri'));
+    expect(writeText).toHaveBeenCalledWith('http://127.0.0.1:8889/tidal/callback');
+    await waitFor(() =>
+      expect(copyOf('tidal-redirect-uri').getAttribute('aria-label')).toBe('Copied'),
+    );
+    // emptied, it copies the default the server falls back to
+    fireEvent.change(el('deezer-redirect-uri'), { target: { value: 'https://me.example/dz' } });
+    fireEvent.click(copyOf('deezer-redirect-uri'));
+    expect(writeText).toHaveBeenLastCalledWith('https://me.example/dz');
+    fireEvent.change(el('spotify-redirect-uri'), { target: { value: '' } });
+    fireEvent.click(copyOf('spotify-redirect-uri'));
+    expect(writeText).toHaveBeenLastCalledWith('http://127.0.0.1:8888/callback');
   });
 
   it('a test saves what is waiting first', async () => {
     part('api-music');
     loaded({ discogs: {} });
     store.set('discogs', 'token', 'x');
-    fireEvent.click(
-      document.querySelector('[data-service="discogs"] .test-button') as HTMLButtonElement,
-    );
+    void serviceActions.get('music:discogs')!.test!();
     await waitFor(() => expect(shell.testConnection).toHaveBeenCalledWith('discogs'));
     expect(saved().discogs).toEqual({ token: 'x' });
   });
@@ -342,9 +457,7 @@ describe('the service cards', () => {
     loaded({ deezer_download: { arl: '__redacted_unchanged__' } });
     answers['/api/test-connection'] = { success: true, message: 'Deezer ok' };
     answers['/api/deezer-download/test'] = { success: true, user: 'me', tier: 'Premium' };
-    fireEvent.click(
-      document.querySelector('[data-service="deezer"] .test-button') as HTMLButtonElement,
-    );
+    void serviceActions.get('music:deezer')!.test!();
     await waitFor(() =>
       expect(shell.showToast).toHaveBeenCalledWith(
         'Deezer ok · ARL: me (Premium)',
@@ -365,19 +478,19 @@ describe('the service cards', () => {
         }),
       );
     });
-    expect(el('qobuz-connection-logged-in').style.display).toBe('flex');
-    expect(el('qobuz-connection-form').style.display).toBe('none');
+    expect(el('qobuz-connection-logged-in').hidden).toBe(false);
+    expect(el('qobuz-connection-form').hidden).toBe(true);
     expect(el('qobuz-connection-user-info').textContent).toBe('Connected: Ann (Studio)');
     act(() => {
       window.dispatchEvent(new CustomEvent('soulsync:qobuz-auth', { detail: {} }));
     });
-    expect(el('qobuz-connection-form').style.display).toBe('block');
+    expect(el('qobuz-connection-form').hidden).toBe(false);
     answers['/api/qobuz/auth/token'] = { success: false, error: 'bad token' };
     fireEvent.change(el('qobuz-connection-token'), { target: { value: ' tk ' } });
     fireEvent.click(el('qobuz-token-login-btn'));
     await waitFor(() => expect(el('qobuz-token-status').textContent).toBe('bad token'));
     expect(calls.find((c) => c.url === '/api/qobuz/auth/token')?.body).toEqual({ token: 'tk' });
-    expect(el('qobuz-token-status').style.color).toBe('rgb(255, 85, 85)');
+    expect(el('qobuz-token-status').getAttribute('data-tone')).toBe('bad');
   });
 });
 

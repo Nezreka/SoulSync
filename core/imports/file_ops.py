@@ -180,10 +180,40 @@ def _atomic_cross_device_move(src: Path, dst: Path) -> None:
         logger.info(f"Could not delete source after cross-device move (may be owned by another process): {src}")
 
 
+def free_destination(src, dst) -> Path:
+    """where ``src`` may land without destroying a different file at ``dst``.
+
+    safe_move_file replaces whatever is at the destination, which is right
+    where the caller has already judged the two (the import pipeline compares
+    quality and retires the old file). a caller that has NOT judged them must
+    ask here first: a "download as-is" files a track under its remote folder
+    and file name alone, so two albums' ``CD1/01 - Intro.flac`` shared a
+    destination and the second took the first's place, leaving the first's
+    library row describing other audio.
+
+    the same file again (same size) keeps the destination: a retry of one
+    download is not a second file. a different file gets ``name (2).ext``."""
+    src, dst = Path(src), Path(dst)
+    try:
+        if not dst.exists() or not src.exists() or src.stat().st_size == dst.stat().st_size:
+            return dst
+    except OSError:
+        return dst
+    counter = 2
+    while True:
+        candidate = dst.with_name(f"{dst.stem} ({counter}){dst.suffix}")
+        if not candidate.exists():
+            return candidate
+        counter += 1
+
+
 def safe_move_file(src, dst):
     """Atomically publish ``src`` at ``dst`` without pre-deleting ``dst``."""
     src = Path(src)
     dst = Path(dst)
+    # the folder watcher must not index a file before its own import records it
+    from core.library import own_writes
+    own_writes.note(src, dst)
 
     dst.parent.mkdir(parents=True, exist_ok=True)
 

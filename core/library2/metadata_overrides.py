@@ -308,6 +308,15 @@ def set_field_override(
     ).fetchone() is None:
         raise MetadataOverrideError("metadata entity not found", status=404)
     value = _validated_value(spec, value)
+    if entity_type == "artist" and field_name == "name":
+        # #2165: the artist's name names its folder and tags too. another
+        # artist going by it (proven another by its ids) would share a folder
+        from core.imports.library_names import name_taken_by
+        taken = name_taken_by(conn, entity_id, value)
+        if taken:
+            raise MetadataOverrideError(
+                f"{taken['name']} in your library is a different artist with that name. "
+                "Pick a name that tells them apart.", status=409)
     try:
         value_json = json.dumps(
             value,
@@ -332,6 +341,7 @@ def set_field_override(
                updated_at=CURRENT_TIMESTAMP""",
         (entity_type, entity_id, field_name, value_json, 1, reason),
     )
+    _names_changed(entity_type, field_name)
     row = conn.execute(
         """SELECT * FROM lib2_metadata_overrides
             WHERE entity_type=? AND entity_id=? AND field_name=?""",
@@ -359,7 +369,20 @@ def clear_field_override(
             WHERE entity_type=? AND entity_id=? AND field_name=?""",
         (entity_type, int(entity_id), field_name),
     )
+    _names_changed(entity_type, field_name)
     return bool(result.rowcount)
+
+
+def _names_changed(entity_type: str, field_name: str) -> None:
+    """a pinned artist name is what the next download is filed under (#2165):
+    drop the cached answers so it doesn't wait out their 30 seconds."""
+    if entity_type != "artist" or field_name != "name":
+        return
+    try:
+        from core.imports.library_names import clear_cache
+        clear_cache()
+    except Exception:  # noqa: BLE001, S110 - a cache that lives on is only 30s stale
+        pass
 
 
 def get_field_overrides(
@@ -478,8 +501,13 @@ def effective_artist_names(conn: Any, artist_ids: Any) -> Dict[int, str]:
         return {}
     marks = ",".join("?" for _ in ids)
     rows = conn.execute(
-        f"SELECT id, name FROM lib2_artists WHERE id IN ({marks})", ids).fetchall()
-    provider = {int(row[0]): {"name": row[1]} for row in rows}
+        f"SELECT a.id, COALESCE(c.id, a.id) AS eff_id, COALESCE(c.name, a.name) AS eff_name "
+        f"FROM lib2_artists a LEFT JOIN lib2_artists c ON c.id = a.canonical_artist_id "
+        f"WHERE a.id IN ({marks})", ids).fetchall()
+    # Follow canonical_artist_id (#2257) so merged aliases (e.g. "Maître Gims" -> "GIMS",
+    # "16 Bit Lolita's" -> "16BL") always project the current canonical artist name.
+    id_to_eff = {int(row[0]): int(row[1]) for row in rows}
+    provider = {int(row[1]): {"name": row[2]} for row in rows}
     try:
         projected = project_metadata_many(
             conn, entity_type="artist", provider_fields=provider)
@@ -487,10 +515,10 @@ def effective_artist_names(conn: Any, artist_ids: Any) -> Dict[int, str]:
         from utils.logging_config import get_logger
         get_logger("library2.metadata_overrides").debug(
             "artist name projection skipped: %s", exc)
-        return {entity_id: fields["name"] for entity_id, fields in provider.items()}
+        return {aid: provider[eff_id]["name"] for aid, eff_id in id_to_eff.items()}
     return {
-        entity_id: (effective.get("name") or provider[entity_id]["name"])
-        for entity_id, (effective, _overrides) in projected.items()
+        aid: ((projected.get(eff_id, ({}, None))[0].get("name")) or provider[eff_id]["name"])
+        for aid, eff_id in id_to_eff.items()
     }
 
 

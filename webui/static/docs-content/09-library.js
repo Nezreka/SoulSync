@@ -1,5 +1,6 @@
 registerDocsSection({
     id: 'library',
+    needs: 'music.library',
     title: 'Music Library',
     icon: '📚',
     pages: [
@@ -26,8 +27,11 @@ The Library page shows every artist in your collection as cards with images, alb
 - **Watchlist filter** — All, Watched, or Unwatched artists
 - **Metadata source filter** — find artists unmatched to a specific service (e.g. "No Discogs") or matched to one (e.g. "Has Spotify")
 - **Reviewed filter** — All, Not reviewed, or Reviewed. An artist is reviewed when every album of theirs with files is locked
+- **Locked filter** (albums view) — All, Unlocked, or Locked, to find albums you have or haven't reviewed yet
 - **Collection**: each artist card and table row shows owned / expected tracks with a bar, green when complete, amber when tracks are missing. For a Watchlist artist, expected follows their collection settings, so a release they leave out never counts as missing. For anyone else it's the albums you have: every track of each release you hold something of, plus anything you asked for, so one track of a 14 track album reads 1 / 14. An artist whose release sizes were never looked up says **Not checked** instead of complete. Click **N missing** to see those tracks: in Wanted for a Watchlist artist, on the artist's page for anyone else
 - **Leftover rows**: when a retag or re-identify moves a file onto another row of its album, the old row is left with no file at the same position. A library scan and an artist's **Refresh & Scan** fold it into the row that has the file (its plays come along), so the album counts right again. A locked album keeps them until you act, and you can remove one yourself from its **⋯** menu with **Remove This Row**. A row alone at its position is a missing track and stays
+- **Move a track here**: a missing track's **⋯** menu (admins) finds a track you already have somewhere else, a stray single say, and moves it into the slot. Search your library (it starts with the missing title), pick the track by its album, path and quality, and the preview shows where the file goes and which tags change. **Move here** moves the file, it never copies it: the old row goes (its plays, history and playlist spots come along), its album leaves the library when nothing else is on it, the file is retagged for this album and filed into its folder by your naming template (left where it is when file organization is off). A locked album, on either side, has to be unlocked first. **Reassign to another artist** on an album also moves now: the originals go once the re-import lands, with their old row and an album left empty
+- **Copy a track here** (was **I Have This**): the same ⋯ menu, for when you want the track in both places, a song on a single and on the album say. It copies the file through the import pipeline into the slot and leaves the original where it is. Use **Move a track here** when the old copy should go.
 - **Collection filters** live in the Filters menu: complete or incomplete, missing count and completion ranges, and artists only credited on other people's tracks. Sort by completion, missing tracks, could be better or incomplete albums, and turn any sort around with the arrow
 - **Overview** opens a summary above the list: artists, tracks owned, complete and incomplete collections, tracks missing, could be better, and Watchlist artists
 - **Card size** slider in the toolbar, separate for artist and album cards (and posters on the video library), with a reset. The list also remembers its view, sort, filters and scroll when you come back from an artist
@@ -51,24 +55,38 @@ Click any artist card to open their detail page: albums, EPs, and singles as car
         },
         {
             id: 'lib-enhanced',
+            needs: 'admin',
             title: 'Library Management',
             lede: 'Manage catalogue metadata and physical file versions in the Library.',
             body: `
 Management actions are part of the Library page; there is no separate Enhanced toggle.
 
+![Library v2 management view with the track table](lib-enhanced.jpg)
+
 Catalogue tracks and their physical files are managed separately. **File versions** shows the copies held for a track, and **Recording duplicates** reviews linked single/album recordings. Removal actions preview the selected catalogue entries and file paths before applying changes. Available actions depend on your profile permissions and selected library.
 
 **Preview Rename / Organize** shows where each file would go under your naming template before anything moves. You don't have to open it to find out: on the artist page an album row shows **N to rename** when some of its files are not where the template puts them, the artist's toolbar shows the total, and the album's track table marks those files in the **File path** column. Click the count to open the preview. The check runs after the page loads and only while file organization is on and the template is valid.
 
-On an album's track list, a small **flame** next to a title marks the album's most played tracks on Last.fm: up to three that clearly stand out from the rest. It needs the Last.fm worker to have enriched the album's tracks, and an album where the plays are close together, or where Last.fm knows too few of the tracks, shows none.
+**Folder and tag name** (Artist Settings) shows what new downloads of an artist are filed and tagged as. A download goes under the name your library uses for that artist, found by its Deezer, Spotify or MusicBrainz id, even when the download source spells it another way: if your library calls Machine Gun Kelly **mgk** and Deezer still says Machine Gun Kelly, new releases land in \`mgk/\` and are tagged mgk. A name in another script counts too: when iTunes says **Δέσποινα Βανδή** and your library has **Despina Vandi** (her usual Latin spelling, or one of the MusicBrainz aliases SoulSync stores), the download joins Despina Vandi. Playlist sync and the "already owned" check look an artist up under those names as well. A featured artist keeps its own name. Type a name there to set it yourself (it is also the name SoulSync shows, the same one Edit Metadata sets). Files you already have stay where they are: **Preview rename** and **Preview retag** bring them in line. A name a different artist in your library already uses is refused, so two different artists never share a folder.
+
+On an album's track list, a small **flame** next to a title marks the album's most played tracks on Last.fm: up to three that clearly stand out from the rest. It needs the Last.fm worker to have enriched the album's tracks, and an album where the plays are close together shows none. When Last.fm knows too few of the album's tracks (no key, or a key without Last.fm Pro from December 2026), the flame ranks them on **ListenBrainz** listens instead: the Last.fm worker asks ListenBrainz for the artist's most played recordings once a month and keeps the counts. The two are never mixed on one album, and hovering the flame says which one it is.
+
+## You and this artist
+
+Under an artist's header, once you have played them, **You and <artist>** shows your own listening: how many plays, where they rank among the artists you play ("Your #3 artist of 410"), when you first listened, when you last played them, and your plays per month over the last year. Next to it, **You play most** lists the five songs of theirs you play most, each with its play count and when you last played it; a song in your library opens its album.
+
+It reads your own listening history (yours when you have your own ListenBrainz, Last.fm, media-server account or imported Spotify history, else the shared one), and counts a play when it names the artist, one of their linked aliases, or is linked to one of their library tracks, so a play filed under "Artist feat. Someone" still counts when it matched their song. Spotify history kept for taste only isn't counted here.
 `
         },
         {
             id: 'lib-matching',
+            needs: 'admin',
             title: 'Service Matching',
             lede: 'Link your artists, albums, and tracks to external services for richer metadata.',
             body: `
 The Library exposes provider links and matching actions on catalogue entities. The available services depend on the entity and its stored provider IDs.
+
+![Provider badges on a library artist: MusicBrainz is linked, while Deezer, iTunes, AudioDB and Discogs have no stored ID yet](lib-matching.jpg)
 
 - Click any chip to **manually search and link** the correct external ID when automatic matching gets it wrong
 - **Paste a link or an ID** instead of a name when several artists share one (eleven called "1905"): open the right one on that service, copy its address, and paste it. Works for Spotify, MusicBrainz, Deezer, iTunes/Apple Music, Discogs, Tidal, Qobuz, Amazon, AudioDB, JioSaavn, Last.fm and Bandcamp links, and Genius IDs. A paste that doesn't resolve falls back to a normal search
@@ -82,6 +100,7 @@ Good matches are the foundation of everything downstream — discovery, similar 
         },
         {
             id: 'lib-tags',
+            needs: 'admin',
             title: 'Write Tags to File',
             lede: 'Sync your database metadata into the actual audio file tags.',
             body: `
@@ -99,6 +118,7 @@ Supports MP3, FLAC, OGG, and M4A via Mutagen. After writing, optional server syn
         },
         {
             id: 'lib-bulk',
+            needs: 'admin',
             title: 'Bulk Operations',
             lede: 'Select tracks across albums and act on all of them at once.',
             body: `
@@ -113,20 +133,94 @@ Select tracks across multiple albums using the checkboxes. The bulk bar appears 
         },
         {
             id: 'lib-missing',
+            needs: 'music.get=download',
             title: 'Download Missing Tracks',
             lede: 'Fill gaps in albums without leaving the library.',
             body: `
 From any album card showing missing tracks, click **Download Missing** to open a modal listing every track not in your library. Select tracks, choose a download source, and start the download — progress is tracked per track with status indicators.
 
+![Album with missing tracks and the Download Missing action](lib-missing.jpg)
+
 **Multi-disc albums** are handled automatically: tracks organize into \`Disc N/\` subfolders within the album directory, preventing track number collisions (Disc 1 Track 1 vs Disc 2 Track 1). Disc structure is detected from Spotify or iTunes metadata.
 `
         },
         {
+            id: 'lib-coverage',
+            title: "Your Media Server's Folders",
+            lede: 'Which of your media server\'s music folders SoulSync can read, and what to do about the rest.',
+            body: `
+SoulSync reads your music straight from disk, from its **library folders**: the Music Library Folder and any **Additional Music Libraries**. Your media server may keep music in more places than that. **Settings → Library → Folders → Music → Your media server's folders** lists every music folder Plex, Jellyfin or Navidrome uses and says, for each one, whether SoulSync scans it.
+
+At the top is one number: how much of the media server's music SoulSync can read directly. It is measured, not guessed: up to 40 real files from each folder are opened, and their size is checked against what SoulSync recorded. A big library costs a few lookups per folder, never a full scan.
+
+Each folder is one of these:
+
+| What it says | What it means | What to do |
+|---|---|---|
+| **SoulSync sees this folder as /music, and scans it** | Covered. The names don't have to match: SoulSync finds Plex's \`/data/music\` as its own \`/music\` by the folder names they share | Nothing |
+| **...but only scans part of it** | A library folder sits inside it, the rest isn't scanned | Add the rest, or the whole folder, as a library folder |
+| **...but it isn't one of its library folders** | SoulSync can read it but doesn't scan it | **Add as a library folder** (one click) |
+| **SoulSync can't see this folder** | The drive or share isn't mounted into SoulSync | Mount it. In Docker the row shows the volume line to add to your compose file, then add the right-hand folder as a library folder |
+
+**Why some files failed** lists a few sampled files and the reason: the folder isn't there, the file isn't there (the folder may be the wrong one), SoulSync isn't allowed to read it, or the size doesn't match.
+
+Navidrome doesn't say which folders it uses, so its folders are worked out from its track paths. If Navidrome sends paths that start at the artist folder, turn on **Report Real Path** for the SoulSync user.
+
+### Folder overrides
+
+When SoulSync can't work out a folder on its own (two mounts that share no folder names), open **SoulSync sees it somewhere else** on that row, type the folder as SoulSync sees it, press **Try it** to sample it, then **Save**. That saves a folder override. Every media server path SoulSync turns into its own asks the overrides first, then what it learned itself. The longest matching folder wins, and an override whose folder is missing is skipped. An override only renames a folder: the drive still has to be mounted into SoulSync.
+
+Help warns when SoulSync can read less than half of the media server's music.
+`
+        },
+        {
+            id: 'lib-watch',
+            title: 'Live Folder Watching',
+            lede: 'Music you add, retag, move or delete by hand shows up on its own, one album at a time.',
+            body: `
+SoulSync watches your music library folders: the Music Library Folder, each profile's own library folder and every **Additional Music Library**. Copy an album in, retag one in another tagger, rename a folder or delete a few tracks, and the Library catches up a few seconds after the copy finishes. No scan needed. An open Library page refreshes by itself.
+
+## What happens on a change
+
+- **One album, one rescan.** Changes are gathered per album folder (a \`CD1\` or \`Disc 2\` folder counts as its album), and the folder is read once it has been quiet for a few seconds and its files have stopped growing. Copying 15 tracks is one rescan, not 15.
+- **New files** are added to the Library in place, with their identity from their tags. Nothing found this way is downloaded, upgraded or added to the Wishlist.
+- **Changed files** (new tags, a better copy) are read again, the same as **Refresh & Scan** on the artist page.
+- **Moved or renamed files keep their record**, so plays, padlocks, history and download records follow them. A move counts when the system reports the rename, or when a file gone from its old place turns up somewhere else with the same size and the same tags (and only one file fits). Every move is listed under **Tools → Update File Locations** and can be undone there.
+- **Deleted files** are marked as possibly missing at once. The next library scan confirms it, the same two-step rule every scan follows.
+- A change in the **Import folder** starts the auto-import right away instead of at its next check.
+
+## What is left alone
+
+- Files SoulSync is writing itself: imports, tag writes, reorganize, repairs and deletes.
+- Half-copied and temp files (\`.part\`, \`.tmp\`, \`~\`, browser and download client partials), hidden files and folders, and NAS system folders like \`@eaDir\` and \`#recycle\`.
+- A folder that disappears as a whole. That is a drive or share that is away, not a deleted library: nothing in it is marked missing, and watching starts again when it is back. Many files vanishing from one album batch at once is held back the same way.
+- Everything while a full library refresh is running; the changes wait for it.
+
+## Live or on a timer
+
+**Settings → Library → Folders → Watching for changes** lists every watched folder and how it is watched:
+
+| It says | Why |
+|---|---|
+| **Live** | A local disk: the system reports changes as they happen |
+| **Checked every 15 min** | A network share (SMB, NFS, a Windows \`\\\\server\\share\` path or mapped drive, Docker Desktop's host folders), where change reports don't arrive reliably. Each check reads the folders' listings, and the sizes and dates of a twelfth of the files, so an edit in place is found within twelve checks |
+| **Not reachable** | The folder or its drive is away |
+| **Off** | Turned off for that folder |
+
+Each folder has its own choice: **Automatic**, **Live**, **On a timer** or **Off**. **Check network shares every** sets the timer. The switch at the top turns watching off everywhere.
+
+A library with more folders than Linux lets one program watch live (\`fs.inotify.max_user_watches\`) is checked on a timer instead, and its row says so. Raise that limit on the host to watch it live. Live watching uses the \`watchdog\` package, which the Docker image includes; without it every folder is checked on a timer.
+`
+        },
+        {
             id: 'lib-smart-delete',
+            needs: 'admin',
             title: 'Remove Entries and Files',
             lede: 'Remove tracks from the database only, or from disk as well — with a deliberate choice each time.',
             body: `
 The Library previews the affected entries and file paths before removal:
+
+![Remove dialog offering database-only removal or deleting the files too](lib-delete.jpg)
 
 - **Remove from library database only** — removes the selected library records and keeps the physical files on disk.
 - **Permanently delete files** — removes the corresponding records and disk files after explicit confirmation. Paths outside configured Music Library Paths, or on unavailable storage, are blocked.
@@ -136,6 +230,7 @@ File-removal operations are recorded in the deletion journal. Permanent deletion
         },
         {
             id: 'lib-redownload',
+            needs: 'admin',
             title: 'Track Redownload',
             lede: 'Replace a track with a better copy from a different source or quality.',
             body: `
@@ -150,10 +245,13 @@ A 3-step wizard guides you through redownloading a specific track:
         },
         {
             id: 'lib-issues',
+            needs: 'everyone',
             title: 'Library Issues',
             lede: 'Problems people reported by hand — the manual issue tracker.',
             body: `
 The Issues page is the **manual issue tracker**: nothing here is ever written by a scan — every row is a problem reported by a person (profiles can file them from library pages and the player). Automated scan findings live in **Library Maintenance** on the Tools page, a deliberately separate surface.
+
+![Library Issues page with reported problems and status counters](lib-issues.jpg)
 
 Issues are grouped by category — wrong track, wrong metadata, wrong cover, wrong artist, wrong album, duplicate tracks, missing tracks, audio quality, incomplete album, other — each with a status (**open**, **in progress**, **resolved**, **dismissed**) and a priority (**low**, **normal**, **high**). Filter by status and category to work through them, and update issues individually or in bulk.
 

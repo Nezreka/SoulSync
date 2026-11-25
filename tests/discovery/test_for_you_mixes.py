@@ -181,19 +181,82 @@ def test_blends_only_exist_between_profiles_with_their_own_listening(db, monkeyp
     assert not any(k.startswith('blend_') for k in keys)
 
 
-def test_a_blend_card_names_both_people(db, monkeypatch):
-    monkeypatch.setattr('core.listening_scope.listening_owners', lambda database: [1, 2])
-    monkeypatch.setattr('core.listening_scope.listening_owner', lambda database, pid: 1)
+def _people(db, *rows):
+    """(id, name, own pile?, shares?) profiles; an own pile is a listenbrainz token"""
+    from core.personalized.listening_privacy import ensure_schema
     with db._get_connection() as conn:
-        conn.execute("INSERT OR REPLACE INTO profiles (id, name) VALUES (1, 'Boulder')")
-        conn.execute("INSERT OR REPLACE INTO profiles (id, name) VALUES (2, 'Thomas')")
+        ensure_schema(conn.cursor())
+        for pid, name, own, share in rows:
+            conn.execute("INSERT OR REPLACE INTO profiles (id, name, listenbrainz_token, share_listening) "
+                         "VALUES (?, ?, ?, ?)", (pid, name, 'tok' if own else None, 1 if share else 0))
         conn.commit()
-    for n in range(10):
-        t = _track(db, f'Shared {n}', f'shared {n}')
-        _play(db, t, 5, times=2, owner=1)
-        _play(db, t, 5, times=2, owner=2)
+
+
+def _blend_keys(db, pid):
+    return [m['key'] for m in F.build_for_you(db, pid, now=NOW)['mixes'] if m['key'].startswith('blend_')]
+
+
+def _shared_plays(db, *owners, n=10, prefix='Shared'):
+    for i in range(n):
+        t = _track(db, f'{prefix} {i}', f'{prefix.lower()} {i}')
+        for o in owners:
+            _play(db, t, 5, times=2, owner=o, artist=f'{prefix} {i}')
+
+
+def test_a_blend_card_names_both_people(db):
+    _people(db, (1, 'Boulder', False, True), (2, 'Thomas', True, True))
+    _shared_plays(db, 1, 2)
     blends = [m for m in F.build_for_you(db, 1, now=NOW)['mixes'] if m['key'] == 'blend_2']
     assert blends and blends[0]['name'] == 'Boulder + Thomas'
+
+
+def test_no_blend_unless_both_share(db):
+    # nobody has said yes: the default, existing profiles included
+    _people(db, (1, 'Boulder', False, False), (2, 'Thomas', True, False))
+    _shared_plays(db, 1, 2)
+    assert _blend_keys(db, 1) == [] and _blend_keys(db, 2) == []
+    # only one side said yes: still nothing, on either side
+    _people(db, (1, 'Boulder', False, True), (2, 'Thomas', True, False))
+    assert _blend_keys(db, 1) == [] and _blend_keys(db, 2) == []
+    _people(db, (1, 'Boulder', False, False), (2, 'Thomas', True, True))
+    assert _blend_keys(db, 1) == [] and _blend_keys(db, 2) == []
+    # both
+    _people(db, (1, 'Boulder', False, True), (2, 'Thomas', True, True))
+    assert _blend_keys(db, 1) == ['blend_2'] and _blend_keys(db, 2) == ['blend_1']
+
+
+def test_the_shared_pile_needs_everyone_on_it(db):
+    # profile 3 has no account of its own, so its plays are in the shared
+    # pile: the admin's yes can't share them for it
+    _people(db, (1, 'Boulder', False, True), (2, 'Thomas', True, True), (3, 'Kid', False, False))
+    _shared_plays(db, 1, 2)
+    assert _blend_keys(db, 2) == []
+    _people(db, (3, 'Kid', False, True))
+    assert _blend_keys(db, 2) == ['blend_1']
+
+
+def test_a_turned_off_profile_does_not_hold_the_pile_back(db):
+    _people(db, (1, 'Boulder', False, True), (2, 'Thomas', True, True), (3, 'Gone', False, False))
+    with db._get_connection() as conn:
+        conn.execute("UPDATE profiles SET disabled = 1 WHERE id = 3")
+        conn.commit()
+    _shared_plays(db, 1, 2)
+    assert _blend_keys(db, 2) == ['blend_1']
+
+
+def test_partners_are_ranked_by_artists_in_common(db):
+    # four people share; the three with most artists in common with you get
+    # cards, closest first, whatever their profile ids
+    _people(db, (1, 'Me', False, True), (2, 'Few', True, True), (3, 'Most', True, True),
+            (4, 'None', True, True), (5, 'Some', True, True))
+    _shared_plays(db, 1, 3, n=12, prefix='Big')
+    _shared_plays(db, 1, 5, n=8, prefix='Mid')
+    _shared_plays(db, 1, 2, n=2, prefix='Tiny')
+    _shared_plays(db, 4, n=10, prefix='Elsewhere')
+    with db._get_connection() as conn:
+        assert F.rank_partners(conn, 1, [2, 3, 4, 5], now=NOW) == [3, 5, 2, 4]
+    # three cards at most: the one with nothing in common is left out
+    assert _blend_keys(db, 1) == ['blend_3', 'blend_5', 'blend_2']
 
 
 # ── the endpoints ────────────────────────────────────────────────────────────

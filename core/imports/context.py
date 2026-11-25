@@ -365,7 +365,13 @@ def get_provider_source_ids(context: Optional[Dict[str, Any]]) -> Dict[str, str]
     version keeps the pipeline's own keys, which the wishlist needs to find
     the row a download came from; see `core.context_sentinels.provider_id`."""
     from core.context_sentinels import provider_id
-    return {key: provider_id(value) for key, value in get_import_source_ids(context).items()}
+    from core.various_artists_ids import is_various_artists_id
+    ids = {key: provider_id(value) for key, value in get_import_source_ids(context).items()}
+    # a compilation's "Various Artists" id is nobody's: not a tag, not a
+    # library artist's id, not a lookup (#2229)
+    if is_various_artists_id(ids.get("artist_id"), get_import_source(context)):
+        ids["artist_id"] = ""
+    return ids
 
 
 def get_source_tag_names(source: str) -> Dict[str, Optional[str]]:
@@ -666,7 +672,9 @@ def _resolve_single_to_parent_album(context, artist_context):
                        or get_import_clean_artist(context, default="")).strip()
         if not source or not track_title or not artist_name:
             return None
-        artist_id = str(get_import_source_ids(context).get("artist_id") or "")
+        # a provider's artist id: never a "Various Artists" one, whose
+        # albums are every compilation the provider has (#2229)
+        artist_id = str(get_provider_source_ids(context).get("artist_id") or "")
 
         from core.metadata.album_tracks import (
             get_artist_albums_for_source,

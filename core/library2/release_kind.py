@@ -19,6 +19,54 @@ def confirm_release_kind(conn, album_id: int, value, *, known: bool = True) -> b
     return bool(changed.rowcount)
 
 
+def settle_shape_kind(conn, album_id: int) -> str:
+    """a row typed 'album' by no source's word takes the kind its folder
+    took. a bare 'album' is every source's default (itunes and deezer's
+    track lookups say it of every single), so the path builder files by the
+    release's shape and the row said Album: 'Bubzstep', one track, sat under
+    Albums while its folder said Single (#2240). how the download filed it
+    first (filed_release), else the release's track count and runtime.
+    only a row still unconfirmed (album_type_known=0); it stays unconfirmed,
+    so a provider that does say can still correct it. returns the new kind,
+    '' when nothing changed."""
+    row = conn.execute(
+        "SELECT album_type, album_type_known, filed_release, expected_track_count,"
+        " track_count, duration FROM lib2_albums WHERE id=?", (int(album_id),)).fetchone()
+    if row is None or str(row[0] or 'album').lower() != 'album' or row[1]:
+        return ''
+    try:
+        filed = json.loads(row[2] or '{}')
+    except (TypeError, ValueError):
+        filed = {}
+    if isinstance(filed, dict) and filed.get('type'):
+        from core.imports.paths import get_album_type_display
+        kind = get_album_type_display(
+            filed['type'], filed.get('total_tracks'), str(filed.get('source') or ''),
+            bool(filed.get('locked')), filed.get('duration_ms') or None).strip().lower()
+    else:
+        from core.metadata.release_type import release_type_from_shape
+        count, total_ms = row[3] or row[4], row[5]
+        if not count:
+            # no release count: only the plain single's own shape, one song
+            # named like the release. two held songs of a 12-track album
+            # are no single
+            held = conn.execute(
+                "SELECT COUNT(*), MAX(t.duration), MAX(t.title), MAX(al.title)"
+                "  FROM lib2_tracks t JOIN lib2_albums al ON al.id=t.album_id"
+                " WHERE t.album_id=?", (int(album_id),)).fetchone()
+            from core.library2.importer import release_title_key
+            if held[0] != 1 or release_title_key(held[2] or '') != release_title_key(held[3] or ''):
+                return ''
+            count, total_ms = 1, total_ms or held[1]
+        kind = release_type_from_shape(count, total_ms)
+    if kind not in ('single', 'ep'):
+        return ''
+    conn.execute("UPDATE lib2_albums SET album_type=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                 (kind, int(album_id)))
+    conn.execute("UPDATE lib2_albums SET album_type_known=0 WHERE id=?", (int(album_id),))
+    return kind
+
+
 # one time repair: releases a count guess typed single/ep that run 30+ minutes.
 # album_type_known can't tell a guess from a provider's word (the kind trigger
 # marks every non-album row known), so a row only changes when a provider it

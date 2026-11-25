@@ -2670,3 +2670,16 @@
   color: var(--white-a60);
   border-bottom: 1px solid var(--white-a07);
 }
+
+/* getting books isn't part of the profile (#2166): one calm line under the
+   cover, where the wishlist and releases buttons would be */
+.detailCalm {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-lg);
+  background: var(--white-a06);
+  color: var(--white-a70);
+  font-size: 12.5px;
+  line-height: 1.45;
+  text-align: center;
+}

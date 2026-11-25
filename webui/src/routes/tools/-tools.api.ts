@@ -17,6 +17,7 @@
  */
 
 import type { FindingGroup, FindingTypeInfo } from './-tools.groups';
+import type { KeepBestSummary } from './-tools.keep-best-bulk';
 import type {
   BackupListResponse,
   BulkFixStatus,
@@ -424,6 +425,9 @@ export interface FixResult {
   /** an orphan delete stopped because a library track shares its filename. */
   needs_confirm?: boolean;
   library_paths?: string[];
+  /** #2179: a bulk Keep Best left this duplicate open for a person, and why
+   *  (same_recording, playlist, protected) */
+  needs_you?: string;
 }
 
 /**
@@ -449,6 +453,134 @@ export async function fixFinding(
   if (options?.scope) body.scope = viewScopeBody(options.scope);
   const response = await postJson(repairUrl(`/findings/${id}/fix`), body);
   return (await response.json()) as FixResult;
+}
+
+/** one place a cover can live, and what Apply Art does there (#2169) */
+export interface CoverPlanStep {
+  place: 'library' | 'files' | 'folder';
+  action: 'write' | 'keep' | 'skip';
+  why: string;
+  count?: number;
+  file?: string;
+  /** the picked cover replaces the library's own (#2202) */
+  replace?: boolean;
+  /** the library's saved cover no longer loads (#2202) */
+  broken?: boolean;
+}
+
+/** a cover Apply Art can take: one tile of the finding (#2202) */
+export type CoverPick = 'library' | 'folder' | 'files' | 'found';
+
+export const COVER_PICKS: readonly CoverPick[] = ['library', 'folder', 'files', 'found'];
+
+/** a cover finding as it is now: the library, the files and the folder,
+ *  the found cover and its source, and what Apply Art does in each (#2169).
+ *  `choices` are the tiles with a picture, `pick` the best of them, and
+ *  `plans` what Apply Art does with each one picked (#2202) */
+export interface CoverFindingState {
+  album_id: number;
+  library: { has: boolean; locked: boolean; broken?: boolean; url: string | null };
+  files: { with: number; without: number; unknown: number; url: string | null };
+  folder: { file: string | null; exists: boolean; url: string | null };
+  found: { url: string | null; source: string | null };
+  settings: { embed: boolean; sidecar: boolean };
+  plan: CoverPlanStep[];
+  choices: CoverPick[];
+  pick: CoverPick | null;
+  plans: Partial<Record<CoverPick, CoverPlanStep[]>>;
+}
+
+/** null when the album left the library or the call failed: the finding
+ *  still shows what the scan saw */
+export async function fetchCoverFindingState(id: number): Promise<CoverFindingState | null> {
+  try {
+    const response = await fetch(repairUrl(`/findings/${id}/cover`));
+    if (!response.ok) return null;
+    const data = (await response.json()) as Partial<CoverFindingState> & { success?: boolean };
+    // anything not shaped like a state is no state: the scan's view stands
+    if (data.success !== true || !data.library || !data.files || !data.folder || !data.found)
+      return null;
+    const choices = Array.isArray(data.choices)
+      ? data.choices.filter((pick): pick is CoverPick => COVER_PICKS.includes(pick))
+      : [];
+    return {
+      ...data,
+      plan: Array.isArray(data.plan) ? data.plan : [],
+      choices,
+      pick: data.pick && choices.includes(data.pick) ? data.pick : (choices[0] ?? null),
+      plans: data.plans && typeof data.plans === 'object' ? data.plans : {},
+    } as CoverFindingState;
+  } catch {
+    return null;
+  }
+}
+
+/** one copy in a Keep Best preview (#2172) */
+export interface KeepBestCopy {
+  file_id: number;
+  action: 'keep' | 'remove' | 'protected';
+  path: string;
+  playlists: string[];
+  ignored_playlists: string[];
+  playlists_covered: string[];
+  playlist_moves: string[];
+  playlists_blocked: string;
+  protected_reasons: string[];
+}
+
+export interface KeepBestPreview {
+  success: boolean;
+  error?: string;
+  kept_file_id?: number;
+  move_playlist_entries?: boolean;
+  copies?: KeepBestCopy[];
+}
+
+/** what Keep Best would do for a duplicate finding with this fix action,
+ *  nothing changed (#2172). null when the call failed */
+export async function fetchKeepBestPreview(
+  id: number,
+  action: string,
+): Promise<KeepBestPreview | null> {
+  try {
+    const response = await fetch(
+      repairUrl(`/findings/${id}/keep-best-preview?action=${encodeURIComponent(action)}`),
+    );
+    if (response.status >= 500) return null;
+    return (await response.json()) as KeepBestPreview;
+  } catch {
+    return null;
+  }
+}
+
+/** what a Keep Best all over the open duplicate findings in this view would
+ *  do before it runs: how many go through and how many need you, with moving
+ *  playlist entries off and on (#2179). null when the call failed */
+export async function fetchKeepBestSummary(filters?: {
+  jobId?: string;
+  severity?: string;
+}): Promise<KeepBestSummary | null> {
+  const params = new URLSearchParams();
+  if (filters?.jobId) params.set('job_id', filters.jobId);
+  if (filters?.severity) params.set('severity', filters.severity);
+  const query = params.toString();
+  try {
+    const response = await fetch(
+      repairUrl(`/findings/keep-best-summary${query ? `?${query}` : ''}`),
+    );
+    if (!response.ok) return null;
+    const data = (await response.json()) as Partial<KeepBestSummary> & { success?: boolean };
+    if (data.success !== true) return null;
+    return {
+      total: data.total || 0,
+      ready: data.ready || 0,
+      ready_with_move: data.ready_with_move || 0,
+      needs_you: data.needs_you || {},
+      needs_you_with_move: data.needs_you_with_move || {},
+    };
+  } catch {
+    return null;
+  }
 }
 
 /** `resolveRepairFinding`. Response ignored by the vanilla. */

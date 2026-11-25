@@ -4,12 +4,8 @@
  *
  * Two things here are load-bearing beyond looks:
  *
- * 1. **The card `id` must survive.** helper.js anchors its help popovers on
- *    `#db-updater-card`, `#metadata-updater-card`, `#duplicate-cleaner-card`,
- *    `#discovery-pool-card`, `#media-scan-card`, `#backup-manager-card`,
- *    `#metadata-cache-card` and `#blacklist-card`, and its search walks UP the
- *    DOM matching those selectors. Drop an id and that card silently stops
- *    being findable from the helper.
+ * 1. **The card keeps the `id` it is given** (`#db-updater-card`, ...): the
+ *    page's tests and anything that links to one card address it by id.
  *
  * 2. **The `?` button opens the VANILLA modal.** `#tool-help-modal` and
  *    `TOOL_HELP_CONTENT` both live outside this page, so the button calls

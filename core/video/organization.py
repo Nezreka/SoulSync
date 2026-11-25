@@ -302,6 +302,25 @@ def languages_unknown(scope: Any, fields: dict, settings: Any) -> bool:
             or ("$sublangs" in tpl and fields.get("subtitle_languages") is None))
 
 
+_ID_TOKENS = {"movie": ("tmdbid", "imdbid"), "episode": ("tmdbid", "imdbid", "tvdbid")}
+ID_LABELS = {"tmdbid": "TMDB id", "imdbid": "IMDb id", "tvdbid": "TVDB id"}
+
+
+def missing_ids(scope: Any, fields: dict, settings: Any) -> list:
+    """the title ids ($imdbid, $tmdbid, $tvdbid) the template names that this
+    title has no stored value for, as their token names. Mass rename and the
+    naming check leave such a file alone instead of stripping the
+    '{imdb-tt...}' its folder already carries, and the naming check says so.
+    A title missing an id is one enrichment hasn't filled, not one without."""
+    tokens = _ID_TOKENS.get(scope)
+    if not tokens:
+        return []
+    s = normalize(settings)
+    tpl = str(s.get("movie_template" if scope == "movie" else "episode_template") or "")
+    return [t for t in tokens
+            if re.search(r"\$\{?" + t + r"(?![A-Za-z0-9_])", tpl) and not _str(fields.get(t)).strip()]
+
+
 def _movie_values(f: dict) -> dict:
     title = f.get("title") or "Unknown"
     return {

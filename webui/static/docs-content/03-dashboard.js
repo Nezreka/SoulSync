@@ -1,10 +1,12 @@
 registerDocsSection({
     id: 'dashboard',
+    needs: 'admin',
     title: 'Dashboard',
     icon: '📊',
     pages: [
         {
             id: 'dash-overview',
+            needs: 'music.dashboard',
             title: 'Overview & Stats',
             lede: 'Your command center: library stats, alerts, and sync pipelines — all updating live.',
             body: `
@@ -23,7 +25,7 @@ The dashboard is organized into bands that appear when they have something to sh
 
 Stats update in real time over WebSocket — no page refresh needed.
 
-![Dashboard overview](dash-overview.jpg)
+![The dashboard with library stats, worker orbs, alerts, and content rails](dash-overview.jpg)
 
 > [!TIP]
 > Click the **version number** in the sidebar footer to open the **What's New** modal with release notes. It glows when an update is available: green for routine, yellow for major, red for critical.
@@ -38,6 +40,8 @@ Stats update in real time over WebSocket — no page refresh needed.
 
 Download history now lives on the **Active Downloads** page. Completed and failed downloads stay listed there with a persistent history — clearing the list removes the rows, never your files.
 
+![The Active Downloads page, where finished downloads stay listed. The Recent History bar along the bottom holds the full history; it is empty here because no transfers have run yet](dash-history.jpg)
+
 Each history entry is expandable — click to reveal source provenance details:
 
 - **Expected vs downloaded** — what you asked for versus what the source actually provided. Mismatches are highlighted.
@@ -51,6 +55,7 @@ Each history entry is expandable — click to reveal source provenance details:
         },
         {
             id: 'dash-global-search',
+            needs: 'everyone',
             title: 'Global Search',
             lede: 'The floating global search bar was retired — here is what replaced it.',
             body: `
@@ -58,11 +63,13 @@ Each history entry is expandable — click to reveal source provenance details:
 
 The floating **"Search everything…"** bar that used to sit above the media player has been **deliberately removed**. It duplicated the Search page, and the two were easy to confuse.
 
+![The Search page that replaced the retired floating search bar](dash-search-now.jpg)
+
 ## Where to search now
 
 - **Search page** — the full search experience: Enhanced Search with categorized results (artists, albums, tracks), download modals, and candidate selection. See [Music Downloads](#search).
 - **Docs search** — press \`/\` on this Help page to search all documentation.
-- **Helper search** — press \`Ctrl+K\` anywhere to search help topics and jump straight to the right docs page.
+- **Ctrl K** anywhere opens one search for help articles, settings, pages and actions. Type a name and its last row offers **Search music for** it. See [Search and Ctrl K](#ts-search).
 
 > [!TIP]
 > Downloads started from the Search page behave exactly like downloads started anywhere else — they appear in Active Downloads with full progress and retry controls.
@@ -75,7 +82,7 @@ The floating **"Search everything…"** bar that used to sit above the media pla
             body: `
 ## Worker orbs
 
-The dashboard header shows a **worker orb** for each of 17 background workers. Hover any orb to see its current status, what item it's processing, and progress counts (e.g. "142/500 matched"). Enrichment workers run automatically in the background, enriching your library with:
+The dashboard header shows a **worker orb** for each of 17 background workers. The orbs, **Manage Workers** and everything behind them are the admin's: a member's dashboard has no orbs, and the server refuses them the workers' status and controls. Hover any orb to see its current status, what item it's processing, and progress counts (e.g. "142/500 matched"). Enrichment workers run automatically in the background, enriching your library with:
 
 ::: cards
 ### 🟣 MusicBrainz
@@ -85,13 +92,13 @@ Artist descriptions, artist art, album info.
 ### 🟣 Deezer
 Deezer IDs, genres, album metadata.
 ### 🎵 JioSaavn
-Track, album, and artist metadata — strong for Indian and Bollywood catalogs (experimental, enable under Settings → Advanced).
+Track, album, and artist metadata — strong for Indian and Bollywood catalogs (experimental, enable under Settings → System → Developer).
 ### 🟢 Spotify
 Artist genres, follower counts, images, album release dates, track previews.
 ### 🌸 iTunes
 Apple Music IDs and preview links.
 ### 🔴 Last.fm
-Listener and play counts, bios, tags, similar artists.
+Listener and play counts, bios, tags, similar artists. For an artist Last.fm has nothing for, or with no working key, it fills the bio from TheAudioDB or Wikipedia, tags from MusicBrainz, and ListenBrainz listeners and Deezer fans instead, asked again every 30 days. Last.fm's own data always comes first and is never overwritten.
 ### 🟡 Genius
 Lyrics, descriptions, alternate names, song artwork.
 ### 🌊 Bandcamp
@@ -114,7 +121,7 @@ Background library repair jobs — findings land on the Tools page.
 Deterministic SoulIDs generated for artists, albums, and tracks.
 :::
 
-![Enrichment workers status](dash-workers.jpg)
+![Worker orbs in the dashboard header with a status tooltip](dash-workers.jpg)
 
 > [!NOTE]
 > Workers retry "not found" items every 30 days and errored items every 7 days. You can pause/resume any worker from the dashboard.
@@ -126,6 +133,7 @@ Workers include smart rate limiting for all APIs. If Spotify returns a rate limi
         },
         {
             id: 'dash-tools',
+            needs: 'music.dashboard',
             title: 'Dashboard Sidebar',
             lede: 'Live cards for your week, sync pipelines, automations, and quick navigation.',
             body: `
@@ -140,7 +148,7 @@ Under the listen band the dashboard holds four live cards:
 
 The dashboard footer holds quick settings toggles.
 
-![Dashboard tool cards](dash-tools.jpg)
+![Dashboard sidebar with the playlist sync rail, automations card, and quick navigation tiles](dash-tools.jpg)
 
 > [!TIP]
 > The old per-tool dashboard cards (Database Updater, Metadata Updater, Retag, Backup Manager, repair jobs) now live on the dedicated **Tools** page, organized into Operations and Tools tabs.
@@ -190,7 +198,7 @@ The **Backup Manager** is a server card on the **Tools** page. It protects your 
 - **Delete** — remove individual backups.
 - **Rolling cleanup** — automatically keeps only the 5 most recent backups to save disk space.
 
-![Backup manager](dash-backup.jpg)
+![Backup Manager with timestamped database backups and restore controls](dash-backup.jpg)
 
 > [!TIP]
 > The **Auto-Backup Database** system automation creates a backup every 3 days automatically. Adjust the interval in [Automations](#auto-system).
@@ -204,6 +212,8 @@ The **Backup Manager** is a server card on the **Tools** page. It protects your 
 ## Where it lives now
 
 Repair and maintenance live on the **Tools** page, which has four pills:
+
+![Tools page Operations tab with the library health score and findings cards](dash-repair.jpg)
 
 - **Findings** — what the repair jobs found (missing tags, duplicates, dead files, …), with the library's health score. You fix them one at a time or in bulk.
 - **Jobs** — what is running, **Run a check** (a few jobs queued together), the **Areas**, and every job with its schedule, switch and settings.
@@ -230,6 +240,7 @@ The view switch offers two more ways in: **Albums** is a lens on the findings th
 
 - **Dismiss** means "don't raise this again". Every dismiss shows an **Undo** for a few seconds, and dismissed findings can be reopened from the Dismissed view.
 - **A tag finding shows both sides.** Open a Library Re-tag row and each tag is listed with the value in the file now beside the value Apply Tags would write. Nothing outside that list is touched.
+- **Blank tags fill themselves.** With **Fill empty tags automatically** on (the default while post-processing writes tags), SoulSync fills a tag finding's blanks on its own within a few minutes and closes it. What it filled is on the **Filled Tags** card, with **Undo**. Findings for files it leaves alone (hand-tagged, locked, read-only, still downloading) stay here.
 - **Fix All on tag findings only fills.** It writes the tags that are blank in a file and never replaces a tag the file already has. A finding where the file and the library disagree stays open: open it, read both values, then **Apply Tags** or **Dismiss**. If a finding had both, the blanks are filled, the rest waits, and the row shows what was filled with **Undo the fill**. The prompt has a second answer, **Also replace tags that differ**, which asks again before it runs.
 - **A different genre or year is not a fault.** The file is as often right as the catalogue (a remaster's year, "Electro" against "Electronic"), so those two are shown on the finding as "differs from the library. Left as it is" and are not filed on their own. To have them filed, turn on **Flag genre differences** or **Flag year differences** in the Library Re-tag job's settings. A blank genre or year is always filed.
 - **Fixed tag findings keep their history.** In the Fixed view, a re-tag row shows every tag as it was and as it is now. **Undo changes** writes the old values back and reopens the finding. A cover that was embedded stays, since the old picture is not kept.
@@ -244,10 +255,10 @@ The background repair worker runs automated jobs on configurable schedules, incl
 | Job | What it does |
 |-----|--------------|
 | Track Number Repair | Fixes missing/incorrect track numbers against official tracklists |
-| Orphan File Detector | Finds audio files in your output folder not tracked in the database |
-| Dead File Cleaner | Finds library entries whose file no longer exists. Each one has **Re-download** and **Remove**: Remove takes the track out of your library and downloads nothing, for files you moved away on purpose (select several and use Fix Selected to remove them together). When most of the library is missing at once it stops and marks nothing, because that is usually a disconnected drive. If you deleted the files yourself, answer the **Unreachable Library** finding with **They are gone** and each file is listed under Dead Files |
+| Orphan File Detector | Finds audio files in your music library folder not tracked in the database |
+| Dead File Cleaner | Finds library entries whose file no longer exists. Each one has **Re-download** and **Remove**: Remove takes the track out of your library and downloads nothing, for files you moved away on purpose (select several and use Fix Selected to remove them together). When most of the library is missing at once it stops and marks nothing, because that is usually a disconnected drive; the log then shows one path it can't reach and where those paths point (a folder that is there means deleted files, an old folder outside your library points at Tools > Update File Locations). A smaller group of missing files is marked even when they sit together (one artist, one import), as long as their library folder is there. If you deleted the files yourself, answer the **Unreachable Library** finding with **They are gone** and each file is listed under Dead Files |
 | AcoustID Scanner | Batch audio fingerprint verification across your library. Needs an AcoustID key. With **Enable Download Verification** off in Settings, new downloads are not checked and the scheduled scan is skipped, but **Run Now** still scans, so you can check your library when you choose |
-| Cover Art Filler | Detects albums/tracks without embedded artwork and fetches it |
+| Cover Art Filler | Checks the three places an album's cover lives: saved in the library, inside the audio files (when embedding art is on) and as cover.jpg in the album folder (when cover.jpg downloads are on). A cover file counts by any of its usual names in any case (cover, folder, front, album, albumart as jpg, jpeg, png or webp), and a Disc 1 / CD2 folder counts the one in the release folder above it. A saved library cover that no longer loads counts as missing. Each finding shows all three plus the cover a source found and which source, an empty box where there is none. Every box with a picture can be picked: the best one there is starts picked (the library's, then the folder's, then the one inside the files, then the found one), and the finding lists what **Apply Art** writes in each place with that pick. Apply Art puts the picked cover where one is missing; a cover you have is kept, except that picking the found cover over the library's replaces the library one. A finding for an album that has every cover closes on the next scan. **Change cover** on a finding opens the album page's picker to choose any cover instead. An artist photo is only suggested for an artist with none, and only applied with **Use for artist** |
 | Metadata Gap Filler | Completes missing fields (genre, year, …) from connected services |
 | Fake Lossless Detector | Flags suspected lossy transcodes for review; findings have no automatic repair or re-download action |
 | Library Reorganize | Restructures folders to match your path templates |
@@ -256,7 +267,7 @@ The background repair worker runs automated jobs on configurable schedules, incl
 | Artist Merge Review | Shows every artist merge SoulSync made by itself, with the reason and how many albums moved: approve one to undo it. Asks about pairs that share one catalogue id and nothing else (approve to merge, dismiss to keep two). Finds artists merged by mistake, where albums under one artist are filed and tagged under another name, and splits them. An undone merge or a split is never merged again; nothing on disk is changed |
 | Compilation Songs to Original Albums | For players that filter by an album's year: finds where each song on an artist's greatest hits or best-of first came out (the studio album when the same recording is on one, otherwise the single) and, once approved, retags it and files it under that album. Off by default; it breaks compilations up, needs a MusicBrainz release id on the compilation, and leaves various-artists compilations alone |
 | Use File Tags | For tags you fixed outside SoulSync: finds every album whose files say something the Library does not (titles, track numbers, year, genre, which album a track is on) and, once approved, makes the Library follow the files. Off by default; nothing on disk is changed |
-| Cache Maintenance | Cleans expired metadata cache entries |
+| Cache Maintenance | Cleans expired metadata cache entries, prunes old cache and log rows, merges the search indexes and folds the write-ahead log back in |
 | Corrupt File Detector | Decode-tests every library FLAC (\`flac -t\`, falling back to ffmpeg) and flags physically damaged files — the only cure is a fresh download |
 | Comma Artist Splitter | Finds dummy artists that are really several artists joined by separators ("Camellia, Toby Fox") and splits their tags — verifies against metadata APIs first so real separator-named acts like "Tyler, The Creator" are never split. A name the library or a provider knows as one artist ("K/DA") stays whole inside a longer credit. A wrong split is fixed on the finding: Edit split or One artist, and the name goes on the job's Keep Whole Names list so no scan or import splits it again |
 | Watchlist & Wishlist Reconcile | Reconciles monitored artists with the Watchlist and monitored tracks that have no file with the Wishlist, and asks for better copies of tracks below their quality profile, a few each run |
@@ -264,7 +275,7 @@ The background repair worker runs automated jobs on configurable schedules, incl
 | Expired Download Cleaner | Proposes deleting watchlist/playlist-sourced downloads past their per-origin retention window; always keeps actively-mirrored playlists, watched artists, and tracks you've played more than once (optional auto-delete). Also cleans up after **Rotating** playlists: a song the playlist downloaded goes once it has left the playlist, with no retention window |
 | Genre Tag Cleanup | Re-applies the strict genre whitelist to genres stored before it was enabled — one finding per artist/album with off-whitelist genres |
 | Genre Enrichment | Adds conservatively translated genres from stored metadata and caches |
-| Library Re-tag | Rewrites tags + cover art from a fresh metadata-source pull, in place (no moves, renames, or re-matching) — dry-run findings show old → new for every track |
+| Library Re-tag | Rewrites tags + cover art from a fresh metadata-source pull, in place (no moves, renames, or re-matching) — dry-run findings show old → new for every track. An import fills the tags it left blank from what the library knows (genre, disc total) before it checks the file, so a fresh import doesn't file blanks as findings. Blanks the library learns about later are filled the same way while **Fill empty tags automatically** allows it (see Filled Tags), and only what differs is filed. Two spellings of one artist ("The" and case aside) are one credit |
 | Live/Commentary Cleaner | Finds live performances, commentary, interviews, and spoken-word content in the library |
 | Lossy Converter | Finds lossless files with no lossy copy alongside and converts them with ffmpeg using your configured codec/bitrate |
 | Lyrics Filler | Finds tracks with no \`.lrc\` sidecar, checks LRClib so instrumentals are never flagged, then fetches synced lyrics — writes the \`.lrc\` and embeds them |
@@ -273,7 +284,7 @@ The background repair worker runs automated jobs on configurable schedules, incl
 | Preview Clip Cleanup | Detects ~30s preview clips (some sources deliver samples instead of full songs), compares against the expected length from the metadata source, and re-fetches the full track |
 | Discography Refresh | Re-fetches watchlist artists' discographies so new releases go on the Wishlist. With **Artists** set to library it also walks every artist you own a release by (the old Discography Backfill) and files a finding for each release you don't have (Add to Wishlist on each, or turn on auto add) |
 | Album Completeness | Finds albums you mostly own and wishlists the missing tracks (Fill Album). A song you already have on its single is never downloaded again |
-| Duplicate Detector | Groups copies of the same song and recommends one to keep: playlist copies first, then your manual pick, then the best quality. Between two copies of the same quality the album's copy is kept over the single's. It also finds a release listed twice (once per media server): **auto merge catalogue** merges the pairs it can prove are the same release and leaves the rest for you |
+| Duplicate Detector | Groups copies of the same song and recommends one to keep: playlist copies first, then your manual pick, then the best quality. Between two copies of the same quality the album's copy is kept over the single's. A copy in your media server's playlists stays, unless every playlist it is in also holds the kept copy. **Playlists That Never Protect** names playlists (one per \`;\`) that never keep a copy, like a smart playlist of unsorted files. With **Move Playlist Entries** on, or the switch on a finding, the removed copy's entry in a playlist the kept copy is not in is pointed at the kept copy first, in the same place; smart playlists are never changed and a copy whose entry can't move stays. The finding shows what Keep Best will do before you confirm. It also finds a release listed twice (once per media server): **auto merge catalogue** merges the pairs it can prove are the same release and leaves the rest for you |
 | Quality Profile Audit | Flags library tracks below their quality profile, including ones not on the Wishlist. You decide per finding: **Wishlist & Upgrade**, or leave it. Changes nothing on its own |
 | Fix Unknown Artists | Finds tracks tagged "Unknown Artist", resolves the correct artist/album/track from file tags or the metadata API, then re-tags, moves the file to the correct folder, and updates the database |
 | Album Edition Review | Suggests the release edition that best matches the tracks you own |
@@ -288,12 +299,15 @@ An upgrade from 3.6.1 merges each release your older media servers listed twice 
         },
         {
             id: 'dash-activity',
+            needs: 'music.dashboard',
             title: 'Recent Activity',
             lede: 'The dashboard has no dedicated activity feed — here is where recent events actually surface.',
             body: `
 ## Where recent events surface
 
 The dashboard does not render an activity feed. Recent activity shows up in the bands that own it:
+
+![Dashboard bands where recent activity surfaces, including alerts and listening history](dash-activity.jpg)
 
 - **Alerts band** — exceptions that need a human (a service disconnected, a scan failed, etc.). Renders nothing while every core connection is healthy.
 - **Active downloads** — downloads in progress, full-width, with live progress. Finished work moves to the history on the Active Downloads page.
@@ -305,6 +319,7 @@ Stats and bands update in real time over WebSocket — no page refresh needed. F
         },
         {
             id: 'dash-notifications',
+            needs: 'everyone',
             title: 'Notifications',
             lede: 'The bell in the corner: what just happened, what is running, and whether anything needs you.',
             body: `
@@ -323,6 +338,12 @@ The bell sits bottom right on every page. The red count is notes you have not se
 
 **Escape** closes the panel. The panel is filled from the server's journal when a page loads, so a reload does not empty it; the bin in the header clears the panel only.
 
+## What a member sees
+
+The panel is everyone's, but what the server is doing is the admin's. A member's panel holds their own notes, their own downloads, their own automations and their listening imports. Health, the footer (downloads across the server, uptime, memory), library scans, repair jobs, the wishlist run and the video jobs are not there, and the server refuses those feeds to a member too.
+
+The dashboards follow the same line. A member's hero shows the size of their own library, and under it a **Browse library** button when they may open the Library page (and **Repair** when an admin gave them Tools). The media server's name and state, when it was last scanned, the database's size, the disk the video library takes, the scans, **Review downloads**, **Poster manager** and the alerts band (a server down, a Spotify ban) are the admin's. So is the **Spotify Rate Limited** window and the toasts around it: a member's searches fall back on their own, there is nothing for them to do about it.
+
 ## Toasts
 
 A note appears above the bell as it happens. Up to three stand at once, and the line along the bottom is the time left: it stops while you point at the toast. Problems stay about twice as long as good news. Click a toast to dismiss it.
@@ -334,12 +355,15 @@ The clock button opens the journal the server keeps for your profile: search, th
         },
         {
             id: 'dash-stats-deep',
+            needs: 'music.stats',
             title: 'Stats in Depth',
             lede: 'Everything the Stats page measures — Listening analytics, Year in Listening, and Library health.',
             body: `
 The **Stats** page has two tabs, **Listening** and **Library**, with the tab, range, and story kept in the URL (\`?tab=\`, \`?range=\`, \`?story=\`).
 
-Listening data requires **Listening Stats** to be enabled in Settings → Library ("Enable listening stats collection from media server") — it polls play history from your active media server (Plex, Jellyfin, or Navidrome).
+![Listening Stats page with play totals, activity chart, and top artists](dash-stats.jpg)
+
+Listening data requires **Listening Stats** to be enabled in Settings → Discovery → Recommendations ("Collect listening stats from your media server") — it polls play history from your active media server (Plex, Jellyfin, or Navidrome).
 
 ## Header controls
 
@@ -347,6 +371,23 @@ Listening data requires **Listening Stats** to be enabled in Settings → Librar
 - **Range picker** (Listening tab only) — **7 Days**, **30 Days**, **12 Months**, **All Time**.
 - **Sync now** — pulls the latest play history now; the line beside it reads "Last synced: …" or "Not synced yet". (In standalone mode this is replaced by the note "Standalone mode: manual sync unavailable".)
 - **Last.fm and ListenBrainz** — each service you've configured shows its account, a status (**Checking settings…**, **Configure in Settings**, **Syncing…**, **Sync failed**, **Sync paused**, **Up to date**, **Ready to sync**), a **Sync now** / **Resume sync** / **Retry sync** link, and a progress bar while syncing. Hover the status for detail like "Last synced … · next check in …".
+- **Import Spotify history**: brings in your Spotify streaming history from Spotify's privacy export. See below.
+
+## Import your Spotify history
+
+Ask Spotify for your data (Spotify account page → Privacy settings → Download your data). **Account data** arrives in a few days and covers the last year; **Extended streaming history** takes longer and covers every year you've used Spotify. Either works, and so does both.
+
+On the Stats page click **Import Spotify history**, then drop the zip Spotify sent (or the \`StreamingHistory_music\`, \`Streaming_History_Audio\` or \`endsong\` json files inside it) and click **Import**.
+
+- The file is read in your browser. Only music plays are sent to SoulSync, as plain rows (time, song, artist, album, Spotify track id). Nothing else in the export leaves your device.
+- Left out: plays under 30 seconds, podcasts, audiobooks and videos, and anything you played in a Spotify **private session**.
+- Each play lands in your own listening history as its own source, with its Spotify track id, so it matches the exact song in your library when the library knows that id (otherwise by title and artist).
+- A play ListenBrainz or Last.fm already brought in (Spotify scrobbled it there) is linked to that play, not added twice. Importing the same export again adds nothing.
+- **Count these plays in Stats and Your Year** is on by default. Turn it off to keep the history for your mixes and recommendations only: Daily Mixes, Repeat Rewind, Discover recommendations and stations still use it, while Stats, Your Year, the dashboard's week and the artist page leave it out. You can switch it later in the same window.
+- When it's done you get a summary, e.g. "12,340 plays from 2015 to 2024, 3,100 artists, 9,800 matched to your library", plus what was left out.
+- **Remove this import** takes every play it added back out. Plays from ListenBrainz or Last.fm stay.
+
+The admin's import goes into the shared listening history. Anyone else's goes into their own: importing makes your listening history yours, like connecting your own ListenBrainz does, so your stats and mixes read it and nobody else's do. Who can see it follows **Share my listening** like the rest of your history. Importing needs **Listening stats** in the profile's permissions.
 
 ## Listening tab
 
@@ -376,10 +417,24 @@ No data yet? You'll see 📊 **"No Listening Data Yet"** — enable Listening St
 5. **Top artists countdown** — ranked rows with art, name, plays.
 6. **The albums you lived in** — up to 4 album cards; click one to play it.
 7. **On repeat** — your top track with plays, first-played and most-recent dates.
-8. **Discoveries** — up to 8 artists whose very first play in your history landed inside this year.
-9. **When you listened** — your biggest day and most-likely hour.
-10. **Share card** — build a shareable year card: themes (midnight/ink/sunset/paper), layouts, up to 5 stats, toggleable runners-up and artwork.
+8. **Your sound** — your top genre and its share of what you played, with the next four under it. Genres come from your library's artists.
+9. **Discoveries** — up to 8 artists whose very first play in your history landed inside this year.
+10. **Your longest streak** — the most days in a row with music, and when it ran.
+11. **Your biggest day** — the day you played the most, how long, and who you played most that day.
+12. **Every day of it** — a calendar of the whole year, one square a day, darker the more you played.
+13. **When you listened** — the hour you press play most.
+14. **Share card** — build a shareable year card: themes (midnight/ink/sunset/paper), layouts, up to 5 stats, toggleable runners-up and artwork.
 :::
+
+**Your soundtrack.** The story plays your most played songs of the year that you own, in full through the player, each one starting a third of the way in and fading into the next after about 40 seconds. It starts by itself only when nothing else is playing; otherwise press **Play your soundtrack** at the top. **Mute** silences it without stopping, and closing the story fades it out (a song you started yourself is left playing).
+
+**Save your year as a playlist.** On the last slide, pick **Top 50** or **Top 100** and **Save as playlist**. It makes a playlist called **Your 2026** (the year of the story) under your playlists. Saving again updates the same playlist instead of making another one, and a renamed one keeps your name.
+
+**Save video.** Next to Save image, **Save video** records the story as a short video ending on your card, in the card's size and theme. It records in real time (about half a minute), as mp4 where your browser can and webm otherwise, with your soundtrack in it when it's playing.
+
+**December.** From 1 December to 15 January the dashboard shows **Your 2026 is ready** with a button into the story, and you get one note in your notifications. Hide the banner with **×**; it stays hidden until next year. Each profile has its own.
+
+The story counts the same plays as the rest of Stats: a private session never shows up in it.
 
 ## Library tab (not range-scoped)
 
@@ -401,6 +456,8 @@ No data yet? You'll see 📊 **"No Listening Data Yet"** — enable Listening St
             body: `
 The **Active Downloads** page is poll-driven and has three views: **Downloads**, **Review** (labeled **Quarantine** when AcoustID isn't configured), and **Clients**.
 
+![Active Downloads page with batches, live counts, and status filters](dash-downloads.jpg)
+
 ## Header
 
 Live counts — **active**, **queued**, **failed**, **total** — with the active count showing combined speed + ETA.
@@ -419,7 +476,7 @@ Downloads are grouped into **batches** — one triggered download job (album syn
 - Old rows collapse into **"Earlier (N)"**; same-album history folds to one line; past 12 items a "Show N more" fold appears.
 - **Recent History** fold with a **Download History** button for the full download+import history.
 
-Status chips filter the view: **All / Active / Completed / Queued / Failed**.
+Status chips filter the view: **All / Active / Completed / Queued / Failed / Upgrades**. A quality upgrade (a download that replaces a file you already have) says so on its row: "Replacing MP3 320" while it's being found, "MP3 320 → FLAC" once the new file is in. **Upgrades** shows just those, whatever their status. On the artist page, a track whose upgrade is already on its way shows **↑ queued**, and the album's Upgrade button counts how many are queued.
 
 ## Clients tab — download-client management
 
@@ -454,6 +511,12 @@ Files that **failed** verification and were **not** imported. Trigger badges: **
 
 Per-row: Play, Compare, Audit, **✔ Approve** (re-imports this exact file into the library, marked human-verified — nothing is renamed), **⤴ Recover** (legacy sidecars without embedded context go back to Staging for manual import), **🗑 Delete** (permanent).
 
+Quarantine clears itself of noise:
+
+- **Near-misses**: when a track's later candidate downloads fine, the files it quarantined on the way leave Review on their own. They go to the 🗑 Deleted recycle bin as "Near-miss, cleared from Review", so **↩ Restore** puts one back in Review. Turn it off with **Clear near-misses once the track downloads** in Settings > Downloads > Retry Logic.
+- **Automatic quality upgrades** never send anything to Review: if no candidate verifies, the file you already have stays and the rejected ones go to the recycle bin. An upgrade you start yourself still lands in Review like any download.
+- **Auto-reject old items** (off by default): set **Auto-reject Review items older than (days)** in the same place and older entries move to the recycle bin as "Review item expired".
+
 > [!TIP]
 > Lots of **DURATION** quarantines that turn out to be the right song? Raise **Duration tolerance** in Settings > Library > Post-Processing so future downloads with the same small drift go straight through.
 
@@ -469,6 +532,8 @@ Retention: **"keep deleted files:"** — keep forever, or auto-delete after 7 / 
             lede: 'Live per-service API usage gauges, the limits behind them, and 24-hour call history.',
             body: `
 Enrichment workers call third-party metadata APIs, and every call is tracked per service. Open a worker's rate graph from the **Manage Workers** modal — the **📈 API Graph** button ("24-hour API call history") on any worker.
+
+![API rate monitor gauge showing a service's call rate against its limit](dash-api-monitor.jpg)
 
 > [!NOTE]
 > The old equalizer-bar grid that used to live in the Services card is retired. Rate graphs now open per-worker from the Manage Workers modal — the gauge registries and the rate detail modal in \`api-monitor.js\` are the surviving live code.
@@ -514,6 +579,8 @@ The tracker also logs rate-limit **events** (bans, peaks, escalations — last 2
             body: `
 The **Config Migration** card ("Export every setting (music + video) as one JSON file to move to a new install, or import one here.") opens the export/import modal via **Export / Import Config**. **Admin only.**
 
+![Config Migration modal for exporting or importing every setting as one JSON file](dash-config-migration.jpg)
+
 ## Export tab
 
 Shows the bundle JSON in a preview pane, with:
@@ -543,6 +610,8 @@ A secrets-redacted bundle never blanks your existing credentials — each settin
             body: `
 The **Manual Library Match** card ("Map wishlist and playlist source tracks to library tracks you already own") stops SoulSync re-downloading things you already have. Open it with **Open Library Match** (it can also launch prefilled from sync-history rows).
 
+![Manual Library Match modal with source track and library track search panels](dash-manual-match.jpg)
+
 ## The modal
 
 Two side-by-side search panels:
@@ -570,6 +639,8 @@ Matches store the library file's path, so they re-resolve after rescans — and 
             body: `
 The **Import IDs from File Tags** card ("Read provider IDs (Spotify, MusicBrainz, iTunes, Deezer…) already embedded in your files and fill them into the database — lets enrichment workers skip redundant API lookups. Only fills blanks; never overwrites an existing match.").
 
+![Reconcile IDs card reading provider IDs embedded in file tags](dash-reconcile.jpg)
+
 Card stats: **IDs Filled** / **Rows Updated** / **Conflicts** / **Unreadable**.
 
 ## What it reconciles
@@ -590,11 +661,60 @@ The button shows **Starting…** then **Scanning…** (disabled while busy) — 
 `
         },
         {
+            id: 'dash-tool-filled-tags',
+            title: 'Filled Tags',
+            lede: 'The blank tags SoulSync filled from your library on its own, and how to undo them.',
+            body: `
+When the library learns something after a download (enrichment finds a genre, a media server sync brings a year, an edition gives a track total), the file's tags don't change by themselves. With **Fill empty tags automatically** on (Settings → Library → Post-Processing), SoulSync writes it into the tags the file left blank, so you don't get a Library Re-tag finding per file to apply.
+
+| Setting | What it writes |
+|---|---|
+| **Fill empty tags only** (the default while post-processing writes tags) | A tag that is blank in the file and known to the library: title, artist, album artist, album, year, genre, track and disc numbers and totals. A cover only when the file has none and the album already has one in your library. A tag the file has is never replaced |
+| **Fill and update** | Also replaces tags that differ from the library, the same write as applying the finding. A genre or year difference stays alone unless **Flag genre differences** / **Flag year differences** is on |
+| **Off** | Nothing. Blanks are filed as Library Re-tag findings, as before. An import does not fill blanks either |
+
+With post-processing off, nothing is filled whatever the setting says.
+
+**When it runs.** The Library Re-tag job fills while it compares, and files a finding only for what is left. Between jobs, the repair worker works through the open tag findings in small batches every ten minutes, never while a job or a library scan is running. **Fill Now** on the card starts a pass right away.
+
+**What it leaves alone** (the finding stays for you): hand-tagged files and every file of their album, albums or artists locked for tags, files in the download, staging, torrent or usenet download folders (where a seeding torrent's data lives), files changed in the last ten minutes or being written by something else, files SoulSync can't write (a read-only mount), findings you dismissed, and any write whose audio check fails (then nothing is written at all).
+
+**No loops.** SoulSync fills a tag in a file at most once. If you or another tagger clears it afterwards, it stays cleared; if you change it, your value stays.
+
+## The card
+
+The **Filled Tags** card (Tools → Metadata & Cache, admins only) shows how many tags were filled this week and the setting. Each run is listed (on its own, or a Library Re-tag run): **Show** lists its files with every tag before and after, **Undo** on a file or on the run puts the blanks back. A tag that was changed since the fill keeps its new value, and a cover the fill added is taken out again. What you undo is never filled again: it comes back as a Library Re-tag finding for you to decide. The Re-tag job's own **Auto apply** writes are listed and undone here too.
+`
+        },
+        {
+            id: 'dash-tool-file-locations',
+            title: 'Update File Locations',
+            lede: 'Moved your music library folder? Point the library at where the files are now.',
+            body: `
+The **Update File Locations** card (Tools → Database & Scanning, admins only) is for after you move the music library folder, for example from \`/app/Transfer\` to \`/music\` in Settings and in your docker-compose mount. Files keep playing after a move, but the library still names the old folder in the File column, Edit Track, findings and rename previews until this runs.
+
+::: steps
+1. Click **Check Locations**. Every record is read, nothing is written. The card lists each folder that moved with a count, like "12,340 files: /app/Transfer → /music", and what it would leave alone and why.
+2. Untick any folder pair you don't want, then click **Update N files** and confirm. It runs in the background with a progress bar and a **Stop** button; a stopped run picks up where it left off next time.
+3. Every run is listed under the buttons with an **Undo**.
+:::
+
+## What gets updated
+
+A record moves only when its file is not where it says, the file is found in exactly one place by the same path under one of your library folders (the music library folder or a music path under Settings → Library → Folders, never the download folder), and it is the same size the library recorded. Anything else is left alone: not found anywhere, found in two places, a different size, no size recorded, or a path some other record already holds. Files are never moved or touched, and the path your media server reports for a file is never changed.
+
+> [!NOTE]
+> A library scan (Refresh & Scan, Full Refresh, Deep Scan) does the same on its own, with one more rule: the old folder has to be gone or empty. If it still has files in it, the scan leaves the records for you to check here. Those runs show up on the card too and can be undone the same way.
+`
+        },
+        {
             id: 'dash-tool-media-scan',
             title: 'Media Server Scan',
             lede: 'Manually trigger a Plex library scan for your music.',
             body: `
 The **Media Server Scan** card ("Manually trigger Plex media library scan for music") has one button: **📡 Scan Library**. Card stats: **Last Scan** / **Status**.
+
+![Media Server Scan card with last scan time and status](dash-media-scan.jpg)
 
 > [!NOTE]
 > The card only appears when your active media server is **Plex**. Jellyfin and Navidrome detect new files in real time, so no manual scan is offered for them.
@@ -618,14 +738,16 @@ After the scan, SoulSync updates its own database automatically via the **Auto-U
             title: 'Duplicate Cleaner',
             lede: 'One-click automatic duplicate removal — best copy wins, losers go to the recycle bin.',
             body: `
-The **Duplicate Cleaner** card ("Detect and remove duplicate tracks in output folder") is fully automatic — **there are no review or keep options on the card; removal happens on click**. Card stats: **Files Scanned** / **Duplicates Found** / **Deleted** / **Space Freed**.
+The **Duplicate Cleaner** card ("Detect and remove duplicate tracks in your music library folder") is fully automatic — **there are no review or keep options on the card; removal happens on click**. Card stats: **Files Scanned** / **Duplicates Found** / **Deleted** / **Space Freed**.
+
+![Duplicate Cleaner card with files scanned, duplicates found, and space freed](dash-duplicates.jpg)
 
 ## How it decides
 
-It scans the Transfer/output folder and groups audio files (FLAC, MP3, M4A, AAC, Opus, OGG, WAV, APE, WMA, ALAC, AIFF, DSF, DFF) by **same directory + same filename ignoring extension**.
+It scans your music library folder and groups audio files (FLAC, MP3, M4A, AAC, Opus, OGG, WAV, APE, WMA, ALAC, AIFF, DSF, DFF) by **same directory + same filename ignoring extension**.
 
 - **Keep rule:** best format wins — FLAC/lossless tier > OPUS/OGG > M4A/AAC > MP3/WMA; same-format ties broken by **larger file size**.
-- **Losers are moved, not deleted** — into \`Transfer/.deleted/\` with relative paths preserved, recorded in the deleted-files quarantine so they can be restored and aged by your retention policy (see the 🗑 Deleted view on [Active Downloads](#dash-downloads-deep)).
+- **Losers are moved, not deleted** — into a \`.deleted/\` folder inside your music library folder with relative paths preserved, recorded in the deleted-files quarantine so they can be restored and aged by your retention policy (see the 🗑 Deleted view on [Active Downloads](#dash-downloads-deep)).
 
 Protected from ever being flagged: intentionally created **lossy companions** (the lossy-copy feature's same-stem MP3/Opus/M4A next to a lossless source), the \`.deleted\` quarantine itself, and the atomic-publish staging tree (which holds half-downloaded albums — a textbook false duplicate).
 
@@ -648,13 +770,17 @@ Protected from ever being flagged: intentionally created **lossy companions** (t
             body: `
 The **\<Server\> Database Updater** card (e.g. "Plex Database Updater") shows **Last Full Refresh** (date or "Never") plus stats: **Artists** / **Albums** / **Tracks** / **Size (MB)**. Starting or stopping a run **requires admin**.
 
+![Database Updater card with library counts and the three update modes](dash-db-updater.jpg)
+
 ## The three modes
 
 Pick from the update-type select, then click **Update Database** (the button stays as **Stop Update** while running — even during "Starting…" so a wedged start is cancellable):
 
-- **Incremental Update** (default) — only new artists/albums/tracks since the last update. Fast. (In SoulSync standalone this is a no-op — the library updates at download time — so use Deep Scan or Full Refresh there.)
-- **Full Refresh** — confirm dialog: "This will clear and rebuild the database for the active server. It can take a long time." Clears and rebuilds everything from the active media server.
-- **Deep Scan** — confirm dialog: "A deep scan re-checks every track in your media server library… Adds any new tracks that were missed · Removes tracks no longer on your server · Preserves all existing metadata and enrichment data."
+- **Incremental Update** (default) — only what is new since the last update. Fast. With a media server it reads the server's recently added albums; with SoulSync Standalone it walks your music folders and adds the files the library doesn't know yet.
+- **Full Refresh** — confirm dialog: "A full refresh re-reads your whole library and updates what changed. Nothing is cleared first. It can take a long time." With Standalone it also re-reads every known file's tags and quality.
+- **Deep Scan** — confirm dialog: "A deep scan re-checks every track in your library… Catches what the regular scans missed · Removes tracks that are no longer there · Preserves all existing metadata and enrichment data." With a media server it adds tracks that were missed and removes ones the server no longer has. With Standalone it adds the files in your music folder the library doesn't know and records the ones that have gone missing, without re-reading every file's tags. (If you turned off "Music Library is my permanent library", files it doesn't know go to the Import folder to be matched instead.)
+
+With Standalone, all three read **every** music folder: the main one, the extra music folders in Settings, and each profile's own library folder. A library on more than one drive is one library. A folder that can't be reached is skipped and the scan says so; nothing in it is marked missing.
 
 Progress shows phase text plus "N / M artists (P%)"; the card stats refresh when the run lands.
 `
@@ -665,6 +791,8 @@ Progress shows phase text plus "N / M artists (P%)"; the card stats refresh when
             lede: 'Blocked download sources that will never be used again.',
             body: `
 The **Download Blacklist** card ("Blocked sources that won't be used for future downloads") holds a **per-profile** list of download sources — Soulseek users or service backends — excluded from all future download matching. Card stat: **Blocked: N**. Open it with **View Blacklist**.
+
+![Download Blacklist card and its blocked sources list](dash-blacklist.jpg)
 
 ## How sources get blacklisted
 
@@ -689,6 +817,8 @@ Empty state: "No blocked sources. Sources can be blacklisted from the Source Inf
             lede: 'Browse, inspect, and clear the cached API responses behind enrichment.',
             body: `
 The **Metadata Cache** card ("Cached API responses from Spotify & iTunes") shows stats for **Artists** / **Albums** / **Tracks** / **Hits** — summed over first-party sources only (Spotify + iTunes + Deezer + Beatport). Discogs and MusicBrainz are deliberately excluded here and appear only in Cache Health.
+
+![Metadata Cache browser with cached artists, albums, and tracks by source](dash-metadata-cache.jpg)
 
 ## Browse Cache
 
@@ -732,6 +862,8 @@ Tabs All/Artists/Albums/Tracks with counts, "Filter by name…" search, **Clear 
             body: `
 The **Discovery Pool** card ("View and fix matched/failed discovery results across all mirrored playlists") records how tracks in **mirrored playlists** (synced from external sources like YouTube/Spotify) were matched — "discovered" — to metadata providers. Card stats: **Matched:** / **Failed:**. Open it with **Open Discovery Pool**.
 
+![Discovery Pool modal listing matched and failed mirrored-playlist tracks](dash-discovery-pool.jpg)
+
 ## The modal
 
 Header shows **N Matched**, **N Failed**, and a playlist filter (All Playlists + each mirrored playlist). Two lists:
@@ -751,6 +883,8 @@ A "Filter tracks…" search box and ← Back navigation round it out; closing th
             lede: 'Re-check your artists against every enrichment service and push fresh art to your server.',
             body: `
 The **\<Server\> Metadata Updater** card (e.g. "Plex Metadata Updater") is shown for **Plex and Jellyfin only** — hidden for anything else. It re-checks your library's artists against all connected enrichment services and pushes the results to your media server:
+
+![Metadata Updater card pushing fresh artist art and metadata to the media server](dash-metadata-updater.jpg)
 
 - **Artist photo**: a big square photo for artists without one. fanart.tv first, then TheAudioDB, then Deezer, with Spotify's 640px photo as the last resort.
 - **Artist background**: the wide picture Plexamp and the Plex web app (and Jellyfin's backdrop) show behind an artist page, for artists without one. From fanart.tv, then TheAudioDB.

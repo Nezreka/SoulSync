@@ -303,7 +303,13 @@ describe('MirroredDetailModal cover art menu', () => {
     render(
       <MirroredDetailModal
         playlistId={3}
-        data={{ name: 'Night Drive', source: 'spotify', custom_cover: true, tracks: [] }}
+        data={{
+          name: 'Night Drive',
+          source: 'spotify',
+          custom_cover: true,
+          source_image_url: 'https://src/a.jpg',
+          tracks: [],
+        }}
         now={0}
         {...h}
       />,

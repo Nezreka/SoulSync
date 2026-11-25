@@ -129,18 +129,50 @@ def _build_lookup(genre_list):
     return {_normalize_for_match(g) for g in genre_list}
 
 
-def filter_genres(genres, config_manager=None):
-    """Filter a list of genres against the whitelist.
+def strip_artist_name_genres(genres, artist_names=None):
+    """Remove any genre tag that is just the artist's or album artist's own name (#2258).
 
-    Args:
-        genres: List of genre strings to filter
-        config_manager: ConfigManager instance (None = no filtering)
-
-    Returns:
-        Filtered list of genres. When strict mode is off, returns genres unchanged.
+    Crowdsourced tag sources (Last.fm, MusicBrainz user tags) frequently include
+    the artist's own name as a top tag (e.g. '2 Chainz' on a 2 Chainz album).
     """
     if not genres or not isinstance(genres, list):
         return genres or []
+    if not artist_names:
+        return genres
+    if isinstance(artist_names, str):
+        artist_names = [artist_names]
+    blocked = set()
+    for raw in artist_names:
+        if not raw or not isinstance(raw, str):
+            continue
+        norm_full = _normalize_for_match(raw)
+        if norm_full:
+            blocked.add(norm_full)
+        for part in re.split(r'[,;/&]|\s+(?:feat\.?|ft\.?|and)\s+', raw, flags=re.IGNORECASE):
+            norm_part = _normalize_for_match(part)
+            if norm_part:
+                blocked.add(norm_part)
+    if not blocked:
+        return genres
+    return [g for g in genres if _normalize_for_match(g) not in blocked]
+
+
+def filter_genres(genres, config_manager=None, *, artist_names=None):
+    """Filter a list of genres against the whitelist (and strip artist-name tags).
+
+    Args:
+        genres: List of genre strings to filter
+        config_manager: ConfigManager instance (None = no whitelist filtering)
+        artist_names: Optional artist / album artist name(s) that must never be
+            written as genres (#2258).
+
+    Returns:
+        Filtered list of genres.
+    """
+    if not genres or not isinstance(genres, list):
+        return genres or []
+
+    genres = strip_artist_name_genres(genres, artist_names)
 
     # Check if strict mode is enabled
     if config_manager is None:

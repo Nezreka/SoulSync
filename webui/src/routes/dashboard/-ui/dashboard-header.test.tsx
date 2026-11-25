@@ -117,10 +117,10 @@ afterEach(() => {
 /** The hero plus the rail's tiles, sharing one header hook the way the page
  *  does. */
 function HeaderAndTiles() {
-  const header = useDashboardHeader();
+  const header = useDashboardHeader({ workers: true });
   return (
     <>
-      <DashboardHeaderView header={header} />
+      <DashboardHeaderView header={header} workers />
       <QuickNavTiles header={header} />
     </>
   );

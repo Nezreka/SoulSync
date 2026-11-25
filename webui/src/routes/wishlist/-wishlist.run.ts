@@ -15,14 +15,19 @@ export interface StartResult {
   alreadyRunning: boolean;
 }
 
-export async function startWishlistDownload(scope: WishlistRunScope): Promise<StartResult> {
+export async function startWishlistDownload(
+  scope: WishlistRunScope,
+  lidarrWholeAlbum?: boolean,
+): Promise<StartResult> {
+  // no category and no track ids = every wanted track. the manual run always
+  // downloads even if the library check thinks a track is owned, so there is
+  // no force option to send. lidarrWholeAlbum undefined = the server's default.
+  const body: Record<string, unknown> = scope === 'all' ? {} : { category: scope };
+  if (lidarrWholeAlbum !== undefined) body.lidarr_whole_album = lidarrWholeAlbum;
   const response = await fetch('/api/wishlist/download_missing', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    // no category and no track ids = every wanted track. the manual run always
-    // downloads even if the library check thinks a track is owned, so there is
-    // no force option to send.
-    body: JSON.stringify(scope === 'all' ? {} : { category: scope }),
+    body: JSON.stringify(body),
   });
   if (response.status === 409) return { batchId: null, alreadyRunning: true };
   const data = (await response.json().catch(() => ({}))) as {
@@ -49,6 +54,8 @@ interface RunStatusPayload {
   phase?: string;
   analysis_progress?: { total?: number; processed?: number };
   tasks?: { status?: string }[];
+  /** a split run: how many of its batches wait for a worker, how many run (#2242). */
+  run_batches?: { total?: number; waiting?: number; running?: number };
 }
 
 export interface RunSummary {
@@ -68,8 +75,22 @@ function plural(n: number, word: string): string {
   return `${n} ${word}${n === 1 ? '' : 's'}`;
 }
 
+/** " · 75 albums waiting" while part of a big run waits its turn. */
+function waitingNote(status: RunStatusPayload): string {
+  const waiting = status.run_batches?.waiting ?? 0;
+  return waiting > 0 ? ` · ${plural(waiting, 'album')} waiting` : '';
+}
+
 /** what the strip says about a run, from the merged batch status. */
 export function summarizeRun(status: RunStatusPayload | null | undefined): RunSummary | null {
+  const summary = summarizeRunStatus(status);
+  if (summary && status && summary.stage !== 'finished' && summary.stage !== 'stopped') {
+    summary.label += waitingNote(status);
+  }
+  return summary;
+}
+
+function summarizeRunStatus(status: RunStatusPayload | null | undefined): RunSummary | null {
   if (!status || !status.phase) return null;
   const phase = status.phase;
   if (phase === 'analysis' || phase === 'queued') {

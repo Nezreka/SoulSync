@@ -1,16 +1,15 @@
 /**
- * System > Security & Access (SETTINGS_PORT.md, step 9c): the markup it
- * replaced, the PIN, password and recovery flows against their endpoints, the
+ * System > Security (settings-bic phase 6, on the parts): the cards and the
+ * open-door note, the PIN, password and recovery flows against their endpoints, the
  * locks that keep anyone from shutting themselves out, the OIDC block, and
  * every security.* key it saves.
  */
 
-import { act, fireEvent, render, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createSettingsStore, type SettingsPayload, type SettingsStore } from '../settings-store';
-import { shape, vanilla } from './__fixtures__/shape';
-import { badOrigins, pinError, SecuritySection } from './system-security';
+import { badOrigins, pinError, SecurityView } from './system-security';
 
 type Shell = Window & Record<string, unknown>;
 const shell = window as unknown as Shell;
@@ -58,8 +57,7 @@ afterEach(async () => {
     delete shell[k];
 });
 
-const section = () =>
-  render(<SecuritySection store={store} part="security" opened={0} active={false} />);
+const section = () => render(<SecurityView store={store} />);
 const el = (id: string) => document.getElementById(id) as HTMLInputElement;
 function saved(): SettingsPayload {
   const merged: SettingsPayload = {};
@@ -73,15 +71,59 @@ async function loaded(settings: SettingsPayload = { security: {} }) {
   await act(() => Promise.resolve());
 }
 
-describe('the section is the markup it replaced', () => {
-  it('before the settings load', () => {
+describe('the cards', () => {
+  it('four cards, every control in its own, named without a colon, no emoji or step numbers', () => {
     const { container } = section();
-    expect(shape(container)).toEqual(
-      shape(vanilla('system-security.vanilla.html', { afterInit: true })),
-    );
+    const cards = [...container.querySelectorAll<HTMLElement>('[data-card]')];
+    expect(cards.map((c) => c.dataset.card)).toEqual([
+      'Lock with a PIN',
+      'Sign-in',
+      'Reverse proxy',
+      'Server identity',
+    ]);
+    const home: Record<string, string[]> = {
+      'Lock with a PIN': ['security-require-pin', 'security-new-pin', 'security-confirm-pin'],
+      'Sign-in': [
+        'security-login-password',
+        'security-recovery-question',
+        'security-require-login',
+        'security-plex-signin',
+        'security-plex-signin-auto-create',
+        'security-oidc-signin',
+        'security-oidc-issuer',
+        'security-oidc-client-secret',
+        'security-oidc-scopes',
+        'security-oidc-only',
+        'security-signup-template-open',
+      ],
+      'Reverse proxy': [
+        'security-trust-proxy',
+        'security-auth-proxy-header',
+        'security-cors-origins',
+      ],
+      'Server identity': ['security-server-fingerprint'],
+    };
+    for (const card of cards)
+      for (const id of home[card.dataset.card!]) expect(card.contains(el(id)), id).toBe(true);
+    for (const label of container.querySelectorAll('label, h4'))
+      expect(label.textContent ?? '').not.toMatch(/:\s*$|—|Step \d|🔑|👤|🌐/);
+    expect(container.querySelector('.form-group, .security-subgroup')).toBeNull();
+    // the rare OIDC fields wait behind More options
+    expect(el('security-oidc-scopes').closest('[data-more-body]')).not.toBeNull();
+    expect(el('security-oidc-issuer').closest('[data-more-body]')).toBeNull();
     // the shell draws its two boxes once they are on the page
     expect(shell.initOidcAdminStatus).toHaveBeenCalledOnce();
     expect(shell.refreshOidcOnlySettingsStatus).toHaveBeenCalledOnce();
+  });
+
+  it('with no PIN and no sign-in, the page says anyone can get in, above the locks', async () => {
+    section();
+    await loaded({ security: {} });
+    await waitFor(() =>
+      expect(document.getElementById('security-open-note')!.textContent).toContain(
+        'Anyone who can reach SoulSync can use it: there is no PIN and no sign-in.',
+      ),
+    );
   });
 });
 
@@ -103,8 +145,8 @@ describe('the PIN', () => {
     await loaded({ security: { require_pin_on_launch: true } });
     expect(el('security-require-pin').checked).toBe(false);
     expect(el('security-require-pin').disabled).toBe(true);
-    expect(el('security-pin-setup').style.display).toBe('block');
-    expect(el('security-change-pin-section').style.display).toBe('none');
+    expect(el('security-pin-setup').hidden).toBe(false);
+    expect(el('security-change-pin-section').hidden).toBe(true);
   });
 
   it('a PIN saves through its endpoint, then the lock can be turned on and saves at once', async () => {
@@ -122,8 +164,8 @@ describe('the PIN', () => {
       ),
     );
     expect(calls.find((c) => c.url === '/api/profiles/1/set-pin')?.body).toEqual({ pin: '1234' });
-    expect(el('security-pin-setup').style.display).toBe('none');
-    expect(el('security-change-pin-section').style.display).toBe('block');
+    expect(el('security-pin-setup').hidden).toBe(true);
+    expect(el('security-change-pin-section').hidden).toBe(false);
     expect(el('security-new-pin').value).toBe('');
     expect(el('security-require-pin').disabled).toBe(false);
     fireEvent.click(el('security-require-pin'));
@@ -134,8 +176,8 @@ describe('the PIN', () => {
     admin.has_pin = true;
     section();
     await loaded();
-    fireEvent.click(el('security-change-pin-section').querySelector('button')!);
-    expect(el('security-pin-setup').style.display).toBe('block');
+    fireEvent.click(screen.getByRole('button', { name: 'Change PIN' }));
+    expect(el('security-pin-setup').hidden).toBe(false);
     fireEvent.click(el('security-require-pin'));
     expect(el('security-require-pin').checked).toBe(false);
     expect(posted).toEqual([]);
@@ -148,25 +190,25 @@ describe('user accounts', () => {
     await loaded({ security: { require_login: true } });
     expect(el('security-require-login').disabled).toBe(true);
     expect(el('security-require-login').checked).toBe(false);
-    expect(el('security-login-toggle-wrap').className).toBe('form-group security-locked');
+    expect(el('security-login-toggle-wrap').className).toMatch(/rowOff/);
     expect(el('security-require-login-help').textContent).toBe(
-      '🔒 Set the admin password in Step 1 first — then you can turn this on.',
+      'Set the admin password above first, then you can turn this on.',
     );
     fireEvent.change(el('security-login-password'), { target: { value: 'abc' } });
-    fireEvent.click(el('security-login-password').parentElement!.querySelector('button')!);
+    fireEvent.click(screen.getByRole('button', { name: 'Save password' }));
     expect(el('security-login-password-msg').textContent).toBe(
       'Password must be at least 6 characters',
     );
     fireEvent.change(el('security-login-password'), { target: { value: 'secret1' } });
     fireEvent.change(el('security-login-password-confirm'), { target: { value: 'secret1' } });
-    fireEvent.click(el('security-login-password').parentElement!.querySelector('button')!);
+    fireEvent.click(screen.getByRole('button', { name: 'Save password' }));
     await waitFor(() => expect(el('security-require-login').disabled).toBe(false));
     expect(calls.find((c) => c.url === '/api/profiles/1/set-password')?.body).toEqual({
       password: 'secret1',
     });
-    expect(el('security-login-password-status').style.display).toBe('block');
-    expect(el('security-login-password').placeholder).toBe('Enter a new password to change it');
-    expect(el('security-login-toggle-wrap').className).toBe('form-group');
+    expect(el('security-login-password-status').hidden).toBe(false);
+    expect(el('security-login-password').placeholder).toBe('New password');
+    expect(el('security-login-toggle-wrap').className).not.toMatch(/rowOff/);
     // the saved setting shows again now the lock is open
     expect(el('security-require-login').checked).toBe(true);
   });
@@ -178,22 +220,22 @@ describe('user accounts', () => {
     await loaded();
     await waitFor(() => expect(el('security-recovery-question').value).toBe('__custom__'));
     expect(el('security-recovery-custom').value).toBe('Who was my first boss?');
-    expect(el('security-recovery-custom').style.display).toBe('block');
+    expect(el('security-recovery-custom').parentElement!.parentElement!.hidden).toBe(false);
     expect(el('security-recovery-status').textContent).toBe(
-      '✓ Recovery question saved: “Who was my first boss?”',
+      'Saved: “Who was my first boss?”. Answer a new one below to change it.',
     );
     fireEvent.change(el('security-recovery-question'), {
       target: { value: 'What city were you born in?' },
     });
-    expect(el('security-recovery-custom').style.display).toBe('none');
-    const save = el('security-recovery-answer').parentElement!.querySelector('button')!;
+    expect(el('security-recovery-custom').parentElement!.parentElement!.hidden).toBe(true);
+    const save = screen.getByRole('button', { name: 'Save recovery question' });
     fireEvent.click(save);
     expect(el('security-recovery-msg').textContent).toBe('Enter an answer');
     fireEvent.change(el('security-recovery-answer'), { target: { value: 'Leeds' } });
     fireEvent.click(save);
     await waitFor(() =>
       expect(el('security-recovery-status').textContent).toBe(
-        '✓ Recovery question saved: “What city were you born in?”',
+        'Saved: “What city were you born in?”. Answer a new one below to change it.',
       ),
     );
     expect(calls.find((c) => c.url === '/api/profiles/1/set-recovery')?.body).toEqual({
@@ -240,23 +282,37 @@ describe('OIDC and the rest', () => {
     fireEvent.change(el('security-oidc-client-secret'), { target: { value: ' s3 ' } });
     fireEvent.click(el('security-oidc-signin-auto-create'));
     fireEvent.click(el('security-plex-signin'));
-    fireEvent.change(el('security-signup-sides'), { target: { value: 'both' } });
-    fireEvent.change(el('security-signup-request-limit'), { target: { value: '' } });
-    fireEvent.change(el('security-signup-request-limit-days'), { target: { value: '30' } });
     fireEvent.click(el('security-trust-proxy'));
     fireEvent.change(el('security-auth-proxy-header'), { target: { value: ' Remote-User ' } });
+    fireEvent.change(el('security-auth-proxy-trusted'), {
+      target: { value: ' 172.18.0.2\n10.0.0.0/8 ' },
+    });
     await waitFor(() => expect(store.hasPending()).toBe(false));
     expect(saved().security).toEqual({
       oidc_issuer: 'https://id.example',
       oidc_client_secret: ' s3 ',
       oidc_signin_auto_create: false,
       plex_signin: true,
-      signup_sides: 'both',
-      signup_request_limit: 0,
-      signup_request_limit_days: 30,
       trust_reverse_proxy: true,
       auth_proxy_header: 'Remote-User',
+      auth_proxy_trusted: '172.18.0.2\n10.0.0.0/8',
     });
+  });
+
+  it('a proxy header with no trusted address says it is being ignored', async () => {
+    section();
+    await loaded({ security: { auth_proxy_header: 'Remote-User' } });
+    expect(document.getElementById('security-auth-proxy-untrusted')?.textContent).toMatch(
+      /header is being ignored/,
+    );
+    fireEvent.change(el('security-auth-proxy-trusted'), { target: { value: '172.18.0.2' } });
+    expect(document.getElementById('security-auth-proxy-untrusted')).toBeNull();
+  });
+
+  it('no header, no warning', async () => {
+    section();
+    await loaded();
+    expect(document.getElementById('security-auth-proxy-untrusted')).toBeNull();
   });
 
   it('a malformed WebSocket origin is saved, with the warning once the typing stops', async () => {

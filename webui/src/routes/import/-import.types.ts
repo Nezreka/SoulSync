@@ -48,7 +48,13 @@ export interface ImportInboxFile {
 }
 
 /** what an import did with one track. 'completed' is a plain import. */
-export type ImportTrackOutcome = 'completed' | 'upgraded' | 'skipped_owned' | 'failed';
+export type ImportTrackOutcome =
+  | 'completed'
+  | 'upgraded'
+  | 'skipped_owned'
+  | 'failed'
+  /** a file the run did not take: it stays in Import (#2220) */
+  | 'left_behind';
 
 export interface ImportOutcomeSummary {
   imported: number;
@@ -74,6 +80,10 @@ export interface ImportInboxMatch {
   total_tracks: number;
   matches: ImportInboxMatchLine[];
   summary?: ImportOutcomeSummary | null;
+  /** the metadata source the release came from */
+  source?: string | null;
+  /** files the run left in Import, and why (#2220) */
+  left_behind?: { file: string; why: string }[];
 }
 
 /** One staging item: an album folder, a loose-file group, or a single file,
@@ -230,6 +240,11 @@ export interface ImportAlbumSearchPayload {
   primary_source?: string | null;
   /** Explicit source the caller picked, if any (echoed back). */
   source_override?: string | null;
+  /**
+   * Set when the query was a pasted release link or MBID (#2203): the
+   * source the link names, and why nothing came back when nothing did.
+   */
+  link?: { source: string; message: string } | null;
   ready?: boolean;
   error?: string;
 }
@@ -243,6 +258,10 @@ export interface ImportSearchSource {
 export interface ImportSearchSourcesPayload {
   success: boolean;
   sources?: ImportSearchSource[];
+  /** the source the picker opens on; '' is Any source (#2203) */
+  default_source?: string;
+  /** whether this profile may change that default (admins) */
+  can_set_default?: boolean;
   error?: string;
 }
 

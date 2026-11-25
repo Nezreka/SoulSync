@@ -8,6 +8,8 @@ client. Keys come from video_settings.
 
 from __future__ import annotations
 
+import re
+
 from utils.logging_config import get_logger
 
 logger = get_logger("video_enrichment.clients")
@@ -18,6 +20,16 @@ def _int(val):
         return int(val)
     except (TypeError, ValueError):
         return None
+
+
+_IMDB_ID = re.compile(r"^tt\d{7,}$")
+
+
+def imdb_id_or_none(val):
+    """an IMDb id ('tt' and 7+ digits) or None: what a provider lists is only
+    stored when it looks like one."""
+    text = str(val or "").strip()
+    return text if _IMDB_ID.match(text) else None
 
 
 def tmdb_certification(kind, dr, region="US"):
@@ -48,8 +60,9 @@ def tmdb_certification(kind, dr, region="US"):
 
 
 def parse_title_identity(kind, d):
-    """{name, original_name, year, aliases} out of a tmdb movie/tv detail
-    response fetched with alternative_titles appended. {} for an empty one."""
+    """{name, original_name, year, aliases, translations} out of a tmdb
+    movie/tv detail response fetched with alternative_titles and translations
+    appended. {} for an empty one."""
     d = d if isinstance(d, dict) else {}
     if not d.get("id"):
         return {}
@@ -66,10 +79,29 @@ def parse_title_identity(kind, d):
             seen.add(t.lower())
             aliases.append(t)
     year = str(date or "")[:4]
+    # the title in every language TMDB has (#2234). alternative_titles is
+    # TMDB's list of OTHER names; a film's own french or german title lives in
+    # its translations, so "Rocco et ses frères" was never an accepted name
+    # and every french release of Rocco and His Brothers was a wrong title
+    aliases = aliases[:60]
+    known = {str(t or "").strip().lower() for t in (name, original, *aliases)}
+    translations = []
+    tr = d.get("translations") if isinstance(d.get("translations"), dict) else {}
+    for row in (tr.get("translations") or []):
+        data = (row or {}).get("data") if isinstance(row, dict) else None
+        if not isinstance(data, dict):
+            continue
+        t = str(data.get("title" if kind == "movie" else "name") or "").strip()
+        if t and t.lower() not in known:
+            known.add(t.lower())
+            translations.append(t)
     out = {"name": str(name or "").strip() or None,
            "original_name": str(original or "").strip() or None,
            "year": int(year) if year.isdigit() else None,
-           "aliases": aliases[:30]}
+           "aliases": aliases}
+    # only when there are any, so a response without them reads as before
+    if translations:
+        out["translations"] = translations[:80]
     # genres and keywords, for the library rules (#2029): only when tmdb sent
     # them, so a response without them reads exactly as before
     genres = [str(g.get("name")).strip() for g in (d.get("genres") or [])
@@ -77,6 +109,14 @@ def parse_title_identity(kind, d):
     kw = d.get("keywords") if isinstance(d.get("keywords"), dict) else {}
     keywords = [str(k.get("name")).strip() for k in (kw.get("keywords") or kw.get("results") or [])
                 if isinstance(k, dict) and k.get("name")]
+    # the ids the indexers search by, for a title that isn't in the library
+    # (#2224): a movie's imdb id is on its detail, a show's in external_ids
+    ext = d.get("external_ids") if isinstance(d.get("external_ids"), dict) else {}
+    imdb = imdb_id_or_none(d.get("imdb_id") or ext.get("imdb_id"))
+    if imdb:
+        out["imdb_id"] = imdb
+    if kind != "movie" and ext.get("tvdb_id"):
+        out["tvdb_id"] = ext["tvdb_id"]
     if genres:
         out["genres"] = genres
     if keywords:
@@ -555,8 +595,9 @@ class TMDBClient:
 
     def title_identity(self, kind, tmdb_id):
         """who a movie or show is, for judging releases: TMDB's own (english)
-        name, its original-language name, its year and its alternative titles,
-        in one call. {} on any error / no key.
+        name, its original-language name, its year, its alternative titles and
+        its title in every language (translations, #2234), in one call. {} on
+        any error / no key.
 
         the alias list alone missed the names that matter most. a library
         whose server is in french stores "L'amour sous couverture", and TMDB's
@@ -570,7 +611,9 @@ class TMDBClient:
         try:
             r = requests.get(self.BASE + path + str(int(tmdb_id)),
                              params={"api_key": self.api_key,
-                                     "append_to_response": "alternative_titles,keywords"}, timeout=12)
+                                     "append_to_response": "alternative_titles,translations,keywords"
+                                     + ("" if kind == "movie" else ",external_ids")},
+                             timeout=12)
             r.raise_for_status()
             d = r.json() or {}
         except Exception:
@@ -644,7 +687,26 @@ class TMDBClient:
         guests = [{"name": g["name"], "character": g.get("character"), "tmdb_id": g.get("id"),
                    "photo": (self.PROFILE + g["profile_path"]) if g.get("profile_path") else None}
                   for g in (d.get("guest_stars") or [])[:20] if g.get("name")]
-        return {"guest_stars": guests,
+        raw_crew = d.get("crew") or (d.get("credits") or {}).get("crew") or []
+        key_jobs = ("Director", "Writer", "Teleplay", "Story", "Screenplay")
+        crew = []
+        seen_crew = set()
+        for c in raw_crew:
+            job = c.get("job") or ""
+            name = c.get("name") or ""
+            if not name or job not in key_jobs:
+                continue
+            key = (c.get("id") or name, job)
+            if key in seen_crew:
+                continue
+            seen_crew.add(key)
+            crew.append({
+                "name": name,
+                "job": job,
+                "tmdb_id": c.get("id"),
+                "photo": (self.PROFILE + c["profile_path"]) if c.get("profile_path") else None,
+            })
+        return {"guest_stars": guests, "crew": crew[:10],
                 "still_url": (self.IMG + d["still_path"]) if d.get("still_path") else None,
                 "rating": d.get("vote_average") or None, "overview": d.get("overview") or None,
                 "runtime_minutes": d.get("runtime"), "air_date": d.get("air_date") or None}
@@ -1173,6 +1235,28 @@ class TMDBClient:
             "photos": photos, "also_known_as": akas, "credits": credits}
 
 
+def _tvdb_remote_ids(remote_ids) -> dict:
+    """imdb_id / tmdb_id from a TVDB series record's remoteIds. A source listed
+    with two different values gives neither."""
+    found = {"imdb_id": set(), "tmdb_id": set()}
+    for r in remote_ids or []:
+        if not isinstance(r, dict):
+            continue
+        name = str(r.get("sourceName") or "").strip().lower()
+        val = str(r.get("id") or "").strip()
+        if name == "imdb" and imdb_id_or_none(val):
+            found["imdb_id"].add(val)
+        elif name == "themoviedb.com" and _int(val) is not None:
+            found["tmdb_id"].add(_int(val))
+    return {k: next(iter(v)) for k, v in found.items() if len(v) == 1}
+
+
+def _years_agree(ours, theirs) -> bool:
+    """True unless both years are known and more than a year apart."""
+    a, b = _int(ours), _int(str(theirs or "").strip()[:4] or None)
+    return a is None or b is None or abs(a - b) <= 1
+
+
 class TVDBClient:
     BASE = "https://api4.thetvdb.com/v4"
 
@@ -1249,6 +1333,14 @@ class TVDBClient:
                 # Show-level air time (network local time, e.g. "21:00") — drives
                 # the Calendar's per-day time sort. Streaming shows have none.
                 meta["airs_time"] = (sd.get("airsTime") or "").strip() or None
+                # the ids TVDB links the series to: a show TMDB has no IMDb id
+                # for still gets one, and one the server gave no TMDB id can be
+                # matched by id. enrichment only fills empty columns
+                # a series years off the show's own is a different show the
+                # stored tvdb id points at (a title-search guess): its ids
+                # would name the wrong title, so they're left out
+                if _years_agree(year, sd.get("year") or str(sd.get("firstAired") or "")[:4]):
+                    meta.update(_tvdb_remote_ids(sd.get("remoteIds")))
             except Exception:
                 logger.exception("TVDB details fetch failed for %s", title or tvdb_id)
         if tvdb_id is None:

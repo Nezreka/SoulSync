@@ -29,6 +29,7 @@ import { useCallback, useRef, useState } from 'react';
 
 import { DialogFrame } from '@/components/dialog';
 
+import type { KeepBestTally, RecordingPair } from '../-tools.keep-best-bulk';
 import type {
   AcoustidFixAction,
   BackfillFixAction,
@@ -38,6 +39,7 @@ import type {
   RetagFixAction,
 } from '../-tools.types';
 
+import { needsYouList } from '../-tools.keep-best-bulk';
 import styles from './finding-prompts.module.css';
 
 // ── Transcribed inline styles ────────────────────────────────────────────────
@@ -614,6 +616,250 @@ function WitnessMeDialog({
   );
 }
 
+/** Keep Best over many duplicates (#2179): what goes through, what needs you
+ *  and why, before anything runs. Moving playlist entries is offered for the
+ *  run (off until ticked), and differently named pairs in a selection are
+ *  listed so confirming them is a look, not a blind yes. */
+export interface KeepBestBulkChoice {
+  move: boolean;
+  confirm: boolean;
+}
+
+function KeepBestBulkPrompt({
+  tally,
+  pairs,
+  resolve,
+}: {
+  tally: (move: boolean, confirm: boolean) => KeepBestTally;
+  pairs: RecordingPair[];
+  resolve: (value: KeepBestBulkChoice | null) => void;
+}) {
+  const [move, setMove] = useState(false);
+  const [confirm, setConfirm] = useState(false);
+  const now = tally(move, confirm);
+  const plain = tally(false, confirm);
+  const moved = tally(true, confirm);
+  // moving is worth offering when a playlist is what holds a finding back
+  const offerMove = (plain.needs.playlist || 0) > 0;
+  const unblocked = moved.ready - plain.ready;
+  const reasons = needsYouList(now.needs);
+  const title = `Keep Best on ${now.total.toLocaleString()} duplicate${now.total === 1 ? '' : 's'}`;
+  return (
+    <DialogFrame
+      open
+      onOpenChange={(next) => {
+        if (!next) resolve(null);
+      }}
+      viewportClassName={clsx('modal-overlay', styles.overlay)}
+      className={clsx(styles.box, styles.keepBest)}
+      aria-label={title}
+    >
+      <div style={TITLE}>{title}</div>
+      <p className={styles.keepLead}>
+        Keeps the recommended copy of each and moves the rest to recoverable quarantine. Protected
+        copies stay.
+      </p>
+      <div className={styles.keepTally} data-testid="keep-best-tally">
+        <span className={styles.keepCount}>
+          <b>{now.ready.toLocaleString()}</b> go through
+        </span>
+        {now.held ? (
+          <span className={clsx(styles.keepCount, styles.keepHeld)}>
+            <b>{now.held.toLocaleString()}</b> need you
+          </span>
+        ) : null}
+      </div>
+      {reasons.length ? (
+        <ul className={styles.keepReasons}>
+          {reasons.map((line) => (
+            <li key={line}>{line}</li>
+          ))}
+        </ul>
+      ) : null}
+      {offerMove ? (
+        <label className={styles.keepOption}>
+          <input
+            type="checkbox"
+            id="_keep-best-move"
+            checked={move}
+            onChange={(event) => setMove(event.target.checked)}
+          />
+          <span>
+            Move playlist entries to the kept copy
+            <span className={styles.keepNote}>
+              {unblocked > 0 ? `Lets ${unblocked.toLocaleString()} more go through. ` : ''}
+              A removed copy&apos;s entry in a playlist the kept copy is not in points at the kept
+              copy instead, in the same place. Smart playlists are never changed.
+            </span>
+          </span>
+        </label>
+      ) : null}
+      {pairs.length ? (
+        <div className={styles.keepPairs}>
+          <div className={styles.keepPairsHead}>
+            Named differently ({pairs.length.toLocaleString()})
+          </div>
+          <ul className={styles.keepPairList} aria-label="Copies named differently">
+            {pairs.map((pair) => (
+              <li key={pair.id} className={styles.keepPair}>
+                {pair.copies.map((one, index) => (
+                  <span className={styles.keepPairCopy} key={`${pair.id}-${index}`}>
+                    <span className={styles.keepPairTitle}>{one.title}</span>
+                    <span className={styles.keepNote}>
+                      {[one.artist, one.detail].filter(Boolean).join(' · ')}
+                    </span>
+                  </span>
+                ))}
+              </li>
+            ))}
+          </ul>
+          <label className={styles.keepOption}>
+            <input
+              type="checkbox"
+              id="_keep-best-confirm"
+              checked={confirm}
+              onChange={(event) => setConfirm(event.target.checked)}
+            />
+            <span>
+              I checked these: each pair is the same recording
+              <span className={styles.keepNote}>
+                Leave it off and they stay open for you to look at one by one.
+              </span>
+            </span>
+          </label>
+        </div>
+      ) : null}
+      {now.held ? (
+        <p className={styles.keepNote}>
+          The ones that need you stay open, marked Needs you. Sort the list by Needs you first to
+          find them.
+        </p>
+      ) : null}
+      <div className={styles.keepActions}>
+        <button id="_keep-best-cancel" type="button" style={GREY} onClick={() => resolve(null)}>
+          Cancel
+        </button>
+        <button
+          id="_keep-best-go"
+          type="button"
+          style={RED}
+          disabled={now.ready === 0}
+          onClick={() => resolve({ move, confirm })}
+        >
+          {now.ready ? `Keep Best on ${now.ready.toLocaleString()}` : 'Nothing can go through'}
+        </button>
+      </div>
+    </DialogFrame>
+  );
+}
+
+/** What a type-to-confirm gate says, and the exact text that unlocks it. */
+export interface TypeToConfirmOptions {
+  title: string;
+  message: string;
+  /** typed exactly (surrounding spaces aside) to enable the confirm button */
+  phrase: string;
+  confirmText: string;
+}
+
+/**
+ * A delete that can't be clicked through: the confirm button stays off until
+ * the phrase is typed. Resolves the typed text (the server checks it again)
+ * or null on cancel. Shelf Life's Delete Title fix types the title here.
+ */
+function TypeToConfirmDialog({
+  options,
+  resolve,
+}: {
+  options: TypeToConfirmOptions;
+  resolve: (value: string | null) => void;
+}) {
+  const [text, setText] = useState('');
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const match = text.trim() !== '' && text.trim() === options.phrase.trim();
+
+  return (
+    <DialogFrame
+      open
+      onOpenChange={(next) => {
+        if (!next) resolve(null);
+      }}
+      viewportClassName={clsx('confirm-modal-overlay', styles.witnessOverlay)}
+      className={styles.witnessBox}
+      initialFocus={inputRef}
+      aria-label={options.title}
+    >
+      <h3 style={{ margin: '0 0 8px', color: 'var(--danger)', fontSize: '1.2em' }}>
+        {options.title}
+      </h3>
+      <p style={{ margin: '0 0 12px', fontSize: '0.9em', opacity: 0.85 }}>{options.message}</p>
+      <p style={{ margin: '0 0 6px', fontSize: '0.9em', opacity: 0.9 }}>
+        To confirm, type <strong style={{ color: 'var(--danger)' }}>{options.phrase}</strong> below:
+      </p>
+      <input
+        type="text"
+        id="type-to-confirm-input"
+        ref={inputRef}
+        autoComplete="off"
+        spellCheck={false}
+        value={text}
+        onChange={(event) => setText(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' && match) resolve(text);
+        }}
+        style={{
+          width: '100%',
+          padding: '10px',
+          border: '1px solid var(--white-a30)',
+          borderRadius: '6px',
+          background: 'var(--bg-primary)',
+          color: 'var(--text-primary)',
+          fontSize: '1em',
+          margin: '8px 0 16px',
+          boxSizing: 'border-box',
+        }}
+      />
+      <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+        <button
+          id="type-to-confirm-cancel"
+          type="button"
+          onClick={() => resolve(null)}
+          style={{
+            padding: '8px 20px',
+            border: '1px solid var(--white-a30)',
+            borderRadius: '6px',
+            background: 'transparent',
+            color: 'var(--text-primary)',
+            cursor: 'pointer',
+            fontSize: '0.9em',
+          }}
+        >
+          Cancel
+        </button>
+        <button
+          id="type-to-confirm-confirm"
+          type="button"
+          disabled={!match}
+          onClick={() => resolve(text)}
+          style={{
+            padding: '8px 20px',
+            border: 'none',
+            borderRadius: '6px',
+            background: match ? 'var(--danger)' : 'var(--white-a30)',
+            color: match ? 'var(--text-1)' : 'var(--text-3)',
+            cursor: match ? 'pointer' : 'not-allowed',
+            fontSize: '0.9em',
+            fontWeight: 600,
+            transition: 'all 0.2s',
+          }}
+        >
+          {options.confirmText}
+        </button>
+      </div>
+    </DialogFrame>
+  );
+}
+
 // ── The hook ─────────────────────────────────────────────────────────────────
 
 type PendingPrompt =
@@ -634,7 +880,14 @@ type PendingPrompt =
       manualCount: number;
       resolve: (value: RetagFixAction | null) => void;
     }
-  | { kind: 'witness'; count: number; resolve: (value: boolean) => void };
+  | { kind: 'witness'; count: number; resolve: (value: boolean) => void }
+  | {
+      kind: 'keepBest';
+      tally: (move: boolean, confirm: boolean) => KeepBestTally;
+      pairs: RecordingPair[];
+      resolve: (value: KeepBestBulkChoice | null) => void;
+    }
+  | { kind: 'typed'; options: TypeToConfirmOptions; resolve: (value: string | null) => void };
 
 export interface FindingPrompts {
   promptOrphan: () => Promise<OrphanFixAction | null>;
@@ -648,6 +901,14 @@ export interface FindingPrompts {
     bulk?: boolean,
   ) => Promise<RetagFixAction | null>;
   promptWitnessMe: (count: number) => Promise<boolean>;
+  /** #2179: Keep Best over many duplicates. `pairs` only for a selection,
+   *  whose rows are loaded: a whole type is never confirmed blind */
+  promptKeepBest: (
+    tally: (move: boolean, confirm: boolean) => KeepBestTally,
+    pairs?: RecordingPair[],
+  ) => Promise<KeepBestBulkChoice | null>;
+  /** a delete gated on typing a phrase; resolves the typed text or null */
+  promptTypeToConfirm: (options: TypeToConfirmOptions) => Promise<string | null>;
   /** Render this somewhere inside the findings tab. */
   promptNode: React.ReactNode;
 }
@@ -711,6 +972,21 @@ export function useFindingPrompts(): FindingPrompts {
     [],
   );
 
+  const promptKeepBest = useCallback(
+    (tally: (move: boolean, confirm: boolean) => KeepBestTally, pairs: RecordingPair[] = []) =>
+      new Promise<KeepBestBulkChoice | null>((resolve) => {
+        setPending({ kind: 'keepBest', tally, pairs, resolve });
+      }),
+    [],
+  );
+  const promptTypeToConfirm = useCallback(
+    (options: TypeToConfirmOptions) =>
+      new Promise<string | null>((resolve) => {
+        setPending({ kind: 'typed', options, resolve });
+      }),
+    [],
+  );
+
   let promptNode: React.ReactNode = null;
   if (pending?.kind === 'orphan') {
     promptNode = <OrphanPrompt resolve={(v) => settle(pending.resolve as never, v)} />;
@@ -739,10 +1015,25 @@ export function useFindingPrompts(): FindingPrompts {
         resolve={(v) => settle(pending.resolve as never, v)}
       />
     );
+  } else if (pending?.kind === 'keepBest') {
+    promptNode = (
+      <KeepBestBulkPrompt
+        tally={pending.tally}
+        pairs={pending.pairs}
+        resolve={(v) => settle(pending.resolve as never, v)}
+      />
+    );
   } else if (pending?.kind === 'witness') {
     promptNode = (
       <WitnessMeDialog
         orphanCount={pending.count}
+        resolve={(v) => settle(pending.resolve as never, v)}
+      />
+    );
+  } else if (pending?.kind === 'typed') {
+    promptNode = (
+      <TypeToConfirmDialog
+        options={pending.options}
         resolve={(v) => settle(pending.resolve as never, v)}
       />
     );
@@ -756,6 +1047,8 @@ export function useFindingPrompts(): FindingPrompts {
     promptBackfill,
     promptRetag,
     promptWitnessMe,
+    promptKeepBest,
+    promptTypeToConfirm,
     promptNode,
   };
 }

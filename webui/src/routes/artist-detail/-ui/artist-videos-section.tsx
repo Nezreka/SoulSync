@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { useFeatureOn } from '@/platform/features';
-import { acquireVerb, profileAsksFirst } from '@/platform/shell/download-rights';
+import { acquireVerb, profileAsksFirst, useMusicGet } from '@/platform/shell/download-rights';
+import { useMusicVideosAllowed } from '@/platform/shell/my-permissions';
 
 import type { SearchVideo } from '../../search/-search.types';
 
@@ -116,7 +117,8 @@ function ArtistVideoSpotlight({
   video: SearchVideo;
   progress: DownloadProgress;
   requested: Set<string>;
-  onDownload: (video: SearchVideo) => void;
+  /** absent when getting music isn't part of the profile: no button */
+  onDownload?: (video: SearchVideo) => void;
   onPlay: (video: SearchVideo) => void;
 }) {
   const { state, percent } = videoProgressState(video, progress);
@@ -166,15 +168,17 @@ function ArtistVideoSpotlight({
             <span aria-hidden="true">▶</span>
             Play
           </button>
-          <button
-            type="button"
-            className="artist-video-secondary"
-            onClick={() => onDownload(video)}
-            disabled={state === 'downloading' || state === 'completed' || isRequested}
-          >
-            <span aria-hidden="true">↓</span>
-            {downloadLabel(state, percent, isRequested)}
-          </button>
+          {onDownload ? (
+            <button
+              type="button"
+              className="artist-video-secondary"
+              onClick={() => onDownload(video)}
+              disabled={state === 'downloading' || state === 'completed' || isRequested}
+            >
+              <span aria-hidden="true">↓</span>
+              {downloadLabel(state, percent, isRequested)}
+            </button>
+          ) : null}
           <button
             type="button"
             className="artist-video-secondary"
@@ -220,7 +224,8 @@ function ArtistVideoPlayer({
   hasPrevious: boolean;
   hasNext: boolean;
   playbackError: number | null;
-  onDownload: (video: SearchVideo) => void;
+  /** absent when getting music isn't part of the profile: no button */
+  onDownload?: (video: SearchVideo) => void;
   onPrevious: () => void;
   onNext: () => void;
   onEnded: () => void;
@@ -322,20 +327,22 @@ function ArtistVideoPlayer({
           >
             Autoplay
           </button>
-          <button
-            type="button"
-            className="artist-video-icon-btn"
-            onClick={() => onDownload(video)}
-            disabled={state === 'downloading' || state === 'completed' || isRequested}
-            aria-label={`${label} ${title}`}
-            title={label}
-          >
-            {state === 'completed' || isRequested
-              ? '✓'
-              : state === 'downloading'
-                ? Math.round(percent)
-                : '↓'}
-          </button>
+          {onDownload ? (
+            <button
+              type="button"
+              className="artist-video-icon-btn"
+              onClick={() => onDownload(video)}
+              disabled={state === 'downloading' || state === 'completed' || isRequested}
+              aria-label={`${label} ${title}`}
+              title={label}
+            >
+              {state === 'completed' || isRequested
+                ? '✓'
+                : state === 'downloading'
+                  ? Math.round(percent)
+                  : '↓'}
+            </button>
+          ) : null}
           <button
             type="button"
             className="artist-video-icon-btn"
@@ -385,7 +392,8 @@ function ArtistVideoRailItem({
   playing: boolean;
   progress: DownloadProgress;
   requested: Set<string>;
-  onDownload: (video: SearchVideo) => void;
+  /** absent when getting music isn't part of the profile: no button */
+  onDownload?: (video: SearchVideo) => void;
   onPlay: (video: SearchVideo) => void;
 }) {
   const { state, percent } = videoProgressState(video, progress);
@@ -454,29 +462,33 @@ function ArtistVideoRailItem({
         >
           ▶
         </button>
-        <button
-          type="button"
-          className="artist-video-icon-btn"
-          onClick={() => onDownload(video)}
-          disabled={state === 'downloading' || state === 'completed' || isRequested}
-          aria-label={`${label} ${video.title ?? 'video'}`}
-          title={label}
-        >
-          {state === 'completed' || isRequested
-            ? '✓'
-            : state === 'downloading'
-              ? Math.round(percent)
-              : '↓'}
-        </button>
+        {onDownload ? (
+          <button
+            type="button"
+            className="artist-video-icon-btn"
+            onClick={() => onDownload(video)}
+            disabled={state === 'downloading' || state === 'completed' || isRequested}
+            aria-label={`${label} ${video.title ?? 'video'}`}
+            title={label}
+          >
+            {state === 'completed' || isRequested
+              ? '✓'
+              : state === 'downloading'
+                ? Math.round(percent)
+                : '↓'}
+          </button>
+        ) : null}
       </div>
     </article>
   );
 }
 
-/** music videos switched off (#1909): no section, and no yt-dlp search
- *  behind it either */
+/** music videos switched off (#1909), or not part of this profile (#2166:
+ *  music.videos off, or explicit music hidden): no section, and no yt-dlp
+ *  search behind it either */
 export function ArtistVideosSection(props: { artistName?: string | null; standalone?: boolean }) {
-  const on = useFeatureOn('music_videos');
+  const allowed = useMusicVideosAllowed();
+  const on = useFeatureOn('music_videos') && allowed;
   return on ? <ArtistVideosPanel {...props} /> : null;
 }
 
@@ -521,6 +533,10 @@ function ArtistVideosPanel({
     },
     [downloadVideo, requestVideo],
   );
+  // getting music isn't part of the profile (#2166): no save or request
+  // button on any video, rather than one the server refuses
+  const { cantRequest } = useMusicGet();
+  const onDownload = cantRequest ? undefined : acquire;
 
   useEffect(() => {
     if (!query) {
@@ -772,7 +788,7 @@ function ArtistVideosPanel({
                   hasPrevious={hasPrevious}
                   hasNext={hasNext}
                   playbackError={playbackError}
-                  onDownload={acquire}
+                  onDownload={onDownload}
                   onPrevious={previous}
                   onNext={next}
                   onEnded={ended}
@@ -787,7 +803,7 @@ function ArtistVideosPanel({
                 video={featured}
                 progress={videoProgress}
                 requested={requestedVideos}
-                onDownload={acquire}
+                onDownload={onDownload}
                 onPlay={play}
               />
             )}
@@ -809,7 +825,7 @@ function ArtistVideosPanel({
                       playing={Boolean(nowPlaying) && videoKey(video) === nowPlaying}
                       progress={videoProgress}
                       requested={requestedVideos}
-                      onDownload={acquire}
+                      onDownload={onDownload}
                       onPlay={play}
                     />
                   ))}

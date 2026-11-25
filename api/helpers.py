@@ -120,15 +120,54 @@ def download_permission_error():
     then ``if err: return err``. It lives here rather than in web_server so the
     isolated blueprints can use it without importing the app.
     """
-    from core.permissions import download_denied_reason
+    from core.permissions import PROFILE_UNREADABLE, download_denied_reason, strict_profile_getter
     from core.profile_context import get_current_profile_id
 
-    def _get_profile(pid):
+    def _db():
         from database.music_database import get_database
 
-        return get_database().get_profile(pid)
+        return get_database()
 
-    reason = download_denied_reason(get_current_profile_id(), _get_profile)
+    # raises on a read error: unreadable is not "allowed"
+    reason = download_denied_reason(get_current_profile_id(), strict_profile_getter(_db))
     if reason:
-        return jsonify({"success": False, "error": reason}), 403
+        return jsonify({"success": False, "error": reason}), (503 if reason == PROFILE_UNREADABLE else 403)
     return None
+
+
+def media_download_error(permission: str):
+    """download_permission_error for one kind of media (#2166): when the
+    request carries a permission map (every signed-in profile behind the
+    profile gate), ``permission`` (books.get, podcasts.get) on "download" in
+    that map, under the global policy, is the whole answer: getting books or
+    episodes is its own row, so a member who asks first for music can still
+    get audiobooks right away, and the other way round (follow-up 14). with
+    no map (an api key, or a helper unit-tested without the gate) the
+    profile's one download switch answers, as before. the permission names
+    the media, never the profile: that is still the session's."""
+    from flask import g, has_request_context
+
+    from core.permissions import map_refuses, refusal
+    try:
+        has_map = has_request_context() and "perms" in g
+    except Exception:  # noqa: BLE001 - can't tell, the switch answers
+        has_map = False
+    if has_map:
+        return refusal(permission) if map_refuses(permission, "download") else None
+    return download_permission_error()
+
+
+def media_asks_first(permission: str) -> bool:
+    """True when the current request's permission map says ``permission``
+    (books.get, podcasts.get) is Ask first: not right away, but asking is
+    allowed (#2188). the caller files a request for an admin instead of
+    downloading. no map (an api key, a bare test app) never asks: the
+    download switch answers there, as before."""
+    from flask import g, has_request_context
+
+    from core.permissions import map_refuses
+    try:
+        has_map = has_request_context() and "perms" in g
+    except Exception:  # noqa: BLE001 - can't tell, nothing asks
+        return False
+    return bool(has_map) and map_refuses(permission, "download") and not map_refuses(permission, "ask")

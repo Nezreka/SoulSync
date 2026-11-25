@@ -179,6 +179,15 @@ export function FindingsInbox({
                   touches files
                 </span>
               ) : null}
+              {/* #2179: the ones Keep Best all leaves for a person */}
+              {group.needs_you && showsPending ? (
+                <span
+                  className="repair-inbox-risk needs-you"
+                  title="Keep Best all can't act on these by itself: copies named differently, or every other copy protected. They stay open, marked Needs you."
+                >
+                  {group.needs_you.toLocaleString()} need{group.needs_you === 1 ? 's' : ''} you
+                </span>
+              ) : null}
               {info?.acquires ? (
                 <span
                   className="repair-inbox-risk acquires"
@@ -198,14 +207,17 @@ export function FindingsInbox({
                 className={`repair-inbox-btn${destructive ? ' destructive' : ''}`}
                 disabled={busy}
                 title={
-                  destructive
-                    ? `${info?.verb || 'Fix'} all ${group.pending.toLocaleString()} — asks before touching any file`
-                    : `${info?.verb || 'Fix'} all ${group.pending.toLocaleString()}`
+                  group.finding_type === 'shelf_life'
+                    ? 'Pick which titles to delete, lowest Shelf Life first'
+                    : destructive
+                      ? `${info?.verb || 'Fix'} all ${group.pending.toLocaleString()} — asks before touching any file`
+                      : `${info?.verb || 'Fix'} all ${group.pending.toLocaleString()}`
                 }
                 onClick={() => onFixGroup(group, info)}
               >
-                {info?.verb || 'Fix'}
-                {` all (${group.pending.toLocaleString()})`}
+                {group.finding_type === 'shelf_life'
+                  ? 'Free up space…'
+                  : `${info?.verb || 'Fix'} all (${group.pending.toLocaleString()})`}
               </button>
             ) : null}
             {group.pending > 0 && showsPending ? (

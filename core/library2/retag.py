@@ -315,7 +315,12 @@ def _credited_artists(conn, track_id: int) -> List[str]:
     from core.library2.metadata_overrides import effective_artist_names
 
     names = effective_artist_names(conn, [r["id"] for r in rows])
-    return [n for n in (names.get(int(r["id"]), r["name"]) for r in rows) if n]
+    # one credit per artist, spelling aside: a track credited to "Chamber
+    # Orchestra of London" and to a second row "The Chamber Orchestra Of
+    # London" wrote both into ARTIST, and every scan filed the file for the
+    # duplicate (#2217)
+    from core.text.normalize import dedupe_credit_names
+    return dedupe_credit_names(n for n in (names.get(int(r["id"]), r["name"]) for r in rows) if n)
 
 
 def _album_cover_source(
@@ -514,7 +519,11 @@ def _db_data_for_row(conn, row: Any) -> Dict[str, Any]:
         # strict off is a no-op; a genre the user set by hand is theirs
         from core.genre_filter import filter_genres
         from core.metadata.common import get_config_manager
-        data["genres"] = filter_genres(list(data["genres"]), get_config_manager())
+        data["genres"] = filter_genres(
+            list(data["genres"]),
+            get_config_manager(),
+            artist_names=[data.get("artist_name"), data.get("track_artist")],
+        )
     data["_manual_fields"] = manual
     # ``build_tag_diff`` renders its Cover Art row from ``thumb_url``. Without
     # it the preview claimed "Cover Art: None → None, unchanged" for every lib2
@@ -903,8 +912,11 @@ def _change_record(file, diff, written, before, after, cover):
             new = written[key]
         if isinstance(new, (list, tuple)):
             new = ', '.join(str(v) for v in new)
-        rows.append({'key': key, 'label': item.get('field') or key,
-                     'before': item.get('file_value') or '', 'after': str(new)})
+        row = {'key': key, 'label': item.get('field') or key,
+               'before': item.get('file_value') or '', 'after': str(new)}
+        if key == 'artists':
+            row['before_values'] = before.get(key) or None
+        rows.append(row)
     return {'file_id': file['id'], 'path': file['path'], 'fields': rows,
             'cover': ('replaced' if before.get('has_cover_art') else 'added') if cover else None}
 

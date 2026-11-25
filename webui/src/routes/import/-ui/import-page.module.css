@@ -442,6 +442,13 @@
   gap: 6px;
 }
 
+/* an action this row does not have: an invisible stand-in of the same size, so
+   the real buttons keep their place from row to row */
+.actionPlaceholder {
+  display: inline-flex;
+  visibility: hidden;
+}
+
 .progress {
   width: 100%;
   height: 4px;
@@ -1438,6 +1445,20 @@
   .rowSide {
     align-items: flex-start;
     min-width: 0;
+    max-width: 100%;
+  }
+
+  /* #2185: the badge and the buttons wrap inside the card instead of running
+     off the right edge. the stand-ins go: they held four button widths on one
+     line, so the real Identify sat past the screen */
+  .rowSideTop,
+  .rowActions {
+    flex-wrap: wrap;
+    max-width: 100%;
+  }
+
+  .actionPlaceholder {
+    display: none;
   }
 
   .trackHead {
@@ -1487,5 +1508,16 @@
   .jobSide {
     grid-column: 1 / -1;
     align-items: stretch;
+  }
+}
+
+/* #2185: on a phone the side (match, status, buttons) takes the card's full
+   width under the art, not the narrow column beside it */
+@media (max-width: 560px) {
+  .row {
+    grid-template-areas:
+      'check art body'
+      'side side side'
+      'detail detail detail';
   }
 }

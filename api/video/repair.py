@@ -294,6 +294,73 @@ def register_routes(bp):
         # an unscoped fix_action is a caller bug, not "nothing matched"
         return jsonify(res), (400 if res.get("invalid") else 200)
 
+    @bp.route("/repair/shelf-life/plan", methods=["POST"])
+    def video_repair_shelf_life_plan():
+        """which Shelf Life titles a cleanup would delete: lowest score first
+        up to ``target_gb``, or exactly ``ids``, or every open finding."""
+        from core.video.repair import shelf_life
+        from . import get_video_db
+        body = request.get_json(silent=True) or {}
+        target = None
+        if body.get("target_gb") not in (None, ""):
+            try:
+                target = int(float(body["target_gb"]) * 1024 ** 3)
+            except (TypeError, ValueError):
+                return jsonify({"error": "target_gb must be a number"}), 400
+            if target <= 0:
+                return jsonify({"error": "target_gb must be more than 0"}), 400
+        ids = body.get("ids")
+        if ids is not None and not isinstance(ids, list):
+            return jsonify({"error": "ids must be a list"}), 400
+        return jsonify(shelf_life.plan_cleanup(get_video_db(), target_bytes=target, ids=ids))
+
+    @bp.route("/repair/shelf-life/delete", methods=["POST"])
+    def video_repair_shelf_life_delete():
+        """delete a batch of Shelf Life titles in the background, each through
+        Delete Title. one typed phrase covers the batch ('delete 14 titles'),
+        checked here; each title then goes with its own name."""
+        from core.video.repair import shelf_life
+        from . import get_video_db
+        body = request.get_json(silent=True) or {}
+        db = get_video_db()
+        actions, error = shelf_life.batch_delete_actions(db, body.get("ids"), body.get("phrase"))
+        if error:
+            return jsonify({"started": False, "error": error}), 400
+        res = _worker().start_bulk_fix(ids=list(actions), finding_type=shelf_life.FINDING_TYPE,
+                                       fix_actions=actions)
+        if not res.get("started"):
+            shelf_life.forget_precheck(db, list(actions))
+        return jsonify(res), (200 if res.get("started") or res.get("already_running") else 400)
+
+    @bp.route("/repair/shelf-life/<kind>/<int:item_id>", methods=["GET"])
+    def video_repair_shelf_life_title(kind, item_id):
+        """one title's Shelf Life for its detail page: score or gate, reasons,
+        when it was scored, and Keep."""
+        from core.video.repair import shelf_life
+        from . import get_video_db
+        if kind not in ("movie", "show"):
+            return jsonify({"error": "kind must be movie or show"}), 400
+        view = shelf_life.title_view(get_video_db(), kind, item_id)
+        if view is None:
+            return jsonify({"error": "not in the library"}), 404
+        return jsonify({"success": True, **view})
+
+    @bp.route("/repair/shelf-life/<kind>/<int:item_id>/keep", methods=["POST"])
+    def video_repair_shelf_life_keep(kind, item_id):
+        """mark a title Keep (``{"keep": true}``) or take it off."""
+        from core.video.repair import shelf_life
+        from . import get_video_db
+        if kind not in ("movie", "show"):
+            return jsonify({"error": "kind must be movie or show"}), 400
+        body = request.get_json(silent=True) or {}
+        if not isinstance(body.get("keep"), bool):
+            return jsonify({"error": "keep must be true or false"}), 400
+        res = shelf_life.set_title_keep(get_video_db(), kind, item_id, body["keep"],
+                                        set_by=shelf_life._resolver_id())
+        if res is None:
+            return jsonify({"error": "not in the library"}), 404
+        return jsonify(res), (200 if res.get("success") else 400)
+
     @bp.route("/repair/bulk-fix/status", methods=["GET"])
     def video_repair_bulk_fix_status():
         return jsonify(_worker().get_bulk_fix_status())

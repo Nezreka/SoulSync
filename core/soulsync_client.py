@@ -337,11 +337,11 @@ class SoulSyncClient(MediaServerBase):
     def _scan_transfer(self, since_mtime: float = 0) -> List[SoulSyncArtist]:
         """Scan the Transfer folder and build artist/album/track hierarchy."""
         if not os.path.isdir(self._transfer_path):
-            logger.warning(f"Transfer path not found: {self._transfer_path}")
+            logger.warning(f"Music library folder not found: {self._transfer_path}")
             return []
 
         self._emit_progress(f"Scanning {self._transfer_path}...")
-        logger.info(f"[SoulSync] Scanning Transfer folder: {self._transfer_path}")
+        logger.info(f"[SoulSync] Scanning music library folder: {self._transfer_path}")
 
         # Walk filesystem and collect all audio files with tags
         file_entries = []  # (file_path, tags)
@@ -525,7 +525,7 @@ class SoulSyncClient(MediaServerBase):
         thread = None
         try:
             if not self.is_connected():
-                logger.warning("[SoulSync] Library scan requested but the Transfer path is not available")
+                logger.warning("[SoulSync] Library scan requested but the music library folder is not available")
                 return False
             # The check + assign + start must be atomic: callers are
             # concurrent by design (scan-manager timer thread, the
@@ -568,7 +568,7 @@ class SoulSyncClient(MediaServerBase):
         import time
         try:
             if not os.path.isdir(self._transfer_path):
-                logger.error(f"[SoulSync] Triggered library scan aborted — Transfer path not available: {self._transfer_path}")
+                logger.error(f"[SoulSync] Triggered library scan aborted — music library folder not available: {self._transfer_path}")
                 return
             artists = self._scan_transfer()
             self._cache = artists

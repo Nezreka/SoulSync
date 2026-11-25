@@ -1,0 +1,432 @@
+{
+  "ok": true,
+  "days": 7,
+  "range": {
+    "start": 1794296547.670168,
+    "end": 1794901347.670168
+  },
+  "headline": {
+    "people": 5,
+    "hours": 0.1,
+    "top_kind": "films",
+    "busiest_daypart": "morning",
+    "converted_pct": 43,
+    "converted_one_in": 2,
+    "top_converted_user": "maya",
+    "top_converted_user_away_pct": 67,
+    "servers": ["jellyfin", "plex"]
+  },
+  "tiles": {
+    "plays": {
+      "value": 7,
+      "prev": 0,
+      "change_pct": null
+    },
+    "hours": {
+      "value": 0.1,
+      "by_kind": {
+        "tv": 0.0,
+        "films": 0.0,
+        "music": 0.0,
+        "books": 0.0,
+        "other": 0.0
+      },
+      "estimated_hours": 0.0
+    },
+    "most_at_once": {
+      "value": 7,
+      "at": 1794898320
+    },
+    "played_as_is": {
+      "pct": 57,
+      "plays": 4,
+      "known": 7
+    },
+    "sent_remotely": {
+      "gb": 0.09,
+      "peak_kbps": 15070,
+      "peak_at": 1794898320
+    }
+  },
+  "per_day": [
+    {
+      "date": "2026-11-10",
+      "weekday": 1,
+      "weekend": false,
+      "hours": 0.0,
+      "plays": 0
+    },
+    {
+      "date": "2026-11-11",
+      "weekday": 2,
+      "weekend": false,
+      "hours": 0.0,
+      "plays": 0
+    },
+    {
+      "date": "2026-11-12",
+      "weekday": 3,
+      "weekend": false,
+      "hours": 0.0,
+      "plays": 0
+    },
+    {
+      "date": "2026-11-13",
+      "weekday": 4,
+      "weekend": false,
+      "hours": 0.0,
+      "plays": 0
+    },
+    {
+      "date": "2026-11-14",
+      "weekday": 5,
+      "weekend": true,
+      "hours": 0.0,
+      "plays": 0
+    },
+    {
+      "date": "2026-11-15",
+      "weekday": 6,
+      "weekend": true,
+      "hours": 0.0,
+      "plays": 0
+    },
+    {
+      "date": "2026-11-16",
+      "weekday": 0,
+      "weekend": false,
+      "hours": 0.0,
+      "plays": 0
+    },
+    {
+      "date": "2026-11-17",
+      "weekday": 1,
+      "weekend": false,
+      "hours": 0.1,
+      "plays": 7
+    }
+  ],
+  "methods": {
+    "direct_play": {
+      "plays": 3,
+      "pct": 43
+    },
+    "direct_stream": {
+      "plays": 1,
+      "pct": 14
+    },
+    "transcode": {
+      "plays": 3,
+      "pct": 43
+    }
+  },
+  "reasons": [
+    {
+      "code": "audio_codec",
+      "label": "Audio format the player can't play",
+      "plays": 3
+    },
+    {
+      "code": "over_remote_limit",
+      "label": "Over the player's remote quality",
+      "plays": 2
+    },
+    {
+      "code": "container",
+      "label": "File type the player can't open",
+      "plays": 1
+    },
+    {
+      "code": "hdr",
+      "label": "HDR on a screen without HDR",
+      "plays": 1
+    },
+    {
+      "code": "subtitle_burn_image",
+      "label": "Image subtitles burned in",
+      "plays": 1
+    }
+  ],
+  "hardware": {
+    "hw": 2,
+    "total": 3
+  },
+  "heatmap": {
+    "cells": [
+      [
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+      ],
+      [
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+      ],
+      [
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+      ],
+      [
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+      ],
+      [
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+      ],
+      [
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+      ],
+      [
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+      ]
+    ],
+    "max": 0.1,
+    "busiest": {
+      "weekday": 1,
+      "hour_start": 5,
+      "hour_end": 7
+    },
+    "quietest": {
+      "weekday": 0,
+      "hour": 0
+    },
+    "dayparts": {
+      "morning": 0.1,
+      "afternoon": 0.0,
+      "evening": 0.0,
+      "night": 0.0
+    },
+    "busiest_daypart": "morning"
+  },
+  "players": [
+    {
+      "product": "Jellyfin Android TV",
+      "plays": 1,
+      "hours": 0.0
+    },
+    {
+      "product": "Jellyfin Web",
+      "plays": 1,
+      "hours": 0.0
+    },
+    {
+      "product": "Jellyfin iOS",
+      "plays": 1,
+      "hours": 0.0
+    },
+    {
+      "product": "Plex for Android (Mobile)",
+      "plays": 1,
+      "hours": 0.0
+    },
+    {
+      "product": "Plex for Apple TV",
+      "plays": 1,
+      "hours": 0.0
+    },
+    {
+      "product": "Plex for iOS",
+      "plays": 1,
+      "hours": 0.0
+    },
+    {
+      "product": "Plexamp",
+      "plays": 1,
+      "hours": 0.0
+    }
+  ],
+  "locations": [
+    {
+      "label": "Home network",
+      "home": true,
+      "plays": 4,
+      "hours": 0.0
+    },
+    {
+      "label": "Away, place unknown",
+      "home": false,
+      "plays": 3,
+      "hours": 0.0
+    }
+  ],
+  "people": [
+    {
+      "user": "maya",
+      "avatar": "/api/server-activity/avatar?user=plex:7341",
+      "hours": 0.0,
+      "plays": 3,
+      "spark": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "mostly": {
+        "title": "Dune: Part Two",
+        "kind": "movie"
+      },
+      "devices": ["Plex for Apple TV", "Jellyfin iOS", "Plex for iOS"],
+      "away_pct": 100,
+      "top_location": null,
+      "lossless_pct": null,
+      "last_seen": 1794901347.352861,
+      "live": true
+    },
+    {
+      "user": "dan",
+      "avatar": "/api/server-activity/avatar?user=jellyfin:0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f",
+      "hours": 0.0,
+      "plays": 1,
+      "spark": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "mostly": {
+        "title": "Severance",
+        "kind": "episode"
+      },
+      "devices": ["Jellyfin Android TV"],
+      "away_pct": 0,
+      "top_location": null,
+      "lossless_pct": null,
+      "last_seen": 1794901347.352861,
+      "live": true
+    },
+    {
+      "user": "sam",
+      "avatar": "/api/server-activity/avatar?user=plex:1",
+      "hours": 0.0,
+      "plays": 1,
+      "spark": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "mostly": {
+        "title": "Radiohead",
+        "kind": "track"
+      },
+      "devices": ["Plexamp"],
+      "away_pct": 0,
+      "top_location": null,
+      "lossless_pct": 100,
+      "last_seen": 1794901347.352861,
+      "live": true
+    },
+    {
+      "user": "jo",
+      "avatar": null,
+      "hours": 0.0,
+      "plays": 1,
+      "spark": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "mostly": {
+        "title": "The Selfish Gene",
+        "kind": "audiobook"
+      },
+      "devices": ["Jellyfin Web"],
+      "away_pct": null,
+      "top_location": null,
+      "lossless_pct": null,
+      "last_seen": 1794901347.352861,
+      "live": true
+    },
+    {
+      "user": "ruth",
+      "avatar": "/api/server-activity/avatar?user=plex:9182",
+      "hours": 0.0,
+      "plays": 1,
+      "spark": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "mostly": {
+        "title": "Project Hail Mary",
+        "kind": "audiobook"
+      },
+      "devices": ["Plex for Android (Mobile)"],
+      "away_pct": null,
+      "top_location": null,
+      "lossless_pct": null,
+      "last_seen": 1794901347.352861,
+      "live": true
+    }
+  ],
+  "top": {
+    "films": [
+      {
+        "title": "Dune: Part Two",
+        "thumb": "/library/metadata/5101/thumb/1710000001",
+        "hours": 0.0,
+        "plays": 1,
+        "people": 1,
+        "link": {
+          "kind": "movie",
+          "id": "693134",
+          "source": "tmdb"
+        },
+        "year": 2024
+      },
+      {
+        "title": "The Wild Robot",
+        "thumb": "jf:b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+        "hours": 0.0,
+        "plays": 1,
+        "people": 1,
+        "link": {
+          "kind": "movie",
+          "id": "1184918",
+          "source": "tmdb"
+        },
+        "year": 2024
+      }
+    ],
+    "shows": [
+      {
+        "title": "Severance",
+        "thumb": "jf:5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e",
+        "hours": 0.0,
+        "plays": 1,
+        "people": 1,
+        "link": null,
+        "episodes": 1
+      },
+      {
+        "title": "Shōgun",
+        "thumb": "/library/metadata/900/thumb/1",
+        "hours": 0.0,
+        "plays": 1,
+        "people": 1,
+        "link": null,
+        "episodes": 1
+      }
+    ],
+    "artists": [
+      {
+        "title": "Radiohead",
+        "thumb": "/library/metadata/701/thumb/1700000002",
+        "hours": 0.0,
+        "plays": 1,
+        "people": 1,
+        "link": null,
+        "tracks": 1
+      }
+    ],
+    "books": [
+      {
+        "title": "Project Hail Mary",
+        "thumb": "/library/metadata/801/thumb/1700000003",
+        "hours": 0.0,
+        "plays": 1,
+        "people": 1,
+        "link": null,
+        "kind": "audiobook",
+        "user": "ruth",
+        "episodes": null,
+        "percent": 42,
+        "finished": false
+      },
+      {
+        "title": "The Selfish Gene",
+        "thumb": "jf:c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4",
+        "hours": 0.0,
+        "plays": 1,
+        "people": 1,
+        "link": null,
+        "kind": "audiobook",
+        "user": "jo",
+        "episodes": null,
+        "percent": 10,
+        "finished": false
+      }
+    ]
+  },
+  "unknown_method_plays": 0,
+  "tz": "UTC"
+}

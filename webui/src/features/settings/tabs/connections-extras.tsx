@@ -1,33 +1,44 @@
 /**
- * Connections, step 10b (SETTINGS_PORT.md): the music side's hidden API
- * Configuration group, whole. Its heading with Expand All, every music
- * service card (the Metadata ones are connections-metadata.tsx; Concerts,
- * Last.fm, Genius, Pollinations, fanart.tv, AcoustID and ListenBrainz are
- * here) and the row of test buttons under them.
+ * Connections: the music side's hidden API Configuration group and the music
+ * service cards not in connections-metadata.tsx (Concerts, Last.fm, Genius,
+ * Pollinations, fanart.tv, AcoustID, ListenBrainz), on the settings parts.
  *
  * Nothing shows the group itself (style.css hides it): it is where the cards
- * live between visits to the Services modal. Each card portals into a wrapper
- * kept here, before the test row (connections-services.tsx).
+ * live between visits to the service sheet. Each card portals into a wrapper
+ * kept here (connections-services.tsx). Its Expand All and the row of six
+ * Test buttons nobody could see went (settings-bic DESIGN 3.3).
  */
 
-import { type ReactNode, useState, useSyncExternalStore } from 'react';
+import { type ReactNode, useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 
 import type { SettingsStore } from '../settings-store';
 
 import {
-  Field,
+  ActionRow,
+  Btn,
+  FieldLine,
+  More,
+  Note,
+  Row,
+  SecretField,
+  SheetField,
+  SheetGroup,
+  StatusWords,
+  Switch,
+  TextField,
+} from '../ui';
+import s from '../ui/settings.module.css';
+import {
   HydrabaseCard,
   MetadataServiceCards,
   MusicbrainzCard,
   ServiceCard,
-  TestButton,
   testService,
   useText,
 } from './connections-metadata';
 import { ServiceHome } from './connections-services';
 import { useLoadedDraft } from './library-card';
-import { SecretInput } from './parts';
-import { text, useSettings } from './source-panels';
+import { secretNote, text, useSettings } from './source-panels';
 
 type Section_ = Record<string, unknown>;
 type Shell = Window & {
@@ -74,65 +85,95 @@ function ConcertsCard({ store }: { store: SettingsStore }) {
   const country = useTrimmed(store, 'concerts', 'country', (v) => v.toUpperCase());
   const sl = useTrimmed(store, 'concerts', 'setlistfm_api_key');
   return (
-    <ServiceCard service="concerts" colour="#00b4b3" title="Concerts">
-      <div className="setting-help-text">
-        Adds a <strong>Live</strong> section to artist pages. Both are optional and independent —
-        set up either, both, or neither.
-      </div>
-      <div className="form-group">
-        <label>Ticketmaster API Key:</label>
-        <input
-          type="text"
+    <ServiceCard
+      service="concerts"
+      colour="#00b4b3"
+      title="Concerts"
+      test={() => testService(store, 'concerts')}
+    >
+      <Note info>
+        Adds a <strong>Live</strong> section to artist pages. Both keys are optional and
+        independent: set up either, both, or neither.
+      </Note>
+      <SheetGroup title="Upcoming dates" />
+      <SheetField
+        label="Ticketmaster API key"
+        htmlFor="concerts-ticketmaster-api-key"
+        help="Upcoming dates, venues and ticket links. A free self-service key from developer.ticketmaster.com (5,000 calls a day)."
+      >
+        <TextField
+          full
           id="concerts-ticketmaster-api-key"
           placeholder="Your Discovery API key"
           value={tm.value}
           onChange={(event) => tm.onChange(event.target.value)}
         />
-        <div className="setting-help-text">
-          Upcoming dates, venues and ticket links. Free self-service key from
-          developer.ticketmaster.com (5,000 calls a day).
-        </div>
-      </div>
-      <div className="form-group">
-        <label>Concerts near you (country):</label>
-        <input
-          type="text"
+      </SheetField>
+      <Row
+        label="Concerts near you"
+        htmlFor="concerts-country"
+        field
+        help="Two letters, like US or GB. Keeps the concerts in your Discover inbox to one country. Leave it empty for everywhere. Artist pages always show every date."
+      >
+        <TextField
           id="concerts-country"
+          className={s.fieldCode}
           maxLength={2}
           placeholder="US"
           autoComplete="off"
-          style={{ textTransform: 'uppercase', maxWidth: '90px' }}
           value={country.value}
           onChange={(event) => country.onChange(event.target.value)}
         />
-        <div className="setting-help-text">
-          Two letters, like US or GB. Keeps the concerts in your Discover inbox to one country.
-          Leave it empty for everywhere. Artist pages always show every date.
-        </div>
-      </div>
-      <div className="form-group">
-        <label>Setlist.fm API Key:</label>
-        <input
-          type="text"
+      </Row>
+      <SheetGroup title="Setlists" />
+      <SheetField
+        label="Setlist.fm API key"
+        htmlFor="concerts-setlistfm-api-key"
+        help="What the artist played at recent shows, song by song, and a setlist can be played straight from your library. A free key from setlist.fm/settings/api (non-commercial use)."
+      >
+        <TextField
+          full
           id="concerts-setlistfm-api-key"
           placeholder="Your setlist.fm API key"
           value={sl.value}
           onChange={(event) => sl.onChange(event.target.value)}
         />
-        <div className="setting-help-text">
-          What the artist actually played at recent shows, song by song — and a setlist can be
-          played straight from your library. Free key from setlist.fm/settings/api (non-commercial
-          use).
-        </div>
-      </div>
-      <div className="form-actions">
-        <TestButton onClick={() => void testService(store, 'concerts')} />
-      </div>
+      </SheetField>
     </ServiceCard>
   );
 }
 
 // ── Last.fm ──
+
+/** From 1 December 2026 a Last.fm API key needs a Pro subscription. The
+ *  server remembers a refused key (/api/lastfm/configured says so); the card
+ *  then says it plainly instead of a bare "invalid key". */
+export const LASTFM_PRO_NOTE =
+  'Last.fm API keys need a Pro subscription from 1 December 2026. Without one, SoulSync fills in from free sources (ListenBrainz, Deezer).';
+
+export interface LastfmKeyStatus {
+  key_rejected: boolean;
+  message: string;
+}
+
+export function useLastfmKeyStatus(): [LastfmKeyStatus, () => void] {
+  const [status, setStatus] = useState<LastfmKeyStatus>({ key_rejected: false, message: '' });
+  const refresh = useCallback(() => {
+    fetch('/api/lastfm/configured')
+      .then((resp) => (resp.ok ? resp.json() : null))
+      .then((data: Partial<LastfmKeyStatus> | null) => {
+        if (!data) return;
+        const next = { key_rejected: !!data.key_rejected, message: data.message || '' };
+        // unchanged: keep the same object, so nothing re-renders
+        setStatus((prev) =>
+          prev.key_rejected === next.key_rejected && prev.message === next.message ? prev : next,
+        );
+      })
+      .catch(() => {});
+  }, []);
+  useEffect(refresh, [refresh]);
+  return [status, refresh];
+}
 
 function LastfmCard({ store }: { store: SettingsStore }) {
   const settings = useSettings(store);
@@ -142,6 +183,7 @@ function LastfmCard({ store }: { store: SettingsStore }) {
   const user = useTrimmed(store, 'lastfm', 'username');
   const scrobble = useChecked(store, 'lastfm', 'scrobble_enabled');
   const authorized = !!((settings.lastfm || {}) as Section_).session_key;
+  const [keyStatus, refreshKeyStatus] = useLastfmKeyStatus();
 
   // save first, so the API secret is stored
   async function authorize() {
@@ -161,63 +203,78 @@ function LastfmCard({ store }: { store: SettingsStore }) {
   }
 
   return (
-    <ServiceCard service="lastfm" colour="#d51007" title="Last.fm" titleClass="lastfm-title">
-      <Field label="API Key:">
-        <SecretInput id="lastfm-api-key" placeholder="Last.fm API Key" {...key} />
-      </Field>
-      <Field label="API Secret:">
-        <SecretInput
+    <ServiceCard
+      service="lastfm"
+      colour="#d51007"
+      title="Last.fm"
+      test={() => testService(store, 'lastfm').then(refreshKeyStatus)}
+    >
+      {keyStatus.key_rejected ? (
+        <div id="lastfm-key-rejected" role="status">
+          <Note>{keyStatus.message}</Note>
+        </div>
+      ) : null}
+      <SheetGroup title="Your Last.fm API account" />
+      <SheetField
+        label="API key"
+        htmlFor="lastfm-api-key"
+        help={secretNote(key.value, 'Used for metadata enrichment.')}
+        more={
+          <>
+            Get the key and secret from{' '}
+            <a href="https://www.last.fm/api/account/create" target="_blank" rel="noreferrer">
+              Last.fm API Account
+            </a>
+            . <span id="lastfm-pro-note">{LASTFM_PRO_NOTE}</span>
+          </>
+        }
+      >
+        <SecretField id="lastfm-api-key" placeholder="Last.fm API Key" {...key} />
+      </SheetField>
+      <SheetField
+        label="API secret"
+        htmlFor="lastfm-api-secret"
+        help={secretNote(secret.value, 'Needed for scrobbling.')}
+      >
+        <SecretField
           id="lastfm-api-secret"
           placeholder="Last.fm API Secret (required for scrobbling)"
           {...secret}
         />
-      </Field>
-      <div className="form-group">
-        <label htmlFor="lastfm-username">Username:</label>
-        <input
-          type="text"
+      </SheetField>
+      <SheetField
+        label="Username"
+        htmlFor="lastfm-username"
+        help="The Last.fm account whose listening history is imported. It can be corrected here or on the Stats page."
+      >
+        <TextField
+          full
           id="lastfm-username"
           placeholder="Your Last.fm username"
           value={user.value}
           onChange={(event) => user.onChange(event.target.value)}
         />
-        <small>
-          The Last.fm account whose listening history to import. You can correct this username here
-          or on the Stats page.
-        </small>
-      </div>
-      <div className="callback-info">
-        <div className="callback-help">
-          Get your API key and secret from{' '}
-          <a
-            href="https://www.last.fm/api/account/create"
-            target="_blank"
-            style={{ color: '#d51007' }}
-          >
-            Last.fm API Account
-          </a>
-        </div>
-        <div className="callback-help">
-          API key: used for metadata enrichment. API secret: required for scrobbling.
-        </div>
-      </div>
-      <div className="form-group" style={{ marginTop: '12px' }}>
-        <label className="checkbox-label">
-          <input type="checkbox" id="lastfm-scrobble-enabled" {...scrobble} /> Scrobble plays to
-          Last.fm
-        </label>
-      </div>
-      <div className="form-actions" id="lastfm-scrobble-actions">
-        <button className="test-button" onClick={() => void authorize()}>
-          Authorize Scrobbling
-        </button>{' '}
-        <span className="setting-help-text" id="lastfm-scrobble-status">
+      </SheetField>
+      <SheetGroup title="Scrobbling" />
+      <Row
+        label="Scrobble plays to Last.fm"
+        htmlFor="lastfm-scrobble-enabled"
+        help="ListenBrainz is the recommended scrobbler: free, no subscription."
+      >
+        <Switch id="lastfm-scrobble-enabled" {...scrobble} />
+      </Row>
+      <ActionRow
+        id="lastfm-scrobble-actions"
+        label="Allow scrobbling"
+        help="Saves first, then opens Last.fm to let SoulSync scrobble for you."
+      >
+        <StatusWords id="lastfm-scrobble-status" tone={authorized ? 'ok' : 'idle'}>
           {loads ? (authorized ? 'Authorized' : 'Not authorized') : ''}
-        </span>
-      </div>
-      <div className="form-actions">
-        <TestButton onClick={() => void testService(store, 'lastfm')} />
-      </div>
+        </StatusWords>
+        <Btn small onClick={() => void authorize()}>
+          Authorize scrobbling
+        </Btn>
+      </ActionRow>
     </ServiceCard>
   );
 }
@@ -227,24 +284,28 @@ function LastfmCard({ store }: { store: SettingsStore }) {
 function GeniusCard({ store }: { store: SettingsStore }) {
   const token = useText(store, 'genius', 'access_token');
   return (
-    <ServiceCard service="genius" colour="#ffff64" title="Genius" titleClass="genius-title">
-      <Field label="Client Access Token:">
-        <SecretInput id="genius-access-token" placeholder="Genius Client Access Token" {...token} />
-      </Field>
-      <div className="callback-info">
-        <div className="callback-help">
-          Get your token from{' '}
-          <a href="https://genius.com/api-clients" target="_blank" style={{ color: '#ffff64' }}>
-            Genius API Clients
-          </a>
-        </div>
-        <div className="callback-help">
-          Generate a "Client Access Token" — no OAuth flow needed.
-        </div>
-      </div>
-      <div className="form-actions">
-        <TestButton onClick={() => void testService(store, 'genius')} />
-      </div>
+    <ServiceCard
+      service="genius"
+      colour="#ffff64"
+      title="Genius"
+      test={() => testService(store, 'genius')}
+    >
+      <SheetField
+        label="Client access token"
+        htmlFor="genius-access-token"
+        help={secretNote(token.value, 'Generate a Client Access Token. No sign-in flow needed.')}
+        more={
+          <>
+            Get it from{' '}
+            <a href="https://genius.com/api-clients" target="_blank" rel="noreferrer">
+              Genius API Clients
+            </a>{' '}
+            with Generate Access Token.
+          </>
+        }
+      >
+        <SecretField id="genius-access-token" placeholder="Genius Client Access Token" {...token} />
+      </SheetField>
     </ServiceCard>
   );
 }
@@ -255,128 +316,96 @@ function OptionalKey({
   section,
   id,
   placeholder,
+  help,
+  more,
 }: {
   store: SettingsStore;
   section: string;
   id: string;
   placeholder: string;
+  help: string;
+  more: ReactNode;
 }) {
   const key = useTrimmed(store, section, 'api_key');
   return (
-    <Field label="API Key (optional):">
-      <SecretInput id={id} placeholder={placeholder} autoComplete="off" {...key} />
-    </Field>
+    <SheetField
+      label="API key (optional)"
+      htmlFor={id}
+      help={secretNote(key.value, help)}
+      more={more}
+    >
+      <SecretField id={id} placeholder={placeholder} autoComplete="off" {...key} />
+    </SheetField>
   );
 }
 
 function PollinationsCard({ store }: { store: SettingsStore }) {
   return (
-    <ServiceCard service="pollinations" colour="#7ad3a7" title="Pollinations">
+    <ServiceCard
+      service="pollinations"
+      colour="#7ad3a7"
+      title="Pollinations"
+      test={() => testService(store, 'pollinations')}
+    >
+      <Note info>
+        Makes cover art for playlists, from the ⋯ menu on any playlist. It works without a key: one
+        image every 45 seconds, with a small Pollinations mark in the corner.
+      </Note>
       <OptionalKey
         store={store}
         section="pollinations"
         id="pollinations-api-key"
         placeholder="Pollinations API key"
+        help="A key removes the mark and the wait."
+        more={
+          <>
+            A key from{' '}
+            <a href="https://enter.pollinations.ai" target="_blank" rel="noopener noreferrer">
+              enter.pollinations.ai
+            </a>{' '}
+            removes the mark and the wait.
+          </>
+        }
       />
-      <div className="callback-info">
-        <div className="callback-help">
-          Makes cover art for playlists, from the ⋯ menu on any playlist. Works without a key: one
-          image every 45 seconds, with a small Pollinations mark in the corner.
-        </div>
-        <div className="callback-help">
-          A key from{' '}
-          <a
-            href="https://enter.pollinations.ai"
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{ color: '#7ad3a7' }}
-          >
-            enter.pollinations.ai
-          </a>{' '}
-          removes the mark and the wait.
-        </div>
-      </div>
-      <div className="form-actions">
-        <TestButton onClick={() => void testService(store, 'pollinations')} />
-      </div>
     </ServiceCard>
   );
 }
 
 function FanartCard({ store }: { store: SettingsStore }) {
   return (
-    <ServiceCard service="artist-fanart" colour="rgb(var(--accent-rgb))" title="fanart.tv">
+    <ServiceCard
+      service="artist-fanart"
+      colour="rgb(var(--accent-rgb))"
+      title="fanart.tv"
+      test={() => testService(store, 'fanart')}
+    >
+      <Note info>
+        HD artist photos and the wide background Plex and Jellyfin show behind an artist page, used
+        by <b>Update media server metadata</b> on the Tools page. Without a key SoulSync still tries
+        TheAudioDB and Deezer.
+      </Note>
       {/* the music card's own id: the video side's fanart.tv card owns fanart-api-key */}
       <OptionalKey
         store={store}
         section="fanart"
         id="artist-fanart-api-key"
         placeholder="fanart.tv personal API key"
+        help="The video side's fanart.tv key is used when this is empty."
+        more={
+          <>
+            A free key from{' '}
+            <a href="https://fanart.tv/get-an-api-key/" target="_blank" rel="noopener noreferrer">
+              fanart.tv
+            </a>
+            . The video side's fanart.tv key is used when this is empty.
+          </>
+        }
       />
-      <div className="callback-info">
-        <div className="callback-help">
-          HD artist photos and the wide background Plex and Jellyfin show behind an artist page,
-          used by <b>Update media server metadata</b> on the Tools page. Without a key SoulSync
-          still tries TheAudioDB and Deezer.
-        </div>
-        <div className="callback-help">
-          A free key from{' '}
-          <a
-            href="https://fanart.tv/get-an-api-key/"
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{ color: 'rgb(var(--accent-rgb))' }}
-          >
-            fanart.tv
-          </a>
-          . The video side's fanart.tv key is used when this is empty.
-        </div>
-      </div>
-      <div className="form-actions">
-        <TestButton onClick={() => void testService(store, 'fanart')} />
-      </div>
     </ServiceCard>
   );
 }
 
 // ── AcoustID ──
-
-/** settings.js clearQuarantine */
-async function clearQuarantine() {
-  const w = shell() as Shell & {
-    showConfirmDialog?: (o: {
-      title: string;
-      message: string;
-      confirmText?: string;
-      destructive?: boolean;
-    }) => Promise<boolean>;
-  };
-  if (
-    !(await w.showConfirmDialog?.({
-      title: 'Clear Quarantine',
-      message: 'Delete all files in the quarantine folder? This cannot be undone.',
-      confirmText: 'Delete',
-      destructive: true,
-    }))
-  )
-    return;
-  try {
-    w.showLoadingOverlay?.('Clearing quarantine folder...');
-    const response = await fetch('/api/quarantine/clear', { method: 'POST' });
-    const result = (await response.json()) as {
-      success?: boolean;
-      message?: string;
-      error?: string;
-    };
-    if (result.success) toast(result.message || 'Quarantine cleared', 'success');
-    else toast(`Failed to clear quarantine: ${result.error}`, 'error');
-  } catch (error) {
-    console.error('Error clearing quarantine:', error);
-    toast('Failed to clear quarantine', 'error');
-  } finally {
-    w.hideLoadingOverlay?.();
-  }
-}
 
 function AcoustidCard({ store }: { store: SettingsStore }) {
   const enabled = useChecked(store, 'acoustid', 'enabled');
@@ -386,75 +415,57 @@ function AcoustidCard({ store }: { store: SettingsStore }) {
       service="acoustid"
       colour="#ba55d3"
       title="AcoustID Verification"
-      titleClass="acoustid-title"
+      test={() => testService(store, 'acoustid')}
     >
-      <div className="form-group" style={{ marginBottom: '12px' }}>
-        <label
-          className="checkbox-label"
-          style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}
-        >
-          <input type="checkbox" id="acoustid-enabled" {...enabled} />{' '}
-          <span>Enable Download Verification</span>
-        </label>
-        <div style={{ color: '#888', fontSize: '0.8em', marginTop: '4px', marginLeft: '24px' }}>
-          Verifies downloaded audio matches expected track using fingerprints. Turning it off only
-          stops the check on new downloads: the AcoustID Scanner in Tools still scans when you run
-          it yourself.
-        </div>
-      </div>
-      <Field label="Application API Key:">
-        <SecretInput id="acoustid-api-key" placeholder="AcoustID Application API Key" {...key} />
-      </Field>
-      <div className="callback-info">
-        <div className="callback-help">
-          Requires an <strong>Application API key</strong> (not your user account key) — register a
-          free application at{' '}
-          <a
-            href="https://acoustid.org/new-application"
-            target="_blank"
-            style={{ color: '#ba55d3' }}
-          >
-            acoustid.org/new-application
-          </a>
-        </div>
-        <div
-          className="callback-help"
-          style={{ opacity: 0.7, fontSize: '0.85em', marginTop: '4px' }}
-        >
-          The fpcalc fingerprint tool is automatically downloaded if needed. Failed verifications
-          move files to Quarantine folder.
-        </div>
-      </div>
-      <div
-        className="form-actions"
-        style={{
-          marginTop: '10px',
-          display: 'flex',
-          gap: '8px',
-          alignItems: 'center',
-          flexWrap: 'wrap',
-        }}
+      <SheetField
+        label="Application API key"
+        htmlFor="acoustid-api-key"
+        help={secretNote(key.value, 'An application key, not your user account key.')}
+        more={
+          <>
+            Register a free application at{' '}
+            <a href="https://acoustid.org/new-application" target="_blank" rel="noreferrer">
+              acoustid.org/new-application
+            </a>{' '}
+            and use its key, not your user account key. The fpcalc fingerprint tool is downloaded
+            when needed.
+          </>
+        }
       >
-        <button className="test-button" onClick={() => void testService(store, 'acoustid')}>
-          Test Connection
-        </button>{' '}
-        <button
-          className="test-button"
-          onClick={() => void clearQuarantine()}
-          style={{
-            background: 'rgba(255,82,82,0.15)',
-            borderColor: 'rgba(255,82,82,0.3)',
-            color: '#ff5252',
-          }}
-        >
-          Clear Quarantine
-        </button>
-      </div>
+        <SecretField id="acoustid-api-key" placeholder="AcoustID Application API Key" {...key} />
+      </SheetField>
+      <SheetGroup title="Options" />
+      <Row
+        label="Verify downloads"
+        htmlFor="acoustid-enabled"
+        help="Checks a downloaded file is the expected track by its fingerprint. A file that fails goes to the quarantine folder."
+        more="Turning it off only stops the check on new downloads: the AcoustID Scanner in Tools still scans when you run it yourself. Clear the quarantine folder from System, Maintenance."
+      >
+        <Switch id="acoustid-enabled" {...enabled} />
+      </Row>
     </ServiceCard>
   );
 }
 
 // ── ListenBrainz ──
+
+/** self-hosted scrobblers that speak the ListenBrainz API, and the port
+ *  each listens on out of the box */
+export const SCROBBLER_PRESETS = [
+  { id: 'maloja', label: 'Maloja', port: 42010 },
+  { id: 'koito', label: 'Koito', port: 4110 },
+] as const;
+
+/** the ListenBrainz address on a self-hosted scrobbler: keeps the server
+ *  already typed (and any reverse-proxy path before its api), else
+ *  localhost on the scrobbler's own port */
+export function scrobblerPresetUrl(current: string, preset: { port: number }): string {
+  let root = (current || '').trim().replace(/\/+$/, '');
+  root = root.replace(/\/apis\/(listenbrainz|lbrnz)(\/1)?$/i, '').replace(/\/1$/, '');
+  if (!root || /api\.listenbrainz\.org/i.test(root)) root = `http://localhost:${preset.port}`;
+  if (!/^https?:\/\//i.test(root)) root = `http://${root}`;
+  return `${root}/apis/listenbrainz`;
+}
 
 function ListenbrainzCard({ store }: { store: SettingsStore }) {
   const base = useText(store, 'listenbrainz', 'base_url');
@@ -466,118 +477,100 @@ function ListenbrainzCard({ store }: { store: SettingsStore }) {
       service="listenbrainz"
       colour="#eb743b"
       title="ListenBrainz"
-      titleClass="listenbrainz-title"
+      test={() => testService(store, 'listenbrainz')}
     >
-      <Field label="API Base URL:">
-        <input
-          type="text"
-          id="listenbrainz-base-url"
-          placeholder="Leave empty for official (api.listenbrainz.org)"
-          value={base.value}
-          onChange={(event) => base.onChange(event.target.value)}
-        />
-      </Field>
-      <Field label="User Token:">
-        <SecretInput id="listenbrainz-token" placeholder="ListenBrainz User Token" {...token} />
-      </Field>
-      <Field label="Username (optional):">
-        <input
-          type="text"
+      <SheetField
+        label="User token"
+        htmlFor="listenbrainz-token"
+        help={secretNote(token.value, 'From your ListenBrainz settings.')}
+        more={
+          <>
+            Get it from{' '}
+            <a href="https://listenbrainz.org/profile/" target="_blank" rel="noreferrer">
+              ListenBrainz Settings
+            </a>
+            .
+          </>
+        }
+      >
+        <SecretField id="listenbrainz-token" placeholder="ListenBrainz User Token" {...token} />
+      </SheetField>
+      <SheetField
+        label="Username (optional)"
+        htmlFor="listenbrainz-username"
+        help="Found from the token when left empty."
+      >
+        <TextField
+          full
           id="listenbrainz-username"
           placeholder="Auto-detected from token if blank"
           value={user.value}
           onChange={(event) => user.onChange(event.target.value)}
         />
-      </Field>
-      <div className="callback-info">
-        <div className="callback-help">
-          Get your token from{' '}
-          <a href="https://listenbrainz.org/profile/" target="_blank" style={{ color: '#eb743b' }}>
-            ListenBrainz Settings
-          </a>
-        </div>
-        <div className="callback-help">
-          Self-hosted? Enter your server URL (e.g. http://localhost:8093)
-        </div>
-        <div className="callback-help">
-          Maloja: use http://your-server:42010/apis/listenbrainz and your Maloja API key. Start
-          history sync from Stats.
-        </div>
-      </div>
-      <div className="form-group" style={{ marginTop: '12px' }}>
-        <label className="checkbox-label">
-          <input type="checkbox" id="listenbrainz-scrobble-enabled" {...scrobble} /> Scrobble plays
-          to ListenBrainz
-        </label>
-      </div>
-      <div className="form-actions">
-        <TestButton onClick={() => void testService(store, 'listenbrainz')} />
-      </div>
+      </SheetField>
+      <Row
+        label="Scrobble plays to ListenBrainz"
+        htmlFor="listenbrainz-scrobble-enabled"
+        help={
+          <span id="listenbrainz-recommended">
+            Recommended for scrobbling: free and open, no subscription. Last.fm API keys need Pro
+            from 1 December 2026.
+          </span>
+        }
+      >
+        <Switch id="listenbrainz-scrobble-enabled" {...scrobble} />
+      </Row>
+      <More label="More options" count={1} names="your own server, Maloja or Koito">
+        <SheetField
+          label="API base URL"
+          htmlFor="listenbrainz-base-url"
+          help="Self-hosted? Your server's address, for example http://localhost:8093. Leave it empty for the official one."
+          more={
+            <>
+              Maloja: http://your-server:42010/apis/listenbrainz and your Maloja API key. Koito:
+              http://your-server:4110/apis/listenbrainz and a Koito API key. Start the history sync
+              from Stats.
+            </>
+          }
+        >
+          <FieldLine wrap>
+            <TextField
+              full
+              mono
+              id="listenbrainz-base-url"
+              placeholder="Leave empty for official (api.listenbrainz.org)"
+              value={base.value}
+              onChange={(event) => base.onChange(event.target.value)}
+            />
+            {SCROBBLER_PRESETS.map((preset) => (
+              <Btn
+                key={preset.id}
+                small
+                id={`listenbrainz-preset-${preset.id}`}
+                aria-label={`Fill in the address for ${preset.label}`}
+                onClick={() => base.onChange(scrobblerPresetUrl(base.value, preset))}
+              >
+                {preset.label}
+              </Btn>
+            ))}
+          </FieldLine>
+        </SheetField>
+      </More>
     </ServiceCard>
   );
 }
 
 // ── the group ──
 
-const TEST_ROW: Array<[string, string]> = [
-  ['spotify', 'Spotify'],
-  ['tidal', 'Tidal'],
-  ['listenbrainz', 'ListenBrainz'],
-  ['acoustid', 'AcoustID'],
-  ['lastfm', 'Last.fm'],
-  ['genius', 'Genius'],
-];
-
-/** settings.js toggleAllServiceAccordions: every card on the page, open or
- *  shut together */
-export function toggleAll(button: HTMLButtonElement) {
-  const cards = [...document.querySelectorAll('#settings-page .stg-service')];
-  const allOpen = cards.length > 0 && cards.every((c) => c.classList.contains('expanded'));
-  for (const c of cards) c.classList.toggle('expanded', !allOpen);
-  button.textContent = allOpen ? 'Expand All' : 'Collapse All';
-}
-
+/** the hidden home of the music cards: a tile opens one in the service sheet */
 export function MusicApiGroup({ store }: { store: SettingsStore }) {
   const [home, setHome] = useState<HTMLElement | null>(null);
   return (
-    <div
-      className="settings-group"
-      data-stg="connections"
-      data-music-only=""
-      data-svc-legacy=""
-      ref={setHome}
-    >
-      <h3>
-        API Configuration{' '}
-        <button
-          className="stg-accordion-toggle"
-          onClick={(event) => toggleAll(event.currentTarget)}
-        >
-          Expand All
-        </button>
-      </h3>
+    <div data-music-only="" data-svc-legacy="" ref={setHome}>
       <ServiceHome.Provider value={home}>
         <Cards store={store} />
       </ServiceHome.Provider>
-      <div className="api-test-buttons">
-        {TEST_ROW.map(([service, name], i) => (
-          <Spaced key={service} first={i === 0}>
-            <button className="test-button" onClick={() => void testService(store, service)}>
-              Test {name}
-            </button>
-          </Spaced>
-        ))}
-      </div>
     </div>
-  );
-}
-
-function Spaced({ first, children }: { first: boolean; children: ReactNode }) {
-  return (
-    <>
-      {first ? null : ' '}
-      {children}
-    </>
   );
 }
 

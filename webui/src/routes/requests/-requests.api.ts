@@ -3,6 +3,12 @@ import { queryOptions, type QueryClient } from '@tanstack/react-query';
 import { apiClient, readJson } from '@/app/api-client';
 
 import type {
+  AcquisitionMode,
+  AcquisitionModes,
+  AwaitingMedia,
+  AwaitingMusicGroup,
+  AwaitingQueue,
+  AwaitingVideoTitle,
   MusicRequestBadgeCounts,
   MusicRequestCounts,
   MusicRequestList,
@@ -45,6 +51,17 @@ export function normalizeQuota(raw: Partial<RequestQuota> | null | undefined): R
   return { limit, days: Number(raw.days) || 7, used, remaining };
 }
 
+const ACQUISITION_KINDS = ['music', 'movie', 'tv', 'audiobook'] as const;
+
+/** every kind automatic unless the payload says manual (#2199). */
+export function normalizeModes(
+  raw: Partial<AcquisitionModes> | null | undefined,
+): AcquisitionModes {
+  const out = {} as AcquisitionModes;
+  for (const kind of ACQUISITION_KINDS) out[kind] = raw?.[kind] === 'manual' ? 'manual' : 'auto';
+  return out;
+}
+
 export async function fetchMusicRequests(profileId: number): Promise<MusicRequestList> {
   const payload = await readJson<MusicRequestListResponse>(
     apiClient.get('requests/music', {
@@ -58,9 +75,13 @@ export async function fetchMusicRequests(profileId: number): Promise<MusicReques
     history: payload.history ?? [],
     pendingVideos: payload.pending_videos ?? [],
     videoHistory: payload.video_history ?? [],
+    pendingMedia: payload.pending_media ?? [],
+    mediaHistory: payload.media_history ?? [],
     counts: normalizeCounts(payload.counts),
     asksFirst: payload.asks_first === true,
     quota: normalizeQuota(payload.quota),
+    acquisition: normalizeModes(payload.acquisition),
+    awaiting: Number(payload.awaiting) || 0,
   };
 }
 
@@ -97,7 +118,14 @@ export async function fetchMusicRequestCounts(profileId: number): Promise<MusicR
 
 export async function approveMusicRequest(
   profileId: number,
-  body: { profile_id: number; key: string; response?: string },
+  body: {
+    profile_id: number;
+    key: string;
+    response?: string;
+    acquisition?: AcquisitionMode;
+    /** some of a playlist request's songs; left out, the whole request (#2302) */
+    track_ids?: string[];
+  },
 ): Promise<void> {
   const payload = await readJson<Ok>(
     apiClient.post('requests/music/approve', { headers: headersFor(profileId), json: body }),
@@ -107,7 +135,7 @@ export async function approveMusicRequest(
 
 export async function declineMusicRequest(
   profileId: number,
-  body: { profile_id: number; key: string; response?: string },
+  body: { profile_id: number; key: string; response?: string; track_ids?: string[] },
 ): Promise<void> {
   const payload = await readJson<Ok>(
     apiClient.post('requests/music/decline', { headers: headersFor(profileId), json: body }),
@@ -208,6 +236,50 @@ export async function withdrawMusicVideoRequest(
   assertOk(payload, 'Could not withdraw that request');
 }
 
+/** an audiobook or episode ask (#2188): approving puts the book on their
+ *  wishlist, or starts the episode. */
+export async function approveMediaRequest(
+  profileId: number,
+  requestId: number,
+  acquisition?: AcquisitionMode,
+): Promise<void> {
+  const payload = await readJson<Ok>(
+    apiClient.post(`requests/media/${requestId}/approve`, {
+      headers: headersFor(profileId),
+      ...(acquisition ? { json: { acquisition } } : {}),
+    }),
+  );
+  assertOk(payload, 'Could not approve that request');
+}
+
+export async function declineMediaRequest(
+  profileId: number,
+  requestId: number,
+  response?: string,
+): Promise<void> {
+  const payload = await readJson<Ok>(
+    apiClient.post(`requests/media/${requestId}/decline`, {
+      headers: headersFor(profileId),
+      json: response ? { response } : {},
+    }),
+  );
+  assertOk(payload, 'Could not decline that request');
+}
+
+export async function withdrawMediaRequest(profileId: number, requestId: number): Promise<void> {
+  const payload = await readJson<Ok>(
+    apiClient.post(`requests/media/${requestId}/withdraw`, { headers: headersFor(profileId) }),
+  );
+  assertOk(payload, 'Could not withdraw that request');
+}
+
+export async function deleteMediaRequest(profileId: number, requestId: number): Promise<void> {
+  const payload = await readJson<Ok>(
+    apiClient.delete(`requests/media/${requestId}`, { headers: headersFor(profileId) }),
+  );
+  assertOk(payload, 'Could not remove that request');
+}
+
 export function musicRequestsQueryOptions(profileId: number) {
   return queryOptions({
     queryKey: [...REQUESTS_QUERY_KEY, 'list', profileId],
@@ -217,4 +289,90 @@ export function musicRequestsQueryOptions(profileId: number) {
 
 export function invalidateMusicRequests(queryClient: QueryClient) {
   return queryClient.invalidateQueries({ queryKey: REQUESTS_QUERY_KEY });
+}
+
+// ── approved requests waiting for a release pick (#2199) ──────────────────
+
+export const AWAITING_QUERY_KEY = [...REQUESTS_QUERY_KEY, 'awaiting'] as const;
+
+export async function fetchAcquisitionModes(profileId: number): Promise<AcquisitionModes> {
+  const payload = await readJson<Ok & { modes?: Partial<AcquisitionModes> }>(
+    apiClient.get('requests/acquisition', { headers: headersFor(profileId) }),
+  );
+  assertOk(payload, 'Could not load the approval settings');
+  return normalizeModes(payload.modes);
+}
+
+/** admin: save how approved requests download, for the kinds that changed. */
+export async function saveAcquisitionModes(
+  profileId: number,
+  modes: Partial<AcquisitionModes>,
+): Promise<AcquisitionModes> {
+  const payload = await readJson<Ok & { modes?: Partial<AcquisitionModes> }>(
+    apiClient.put('requests/acquisition', { headers: headersFor(profileId), json: { modes } }),
+  );
+  assertOk(payload, 'Could not save the approval settings');
+  return normalizeModes(payload.modes);
+}
+
+/**
+ * the pick queue: music and book asks from the music side, movies and TV
+ * from the video side. a side that refuses (a moderator without video, a
+ * side that's off) just adds nothing.
+ */
+export async function fetchAwaitingQueue(profileId: number): Promise<AwaitingQueue> {
+  const [main, video] = await Promise.allSettled([
+    readJson<Ok & { music?: AwaitingMusicGroup[]; media?: AwaitingMedia[] }>(
+      apiClient.get('requests/awaiting', { headers: headersFor(profileId) }),
+    ),
+    readJson<Ok & { titles?: AwaitingVideoTitle[] }>(
+      apiClient.get('video/requests/awaiting', { headers: headersFor(profileId) }),
+    ),
+  ]);
+  const music = main.status === 'fulfilled' && main.value.success ? main.value : null;
+  const titles = video.status === 'fulfilled' && video.value.success ? video.value.titles : null;
+  return {
+    music: Array.isArray(music?.music) ? music.music : [],
+    media: Array.isArray(music?.media) ? music.media : [],
+    video: Array.isArray(titles) ? titles : [],
+  };
+}
+
+/** a held music ask goes to the automatic pass after all. */
+export async function releaseMusicRequestToAuto(
+  profileId: number,
+  body: { profile_id: number; key: string },
+): Promise<void> {
+  const payload = await readJson<Ok>(
+    apiClient.post('requests/music/awaiting/auto', { headers: headersFor(profileId), json: body }),
+  );
+  assertOk(payload, 'Could not hand that request to the automatic download');
+}
+
+/** a release was grabbed for a held book: the request moves on. */
+export async function markMediaRequestPicked(profileId: number, requestId: number): Promise<void> {
+  const payload = await readJson<Ok>(
+    apiClient.post(`requests/media/${requestId}/picked`, { headers: headersFor(profileId) }),
+  );
+  assertOk(payload, 'The release is on its way, but the request didn’t update');
+}
+
+export async function releaseMediaRequestToAuto(
+  profileId: number,
+  requestId: number,
+): Promise<void> {
+  const payload = await readJson<Ok>(
+    apiClient.post(`requests/media/${requestId}/auto`, { headers: headersFor(profileId) }),
+  );
+  assertOk(payload, 'Could not hand that request to the automatic download');
+}
+
+export async function releaseVideoRequestToAuto(
+  profileId: number,
+  requestId: number,
+): Promise<void> {
+  const payload = await readJson<Ok>(
+    apiClient.post(`video/requests/${requestId}/auto`, { headers: headersFor(profileId) }),
+  );
+  assertOk(payload, 'Could not hand that request to the automatic download');
 }

@@ -678,6 +678,48 @@ def _extid_match_is_owned(wanted_album: str, library_album: str, allow_duplicate
     return _albums_likely_match(wanted_album, library_album)
 
 
+def _watchlist_release_statuses(artist, source, source_artist_id, source_provider):
+    """#2175: (allowed statuses, {group id: statuses} or None) for one artist.
+
+    Only a MusicBrainz catalogue has statuses. Any other source, or every
+    status allowed, asks nothing and keeps nothing out."""
+    from core.release_statuses import effective_statuses, fetch_group_statuses, is_restrictive
+    try:
+        from core.settings import config_manager
+    except Exception:  # noqa: BLE001
+        config_manager = None
+    allowed = effective_statuses(artist, config_manager)
+    if not is_restrictive(allowed):
+        return allowed, None
+    if str(source or source_provider or '').strip().lower() != 'musicbrainz':
+        return allowed, None
+    mbid = (source_artist_id if str(source_provider or source or '').strip().lower() == 'musicbrainz'
+            else None) or getattr(artist, 'musicbrainz_artist_id', None)
+    if not mbid:
+        return allowed, None
+    return allowed, fetch_group_statuses(str(mbid))
+
+
+def _album_statuses_pass(album, album_data, group_statuses, allowed) -> bool:
+    """Does this album's release group get through the status filter? A
+    group the lookup doesn't know passes."""
+    if not group_statuses:
+        return True
+    from core.release_statuses import statuses_pass
+
+    def read(obj, key):
+        if isinstance(obj, dict):
+            return obj.get(key)
+        return getattr(obj, key, None)
+
+    for obj in (album, album_data):
+        for key in ('release_group_id', 'id'):
+            value = str(read(obj, key) or '').strip().lower()
+            if value and value in group_statuses:
+                return statuses_pass(group_statuses[value], allowed)
+    return True
+
+
 def _resolve_edition_preference(explicit_value=None) -> str:
     """Validate a ``watchlist.edition_preference`` value.
 
@@ -775,6 +817,20 @@ def _edition_explicit_flag(album_data, tracks) -> bool:
                 return True
     except Exception:
         return False
+    return False
+
+
+_WATCHLIST_ID_COLUMNS = ('spotify_artist_id', 'itunes_artist_id', 'deezer_artist_id',
+                         'discogs_artist_id', 'musicbrainz_artist_id')
+
+
+def _watchlist_ids_disagree(first, second) -> bool:
+    """two watchlist rows that both hold an id from one source, and not the
+    same one: two artists, whatever their names say"""
+    for col in _WATCHLIST_ID_COLUMNS:
+        a, b = str(first[col] or '').strip(), str(second[col] or '').strip()
+        if a and b and a != b:
+            return True
     return False
 
 
@@ -1280,8 +1336,136 @@ class WatchlistScanner:
                 logger.debug("Could not cache %s artist ID for %s: %s", source, artist_name, e)
         return found_id
 
+    def repair_watchlist_duplicates_and_ids(self, profile_id: int) -> dict:
+        """Self-healing repair for watchlist_artists (#2274, #2275):
+        1. Fix rows where an iTunes artist ID was mistakenly copied into deezer_artist_id
+           (deezer_artist_id == itunes_artist_id), pulling the verified Deezer ID from
+           lib2_artists if available and clearing stale Deezer image URLs so artwork
+           re-resolves for the right artist.
+        2. Merge duplicate watchlist_artists rows sharing the same normalized artist name
+           for this profile, coalescing provider IDs onto the kept row.
+        """
+        stats = {"fixed_ids": 0, "cleared_artwork": 0, "merged_duplicates": 0}
+        try:
+            conn = self.database._get_connection()
+            cursor = conn.cursor()
+
+            # 1. Repair bogus deezer_artist_id == itunes_artist_id rows (#2274, #2275)
+            cursor.execute("""
+                SELECT id, artist_name, itunes_artist_id, deezer_artist_id, image_url
+                FROM watchlist_artists
+                WHERE profile_id = ?
+                  AND itunes_artist_id IS NOT NULL AND TRIM(itunes_artist_id) != ''
+                  AND deezer_artist_id IS NOT NULL AND TRIM(deezer_artist_id) = TRIM(itunes_artist_id)
+            """, (profile_id,))
+            bad_id_rows = cursor.fetchall()
+            for row in bad_id_rows:
+                bad_id = str(row['deezer_artist_id']).strip()
+                new_deezer_id = None
+                # Try to recover the verified Deezer ID from lib2_artists
+                try:
+                    cursor.execute("""
+                        SELECT external_ids, image_url FROM lib2_artists
+                        WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))
+                        LIMIT 1
+                    """, (row['artist_name'],))
+                    lib_row = cursor.fetchone()
+                    if lib_row and lib_row['external_ids']:
+                        import json as _json
+                        ext = _json.loads(lib_row['external_ids']) if isinstance(lib_row['external_ids'], str) else lib_row['external_ids']
+                        if isinstance(ext, dict):
+                            cand_dz = str(ext.get('deezer') or '').strip()
+                            if cand_dz and cand_dz != bad_id:
+                                new_deezer_id = cand_dz
+                except Exception:  # noqa: BLE001, S110 - no replacement id found: the bad one is still cleared
+                    pass
+                cur_img = str(row['image_url'] or '')
+                clear_img = bool(
+                    cur_img and (f"/artist/{bad_id}/" in cur_img or "dzcdn.net" in cur_img or "api.deezer.com" in cur_img)
+                )
+                if clear_img:
+                    cursor.execute(
+                        "UPDATE watchlist_artists SET deezer_artist_id = ?, image_url = NULL WHERE id = ?",
+                        (new_deezer_id, row['id']),
+                    )
+                    stats["cleared_artwork"] += 1
+                else:
+                    cursor.execute(
+                        "UPDATE watchlist_artists SET deezer_artist_id = ? WHERE id = ?",
+                        (new_deezer_id, row['id']),
+                    )
+                stats["fixed_ids"] += 1
+
+            # 2. Deduplicate watchlist_artists by normalized artist_name (#2274)
+            cursor.execute("""
+                SELECT id, artist_name, spotify_artist_id, itunes_artist_id,
+                       deezer_artist_id, discogs_artist_id, musicbrainz_artist_id, image_url
+                FROM watchlist_artists
+                WHERE profile_id = ?
+                ORDER BY id ASC
+            """, (profile_id,))
+            all_rows = cursor.fetchall()
+            by_name: dict = {}
+            for r in all_rows:
+                key = " ".join(str(r['artist_name'] or '').strip().casefold().split())
+                if not key:
+                    continue
+                by_name.setdefault(key, []).append(r)
+
+            id_cols = (
+                'spotify_artist_id', 'itunes_artist_id', 'deezer_artist_id',
+                'discogs_artist_id', 'musicbrainz_artist_id', 'image_url',
+            )
+            for group in by_name.values():
+                if len(group) < 2:
+                    continue
+                keeper = group[0]
+                merged_vals = {col: keeper[col] for col in id_cols}
+                # a name is not an identity: two artists can share one (the
+                # american Nirvana and the british one). rows are the same
+                # artist only while none of their ids disagree. the first cut
+                # of this merged on the name alone and deleted the rest, so a
+                # second artist of the same name was taken off the watchlist
+                # and its ids poured into the first.
+                same_artist = []
+                for dup in group[1:]:
+                    if _watchlist_ids_disagree(merged_vals, dup):
+                        continue
+                    same_artist.append(dup)
+                    for col in id_cols:
+                        if not merged_vals[col] and dup[col]:
+                            merged_vals[col] = dup[col]
+                if not same_artist:
+                    continue
+                group = [keeper] + same_artist
+                cursor.execute("""
+                    UPDATE watchlist_artists
+                    SET spotify_artist_id = ?, itunes_artist_id = ?, deezer_artist_id = ?,
+                        discogs_artist_id = ?, musicbrainz_artist_id = ?, image_url = ?
+                    WHERE id = ?
+                """, (
+                    merged_vals['spotify_artist_id'], merged_vals['itunes_artist_id'],
+                    merged_vals['deezer_artist_id'], merged_vals['discogs_artist_id'],
+                    merged_vals['musicbrainz_artist_id'], merged_vals['image_url'],
+                    keeper['id'],
+                ))
+                for dup in group[1:]:
+                    cursor.execute("DELETE FROM watchlist_artists WHERE id = ?", (dup['id'],))
+                    stats["merged_duplicates"] += 1
+
+            if any(stats.values()):
+                conn.commit()
+                logger.info(
+                    "Repaired watchlist for profile %s: fixed_ids=%s cleared_artwork=%s merged_duplicates=%s",
+                    profile_id, stats["fixed_ids"], stats["cleared_artwork"], stats["merged_duplicates"],
+                )
+        except Exception as e:
+            logger.debug("Watchlist repair skipped for profile %s: %s", profile_id, e)
+        return stats
+
     def backfill_watchlist_artist_images(self, profile_id: int) -> int:
         """Backfill missing watchlist artist images using cached metadata and existing album art."""
+        self.repair_watchlist_duplicates_and_ids(profile_id)
         try:
             conn = self.database._get_connection()
             cursor = conn.cursor()
@@ -1316,8 +1500,12 @@ class WatchlistScanner:
                 if cr and usable_image_url(cr['image_url']):
                     img = cr['image_url']
 
-                # 2. Deezer direct URL (no API call needed)
-                if not img and row['deezer_artist_id']:
+                # 2. Deezer direct URL (skip if deezer_artist_id collides with itunes_artist_id, #2275)
+                if (
+                    not img
+                    and row['deezer_artist_id']
+                    and str(row['deezer_artist_id']).strip() != str(row['itunes_artist_id'] or '').strip()
+                ):
                     img = f"https://api.deezer.com/artist/{row['deezer_artist_id']}/image?size=big"
 
                 # 3. Deezer ID from cache (artist may have a Deezer match we haven't stored on watchlist)
@@ -1915,6 +2103,13 @@ class WatchlistScanner:
                 # and only it runs the normal per-track flow. For "all" each
                 # unit is one album, so the loop below behaves exactly as
                 # before.
+                # #2175: the MusicBrainz statuses this artist lets through, and
+                # each release group's, asked once per artist and only when a
+                # status is kept out and the catalogue is MusicBrainz's
+                allowed_statuses, group_statuses = _watchlist_release_statuses(
+                    artist, source if not isinstance(discography_result, list) else None,
+                    source_artist_id, source_provider)
+
                 if edition_preference != EDITION_PREFERENCE_ALL:
                     album_units = _group_albums_by_edition(albums)
                 else:
@@ -2008,6 +2203,12 @@ class WatchlistScanner:
                                 getattr(artist, 'include_albums', True),
                                 getattr(artist, 'include_eps', True),
                                 getattr(artist, 'include_singles', True))
+                            continue
+                        if not _album_statuses_pass(album, album_data, group_statuses,
+                                                    allowed_statuses):
+                            logger.info(
+                                "Skipping '%s': MusicBrainz release status filter (%s) excludes it",
+                                album_name, ', '.join(allowed_statuses or ()))
                             continue
 
                         if edition_preference == EDITION_PREFERENCE_ONE_STANDARD and \
@@ -2141,6 +2342,9 @@ class WatchlistScanner:
                     artist_index=absolute_index,
                     total_artists=total_artists_override if total_artists_override is not None else len(watchlist_artists),
                     profile_id=profile_id,
+                    # whose watch row this artist is (an all-profiles scan
+                    # walks everyone's)
+                    owner_profile_id=getattr(artist, 'profile_id', None) or profile_id,
                     albums_checked=albums_processed,
                     new_tracks_found=artist_new_tracks,
                     tracks_added_to_wishlist=artist_added_tracks,
@@ -3224,6 +3428,17 @@ class WatchlistScanner:
                 'is_local': False
             }
             
+            # the artist's owner may still have this (#2166): music on, not
+            # Can't request, the watchlist part on, explicit hidden when it
+            # hides explicit, and a quality they may use. an ask-first owner's
+            # row is a request (the scheduled run only takes approved ones).
+            owner_id = getattr(watchlist_artist, 'profile_id', 1)
+            want = self._owner_gate(owner_id).want(
+                'music', explicit=track_explicit, part='music.watchlist', title=track_name,
+                quality_id=getattr(watchlist_artist, 'quality_profile_id', None))
+            if want.skip:
+                return False
+
             # Add to wishlist with watchlist context (scoped to artist's profile)
             success = self.database.add_to_wishlist(
                 spotify_track_data=spotify_track_data,
@@ -3237,13 +3452,12 @@ class WatchlistScanner:
                     # #831: groups wishlist rows by the scan run that added them.
                     'scan_run_id': scan_run_id or '',
                 },
-                profile_id=getattr(watchlist_artist, 'profile_id', 1),
+                profile_id=owner_id,
                 # SYNC-01: the watchlist artist's quality profile, not the
                 # global default. The user profile above says WHOSE intent this
                 # is; this says which quality bar the download has to clear.
-                quality_profile_id=getattr(
-                    watchlist_artist, 'quality_profile_id', None
-                ),
+                # resolved for the owner: one they may not use is their default
+                quality_profile_id=want.quality_profile_id,
             )
             
             if success:
@@ -3258,6 +3472,22 @@ class WatchlistScanner:
             logger.error(f"Error adding track to wishlist: {track_name}: {e}")
             return False
     
+    def _owner_gate(self, owner_id):
+        """one OwnerGate per owner for this scanner (it re-reads the owner's
+        rights every minute), over the scanner's own database."""
+        from core.owner_gate import OwnerGate
+        gates = self.__dict__.setdefault('_owner_gates', {})
+        key = owner_id if owner_id is not None else 1
+        gate = gates.get(key)
+        if gate is None:
+            def _ctx(pid):
+                from core.permission_store import context_for
+                return context_for(self.database, pid)
+            gate = gates[key] = OwnerGate(key, load_context=_ctx,
+                                          load_profile=lambda pid: self.database.get_profile(pid),
+                                          label='watchlist scan')
+        return gate
+
     def update_artist_scan_timestamp(self, artist) -> bool:
         """Update the last scan timestamp for an artist.
 
@@ -5041,12 +5271,19 @@ class WatchlistScanner:
             # Recency-weighted seeds: lifetime top artists, boosted by recent (30d) plays.
             lifetime = [s for s in (self.database.get_top_artists('all', 30, profile_id=profile_id) or [])
                         if s.get('name')]
-            if not lifetime:
-                return
             recent_rows = self.database.get_top_artists('30d', 50, profile_id=profile_id) or []
-            recent_counts = {r['name'].lower(): r.get('play_count', 0)
+            # (names as written: an artist you play only this month becomes a
+            # seed by this name, and it is the one shown in "because you like")
+            recent_counts = {r['name']: r.get('play_count', 0)
                              for r in recent_rows if r.get('name')}
-            seeds = build_recency_weighted_seeds(lifetime, recent_counts)
+            # liked songs, server stars and watchlist adds seed too, so a
+            # liked artist's neighbours turn up even before you play them much
+            from core.discovery.favorite_seeds import favorite_artist_units
+            seeds = build_recency_weighted_seeds(
+                lifetime, recent_counts,
+                favorites=favorite_artist_units(self.database, profile_id))
+            if not seeds:
+                return
             seed_names = {s['name'].lower() for s in seeds}
 
             # Owned-artist set (for exclusion) + the seeds' SOURCE ids (similar_artists.source_artist_id
@@ -5385,6 +5622,7 @@ class WatchlistScanner:
 
             logger.info(f"Last.fm radio: generating playlists for {len(top_tracks)} top tracks")
 
+            from core import lastfm_fallback
             from core.lastfm_client import LastFMClient
             from core.listenbrainz_manager import ListenBrainzManager
 
@@ -5400,15 +5638,19 @@ class WatchlistScanner:
                     continue
 
                 try:
-                    similar = client.get_similar_tracks(artist_name, track_name, limit=25)
+                    # last.fm first; deezer's artist radio when the key is
+                    # refused (pro only from 1 december 2026) or it has nothing
+                    similar, similar_source = lastfm_fallback.similar_tracks(
+                        artist_name, track_name, limit=25, lastfm=client)
                     if not similar:
                         logger.info(f"Last.fm radio: no similar tracks for '{artist_name} - {track_name}'")
                         continue
 
-                    playlist_mbid = lb_manager.save_lastfm_radio_playlist(track_name, artist_name, similar)
+                    playlist_mbid = lb_manager.save_lastfm_radio_playlist(
+                        track_name, artist_name, similar, source=similar_source)
                     logger.info(
                         f"Last.fm radio: saved '{track_name}' by '{artist_name}' "
-                        f"→ {playlist_mbid} ({len(similar)} tracks)"
+                        f"→ {playlist_mbid} ({len(similar)} tracks from {similar_source})"
                     )
                     generated += 1
                 except Exception as track_err:

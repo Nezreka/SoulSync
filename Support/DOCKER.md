@@ -37,11 +37,11 @@ On first run, SoulSync will create a default config. You need to update it with 
    - **Spotify**: Client ID and Client Secret
    - **Soulseek**: slskd URL (`http://host.docker.internal:5030`) and API key
    - **Media Server**: Plex/Jellyfin connection details
-   - **Paths**: Download and transfer folder paths
+   - **Paths**: Download folder and music library folder
 
 ### 2. Path Configuration
 
-**Important**: Your download and transfer paths must be accessible to the Docker container.
+**Important**: Your download folder and music library folder must be accessible to the Docker container.
 
 #### Default Setup (E: Drive)
 The docker-compose.yml mounts the E: drive by default:
@@ -52,7 +52,7 @@ volumes:
 
 If your paths are on E: drive, you can use paths like:
 - Download Path: `E:/Music/Downloads`  
-- Transfer Path: `E:/Music/Library`
+- Music Library Folder: `E:/Music/Library`
 
 #### Other Drives
 If your music folders are on different drives, update docker-compose.yml:
@@ -126,7 +126,7 @@ docker-compose logs
 - Check firewall isn't blocking ports 8008, 8888, 8889
 
 ### Files Not Processing
-- Verify download/transfer paths are mounted correctly
+- Verify the download and music library folders are mounted correctly
 - Check paths use correct drive letters (E:/, C:/, etc.)
 - Ensure directories exist and have proper permissions
 

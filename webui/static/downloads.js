@@ -595,12 +595,14 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
                         </label>`}
                         ${downloadModalQualityProfileSelectHtml(virtualPlaylistId)}
                     </div>
+                    <p class="music-get-off-note" role="note">Getting music isn't part of your profile. You can still see what's here and what you already have. Ask your admin if you'd like it.</p>
                     <button class="download-control-btn primary" id="begin-analysis-btn-${virtualPlaylistId}" onclick="startMissingTracksProcess('${virtualPlaylistId}')">
                         Begin Analysis
                     </button>
-                    <button class="download-control-btn" id="add-to-wishlist-btn-${virtualPlaylistId}" onclick="addModalTracksToWishlist('${virtualPlaylistId}')" style="background-color: #9333ea; color: white;">
+                    <button class="download-control-btn" data-request-action id="add-to-wishlist-btn-${virtualPlaylistId}" onclick="addModalTracksToWishlist('${virtualPlaylistId}')" style="background-color: #9333ea; color: white;">
                         ${typeof wishlistAddLabel === 'function' ? wishlistAddLabel() : 'Add to Wishlist'}
                     </button>
+                    <span class="music-asks-left" data-asks-left aria-live="polite"></span>
                     <button class="download-control-btn danger" id="cancel-all-btn-${virtualPlaylistId}" onclick="cancelAllOperations('${virtualPlaylistId}')" style="display: none;">
                         Cancel All
                     </button>
@@ -618,6 +620,8 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
     applyProgressiveTrackRendering(virtualPlaylistId, spotifyTracks.length);
     // Quality Profile selector for this acquisition (P1-01).
     void hydrateDownloadModalQualityProfileSelect(virtualPlaylistId);
+    // a profile that asks first sees what's left of its limit (#2166)
+    if (typeof window.fillMusicAsksLeft === 'function') window.fillMusicAsksLeft(modal);
     modal.style.display = 'flex';
     hideLoadingOverlay();
 }
@@ -1549,6 +1553,7 @@ async function openDownloadMissingWishlistModal(category = null, selectedTrackId
                             <input type="checkbox" id="force-download-all-${playlistId}">
                             <span>Force Download All</span>
                         </label>
+                        ${typeof downloadModalLidarrWholeAlbumHtml === 'function' ? downloadModalLidarrWholeAlbumHtml(playlistId) : ''}
                     </div>
                     <button class="download-control-btn primary" id="begin-analysis-btn-${playlistId}" onclick="startWishlistMissingTracksProcess('${playlistId}')">
                         Begin Analysis
@@ -1571,6 +1576,9 @@ async function openDownloadMissingWishlistModal(category = null, selectedTrackId
     `;
 
     applyProgressiveTrackRendering(playlistId, tracks.length);
+    if (typeof hydrateDownloadModalLidarrWholeAlbum === 'function') {
+        hydrateDownloadModalLidarrWholeAlbum(playlistId);
+    }
     modal.style.display = 'flex';
     hideLoadingOverlay();
     WishlistModalState.setVisible(); // Track that new wishlist modal is now visible
@@ -1608,7 +1616,11 @@ async function startWishlistMissingTracksProcess(playlistId) {
             body: JSON.stringify({
                 force_download_all: forceDownloadAll,
                 category: window.currentWishlistCategory,  // Keep for backward compat
-                track_ids: trackIds  // NEW: Send exact tracks to process
+                track_ids: trackIds,  // NEW: Send exact tracks to process
+                // "Whole album via Lidarr"; undefined (toggle hidden) = server default
+                lidarr_whole_album: (typeof getDownloadModalLidarrWholeAlbum === 'function')
+                    ? getDownloadModalLidarrWholeAlbum(playlistId)
+                    : undefined,
             })
         });
 
@@ -1886,6 +1898,10 @@ async function startMissingTracksProcess(playlistId) {
             // server's own order: mirror assignment, then the global default —
             // i.e. exactly the pre-selector behaviour.
             quality_profile_id: getDownloadModalQualityProfileId(playlistId),
+            // "Whole album via Lidarr"; undefined (toggle hidden) = server default
+            lidarr_whole_album: (typeof getDownloadModalLidarrWholeAlbum === 'function')
+                ? getDownloadModalLidarrWholeAlbum(playlistId)
+                : undefined,
             // Provider hint so a mirror lookup can't be defeated by two providers
             // sharing an upstream playlist id (P2-01). Only sent when the ref
             // actually identifies a provider: the server treats an exact source
@@ -4924,6 +4940,21 @@ const _notifState = {
     clockTimer: null,
 };
 
+// ── who is looking ───────────────────────────────────────────────────────────
+// the panel is everyone's: their own notes, their own downloads, their own
+// automations and imports. what the server is doing (system numbers, health,
+// library scans, repair, the wishlist run, video jobs, other people's syncs)
+// is the admins' (#2170). the server refuses those feeds to a member too; this
+// keeps the panel from asking, and from drawing frames the socket still sends.
+// the same rule the server activity button uses (shell/server-activity.ts).
+function _notifViewerIsAdmin() {
+    let ctx = null;
+    try {
+        ctx = typeof getCurrentProfileContext === 'function' ? getCurrentProfileContext() : null;
+    } catch (e) { ctx = null; }
+    return !!ctx && (ctx.isAdmin === true || ctx.profileId === 1);
+}
+
 // ── system status in the tray ────────────────────────────────────────────
 // The dashboard's System Stats strip retired (Boulder: telemetry belongs
 // where you act on it, not as a home-page section). The live numbers moved
@@ -4942,14 +4973,15 @@ window.addEventListener('ss:dashboard-stats', function (e) {
 function _updateNotifDlBadge() {
     const el = document.getElementById('notif-bell-dl');
     if (!el) return;
-    const n = (_notifState.sysStats && _notifState.sysStats.active_downloads) || 0;
+    // the server-wide download count is an admin's number
+    const n = (_notifViewerIsAdmin() && _notifState.sysStats && _notifState.sysStats.active_downloads) || 0;
     el.textContent = n > 99 ? '99+' : n;
     el.style.display = n > 0 ? '' : 'none';
 }
 
 function _notifSysHTML() {
     const s = _notifState.sysStats;
-    if (!s) return '';
+    if (!s || !_notifViewerIsAdmin()) return '';
     const bits = [];
     const dl = s.active_downloads || 0;
     bits.push('<button type="button" class="notif-sys-item notif-sys-item--link" ' +
@@ -4966,7 +4998,43 @@ function _notifSysHTML() {
     return bits.join('');
 }
 
+// ── whose panel this is ──────────────────────────────────────────────────────
+// the panel's memory (notes, the system numbers) belongs to the profile it was
+// filled for. switching profile without a reload used to leave the last
+// profile's notes and an admin's uptime/memory footer standing in a member's
+// panel (#2191): a new profile starts it over, from its own journal.
+let _notifProfileId;
+window.addEventListener('ss:webui-profile-context-changed', function () {
+    let ctx = null;
+    try {
+        ctx = typeof getCurrentProfileContext === 'function' ? getCurrentProfileContext() : null;
+    } catch (e) { ctx = null; }
+    const id = ctx ? ctx.profileId : null;
+    if (_notifProfileId === undefined) { _notifProfileId = id; return; }
+    if (id === _notifProfileId) return;
+    _notifProfileId = id;
+    _notifResetForProfile();
+});
+
+function _notifResetForProfile() {
+    _notifState.history = [];
+    _notifState.unreadCount = 0;
+    _notifState.pending = [];
+    _notifState.sysStats = null;
+    _notifState.seeded = false;
+    _notifState.openFamilies = {};
+    try { _notifHealth = null; } catch (e) { /* not set up yet */ }
+    _updateNotifBadge();
+    _updateNotifDlBadge();
+    const host = document.querySelector('[data-notif-sys]');
+    if (host) host.innerHTML = _notifSysHTML();
+    if (_notifState.panelOpen) _renderNotifFeed();
+    _seedNotifPanelFromJournal();
+    _seedNotifSys();
+}
+
 function _seedNotifSys() {
+    if (!_notifViewerIsAdmin()) return;
     fetch('/api/system/stats').then(r => r.ok ? r.json() : null).then(data => {
         if (!data) return;
         _notifState.sysStats = data;
@@ -5590,14 +5658,43 @@ function _listenbrainzImportActiveHTML() {
 }
 
 function _musicTasksActive() {
+    if (!_notifViewerIsAdmin()) return _memberTasksActive();
     return _musicAutomationActive() || _musicRepairActive() || _musicWatchlistActive()
         || _musicMediaScanActive() || _musicWishlistActive() || _musicSyncActive()
         || _lastfmImportActive() || _listenbrainzImportActive();
 }
 
 function _musicActiveHTML() {
+    if (!_notifViewerIsAdmin()) return _memberActiveHTML();
     return _musicAutomationActiveHTML() + _musicSyncActiveHTML() + _musicWishlistActiveHTML()
         + _lastfmImportActiveHTML() + _listenbrainzImportActiveHTML() + _musicWatchlistActiveHTML() + _musicMediaScanActiveHTML() + _musicRepairActiveHTML();
+}
+
+// a member's Running now (#2170): only what is theirs. their own automations
+// (the server sends a member nothing else), the downloads this page started,
+// and their listening imports. the unscoped sync pulse lists everyone's
+// playlists, so a member's sync card reads their own downloads only.
+function _memberSyncActiveHTML() {
+    const sources = _activeMusicDownloads();
+    if (!sources.length) return '';
+    const first = sources[0];
+    const title = sources.length === 1
+        ? `Downloading ${_syncProcessName(first)}`
+        : `Downloading ${sources.length} playlists`;
+    const line = sources.length === 1
+        ? _syncProcessLine(first)
+        : sources.map(p => _escToast(_syncProcessName(p))).slice(0, 3).join(', ');
+    return _taskCardHTML(title, _syncProcessProgress(first), line, '', _notifActionHTML('Open Downloads', 'active-downloads'));
+}
+
+function _memberTasksActive() {
+    return _musicAutomationActive() || _activeMusicDownloads().length > 0
+        || _lastfmImportActive() || _listenbrainzImportActive();
+}
+
+function _memberActiveHTML() {
+    return _musicAutomationActiveHTML() + _memberSyncActiveHTML()
+        + _lastfmImportActiveHTML() + _listenbrainzImportActiveHTML();
 }
 
 function _seedMusicAutomationTask() {
@@ -5646,10 +5743,15 @@ function _seedListenbrainzImportTask() {
         .catch(() => {});
 }
 
+// the server's own jobs: an admin's to watch (#2170)
+function _adminTasksActive() {
+    return _notifViewerIsAdmin()
+        && (_overlayTaskActive() || _colSyncTaskActive() || _colArtTaskActive() || _videoBulkTaskActive());
+}
+
 function _updateOverlayBell() {
     const btn = document.getElementById('notif-bell-btn');
-    if (btn) btn.classList.toggle('notif-bell-working',
-        _overlayTaskActive() || _colSyncTaskActive() || _colArtTaskActive() || _videoBulkTaskActive() || _musicTasksActive());
+    if (btn) btn.classList.toggle('notif-bell-working', _adminTasksActive() || _musicTasksActive());
     _ensureTaskPolling();
 }
 
@@ -5658,20 +5760,9 @@ function _updateOverlayBell() {
 // strand an Active card in its last "running" state. Stops itself when idle.
 let _taskPollTimer = null;
 function _ensureTaskPolling() {
-    const active = _overlayTaskActive() || _colSyncTaskActive() || _colArtTaskActive() || _videoBulkTaskActive() || _musicTasksActive();
+    const active = _adminTasksActive() || _musicTasksActive();
     if (active && !_taskPollTimer) {
-        _taskPollTimer = setInterval(() => {
-            _seedOverlayTask();
-            _seedCollectionSyncTask();
-            _seedCollectionArtTask();
-            _seedVideoBulkTask();
-            _seedMusicAutomationTask();
-            _seedMusicDownloadTask();
-            _seedMusicRepairTask();
-            _seedMusicMediaScanTask();
-            _seedLastfmImportTask();
-            _seedListenbrainzImportTask();
-        }, 12000);
+        _taskPollTimer = setInterval(_seedNotifTasks, 12000);
     } else if (!active && _taskPollTimer) {
         clearInterval(_taskPollTimer);
         _taskPollTimer = null;
@@ -5856,6 +5947,9 @@ function _patchOverlayActive() {
 
 // opts.journal === false skips the server journal: for notes the server
 // already logged itself (profile:notify)
+// opts.history === false keeps the note out of the panel and the journal
+// altogether: a refusal ("isn't part of your profile") or a progress line
+// ("Fetching full discography...") is said once, not kept (#2191)
 // opts.action = { label, page } or { label, run } gives the note one thing to
 // do, on the toast and in the panel
 const _TOAST_MAX = 3;                       // more than this and the bell counts, the screen does not fill
@@ -5870,16 +5964,20 @@ function showToast(message, type = 'success', helpSection = null, opts = null) {
     _recentToastKeys.set(toastKey, now);
     for (const [k, t] of _recentToastKeys) { if (now - t > 10000) _recentToastKeys.delete(k); }
 
-    // Add to notification history
+    // Add to notification history. opts.history === false is a toast that
+    // passes (a refusal, a progress line): shown, never kept, never journaled
+    // (#2191)
     const action = opts && opts.action && opts.action.label ? opts.action : null;
-    const entry = { id: now + Math.random(), message, type, helpSection, action, timestamp: now, read: false };
-    _notifState.history.unshift(entry);
-    if (_notifState.history.length > _notifState.maxHistory) _notifState.history.pop();
-    _notifState.unreadCount++;
-    _updateNotifBadge();
-    if (!opts || opts.journal !== false) _queueNotifJournal(type, message);
-    // the panel is open: the note joins it, new, without a reopen
-    if (_notifState.panelOpen) _renderNotifFeed();
+    if (!opts || opts.history !== false) {
+        const entry = { id: now + Math.random(), message, type, helpSection, action, timestamp: now, read: false };
+        _notifState.history.unshift(entry);
+        if (_notifState.history.length > _notifState.maxHistory) _notifState.history.pop();
+        _notifState.unreadCount++;
+        _updateNotifBadge();
+        if (!opts || opts.journal !== false) _queueNotifJournal(type, message);
+        // the panel is open: the note joins it, new, without a reopen
+        if (_notifState.panelOpen) _renderNotifFeed();
+    }
 
     const container = document.getElementById('toast-container');
     if (!container) return;
@@ -6036,7 +6134,7 @@ setTimeout(_seedNotifPanelFromJournal, 1800);
 let _notifHealth = null;
 
 function _notifHealthHTML() {
-    if (!_notifHealth) return '';
+    if (!_notifHealth || !_notifViewerIsAdmin()) return '';
     const checks = _notifHealth.checks || [];
     if (!checks.length) return '';
     const n = s => checks.filter(c => c.status === s).length;
@@ -6052,6 +6150,7 @@ function _notifHealthHTML() {
 }
 
 function _seedNotifHealth() {
+    if (!_notifViewerIsAdmin()) return Promise.resolve();
     return fetch('/api/video/health', { headers: { Accept: 'application/json' } })
         .then(r => (r.ok ? r.json() : null))
         .then(h => {
@@ -6144,10 +6243,28 @@ function toggleNotifPanel() {
 // a busy night does not push the notes off the panel.
 const _NOTIF_JOBS_SHOWN = 3;
 
+// what Running now asks the server for. a member asks for their own things
+// only: the server's jobs answer an admin alone (#2170)
+function _seedNotifTasks() {
+    _seedMusicAutomationTask();
+    _seedMusicDownloadTask();
+    _seedLastfmImportTask();
+    _seedListenbrainzImportTask();
+    if (!_notifViewerIsAdmin()) return;
+    _seedOverlayTask();
+    _seedCollectionSyncTask();
+    _seedCollectionArtTask();
+    _seedVideoBulkTask();
+    _seedMusicRepairTask();
+    _seedMusicMediaScanTask();
+}
+
 function _renderActiveHost() {
     const host = document.querySelector('#notif-panel [data-notif-active-host]');
     if (!host) return;
-    const cards = _musicActiveHTML() + _overlayActiveHTML() + _colSyncActiveHTML() + _colArtActiveHTML() + _videoBulkActiveHTML();
+    const cards = _musicActiveHTML() + (_notifViewerIsAdmin()
+        ? _overlayActiveHTML() + _colSyncActiveHTML() + _colArtActiveHTML() + _videoBulkActiveHTML()
+        : '');
     const scratch = document.createElement('div');
     scratch.innerHTML = cards;
     const jobs = Array.from(scratch.children);
@@ -6202,15 +6319,7 @@ function _openNotifPanel() {
     _renderNotifFeed();
     _seedNotifHealth();   // system health symbols (see _notifHealthHTML)
     _seedNotifSys();      // fresh system numbers even when the socket is down
-    _seedOverlayTask();   // refresh the Active cards from the server on open (socket keeps them live after)
-    _seedCollectionSyncTask();
-    _seedCollectionArtTask();
-    _seedVideoBulkTask();
-    _seedMusicAutomationTask();
-    _seedMusicDownloadTask();
-    _seedMusicRepairTask();
-    _seedMusicMediaScanTask();
-    _seedLastfmImportTask();
+    _seedNotifTasks();    // refresh the Active cards from the server on open (socket keeps them live after)
 
     // Position above the bell button
     if (btn) {
@@ -6330,7 +6439,9 @@ function _notifEntriesHTML() {
         : _notifState.history.filter(e => e.type === _notifState.filter);
     if (entries.length === 0) {
         return _notifState.filter === 'all'
-            ? '<div class="notif-panel-empty"><b>You are all caught up</b>Downloads, scans and jobs leave their notes here.</div>'
+            ? (_notifViewerIsAdmin()
+                ? '<div class="notif-panel-empty"><b>You are all caught up</b>Downloads, scans and jobs leave their notes here.</div>'
+                : '<div class="notif-panel-empty"><b>You are all caught up</b>Your downloads and requests leave their notes here.</div>')
             : '<div class="notif-panel-empty"><b>Nothing with this filter</b>Pick All to see every note.</div>';
     }
     const today = _notifDayStart(Date.now());
@@ -6669,134 +6780,9 @@ const _gsState = {
 // Shared source-picker controller — built on DOM-ready in `_doInit`.
 let _gsController = null;
 
-(function initGlobalSearch() {
-    // Defer init until DOM is ready
-    const _doInit = () => {
-        const bar = document.getElementById('gsearch-bar');
-        const input = document.getElementById('gsearch-input');
-        const results = document.getElementById('gsearch-results');
-        if (!input || !bar || !results) return;
-
-        // Build the stable results-panel structure up front so the controller
-        // has a sourceRow element to render into on its first _notify().
-        results.innerHTML = `
-            <div class="gsearch-source-row" id="gsearch-source-row"></div>
-            <div class="gsearch-fallback-banner hidden" id="gsearch-fallback-banner"></div>
-            <div id="gsearch-body"></div>
-        `;
-
-        _gsController = createSearchController({
-            sourceRowElement: document.getElementById('gsearch-source-row'),
-            iconClassPrefix: 'gsearch',
-            onStateChange: _gsRenderFromState,
-            onSoulseekSelected: (query) => _gsNavigateToSearchPage(query, 'soulseek'),
-            onUnconfiguredClick: (src) => {
-                _gsDeactivate();
-                openSettingsForSource(src);
-            },
-        });
-
-        bar.addEventListener('click', () => input.focus());
-
-        input.addEventListener('focus', () => {
-            bar.classList.add('active');
-            const aura = document.getElementById('gsearch-aura');
-            if (aura) aura.classList.add('active');
-            _gsState.active = true;
-            const shortcut = document.getElementById('gsearch-shortcut');
-            if (shortcut) shortcut.style.display = 'none';
-            // Always redraw on focus so the source icon row is current
-            // (cache dots, active state, etc.). init() is a no-op after the
-            // first call — safe to invoke on every focus.
-            _gsController.init().then(() => _gsRenderFromState(_gsController.state));
-        });
-
-        // No blur handler — closing is handled by click-outside and Escape only
-        // This prevents tab switching and result clicks from closing the panel
-
-        const clearBtn = document.getElementById('gsearch-clear');
-
-        input.addEventListener('input', () => {
-            const q = input.value.trim();
-            if (clearBtn) clearBtn.style.display = q.length > 0 ? '' : 'none';
-            if (_gsState.debounceTimer) clearTimeout(_gsState.debounceTimer);
-            if (q.length < 2) { _gsHideResults(); return; }
-            // 600ms (was 300) — coalesce a name being typed into one search
-            // instead of one external-API search per letter (#751). Enter still
-            // fires immediately via the keydown handler.
-            _gsState.debounceTimer = setTimeout(() => _gsController.submitQuery(q), 600);
-        });
-
-        if (clearBtn) {
-            clearBtn.addEventListener('click', e => {
-                e.stopPropagation();
-                input.value = '';
-                clearBtn.style.display = 'none';
-                // Drop cache so the next search starts clean, but don't
-                // auto-fire a fetch for an empty query.
-                if (_gsController) {
-                    _gsController.state.query = '';
-                    _gsController.state.sources = {};
-                    _gsController.state.fallbacks = {};
-                    _gsController.state.loadingSources = new Set();
-                    _gsController.renderSourceRow();
-                }
-                _gsHideResults();
-                input.focus();
-            });
-        }
-
-        input.addEventListener('keydown', e => {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                if (_gsState.debounceTimer) clearTimeout(_gsState.debounceTimer);
-                const q = input.value.trim();
-                if (q.length >= 2) _gsController.submitQuery(q);
-            } else if (e.key === 'Escape') {
-                _gsDeactivate();
-                input.blur();
-            }
-        });
-
-        // Keyboard shortcuts — never summon the (music-only) global search on the video side.
-        document.addEventListener('keydown', e => {
-            if (document.body.getAttribute('data-side') === 'video') return;
-            if ((e.ctrlKey || e.metaKey) && e.key === 'k') { e.preventDefault(); input.focus(); return; }
-            if (e.key === '/' && !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) { e.preventDefault(); input.focus(); }
-        });
-
-        // Click outside to close — uses delayed check because tab clicks replace DOM
-        document.addEventListener('click', e => {
-            if (!_gsState.active) return;
-            // Skip if click was recent interaction with search system (within 100ms of a switch)
-            if (_gsState._lastInteraction && Date.now() - _gsState._lastInteraction < 200) return;
-            setTimeout(() => {
-                if (!_gsState.active) return;
-                const freshBar = document.getElementById('gsearch-bar');
-                const freshResults = document.getElementById('gsearch-results');
-                const target = e.target;
-                if (freshBar?.contains(target) || freshResults?.contains(target)) return;
-                // The media player (mini bar + expanded now-playing modal)
-                // floats above the page. Clicking it — e.g. opening the full
-                // modal from the mini player, or anything inside that modal —
-                // must NOT tear down the global search results (#732).
-                if (target.closest && target.closest('#media-player, #np-modal-overlay')) return;
-                _gsDeactivate();
-            }, 100);
-        });
-
-        // Collapse on sidebar navigation + hide on downloads page
-        document.addEventListener('click', e => {
-            if (e.target.closest('.sidebar-link, .nav-item, .back-btn')) {
-                if (_gsState.active) _gsDeactivate();
-                // Check after navigation which page we're on
-                setTimeout(_gsUpdateVisibility, 200);
-            }
-        });
-    };
-    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => { _doInit(); _gsUpdateVisibility(); });
-    else { _doInit(); setTimeout(_gsUpdateVisibility, 500); }
-})();
+// initGlobalSearch went with the floating search bar's markup. it bound
+// Ctrl/Cmd K and / on every page; Ctrl/Cmd K is the help palette's now
+// (features/help/host.tsx), which also hands a name to the Search page.
 
 // On load, seed the overlay-apply + collection-sync tasks so the bell reflects a
 // job that was already running before this page connected (the socket keeps them
@@ -7429,31 +7415,28 @@ async function showVersionInfo() {
         } catch (e) { /* ignore */ }
     }
 
-    // Build version data straight from helper.js — single source of truth.
-    // No backend round-trip; the changelog content is shipped in the same
-    // bundle the browser already loaded.
-    const version = (typeof _getCurrentVersion === 'function')
-        ? _getCurrentVersion()
-        : (btn ? btn.textContent.trim().replace('v', '') : '');
-    const sections = (typeof VERSION_MODAL_SECTIONS !== 'undefined')
-        ? VERSION_MODAL_SECTIONS
-        : [];
+    // The notes come from the one release notes file
+    // (webui/src/features/help/release-notes.ts), which the React bundle
+    // publishes as window.SoulSyncReleaseNotes. The help sheet's What's new
+    // reads the same file, so a release is written once.
+    const version = btn ? btn.textContent.trim().replace(/^v/, '') : '';
+    const notes = window.SoulSyncReleaseNotes;
+    let sections = [];
+    try {
+        sections = notes ? notes.modalSections(version || undefined) : [];
+    } catch (e) { /* no notes: the modal still opens with its header */ }
     const versionData = {
         version,
         title: "What's New in SoulSync",
-        subtitle: version ? `Version ${version} — Latest Changes` : 'Latest Changes',
+        subtitle: version ? `Version ${version}: latest changes` : 'Latest changes',
         sections,
     };
 
-    // The version modal shows the same What's New content the helper's badge
-    // points at — mark it seen here too, or the helper button's red dot never
-    // clears for users who read release notes this way (Kazimir's stuck dot).
+    // Reading the notes here counts as having seen them: What's new's chip in
+    // the help sheet keys off the same version (Kazimir's stuck dot).
     try {
-        if (typeof _getLatestWhatsNewVersion === 'function') {
-            localStorage.setItem('soulsync_helper_version_seen', _getLatestWhatsNewVersion());
-            if (typeof _updateHelperBadge === 'function') _updateHelperBadge();
-        }
-    } catch (e) { /* badge sync is cosmetic */ }
+        if (version) localStorage.setItem('soulsync_helper_version_seen', version);
+    } catch (e) { /* storage blocked */ }
 
     try {
         populateVersionModal(versionData, hadUpdate ? updateInfo : null);

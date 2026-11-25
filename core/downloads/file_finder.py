@@ -155,6 +155,35 @@ def _path_matches_api_dirs(file_path: str, api_dirs: list[str]) -> bool:
     return all(d in path_parts for d in api_dirs)
 
 
+# a different performance of the song, not a label on the same one: a
+# "(Remastered 2016)" or "[FLAC]" on one name and not the other is still the
+# same file, a "(Live)" is not
+_PERFORMANCE_WORDS = ("live", "remix", "acoustic", "instrumental", "demo", "karaoke")
+
+
+def _track_marks(name: str) -> Tuple[tuple, frozenset]:
+    """what tells one track's file from another's when the names are close:
+    its numbers (outside brackets: a "(2016 Remaster)" is not a position) and
+    the performance words anywhere in it."""
+    stem = os.path.splitext(unidecode(str(name or "")).lower())[0]
+    stem = _SLSKD_DEDUP_SUFFIX.sub('', stem)
+    words = frozenset(w for w in re.findall(r'[a-z]+', stem) if w in _PERFORMANCE_WORDS)
+    bare = re.sub(r'\[[^\]]*\]|\([^)]*\)', ' ', stem)
+    numbers = tuple(int(n) for n in re.findall(r'\d+', bare))
+    return numbers, words
+
+
+def _same_track_marks(first: str, second: str) -> bool:
+    """False when the two names are provably two tracks: both carry numbers
+    and they differ, or one is a live/remix/... and the other is not. a name
+    with no number at all against one with (a client that adds "01 - ")
+    proves nothing and passes."""
+    (n1, w1), (n2, w2) = _track_marks(first), _track_marks(second)
+    if n1 and n2 and n1 != n2:
+        return False
+    return w1 == w2
+
+
 def _search_in_directory(
     search_dir: str,
     location_name: str,
@@ -247,6 +276,15 @@ def _search_in_directory(
                     None, normalized_target, normalized_stem,
                 ).ratio(),
             )
+            # a close name is not the same file when what tells two tracks
+            # apart differs: "01 - Intro" and "02 - Intro" score 0.93,
+            # "Track01" and "Track02" 0.9, and with the brackets dropped
+            # "Song (Live)" IS "Song". this tier then handed a task its
+            # neighbour's file (or a stale one), and nothing downstream
+            # checks a title: a same-length neighbour was imported under
+            # this track's tags.
+            if similarity > 0 and not _same_track_marks(target_basename, filename):
+                similarity = 0.0
             if similarity > highest_fuzzy_similarity:
                 highest_fuzzy_similarity = similarity
                 best_fuzzy_path = file_path
@@ -328,7 +366,7 @@ def find_completed_audio_file(
         if tx_sim > _FUZZY_THRESHOLD:
             if tx_sim < 1.0:
                 logger.info(
-                    "Found fuzzy match in transfer (%.2f): %s",
+                    "Found fuzzy match in music library folder (%.2f): %s",
                     tx_sim, best_tx_path,
                 )
             return (best_tx_path, 'transfer')

@@ -209,6 +209,34 @@ def _worker_name(worker: Any) -> str:
     return type(worker).__name__
 
 
+def _hold(worker: Any) -> None:
+    """stop a worker for the length of a migration, and nothing more.
+
+    a worker's own ``pause()`` may be its SAVED switch. the repair worker's
+    is: it writes the music automations master toggle to the database. the
+    gate pauses at every start and resumes about a minute later, so a
+    restart inside that minute left the toggle off for good, with nothing
+    left to turn it back on ("my music automations global toggle keeps
+    getting toggled off"). and a toggle the person had turned off was turned
+    back on by the resume.
+
+    a worker that has a hold (start no job, pause the running one, the saved
+    switch untouched) is held; the rest are paused as before."""
+    if callable(getattr(worker, "hold_for_foreground", None)) \
+            and callable(getattr(worker, "release_foreground", None)):
+        worker.hold_for_foreground()
+    else:
+        worker.pause()
+
+
+def _release(worker: Any) -> None:
+    if callable(getattr(worker, "hold_for_foreground", None)) \
+            and callable(getattr(worker, "release_foreground", None)):
+        worker.release_foreground()
+    else:
+        worker.resume()
+
+
 class MigrationPauseSupervisor:
     """Hold the enrichment workers still for as long as a migration is alive.
 
@@ -295,7 +323,7 @@ class MigrationPauseSupervisor:
             if getattr(worker, "paused", False):
                 continue
             try:
-                worker.pause()
+                _hold(worker)
             except Exception as exc:  # noqa: BLE001
                 logger.debug("could not pause %s: %s", _worker_name(worker), exc)
                 continue
@@ -315,7 +343,7 @@ class MigrationPauseSupervisor:
             start_deferred_workers(self._database)
         if not self._paused_by_us and not self._engine_paused:
             return
-        resumed = _staggered(list(self._paused_by_us), lambda worker: worker.resume(), _worker_name)
+        resumed = _staggered(list(self._paused_by_us), _release, _worker_name)
         self._paused_by_us = []
         if self._engine is not None and self._engine_paused:
             try:

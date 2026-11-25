@@ -1297,3 +1297,59 @@ def test_a_page_address_is_not_a_spotify_id(repair_db):
     assert row(link)["spotify_id"] == "3zJMNOxnbHWG2rZwswnSM2"
     assert row(real)["spotify_id"] == "3zJMNOxnbHWG2rZwswnSM2"
     assert _sanitize_provider_namespaces(conn, conn.cursor()) == 0
+
+
+# ── two artists who share a name are two artists ────────────────────────────
+
+def _links(conn, name):
+    return {r["id"]: r["canonical_artist_id"] for r in conn.execute(
+        "SELECT id, canonical_artist_id FROM lib2_artists WHERE name=?", (name,))}
+
+
+def test_same_named_artists_with_different_musicbrainz_ids_stay_apart(repair_db):
+    """there are two bands called Nirvana. they were alias-linked for sharing
+    the name, and shown as one artist with both discographies."""
+    database, conn = repair_db
+    american = _artist(conn, "Nirvana", musicbrainz_id="5b11f4ce-a62d-471e-81fc-a69a8278c7da")
+    british = _artist(conn, "Nirvana", musicbrainz_id="9282c8b4-ca0b-4c6b-b7e3-4f7762dfc4d6")
+    conn.commit()
+    stats = repair_duplicate_artists(database)
+    assert stats["artists_merged"] == 0 and stats["alias_linked"] == 0
+    assert _links(conn, "Nirvana") == {american: None, british: None}
+
+
+def test_two_strong_catalogues_disagreeing_is_two_artists_and_one_is_a_slip(repair_db):
+    database, conn = repair_db
+    a = _artist(conn, "Bush", spotify_id="sp-uk", external_ids=json.dumps({"deezer": "dz-uk"}))
+    b = _artist(conn, "Bush", spotify_id="sp-ca", external_ids=json.dumps({"deezer": "dz-ca"}))
+    conn.commit()
+    repair_duplicate_artists(database)
+    assert _links(conn, "Bush") == {a: None, b: None}
+
+
+def test_a_pair_already_linked_by_the_old_rule_is_taken_apart(repair_db):
+    """libraries already hold these links: the pass that made them undoes them"""
+    database, conn = repair_db
+    american = _artist(conn, "Nirvana", musicbrainz_id="mb-us", spotify_id="sp-us")
+    british = _artist(conn, "Nirvana", musicbrainz_id="mb-uk", spotify_id="sp-uk")
+    conn.execute("UPDATE lib2_artists SET canonical_artist_id=? WHERE id=?", (american, british))
+    conn.commit()
+    stats = repair_duplicate_artists(database)
+    assert stats.get("alias_unlinked") == 1
+    assert _links(conn, "Nirvana") == {american: None, british: None}
+    # and it settles: a second pass changes nothing
+    again = repair_duplicate_artists(database)
+    assert not again.get("alias_unlinked") and again["alias_linked"] == 0
+
+
+def test_three_rows_two_artists_link_only_within_each_artist(repair_db):
+    database, conn = repair_db
+    us_one = _artist(conn, "Nirvana", musicbrainz_id="mb-us", spotify_id="sp-us")
+    uk = _artist(conn, "Nirvana", musicbrainz_id="mb-uk", spotify_id="sp-uk")
+    us_two = _artist(conn, "Nirvana", musicbrainz_id="mb-us", spotify_id="sp-us-dup")
+    conn.commit()
+    repair_duplicate_artists(database)
+    links = _links(conn, "Nirvana")
+    assert links[uk] is None
+    # the two american rows are one artist (one disagreeing id is a slip)
+    assert {links[us_one], links[us_two]} in ({None, us_one}, {None, us_two})

@@ -20,6 +20,7 @@ import {
   useSyncExternalStore,
 } from 'react';
 
+import { DownloadGlyph } from '@/components/primitives';
 import { ActionMenu, type ActionMenuItem } from '@/routes/artist-detail/-ui/action-menu';
 
 import type {
@@ -523,7 +524,7 @@ function EpisodeRow({
             disabled={busy}
             onClick={() => b.grabEpisode?.(ep.episode_number)}
           >
-            ⭳
+            <DownloadGlyph />
           </button>
         ) : null}
         <span className="vd-pop">
@@ -699,7 +700,12 @@ export function EpisodeList(props: EpisodeListProps) {
   const reload = () => invalidate('show', show.id);
 
   const episodes = missingOnly ? season.episodes.filter((e) => !e.owned) : season.episodes;
-  const seasonMissing = season.episodes.filter((e) => !e.owned);
+  // #2284: missing is an episode that has aired and isn't here, the same rule
+  // the top of the page counts by. every episode without a file was counted,
+  // so a season still airing said "4 missing" for episodes that don't exist
+  // yet, and the number never agreed with the one above it.
+  const seasonMissing = season.episodes.filter((e) => !e.owned && aired(e));
+  const seasonUpcoming = season.episodes.filter((e) => !e.owned && !aired(e)).length;
   const canAcquire = seasonMissing.length > 0 && canDownload && canGrab;
   const hunted = libSeason
     ? libSeason.episodes.some((e) => e.monitored)
@@ -811,9 +817,12 @@ export function EpisodeList(props: EpisodeListProps) {
   const pickedHunted = pickedEpisodes.some((e) => e.monitored);
 
   const showBar = canAcquire || isLibrary;
-  const status = canAcquire
-    ? `${seasonMissing.length} missing`
-    : `All ${season.episodes.length} here`;
+  const upcomingNote = seasonUpcoming ? ` · ${seasonUpcoming} still to air` : '';
+  const status = seasonMissing.length
+    ? `${seasonMissing.length} missing${upcomingNote}`
+    : seasonUpcoming
+      ? `All ${season.episodes.length - seasonUpcoming} aired here${upcomingNote}`
+      : `All ${season.episodes.length} here`;
 
   return (
     <div className={s.listScope}>
@@ -853,7 +862,9 @@ export function EpisodeList(props: EpisodeListProps) {
               disabled={busy === 'grab'}
               onClick={() => void run('grab', () => b.grabSeason?.(n))}
             >
-              <span className="discog-btn-icon">⭳</span>
+              <span className="discog-btn-icon">
+                <DownloadGlyph />
+              </span>
               <span className="discog-btn-text">
                 {busy === 'grab' ? 'Searching…' : 'Grab season'}
               </span>

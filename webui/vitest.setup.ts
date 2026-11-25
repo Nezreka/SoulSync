@@ -60,6 +60,14 @@ beforeEach(() => {
     // cause false positive tests". A test that cares about the badge overrides
     // this with its own handler.
     http.get('/api/issues/counts', () => HttpResponse.json({ success: true, counts: {} })),
+    // #2213: the library's recognition badges ask which servers are set up.
+    // an empty list hides nothing, so a test only sets it up to test that.
+    http.get('/api/media-servers', () => HttpResponse.json({ active: null, servers: [] })),
+    // note sonar asks whether song recognition is there whenever the search
+    // field renders. unavailable hides its button; its own tests say otherwise.
+    http.get('/api/listen/status', () =>
+      HttpResponse.json({ success: true, available: false, reason: 'not in tests' }),
+    ),
   );
 });
 

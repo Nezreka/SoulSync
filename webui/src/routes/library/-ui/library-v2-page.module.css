@@ -662,6 +662,24 @@ button.featureTag:disabled {
   color: var(--text-1);
 }
 
+/* #2204: the title is a link to the album page */
+a.albumHeadTitleButton {
+  display: inline-block;
+  text-decoration: none;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+}
+
+a.albumHeadTitleButton:hover {
+  text-decoration: underline;
+}
+
+a.albumHeadTitleButton:focus-visible {
+  outline: 2px solid rgba(var(--accent-rgb), 0.6);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
 .albumDateBadge,
 .albumSizeBadge,
 .albumRenameBadge,
@@ -818,10 +836,19 @@ button.albumRenameBadge:focus-visible {
   justify-self: start;
   display: inline-flex;
   color: var(--white-a35);
+  background: none;
+  border: none;
+  padding: 2px;
+  border-radius: 6px;
+  cursor: pointer;
   transition:
     transform 0.15s ease,
     color 0.15s ease;
-  pointer-events: none;
+}
+
+.albumExpand:focus-visible {
+  outline: 2px solid rgba(var(--accent-rgb), 0.6);
+  outline-offset: 1px;
 }
 
 .albumExpand svg {
@@ -961,64 +988,6 @@ button.albumRenameBadge:focus-visible {
 }
 
 /* --- artist cards --- */
-
-.mediaServerBadges {
-  position: absolute;
-  z-index: 2;
-  top: 18px;
-  right: 18px;
-  display: flex;
-  align-items: center;
-}
-
-.mediaServerRecognitionBadge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 2px;
-  min-width: 23px;
-  min-height: 21px;
-  padding: 2px 5px;
-  border: 1px solid rgba(134, 239, 172, 0.14);
-  border-radius: 6px;
-  background: rgba(16, 42, 31, 0.48);
-  color: rgba(187, 247, 208, 0.62);
-  font-size: 8px;
-  font-weight: 650;
-  line-height: 1;
-  white-space: nowrap;
-  transition:
-    border-color 0.12s ease,
-    background 0.12s ease,
-    color 0.12s ease;
-}
-
-.mediaServerRecognitionBadge:hover {
-  border-color: rgba(134, 239, 172, 0.38);
-  background: rgba(16, 55, 38, 0.82);
-  color: rgba(220, 252, 231, 0.94);
-}
-
-.mediaServerRecognitionBadge svg {
-  width: 10px;
-  height: 10px;
-  flex: 0 0 auto;
-  stroke-width: 1.7;
-}
-
-.mediaServerRecognitionCheck {
-  color: rgba(74, 222, 128, 0.78);
-  font-size: 8px;
-  font-weight: 800;
-}
-
-.mediaServerRecognitionCount {
-  min-width: 8px;
-  color: rgba(255, 255, 255, 0.52);
-  font-size: 8px;
-  font-variant-numeric: tabular-nums;
-  text-align: center;
-}
 
 /* dev's grid: covers ease in from the dark tile once loaded, not a pop */
 .artFade {
@@ -1381,7 +1350,7 @@ button.statusWarn:disabled {
 }
 
 .metadataTagsTooltipPositioner {
-  z-index: 999999;
+  z-index: var(--z-float);
   isolation: isolate;
   pointer-events: none;
 }
@@ -3648,6 +3617,13 @@ button.statusWarn:disabled {
   background: rgba(var(--accent-rgb), 0.1);
 }
 
+/* #2210: the profile in use, shown to a member: nothing to click */
+.qpOptionStatic,
+.qpOptionStatic:hover {
+  cursor: default;
+  border-color: rgb(var(--accent-rgb));
+}
+
 .qpName {
   font-weight: 600;
   font-size: 14px;
@@ -3936,6 +3912,15 @@ button.statusWarn:disabled {
 .overflowMenuFloating {
   position: fixed;
   left: auto;
+}
+
+/* no room on the left for Enrich to fly out (a phone), or the menu scrolls and
+   would clip it: the provider list opens in place under Enrich (#2183) */
+.overflowMenuInlineSub .enrichDropdownSubmenu {
+  position: static;
+  min-width: 0;
+  margin: 0 8px 6px;
+  box-shadow: none;
 }
 
 .overflowMenuItem {

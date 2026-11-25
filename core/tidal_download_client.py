@@ -247,6 +247,47 @@ def _looks_like_json_decode_error(exc: Exception) -> bool:
     )
 
 
+def _v2_to_track_result(payload: Dict[str, Any], track_id: str, quality_info: Dict[str, Any],
+                        tier_quality: Any, hint: Optional[Dict[str, Any]] = None) -> Optional[TrackResult]:
+    """a TrackResult from a tidal v2 track response. the wishlist's title/artist/
+    album are kept: the API's credit order can put a featured artist first."""
+    attrs = ((payload or {}).get("data") or {}).get("attributes") or {}
+    if not attrs:
+        return None
+
+    hint = hint or {}
+    artist_name = str(hint.get("artist") or "").strip() or "Unknown Artist"
+    title = str(hint.get("title") or attrs.get("title") or "Unknown Title").strip()
+    if not hint.get("title"):
+        version = str(attrs.get("version") or "").strip()
+        if version and version.lower() not in title.lower():
+            title = f"{title} ({version})"
+    album_name = str(hint.get("album") or "").strip()
+
+    result = TrackResult(
+        username="tidal",
+        filename=f"{track_id}||{artist_name} - {title}",
+        size=0,
+        bitrate=quality_info.get("bitrate"),
+        duration=int(hint.get("duration_ms") or 0),
+        quality=quality_info.get("codec", "flac"),
+        free_upload_slots=999,
+        upload_speed=999999,
+        queue_length=0,
+        artist=artist_name,
+        title=title,
+        album=album_name or None,
+        _source_metadata={
+            "source": "tidal",
+            "track_id": str(track_id),
+            "isrc": attrs.get("isrc") or None,
+            "explicit": bool(attrs.get("explicit", False)),
+        },
+    )
+    result.set_quality(tier_quality)
+    return result
+
+
 def _ffmpeg_path():
     """ffmpeg on PATH, else the bundled one in tools/, else None."""
     ff = shutil.which('ffmpeg')
@@ -675,6 +716,56 @@ class TidalDownloadClient(DownloadSourcePlugin):
 
         return variants
 
+    async def _exact_track_from_hint(self) -> Optional[TrackResult]:
+        """the playlist's own tidal track, when the wishlist row names one.
+
+        a tidal playlist already carries the exact track id; searching by
+        artist/title can pick a different recording (clean vs explicit, another
+        album), so the id wins when it is available"""
+        from core.downloads.track_hint import current_track_hint
+
+        hint = current_track_hint() or {}
+        track_id = str(hint.get("tidal_id") or "").strip()
+        if not track_id:
+            return None
+        try:
+            return await run_blocking(self._fetch_track_result_by_id, track_id, hint)
+        except Exception as exc:  # noqa: BLE001 - fall back to the text search
+            logger.warning(f"Tidal exact track {track_id} failed: {exc}")
+            return None
+
+    def _fetch_track_result_by_id(self, track_id: str, hint: Optional[Dict[str, Any]] = None) -> Optional[TrackResult]:
+        if not self.is_available():
+            return None
+        token = getattr(self.session, "access_token", None)
+        if not token and getattr(self, "_boot_session_tokens", None):
+            # A deferred boot restore leaves the saved tokens pending; finish
+            # it before giving up on the exact id.
+            self._complete_deferred_session()
+            token = getattr(self.session, "access_token", None)
+        if not token:
+            return None
+        country = getattr(self.session, "country_code", None) or "US"
+        response = self._get_with_rate_limit_retry(
+            f"https://openapi.tidal.com/v2/tracks/{track_id}",
+            params={"countryCode": country},
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/vnd.api+json",
+            },
+            timeout=20,
+        )
+        response.raise_for_status()
+        quality_key = quality_tier_for_source("tidal", default="lossless")
+        quality_info = QUALITY_MAP.get(quality_key, QUALITY_MAP["lossless"])
+        return _v2_to_track_result(
+            response.json(),
+            track_id,
+            quality_info,
+            quality_from_tidal_tier(quality_key),
+            hint,
+        )
+
     async def search(self, query: str, timeout: int = None, progress_callback=None) -> Tuple[List[TrackResult], List[AlbumResult]]:
         if not self.is_available():
             logger.warning("Tidal not available for search (not authenticated)")
@@ -683,6 +774,15 @@ class TidalDownloadClient(DownloadSourcePlugin):
         if not query or not isinstance(query, str):
             logger.warning(f"Invalid Tidal search query: {query!r}")
             return ([], [])
+
+        exact = await self._exact_track_from_hint()
+        if exact is not None:
+            logger.info(
+                f"Tidal: using the playlist's own track "
+                f"{exact._source_metadata.get('track_id')} ({exact.artist} - {exact.title}) "
+                f"instead of searching"
+            )
+            return ([exact], [])
 
         logger.info(f"Searching Tidal for: {query}")
 

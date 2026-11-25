@@ -62,6 +62,61 @@ def _profile() -> int:
         return 1
 
 
+def _delete_channel_file(ep):
+    """one channel video off disk: the video through the recycle bin (so it
+    can be put back), its sidecars removed outright (regenerable). only the
+    exact recorded path is touched. -> (ok, size, trash_path)"""
+    import os
+    from . import get_video_db
+    from core.video import organization, recycle
+    path = ep.get("dest_path")
+    if not path:
+        return (False, 0, None)
+    size, trash = 0, None
+    try:
+        if os.path.exists(path):
+            size = os.path.getsize(path)
+            db = get_video_db()
+            res = recycle.discard(path, organization.load(db), db, reason="removed from the channel page")
+            if not res.get("ok"):
+                return (False, 0, None)
+            trash = res.get("trash_path")
+    except OSError:
+        logger.exception("channel library: could not delete %s", path)
+        return (False, 0, None)
+    stem = os.path.splitext(path)[0]
+    for sc in (stem + ".nfo", stem + "-thumb.jpg", stem + "-thumb.jpeg", stem + "-thumb.png",
+               stem + "-thumb.webp", stem + ".jpg"):
+        try:
+            if os.path.exists(sc):
+                os.remove(sc)
+        except OSError:
+            logger.debug("channel library: sidecar %s stayed", sc)
+    return (True, size, trash)
+
+
+def _refresh_after_change() -> None:
+    """the media server looks again, so a deleted video goes from it too
+    (a channel is a show there). best effort, off the request."""
+    try:
+        from .library_manage import _refresh_server
+        _refresh_server("show")
+    except Exception:   # noqa: BLE001 - the server's own scan catches up anyway
+        logger.debug("server refresh after a channel file change failed", exc_info=True)
+
+
+def _channel_library_payload(db, channel_id):
+    from datetime import date
+    from core.video import channel_library
+    return channel_library.channel_library(
+        db.youtube_channel_files(channel_id),
+        settings=db.get_channel_settings(channel_id) or {},
+        wished_ids=db.youtube_channel_wished_ids(channel_id, profile_id=_profile()),
+        retry_state=db.youtube_retry_state(),
+        today=date.today().isoformat(),
+    )
+
+
 def register_routes(bp):
     @bp.route("/youtube/video/<video_id>/segments", methods=["GET"])
     def video_youtube_segments(video_id):
@@ -703,6 +758,85 @@ def register_routes(bp):
         except Exception:
             logger.exception("youtube wishlist add failed")
             return jsonify({"success": False, "error": "Failed"}), 500
+
+    # ── a channel's library: its files, and managing them (admin, access.py) ──
+
+    @bp.route("/youtube/library/<channel_id>", methods=["GET"])
+    def video_youtube_channel_library(channel_id):
+        """what of this channel is on disk: files, sizes, folder, what needs attention"""
+        from . import get_video_db
+        try:
+            return jsonify({"success": True, **_channel_library_payload(get_video_db(), channel_id)})
+        except Exception:
+            logger.exception("channel library failed for %s", channel_id)
+            return jsonify({"success": False, "error": "Couldn't read this channel's files"}), 500
+
+    @bp.route("/youtube/library/<channel_id>/delete", methods=["POST"])
+    def video_youtube_channel_library_delete(channel_id):
+        """{video_ids: [...] | all: true, forget?: bool}. delete goes through the
+        recycle bin; the video stays known (pruned) so no scan fetches it again,
+        unless forget asks for it to download again"""
+        from datetime import date
+        from . import get_video_db
+        from core.video import channel_library
+        db = get_video_db()
+        body = request.get_json(silent=True) or {}
+        rows = db.youtube_channel_files(channel_id)
+        if not body.get("all"):
+            wanted = {str(v) for v in (body.get("video_ids") or []) if v}
+            if not wanted:
+                return jsonify({"success": False, "error": "Pick the videos to delete"}), 400
+            rows = [r for r in rows if str(r.get("media_id")) in wanted]
+        out = channel_library.remove_files(
+            rows, delete_file=_delete_channel_file, mark_pruned=db.mark_download_pruned,
+            forget=db.delete_download_history, today=date.today().isoformat(),
+            keep_in_ledger=not body.get("forget"))
+        _refresh_after_change()
+        return jsonify({"success": True, **out, **_channel_library_payload(db, channel_id)})
+
+    @bp.route("/youtube/library/<channel_id>/clean", methods=["POST"])
+    def video_youtube_channel_library_clean(channel_id):
+        """apply this channel's retention now, instead of waiting for the nightly clean"""
+        from datetime import date
+        from . import get_video_db
+        from core.video import channel_library
+        from core.video.retention import episodes_to_prune
+        db = get_video_db()
+        today = date.today().isoformat()
+        policy = (db.get_channel_settings(channel_id) or {}).get("retention")
+        due = episodes_to_prune(db.youtube_channel_files(channel_id), policy, today=today)
+        out = channel_library.remove_files(
+            due, delete_file=_delete_channel_file, mark_pruned=db.mark_download_pruned,
+            forget=db.delete_download_history, today=today)
+        _refresh_after_change()
+        return jsonify({"success": True, **out, **_channel_library_payload(db, channel_id)})
+
+    @bp.route("/youtube/library/<channel_id>/undo", methods=["POST"])
+    def video_youtube_channel_library_undo(channel_id):
+        """put deleted files back from the recycle bin. {undo: [{history_id, trash_path}]}"""
+        import os
+        from . import get_video_db
+        from core.video import organization, recycle
+        db = get_video_db()
+        settings = organization.load(db)
+        restored = 0
+        owned = {r.get("id") for r in db.youtube_channel_files(channel_id)}
+        for item in (request.get_json(silent=True) or {}).get("undo") or []:
+            trash_path = str(item.get("trash_path") or "")
+            try:
+                hid = int(item.get("history_id"))
+            except (TypeError, ValueError):
+                continue
+            if hid in owned or not trash_path:
+                continue
+            res = recycle.restore_entry(os.path.dirname(trash_path), os.path.basename(trash_path),
+                                        settings, db)
+            if res.get("success"):
+                db.unprune_download(hid)
+                restored += 1
+        _refresh_after_change()
+        return jsonify({"success": True, "restored": restored,
+                        **_channel_library_payload(db, channel_id)})
 
     @bp.route("/youtube/wishlist/remove", methods=["POST"])
     def video_youtube_wishlist_remove():

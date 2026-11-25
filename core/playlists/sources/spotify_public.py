@@ -60,6 +60,7 @@ class SpotifyPublicPlaylistSource(PlaylistSource):
             source_playlist_id=url_hash,
             name=data.get("name", "Spotify Playlist"),
             owner=data.get("subtitle"),
+            image_url=data.get("image_url") or None,
             track_count=len(tracks_raw),
             source_url=source_url,
             extra={

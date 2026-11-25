@@ -139,40 +139,16 @@ def record_sync_history_start(
                 if imgs and isinstance(imgs, list) and len(imgs) > 0:
                     thumb_url = imgs[0].get('url') if isinstance(imgs[0], dict) else imgs[0]
 
-        # Check for existing entry with same playlist_id — update instead of duplicating
-        existing = database.get_latest_sync_history_by_playlist(
-            playlist_id, profile_id=profile_id
-        )
-        if existing:
-            try:
-                conn = database._get_connection()
-                cursor = conn.cursor()
-                cursor.execute(
-                    """
-                    UPDATE sync_history
-                    SET batch_id = ?, playlist_name = ?, source = ?, sync_type = ?,
-                        tracks_json = ?, artist_context = ?, album_context = ?,
-                        thumb_url = ?, total_tracks = ?, is_album_download = ?,
-                        playlist_folder_mode = ?, source_page = ?, started_at = CURRENT_TIMESTAMP,
-                        completed_at = NULL, tracks_found = 0, tracks_downloaded = 0, tracks_failed = 0,
-                        profile_id = ?, quality_profile_id = ?
-                    WHERE id = ?
-                    """,
-                    (batch_id, playlist_name, source, sync_type,
-                     json.dumps(tracks, ensure_ascii=False),
-                     json.dumps(artist_context, ensure_ascii=False) if artist_context else None,
-                     json.dumps(album_context, ensure_ascii=False) if album_context else None,
-                     thumb_url, len(tracks), int(is_album_download), int(playlist_folder_mode),
-                     source_page,
-                     int(profile_id) if profile_id is not None else None,
-                     int(quality_profile_id) if quality_profile_id is not None else None,
-                     existing['id']),
-                )
-                conn.commit()
-                logger.info(f"Updated existing sync history entry {existing['id']} for '{playlist_name}'")
-                return
-            except Exception as e:
-                logger.warning(f"Failed to update existing sync history, creating new: {e}")
+        # #2271: Preserve separate historical execution records for each sync run
+        # (never overwrite the previous run's sync_history row). Record whether the
+        # execution was automatically scheduled or manually triggered via source_page.
+        effective_source_page = source_page
+        if not effective_source_page:
+            effective_source_page = (
+                'scheduled'
+                if str(playlist_id or '').startswith('auto_mirror_')
+                else 'manual'
+            )
 
         database.add_sync_history_entry(
             batch_id=batch_id,
@@ -187,7 +163,7 @@ def record_sync_history_start(
             total_tracks=len(tracks),
             is_album_download=is_album_download,
             playlist_folder_mode=playlist_folder_mode,
-            source_page=source_page,
+            source_page=effective_source_page,
             profile_id=profile_id,
             quality_profile_id=quality_profile_id,
         )
@@ -221,6 +197,29 @@ def record_sync_history_noop(
     """
     try:
         n = len(tracks or [])
+        # since #2271 every run is its own entry, and for a run that did
+        # something that is right. a run with nothing to do is not news twice:
+        # an hourly auto-sync wrote 24 identical "already here" rows a day per
+        # playlist into a list capped at 100, and pushed the runs that
+        # downloaded something out of it. so a no-op that follows a no-op
+        # refreshes that entry (when it last ran, what it checked); one that
+        # follows a real run gets its own.
+        latest = database.get_latest_sync_history_by_playlist(playlist_id, profile_id=profile_id)
+        if latest and str(latest.get('batch_id') or '').startswith('noop_'):
+            conn = database._get_connection()
+            try:
+                conn.execute(
+                    "UPDATE sync_history SET batch_id = ?, playlist_name = ?, tracks_json = ?, "
+                    "total_tracks = ?, tracks_found = ?, tracks_downloaded = 0, tracks_failed = 0, "
+                    "started_at = CURRENT_TIMESTAMP, completed_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (f"noop_{playlist_id}_{int(time.time())}", playlist_name,
+                     json.dumps(tracks or [], ensure_ascii=False), n, n, latest['id']),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+            logger.info("Refreshed no-op sync for '%s' (%d track(s) already present)", playlist_name, n)
+            return
         record_sync_history_start(
             database,
             batch_id=f"noop_{playlist_id}_{int(time.time())}",

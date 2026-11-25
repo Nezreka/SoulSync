@@ -32,6 +32,22 @@ def _file_count(db, movie_id: int) -> int:
         conn.close()
 
 
+def _waiting_for_server(db, source, row, kind: str) -> bool:
+    """a row soulsync itself made (core/video/owned_ids.py) that a media
+    server doesn't list yet, with a file still on disk: not 'gone', waiting
+    for the server's own scan. soulsync's folder source answers for itself."""
+    from core.video.owned_ids import is_owned
+    if source.server_name == "soulsync" or not is_owned(row["server_id"]):
+        return False
+    where = ("movie_id=?" if kind == "movie" else
+             "episode_id IN (SELECT id FROM episodes WHERE show_id=?)")
+    conn = db._get_connection()
+    try:
+        return db._owned_files_there(conn, where, (int(row["id"]),))
+    finally:
+        conn.close()
+
+
 def sync_movie(db, movie_id: int, *, remove_when_gone: bool = True,
                refresh_metadata: bool = True) -> dict:
     """Reconcile ONE local movie against the server.
@@ -73,6 +89,10 @@ def sync_movie(db, movie_id: int, *, remove_when_gone: bool = True,
         raise MovieSyncError("This video server does not support per-movie sync")
 
     item = source.movie_item(row["server_id"], title=row["title"], tmdb_id=row["tmdb_id"])
+    if item is None and _waiting_for_server(db, source, row, "movie"):
+        # soulsync placed it and the server hasn't scanned it in yet: it stays
+        return {"status": "ok", "title": row["title"], "movie_removed": False, "gone": False,
+                "waiting": True, "files_added": 0, "files_removed": 0}
     if item is None and not remove_when_gone:
         return {"status": "ok", "title": row["title"], "movie_removed": False, "gone": True,
                 "files_added": 0, "files_removed": 0}

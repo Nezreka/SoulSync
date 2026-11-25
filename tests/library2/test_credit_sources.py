@@ -399,7 +399,7 @@ def test_musicbrainz_and_tidal_never_search_by_text(tmp_path, online, monkeypatc
         conn.commit()
     tried = _searcher(monkeypatch, candidates=5)
     monkeypatch.setattr(pc, "_credit_client", lambda service: None)
-    pc.ensure_track_credits(db, track, {"musicbrainz", "tidal"}, artist_hints=["ODESZA"])
+    pc.ensure_track_credits(db, track, {"musicbrainz", "tidal", "discogs"}, artist_hints=["ODESZA"])
     assert tried == []
 
 
@@ -413,8 +413,14 @@ def test_an_isrc_musicbrainz_does_not_know_is_not_asked_again(tmp_path, online, 
     client.track_artist_credits_by_isrc = lambda code: asked.append(code) or None
     monkeypatch.setattr(pc, "_credit_client", lambda service: client)
     pc.ensure_track_credits(db, track, {"musicbrainz"})
-    pc.ensure_track_credits(db, track, {"musicbrainz"})
+    pc.ensure_track_credits(db, track, {"musicbrainz"}, artist_hints=["ODESZA"])
     assert asked == ["USX9P1700001"]
+
+    with db._get_connection() as conn:
+        conn.execute("UPDATE lib2_tracks SET isrc='USX9P1700002' WHERE id=?", (track,))
+        conn.commit()
+    pc.ensure_track_credits(db, track, {"musicbrainz"})
+    assert asked == ["USX9P1700001", "USX9P1700002"]
 
 
 def test_discogs_answers_only_when_every_track_the_number_can_mean_agrees():
@@ -431,3 +437,26 @@ def test_discogs_answers_only_when_every_track_the_number_can_mean_agrees():
     same = {"artists": [{"id": 1, "name": "Main"}], "tracklist": [
         {"type_": "track", "position": "A1"}, {"type_": "track", "position": "B1"}]}
     assert _discogs(same).track_artist_credits("r1_t1") == [{"id": "1", "name": "Main"}]
+
+
+def test_discogs_album_tracks_carry_identified_credits_into_downloads(tmp_path, monkeypatch):
+    from core.discogs_client import get_metadata_cache
+
+    release = {"id": 123, "title": "A Moment Apart", "tracklist": [
+        {"type_": "heading", "title": "Side A"},
+        {"type_": "track", "position": "A1", "title": "Corners of the Earth",
+         "artists": [{"id": 1, "name": "ODESZA"}, {"id": 2, "name": "RY X"}]},
+    ]}
+    client = _discogs(release)
+    monkeypatch.setattr(client, "_api_get", lambda path: release)
+    monkeypatch.setattr(get_metadata_cache(), "get_entity", lambda *args: None)
+    monkeypatch.setattr(get_metadata_cache(), "store_entity", lambda *args: None)
+    track = client.get_album_tracks("123")["items"][0]
+    assert track["artists"] == [{"id": "1", "name": "ODESZA"}, {"id": "2", "name": "RY X"}]
+
+    from core.library2.autolink import _store_download_credits
+    db = MusicDatabase(str(tmp_path / "m.db"))
+    with db._get_connection() as conn:
+        track_id = _track(conn, discogs=track["id"])
+        _store_download_credits(conn, track_id, track, "discogs", track["id"])
+        assert stored_track_credits(conn, track_id)[0] == ("discogs credits", ["ODESZA", "RY X"])

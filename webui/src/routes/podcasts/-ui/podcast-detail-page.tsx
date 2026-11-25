@@ -103,7 +103,7 @@ export function PodcastDetailPage({ podcastId }: PodcastDetailPageProps) {
 
   const onDownloadEpisode = (ep: PodcastEpisodeItem) => {
     if (!show) return;
-    handleDownloadEpisode(ep, show.title, show.artwork_url);
+    handleDownloadEpisode(ep, show.title, show.artwork_url, show.feed_url);
   };
 
   if (isLoading) {

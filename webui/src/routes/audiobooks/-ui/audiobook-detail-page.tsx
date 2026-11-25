@@ -2,6 +2,12 @@ import { Link, useParams } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 
 import { EmptyState, Skeleton } from '@/components/primitives';
+import {
+  offTitle,
+  useAdminName,
+  useMyPermissions,
+  usePermMode,
+} from '@/platform/shell/my-permissions';
 
 import type { AudiobookItem } from '../-audiobooks.types';
 
@@ -48,6 +54,9 @@ export function AudiobookDetailPage() {
   const [related, setRelated] = useState<Related>(EMPTY_RELATED);
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [releasesOpen, setReleasesOpen] = useState(false);
+  const perms = useMyPermissions();
+  const booksGet = usePermMode('books');
+  const admin = useAdminName();
 
   useEffect(() => {
     let cancelled = false;
@@ -140,7 +149,21 @@ export function AudiobookDetailPage() {
           )}
           <AudiobookWishlistButton book={book} variant="full" />
 
-          {book.source === 'audible' && (
+          {/* getting books isn't part of the profile (#2166): one calm line
+              where the wishlist and releases buttons would be */}
+          {booksGet === 'none' && (
+            <p className={styles.detailCalm} role="note">
+              {offTitle(perms, 'books')}. Ask {admin || 'your admin'} if you’d like it.
+            </p>
+          )}
+          {/* Ask first (#2188): Request sends it to the admin's Requests */}
+          {booksGet === 'ask' && book.source === 'audible' && (
+            <p className={styles.detailCalm} role="note">
+              Books need approval: Request sends it to {admin || 'your admin'} first.
+            </p>
+          )}
+
+          {book.source === 'audible' && booksGet === 'download' && (
             <button
               type="button"
               className={styles.wishlistFull}

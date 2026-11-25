@@ -85,6 +85,10 @@ class QueueItem:
     # request of its own, so the item carries who it is working for; a locked
     # album is only moved for a person.
     by_user: bool = False
+    # #2193: only these tracks of the album move (a track moved into a
+    # missing slot), never the rest of an album nobody asked to rename.
+    # None is the whole album.
+    track_ids: Optional[List[int]] = None
     status: str = 'queued'              # queued | running | done | failed | cancelled
     started_at: Optional[float] = None
     finished_at: Optional[float] = None
@@ -110,6 +114,7 @@ class QueueItem:
             'artist_name': self.artist_name,
             'library': self.library,
             'by_user': self.by_user,
+            'track_ids': self.track_ids,
             'enqueued_at': self.enqueued_at,
             'started_at': self.started_at,
             'finished_at': self.finished_at,
@@ -181,6 +186,7 @@ class ReorganizeQueue:
         album_title: str,
         artist_id: Optional[str],
         artist_name: str,
+        track_ids: Optional[List[int]] = None,
     ) -> dict:
         """Add an album to the queue. Returns a result dict:
 
@@ -198,9 +204,13 @@ class ReorganizeQueue:
         if not by_user and _album_locked(album_id, record=True):
             return {'queued': False, 'reason': 'locked'}
         with self._cond:
+            wanted = sorted({int(t) for t in track_ids}) if track_ids else None
             for existing in self._items:
                 if (existing.album_id == album_id and _covers(existing.library, library)
-                        and existing.status in ('queued', 'running')):
+                        # a run already going planned before a track moved in
+                        and existing.status in (('queued', 'running') if wanted is None
+                                                else ('queued',))
+                        and _covers_tracks(existing.track_ids, wanted)):
                     return {
                         'queued': False,
                         'reason': 'already_queued',
@@ -216,6 +226,7 @@ class ReorganizeQueue:
                 enqueued_at=time.time(),
                 library=library,
                 by_user=by_user,
+                track_ids=wanted,
             )
             self._items.append(item)
             self._persist(item)
@@ -298,13 +309,16 @@ class ReorganizeQueue:
             tally['locked'] = locked
         return tally
 
-    def cancel(self, queue_id: str) -> dict:
+    def cancel(self, queue_id: str, may: Optional[Callable[[QueueItem], bool]] = None) -> dict:
         """Cancel a queued item. The currently-running item cannot be
-        cancelled (Python threads aren't cleanly killable)."""
+        cancelled (Python threads aren't cleanly killable). ``may`` answers
+        whether the caller may touch this item at all."""
         with self._cond:
             for item in self._items:
                 if item.queue_id != queue_id:
                     continue
+                if may is not None and not may(item):
+                    return {'cancelled': False, 'reason': 'not_yours'}
                 if item.status == 'queued':
                     item.status = 'cancelled'
                     item.finished_at = time.time()
@@ -316,19 +330,21 @@ class ReorganizeQueue:
                 return {'cancelled': False, 'reason': 'not_active'}
         return {'cancelled': False, 'reason': 'not_found'}
 
-    def clear_queued(self) -> int:
-        """Cancel ALL queued items (running item continues). Returns
-        the count of items cancelled."""
+    def clear_queued(self, only: Optional[Callable[[QueueItem], bool]] = None) -> int:
+        """Cancel ALL queued items (running item continues), or just the
+        ones ``only`` picks. Returns the count of items cancelled."""
         cancelled = 0
         with self._cond:
             now = time.time()
             for item in self._items:
-                if item.status == 'queued':
+                if item.status == 'queued' and (only is None or only(item)):
                     item.status = 'cancelled'
                     item.finished_at = now
                     cancelled += 1
+                    if only is not None:
+                        self._persist(item)
             # one statement instead of N deletes - this can be thousands of rows
-            if cancelled and self._store is not None:
+            if cancelled and only is None and self._store is not None:
                 try:
                     self._store.delete_queued()
                 except Exception as e:
@@ -424,6 +440,7 @@ class ReorganizeQueue:
                         enqueued_at=float(snap.get('enqueued_at') or time.time()),
                         library=snap.get('library'),
                         by_user=bool(snap.get('by_user')),
+                        track_ids=snap.get('track_ids') or None,
                     )
                 except (KeyError, TypeError, ValueError):
                     continue
@@ -605,6 +622,14 @@ def _covers(queued_library, library) -> bool:
     """Does a queued item already do this library's run? One queued for every
     library (None) covers each of them."""
     return queued_library is None or queued_library == library
+
+
+def _covers_tracks(queued_tracks, tracks) -> bool:
+    """Does a queued item already move these tracks? A whole-album item
+    (None) moves every one; a track item only its own."""
+    if queued_tracks is None:
+        return True
+    return tracks is not None and set(tracks) <= set(queued_tracks)
 
 
 def _library_for_new_item():

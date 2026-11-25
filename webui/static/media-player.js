@@ -18,6 +18,7 @@ function initializeMediaPlayer() {
         audioPlayer.addEventListener('timeupdate', updateAudioProgress);
         audioPlayer.addEventListener('timeupdate', npCrossfadeTick);
         audioPlayer.addEventListener('timeupdate', npThrottledPositionState);
+        audioPlayer.addEventListener('timeupdate', npMaybeSendNowPlaying);
         audioPlayer.addEventListener('timeupdate', npMaybeLogPlay);
         audioPlayer.addEventListener('timeupdate', npMaybeMarkScrobbleEligible);
         audioPlayer.addEventListener('ended', onAudioEnded);
@@ -145,6 +146,7 @@ function setTrackInfo(track) {
     npPlayLogged = false;   // new track — allow one play-log once it's heard a bit
     npPlayId = null;   // listening_history id for this play (for the scrobble-eligibility ping)
     npScrobbleEligibleSent = false;
+    npNowPlayingSent = false;   // new track: tell the scrobble accounts once it really plays
     npPlayGeneration++;   // invalidate any in-flight log-play response for the previous track
     // Chat now-playing (opt-in, chat.js owns the gate + throttle). Never let a
     // chat problem break playback.
@@ -634,6 +636,8 @@ function updateMediaScanFromData(data) {
     // On the tools page the React card announces it; everywhere else this is
     // the only messenger.
     if (typeof currentPage !== 'undefined' && currentPage === 'tools') return;
+    // the media server's scan is the admin's operational news (#2208)
+    if (typeof _statusViewerIsAdmin === 'function' && !_statusViewerIsAdmin()) return;
     showToast('✅ Media scan completed', 'success', 3000);
 }
 
@@ -4142,6 +4146,31 @@ function npMaybeLogPlay() {
         }).then(r => (r && r.ok) ? r.json() : null)
           .then(d => { if (d && d.play_id != null && gen === npPlayGeneration) npPlayId = d.play_id; })
           .catch(() => {});   // fire-and-forget; logging must never affect playback
+    } catch (e) { /* non-fatal */ }
+}
+
+// Tell Last.fm / ListenBrainz what is playing ("now playing", never a
+// scrobble) once the track has really started: a second in, so a track
+// skipped straight past never shows. Previews never count.
+let npNowPlayingSent = false;
+function npMaybeSendNowPlaying() {
+    if (npNowPlayingSent || !currentTrack || !audioPlayer) return;
+    if (currentTrack.is_preview) return;
+    if (!isFinite(audioPlayer.currentTime) || audioPlayer.currentTime < 1) return;
+    npNowPlayingSent = true;   // set first so a slow request can't double-fire
+    try {
+        fetch('/api/library/now-playing', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                track: {
+                    title: _stripSourceIdPrefix(currentTrack.title) || '',
+                    artist: _stripSourceIdPrefix(currentTrack.artist) || '',
+                    album: _stripSourceIdPrefix(currentTrack.album) || '',
+                },
+                duration_ms: Math.round((audioPlayer.duration || 0) * 1000),
+            }),
+        }).catch(() => {});   // fire-and-forget; must never affect playback
     } catch (e) { /* non-fatal */ }
 }
 

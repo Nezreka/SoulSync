@@ -9,6 +9,7 @@ import { createRoot, type Root } from 'react-dom/client';
 
 import type { EpisodeListProps, TitleKind } from './types';
 
+import { ChannelLibrary } from './channel-library';
 import { EpisodeList } from './episode-list';
 import { type PageCommand, sendCommand } from './library-store';
 import { LibraryTab, type PageSlots } from './library-tab';
@@ -16,7 +17,14 @@ import { LibraryTab, type PageSlots } from './library-tab';
 export interface VideoLibraryTabApi {
   mount: (
     el: HTMLElement,
-    opts: { kind: TitleKind; id: number; heroSlot?: HTMLElement | null; slots?: PageSlots | null },
+    opts: {
+      kind: TitleKind | 'channel';
+      id: number | string;
+      /** a channel's name, for its folder and its settings */
+      title?: string;
+      heroSlot?: HTMLElement | null;
+      slots?: PageSlots | null;
+    },
   ) => void;
   unmount: (el: HTMLElement) => void;
   /** a show's season, its bar and its episodes; call again to re-render */
@@ -48,8 +56,26 @@ export const videoLibraryTab: VideoLibraryTabApi = {
   open(what) {
     sendCommand(what);
   },
-  mount(el, { kind, id, heroSlot, slots }) {
-    if (!el || (kind !== 'movie' && kind !== 'show') || !Number.isFinite(Number(id))) return;
+  mount(el, { kind, id, title, heroSlot, slots }) {
+    if (!el) return;
+    if (kind === 'channel') {
+      if (!id) return;
+      let root = roots.get(el);
+      if (!root) {
+        root = createRoot(el);
+        roots.set(el, root);
+      }
+      root.render(
+        <ChannelLibrary
+          key={`channel:${id}`}
+          channelId={String(id)}
+          title={title ?? ''}
+          slots={slots ?? null}
+        />,
+      );
+      return;
+    }
+    if ((kind !== 'movie' && kind !== 'show') || !Number.isFinite(Number(id))) return;
     let root = roots.get(el);
     if (!root) {
       root = createRoot(el);

@@ -6,6 +6,7 @@ Wishlist Service - High-level service for managing failed download track wishlis
 
 from typing import Any, Dict, List, Optional
 
+from core.requests.acquisition import AWAITING as AWAITING_SELECTION
 from core.wishlist.payloads import extract_wishlist_track_from_modal_info
 from database.music_database import MusicDatabase, get_database
 from utils.logging_config import get_logger
@@ -312,6 +313,9 @@ class WishlistService:
             "last_attempted": wishlist_track["last_attempted"],
             "source_type": wishlist_track["source_type"],
             "source_info": wishlist_track["source_info"],
+            # the album's MusicBrainz release group, matched in the background:
+            # lets Lidarr fetch the album by id instead of by name
+            "musicbrainz_release_group_id": wishlist_track.get("musicbrainz_release_group_id"),
             # Per-item quality-profile pointer, resolved once at
             # wishlist-insert time (see core/quality/migrate_to_profiles.py).
             # The download/import pipeline resolves the profile's actual
@@ -377,17 +381,25 @@ class WishlistService:
         out["track_data"] = out["spotify_data"] = data
         return out
 
+    def get_wishlist_tracks_including_held(self, profile_id: int = 1) -> List[Dict[str, Any]]:
+        """every row, held request rows (#2199) too: for the sweeps that clear
+        tracks the library already has, never for a download feed."""
+        return self.get_wishlist_tracks_for_download(profile_id=profile_id, include_held=True)
+
     def get_wishlist_tracks_for_download(
         self,
         limit: Optional[int] = None,
         profile_id: int = 1,
         approved_only: bool = False,
+        include_held: bool = False,
     ) -> List[Dict[str, Any]]:
         """
         Get wishlist tracks formatted for the download modal.
         Returns tracks in a format similar to playlist tracks for compatibility.
         ``approved_only``: just the rows an admin approved (a profile without
-        download rights, see core/requests/music.py).
+        download rights, see core/requests/music.py). an approved request
+        held for a release pick (#2199) is never in it unless
+        ``include_held`` (the owned-track sweeps, which only remove).
         """
         try:
             if approved_only:
@@ -398,6 +410,11 @@ class WishlistService:
             formatted_tracks = []
 
             for wishlist_track in wishlist_tracks:
+                # an approved request held for a release pick (#2199) is the
+                # admin's to choose: no download path takes it, whatever the
+                # owner's rights are now
+                if not include_held and wishlist_track.get("request_status") == AWAITING_SELECTION:
+                    continue
                 formatted_track = self.format_track_for_download(wishlist_track)
                 # H10: the formatted track must know which profile's wishlist
                 # row it came from. Without the owner, a cross-profile batch
@@ -583,3 +600,17 @@ def get_wishlist_service() -> WishlistService:
 
 
 __all__ = ["WishlistService", "get_wishlist_service"]
+
+
+def wishlist_rows_for_sweep(wishlist_service, profile_id: int) -> List[Dict[str, Any]]:
+    """a profile's rows for a sweep that removes what the library already
+    has: held request rows (#2199) included, so a picked release that landed
+    still clears its row. a service without the method (a test double) gives
+    its download rows."""
+    fn = getattr(wishlist_service, "get_wishlist_tracks_including_held", None)
+    if callable(fn):
+        rows = fn(profile_id=profile_id)
+        # a mock answers every name with another mock: only a list is rows
+        if isinstance(rows, list):
+            return rows
+    return wishlist_service.get_wishlist_tracks_for_download(profile_id=profile_id)

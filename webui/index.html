@@ -6,6 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>SoulSync - Music Sync & Manager</title>
     <meta name="soulsync-url-base" content="{{ request.script_root }}">
+    <meta name="soulsync-build" content="{{ soulsync_build }}">
     <script src="{{ url_for('static', filename='url-base.js', v=static_v) }}"></script>
     <!-- Collapsed sidebar (#1155). Has to run HERE, before the stylesheet
          resolves --sidebar-w, or the sidebar renders full width and snaps to the
@@ -19,6 +20,20 @@
                     document.documentElement.setAttribute('data-sidebar', 'collapsed');
                 }
             } catch (e) { /* localStorage blocked — full width, no harm */ }
+        })();
+    </script>
+    <!-- The player app (/player) paints over the manager, but only once the
+         React bundle has loaded and the shell knows the profile. Until then a
+         reload there (every profile switch is one) would flash the manager's
+         sidebar. Mark it before first paint; the rule below shows a dark
+         screen with the logo instead. The login, launch-PIN and profile
+         picker screens stay visible: they come first. -->
+    <script>
+        (function () {
+            try {
+                var path = window.SoulSyncURL ? window.SoulSyncURL.strip(location.pathname) : location.pathname;
+                if (/^\/player(\/|$)/.test(path)) document.documentElement.classList.add('ss-player-boot');
+            } catch (e) { /* no mark: the manager shows briefly, as before */ }
         })();
     </script>
     <!-- Console noise gate (#1210). The shipped UI makes ~1000 console.log
@@ -135,6 +150,45 @@
             --accent-neon-rgb: {{ initial_accent_neon_rgb }};
         }
     </style>
+    <style id="soulsync-player-boot">
+        html.ss-player-boot,
+        html.ss-player-boot body { background: #000000 !important; }
+        /* opacity, not visibility: a child can set itself visible again (the
+           manager's nav does), but nothing inside can undo its parent's opacity.
+           the profile layers (a pin pad, a forgotten pin) open over the picker
+           and have to show too: hidden, a pin pad flashed and was gone */
+        html.ss-player-boot body > *:not([data-player-root]):not(#launch-pin-overlay):not(#login-overlay):not(#profile-picker-overlay):not(.pf-layer):not(#toast-container) {
+            opacity: 0;
+            pointer-events: none;
+        }
+        html.ss-player-boot body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background:
+                radial-gradient(ellipse 46% 42% at 44% 44%, rgba(236, 72, 153, 0.16) 0%, transparent 70%),
+                radial-gradient(ellipse 48% 44% at 56% 52%, rgba(34, 211, 238, 0.16) 0%, transparent 72%);
+            pointer-events: none;
+        }
+        html.ss-player-boot body::after {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background: url("{{ url_for('static', filename='soulsync-mark.png') }}") center / min(230px, 48vw) no-repeat;
+            animation: ss-html-breathe 3.2s ease-in-out infinite;
+            pointer-events: none;
+        }
+        @keyframes ss-html-breathe {
+            0%, 100% {
+                transform: scale(1) translateY(0);
+                filter: drop-shadow(0 0 14px rgba(236, 72, 153, 0.18)) drop-shadow(0 0 24px rgba(34, 211, 238, 0.16));
+            }
+            50% {
+                transform: scale(1.035) translateY(-5px);
+                filter: brightness(1.08) saturate(1.14) drop-shadow(0 0 24px rgba(251, 146, 60, 0.28)) drop-shadow(0 0 38px rgba(56, 189, 248, 0.28));
+            }
+        }
+    </style>
     <script>
         window._particlesEnabled = {{ initial_particles_enabled | tojson }};
         window._workerOrbsEnabled = {{ initial_worker_orbs_enabled | tojson }};
@@ -144,9 +198,14 @@
         window.SOULSYNC_PROFILE_GATE = {{ profile_gate_rules | tojson }};
         // the signed-in profile, so the sidebar shows only their pages from
         // the first frame (#2156). null when the server knows nobody yet
-        // (picker, sign-in): the nav items wait hidden until init.js has one.
+        // (picker, sign-in). anyone but an admin starts with the nav hidden:
+        // profile-nav.js is a separate file under the nav, and chrome paints
+        // the half-loaded page while it fetches, so the full nav showed for a
+        // frame. it shows again only once a real profile has cut it down.
         window.SOULSYNC_BOOT_PROFILE = {{ boot_profile | tojson }};
-        if (!window.SOULSYNC_BOOT_PROFILE) document.documentElement.classList.add('nav-pending');
+        (function (p) {
+            if (!p || !(p.is_admin || String(p.id) === '1')) document.documentElement.classList.add('nav-pending');
+        })(window.SOULSYNC_BOOT_PROFILE);
         // Side-access flash guard: the profile arrives over fetch, so on a
         // reload the Music↔Video switcher would render for a beat before the
         // single-side hiding kicks in. The last profile-apply cached its sides
@@ -270,7 +329,7 @@
 
     <div class="main-container">
         <!-- Mobile Navigation -->
-        <button class="hamburger-btn" id="hamburger-btn" aria-label="Open navigation" aria-expanded="false"
+        <button class="hamburger-btn" id="hamburger-btn" data-tour="shell.menu" aria-label="Open navigation" aria-expanded="false"
             aria-controls="app-sidebar">
             <span class="hamburger-line"></span>
             <span class="hamburger-line"></span>
@@ -302,7 +361,7 @@
                     </button>
                 </div>
                 <!-- Audio ↔ Video side toggle (shell-only; wired by video/video-side.js) -->
-                <div class="side-toggle" role="group" aria-label="Switch between Audio and Video">
+                <div class="side-toggle" data-tour="shell.side-switch" role="group" aria-label="Switch between Audio and Video">
                     <span class="side-toggle-thumb" aria-hidden="true"></span>
                     <button type="button" class="side-toggle-btn active" data-side-target="music">
                         <svg class="side-toggle-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -328,7 +387,23 @@
                         <span>Video</span>
                     </button>
                 </div>
-                <div id="profile-indicator" class="profile-indicator" style="display: none;">
+                <!-- the player: watch and listen, a separate app (it has "Back to SoulSync") -->
+                <a class="open-player" href="{{ request.script_root }}/player" title="Open the player" data-tour="shell.open-player">
+                    <span class="open-player-key" aria-hidden="true">
+                        <svg class="open-player-icon" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M8 5.14v13.72a1 1 0 0 0 1.5.86l11.1-6.86a1 1 0 0 0 0-1.72L9.5 4.28A1 1 0 0 0 8 5.14z" />
+                        </svg>
+                    </span>
+                    <span class="open-player-text">
+                        <span class="open-player-label">Open the player</span>
+                        <span class="open-player-sub">Watch and listen</span>
+                    </span>
+                    <svg class="open-player-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <polyline points="9 6 15 12 9 18" />
+                    </svg>
+                </a>
+                <div id="profile-indicator" class="profile-indicator" data-tour="shell.profile" style="display: none;">
                     <!-- opens the quick switch menu (init.js toggleProfileQuickSwitch) -->
                     <button type="button" id="profile-indicator-button" class="profile-indicator-main"
                         aria-haspopup="menu" aria-expanded="false" title="Switch profile">
@@ -364,7 +439,7 @@
             <div class="sidebar-scroll">
 
                 <!-- Navigation Section -->
-                <nav class="sidebar-nav">
+                <nav class="sidebar-nav" data-tour="shell.nav">
                     <a class="nav-button" data-page="dashboard" href="/dashboard">
                         <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none"
                                 stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -613,7 +688,7 @@
                 </script>
 
                 <!-- Video Navigation (shell-only; shown when body[data-side="video"], wired by video/video-side.js) -->
-                <nav class="sidebar-nav video-nav" aria-label="Video navigation">
+                <nav class="sidebar-nav video-nav" data-tour="shell.nav" aria-label="Video navigation">
                     <a class="nav-button" data-video-page="video-dashboard" href="/video-dashboard">
                         <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none"
                                 stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -640,7 +715,7 @@
                             </svg></span>
                         <span class="nav-text">Search</span>
                     </a>
-                    <a class="nav-button" data-video-page="video-discover" href="/video-discover">
+                    <a class="nav-button" data-video-page="video-discover" data-tour="video.nav-discover" href="/video-discover">
                         <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none"
                                 stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
                                 <circle cx="12" cy="12" r="10" />
@@ -799,6 +874,8 @@
                         try { c = JSON.parse(localStorage.getItem('ss_features') || 'null'); } catch (e) { }
                         if (!c || !Array.isArray(c.pages)) return;
                         document.documentElement.setAttribute('data-features-off', (c.off || []).join(' '));
+                        // an admin locked it (#2164): no Customize, nothing to change
+                        if (c.locked === true) document.documentElement.setAttribute('data-features-locked', '');
                         var pages = {};
                         c.pages.forEach(function (p) { pages[p] = true; });
                         document.querySelectorAll('.sidebar-nav .nav-button').forEach(function (b) {
@@ -847,7 +924,7 @@
 
                 <!-- Version Section -->
                 <div class="version-section">
-                    <button class="version-button" onclick="showVersionInfo()">v{{ soulsync_base_version }}</button>
+                    <button class="version-button" data-tour="shell.version" onclick="showVersionInfo()">v{{ soulsync_base_version }}</button>
                 </div>
 
                 <!-- Status Section (music side) -->
@@ -963,7 +1040,7 @@
                             <div class="vsr-hero-glow" aria-hidden="true"></div>
                             <h1 class="vsr-hero-title">Search</h1>
                             <p class="vsr-hero-sub">Find a title, search your indexers for a release, or see what is new</p>
-                            <div class="vsr-tabs" role="tablist" aria-label="Search mode">
+                            <div class="vsr-tabs" data-tour="video.search-modes" role="tablist" aria-label="Search mode">
                                 <!-- named for what each searches (#1909). "enhanced" and
                                      "basic" said nothing about that; data-vsr-tab keeps the
                                      old ids so the code is unchanged -->
@@ -979,7 +1056,7 @@
                             </div>
                             <div class="vsr-panel active" data-vsr-panel="enhanced" id="vsr-enhanced-panel"
                                 role="tabpanel">
-                                <div class="vsr-searchbar">
+                                <div class="vsr-searchbar" data-tour="video.search-field">
                                     <svg class="vsr-search-ic" aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none"
                                         stroke="currentColor" stroke-width="2" stroke-linecap="round">
                                         <circle cx="11" cy="11" r="7" />
@@ -1040,7 +1117,7 @@
                                 <div class="loading-spinner"></div>
                                 <div class="loading-text">Searching&hellip;</div>
                             </div>
-                            <div class="vsr-results" data-video-search-results></div>
+                            <div class="vsr-results" data-video-search-results data-tour="video.search-results"></div>
                             <div class="vsr-state" data-video-search-hint>
                                 <div class="vsr-state-ic">&#127902;</div>
                                 <div class="vsr-state-title">Search SoulSync</div>
@@ -1369,7 +1446,7 @@
                      video/video-requests.js, styled by .vreq-* in video-side.css. -->
                 <section class="video-subpage" data-video-subpage="video-requests" hidden>
                     <div class="vreq-page">
-                        <div class="vreq-head">
+                        <div class="vreq-head" data-tour="video.requests">
                             <h1 class="vreq-title-h">Requests</h1>
                             <p class="vreq-sub-h">What your household asked for. Approve once, everyone who asked
                                 hears about it.</p>
@@ -1485,7 +1562,7 @@
                                     <p class="vd-overview" data-vd-overview></p>
                                     <!-- where it stands: requested, on the way, downloading, partly here (#2160) -->
                                     <div class="vts-host" data-vd-title-status hidden></div>
-                                    <div class="vd-actions artist-hero-actions" data-vd-actions></div>
+                                    <div class="vd-actions artist-hero-actions" data-vd-actions data-tour="video.title-actions"></div>
                                     <!-- the library line: the React island portals it here on a library show -->
                                     <div class="vd-libline" data-vd-libline></div>
                                     <div class="vd-kudos">
@@ -1495,6 +1572,7 @@
                                     <div class="vd-crew-line" data-vd-crew-line hidden></div>
                                     <div class="vd-essentials" data-vd-essentials hidden></div>
                                     <div class="vd-health" data-vd-health hidden></div>
+                                    <div class="vd-shelf" data-vd-shelf hidden></div>
                                     <div class="vd-subs" data-vd-subs hidden></div>
                                     <!-- External-source links reuse the artist-hero-badge style. -->
                                     <div class="artist-hero-badges vd-links" data-vd-links></div>
@@ -1625,7 +1703,7 @@
                                     <p class="vd-overview" data-vd-overview></p>
                                     <!-- where it stands: requested, on the way, downloading, partly here (#2160) -->
                                     <div class="vts-host" data-vd-title-status hidden></div>
-                                    <div class="vd-actions artist-hero-actions" data-vd-actions></div>
+                                    <div class="vd-actions artist-hero-actions" data-vd-actions data-tour="video.title-actions"></div>
                                     <!-- the library line (copies, quality, match): the React island
                                          portals it here on a library movie, so the page needs no second tab -->
                                     <div class="vd-libline" data-vd-libline></div>
@@ -1636,6 +1714,7 @@
                                     <div class="vd-crew-line" data-vd-crew-line hidden></div>
                                     <div class="vd-essentials" data-vd-essentials hidden></div>
                                     <div class="vd-health" data-vd-health hidden></div>
+                                    <div class="vd-shelf" data-vd-shelf hidden></div>
                                     <div class="vd-subs" data-vd-subs hidden></div>
                                     <div class="artist-hero-badges vd-links" data-vd-links></div>
                                 </div>
@@ -3089,7 +3168,7 @@
             <!-- Tools & Operations — React (webui/src/routes/tools). The
                  424-line vanilla region that lived here was deleted with the
                  P7 flip; #tools-page and its card classes are re-rendered by
-                 ToolsPage so style.css and helper.js still resolve. -->
+                 ToolsPage so style.css still resolves. -->
 
             <!-- ═══════════════════════════════════════════════════════════════════
                  WATCHLIST PAGE
@@ -3795,15 +3874,16 @@
                             <option value="">Loading&hellip;</option>
                         </select>
                     </label>
+                    <p class="music-get-off-note" role="note">Getting music isn't part of your profile. Ask your admin if you'd like it.</p>
                     <div class="wishlist-modal-actions">
                         <button class="btn btn--secondary" onclick="closeAddToWishlistModal()">
                             Close
                         </button>
-                        <button class="btn btn--download" id="wishlist-download-now-btn"
+                        <button class="btn btn--download" id="wishlist-download-now-btn" data-download-action
                             onclick="handleWishlistDownloadNow()">
                             Download Now
                         </button>
-                        <button class="btn btn--primary" id="confirm-add-to-wishlist-btn">
+                        <button class="btn btn--primary" id="confirm-add-to-wishlist-btn" data-request-action>
                             Add to Wishlist
                         </button>
                     </div>
@@ -4232,7 +4312,7 @@
         <div class="no-track-message hidden" id="no-track-message"><span>Play a track to get started</span></div>
     </div>
 
-    <button class="activity-float-btn" id="activity-float-btn" style="display:none" onclick="ServerActivity.toggle()"
+    <button class="activity-float-btn" id="activity-float-btn" data-tour="shell.activity" style="display:none" onclick="ServerActivity.toggle()"
         title="Server Activity — live streams">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
             stroke-linecap="round" stroke-linejoin="round">
@@ -4240,7 +4320,7 @@
         </svg>
         <span class="activity-float-badge" id="activity-float-badge" style="display:none">0</span>
     </button>
-    <button class="notif-bell-btn" id="notif-bell-btn" onclick="toggleNotifPanel()" title="Notifications"
+    <button class="notif-bell-btn" id="notif-bell-btn" data-tour="shell.notifications" onclick="toggleNotifPanel()" title="Notifications"
         aria-label="Notifications" aria-haspopup="dialog" aria-expanded="false">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
             stroke-linecap="round" stroke-linejoin="round">
@@ -4250,9 +4330,9 @@
         <span class="notif-bell-badge" id="notif-bell-badge" style="display:none">0</span>
         <span class="notif-bell-dl" id="notif-bell-dl" style="display:none" title="Active downloads">0</span>
     </button>
-    <button class="helper-float-btn" id="helper-float-btn" onclick="toggleHelperMode()"
-        title="Interactive Help — click any element to learn about it">
-        <span>?</span>
+    <button class="helper-float-btn" id="helper-float-btn" data-tour="shell.help" onclick="toggleHelperMode()" title="Help (?)"
+        aria-label="Help" aria-haspopup="dialog" aria-expanded="false" aria-controls="soulsync-help-sheet">
+        <span aria-hidden="true">?</span>
     </button>
 
     <script src="{{ url_for('static', filename='docs.js', v=static_v) }}"></script>

@@ -1,6 +1,7 @@
 import { queryOptions } from '@tanstack/react-query';
 
 import { apiClient, readJson } from '@/app/api-client';
+import { normalizeStatuses, type ReleaseStatus } from '@/components/release-statuses';
 
 import type {
   WatchlistFoundRelease,
@@ -20,6 +21,8 @@ import type {
   WatchlistRecentReleasesResponse,
   WatchlistScanStatusResponse,
 } from './-watchlist.types';
+
+import { primaryArtistId } from './-watchlist.helpers';
 
 export const WATCHLIST_QUERY_KEY = ['watchlist'] as const;
 
@@ -175,6 +178,10 @@ export function withEditionDefaults(config: WatchlistGlobalConfig): WatchlistGlo
     // #2082: an older server has one Live rule for albums and tracks
     include_live_tracks:
       (config as { include_live_tracks?: boolean }).include_live_tracks ?? config.include_live,
+    // #2175: an older server has no statuses, which is every one
+    release_statuses: normalizeStatuses(
+      (config as { release_statuses?: unknown }).release_statuses,
+    ),
   };
 }
 
@@ -250,11 +257,39 @@ export async function removeWatchlistArtist(artistId: string): Promise<void> {
   assertSuccess(payload, 'Failed to remove artist from watchlist');
 }
 
-export async function removeWatchlistArtistsBatch(artistIds: string[]): Promise<void> {
-  const payload = await readJson<SuccessResponse>(
-    apiClient.post('watchlist/remove-batch', { json: { artist_ids: artistIds } }),
-  );
-  assertSuccess(payload, 'Failed to remove artists from watchlist');
+// a big library takes the server a while to unwatch many artists at once;
+// the 10s default gave up on a removal that went on to finish (#2200)
+export const REMOVE_BATCH_TIMEOUT_MS = 120_000;
+
+export interface WatchlistBatchRemoval {
+  removed: number;
+  /** still on the watchlist when the page stopped waiting */
+  pending: number;
+  timedOut: boolean;
+}
+
+export async function removeWatchlistArtistsBatch(
+  artistIds: string[],
+): Promise<WatchlistBatchRemoval> {
+  try {
+    const payload = await readJson<SuccessResponse & { removed?: number }>(
+      apiClient.post('watchlist/remove-batch', {
+        json: { artist_ids: artistIds },
+        timeout: REMOVE_BATCH_TIMEOUT_MS,
+      }),
+    );
+    assertSuccess(payload, 'Failed to remove artists from watchlist');
+    return { removed: payload.removed ?? artistIds.length, pending: 0, timedOut: false };
+  } catch (error) {
+    if (!(error instanceof Error && error.name === 'TimeoutError')) throw error;
+    // the server keeps going after the page stops waiting: say what the
+    // watchlist holds now instead of calling it a failure
+    const onList = new Set(
+      (await fetchWatchlistArtists()).map((artist) => primaryArtistId(artist)),
+    );
+    const pending = artistIds.filter((id) => onList.has(id)).length;
+    return { removed: artistIds.length - pending, pending, timedOut: true };
+  }
 }
 
 export async function addWatchlistArtist(input: {
@@ -374,6 +409,8 @@ export interface WatchlistArtistConfigUpdate {
   preferred_metadata_source: string | null;
   /** #1822: always sent by the panel, so a save says which rules it means. */
   follow_defaults: boolean;
+  /** #2175: the artist's own release statuses, null = the library's. */
+  release_statuses: ReleaseStatus[] | null;
 }
 
 export async function saveWatchlistArtistConfig(

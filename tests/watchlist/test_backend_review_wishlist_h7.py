@@ -20,7 +20,7 @@ from types import SimpleNamespace
 import core.watchlist.auto_scan as autosc
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-_WS_SRC = (REPO_ROOT / "web_server.py").read_text()
+_WS_SRC = (REPO_ROOT / "web_server.py").read_text(encoding="utf-8")
 _WS_TREE = ast.parse(_WS_SRC)
 
 logger = logging.getLogger("tests")

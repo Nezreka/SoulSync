@@ -1,6 +1,6 @@
 /**
- * Connections > Server Connections (SETTINGS_PORT.md, step 10c): the markup
- * it replaced, the toggles and the active server, Plex's setup and PIN link,
+ * Connections > Server connections: the pick-one row and the active server
+ * (state in words, View configuration, Test server), Plex's setup and PIN link,
  * the library pickers and their endpoints, the playlist account, Music
  * Assistant's source, and testConnection.
  */
@@ -9,8 +9,7 @@ import { act, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createSettingsStore, type SettingsPayload, type SettingsStore } from '../settings-store';
-import { shape, vanilla } from './__fixtures__/shape';
-import { ServerConnections, testConnection } from './connections-servers';
+import { ServerConnections, serverState, testConnection, testResults } from './connections-servers';
 
 type Shell = Window & Record<string, unknown>;
 const shell = window as unknown as Shell;
@@ -69,7 +68,19 @@ afterEach(async () => {
 const section = () => render(<ServerConnections store={store} />);
 const el = <T extends HTMLElement = HTMLInputElement>(id: string) =>
   document.getElementById(id) as T;
-const shown = (id: string) => el(id).style.display !== 'none';
+/** shown: nothing inside the panels hides it (the rebuilt panels use
+ *  `hidden`; without the sheet they all sit in a hidden home) */
+const shown = (id: string) => {
+  for (
+    let n: HTMLElement | null = el(id);
+    n && !n.hasAttribute('data-server-panels');
+    n = n.parentElement
+  )
+    if (n.hidden) return false;
+  return true;
+};
+const button = (within: HTMLElement, words: string) =>
+  [...within.querySelectorAll('button')].find((b) => b.textContent === words)!;
 const sent = (url: string) => calls.filter((c) => c.url === url);
 function saved(): SettingsPayload {
   const merged: SettingsPayload = {};
@@ -79,10 +90,66 @@ function saved(): SettingsPayload {
 }
 const loaded = (settings: Record<string, unknown>) => act(() => store.hydrate(settings));
 
-describe('the section is the markup it replaced', () => {
-  it('before the settings load', () => {
-    const { container } = section();
-    expect(shape(container)).toEqual(shape(vanilla('connections-servers.vanilla.html')));
+describe('the pick-one row', () => {
+  it('before the settings load: five servers with their logos, Plex picked, nothing tested', () => {
+    testResults.reset();
+    section();
+    const row = document.querySelector('[role="radiogroup"][aria-label="Media server"]')!;
+    const servers = [...row.querySelectorAll<HTMLElement>('[role="radio"]')];
+    expect(servers.map((b) => b.id)).toEqual([
+      'plex-toggle',
+      'jellyfin-toggle',
+      'navidrome-toggle',
+      'music_assistant-toggle',
+      'soulsync-toggle',
+    ]);
+    expect(servers.map((b) => b.textContent)).toEqual([
+      'Plex',
+      'Jellyfin',
+      'Navidrome',
+      'Music Assistant',
+      'Standalone',
+    ]);
+    expect(servers.every((b) => b.querySelector('img'))).toBe(true);
+    expect(el('plex-toggle').getAttribute('aria-checked')).toBe('true');
+    // its state is words: nothing is known yet
+    expect(document.querySelector('[data-card="Server connections"]')!.textContent).toContain(
+      'Plex: Not tested yet',
+    );
+    // every panel is in the page (in the sheet's body, or a hidden home)
+    for (const id of ['plex-container', 'jellyfin-container', 'navidrome-container'])
+      expect(el(id)).not.toBeNull();
+  });
+
+  it('says what the server poll and the last Test said', () => {
+    const frame = { media_server: { connected: true, type: 'plex' } };
+    expect(serverState('plex', frame, undefined)).toEqual({ tone: 'ok', text: 'Connected' });
+    expect(serverState('jellyfin', frame, undefined).text).toBe('Not tested yet');
+    expect(
+      serverState('plex', { media_server: { connected: false, type: 'plex' } }, undefined),
+    ).toEqual({ tone: 'bad', text: 'Not connected' });
+    expect(serverState('plex', frame, { tone: 'bad', text: 'timed out', at: 1 }).text).toBe(
+      'timed out',
+    );
+    expect(serverState('soulsync', null, undefined).text).toBe('Standalone: no media server');
+  });
+
+  it('View configuration opens the server being looked at; Test server is in the card', async () => {
+    const onView = vi.fn();
+    render(<ServerConnections store={store} onView={onView} />);
+    loaded({ active_media_server: 'navidrome' });
+    const view = [...document.querySelectorAll('button')].find(
+      (b) => b.textContent === 'View configuration',
+    )!;
+    fireEvent.click(view);
+    expect(onView).toHaveBeenCalledWith('navidrome');
+    const test = [...document.querySelectorAll('button')].find(
+      (b) => b.textContent === 'Test server',
+    )!;
+    fireEvent.click(test);
+    await waitFor(() =>
+      expect(sent('/api/test-connection')[0]?.body).toEqual({ service: 'server' }),
+    );
   });
 });
 
@@ -103,7 +170,7 @@ describe('the servers', () => {
       active_media_server: 'jellyfin',
       jellyfin: { base_url: 'http://jf', api_timeout: 90 },
     });
-    expect(el('jellyfin-toggle').className).toBe('server-toggle-btn active');
+    expect(el('jellyfin-toggle').getAttribute('aria-checked')).toBe('true');
     expect(el('plex-container').className).toBe('server-config-container hidden');
     expect(el('jellyfin-container').className).toBe('server-config-container');
     expect(el('jellyfin-url').value).toBe('http://jf');
@@ -154,7 +221,7 @@ describe('the servers', () => {
 });
 
 describe('Plex', () => {
-  it('configured: the setup offers View Configuration, which opens the fields', async () => {
+  it('configured: the setup offers View configuration, which opens the fields', async () => {
     answers['/api/plex/music-libraries'] = {
       success: true,
       libraries: [{ title: 'Music' }],
@@ -253,7 +320,7 @@ describe('Plex', () => {
     expect(sent('/api/plex/verify-token')[0].body).toEqual({ url: 'http://mine', token: 'new' });
     expect(posted).toEqual([]);
     // Cancel goes back to the configured view
-    fireEvent.click(el('plex-pin-auth-flow').querySelector('.test-button')!);
+    fireEvent.click(button(el('plex-pin-auth-flow'), 'Cancel'));
     expect(shown('plex-setup')).toBe(false);
     expect(shown('plex-configuration')).toBe(true);
   });
@@ -276,7 +343,7 @@ describe('Navidrome and Music Assistant', () => {
     expect(shown('navidrome-playlist-clear')).toBe(true);
     await waitFor(() => expect(el<HTMLSelectElement>('navidrome-music-folder').value).toBe('A'));
     fireEvent.change(el('navidrome-playlist-username'), { target: { value: ' you ' } });
-    fireEvent.click(el('navidrome-playlist-login').querySelector('.test-button')!);
+    fireEvent.click(button(el('navidrome-playlist-login'), 'Save playlist account'));
     expect(shell.showToast).toHaveBeenCalledWith(
       'Enter the playlist account username and password',
       'warning',
@@ -284,7 +351,7 @@ describe('Navidrome and Music Assistant', () => {
     );
     fireEvent.change(el('navidrome-playlist-password'), { target: { value: 'pw' } });
     answers['/api/profiles/me/navidrome-login'] = { success: true, username: 'you' };
-    fireEvent.click(el('navidrome-playlist-login').querySelector('.test-button')!);
+    fireEvent.click(button(el('navidrome-playlist-login'), 'Save playlist account'));
     await waitFor(() =>
       expect(el('navidrome-playlist-status').textContent).toBe('Your synced playlists go to you.'),
     );
@@ -369,7 +436,8 @@ describe('the library pickers (were static/settings.js, before that beatport-ui.
     });
     await waitFor(() => expect(plex().value).toBe('Music'));
     expect([...plex().options].map((o) => o.textContent)).toEqual(['Podcasts', 'Music']);
-    expect(el('plex-library-selector-container').style.display).toBe('block');
+    // the picker itself is shown (its panel opens on the setup until asked)
+    expect(el('plex-library-selector-container').hidden).toBe(false);
   });
 
   it('prefers value over title, for the All Libraries sentinel', async () => {
@@ -384,12 +452,12 @@ describe('the library pickers (were static/settings.js, before that beatport-ui.
 
   it('hides the picker when the server has nothing, or does not answer', async () => {
     await plexWith({ success: true, libraries: [] });
-    expect(el('plex-library-selector-container').style.display).toBe('none');
+    expect(el('plex-library-selector-container').hidden).toBe(true);
     answers['/api/plex/music-libraries'] = () => {
       throw new Error('plex down');
     };
     await act(() => testConnection('plex', store));
-    expect(el('plex-library-selector-container').style.display).toBe('none');
+    expect(el('plex-library-selector-container').hidden).toBe(true);
   });
 
   it('a failed switch is a toast, never an alert', async () => {

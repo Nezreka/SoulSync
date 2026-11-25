@@ -784,9 +784,13 @@ window.refreshMusicRequestsBadge = refreshMusicRequestsBadge;
 let _requestAdminName = null;
 function announceWishlistRequest() {
     if (typeof canDownload !== 'function' || canDownload()) return false;
+    // with a limit, the toast says what's left ("2 of 5 asks left this week")
     const say = (name) => {
-        if (typeof showToast === 'function') showToast(`Sent to ${name || 'your admin'} as a request`, 'info');
+        const sent = `Sent to ${name || 'your admin'} as a request`;
         refreshMusicRequestsBadge();
+        _musicAsksLeftLine().then((left) => {
+            if (typeof showToast === 'function') showToast(left ? `${sent}. ${left}` : sent, 'info');
+        });
     };
     if (_requestAdminName) { say(_requestAdminName); return true; }
     fetch('/api/profiles', { headers: { 'Accept': 'application/json' } })
@@ -807,11 +811,53 @@ window.announceWishlistRequest = announceWishlistRequest;
 // resolves true when the add should go ahead (and on any doubt).
 function _requestLimitMessage(quota) {
     const days = Number(quota.days) || 7;
-    const noun = Number(quota.limit) === 1 ? 'request' : 'requests';
+    // music, movies and TV each have their own limit: this one is music's
+    const noun = Number(quota.limit) === 1 ? 'music request' : 'music requests';
     const span = days === 1 ? 'for today' : days === 7 ? 'for this week' : days === 30 ? 'for this month' : `for the last ${days} days`;
     return `You've used your ${quota.limit} ${noun} ${span}`;
 }
+// "3 of 5 music asks left this week", or '' with no limit (or on any doubt)
+function _musicAsksLeftLine() {
+    if (typeof canDownload !== 'function' || canDownload()) return Promise.resolve('');
+    return fetch('/api/requests/music/quota', { headers: { 'Accept': 'application/json' } })
+        .then(r => (r.ok ? r.json() : null))
+        .then((d) => {
+            const q = d && d.quota;
+            const limit = q ? Number(q.limit) || 0 : 0;
+            if (!limit) return '';
+            const days = Number(q.days) || 7;
+            const span = days === 1 ? 'today' : days === 7 ? 'this week' : days === 30 ? 'this month' : `in the last ${days} days`;
+            const left = Math.max(0, Number(q.remaining) || 0);
+            if (left <= 0) return `No music asks left ${span}`;
+            return `${left} of ${limit} ${limit === 1 ? 'music ask' : 'music asks'} left ${span}`;
+        })
+        .catch(() => '');
+}
+window.musicAsksLeftLine = _musicAsksLeftLine;
+
+// "3 of 5 asks left this week" next to a modal's Request button. only for a
+// profile that asks first; everyone else's placeholder stays empty (hidden)
+function fillMusicAsksLeft(root) {
+    const spots = root ? root.querySelectorAll('[data-asks-left]') : [];
+    if (!spots.length) return;
+    const perms = window.SoulSyncPerms;
+    const asks = perms ? perms.mode('music') === 'ask' : (typeof canDownload === 'function' && !canDownload());
+    spots.forEach((el) => { el.textContent = ''; });
+    if (!asks) return;
+    _musicAsksLeftLine().then((line) => {
+        spots.forEach((el) => { el.textContent = line; });
+    });
+}
+window.fillMusicAsksLeft = fillMusicAsksLeft;
+
 async function checkMusicRequestQuota() {
+    // getting music isn't part of this profile: the control should not be
+    // there at all (a stale page after an admin's change); say so calmly
+    const perms = window.SoulSyncPerms;
+    if (perms && perms.mode('music') === 'none') {
+        if (typeof showToast === 'function') showToast("Getting music isn't part of your profile. Ask your admin if you'd like it.", 'info', null, { history: false });
+        return false;
+    }
     if (typeof canDownload !== 'function' || canDownload()) return true;
     try {
         const res = await fetch('/api/requests/music/quota', { headers: { 'Accept': 'application/json' } });
@@ -898,6 +944,12 @@ function initializeWebSocket() {
             fetchAndUpdateDbStats();
             updateWishlistCount();
         }
+    });
+
+    // the server says which build it runs on every connect; the shell's
+    // build check offers a reload when it isn't the one this tab loaded
+    socket.on('server:build', (d) => {
+        window.dispatchEvent(new CustomEvent('ss:server-build', { detail: d || {} }));
     });
 
     // Phase 1 event listeners
@@ -1151,6 +1203,14 @@ function handleServiceStatusUpdate(data) {
     // The ban itself is untouched — it still suppresses calls and still
     // protects against hammering. This only stops it interrupting people it
     // does not apply to.
+    // and only the admin (#2208): the ban is the server's operational state.
+    // the server already sends a member a payload without it, this is the
+    // second guard. a modal raised before a profile switch goes with it.
+    if (!_statusViewerIsAdmin()) {
+        if (_spotifyRateLimitShown) { _spotifyRateLimitShown = false; closeRateLimitModal(); }
+        _spotifyInCooldown = false;
+        return;
+    }
     const _spotifyMattersHere = (data.metadata_source?.source || 'spotify') === 'spotify';
     if (data.spotify?.rate_limited && data.spotify.rate_limit && _spotifyMattersHere) {
         handleSpotifyRateLimit(data.spotify.rate_limit);
@@ -1177,6 +1237,14 @@ function handleServiceStatusUpdate(data) {
             handleSpotifyRateLimit(null);
         }
     }
+}
+
+// is the profile on this page an admin? the server's room and payload rules
+// are the real gate; this keeps backend notices off a member's screen if one
+// slips through. nobody loaded yet counts as admin, like the rest of the shell
+function _statusViewerIsAdmin() {
+    if (typeof currentProfile === 'undefined' || !currentProfile) return true;
+    return !!currentProfile.is_admin || currentProfile.id === 1;
 }
 
 function handleWatchlistCountUpdate(data) {

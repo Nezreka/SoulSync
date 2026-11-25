@@ -62,7 +62,12 @@ describe('describeFinding: plain words per type', () => {
     const finding = (details: Record<string, unknown>) => ({
       finding_type: 'comma_artist_split',
       title: 'Combined artist: ODESZA; RY X',
-      details: { combined_name: 'ODESZA; RY X', split_artists: ['ODESZA', 'RY X'], track_count: 1, ...details },
+      details: {
+        combined_name: 'ODESZA; RY X',
+        split_artists: ['ODESZA', 'RY X'],
+        track_count: 1,
+        ...details,
+      },
     });
     expect(describeFinding(finding({ confirmed: true }), 'Split Artists')).toEqual({
       title: 'ODESZA; RY X',
@@ -143,8 +148,97 @@ describe('describeFinding: plain words per type', () => {
     );
     expect(copy.title).toBe('Sprung');
     expect(copy.sub).toBe('Baron Grand');
+    // #2169: the library has a cover, so that is the one apply copies; the
+    // source's is not used and is not offered as if it were
     expect(copy.problem).toBe(
-      'No cover in the audio files and the album folder. Cover Art Archive has one.',
+      'No cover in the audio files and the album folder. The library has a cover to copy.',
+    );
+    // #2202: the cover is picked on the finding, the line names none
+    expect(copy.fix).toBe(
+      'Apply Art puts the cover picked below in each place without one. A cover you already have is kept.',
+    );
+  });
+
+  it('missing cover art names the source when the library has none (#2169)', () => {
+    const copy = describeFinding(
+      {
+        finding_type: 'missing_cover_art',
+        title: 'Artwork storage gaps: Stuck',
+        details: {
+          db_missing: true,
+          embed_missing: false,
+          sidecar_missing: true,
+          found_artwork_url: 'https://x/front',
+          artwork_source: 'deezer',
+        },
+      },
+      'Apply Art',
+    );
+    expect(copy.problem).toBe('No cover in the library and the album folder. Deezer has one.');
+  });
+
+  it('missing cover art says a saved cover that no longer loads (#2202)', () => {
+    const copy = describeFinding(
+      {
+        finding_type: 'missing_cover_art',
+        title: 'Artwork storage gaps: Listen',
+        details: {
+          db_missing: true,
+          embed_missing: false,
+          sidecar_missing: true,
+          library_cover_broken: true,
+          found_artwork_url: 'https://x/front',
+          artwork_source: 'deezer',
+        },
+      },
+      'Apply Art',
+    );
+    expect(copy.problem).toBe(
+      "No cover in the library and the album folder. The library's saved cover no longer loads. Deezer has one.",
+    );
+    expect(copy.problem).not.toContain('The library has a cover');
+  });
+
+  it('missing cover art never says the files give a cover they do not have (#2202)', () => {
+    // the reporter's Dua Lipa: a library cover, nothing in the files, no
+    // cover.jpg. the line said apply wrote cover.jpg "from the cover inside
+    // the audio files"
+    const copy = describeFinding(
+      {
+        finding_type: 'missing_cover_art',
+        title: 'Artwork storage gaps: Dua Lipa',
+        details: {
+          db_missing: false,
+          embed_missing: false,
+          sidecar_missing: true,
+          found_artwork_url: null,
+          artwork_source: 'library',
+        },
+      },
+      'Apply Art',
+    );
+    expect(copy.problem).toBe('No cover in the album folder. The library has a cover to copy.');
+    expect(copy.fix).not.toContain('inside the audio files');
+  });
+
+  it('missing cover art with nothing found copies the files cover to the folder (#2169)', () => {
+    const copy = describeFinding(
+      {
+        finding_type: 'missing_cover_art',
+        title: 'Artwork storage gaps: Punkrocker',
+        details: {
+          db_missing: true,
+          embed_missing: false,
+          sidecar_missing: true,
+          sidecar_from_embedded: true,
+          found_artwork_url: null,
+          artwork_source: 'embedded',
+        },
+      },
+      'Apply Art',
+    );
+    expect(copy.problem).toBe(
+      'No cover in the library and the album folder. The audio files have one to copy.',
     );
   });
 

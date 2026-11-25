@@ -16,6 +16,8 @@ Registered from ``web_server.py`` via ``register_library_v2_routes(app, ...)``.
 
 from __future__ import annotations
 
+from core.connect.device_access import device_playback
+
 import functools
 import json
 import os
@@ -25,7 +27,7 @@ import time
 from contextlib import closing
 from typing import Any, Callable, Dict, List, Optional
 
-from flask import jsonify, make_response, request, send_file
+from flask import has_request_context, jsonify, make_response, request, send_file
 
 from core.library2 import ADMIN_PROFILE_ID
 from core.library2 import bootstrap as lib2_bootstrap
@@ -34,6 +36,7 @@ from core.library2.job_registry import JobAlreadyRunning, JobRegistry
 # looking at (#1199): a ContextVar does not cross a thread start, so without
 # this a job for someone's own library would answer from the shared one.
 from core.library_scope import carrying_scope
+from core.permissions import requires, signed_in
 from utils.logging_config import get_logger
 
 logger = get_logger("api.library_v2")
@@ -319,6 +322,11 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
     """
 
     def _page_allowed() -> bool:
+        # the real app answers from the profile's permissions (the library
+        # page needs the music side too); a bare test app from its getter
+        from core.permissions import can, enforcing
+        if enforcing() and has_request_context():
+            return can(None, "music.library")
         if profile_page_allowed_getter is None:
             return True
         try:
@@ -345,6 +353,11 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             # the admin's. Everything that changes files or shared metadata
             # stays with the admin.
             if request.endpoint in _OWN_LIBRARY_WISH_ENDPOINTS and _can_wish():
+                # #2209: an artist on the watchlist is the Watchlist's, so a
+                # profile without that part gets no follow from here either
+                if _is_watchlist_write() and not _may_watch():
+                    from core.permissions import refusal
+                    return refusal("music.watchlist")
                 # a search downloads: a household member who asks first
                 # wishes (their wishlist becomes requests) but never grabs
                 if request.endpoint in _DOWNLOADING_ENDPOINTS and not _may_download():
@@ -385,7 +398,9 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             def guarded(*args, **kwargs):
                 _resolve_merged_ids(kwargs)
                 return _guard() or view(*args, **kwargs)
-            return app.route(rule, **options)(guarded)
+            # declared for the route inventory: the library page. writes are
+            # narrowed further by _guard (admin, or wishing in your own library)
+            return app.route(rule, **options)(requires("music.library")(guarded))
         return register
 
     def _named_row_hidden():
@@ -472,6 +487,30 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         from core.library2.sql_util import shared_library_member
         return shared_library_member() is not None
 
+    def _is_watchlist_write() -> bool:
+        """#2209: does this write follow or unfollow an artist (their watchlist
+        row), rather than wish for releases or tracks?"""
+        endpoint = request.endpoint
+        if endpoint == "lib2_set_monitored":
+            return (request.view_args or {}).get("entity") == "artists"
+        if endpoint == "lib2_artist_settings":
+            return request.method != "GET"
+        if endpoint == "lib2_discovery_artist":
+            body = request.get_json(silent=True)
+            return request.method == "POST" and isinstance(body, dict) and bool(body.get("monitored"))
+        return False
+
+    def _may_watch() -> bool:
+        """may the caller use the Watchlist (music.watchlist)? the admin always;
+        a member when their permissions give them the Watchlist page (#2209)"""
+        if _is_admin():
+            return True
+        try:
+            from core.permissions import can, enforcing
+            return can(None, "music.watchlist") if enforcing() and has_request_context() else True
+        except Exception:  # noqa: BLE001 - unreadable map: no watchlist
+            return False
+
     def _may_download() -> bool:
         """may the caller start a download (not just a request)?"""
         if _is_admin():
@@ -480,7 +519,11 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             # review 4 R4-D-6: a profile that no longer exists (a stale
             # session) is no profile, not one allowed to download
             profile = get_database().get_profile(_profile())
-            return bool(profile and profile.get("can_download", 1))
+            if not (profile and profile.get("can_download", 1)):
+                return False
+            # music.get under the policy and the music side (#2166)
+            from core.permissions import can, enforcing
+            return can(None, "music.get", "download") if enforcing() and has_request_context() else True
         except Exception:  # noqa: BLE001 - unreadable profile: a request, never a grab
             return False
 
@@ -725,6 +768,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         return jsonify({"success": True, "scope": wanted})
 
     @app.route("/api/library/v2/enabled")
+    @signed_in
     def lib2_enabled():
         # iss29-C10: `_guard` rejects every mutating request from a non-admin
         # profile (P0-02 — the lib2 monitored columns are global), but this
@@ -740,12 +784,18 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             "can_write": _is_admin(),
             # E-13: monitor/search in a library of one's own
             "can_wish": _can_wish(),
+            # #2209: following artists is the Watchlist's (music.watchlist)
+            "can_watch": _can_wish() and _may_watch(),
             # a wish that downloads right away (Automatic Search) needs this
             "can_download": _may_download(),
             # a grab for a library track straight from its Interactive Search
             # (the server's profile_may_grab: the admin, or a profile in a
             # library of its own); everyone else grabs through the inspector
             "can_grab": _is_admin() or _wishes_in_own(),
+            # #2210: writing tags and ReplayGain into files: the admin, or a
+            # profile in a library of its own on its own files (the routes
+            # check every file); a member of the shared library never
+            "can_tag": _is_admin() or _wishes_in_own(),
         })
 
     # -- acquisition requests / decisions (Phase 4) -------------------------
@@ -1659,6 +1709,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         })
 
     @_route("/api/library/v2/albums")
+    @device_playback
     def lib2_list_albums():
         """The library by release (A07): search, sort, monitored filter, paging."""
         from core.library2 import queries as Q
@@ -1675,7 +1726,12 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 sort=request.args.get("sort", "title"),
                 monitored=request.args.get("monitored", "all"), page=page, limit=limit,
                 letter=(request.args.get("letter") or "all").lower(),
-                source_filter=request.args.get("source", ""))
+                source_filter=request.args.get("source", ""),
+                # #2223: reviewed (locked) | unreviewed
+                review_filter=request.args.get("review", ""),
+                # the player's genre and label pages
+                genre=request.args.get("genre", ""),
+                label=request.args.get("label", ""))
         for album in albums:
             _apply_artwork_urls(album, "album")
         total_pages = (total + limit - 1) // limit
@@ -1708,6 +1764,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         return songs
 
     @_route("/api/library/v2/songs")
+    @device_playback
     def lib2_list_songs():
         """The library's songs (upstream #1906), paged; limit up to 500 so Play
         all can queue a whole search in one call."""
@@ -1743,6 +1800,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         return jsonify({"success": True, "copies": _song_payload(copies)})
 
     @_route("/api/library/v2/artists")
+    @device_playback
     def lib2_list_artists():
         from core.library2 import queries as Q
         search = request.args.get("search", "")
@@ -2252,6 +2310,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                         "monitored": monitor})
 
     @_route("/api/library/v2/artists/<int:artist_id>")
+    @device_playback
     def lib2_get_artist(artist_id):
         from core.library2 import queries as Q
         with closing(_conn()) as conn:
@@ -2259,10 +2318,27 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         if data is None:
             return _fail("Artist not found", 404)
         _apply_artwork_urls(data, "artist")
-        for entry in data.get("albums", []) + data.get("eps", []) + data.get("singles", []):
+        for entry in data.get("albums", []) + data.get("eps", []) + data.get("singles", []) + data.get("appears_on", []):
             _apply_artwork_urls(entry, "album",
                                 prefer_remote=_is_uncached_discography_row(entry))
         return jsonify({"success": True, "artist": data})
+
+    @_route("/api/library/v2/artists/<int:artist_id>/your-plays")
+    @device_playback
+    def lib2_artist_your_plays(artist_id):
+        """you and this artist: your own plays of them from your listening
+        pile (plays, first and last listened, rank, the last 12 months and
+        the songs you play most). listening null when you never played them."""
+        from core.library2.artist_listening import artist_listening
+        with closing(_conn()) as conn:
+            if not conn.execute("SELECT 1 FROM lib2_artists WHERE id = ?", (artist_id,)).fetchone():
+                return _fail("Artist not found", 404)
+            try:
+                listening = artist_listening(get_database(), conn, artist_id, _profile())
+            except Exception as e:  # noqa: BLE001 - the page shows nothing rather than fail
+                logger.error("your plays for artist %s failed: %s", artist_id, e)
+                return _fail("Could not read your plays", 500)
+        return jsonify({"success": True, "listening": listening})
 
     @_route("/api/library/v2/artists/<int:artist_id>/aliases")
     def lib2_get_artist_aliases(artist_id):
@@ -2390,6 +2466,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                          daemon=True).start()
 
     @_route("/api/library/v2/albums/<int:album_id>")
+    @device_playback
     def lib2_get_album(album_id):
         from core.library2 import queries as Q
         with closing(_conn()) as conn:
@@ -2637,23 +2714,27 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         from core.library2.album_versions import preview_version
         body = request.get_json(silent=True) or {}
         payload = preview_version(get_database(), album_id, body.get("source"),
-                                  body.get("release_id"))
+                                  body.get("release_id"), title=body.get("title"))
         return jsonify(payload), (200 if payload.get("success") else 400)
 
     @_route("/api/library/v2/albums/<int:album_id>/versions/apply", methods=["POST"])
     def lib2_album_version_apply(album_id):
-        """Point the album at the picked version: the manual album match (#758)."""
+        """Point the album at the picked version: the manual album match (#758).
+        #2178: ``version`` (the picked row) puts its title, type and date on
+        the album; ``merge_album_id`` merges an album that is the same edition."""
         from core.library2.album_versions import apply_version
         body = request.get_json(silent=True) or {}
+        version = body.get("version") if isinstance(body.get("version"), dict) else None
         payload = apply_version(get_database(), album_id, body.get("source"),
-                                body.get("release_id"), actor=f"profile:{_profile()}")
+                                body.get("release_id"), actor=f"profile:{_profile()}",
+                                version=version, merge_album_id=body.get("merge_album_id"))
         if not payload.get("success"):
             return jsonify(payload), 400
         from core.enrichment.unmatched import invalidate_unmatched_snapshots
         invalidate_unmatched_snapshots()
         # the new release's guests, same as a manual match
         from core.library2.provider_credits import schedule_match_credits
-        schedule_match_credits(get_database(), "album", album_id, payload["source"],
+        schedule_match_credits(get_database(), "album", payload["album_id"], payload["source"],
                                payload["release_id"])
         return jsonify(payload)
 
@@ -2998,6 +3079,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         return response
 
     @_route("/api/library/v2/artwork/<kind>/<int:eid>")
+    @device_playback
     def lib2_artwork(kind, eid):
         if kind not in ("artist", "album"):
             return "", 404
@@ -4359,6 +4441,26 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         finally:
             conn.close()
 
+    @_route("/api/library/v2/artists/<int:artist_id>/naming")
+    def lib2_artist_naming(artist_id):
+        """What new downloads of this artist are filed and tagged as (#2165).
+
+        A download is named after the library artist it belongs to, found by
+        provider id, so a source that still says "Machine Gun Kelly" files
+        under "mgk". The name is pinned with the artist's ``name`` metadata
+        override (``PATCH /api/library/v2/metadata-overrides/artist/<id>``)."""
+        from core.library2.artist_naming import artist_naming
+        try:
+            from core.metadata.registry import get_primary_source
+            primary = get_primary_source()
+        except Exception:  # noqa: BLE001 - the other sources still answer
+            primary = ""
+        with closing(_conn()) as conn:
+            naming = artist_naming(conn, artist_id, primary_source=primary or "")
+        if naming is None:
+            return _fail("Artist not found", 404)
+        return jsonify({"success": True, **naming})
+
     @_route("/api/library/v2/artists/<int:artist_id>/edit", methods=["POST"])
     def lib2_edit_artist(artist_id):
         """Update artist-level settings. Currently: ``monitor_new_items``
@@ -5305,6 +5407,47 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             conn.close()
         return jsonify({"success": True, **result})
 
+    def _slot_move_source(body) -> Optional[int]:
+        try:
+            value = int((body or {}).get("source_track_id") or 0)
+        except (TypeError, ValueError, AttributeError):
+            return None
+        return value if value > 0 else None
+
+    @_route("/api/library/v2/tracks/<int:track_id>/move-into/preview", methods=["POST"])
+    def lib2_slot_move_preview(track_id):
+        """#2193: what moving a track you have into this missing slot would
+        do (library rows, tags, folder), before anything changes."""
+        source_id = _slot_move_source(request.get_json(silent=True))
+        if not source_id:
+            return _fail("source_track_id required")
+        from core.library2.track_slot_move import SlotMoveError, preview_slot_move
+        try:
+            return jsonify(preview_slot_move(get_database(), source_id, track_id,
+                                             config_manager=config_manager))
+        except SlotMoveError as e:
+            return _fail(str(e), e.status)
+
+    @_route("/api/library/v2/tracks/<int:track_id>/move-into", methods=["POST"])
+    def lib2_slot_move_apply(track_id):
+        """#2193: move a track you have into this missing slot. The file
+        moves (never a copy), the old row and its emptied album go, the tags
+        are rewritten and the file is filed into this album's folder."""
+        source_id = _slot_move_source(request.get_json(silent=True))
+        if not source_id:
+            return _fail("source_track_id required")
+        from core.library2.track_slot_move import SlotMoveError, apply_slot_move
+        try:
+            result = apply_slot_move(get_database(), source_id, track_id,
+                                     config_manager=config_manager,
+                                     profile_id=_intent_profile())
+        except SlotMoveError as e:
+            return _fail(str(e), e.status)
+        except Exception as e:  # noqa: BLE001
+            logger.error("slot move failed (%s → %s): %s", source_id, track_id, e, exc_info=True)
+            return _fail(str(e), 500)
+        return jsonify(result)
+
     @_route("/api/library/v2/artists/<int:artist_id>/history")
     def lib2_artist_history(artist_id):
         """Merged history for this artist (Lidarr's History tab): grabs,
@@ -6222,6 +6365,27 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                     if folded:
                         conn.commit()
                         scan_stats["leftover_tracks_folded"] = folded
+                    # albums of one name merged into one row (weezer's three
+                    # "weezer"s) split back out, now the tags were just read
+                    # (#2110). before the renumbering: three track 1s of
+                    # three albums are not a numbering problem
+                    from core.library2.release_split import split_same_named_releases
+                    split = split_same_named_releases(conn, album_ids)
+                    if split["albums_made"]:
+                        conn.commit()
+                        scan_stats["same_named_albums_split"] = split["albums_made"]
+                        try:  # a provider listing a split album took over
+                            from core.library2.mirror_outbox import drain
+                            drain(db)
+                        except Exception as drain_err:  # noqa: BLE001
+                            logger.debug("post-split outbox drain failed: %s", drain_err)
+                    # a song on another song's number goes to the one its
+                    # file says, now the tags were just read (wolf39us)
+                    from core.library2.track_numbers import heal_colliding_numbers
+                    renumbered = heal_colliding_numbers(conn, album_ids)
+                    if renumbered:
+                        conn.commit()
+                        scan_stats["tracks_renumbered"] = renumbered
                 # A scan is the moment we learn a file is gone or back, and
                 # acquisition is the consumer of exactly that. Handing it over
                 # here — scoped to the tracks that actually changed — is what

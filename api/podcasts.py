@@ -14,6 +14,8 @@ Self-contained and purely additive. Does not modify any existing tables or route
 
 from __future__ import annotations
 
+from core.connect.device_access import device_playback
+
 import hashlib
 import html
 import os
@@ -44,6 +46,8 @@ from core.podcast_client import (
 from core.podcast_download_client import PodcastDownloadClient
 from core.runtime_state import download_batches, download_tasks, tasks_lock
 from utils.logging_config import get_logger
+from core.permissions import requires
+from core.profile_context import admin_only, is_admin_request
 
 logger = get_logger("podcasts.api")
 
@@ -170,6 +174,34 @@ def show_to_dict(show: PodcastShow, include_episodes: bool = True) -> Dict[str, 
     return d
 
 
+def _request_episode(data: Dict[str, Any]):
+    """file an Ask first profile's episode as a request for an admin (#2188)."""
+    from core.profile_context import get_current_profile_id
+    from core.requests.media import PODCAST, episode_key, episode_on_disk, episode_payload
+
+    db = _db()
+    if db is None:
+        return jsonify({"success": False, "error": "database unavailable"}), 500
+    payload = episode_payload(data)
+    key = episode_key(payload)
+    if episode_on_disk(db, payload):
+        return jsonify({"success": False, "in_library": True,
+                        "error": "That episode is already downloaded."}), 409
+    pid = get_current_profile_id()
+    me = db.get_profile(pid) or {}
+    rid = db.add_media_request(
+        profile_id=pid, requester_name=me.get("name") or "", kind=PODCAST, item_key=key,
+        title=payload.get("title") or "Episode", subtitle=payload.get("show_title") or None,
+        image_url=payload.get("artwork_url") or None, payload=payload)
+    if not rid:
+        waiting = db.list_media_requests(profile_id=pid, status="pending", kind=PODCAST)
+        if any(r.get("item_key") == key for r in waiting):
+            return jsonify({"success": True, "requested": True, "already": True}), 200
+        return jsonify({"success": False, "error": "Couldn't save the request"}), 500
+    logger.info("podcast episode request %s filed by profile %s: %s", rid, pid, payload.get("title"))
+    return jsonify({"success": True, "requested": True, "id": rid}), 200
+
+
 def _with_downloaded_flags(show_data: Dict[str, Any], feed_url: str) -> Dict[str, Any]:
     """the show with each episode saying whether it is on disk.
 
@@ -199,7 +231,12 @@ def _with_downloaded_flags(show_data: Dict[str, Any], feed_url: str) -> Dict[str
     episodes = []
     for ep in show_data.get("episodes") or []:
         path = on_disk.get(str(ep.get("enclosure_url") or "")) or on_disk.get(str(ep.get("guid") or ""))
-        episodes.append({**ep, "downloaded": True, "file_path": path} if path else ep)
+        # where it sits on disk is the admin's (#2201): a member's page only
+        # needs to know it's there
+        if path and not is_admin_request():
+            episodes.append({**ep, "downloaded": True})
+        else:
+            episodes.append({**ep, "downloaded": True, "file_path": path} if path else ep)
     return {**show_data, "episodes": episodes}
 
 
@@ -755,6 +792,7 @@ def create_podcasts_blueprint() -> Blueprint:
     bp = Blueprint("podcasts_api", __name__, url_prefix="/api/podcasts")
 
     @bp.route("/search", methods=["GET"])
+    @requires("podcasts.access")
     def search():
         """Search podcasts via iTunes Search API."""
         query = request.args.get("q", "").strip()
@@ -772,6 +810,7 @@ def create_podcasts_blueprint() -> Blueprint:
         return jsonify({"success": True, "query": query, "results": results})
 
     @bp.route("/featured", methods=["GET"])
+    @requires("podcasts.access")
     def featured():
         """Return curated top podcasts across genres with in-memory caching."""
         category = request.args.get("category", "Trending").strip()
@@ -821,6 +860,8 @@ def create_podcasts_blueprint() -> Blueprint:
         return jsonify({"success": True, "category": category, "results": results})
 
     @bp.route("/show", methods=["GET"])
+    @device_playback
+    @requires("podcasts.access")
     def show_detail():
         """Fetch full show metadata and episode list from RSS feed URL."""
         feed_url = request.args.get("url", "").strip()
@@ -857,31 +898,41 @@ def create_podcasts_blueprint() -> Blueprint:
         return jsonify({"success": True, "show": _with_downloaded_flags(show_data, feed_url)})
 
     @bp.route("/download", methods=["POST"])
+    @requires("podcasts.access")
     def download_episode():
         """Trigger background download of a podcast episode."""
         # Same switch music and video answer to. Nothing here had ever asked,
         # so a profile with downloads off could still fill the podcast folder.
-        from .helpers import download_permission_error
+        from .helpers import media_asks_first, media_download_error
 
-        denied = download_permission_error()
+        # a profile that asks first asks for the episode instead (#2188)
+        asks = media_asks_first("podcasts.get")
+        denied = None if asks else media_download_error("podcasts.get")
         if denied is not None:
             return denied
 
         data = request.get_json(silent=True) or {}
         if not (data.get("enclosure_url") or "").strip():
             return jsonify({"success": False, "error": "enclosure_url is required"}), 400
+        if asks:
+            return _request_episode(data)
         res = queue_podcast_download(data)
         return jsonify(res), 200
 
     @bp.route("/downloads", methods=["GET"])
+    @requires("podcasts.access")
     def get_downloads():
         """Return status of all tracked podcast downloads."""
         with _download_lock:
             # Sort newest started first
             items = sorted(_downloads.values(), key=lambda x: x.get("started_at", 0), reverse=True)
+            # the file's path is the admin's (#2201)
+            if not is_admin_request():
+                items = [{k: v for k, v in rec.items() if k != "file_path"} for rec in items]
             return jsonify({"success": True, "downloads": items})
 
     @bp.route("/audio-proxy", methods=["GET"])
+    @requires("podcasts.access")
     def audio_proxy():
         """Streaming proxy with range-request forwarding for enclosures."""
         target_url = request.args.get("url", "").strip()
@@ -936,6 +987,8 @@ def create_podcasts_blueprint() -> Blueprint:
     # -----------------------------------------------------------------------
 
     @bp.route("/watchlist", methods=["GET"])
+    @device_playback
+    @requires("podcasts.access")
     def podcasts_watchlist_list():
         """List all watchlisted podcasts."""
         db = _db()
@@ -951,6 +1004,7 @@ def create_podcasts_blueprint() -> Blueprint:
             return jsonify({"success": True, "podcasts": []})
 
     @bp.route("/watchlist/check", methods=["POST"])
+    @requires("podcasts.access")
     def podcasts_watchlist_check():
         """Check if a podcast is currently in the watchlist."""
         body = request.get_json(silent=True) or {}
@@ -975,6 +1029,7 @@ def create_podcasts_blueprint() -> Blueprint:
             return jsonify({"success": False, "is_watching": False, "podcast": None})
 
     @bp.route("/watchlist/add", methods=["POST"])
+    @requires("podcasts.access")
     def podcasts_watchlist_add():
         """Add or update a podcast in the watchlist."""
         body = request.get_json(silent=True) or {}
@@ -1007,7 +1062,7 @@ def create_podcasts_blueprint() -> Blueprint:
         except (ValueError, TypeError):
             episode_count = None
 
-        from .helpers import acting_profile_id, download_permission_error
+        from .helpers import acting_profile_id, media_download_error
         profile_id = acting_profile_id(request, body.get("profile_id"))
 
         # The direct /download endpoint asks this; the watchlist never did, so
@@ -1015,7 +1070,7 @@ def create_podcasts_blueprint() -> Blueprint:
         # defaults on) and the automation would fetch episodes for it anyway.
         # Following is harmless — only the downloading is gated — so the
         # follow lands with auto-download forced off instead of 403ing.
-        downloads_off = download_permission_error() is not None
+        downloads_off = media_download_error("podcasts.get") is not None
         if downloads_off:
             auto_download = False
 
@@ -1045,6 +1100,7 @@ def create_podcasts_blueprint() -> Blueprint:
             return jsonify({"success": False, "error": f"Failed to add to watchlist: {exc}"}), 500
 
     @bp.route("/watchlist/remove", methods=["POST"])
+    @requires("podcasts.access")
     def podcasts_watchlist_remove():
         """Remove a podcast from the watchlist."""
         body = request.get_json(silent=True) or {}
@@ -1071,6 +1127,7 @@ def create_podcasts_blueprint() -> Blueprint:
             return jsonify({"success": False, "error": f"Failed to remove: {exc}"}), 500
 
     @bp.route("/watchlist/settings", methods=["POST"])
+    @requires("podcasts.access")
     def podcasts_watchlist_settings():
         """Update settings (auto_download, retention_days) for a watchlisted podcast."""
         body = request.get_json(silent=True) or {}
@@ -1085,8 +1142,8 @@ def create_podcasts_blueprint() -> Blueprint:
             # can't arm auto-download here either (the automation re-checks,
             # but the flag should never be set in the first place)
             if auto_download:
-                from .helpers import download_permission_error
-                denied = download_permission_error()
+                from .helpers import media_download_error
+                denied = media_download_error("podcasts.get")
                 if denied is not None:
                     return denied
 
@@ -1115,6 +1172,7 @@ def create_podcasts_blueprint() -> Blueprint:
             return jsonify({"success": False, "error": f"Failed to update settings: {exc}"}), 500
 
     @bp.route("/watchlist/scan-now", methods=["POST"])
+    @requires("podcasts.access")
     def podcasts_watchlist_scan_now():
         """Trigger an immediate scan of all watchlisted podcast feeds."""
         try:
@@ -1127,6 +1185,7 @@ def create_podcasts_blueprint() -> Blueprint:
             return jsonify({"success": False, "error": str(exc)}), 500
 
     @bp.route("/watchlist/scan-status", methods=["GET"])
+    @requires("podcasts.access")
     def podcasts_watchlist_scan_status():
         """Return status and metrics from the podcast automation scanner."""
         try:
@@ -1136,8 +1195,11 @@ def create_podcasts_blueprint() -> Blueprint:
             return jsonify({"success": False, "error": str(exc)}), 500
 
     @bp.route("/downloads/cancel-queued", methods=["POST"])
+    @admin_only
     def cancel_queued_downloads():
-        """Cancel all pending/queued podcast downloads in memory."""
+        """Cancel all pending/queued podcast downloads in memory.
+
+        everyone's queue, not the caller's, so it's the admin's (#2201)."""
         cancelled_count = 0
         with tasks_lock:
             batch = download_batches.get("podcasts", {})
@@ -1163,6 +1225,7 @@ def create_podcasts_blueprint() -> Blueprint:
     # -----------------------------------------------------------------------
 
     @bp.route("/opml/import", methods=["POST"])
+    @requires("podcasts.access")
     def opml_import():
         """Import podcast subscriptions from an OPML file or XML payload.
 
@@ -1253,6 +1316,7 @@ def create_podcasts_blueprint() -> Blueprint:
         })
 
     @bp.route("/opml/export", methods=["GET"])
+    @requires("podcasts.access")
     def opml_export():
         """Export all watchlisted podcasts as an OPML 2.0 XML file."""
         db = _db()

@@ -88,14 +88,23 @@ def test_with_commits_and_does_not_close(db):
 
 
 def test_a_never_closed_connection_comes_back_on_gc(db):
+    from database import connection_pool as cp
     c = db._get_connection()
     raw = c._slot.raw
     c.execute("SELECT 1").fetchone()
+    kept_before = cp.stats["kept_by_cursor"]
     del c
     gc.collect()
-    c2 = db._get_connection()
-    assert c2._slot.raw is raw
-    c2.close()
+    # it went back rather than being kept for a cursor. asserting the next
+    # acquire hands out this exact connection raced with background threads
+    # a previous test left running, which can take it from the pool first
+    assert cp.stats["kept_by_cursor"] == kept_before
+    cp._drain_deferred()
+    with cp._lock:
+        idle = any(s.raw is raw for bucket in cp._idle.values() for s in bucket)
+    taken = any(proxy._slot.raw is raw for proxy in list(cp._checked_out))
+    assert idle or taken
+    raw.execute("SELECT 1")      # never closed
 
 
 def test_a_live_cursor_keeps_its_connection_out_of_the_pool(db):
@@ -355,3 +364,39 @@ def test_an_abandoned_write_transaction_is_rolled_back_at_once(db):
         other.rollback()
     finally:
         other.close()
+
+
+def _with_block_then_cursor_local(db):
+    # the shape of most MusicDatabase readers: the cursor is a local next to
+    # conn, and a function drops its locals in order, conn first
+    with db._get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT 1")
+        return cursor.fetchone()[0]
+
+
+def _with_block_then_execute_local(db):
+    with db._get_connection() as conn:
+        cur = conn.execute("SELECT 1")
+        return cur.fetchone()[0]
+
+
+@pytest.mark.parametrize("call", [_with_block_then_cursor_local, _with_block_then_execute_local])
+def test_a_cursor_local_dropped_after_conn_still_returns_the_connection(db, call):
+    """#2221: conn was finalized while its cursor was still alive, so the
+    connection was never reused and every call opened (and set up) a new one:
+    hundreds of ms each on a big database, thousands of times per sweep."""
+    call(db)
+    before = dict(cp.stats)
+    for _ in range(10):
+        assert call(db) == 1
+    assert cp.stats["misses"] - before["misses"] == 0
+    assert cp.stats["kept_by_cursor"] - before["kept_by_cursor"] == 0
+    assert cp.stats["hits"] - before["hits"] == 10
+
+
+def test_executescript_cursor_is_tracked_like_the_others(db):
+    c = db._get_connection()
+    cur = c.executescript("CREATE TABLE IF NOT EXISTS es(x); INSERT INTO es VALUES (1);")
+    assert getattr(cur, "_pool_proxy", None) is c
+    c.close()
