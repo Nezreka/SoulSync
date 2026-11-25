@@ -489,14 +489,16 @@ def music_channels():
     pid = _profile()
     if pid is None:
         return _signed_out()
-    key = (pid, str(_session_scope()))
+    from core.player.sources.music import hides_explicit
+    clean = hides_explicit()
+    key = (pid, str(_session_scope()), clean)
     now = time.monotonic()
     hit = _music_cache.get(key)
     if hit and now - hit[0] < _MUSIC_CACHE_SECONDS:
         return jsonify({"success": True, "channels": hit[1]})
     try:
         with closing(get_database()._get_connection()) as conn:
-            channels = mc.read(conn)
+            channels = mc.read(conn, hide_explicit=clean)
     except Exception:  # noqa: BLE001
         logger.exception("player music channels failed")
         return jsonify({"success": False, "error": "Could not read the music library"}), 500
