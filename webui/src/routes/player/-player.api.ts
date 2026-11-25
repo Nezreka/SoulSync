@@ -7,6 +7,7 @@ import type { ServerPremiere } from './-lib/premieres';
 import type { ServerResume } from './-lib/rails';
 import type {
   CatalogBook,
+  PlayerLibrary,
   Extras,
   ExtraTitle,
   LibAlbum,
@@ -1626,6 +1627,54 @@ export const musicListeningQuery = () =>
     queryFn: async () => await apiClient.get('player/music/listening').json<MusicListening>(),
     staleTime: 2 * MINUTE,
   });
+
+// ── libraries: their own pages, and who can't see them ─────────────────
+
+/** the video libraries this profile can see */
+export const playerLibrariesQuery = () =>
+  queryOptions({
+    queryKey: ['player', 'libraries'],
+    queryFn: async () =>
+      (await apiClient.get('player/libraries').json<{ libraries?: PlayerLibrary[] }>()).libraries ??
+      [],
+    staleTime: 5 * MINUTE,
+  });
+
+export interface AdminLibrary {
+  id: number;
+  kind: 'movie' | 'show';
+  name: string;
+  main: boolean;
+  own_page: boolean;
+  /** owned movies or shows in it */
+  titles: number;
+  /** the profiles it is hidden from */
+  hidden_from: number[];
+}
+
+/** admin: every library, and the profiles to pick from */
+export const adminLibrariesQuery = () =>
+  queryOptions({
+    queryKey: ['player', 'admin', 'libraries'],
+    queryFn: async () =>
+      await apiClient.get('player/admin/libraries').json<{
+        libraries: AdminLibrary[];
+        profiles: { id: number; name: string; is_admin: boolean }[];
+      }>(),
+    staleTime: MINUTE,
+  });
+
+/** admin: give a library its own page, or change who it is hidden from */
+export async function updateAdminLibrary(
+  id: number,
+  changes: { own_page?: boolean; hidden_from?: number[] },
+) {
+  return (
+    await apiClient
+      .put(`player/admin/libraries/${id}`, { json: changes })
+      .json<{ library: AdminLibrary }>()
+  ).library;
+}
 
 // ── watchlist (per profile, in player.db) ──────────────────────────────
 

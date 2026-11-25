@@ -213,20 +213,22 @@ export function VideoForYou({
   movies,
   shows,
   recentEpisodes,
-  page,
+  library,
 }: {
   kind: 'movie' | 'show';
   movies: CatalogMovie[];
   shows: CatalogShow[];
   recentEpisodes?: Parameters<typeof recentEpisodeCards>[0];
-  /** the layout this page keeps: "movies", "tv", or one library's "movies:lib:3" */
-  page?: string;
+  /** one library's own page: its rows are kept apart, and its links stay in it */
+  library?: { id: number; name: string };
 }) {
   const items: (CatalogMovie | CatalogShow)[] = kind === 'movie' ? movies : shows;
   const base = kind === 'movie' ? '/player/movies' : '/player/tv';
+  // carried on every link back into this page's library tab
+  const inLibrary = library ? `&library=${library.id}` : '';
   const { rows, editor, customize } = usePageRows({
-    page: page ?? (kind === 'movie' ? 'movies' : 'tv'),
-    name: kind === 'movie' ? 'Movies' : 'TV Shows',
+    page: `${kind === 'movie' ? 'movies' : 'tv'}${library ? `:lib:${library.id}` : ''}`,
+    name: library?.name ?? (kind === 'movie' ? 'Movies' : 'TV Shows'),
     fallback: kind === 'movie' ? MOVIE_ROWS : SHOW_ROWS,
     movieGenres: kind === 'movie' ? genresOf(movies) : [],
     showGenres: kind === 'show' ? genresOf(shows) : [],
@@ -282,7 +284,7 @@ export function VideoForYou({
       {
         title: 'Recently added',
         cards: cards('recent', byAdded),
-        more: { to: `${base}?tab=library` },
+        more: { to: `${base}?tab=library${inLibrary}` },
       },
     ];
     out['top-rated'] = [
@@ -318,7 +320,7 @@ export function VideoForYou({
           `${kind}-genre-${g}`,
         ),
       ),
-      more: { to: `${base}?tab=library&genre=${encodeURIComponent(g)}` },
+      more: { to: `${base}?tab=library&genre=${encodeURIComponent(g)}${inLibrary}` },
     });
     out.genres = topGenres(items, 3)
       .map(genreShelf)
@@ -348,7 +350,7 @@ export function VideoForYou({
       out.decades = decades.map(([d, group]) => ({
         title: `From the ${Number(d) >= 2000 ? d : String(d).slice(2)}s`,
         cards: cards(`decade-${d}`, todays(group, `movie-decade-${d}`)),
-        more: { to: `${base}?tab=library&decade=${d}` },
+        more: { to: `${base}?tab=library&decade=${d}${inLibrary}` },
       }));
     } else {
       const networks = [...grouped(shows, (x) => x.network).entries()].sort(
@@ -372,7 +374,7 @@ export function VideoForYou({
     return out;
     // card and base follow kind
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items, shows, kind]);
+  }, [items, shows, kind, inLibrary]);
 
   const episodes = kind === 'show' && recentEpisodes ? recentEpisodeCards(recentEpisodes) : [];
 
@@ -516,11 +518,15 @@ function grouped<T>(items: readonly T[], keyOf: (x: T) => string | number | null
 export function VideoCategories({
   kind,
   items,
+  library,
 }: {
   kind: 'movie' | 'show';
   items: (CatalogMovie | CatalogShow)[];
+  /** one library's own page: its genre and decade links stay in it */
+  library?: number;
 }) {
   const base = kind === 'movie' ? '/player/movies' : '/player/tv';
+  const inLibrary = library ? `&library=${library}` : '';
   const noun = (n: number) =>
     kind === 'movie' ? `${n} film${n === 1 ? '' : 's'}` : `${n} show${n === 1 ? '' : 's'}`;
   const { genres, decades, makers } = useMemo(() => {
@@ -531,7 +537,7 @@ export function VideoCategories({
         key: `g:${g}`,
         label: g,
         sub: noun(group.length),
-        href: `${base}?tab=library&genre=${encodeURIComponent(g)}`,
+        href: `${base}?tab=library&genre=${encodeURIComponent(g)}${inLibrary}`,
         art: coverOf(group, kind, used),
       };
     });
@@ -541,14 +547,14 @@ export function VideoCategories({
         key: `d:${d}`,
         label: Number(d) >= 2000 ? `${d}s` : `${String(d).slice(2)}s`,
         sub: noun(group.length),
-        href: `${base}?tab=library&decade=${d}`,
+        href: `${base}?tab=library&decade=${d}${inLibrary}`,
         art: coverOf(group, kind, used),
       }));
     const makers = makerTiles(items, kind, used);
     return { genres, decades, makers };
     // noun and base follow kind
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items, kind]);
+  }, [items, kind, inLibrary]);
 
   if (!items.length)
     return (
