@@ -508,6 +508,36 @@ def music_channels():
     return jsonify({"success": True, "channels": channels})
 
 
+_listening_cache: dict = {}
+_LISTENING_CACHE_SECONDS = 120
+
+
+@bp.route("/api/player/music/listening", methods=["GET"])
+@device_playback
+@requires("music.library")
+def music_listening():
+    """the music page's listening rows (recently played, heavy rotation,
+    most played): this profile's plays as albums, artists and tracks of its
+    library. cached two minutes per profile and scope."""
+    from core.player import music_listening as ml
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    from core.player.sources.music import hides_explicit
+    clean = hides_explicit()
+    key = (pid, str(_session_scope()), clean)
+    hit = _listening_cache.get(key)
+    if hit and time.monotonic() - hit[0] < _LISTENING_CACHE_SECONDS:
+        return jsonify({"success": True, **hit[1]})
+    try:
+        rows = ml.read(get_database(), pid, hide_explicit=clean)
+    except Exception:  # noqa: BLE001
+        logger.exception("player music listening failed")
+        return jsonify({"success": False, "error": "Could not read your listening"}), 500
+    _listening_cache[key] = (time.monotonic(), rows)
+    return jsonify({"success": True, **rows})
+
+
 def _session_scope():
     """the library scope the caller picked (#1199), part of the cache key"""
     try:
@@ -667,6 +697,74 @@ def reset_home_layout():
 
 
 KEYWORD_MAX = 80
+
+
+@bp.route("/api/player/page-layout/<page_key>", methods=["GET"])
+@device_playback
+@self_only
+def get_page_layout(page_key):
+    """the rows of a browse page (movies, tv, music, youtube, or one
+    library's page "movies:lib:<id>") for this screen, with the catalog of
+    rows the page can show (core/player/page_layout.py is the contract)."""
+    from core.player import page_layout
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    try:
+        key = page_layout.page(page_key)
+        dev = page_layout.device(request.args.get("device"))
+        return jsonify({"success": True, **page_layout.get(player_db(), pid, key, dev),
+                        "catalog": page_layout.catalog(key)})
+    except page_layout.LayoutError as e:
+        return _bad(e)
+    except Exception:  # noqa: BLE001
+        return _failed("page layout read")
+
+
+@bp.route("/api/player/page-layout/<page_key>", methods=["PUT"])
+@device_playback
+@self_only
+def put_page_layout(page_key):
+    """{layout, device}: device is this screen's id, or '*' for every
+    screen of the profile (which drops this screen's own, from_device)"""
+    from core.player import page_layout
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    body = request.get_json(silent=True) or {}
+    try:
+        key = page_layout.page(page_key)
+        dev = page_layout.device(body.get("device"))
+        db = player_db()
+        saved = page_layout.put(db, pid, key, body.get("layout"), dev)
+        if dev == page_layout.ALL and body.get("from_device"):
+            page_layout.reset(db, pid, key, page_layout.device(body.get("from_device")))
+        return jsonify({"success": True, "layout": saved,
+                        "scope": "all" if dev == page_layout.ALL else "device"})
+    except page_layout.LayoutError as e:
+        return _bad(e)
+    except Exception:  # noqa: BLE001
+        return _failed("page layout save")
+
+
+@bp.route("/api/player/page-layout/<page_key>", methods=["DELETE"])
+@device_playback
+@self_only
+def reset_page_layout(page_key):
+    """?device=: this screen follows the shared layout again. no device:
+    the page goes back to its default on every screen."""
+    from core.player import page_layout
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    try:
+        key = page_layout.page(page_key)
+        page_layout.reset(player_db(), pid, key, page_layout.device(request.args.get("device")))
+        return jsonify({"success": True})
+    except page_layout.LayoutError as e:
+        return _bad(e)
+    except Exception:  # noqa: BLE001
+        return _failed("page layout reset")
 
 
 @bp.route("/api/player/maker", methods=["GET"])

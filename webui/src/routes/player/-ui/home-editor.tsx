@@ -30,7 +30,13 @@ export function HomeEditor({
   onSave,
   onReset,
   onClose,
+  title = 'Customize home',
+  noBillboard,
 }: {
+  /** the panel's heading: "Customize home", "Customize Movies" */
+  title?: string;
+  /** a page with no billboard to switch */
+  noBillboard?: boolean;
   layout: HomeLayout;
   catalog: LayoutCatalog | undefined;
   /** where the layout on show came from: this screen's own, the shared one, or the default */
@@ -83,10 +89,10 @@ export function HomeEditor({
   ].filter((o) => !taken.has(o.id));
 
   return inPlayer(
-    <aside className={s.editor} role="dialog" aria-modal="false" aria-label="Customize home">
+    <aside className={s.editor} role="dialog" aria-modal="false" aria-label={title}>
       <div className={s.editorHead}>
         <div>
-          <h2 className={s.editorTitle}>Customize home</h2>
+          <h2 className={s.editorTitle}>{title}</h2>
           <p className={s.editorSub}>
             {scope === 'device'
               ? 'This screen has its own layout.'
@@ -102,18 +108,20 @@ export function HomeEditor({
       </div>
 
       <div className={s.editorBody}>
-        <label className={s.editorRow} data-on={layout.billboard ? 'true' : undefined}>
-          <input
-            type="checkbox"
-            checked={layout.billboard}
-            onChange={(e) => onChange({ ...layout, billboard: e.target.checked })}
-            data-nav
-          />
-          <span className={s.editorRowText}>
-            <span className={s.editorRowName}>Featured billboard</span>
-            <span className={s.editorRowHint}>The big banner of what's new at the top</span>
-          </span>
-        </label>
+        {noBillboard ? null : (
+          <label className={s.editorRow} data-on={layout.billboard ? 'true' : undefined}>
+            <input
+              type="checkbox"
+              checked={layout.billboard}
+              onChange={(e) => onChange({ ...layout, billboard: e.target.checked })}
+              data-nav
+            />
+            <span className={s.editorRowText}>
+              <span className={s.editorRowName}>Featured billboard</span>
+              <span className={s.editorRowHint}>The big banner of what's new at the top</span>
+            </span>
+          </label>
+        )}
 
         {layout.rows.map((row, i) => {
           const def = rowDef(catalog, row.id);

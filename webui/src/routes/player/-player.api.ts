@@ -1551,6 +1551,82 @@ export async function resetHomeLayout(device?: string) {
   });
 }
 
+// ── the rows of the movies, tv, music and youtube pages ────────────────
+
+export const pageLayoutQuery = (page: string, device: string) =>
+  queryOptions({
+    queryKey: ['player', 'page-layout', page, device],
+    queryFn: async () =>
+      await apiClient
+        .get(`player/page-layout/${encodeURIComponent(page)}`, { searchParams: { device } })
+        .json<{
+          layout?: { rows: HomeLayout['rows'] };
+          scope?: 'device' | 'all' | null;
+          catalog?: LayoutCatalog;
+        }>(),
+    staleTime: 5 * MINUTE,
+  });
+
+/** save for this screen, or for every screen of the profile ('*') */
+export async function savePageLayout(
+  page: string,
+  layout: unknown,
+  device: string,
+  fromDevice?: string,
+) {
+  await apiClient.put(`player/page-layout/${encodeURIComponent(page)}`, {
+    json: { layout, device, ...(fromDevice ? { from_device: fromDevice } : {}) },
+  });
+}
+
+/** this screen follows the shared layout again; without a device, the page goes to its default */
+export async function resetPageLayout(page: string, device?: string) {
+  await apiClient.delete(`player/page-layout/${encodeURIComponent(page)}`, {
+    searchParams: device ? { device } : {},
+  });
+}
+
+// ── the music page's listening rows ────────────────────────────────────
+
+export interface ListeningAlbum {
+  album_id: number;
+  title: string;
+  artist: string | null;
+  year: number | null;
+  image_url: string | null;
+  plays?: number;
+}
+export interface ListeningArtist {
+  artist_id: number;
+  name: string;
+  plays: number;
+  image_url: string | null;
+}
+export interface ListeningTrack {
+  track_id: number;
+  title: string;
+  artist: string | null;
+  album_id: number;
+  album: string | null;
+  plays: number;
+  image_url: string | null;
+}
+export interface MusicListening {
+  recent: ListeningAlbum[];
+  heavy_rotation: ListeningArtist[];
+  top_albums: ListeningAlbum[];
+  top_tracks: ListeningTrack[];
+  all_time_artists: ListeningArtist[];
+}
+
+/** this profile's plays as albums, artists and tracks of its library */
+export const musicListeningQuery = () =>
+  queryOptions({
+    queryKey: ['player', 'music-listening'],
+    queryFn: async () => await apiClient.get('player/music/listening').json<MusicListening>(),
+    staleTime: 2 * MINUTE,
+  });
+
 // ── watchlist (per profile, in player.db) ──────────────────────────────
 
 export type WatchlistKind = 'movie' | 'show' | 'youtube';
