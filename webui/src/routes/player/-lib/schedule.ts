@@ -76,18 +76,130 @@ export function seededShuffle<T>(items: readonly T[], seed: number): T[] {
   return out;
 }
 
-/** yyyy-mm-dd of a local date: the day part of the seed */
-export function dayKey(date: Date): string {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
+// ── the guide's clock ───────────────────────────────────────────────────
+//
+// a channel's day starts at midnight and is seeded by the date. each device
+// used its OWN midnight and its own date, so a phone in another timezone (or
+// a server whose TZ isn't the house's) laid out a different guide from the
+// tv in the living room. the server hands its clock out with the day's pool
+// (core/player/guide_day.py clock()) and every day here is counted on it.
+// what a device SHOWS is still its own local time for those instants.
+
+export interface GuideClock {
+  /** the server's zone by name ("America/Los_Angeles"), when it knows it */
+  tz?: string | null;
+  /** its offset from utc right now, in minutes: used when there is no name */
+  offset_minutes?: number | null;
 }
 
+type Zone = { fmt: Intl.DateTimeFormat } | { offset: number } | null;
+let guideZone: Zone = null;
+let guideZoneKey = '';
+
+/** the clock every day is counted on; null or nothing goes back to the device's */
+export function setGuideClock(clock?: GuideClock | null): void {
+  let next: Zone = null;
+  let key = '';
+  const tz = clock?.tz ? String(clock.tz) : '';
+  if (tz) {
+    try {
+      next = {
+        fmt: new Intl.DateTimeFormat('en-US', {
+          timeZone: tz,
+          hourCycle: 'h23',
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+        }),
+      };
+      key = tz;
+    } catch {
+      next = null; // a name this browser doesn't know: the offset below
+    }
+  }
+  if (!next && typeof clock?.offset_minutes === 'number' && Number.isFinite(clock.offset_minutes)) {
+    next = { offset: clock.offset_minutes };
+    key = `utc${clock.offset_minutes}`;
+  }
+  guideZone = next;
+  guideZoneKey = key;
+}
+
+interface Wall {
+  y: number;
+  m: number;
+  d: number;
+  h: number;
+  mi: number;
+  s: number;
+}
+
+/** the date and time on the guide's clock at an instant */
+function wall(ms: number): Wall {
+  const zone = guideZone;
+  if (!zone) {
+    const d = new Date(ms);
+    return {
+      y: d.getFullYear(),
+      m: d.getMonth() + 1,
+      d: d.getDate(),
+      h: d.getHours(),
+      mi: d.getMinutes(),
+      s: d.getSeconds(),
+    };
+  }
+  if ('offset' in zone) {
+    const d = new Date(ms + zone.offset * 60_000);
+    return {
+      y: d.getUTCFullYear(),
+      m: d.getUTCMonth() + 1,
+      d: d.getUTCDate(),
+      h: d.getUTCHours(),
+      mi: d.getUTCMinutes(),
+      s: d.getUTCSeconds(),
+    };
+  }
+  const part: Record<string, number> = {};
+  for (const p of zone.fmt.formatToParts(new Date(ms)))
+    if (p.type !== 'literal') part[p.type] = Number(p.value);
+  return {
+    y: part.year,
+    m: part.month,
+    d: part.day,
+    h: part.hour % 24,
+    mi: part.minute,
+    s: part.second,
+  };
+}
+
+/** how far the guide's clock is ahead of utc at an instant, in ms */
+function offsetAt(ms: number): number {
+  const w = wall(ms);
+  return Date.UTC(w.y, w.m - 1, w.d, w.h, w.mi, w.s) - Math.floor(ms / 1000) * 1000;
+}
+
+/** yyyy-mm-dd on the guide's clock: the day part of the seed */
+export function dayKey(date: Date): string {
+  const w = wall(date.getTime());
+  return `${w.y}-${String(w.m).padStart(2, '0')}-${String(w.d).padStart(2, '0')}`;
+}
+
+/** midnight on the guide's clock, at or before an instant */
 export function startOfLocalDay(ms: number): number {
-  const d = new Date(ms);
-  d.setHours(0, 0, 0, 0);
-  return d.getTime();
+  if (!guideZone) {
+    const d = new Date(ms);
+    d.setHours(0, 0, 0, 0);
+    return d.getTime();
+  }
+  const w = wall(ms);
+  const midnight = Date.UTC(w.y, w.m - 1, w.d);
+  // the offset at midnight can differ from the one now (a clock change in
+  // between): take the guess's own offset and settle on it
+  const guess = midnight - offsetAt(ms);
+  return midnight - offsetAt(guess);
 }
 
 /**
@@ -183,7 +295,7 @@ export interface ScheduleOptions {
 
 /** evening, film time: 6pm to 2am */
 export function filmHour(at: number): boolean {
-  const h = new Date(at).getHours();
+  const h = wall(at).h;
   return h >= 18 || h < 2;
 }
 
@@ -201,7 +313,7 @@ export function scheduleDay(
   day: Date,
   options: ScheduleOptions = {},
 ): GuideProgram[] {
-  const key = `${channelId}|${startOfLocalDay(day.getTime())}|${options.ordered ? 1 : 0}|${
+  const key = `${guideZoneKey}|${channelId}|${startOfLocalDay(day.getTime())}|${options.ordered ? 1 : 0}|${
     options.daypart ? 1 : 0
   }|${options.seenKey ?? ''}|${options.today ?? ''}|${options.blocks ?? 1}|${
     options.rotateShows ? 1 : 0

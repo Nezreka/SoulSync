@@ -318,7 +318,9 @@ def video_catalog():
                 player_db(), view, shaped,
                 keep=lambda c: bool(c.get("movies") or c.get("shows") or c.get("youtube")),
             )
-            return jsonify({"success": True, **day, "frozen": True})
+            # and the clock the day is counted on, so every device seeds the
+            # same schedule whatever timezone it is in
+            return jsonify({"success": True, **day, "frozen": True, "clock": guide_day.clock()})
         return jsonify({"success": True, **shaped()})
     except Exception:  # noqa: BLE001
         logger.exception("player video catalog failed")

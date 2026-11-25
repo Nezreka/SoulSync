@@ -22,6 +22,8 @@ export interface CatalogWire {
   recent_episodes?: CatalogRecentEpisode[];
   youtube?: CatalogYoutube[];
   kinds?: VideoCatalog['kinds'];
+  /** the guide's clock: only sent with the day's frozen pool */
+  clock?: { tz?: string | null; offset_minutes?: number | null } | null;
 }
 
 function reader(fields: string[] | undefined) {
