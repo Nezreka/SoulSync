@@ -216,7 +216,7 @@ Automations can be organized into named **groups** (e.g. "Nightly Operations", "
 | **Clean Search History** | Remove old Soulseek searches (keeps the 50 most recent) |
 | **Clean Completed Downloads** | Clear completed downloads and empty directories from the input folder |
 | **Full Cleanup** | Quarantine, download queue, import folder, and search history in one sweep |
-| **Backup Database** | Create a timestamped database backup |
+| **Backup Database** | Create a timestamped, verified backup of the music database, and of the player and audiobook databases with it (newest five kept) |
 
 ## Utility
 
