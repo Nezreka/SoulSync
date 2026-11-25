@@ -575,7 +575,7 @@ const _CAN_ICONS: Record<CanDoRow['id'], string> = {
 export function _maCanDoSection(): string {
   const perms = getMyPermissions();
   if (perms.isAdmin) return '';
-  const can = describePermissions(perms, { used: _ma.asksUsed });
+  const can = describePermissions(perms, { used: _ma.asksUsed, forMember: true });
   const rows = can.rows
     .map((r) => {
       const lead = r.strong
@@ -595,12 +595,14 @@ export function _maCanDoSection(): string {
     })
     .join('');
   const who = escapeHtml(_ma.adminName || 'your admin');
-  const ask = can.anyOff
-    ? `<p class="ma-can-ask">Something you'd like that isn't here? Ask ${who}. Changes reach you right away.</p>`
-    : '';
+  // what else there is, as something to ask for, not a list of what is denied (#2303)
   const never = can.never.length
-    ? `<div class="ma-can-never"><b>Not part of your profile:</b> ${escapeHtml(can.never.join(', '))}.</div>`
+    ? `<div class="ma-can-never"><b>There's more you can ask ${who} for:</b> ${escapeHtml(can.never.join(', '))}.</div>`
     : '';
+  const ask =
+    can.anyOff && !can.never.length
+      ? `<p class="ma-can-ask">Something you'd like that isn't here? Ask ${who}.</p>`
+      : '';
   return `
     <section class="ma-section" id="ma-cando" aria-labelledby="ma-cando-h">
       <h4 class="ma-section-title" id="ma-cando-h">What you can do</h4>
