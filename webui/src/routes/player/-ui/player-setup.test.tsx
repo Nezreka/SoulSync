@@ -115,4 +115,25 @@ describe('player setup', () => {
       hidden: { '1': [3], '2': [], 'new:2': [] },
     });
   });
+
+  it('lists a library made in setup on the sidebar step, and saves where it was put', async () => {
+    state.payload = admin(false);
+    await mount();
+    await waitFor(() => expect(screen.getByText('Set up your player')).toBeTruthy());
+    next(); // movies
+    fireEvent.click(screen.getByRole('button', { name: 'Add a library' }));
+    const names = screen.getAllByLabelText('Library name') as HTMLInputElement[];
+    fireEvent.change(names[1], { target: { value: 'Cam Movies' } });
+    next(); // tv
+    next(); // people
+    next(); // sidebar
+    // it is there, by its name, and can be switched off like any other place
+    fireEvent.click(screen.getByLabelText('Cam Movies is in the sidebar'));
+    fireEvent.click(screen.getByRole('button', { name: 'Finish' }));
+    await waitFor(() => expect(state.saved).not.toBeNull());
+    const saved = state.saved as { sidebar_hidden: string[]; libraries: { name: string }[] };
+    // named by its place in the libraries list, which the server turns into its id
+    expect(saved.libraries[2].name).toBe('Cam Movies');
+    expect(saved.sidebar_hidden).toEqual(['lib:new:2']);
+  });
 });
