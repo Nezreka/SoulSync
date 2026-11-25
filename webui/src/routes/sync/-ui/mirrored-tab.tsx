@@ -1842,6 +1842,10 @@ export function MirroredTab({
             setDetail(null);
             void pipeline.run(detail.playlistId, detail.data.name ?? '');
           }}
+          onSyncOnly={() => {
+            setDetail(null);
+            void pipeline.run(detail.playlistId, detail.data.name ?? '', { skipWishlist: true });
+          }}
           onRefreshFromSource={() => {
             setDetail(null);
             void pipeline.run(detail.playlistId, detail.data.name ?? '', { refreshOnly: true });
