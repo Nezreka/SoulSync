@@ -408,7 +408,13 @@ def get_party(
     viewer_id: int,
     *,
     now: Optional[float] = None,
+    may_see: Optional[Callable[[str, str], bool]] = None,
 ) -> Optional[Dict[str, Any]]:
+    """``may_see(item_type, item_id)``: may this viewer see the title? the
+    list of parties already left out the ones a profile's rating cap hides;
+    opening one by its id did not, so the id was a way round the cap. a
+    party over the cap answers as one that doesn't exist. the host is never
+    turned away from their own party."""
     ensure_schema(db)
     t = time.time() if now is None else float(now)
     with db._get_connection() as conn:
@@ -419,6 +425,8 @@ def get_party(
             (str(party_id),),
         ).fetchone()
         if not row:
+            return None
+        if may_see and int(row[1]) != int(viewer_id) and not may_see(row[3], row[4]):
             return None
         # Refresh seen_at if viewer is already a member
         conn.execute(
@@ -437,15 +445,19 @@ def join_party(
     ready: Optional[bool] = None,
     rsvp: bool = False,
     now: Optional[float] = None,
+    may_see: Optional[Callable[[str, str], bool]] = None,
 ) -> Dict[str, Any]:
     ensure_schema(db)
     t = time.time() if now is None else float(now)
     with db._get_connection() as conn:
         row = conn.execute(
-            f"SELECT status FROM {PARTIES_TABLE} WHERE id = ?",
+            f"SELECT status, host_profile_id, item_type, item_id FROM {PARTIES_TABLE} WHERE id = ?",
             (str(party_id),),
         ).fetchone()
         if not row or row[0] == "ended":
+            raise PartyError("Watch party not found or already ended")
+        # a title over this profile's rating cap: the same answer as no party
+        if may_see and int(row[1]) != int(profile_id) and not may_see(row[2], row[3]):
             raise PartyError("Watch party not found or already ended")
         existing = conn.execute(
             f"SELECT ready, joined_at FROM {MEMBERS_TABLE} WHERE party_id = ? AND profile_id = ?",

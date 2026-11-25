@@ -1741,7 +1741,7 @@ def get_watch_party(party_id):
     pid = _profile()
     if pid is None:
         return _signed_out()
-    party = parties.get_party(player_db(), party_id, pid)
+    party = parties.get_party(player_db(), party_id, pid, may_see=_party_may_see)
     if not party:
         return jsonify({"success": False, "error": "not_found", "message": "Watch party not found."}), 404
     who = _profiles_by_id()
@@ -1761,7 +1761,8 @@ def join_watch_party(party_id):
     ready = body.get("ready") if isinstance(body.get("ready"), bool) else None
     rsvp = bool(body.get("rsvp", False))
     try:
-        party = parties.join_party(player_db(), party_id, pid, ready=ready, rsvp=rsvp)
+        party = parties.join_party(player_db(), party_id, pid, ready=ready, rsvp=rsvp,
+                                   may_see=_party_may_see)
     except parties.PartyError as e:
         return _bad(e)
     who = _profiles_by_id()
