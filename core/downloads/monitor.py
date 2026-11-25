@@ -1118,7 +1118,7 @@ class WebUIDownloadMonitor:
                     track_label = task.get('track_info', {}).get('name', 'Unknown')
                     tried_sources = task.get('used_sources', set())
                     sources_str = f' (tried {len(tried_sources)} source{"s" if len(tried_sources) != 1 else ""})' if tried_sources else ''
-                    logger.error("Task failed after 3 retry attempts (not in live transfers)")
+                    logger.error("Task failed after %d retry attempts (not in live transfers)", MAX_PEER_RETRIES)
                     task['status'] = 'failed'
                     task['error_message'] = f'Download disappeared from transfer list {MAX_PEER_RETRIES} times for "{track_label}"{sources_str} — source may be unavailable'
 
@@ -1214,7 +1214,7 @@ class WebUIDownloadMonitor:
                 track_label = task.get('track_info', {}).get('name', 'Unknown')
                 tried_sources = task.get('used_sources', set())
                 sources_str = f' (tried {len(tried_sources)} source{"s" if len(tried_sources) != 1 else ""})' if tried_sources else ''
-                logger.error("Task failed after 3 error retry attempts")
+                logger.error("Task failed after %d error retry attempts", MAX_PEER_RETRIES)
                 _cancel_on_giveup(task, deferred_ops, 'errored_state_giveup')
                 task['status'] = 'failed'
                 # Tidal-specific error: check if this was a quality issue.
@@ -1292,7 +1292,7 @@ class WebUIDownloadMonitor:
                     last_retry = task.get('last_retry_time', 0)
 
                     # Don't retry too frequently (wait at least 30 seconds between retries)
-                    if retry_count < MAX_PEER_RETRIES and (current_time - last_retry) > 30:  # Max 3 retry attempts
+                    if retry_count < MAX_PEER_RETRIES and (current_time - last_retry) > 30:  # MAX_PEER_RETRIES attempts
                         logger.warning(f"Task stuck in queue for {queue_time:.1f}s - immediate retry {retry_count + 1}/{MAX_PEER_RETRIES}")
                         task['stuck_retry_count'] = retry_count + 1
                         task['last_retry_time'] = current_time
@@ -1354,7 +1354,7 @@ class WebUIDownloadMonitor:
                         track_label = task.get('track_info', {}).get('name', 'Unknown')
                         tried_sources = task.get('used_sources', set())
                         sources_str = f' (tried {len(tried_sources)} source{"s" if len(tried_sources) != 1 else ""})' if tried_sources else ''
-                        logger.error("Task failed after 3 retry attempts (queue timeout)")
+                        logger.error("Task failed after %d retry attempts (queue timeout)", MAX_PEER_RETRIES)
                         _cancel_on_giveup(task, deferred_ops, 'queued_state_giveup')
                         task['status'] = 'failed'
                         task['error_message'] = f'Download stayed queued too long {MAX_PEER_RETRIES} times for "{track_label}"{sources_str} — peers may be offline or have full queues'
@@ -1388,7 +1388,7 @@ class WebUIDownloadMonitor:
                     last_retry = task.get('last_retry_time', 0)
                     
                     # Don't retry too frequently (wait at least 30 seconds between retries)
-                    if retry_count < MAX_PEER_RETRIES and (current_time - last_retry) > 30:  # Max 3 retry attempts
+                    if retry_count < MAX_PEER_RETRIES and (current_time - last_retry) > 30:  # MAX_PEER_RETRIES attempts
                         logger.warning(f"Task stuck at 0% for {download_time:.1f}s - immediate retry {retry_count + 1}/{MAX_PEER_RETRIES}")
                         task['stuck_retry_count'] = retry_count + 1
                         task['last_retry_time'] = current_time
@@ -1449,7 +1449,7 @@ class WebUIDownloadMonitor:
                         track_label = task.get('track_info', {}).get('name', 'Unknown')
                         tried_sources = task.get('used_sources', set())
                         sources_str = f' (tried {len(tried_sources)} source{"s" if len(tried_sources) != 1 else ""})' if tried_sources else ''
-                        logger.error("Task failed after 3 retry attempts (0% progress timeout)")
+                        logger.error("Task failed after %d retry attempts (0%% progress timeout)", MAX_PEER_RETRIES)
                         _cancel_on_giveup(task, deferred_ops, 'zero_progress_giveup')
                         task['status'] = 'failed'
                         task['error_message'] = f'Download stuck at 0% three times for "{track_label}"{sources_str} — peers may have connection issues'
@@ -1558,7 +1558,7 @@ class WebUIDownloadMonitor:
                         track_label = task.get('track_info', {}).get('name', 'Unknown')
                         tried_sources = task.get('used_sources', set())
                         sources_str = f' (tried {len(tried_sources)} source{"s" if len(tried_sources) != 1 else ""})' if tried_sources else ''
-                        logger.error(f"Task failed after 3 retry attempts (unknown state '{state_str}')")
+                        logger.error(f"Task failed after {MAX_PEER_RETRIES} retry attempts (unknown state '{state_str}')")
                         _cancel_on_giveup(task, deferred_ops, 'unknown_state_giveup')
                         task['status'] = 'failed'
                         task['error_message'] = f'Download stuck in "{state_str}" state {MAX_PEER_RETRIES} times for "{track_label}"{sources_str}'

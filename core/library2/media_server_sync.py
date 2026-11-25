@@ -337,7 +337,26 @@ def owned_track_by_file_twin(cursor, file_path: Any, file_size: Any, *,
         "AND COALESCE(f.file_state,'active')='active' "
         "AND f.path IS NOT NULL AND TRIM(f.path)<>'' " + owner_sql + " LIMIT 50",
         (size, *owner_params)).fetchall()
-    tracks = {int(row[0]) for row in rows if _file_name(row[1]) == name}
+    # ...but only another VIEW of a file, never a second file. a path that is
+    # on this machine's disk is a file in its own right: the same song on two
+    # releases is two files of one name and one size, and the second was
+    # taken for the first, so two releases of a name shared an album (#1299).
+    # the twin rule is for a path that can't be opened from here (the media
+    # server's mount), or one that opens the very same file.
+    import os
+    given = str(file_path or "")
+    given_exists = bool(given) and os.path.isfile(given)
+
+    def another_view(stored: str) -> bool:
+        if not given_exists:
+            return True
+        try:
+            return os.path.isfile(stored) and os.path.samefile(given, stored)
+        except OSError:
+            return False
+
+    tracks = {int(row[0]) for row in rows
+              if _file_name(row[1]) == name and another_view(str(row[1] or ""))}
     return tracks.pop() if len(tracks) == 1 else None
 
 
