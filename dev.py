@@ -170,10 +170,16 @@ def stop_process(label: str, proc: subprocess.Popen, log_handle: object | None) 
 
     try:
         if os.name == 'nt':
+            # the whole tree, not the process we started. on windows that
+            # process is the npm.cmd wrapper: terminate() ended the wrapper
+            # and left the node process under it (the vite dev server)
+            # running. one was left behind by every restart: 28 of them,
+            # each watching webui/ and waking on every build.
+            _kill_tree_windows(proc.pid)
             proc.terminate()
         else:
             os.killpg(proc.pid, signal.SIGTERM)
-    except ProcessLookupError:
+    except (ProcessLookupError, OSError):
         pass
 
     if not wait_for_exit(proc, SHUTDOWN_GRACE_SECONDS):
@@ -239,11 +245,45 @@ def compute_backend_watch_state() -> str:
     return '\n'.join(sorted(rows))
 
 
+def _kill_tree_windows(pid: int) -> None:
+    subprocess.run(['taskkill', '/T', '/F', '/PID', str(pid)], check=False,
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def stop_stale_vite() -> int:
+    """end vite dev servers an earlier run of this script left behind.
+
+    stop_process ends the one this run started. a run that never got there
+    (the terminal window was closed, the machine slept) leaves its vite
+    running, and the next run starts another beside it. only this checkout's
+    own dev server is matched: its vite.js path and the port. windows only;
+    elsewhere the process group takes the server down with the script."""
+    if os.name != 'nt':
+        return 0
+    vite_js = str(ROOT_DIR / 'webui' / 'node_modules').replace("'", "''")
+    script = (
+        "$p = Get-CimInstance Win32_Process -Filter \"name='node.exe'\" | "
+        "Where-Object { $_.CommandLine -like '*" + vite_js + "*vite*' -and "
+        "$_.CommandLine -like '*--port 5173*' }; "
+        "$p | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }; "
+        "$p.Count"
+    )
+    try:
+        out = subprocess.run(['powershell', '-NoProfile', '-Command', script], check=False,
+                             capture_output=True, text=True, timeout=30).stdout.strip()
+        return int(out or 0)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return 0
+
+
 def start_vite() -> subprocess.Popen:
     npm = resolve_command('npm', 'npm.cmd')
     if npm is None:
         raise SystemExit('npm is required to run the Vite dev server.')
 
+    stale = stop_stale_vite()
+    if stale:
+        print(f'Stopped {stale} Vite dev server(s) left by an earlier run.')
     print(f'Starting Vite dev server at {VITE_URL}...')
     vite_cmd = [
         npm,
