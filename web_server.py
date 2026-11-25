@@ -24750,6 +24750,17 @@ _configure_stats_api(get_database=get_database, config_manager=config_manager,
                      lastfm_import_workers_getter=lambda: lastfm_import_workers)
 app.register_blueprint(_create_stats_blueprint())
 
+# Song identification (the Search bar's listen button): ffmpeg + shazamio
+# fingerprint a short clip against Shazam, then the ordinary search resolves
+# the answer to a downloadable row. The blueprint takes only the deps it names.
+from api.listen_routes import configure as _configure_listen_api, create_blueprint as _create_listen_blueprint
+_configure_listen_api(get_database=get_database,
+                      build_search_deps=_build_search_deps,
+                      library_check=_search_library_check,
+                      media_server_engine=lambda: media_server_engine,
+                      config_manager=config_manager)
+app.register_blueprint(_create_listen_blueprint())
+
 # Media server descriptors for the UI (settings page, wizard, quick-switch).
 from api.media_servers import configure as _configure_media_servers_api, create_blueprint as _create_media_servers_blueprint
 _configure_media_servers_api(config_manager_=config_manager, engine_getter=lambda: media_server_engine)
