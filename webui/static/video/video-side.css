@@ -114,49 +114,86 @@ html[data-sidebar="collapsed"] .side-toggle-btn .side-toggle-icon {
     height: 16px;
 }
 
-/* ── The way into the player, under the toggle ─────────────────────────── */
-.open-player {
+/* ── The way into the player, beside the toggle ─────────────────────────
+   one row, so the sidebar doesn't spend a second full-width bar on it: the
+   switch takes the room, the player is a square play key at its end, lit in
+   the accent like the switch's thumb so it reads as the thing to press. */
+.side-row {
     display: flex;
+    align-items: stretch;
+    gap: 6px;
+    margin-top: 12px;
+}
+.side-row .side-toggle {
+    flex: 1;
+    min-width: 0;
+    margin-top: 0;
+}
+.open-player {
+    position: relative;
+    display: flex;
+    flex: none;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 8px;
-    margin-top: 8px;
-    padding: 8px 10px;
-    border: 1px solid var(--white-a07);
+    gap: 1px;
+    width: 46px;
+    /* the SoulSync mark's own colours as its edge: not another switch state */
+    border: 1.5px solid transparent;
     border-radius: 11px;
-    background: var(--white-a03);
-    color: var(--text-secondary);
-    font-size: 12px;
-    font-weight: 600;
-    letter-spacing: 0.02em;
+    background:
+        linear-gradient(var(--bg-secondary), var(--bg-secondary)) padding-box,
+        conic-gradient(from 210deg, hotpink, orange, deepskyblue, mediumpurple, hotpink) border-box;
+    box-shadow: 0 3px 14px color-mix(in srgb, mediumpurple 30%, transparent);
+    color: var(--text-primary);
+    font-size: 9.5px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
     text-decoration: none;
-    transition: color var(--dur-base) ease, background var(--dur-base) ease, border-color var(--dur-base) ease;
+    text-transform: uppercase;
+    transition: transform var(--dur-base) ease, box-shadow var(--dur-base) ease;
 }
 .open-player:hover,
 .open-player:focus-visible {
-    border-color: rgba(var(--accent-rgb), 0.45);
-    background: rgba(var(--accent-rgb), 0.12);
-    color: var(--text-primary);
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px color-mix(in srgb, deepskyblue 35%, transparent);
+}
+.open-player:active {
+    transform: translateY(0) scale(0.97);
 }
 .open-player-icon {
-    width: 13px;
-    height: 13px;
+    width: 15px;
+    height: 15px;
     flex: none;
-    color: rgb(var(--accent-rgb));
+}
+/* only one side on this server: no switch, so the player gets the row and its
+   whole name */
+html.side-locked .open-player {
+    flex: 1;
+    flex-direction: row;
+    gap: 8px;
+    padding: 9px 10px;
+    font-size: 12px;
+    letter-spacing: 0.02em;
+    text-transform: none;
+}
+html[data-sidebar="collapsed"] .side-row {
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+}
+html[data-sidebar="collapsed"] .side-row .side-toggle {
+    flex: none;
+    margin-top: 0;
 }
 html[data-sidebar="collapsed"] .open-player {
     width: 46px;
-    margin-left: auto;
-    margin-right: auto;
-    padding: 9px 0;
+    height: 40px;
     border-radius: 13px;
 }
 html[data-sidebar="collapsed"] .open-player-label {
     display: none;
-}
-html[data-sidebar="collapsed"] .open-player-icon {
-    width: 15px;
-    height: 15px;
 }
 
 /* ── Nav swap: music nav vs video nav ──────────────────────────────────── */
