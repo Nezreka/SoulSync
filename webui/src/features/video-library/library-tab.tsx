@@ -1102,11 +1102,18 @@ function ShowView({
     const want: WishEpisode[] = [];
     const off = { count: 0, inOffSeasons: true };
     for (const season of data.seasons) {
-      if (season.season_number === 0) continue;
+      // #2284: specials count when they are monitored (the Monitor Specials
+      // setting, or the season's own switch), as the show's card counts
+      // them. they were skipped here whatever the switch said, so the card
+      // showed a gap this page never mentioned. unmonitored specials are the
+      // normal case and are not a gap worth saying.
+      const special = season.season_number === 0;
       for (const ep of season.episodes) {
         if (ep.has_file || !ep.aired) continue;
         if (ep.monitored) {
           want.push(wishOf(data.id, season, ep));
+        } else if (special) {
+          continue;
         } else {
           off.count += 1;
           if (season.monitored) off.inOffSeasons = false;

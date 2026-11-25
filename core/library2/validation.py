@@ -616,6 +616,30 @@ def finding_summary(conn, file, findings=None):
             | {'category': 'check' if f['finding_type'] in audio_types or f['finding_type'].startswith('quality_') else 'metadata'} for f in findings]
 
 
+def _diff_rows(details):
+    """a re-tag finding's changed rows, by the name finding_verified checks them under"""
+    return {('albumartist' if d.get('file_key') == 'album_artist' else 'cover' if d.get('file_key') == 'cover_art'
+             else d.get('file_key')): d for d in (details.get('diff') or []) if d.get('changed')}
+
+
+def _tag_now_matches(tags, key, wanted) -> bool:
+    """is ``wanted`` what the file's tag snapshot holds for this row? source
+    ids sit under ``source_ids``; everything else is a top-level tag. text is
+    compared as text, a number as a number (a BPM of 120 and "120.0")."""
+    have = (tags.get('source_ids') or {}).get(key)
+    if have in (None, ''):
+        have = tags.get(key) if tags.get(key) not in (None, '') else tags.get(str(key).lower())
+    if have in (None, '') or wanted in (None, ''):
+        return False
+    a, b = str(have).strip(), str(wanted).strip()
+    if a.casefold() == b.casefold():
+        return True
+    try:
+        return round(float(a)) == round(float(b))
+    except (TypeError, ValueError):
+        return False
+
+
 def finding_verified(conn, finding, files):
     """Only close a supported issue on positive evidence, never on a skipped read."""
     kind = finding['finding_type']
@@ -636,8 +660,20 @@ def finding_verified(conn, finding, files):
             if not required:
                 return None
             # 'differs': a difference the settings say to leave alone
-            if any(checks.get(k) not in ('correct', 'not_required', 'differs') for k in required):
-                return False
+            for k in required:
+                state = checks.get(k)
+                if state is None and k in _diff_rows(details):
+                    # #2292: a row the validator has no check for (ISRC, a
+                    # source id, BPM). the check list only knows the core
+                    # fields, so these read as "unverified" forever and a
+                    # finding that only wrote them could never close: 1,536
+                    # of one library's 1,749. they are confirmed the direct
+                    # way, by what is in the file now.
+                    if not _tag_now_matches(tags, k, _diff_rows(details)[k].get('db_value')):
+                        return False
+                    continue
+                if state not in ('correct', 'not_required', 'differs'):
+                    return False
         elif kind == 'missing_cover_art':
             # #2169: judge only what apply can fill. with no cover in the
             # library and none found, apply writes the files' own cover to

@@ -343,13 +343,27 @@ class DiscogsWorker:
     @staticmethod
     def _album_artist_matches(artist_name, artists):
         """Require a matching release-level artist credit."""
+        import re
         import unicodedata
 
         def normalize(name):
-            return " ".join(
-                unicodedata.normalize("NFKC", name or "")
-                .casefold().split()
-            )
+            # the same artist, spelled the way each side spells it: Discogs
+            # has "Beyonce" or "Beatles, The" where the library has "Beyoncé"
+            # and "The Beatles", and "Simon and Garfunkel" for "Simon &
+            # Garfunkel". exact text alone turned those away, and the album
+            # went without its Discogs data. accents, case, punctuation,
+            # "&"/"and" and a leading or trailing "the" don't make it a
+            # different artist; anything else still does.
+            plain = " ".join(unicodedata.normalize("NFKC", name or "").casefold().split())
+            text = unicodedata.normalize("NFKD", plain)
+            text = "".join(c for c in text if not unicodedata.combining(c))
+            words = re.sub(r"[^\w\s]", " ", text.replace("&", " and ")).split()
+            if len(words) > 1 and words[0] == "the":
+                words = words[1:]
+            elif len(words) > 1 and words[-1] == "the":
+                words = words[:-1]
+            # a name that is all punctuation ("!!!") keeps its own spelling
+            return " ".join(words) or plain
 
         expected = normalize(artist_name)
         if not expected or expected == "unknown artist":

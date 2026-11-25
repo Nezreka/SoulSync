@@ -424,8 +424,40 @@ def save_audio_file(audio_file: Any, symbols: Any) -> bool:
         # those behave exactly as before #819.
         logger.warning("[Atomic Save] atomic path failed (%s) — in-place fallback for %s",
                        atomic_err, os.path.basename(path))
-        _raw_audio_save(audio_file, symbols)
+        try:
+            _raw_audio_save(audio_file, symbols)
+        except PermissionError as denied:
+            # #2295: "Permission denied" on a share that looks writable. it is
+            # nearly always who SoulSync runs as: the container drops to
+            # PUID:PGID (1000:1000 unless set), while `docker exec` is root and
+            # can write anything. say so, with the numbers, where the person
+            # reads the error.
+            hint = permission_hint(path)
+            logger.error("[Atomic Save] cannot write %s: %s", path, hint)
+            raise PermissionError(denied.errno or 13, f"Permission denied. {hint}", path) from denied
         return True
+
+
+def permission_hint(path: str) -> str:
+    """who SoulSync runs as, who owns the file, and what to change: the three
+    facts a "permission denied" on a music folder comes down to."""
+    getuid, getgid = getattr(os, "getuid", None), getattr(os, "getgid", None)
+    if getuid is None or getgid is None:
+        return "SoulSync could not write to this file; check that it is not read-only or open elsewhere."
+    me = f"{getuid()}:{getgid()}"
+    try:
+        info = os.stat(path)
+        folder = os.stat(os.path.dirname(path) or ".")
+        owner = f"{info.st_uid}:{info.st_gid}"
+        facts = (f"SoulSync runs as user {me}; the file belongs to {owner} (mode {info.st_mode & 0o777:o}) "
+                 f"and its folder to {folder.st_uid}:{folder.st_gid} (mode {folder.st_mode & 0o777:o}).")
+    except OSError:
+        owner, facts = "", f"SoulSync runs as user {me}."
+    fix = ("Set the container's PUID and PGID to the owner of your music"
+           + (f" (PUID={owner.split(':')[0]} PGID={owner.split(':')[1]})" if owner and owner != me else "")
+           + ", or make the folder writable by that user. `docker exec` runs as root, so a test there "
+             "passes even when SoulSync itself cannot write.")
+    return facts + " " + fix
 
 
 def get_image_dimensions(data: bytes):
