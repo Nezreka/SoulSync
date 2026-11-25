@@ -183,6 +183,10 @@ def test_live_refresh_stamps_claimed_quality_from_real_itags(monkeypatch):
 
     monkeypatch.setattr('core.youtube_client.yt_dlp.YoutubeDL', _YDL)
     monkeypatch.setattr('core.youtube_client._resolve_cookie_opts', lambda: {})
+    # re-encode off, said here: with it on the claim is the converted output
+    # (mp3 320 by default), not the stream's own format, and this test read
+    # whatever the settings in reach happened to say
+    monkeypatch.setattr('core.youtube_client._youtube_transcode_settings', lambda: (False, 'mp3', 320))
     cand = _yt_track()
     _bare_client().refresh_claimed_quality([cand])
     assert cand.audio_quality.format in ('opus', 'aac')

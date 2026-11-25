@@ -73,6 +73,22 @@ class TestANoOpRunIsStillARun:
                                      [{"id": "t1"}], profile_id=1)
         assert len(_rows(db, "Discover Weekly")) == 1
 
+    def test_a_noop_after_a_real_run_is_its_own_entry(self, db):
+        """#2271: a run that did something keeps its entry; the no-op that
+        follows doesn't overwrite it, and the no-ops after that don't pile up"""
+        from core.downloads.history import record_sync_history_start
+        record_sync_history_start(
+            db, batch_id="real_1", playlist_id="auto_mirror_3", playlist_name="Discover Weekly",
+            tracks=[{"id": "t1"}], is_album_download=False, album_context=None,
+            artist_context=None, playlist_folder_mode=False, profile_id=1)
+        for _ in range(3):
+            record_sync_history_noop(db, "auto_mirror_3", "Discover Weekly",
+                                     [{"id": "t1"}, {"id": "t2"}], profile_id=1)
+        rows = _rows(db, "Discover Weekly")
+        assert sorted(str(r["batch_id"]).startswith("noop_") for r in rows) == [False, True]
+        noop = [r for r in rows if str(r["batch_id"]).startswith("noop_")][0]
+        assert noop["total_tracks"] == 2 and noop["completed_at"]
+
     def test_a_broken_database_cannot_fail_the_sync(self):
         """Bookkeeping must never take a sync down with it."""
         class Boom:

@@ -197,6 +197,29 @@ def record_sync_history_noop(
     """
     try:
         n = len(tracks or [])
+        # since #2271 every run is its own entry, and for a run that did
+        # something that is right. a run with nothing to do is not news twice:
+        # an hourly auto-sync wrote 24 identical "already here" rows a day per
+        # playlist into a list capped at 100, and pushed the runs that
+        # downloaded something out of it. so a no-op that follows a no-op
+        # refreshes that entry (when it last ran, what it checked); one that
+        # follows a real run gets its own.
+        latest = database.get_latest_sync_history_by_playlist(playlist_id, profile_id=profile_id)
+        if latest and str(latest.get('batch_id') or '').startswith('noop_'):
+            conn = database._get_connection()
+            try:
+                conn.execute(
+                    "UPDATE sync_history SET batch_id = ?, playlist_name = ?, tracks_json = ?, "
+                    "total_tracks = ?, tracks_found = ?, tracks_downloaded = 0, tracks_failed = 0, "
+                    "started_at = CURRENT_TIMESTAMP, completed_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (f"noop_{playlist_id}_{int(time.time())}", playlist_name,
+                     json.dumps(tracks or [], ensure_ascii=False), n, n, latest['id']),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+            logger.info("Refreshed no-op sync for '%s' (%d track(s) already present)", playlist_name, n)
+            return
         record_sync_history_start(
             database,
             batch_id=f"noop_{playlist_id}_{int(time.time())}",

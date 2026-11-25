@@ -26103,7 +26103,7 @@ class MusicDatabase:
             # Cap at 100 entries
             cursor.execute("""
                 DELETE FROM sync_history WHERE id NOT IN (
-                    SELECT id FROM sync_history ORDER BY started_at DESC LIMIT 100
+                    SELECT id FROM sync_history ORDER BY started_at DESC, id DESC LIMIT 100
                 )
             """)
             conn.commit()
@@ -26242,8 +26242,11 @@ class MusicDatabase:
             cursor.execute("""
                 SELECT * FROM sync_history
                 WHERE playlist_id = ?
-            """.rstrip() + owner_sql + " ORDER BY started_at DESC LIMIT 1",
+            """.rstrip() + owner_sql + " ORDER BY started_at DESC, id DESC LIMIT 1",
                 [playlist_id, *owner_params])
+            # (id breaks the tie: started_at is to the second, and since #2271
+            # every run is its own row, two runs in one second made "latest"
+            # the OLDER one. a no-download sync then marked the wrong run done.)
             row = cursor.fetchone()
             return dict(row) if row else None
         except Exception as e:

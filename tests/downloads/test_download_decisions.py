@@ -136,7 +136,7 @@ def test_caller_set_codes_exist():
 def test_validation_only_emits_codes_in_the_table():
     """Static guard: a typo'd code on a rarely-hit branch would otherwise only
     blow up on a real install."""
-    src = Path(validation.__file__).read_text()
+    src = Path(validation.__file__).read_text(encoding="utf-8")
     codes = set(re.findall(r"_note\(\s*why,\s*\w+,\s*'([a-z_]+)'", src, flags=re.S))
     assert codes, "pattern stopped matching; update this guard"
     assert codes <= set(REASON_CODES), codes - set(REASON_CODES)
