@@ -4451,7 +4451,7 @@ def update_youtube_discovery_match():
         return jsonify({'error': str(e)}), 500
 
 
-def _build_discovery_wing_it_stub(track_name, artist_name, duration_ms=0, image_url=''):
+def _build_discovery_wing_it_stub(track_name, artist_name, duration_ms=0, image_url='', source_video_id=None):
     """Build stub matched_data for tracks that failed metadata discovery.
     Used as automatic Wing It fallback so tracks still flow through the download pipeline.
 
@@ -4467,6 +4467,9 @@ def _build_discovery_wing_it_stub(track_name, artist_name, duration_ms=0, image_
         'duration_ms': duration_ms,
         'image_url': image_url,
         'source': 'wing_it_fallback',
+        # a song from a YouTube playlist keeps its video, so the download can
+        # take that video when no catalogue knows the song (#2306)
+        **({'youtube_video_id': source_video_id} if source_video_id else {}),
     }
 
 

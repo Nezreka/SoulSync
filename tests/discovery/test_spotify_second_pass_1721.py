@@ -304,7 +304,7 @@ def _yt_deps(states, db, primary):
         spotify_rate_limited=lambda: False,
         discovery_score_candidates=lambda *a: (None, 0.0, -1),
         get_metadata_cache=lambda: _NoCache(),
-        build_discovery_wing_it_stub=lambda t, a, d: {"id": "wing_it_x", "name": t, "artists": [a]},
+        build_discovery_wing_it_stub=lambda t, a, d, **_kw: {"id": "wing_it_x", "name": t, "artists": [a]},
         get_database=lambda: db,
         add_activity_item=lambda *a, **k: None,
     )
@@ -409,7 +409,7 @@ def _pl_deps(db, primary, score=(None, 0.0, -1)):
         validate_discovery_cache_artist=lambda a, m: True,
         discovery_score_candidates=lambda *a: score,
         get_metadata_cache=lambda: _NoCache(),
-        build_discovery_wing_it_stub=lambda t, a, d: {"id": "wing_it_x", "name": t, "artists": [a]},
+        build_discovery_wing_it_stub=lambda t, a, d, **_kw: {"id": "wing_it_x", "name": t, "artists": [a]},
     )
 
 
