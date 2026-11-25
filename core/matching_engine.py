@@ -968,11 +968,41 @@ class MusicMatchingEngine:
 
         return ' '.join(stripped.split()).strip(' -–—')
 
+    _APOSTROPHES = re.compile(r"[\u2019\u2018'`\u00b4]")
+
+    def _with_apostrophes_as_spaces(self, track):
+        """a copy of the track for building search text: its title, artists
+        and album with each apostrophe turned into a space. the track itself
+        is untouched (scoring still sees the real names)."""
+        import copy
+        fix = lambda v: self._APOSTROPHES.sub(' ', v) if isinstance(v, str) else v  # noqa: E731
+        try:
+            clone = copy.copy(track)
+            for attr in ('name', 'album', 'album_name', 'album_title'):
+                if isinstance(getattr(clone, attr, None), str):
+                    object.__setattr__(clone, attr, fix(getattr(clone, attr)))
+            artists = getattr(clone, 'artists', None)
+            if isinstance(artists, (list, tuple)):
+                object.__setattr__(clone, 'artists', type(artists)(fix(a) for a in artists))
+            return clone
+        except Exception:  # noqa: BLE001 - a track that can't be copied is searched as it is
+            return track
+
     def generate_download_queries(self, spotify_track: SpotifyTrack) -> List[str]:
         """
         Generate multiple search query variations for better matching.
         Returns queries in order of preference (cleaned titles first, then original).
         """
+        # an apostrophe is sent as a space. every query here is built from
+        # normalised text, and normalising DELETES apostrophes: "Don't Stop
+        # Believin'" was searched as "dont stop believin". measured against
+        # slskd (Nov 25 2026, "journey ..."): "dont" 0 files, "don't" 610,
+        # "don t" 1,104. soulseek matches whole words and peers' file names
+        # keep the apostrophe, which splits the word, so "dont" is a word
+        # almost no file has. every title with a contraction or a possessive
+        # had been coming back empty from all but the last-resort queries.
+        spotify_track = self._with_apostrophes_as_spaces(spotify_track)
+
         queries = []
 
         if not spotify_track.artists:
