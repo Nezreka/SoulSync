@@ -315,7 +315,11 @@ function frames(kind: Kind): HTMLElement[] {
   // preferences panel, not a service
   return [
     ...document.querySelectorAll<HTMLElement>(`#settings-page [data-svc-frame][${attr}]`),
-  ].filter((f) => f.closest('[data-svc-legacy]'));
+    // a card in the sheet is still a service: while it is open, and for the
+    // moment after it closes, its frame sits in the sheet's body and not in
+    // its home slot. the tiles are read again on close, before the card has
+    // gone home, and counting home slots alone dropped its tile (#2285).
+  ].filter((f) => f.closest('[data-svc-legacy]') || f.closest('#svc-modal-body'));
 }
 
 export interface ServiceMeta {
