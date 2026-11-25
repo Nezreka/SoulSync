@@ -395,3 +395,39 @@ def test_publish_order_is_total_even_for_names_that_only_differ_in_case(tmp_path
 
     assert first == second
     assert len(first) == 2
+
+
+# --- the live publish never lands on a file the library already has ----------
+
+def test_a_track_that_reached_the_folder_meanwhile_is_not_overwritten(tmp_path):
+    """the folder is only checked for audio once, when the batch starts. a
+    track filed there while the batch downloaded (the album asked for twice,
+    a wishlist single) was replaced by the staged copy with no comparison."""
+    from core.downloads.atomic_recovery import publish_without_overwriting
+
+    transfer = str(tmp_path / "music")
+    staging = ap.staging_root_for_batch(transfer, "b9")
+    _mk(Path(staging) / "Artist" / "Album" / "01 - One.flac")
+    _mk(Path(staging) / "Artist" / "Album" / "02 - Two.flac")
+    already = Path(transfer) / "Artist" / "Album" / "01 - One.flac"
+    already.parent.mkdir(parents=True)
+    already.write_bytes(b"the copy the library verified and imported")
+
+    res = publish_without_overwriting(staging, transfer, _move, lambda s, f: 1)
+
+    assert res["failed"] == [] and res["superseded"] == 1
+    assert already.read_bytes() == b"the copy the library verified and imported"
+    assert (Path(transfer) / "Artist" / "Album" / "02 - Two.flac").is_file()
+    # the staged copy is in the recycle bin, not gone
+    set_aside = [p for p in Path(transfer).rglob("01 - One*.flac") if "atomic_superseded" in str(p)]
+    assert len(set_aside) == 1
+
+
+def test_nothing_in_the_way_publishes_everything(tmp_path):
+    from core.downloads.atomic_recovery import publish_without_overwriting
+
+    transfer = str(tmp_path / "music")
+    staging = ap.staging_root_for_batch(transfer, "b10")
+    _mk(Path(staging) / "Artist" / "Album" / "01 - One.flac")
+    res = publish_without_overwriting(staging, transfer, _move, lambda s, f: 1)
+    assert res["superseded"] == 0 and len(res["published"]) == 1
