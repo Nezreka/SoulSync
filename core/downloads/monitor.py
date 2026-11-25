@@ -76,6 +76,9 @@ MAX_TOTAL_QUARANTINE_RETRIES = 100
 # otherwise one slskd hiccup cancels healthy downloads and blacklists
 # their peers via used_sources.
 _LIVE_TRANSFERS_FETCH_FAILED = object()
+# how long a failing slskd transfer poll is read as "unknown" before it is
+# read as "slskd is down" and the ordinary stuck-task handling resumes
+SLSKD_POLL_GRACE_SECONDS = 120
 
 
 def _transfer_broken(state_str) -> bool:
@@ -917,6 +920,25 @@ class WebUIDownloadMonitor:
             _slsk = download_orchestrator.client('soulseek') if download_orchestrator and hasattr(download_orchestrator, 'client') else None
             if soulseek_active and _slsk and _slsk.base_url:
                 transfers_data = run_async(download_orchestrator._make_request('GET', 'transfers/downloads'))
+                # None is "the request failed" (a timeout, slskd busy under a
+                # big batch, an http error): the client returns it and never
+                # raises, so the guard in _check_all_downloads, written for an
+                # exception, never fired. the list then read as EMPTY, every
+                # transfer as "gone from slskd", and each download older than
+                # 90 seconds was cancelled, its peer marked used and the
+                # search started again: one slow answer killed every large
+                # file in progress. an empty answer ([] or {}) is still "no
+                # transfers".
+                if transfers_data is None:
+                    since = getattr(self, '_slskd_poll_failed_since', None)
+                    if since is None:
+                        since = self._slskd_poll_failed_since = time.time()
+                    if time.time() - since < SLSKD_POLL_GRACE_SECONDS:
+                        return _LIVE_TRANSFERS_FETCH_FAILED
+                    # failing for minutes: slskd is down, not busy. let the
+                    # ordinary timeouts run so tasks can move to another source
+                else:
+                    self._slskd_poll_failed_since = None
             if transfers_data:
                 for user_data in transfers_data:
                     username = user_data.get('username', 'Unknown')
