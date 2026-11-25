@@ -43,3 +43,27 @@ def test_a_file_anywhere_else_is_left_alone(tmp_path, monkeypatch):
     twin.write_bytes(b"x")
     assert pipeline._discard_redundant_download(str(twin), _Cfg(downloads)) is False
     assert twin.exists()
+
+
+# ── a rejected file that could not be quarantined ───────────────────────────
+
+def test_a_rejected_file_is_set_aside_where_the_retry_cannot_find_it(tmp_path):
+    """left under its own name, the retry's file lookup could pick the
+    rejected file up again in place of the new download"""
+    from core.downloads import file_finder
+    bad = tmp_path / "user" / "Album" / "01 - Song.flac"
+    bad.parent.mkdir(parents=True)
+    bad.write_bytes(b"truncated")
+    aside = pipeline._set_rejected_file_aside(str(bad))
+    assert aside and aside.endswith("01 - Song.flac.rejected")
+    assert not bad.exists() and open(aside, "rb").read() == b"truncated"   # kept, not deleted
+    assert not file_finder._is_audio_candidate(aside)
+    # a second rejection of the same name doesn't write over the first
+    bad.write_bytes(b"another")
+    again = pipeline._set_rejected_file_aside(str(bad))
+    assert again and again != aside and open(aside, "rb").read() == b"truncated"
+
+
+def test_nothing_to_set_aside_is_not_an_error(tmp_path):
+    assert pipeline._set_rejected_file_aside(str(tmp_path / "gone.flac")) is None
+    assert pipeline._set_rejected_file_aside("") is None

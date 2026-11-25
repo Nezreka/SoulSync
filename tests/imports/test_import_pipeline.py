@@ -1520,7 +1520,12 @@ def test_quarantine_failure_preserves_file_instead_of_deleting(tmp_path, monkeyp
             context_key, context, str(source_path), task_id, batch_id, runtime)
 
         # THE regression: a file we couldn't quarantine is preserved, not deleted.
-        assert source_path.exists(), "file must be LEFT IN PLACE when quarantine fails"
+        # it stays on disk, in its folder, with its bytes. it is renamed so the
+        # retry's file lookup can't pick the rejected file up a second time.
+        aside = tmp_path / "source.flac.rejected"
+        assert aside.exists() and aside.read_bytes() == b"audio", \
+            "file must be KEPT (set aside, not deleted) when quarantine fails"
+        assert not source_path.exists()
         # Downstream still correct — task failed, batch notified of failure.
         assert runtime_state.download_tasks[task_id]["status"] == "failed"
         assert completion_calls == [(batch_id, task_id, False)]
