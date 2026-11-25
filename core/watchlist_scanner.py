@@ -5245,7 +5245,9 @@ class WatchlistScanner:
             lifetime = [s for s in (self.database.get_top_artists('all', 30, profile_id=profile_id) or [])
                         if s.get('name')]
             recent_rows = self.database.get_top_artists('30d', 50, profile_id=profile_id) or []
-            recent_counts = {r['name'].lower(): r.get('play_count', 0)
+            # (names as written: an artist you play only this month becomes a
+            # seed by this name, and it is the one shown in "because you like")
+            recent_counts = {r['name']: r.get('play_count', 0)
                              for r in recent_rows if r.get('name')}
             # liked songs, server stars and watchlist adds seed too, so a
             # liked artist's neighbours turn up even before you play them much
