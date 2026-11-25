@@ -247,6 +247,18 @@ describe('the season bar', () => {
     ]);
   });
 
+  it('an episode that has not aired yet is not missing (#2284)', () => {
+    const future = { ...MISSING, id: 21, episode_number: 3, air_date: '2999-01-01' };
+    const { unmount } = render(
+      <EpisodeList {...props({ season: season([OWNED, MISSING, future]) })} />,
+    );
+    expect(screen.getByText('1 missing · 1 still to air')).toBeTruthy();
+    unmount();
+    render(<EpisodeList {...props({ season: season([OWNED, future]) })} />);
+    expect(screen.getByText('All 1 aired here · 1 still to air')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Grab season/ })).toBeNull();
+  });
+
   it('adds the acquisition actions when episodes are missing, with only Grab on the bar', async () => {
     const { container } = render(<EpisodeList {...props()} />);
     expect(screen.getByText('1 missing')).toBeTruthy();

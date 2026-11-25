@@ -9334,7 +9334,7 @@ class VideoDatabase:
                 "e.still_url, e.overview, s.title AS show_title, s.tmdb_id AS show_tmdb_id, "
                 "s.server_source FROM episodes e JOIN shows s ON s.id = e.show_id "
                 "WHERE e.has_file=0 AND e.monitored=1 AND s.server_source IS NOT NULL "
-                "AND e.air_date IS NOT NULL AND e.air_date <= date('now') "
+                "AND e.air_date IS NOT NULL AND substr(e.air_date, 1, 10) <= date('now') "
                 + w +
                 "ORDER BY s.title COLLATE NOCASE, e.season_number, e.episode_number").fetchall()
             return [dict(r) for r in rows]
