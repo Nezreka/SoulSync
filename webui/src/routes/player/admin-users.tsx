@@ -10,7 +10,6 @@ import {
 } from './-lib/downloads';
 import { PeopleIcon } from './-ui/icons';
 import { PageTitle } from './-ui/kit';
-import { LibrariesAdmin } from './-ui/libraries-admin';
 import { notifyError } from './-ui/notice';
 import s from './-ui/social.module.css';
 import { MyDownloadsPanel } from './downloads';
@@ -235,8 +234,6 @@ function AdminUsersDownloadsPage() {
               </div>
             ))}
           </div>
-
-          <LibrariesAdmin />
 
           {/* Profiles & Permissions Panel (uses Settings' sleek .group / .row / .switch system) */}
           <section className={`${s.group} ${s.groupWide}`} aria-label="Profiles">

@@ -203,16 +203,24 @@ def _video_view():
     return (side and access.has_kind("movie"), side and access.has_kind("show"), side, video_cap())
 
 
+def _library_of(video_db):
+    """(kind, file path) -> the player library that file is in, or None when
+    the libraries can't be read (every title then counts as in none)"""
+    try:
+        from core.player import libraries as player_libraries
+        return player_libraries.resolver(player_db(), video_db).library_of
+    except Exception:  # noqa: BLE001
+        logger.exception("player libraries: no resolver")
+        return None
+
+
 def _visible_libraries(sees_movies=True, sees_shows=True):
     """the video libraries this profile can see, as the player lists them.
     never fails a page: no libraries is the player as it always was."""
     try:
         from core.player import libraries as player_libraries
-        from core.video import libraries as video_libraries
         kinds = [k for k, on in (("movie", sees_movies), ("show", sees_shows)) if on]
-        return player_libraries.visible(
-            player_db(), video_libraries.list_libraries(get_video_db()), _profile(),
-            is_admin=_is_player_admin(), kinds=kinds)
+        return player_libraries.visible(player_db(), _profile(), is_admin=_is_player_admin(), kinds=kinds)
     except Exception:  # noqa: BLE001
         logger.exception("player libraries failed")
         return []
@@ -262,9 +270,11 @@ _cache_key_locks: dict = {}
 
 def _refresh_catalog_bg(key, sees_movies, sees_shows, sees_youtube):
     try:
-        conn = get_video_db()._get_connection()
+        vdb = get_video_db()
+        library_of = _library_of(vdb)
+        conn = vdb._get_connection()
         try:
-            raw = catalog.read_all(conn, sees_movies, sees_shows, sees_youtube)
+            raw = catalog.read_all(conn, sees_movies, sees_shows, sees_youtube, library_of)
         finally:
             conn.close()
         with _cache_lock:
@@ -310,9 +320,11 @@ def _read_catalog(sees_movies, sees_shows, sees_youtube, *, force: bool = False)
             if hit and not force and time.monotonic() - hit[0] < _CACHE_SECONDS:
                 return hit[1]
         started = time.monotonic()
-        conn = get_video_db()._get_connection()
+        vdb = get_video_db()
+        library_of = _library_of(vdb)
+        conn = vdb._get_connection()
         try:
-            raw = catalog.read_all(conn, sees_movies, sees_shows, sees_youtube)
+            raw = catalog.read_all(conn, sees_movies, sees_shows, sees_youtube, library_of)
         finally:
             conn.close()
         with _cache_lock:
@@ -1127,8 +1139,15 @@ def get_player_settings():
     if pid is None:
         return _signed_out()
     try:
+        from core.player import setup as player_setup
+        server = player_setup.get(player_db())
         return jsonify({"success": True, "settings": settings.get(player_db(), pid),
-                        "about": {k: v[2] for k, v in settings.SETTINGS.items()}})
+                        "about": {k: v[2] for k, v in settings.SETTINGS.items()},
+                        # what the admin set for everyone: the name, the sidebar order a
+                        # profile starts from, and the places nobody here gets
+                        "server": {"name": server["server_name"],
+                                   "sidebar_order": server["sidebar_order"],
+                                   "sidebar_hidden": server["sidebar_hidden"]}})
     except Exception:  # noqa: BLE001
         return _failed("settings read", "Couldn't load your settings.")
 
@@ -2115,66 +2134,75 @@ def player_libraries_list():
     return jsonify({"success": True, "libraries": _visible_libraries(sees_movies, sees_shows)})
 
 
-@bp.route("/api/player/admin/libraries", methods=["GET"])
+@bp.route("/api/player/setup", methods=["GET"])
 @device_playback
 @self_only
-def player_admin_libraries():
-    """admin: every library with whether it has its own page and the
-    profiles it is hidden from, and the profiles to pick from"""
+def player_setup_get():
+    """player setup. everyone gets {done, server_name, is_admin}; an admin
+    also gets what there is to set up: every folder of each kind with the
+    library it is in and a few titles to know it by, the libraries, the
+    profiles, who each library is hidden from and the server's sidebar."""
     from core.player import libraries as player_libraries
-    from core.video import libraries as video_libraries
+    from core.player import setup as player_setup
     if _profile() is None:
         return _signed_out()
-    if not _is_player_admin():
-        return jsonify({"success": False, "error": "forbidden", "message": "Admin access required."}), 403
     try:
+        db = player_db()
+        state = player_setup.get(db)
+        out = {"success": True, "done": state["done"], "server_name": state["server_name"],
+               "is_admin": _is_player_admin()}
+        if not out["is_admin"]:
+            return jsonify(out)
         vdb = get_video_db()
-        rows = player_libraries.admin_view(player_db(), video_libraries.list_libraries(vdb),
-                                           vdb.library_title_counts())
-        profiles = [{"id": p.get("id"), "name": p.get("name"), "is_admin": bool(p.get("is_admin"))}
-                    for p in (get_database().get_all_profiles() or [])]
-        return jsonify({"success": True, "libraries": rows, "profiles": profiles})
+        out.update({
+            "sidebar_order": state["sidebar_order"],
+            "sidebar_hidden": state["sidebar_hidden"],
+            "libraries": player_libraries.libraries(db),
+            "folders": player_libraries.folder_overview(vdb, db),
+            "hidden": {str(k): v for k, v in player_libraries.hidden_map(db).items()},
+            "profiles": [{"id": p.get("id"), "name": p.get("name"), "is_admin": bool(p.get("is_admin"))}
+                         for p in (get_database().get_all_profiles() or [])],
+        })
+        return jsonify(out)
     except Exception:  # noqa: BLE001
-        return _failed("player libraries read")
+        return _failed("player setup read")
 
 
-@bp.route("/api/player/admin/libraries/<int:library_id>", methods=["PUT"])
+@bp.route("/api/player/setup", methods=["PUT"])
 @device_playback
 @self_only
-def player_admin_library_update(library_id: int):
-    """admin: {own_page?: bool, hidden_from?: [profile id]} for one library.
-    the main library can't have a second page; an admin profile can't have a
-    library hidden from it (it would see it anyway)."""
+def player_setup_put():
+    """admin: save setup. any of {server_name, sidebar_order, sidebar_hidden,
+    done, libraries: [{id?, kind, name, folders}], hidden: {library: [profile
+    id]}}. libraries is the whole set (core/player/libraries.save); a library
+    hidden from an admin profile is dropped from the list, admins see all."""
     from core.player import libraries as player_libraries
-    from core.video import libraries as video_libraries
+    from core.player import setup as player_setup
     if _profile() is None:
         return _signed_out()
     if not _is_player_admin():
         return jsonify({"success": False, "error": "forbidden", "message": "Admin access required."}), 403
     body = request.get_json(silent=True) or {}
     try:
-        vdb = get_video_db()
-        lib = video_libraries.get_library(vdb, library_id)
-        if not lib:
-            return jsonify({"success": False, "error": "not_found", "message": "No such library."}), 404
         db = player_db()
-        if "own_page" in body:
-            if body.get("own_page") and lib.get("builtin") == "main":
-                return _bad("The main library is Movies / TV Shows itself.")
-            player_libraries.set_own_page(db, library_id, bool(body.get("own_page")))
-        if "hidden_from" in body:
-            wanted = body.get("hidden_from")
-            if not isinstance(wanted, list):
-                return _bad("hidden_from is a list of profile ids")
-            admins = {p.get("id") for p in (get_database().get_all_profiles() or []) if p.get("is_admin")}
-            player_libraries.set_hidden_from(db, library_id, [p for p in wanted if p not in admins])
+        plain = {k: body[k] for k in ("server_name", "sidebar_order", "sidebar_hidden", "done") if k in body}
+        # checked before anything is written, so a bad name doesn't leave the libraries half saved
+        for k, v in plain.items():
+            player_setup._clean(k, v)
+        if "libraries" in body:
+            hidden = body.get("hidden")
+            if isinstance(hidden, dict):
+                admins = {p.get("id") for p in (get_database().get_all_profiles() or []) if p.get("is_admin")}
+                hidden = {k: [p for p in (v or []) if p not in admins] for k, v in hidden.items()}
+            player_libraries.save(db, get_video_db(), body.get("libraries"), hidden)
             _forget_catalog_views()
-        rows = player_libraries.admin_view(db, video_libraries.list_libraries(vdb), vdb.library_title_counts())
-        return jsonify({"success": True, "library": next((r for r in rows if r["id"] == library_id), None)})
-    except player_libraries.LibraryError as e:
+        if plain:
+            player_setup.put(db, plain)
+        return player_setup_get()
+    except (player_libraries.LibraryError, player_setup.SetupError) as e:
         return _bad(e)
     except Exception:  # noqa: BLE001
-        return _failed("player library save")
+        return _failed("player setup save")
 
 
 def _forget_catalog_views():

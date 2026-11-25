@@ -524,9 +524,12 @@ export const playerSettingsQuery = () =>
   queryOptions({
     queryKey: ['player', 'settings'],
     queryFn: async () =>
-      apiClient
-        .get('player/settings')
-        .json<{ settings: PlayerSettings; about: Record<keyof PlayerSettings, string> }>(),
+      apiClient.get('player/settings').json<{
+        settings: PlayerSettings;
+        about: Record<keyof PlayerSettings, string>;
+        /** what the admin set for everyone (player setup) */
+        server?: { name: string; sidebar_order: string[]; sidebar_hidden: string[] };
+      }>(),
     staleTime: 5 * MINUTE,
   });
 
@@ -1643,42 +1646,6 @@ export const playerLibrariesQuery = () =>
       [],
     staleTime: 5 * MINUTE,
   });
-
-export interface AdminLibrary {
-  id: number;
-  kind: 'movie' | 'show';
-  name: string;
-  main: boolean;
-  own_page: boolean;
-  /** owned movies or shows in it */
-  titles: number;
-  /** the profiles it is hidden from */
-  hidden_from: number[];
-}
-
-/** admin: every library, and the profiles to pick from */
-export const adminLibrariesQuery = () =>
-  queryOptions({
-    queryKey: ['player', 'admin', 'libraries'],
-    queryFn: async () =>
-      await apiClient.get('player/admin/libraries').json<{
-        libraries: AdminLibrary[];
-        profiles: { id: number; name: string; is_admin: boolean }[];
-      }>(),
-    staleTime: MINUTE,
-  });
-
-/** admin: give a library its own page, or change who it is hidden from */
-export async function updateAdminLibrary(
-  id: number,
-  changes: { own_page?: boolean; hidden_from?: number[] },
-) {
-  return (
-    await apiClient
-      .put(`player/admin/libraries/${id}`, { json: changes })
-      .json<{ library: AdminLibrary }>()
-  ).library;
-}
 
 // ── watchlist (per profile, in player.db) ──────────────────────────────
 

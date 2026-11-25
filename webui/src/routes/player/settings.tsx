@@ -64,6 +64,7 @@ import {
   type SubtitleSize,
 } from './-ui/playback/use-subtitle-style';
 import { setVisual, useVisual } from './-ui/playback/visuals';
+import { openPlayerSetup } from './-ui/player-setup';
 import { SidebarSettings } from './-ui/sidebar-settings';
 import s from './-ui/social.module.css';
 import { useTrailersSetting } from './-ui/trailer';
@@ -827,6 +828,26 @@ function SettingsPage() {
             </Link>
           </Row>
         </Group>
+
+        {isAdmin ? (
+          <Group
+            icon={<HomeIcon />}
+            title="Player setup"
+            badge="Admin"
+            note="For everyone on this server: its name, how your folders are grouped into libraries, who sees which, and the sidebar people start from."
+          >
+            <Row
+              label="Libraries, people and the server"
+              help="Group folders into libraries like Anime or Kids, hide a library from someone, and name the server."
+            >
+              <button type="button" className={s.actionLink} onClick={openPlayerSetup} data-nav>
+                <HomeIcon />
+                <span>Open player setup</span>
+                <ChevronIcon />
+              </button>
+            </Row>
+          </Group>
+        ) : null}
 
         <Group
           icon={<HomeIcon />}

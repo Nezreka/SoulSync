@@ -26,7 +26,7 @@ def test_a_slow_view_does_not_block_another(monkeypatch):
     release = threading.Event()
     reads = []
 
-    def read_all(conn, movies, shows, youtube):
+    def read_all(conn, movies, shows, youtube, _library_of=None):
         reads.append((movies, shows, youtube))
         if movies:  # the slow view
             release.wait(5)
@@ -50,7 +50,7 @@ def test_the_same_view_twice_at_once_reads_once(monkeypatch):
     monkeypatch.setattr(player_api, "get_video_db", lambda: _VDB())
     reads = []
 
-    def read_all(conn, movies, shows, youtube):
+    def read_all(conn, movies, shows, youtube, _library_of=None):
         reads.append(1)
         time.sleep(0.2)
         return {"n": len(reads)}

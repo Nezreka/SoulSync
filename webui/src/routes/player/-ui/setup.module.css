@@ -1,0 +1,211 @@
+/* player setup: one full-screen sheet over the player, a step at a time */
+
+.veil {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-dialog);
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  background: var(--pl-bg);
+  overflow-y: auto;
+}
+
+.sheet {
+  display: flex;
+  flex-direction: column;
+  width: min(100%, calc(var(--u) * 62));
+  padding: calc(var(--u) * 3) var(--pl-gutter) calc(var(--u) * 2);
+  gap: calc(var(--u) * 1.6);
+}
+
+.steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: calc(var(--u) * 0.5);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.step {
+  padding: calc(var(--u) * 0.35) calc(var(--u) * 0.9);
+  border-radius: var(--radius-pill);
+  background: var(--white-a06);
+  color: var(--pl-text-3);
+  font-size: calc(var(--u) * 0.82);
+}
+
+.step[data-on='true'] {
+  background: var(--pl-text);
+  color: var(--pl-bg);
+}
+
+.step[data-done='true'] {
+  color: var(--pl-text-2);
+}
+
+.title {
+  margin: 0;
+  color: var(--pl-text);
+  font-size: calc(var(--u) * 2.1);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.lead {
+  margin: 0;
+  max-width: 62ch;
+  color: var(--pl-text-2);
+  font-size: calc(var(--u) * 1);
+  line-height: 1.5;
+}
+
+.body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: calc(var(--u) * 1.2);
+}
+
+.field {
+  width: min(100%, calc(var(--u) * 28));
+  height: calc(var(--u) * 3);
+  padding: 0 calc(var(--u) * 1);
+  border: 1px solid var(--pl-line);
+  border-radius: var(--radius-lg);
+  background: var(--white-a06);
+  color: var(--pl-text);
+  font: inherit;
+  font-size: calc(var(--u) * 1.05);
+}
+
+.field:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.library {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 0.6);
+  padding: calc(var(--u) * 1.1);
+  border: 1px solid var(--pl-line);
+  border-radius: var(--radius-lg);
+  background: var(--white-a06);
+}
+
+.libraryHead {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 0.7);
+}
+
+.libraryHead .field {
+  flex: 1;
+  width: auto;
+  height: calc(var(--u) * 2.6);
+  font-weight: 600;
+}
+
+.note {
+  color: var(--pl-text-3);
+  font-size: calc(var(--u) * 0.85);
+}
+
+.folder {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: calc(var(--u) * 0.4) calc(var(--u) * 1);
+  padding: calc(var(--u) * 0.7) 0;
+  border-top: 1px solid var(--pl-line);
+}
+
+.folderPath {
+  overflow: hidden;
+  color: var(--pl-text);
+  font-size: calc(var(--u) * 0.95);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.posters {
+  display: flex;
+  gap: calc(var(--u) * 0.35);
+  margin-top: calc(var(--u) * 0.4);
+}
+
+.posters img {
+  width: calc(var(--u) * 2.6);
+  aspect-ratio: 2 / 3;
+  border-radius: calc(var(--u) * 0.3);
+  background: var(--white-a08);
+  object-fit: cover;
+}
+
+.pick {
+  height: calc(var(--u) * 2.5);
+  padding: 0 calc(var(--u) * 0.8);
+  border: 1px solid var(--pl-line);
+  border-radius: var(--radius-pill);
+  background: var(--pl-bg);
+  color: var(--pl-text);
+  font: inherit;
+  font-size: calc(var(--u) * 0.9);
+}
+
+.grid {
+  border-collapse: collapse;
+  font-size: calc(var(--u) * 0.95);
+}
+
+.grid th,
+.grid td {
+  padding: calc(var(--u) * 0.6) calc(var(--u) * 1);
+  border-bottom: 1px solid var(--pl-line);
+  color: var(--pl-text);
+  text-align: center;
+}
+
+.grid th:first-child,
+.grid td:first-child {
+  text-align: left;
+}
+
+.grid thead th {
+  color: var(--pl-text-2);
+  font-weight: 600;
+}
+
+.place {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 0.8);
+  padding: calc(var(--u) * 0.5) 0;
+  border-bottom: 1px solid var(--pl-line);
+  color: var(--pl-text);
+}
+
+.place span {
+  flex: 1;
+}
+
+.foot {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 0.8);
+  padding: calc(var(--u) * 1) 0;
+  background: var(--pl-bg);
+}
+
+.grow {
+  flex: 1;
+}
+
+.error {
+  color: var(--danger-light);
+  font-size: calc(var(--u) * 0.9);
+}

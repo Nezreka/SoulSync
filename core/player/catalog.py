@@ -19,7 +19,7 @@ result by what the profile may see (kinds and rating caps).
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 EPISODE_SAMPLE = 10
 RECENT_EPISODES = 40
@@ -44,38 +44,32 @@ def genre_names(conn) -> Dict[int, str]:
     return {r[0]: r[1] for r in conn.execute("SELECT id, name FROM genres")}
 
 
-def _main_library(conn, kind: str) -> Optional[int]:
-    """the main library of a kind: where a title in no library folder counts"""
-    try:
-        row = conn.execute("SELECT id FROM video_libraries WHERE kind = ? AND builtin = 'main'",
-                           (kind,)).fetchone()
-        return int(row[0]) if row else None
-    except Exception:  # noqa: BLE001 - a db from before libraries: every title is in "none"
-        return None
+LibraryOf = Optional[Callable[[str, Any], Any]]
 
 
-def owned_movies(conn) -> List[list]:
-    main = _main_library(conn, "movie")
-    files: Dict[int, Tuple[Any, Any]] = {}
+def owned_movies(conn, library_of: LibraryOf = None) -> List[list]:
+    """``library_of(kind, file path)`` names the player library a title is in
+    (core/player/libraries.py); without one the field is None."""
+    files: Dict[int, Tuple[Any, Any, Any]] = {}
     for r in conn.execute("""
-            SELECT movie_id, MAX(runtime_seconds), MAX(added_at) FROM media_files
+            SELECT movie_id, MAX(runtime_seconds), MAX(added_at), MAX(relative_path) FROM media_files
             WHERE movie_id IS NOT NULL GROUP BY movie_id"""):
-        files[r[0]] = (r[1], r[2])
+        files[r[0]] = (r[1], r[2], r[3])
     genres = _genre_map(conn, "movie_genres", "movie_id")
     out = []
     for r in conn.execute("""
             SELECT id, title, year, runtime_minutes, content_rating, rating, added_at,
                    poster_url IS NOT NULL, backdrop_url IS NOT NULL, studio, tmdb_id,
-                   tmdb_collection_id, tmdb_collection_name, video_library_id
+                   tmdb_collection_id, tmdb_collection_name
             FROM movies WHERE has_file = 1"""):
-        file_seconds, file_added = files.get(r[0], (None, None))
+        file_seconds, file_added, file_path = files.get(r[0], (None, None, None))
         seconds = file_seconds or ((r[3] or 0) * 60) or None
         out.append([r[0], r[1], r[2], int(seconds) if seconds else None, r[4],
                     round(r[5], 1) if r[5] else None, genres.get(r[0], []),
                     file_added or r[6], 1 if r[7] else 0, 1 if r[8] else 0, r[9], r[10],
                     # the franchise (0 means tmdb says none)
                     r[11] or None, r[12] if r[11] else None,
-                    r[13] if r[13] is not None else main])
+                    library_of("movie", file_path) if library_of else None])
     return out
 
 
@@ -89,14 +83,14 @@ def sample_evenly(items: list, n: int) -> list:
     return [items[round(i * step)] for i in range(n)]
 
 
-def owned_shows(conn, sample: int = EPISODE_SAMPLE) -> List[list]:
+def owned_shows(conn, sample: int = EPISODE_SAMPLE, library_of: LibraryOf = None) -> List[list]:
     """shows with an owned episode. each carries its owned episode count and a
     sample of those episodes as [episode_id, season, episode, seconds, title],
     in airing order."""
     shows: Dict[int, list] = {}
     for r in conn.execute("""
             SELECT id, title, year, network, content_rating, rating, added_at, runtime_minutes,
-                   poster_url IS NOT NULL, backdrop_url IS NOT NULL, tmdb_id, video_library_id
+                   poster_url IS NOT NULL, backdrop_url IS NOT NULL, tmdb_id
             FROM shows"""):
         shows[r[0]] = list(r)
     episodes: Dict[int, list] = {}
@@ -106,7 +100,10 @@ def owned_shows(conn, sample: int = EPISODE_SAMPLE) -> List[list]:
             ORDER BY show_id, season_number = 0, season_number, episode_number"""):
         episodes.setdefault(r[0], []).append(r)
     genres = _genre_map(conn, "show_genres", "show_id")
-    main = _main_library(conn, "show")
+    paths: Dict[int, Any] = {}
+    if library_of:
+        from core.player.libraries import title_paths
+        paths = title_paths(conn, "show")
     out = []
     for show_id, eps in episodes.items():
         s = shows.get(show_id)
@@ -117,7 +114,8 @@ def owned_shows(conn, sample: int = EPISODE_SAMPLE) -> List[list]:
                   for e in sample_evenly(eps, sample)]
         out.append([s[0], s[1], s[2], s[3], s[4], round(s[5], 1) if s[5] else None,
                     genres.get(show_id, []), s[6], 1 if s[8] else 0, 1 if s[9] else 0,
-                    len(eps), picked, s[10], s[11] if s[11] is not None else main])
+                    len(eps), picked, s[10],
+                    library_of("show", paths.get(show_id)) if library_of else None])
     return out
 
 
@@ -183,11 +181,12 @@ def downloaded_youtube(conn, limit: int = YOUTUBE_MAX) -> List[Dict[str, Any]]:
     return out
 
 
-def read_all(conn, sees_movies: bool, sees_shows: bool, sees_youtube: bool) -> Dict[str, Any]:
+def read_all(conn, sees_movies: bool, sees_shows: bool, sees_youtube: bool,
+             library_of: LibraryOf = None) -> Dict[str, Any]:
     return {
         "genres": genre_names(conn) if (sees_movies or sees_shows) else {},
-        "movies": owned_movies(conn) if sees_movies else [],
-        "shows": owned_shows(conn) if sees_shows else [],
+        "movies": owned_movies(conn, library_of) if sees_movies else [],
+        "shows": owned_shows(conn, library_of=library_of) if sees_shows else [],
         "recent_episodes": recent_episodes(conn) if sees_shows else [],
         "youtube": downloaded_youtube(conn) if sees_youtube else [],
     }

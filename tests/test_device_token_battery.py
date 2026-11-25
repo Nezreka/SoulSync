@@ -65,8 +65,8 @@ OPTED_IN = {
     "player.reset_page_layout": A.PLAYBACK,
     "player.music_listening": A.PLAYBACK,
     "player.player_libraries_list": A.PLAYBACK,
-    "player.player_admin_libraries": A.PLAYBACK,
-    "player.player_admin_library_update": A.PLAYBACK,
+    "player.player_setup_get": A.PLAYBACK,
+    "player.player_setup_put": A.PLAYBACK,
     # the app's music rows read the profile's own listening stats (5914aef37
     # opted these in; this list was not told)
     "stats.stats_cached": A.PLAYBACK,
