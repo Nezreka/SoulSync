@@ -500,12 +500,32 @@ def _other_folders_words(other) -> str:
     return words
 
 
+def _readable_audio(file_path) -> bool:
+    """the file opens as audio and has a length. a file that doesn't (zeroed
+    by a copy that never finished, cut short, not audio at all) has no tags
+    to read, and indexing it anyway filed it as a one-song album under
+    "Unknown Artist" that nothing could play"""
+    try:
+        import mutagen
+        audio = mutagen.File(file_path)
+    except Exception:  # noqa: BLE001 - unreadable is the answer
+        return False
+    info = getattr(audio, "info", None) if audio is not None else None
+    return bool(info is not None and (getattr(info, "length", 0) or 0) > 0)
+
+
 def _index_untracked_in_place(db, paths, label):
     """index files the library doesn't know, where they sit, through the
-    native import writer. returns (new file ids, failed)."""
+    native import writer. a file that isn't readable audio is left out and
+    named in the log. returns (new file ids, failed)."""
     from core.library2.autolink import link_download_into_library_v2
     new_ids, failed = [], 0
+    damaged = []
     for index, file_path in enumerate(paths, 1):
+        if not _readable_audio(file_path):
+            damaged.append(file_path)
+            failed += 1
+            continue
         try:
             file_id = link_download_into_library_v2(
                 {'_final_processed_path': file_path, '_download_username': 'standalone_refresh',
@@ -519,6 +539,13 @@ def _index_untracked_in_place(db, paths, label):
             logger.error("[%s] Could not import %s: %s", label, file_path, exc)
         if index % 50 == 0:
             _db_update_phase_callback(f'Indexing new files... {index}/{len(paths)}')
+    if damaged:
+        shown = "; ".join(damaged[:10]) + (f" and {len(damaged) - 10} more" if len(damaged) > 10 else "")
+        logger.warning("[%s] %d files aren't readable audio and were left out (damaged or not audio): %s",
+                       label, len(damaged), shown)
+        add_activity_item("", f"{label}: damaged files left out",
+                          f"{len(damaged)} files in your music folder aren't readable audio, so they "
+                          f"weren't added: {shown}", "Now")
     return new_ids, failed
 
 
