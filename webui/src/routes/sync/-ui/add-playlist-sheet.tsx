@@ -115,7 +115,46 @@ export function looksLikeSearch(text: string): boolean {
  * search; a result is added by handing its link to the same route a pasted
  * link takes, so nothing about importing is new.
  */
-function usePublicPlaylists(text: string): {
+type SearchSource = '' | 'deezer' | 'spotify';
+
+/** the first songs of a found playlist, to look before adding it */
+function usePreview(p: FoundPlaylist | null): {
+  songs: { title: string; artist: string }[];
+  total: number;
+  state: 'idle' | 'busy' | 'done';
+} {
+  const [out, setOut] = useState<{
+    songs: { title: string; artist: string }[];
+    total: number;
+    state: 'idle' | 'busy' | 'done';
+  }>({ songs: [], total: 0, state: 'idle' });
+  useEffect(() => {
+    if (!p) {
+      setOut({ songs: [], total: 0, state: 'idle' });
+      return;
+    }
+    setOut({ songs: [], total: 0, state: 'busy' });
+    const stop = new AbortController();
+    fetch(
+      `/api/playlists/public-preview?source=${encodeURIComponent(p.source)}&id=${encodeURIComponent(p.id)}`,
+      { signal: stop.signal },
+    )
+      .then((r) => (r.ok ? r.json() : { songs: [], total: 0 }))
+      .then((d: { songs?: { title: string; artist: string }[]; total?: number }) =>
+        setOut({ songs: d.songs ?? [], total: d.total ?? 0, state: 'done' }),
+      )
+      .catch(() => {
+        if (!stop.signal.aborted) setOut({ songs: [], total: 0, state: 'done' });
+      });
+    return () => stop.abort();
+  }, [p]);
+  return out;
+}
+
+function usePublicPlaylists(
+  text: string,
+  source: SearchSource = '',
+): {
   found: FoundPlaylist[];
   state: 'idle' | 'busy' | 'done';
 } {
@@ -132,7 +171,10 @@ function usePublicPlaylists(text: string): {
     const stop = new AbortController();
     // wait for a pause in typing
     const timer = window.setTimeout(() => {
-      fetch(`/api/playlists/public-search?q=${encodeURIComponent(query)}`, { signal: stop.signal })
+      const only = source ? `&source=${source}` : '';
+      fetch(`/api/playlists/public-search?q=${encodeURIComponent(query)}${only}`, {
+        signal: stop.signal,
+      })
         .then((r) => (r.ok ? r.json() : { playlists: [] }))
         .then((d: { playlists?: FoundPlaylist[] }) => {
           setFound(d.playlists ?? []);
@@ -148,7 +190,7 @@ function usePublicPlaylists(text: string): {
       window.clearTimeout(timer);
       stop.abort();
     };
-  }, [query]);
+  }, [query, source]);
   return { found, state };
 }
 
@@ -170,7 +212,11 @@ export function AddPlaylistSheet({ onRoute, onNew, onClose }: AddPlaylistSheetPr
    * is just noise.
    */
   const searching = looksLikeSearch(trimmed);
-  const { found, state: searchState } = usePublicPlaylists(trimmed);
+  const [source, setSource] = useState<SearchSource>('');
+  const { found, state: searchState } = usePublicPlaylists(trimmed, source);
+  // a found playlist opened to look at its songs before adding it
+  const [looking, setLooking] = useState<FoundPlaylist | null>(null);
+  const preview = usePreview(looking);
   const hint = recognised
     ? `${DETECTED_SOURCE_SERVICE_LABELS[detection.source]} recognised`
     : searching
@@ -301,11 +347,86 @@ export function AddPlaylistSheet({ onRoute, onNew, onClose }: AddPlaylistSheetPr
           {hint ?? ''}
         </p>
 
-        {searching && found.length > 0 ? (
+        {searching ? (
+          <div className={styles.foundFilter} role="group" aria-label="Search on">
+            {(
+              [
+                ['', 'All'],
+                ['deezer', 'Deezer'],
+                ['spotify', 'Spotify'],
+              ] as const
+            ).map(([key, label]) => (
+              <button
+                key={key || 'all'}
+                type="button"
+                className={styles.foundPill}
+                aria-pressed={source === key}
+                onClick={() => {
+                  setSource(key);
+                  setLooking(null);
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        ) : null}
+
+        {searching && looking ? (
+          <div className={styles.foundLook} aria-label={`Songs in ${looking.title}`}>
+            <div className={styles.foundRow}>
+              {looking.image_url ? (
+                <img className={styles.foundArt} src={looking.image_url} alt="" />
+              ) : (
+                <span className={styles.foundArt} aria-hidden="true" />
+              )}
+              <span className={styles.foundText}>
+                <span className={styles.tileName}>{looking.title}</span>
+                <span className={styles.tileDesc}>
+                  {[looking.creator, preview.total ? `${preview.total} songs` : '']
+                    .filter(Boolean)
+                    .join(' · ')}
+                </span>
+              </span>
+            </div>
+            {preview.state === 'busy' ? (
+              <p className={styles.hint}>Reading its songs…</p>
+            ) : preview.songs.length ? (
+              <ol className={styles.foundSongs}>
+                {preview.songs.map((song, i) => (
+                  <li key={`${i}-${song.title}`}>
+                    {song.title}
+                    {song.artist ? <span className={styles.tileDesc}> · {song.artist}</span> : null}
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <p className={styles.hint}>
+                Its songs couldn’t be read here. You’ll see them once it’s added.
+              </p>
+            )}
+            {preview.total > preview.songs.length && preview.songs.length ? (
+              <p className={styles.hint}>and {preview.total - preview.songs.length} more</p>
+            ) : null}
+            <div className={styles.foundActions}>
+              <button type="button" className={styles.go} onClick={() => pick(looking)}>
+                Add this playlist
+              </button>
+              <button type="button" className={styles.foundBack} onClick={() => setLooking(null)}>
+                Back to results
+              </button>
+            </div>
+          </div>
+        ) : searching && found.length > 0 ? (
           <ul className={styles.found} aria-label="Public playlists">
             {found.map((p) => (
               <li key={`${p.source}:${p.id}`}>
-                <button type="button" className={styles.foundRow} onClick={() => pick(p)}>
+                <button
+                  type="button"
+                  className={styles.foundRow}
+                  aria-label={`Look at ${p.title}`}
+                  onClick={() => setLooking(p)}
+                >
                   {p.image_url ? (
                     <img className={styles.foundArt} src={p.image_url} alt="" loading="lazy" />
                   ) : (

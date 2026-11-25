@@ -436,7 +436,9 @@ def run_youtube_discovery_worker(url_hash, deps: YoutubeDiscoveryDeps):
 
                 else:
                     # Auto Wing It fallback — build stub from raw source data
-                    stub = deps.build_discovery_wing_it_stub(cleaned_title, cleaned_artist, track.get('duration_ms', 0))
+                    stub = deps.build_discovery_wing_it_stub(
+                        cleaned_title, cleaned_artist, track.get('duration_ms', 0),
+                        source_video_id=track.get('id') if playlist.get('source', 'youtube') in ('youtube', 'youtube_music', 'ytmusic') else None)
                     result['status'] = 'Wing It'
                     result['status_class'] = 'wing-it'
                     result['spotify_track'] = cleaned_title

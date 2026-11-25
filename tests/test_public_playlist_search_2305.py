@@ -64,3 +64,22 @@ def test_a_result_with_no_link_cannot_be_added_so_is_not_offered(client):
 def test_the_limit_is_bounded(client):
     client.get("/api/playlists/public-search?q=road+trip&limit=9999")
     client._deezer.search_playlists.assert_called_once_with("road trip", limit=30)
+
+
+def test_a_preview_shows_the_first_songs(client):
+    client._deezer.get_playlist.return_value = {
+        "track_count": 3, "tracks": [{"name": "Drive", "artists": ["Incubus"]}, {"name": "Go", "artists": []}]}
+    body = client.get("/api/playlists/public-preview?source=deezer&id=908622995").get_json()
+    assert body == {"success": True, "total": 3,
+                    "songs": [{"title": "Drive", "artist": "Incubus"}, {"title": "Go", "artist": ""}]}
+
+
+@pytest.mark.parametrize("query", ["source=deezer&id=", "source=deezer&id=../x", "source=tidal&id=123"])
+def test_a_preview_refuses_junk(client, query):
+    assert client.get(f"/api/playlists/public-preview?{query}").status_code == 400
+
+
+def test_a_preview_that_fails_shows_nothing(client):
+    client._deezer.get_playlist.side_effect = RuntimeError("down")
+    body = client.get("/api/playlists/public-preview?source=deezer&id=1").get_json()
+    assert body == {"success": True, "songs": [], "total": 0}
