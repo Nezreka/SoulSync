@@ -18,6 +18,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 
 import { apiClient } from '@/app/api-client';
+import { appURL } from '@/platform/url-base';
 
 import { posterSet } from '../-lib/images';
 import { moveNav } from '../-lib/nav-order';
@@ -105,6 +106,21 @@ export function PlayerSetupHost() {
   if (!asked && data.done) return null;
   if (!data.libraries || !data.folders) return null;
   return <PlayerSetup data={data} firstTime={!data.done} />;
+}
+
+/** the SoulSync mark with the boot screen's light passing over it */
+function Mark({ size = 'sm' }: { size?: 'sm' | 'md' | 'hero' }) {
+  const src = appURL('/static/soulsync-mark.png');
+  return (
+    <span className={s.logo} data-size={size} aria-hidden="true">
+      {size === 'hero' ? <span className={s.logoAura} /> : null}
+      <img src={src} alt="" />
+      <span
+        className={s.logoSheen}
+        style={{ WebkitMaskImage: `url("${src}")`, maskImage: `url("${src}")` }}
+      />
+    </span>
+  );
 }
 
 function PlayerSetup({ data, firstTime }: { data: SetupPayload; firstTime: boolean }) {
@@ -488,8 +504,14 @@ function PlayerSetup({ data, firstTime }: { data: SetupPayload; firstTime: boole
       <div className={s.stage}>
         <nav className={s.rail} aria-label="Setup steps">
           <div className={s.brand}>
-            <span className={s.mark} aria-hidden="true" />
-            Player setup
+            <Mark size="md" />
+            <span>
+              {name.trim() || 'SoulSync'}
+              <small>Player setup</small>
+            </span>
+          </div>
+          <div className={s.progress} aria-hidden="true">
+            <span style={{ width: `${Math.round((step / (STEPS.length - 1)) * 100)}%` }} />
           </div>
           <ol className={s.steps}>
             {STEPS.map((st, i) => (
@@ -518,6 +540,7 @@ function PlayerSetup({ data, firstTime }: { data: SetupPayload; firstTime: boole
         <main className={s.main}>
           {step === 0 ? (
             <div className={s.body}>
+              <Mark size="hero" />
               <div className={s.eyebrow}>{firstTime ? 'Welcome' : 'Player setup'}</div>
               <h1 className={s.title}>
                 {firstTime ? 'Let’s set up your player' : 'Your player’s setup'}
@@ -533,6 +556,9 @@ function PlayerSetup({ data, firstTime }: { data: SetupPayload; firstTime: boole
                   maxLength={60}
                   placeholder="SoulSync"
                   onChange={(e) => setName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') setStep(1);
+                  }}
                   data-nav
                 />
                 <span className={s.muted}>Your server’s name</span>
@@ -722,6 +748,7 @@ function PlayerSetup({ data, firstTime }: { data: SetupPayload; firstTime: boole
 
           {step === last ? (
             <div className={s.body}>
+              <Mark size="hero" />
               <div className={s.eyebrow}>All set</div>
               <h1 className={s.title}>{(name.trim() || 'SoulSync') + ' is ready'}</h1>
               <p className={s.lead}>
@@ -745,6 +772,19 @@ function PlayerSetup({ data, firstTime }: { data: SetupPayload; firstTime: boole
                   <b>{gone.length}</b>
                   <span>{gone.length === 1 ? 'place' : 'places'} off for everyone</span>
                 </div>
+              </div>
+              {/* pairing stays in Settings, Devices: it is open whether or not
+                  setup ran, so this only points the way */}
+              <div className={s.next}>
+                <div className={s.stepGroup}>Next, your devices</div>
+                <a className={s.nextCard} href={appURL('/settings?tab=devices')} data-nav>
+                  <b>The SoulSync app</b>
+                  <span>Phones, tablets and TVs pair with a one-time code or a QR.</span>
+                </a>
+                <a className={s.nextCard} href={appURL('/settings?tab=devices')} data-nav>
+                  <b>Any music app</b>
+                  <span>Symfonium, Feishin and other Subsonic apps play one profile’s music.</span>
+                </a>
               </div>
             </div>
           ) : null}
@@ -788,7 +828,7 @@ function PlayerSetup({ data, firstTime }: { data: SetupPayload; firstTime: boole
                 onClick={() => setStep(step + 1)}
                 data-nav
               >
-                Next
+                Next: {STEPS[step + 1].label}
               </button>
             ) : null}
             {step === last || !firstTime ? (
@@ -825,7 +865,7 @@ function PlayerSetup({ data, firstTime }: { data: SetupPayload; firstTime: boole
           </div>
           <div className={s.mini}>
             <div className={s.miniName}>
-              <span className={s.mark} aria-hidden="true" />
+              <Mark />
               {name.trim() || 'SoulSync'}
             </div>
             {NAV_GROUPS.map((group) => {

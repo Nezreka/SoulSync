@@ -56,7 +56,7 @@ async function mount() {
     </QueryClientProvider>,
   );
 }
-const next = () => fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+const next = () => fireEvent.click(screen.getByRole('button', { name: /^Next/ }));
 
 afterEach(() => {
   state.payload = null;
