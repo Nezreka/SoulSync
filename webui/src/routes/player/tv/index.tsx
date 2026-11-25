@@ -5,7 +5,7 @@ import { useMemo } from 'react';
 import type { RailCard } from '../-lib/rails';
 
 import { showCard } from '../-lib/rails';
-import { decadeOf, genresOf, sortTitles, validateBrowseSearch } from '../-lib/video';
+import { decadeOf, genresOf, libraryTitles, sortTitles, validateBrowseSearch } from '../-lib/video';
 import { videoCatalogQuery } from '../-player.api';
 import { BrowseTabs, ShowCollections, VideoCategories, VideoForYou } from '../-ui/browse';
 import { CardGrid, Empty, PageTitle, useViewMode, ViewToggle, styles as s } from '../-ui/kit';
@@ -22,12 +22,25 @@ function TvBrowse() {
   const sections = useSections();
   const [view, setView] = useViewMode('tv');
   const search = Route.useSearch();
-  const { sort = 'added', genre = '', decade } = search;
+  const { sort = 'added', genre = '', decade, library } = search;
   const tab = search.tab ?? (genre || decade ? 'library' : 'foryou');
   const navigate = useNavigate({ from: '/player/tv/' });
   const catalog = useQuery({ ...videoCatalogQuery(), enabled: sections.tv });
-  const shows = useMemo(() => catalog.data?.shows ?? [], [catalog.data]);
+  // a library's own page shows only its titles; TV itself, everything not in one
+  const here = useMemo(
+    () => (catalog.data?.libraries ?? []).find((l) => l.id === library && l.kind === 'show'),
+    [catalog.data, library],
+  );
+  const shows = useMemo(
+    () => libraryTitles(catalog.data?.shows ?? [], catalog.data?.libraries ?? [], library),
+    [catalog.data, library],
+  );
   const genres = useMemo(() => genresOf(shows), [shows]);
+  // new episodes of the shows on this page only
+  const recentEpisodes = useMemo(() => {
+    const mine = new Set(shows.map((x) => x.id));
+    return (catalog.data?.recent_episodes ?? []).filter((e) => mine.has(e.show_id));
+  }, [catalog.data, shows]);
 
   const cards: RailCard[] = useMemo(
     () =>
@@ -44,12 +57,12 @@ function TvBrowse() {
 
   return (
     <>
-      <PageTitle>TV</PageTitle>
+      <PageTitle>{here?.name ?? 'TV'}</PageTitle>
       <BrowseTabs
         value={tab}
         onChange={(next) =>
           void navigate({
-            search: next === 'library' ? { tab: next, sort } : { tab: next },
+            search: next === 'library' ? { tab: next, sort, library } : { tab: next, library },
             replace: true,
           })
         }
@@ -63,11 +76,14 @@ function TvBrowse() {
           kind="show"
           movies={catalog.data.movies}
           shows={shows}
-          recentEpisodes={catalog.data.recent_episodes}
+          recentEpisodes={recentEpisodes}
+          library={here ? { id: here.id, name: here.name } : undefined}
         />
       ) : null}
       {catalog.data && tab === 'collections' ? <ShowCollections shows={shows} /> : null}
-      {catalog.data && tab === 'categories' ? <VideoCategories kind="show" items={shows} /> : null}
+      {catalog.data && tab === 'categories' ? (
+        <VideoCategories kind="show" items={shows} library={here?.id} />
+      ) : null}
       {catalog.data && tab === 'library' ? (
         <>
           <BrowseToolbar

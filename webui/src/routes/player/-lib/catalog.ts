@@ -11,6 +11,7 @@ import type {
   CatalogRecentEpisode,
   CatalogShow,
   CatalogYoutube,
+  PlayerLibrary,
   VideoCatalog,
 } from '../-player.types';
 
@@ -22,6 +23,7 @@ export interface CatalogWire {
   recent_episodes?: CatalogRecentEpisode[];
   youtube?: CatalogYoutube[];
   kinds?: VideoCatalog['kinds'];
+  libraries?: PlayerLibrary[];
   /** the guide's clock: only sent with the day's frozen pool */
   clock?: { tz?: string | null; offset_minutes?: number | null } | null;
 }
@@ -59,6 +61,7 @@ export function decodeCatalog(wire: CatalogWire): VideoCatalog {
     tmdb_id: num(m(row, 'tmdb_id')),
     collection_id: num(m(row, 'collection_id')),
     collection: str(m(row, 'collection')),
+    library_id: num(m(row, 'library_id')),
   }));
 
   const sh = reader(wire.fields?.show);
@@ -78,10 +81,12 @@ export function decodeCatalog(wire: CatalogWire): VideoCatalog {
       episode_count: num(sh(row, 'episode_count')) ?? episodes.length,
       episodes,
       tmdb_id: num(sh(row, 'tmdb_id')),
+      library_id: num(sh(row, 'library_id')),
     };
   });
 
   return {
+    libraries: Array.isArray(wire.libraries) ? wire.libraries : [],
     movies,
     shows,
     recent_episodes: wire.recent_episodes ?? [],

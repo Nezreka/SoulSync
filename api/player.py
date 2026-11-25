@@ -203,6 +203,21 @@ def _video_view():
     return (side and access.has_kind("movie"), side and access.has_kind("show"), side, video_cap())
 
 
+def _visible_libraries(sees_movies=True, sees_shows=True):
+    """the video libraries this profile can see, as the player lists them.
+    never fails a page: no libraries is the player as it always was."""
+    try:
+        from core.player import libraries as player_libraries
+        from core.video import libraries as video_libraries
+        kinds = [k for k, on in (("movie", sees_movies), ("show", sees_shows)) if on]
+        return player_libraries.visible(
+            player_db(), video_libraries.list_libraries(get_video_db()), _profile(),
+            is_admin=_is_player_admin(), kinds=kinds)
+    except Exception:  # noqa: BLE001
+        logger.exception("player libraries failed")
+        return []
+
+
 RATING = 4  # content_rating's place in a movie or show row (catalog.MOVIE_FIELDS)
 _CACHE_SECONDS = 30
 _cache: dict = {}
@@ -214,16 +229,27 @@ def shape_video_catalog(raw, sees_movies, sees_shows, sees_youtube, cap):
     filtering is tested apart from the db."""
     from api.video.kids import kind_allows
 
+    from api.video.kids import hidden_libraries
+    hidden = hidden_libraries(cap)
+
     def ok(kind, rating):
         return cap is None or kind_allows(cap, kind, rating)
 
+    def here(row):
+        # the library a title is in is the last field of its row (catalog.*_FIELDS)
+        return not hidden or row[-1] not in hidden
+
+    shows = [s for s in raw.get("shows", []) if sees_shows and ok("show", s[RATING]) and here(s)]
+    show_ids = {s[0] for s in shows} if hidden else None
     return {
         "fields": {"movie": list(catalog.MOVIE_FIELDS), "show": list(catalog.SHOW_FIELDS)},
         "genres": {str(k): v for k, v in (raw.get("genres") or {}).items()},
-        "movies": [m for m in raw.get("movies", []) if sees_movies and ok("movie", m[RATING])],
-        "shows": [s for s in raw.get("shows", []) if sees_shows and ok("show", s[RATING])],
+        "movies": [m for m in raw.get("movies", [])
+                   if sees_movies and ok("movie", m[RATING]) and here(m)],
+        "shows": shows,
         "recent_episodes": [e for e in raw.get("recent_episodes", [])
-                            if sees_shows and ok("show", e.get("content_rating"))],
+                            if sees_shows and ok("show", e.get("content_rating"))
+                            and (show_ids is None or e.get("show_id") in show_ids)],
         "youtube": list(raw.get("youtube", [])) if sees_youtube else [],
         "kinds": {"movies": bool(sees_movies), "shows": bool(sees_shows), "youtube": bool(sees_youtube)},
     }
@@ -307,13 +333,20 @@ def video_catalog():
 
         def shaped():
             raw = _read_catalog(sees_movies, sees_shows, sees_youtube, force=force)
-            return shape_video_catalog(raw, sees_movies, sees_shows, sees_youtube, cap)
+            out = shape_video_catalog(raw, sees_movies, sees_shows, sees_youtube, cap)
+            out["libraries"] = _visible_libraries(sees_movies, sees_shows)
+            return out
 
         if str(request.args.get("guide") or "") == "1":
             # the guide's pool: frozen for the day, so the shared timeline
             # doesn't re-seed when the library changes (core/player/guide_day.py)
             from core.player import guide_day
-            view = f"catalog:{int(bool(sees_movies))}{int(bool(sees_shows))}{int(bool(sees_youtube))}:{cap}"
+            from api.video.kids import hidden_libraries
+            # a profile with a library hidden gets its own frozen pool: the day's
+            # guide for everyone else must not be built from, or shown to, it
+            gone = ",".join(str(i) for i in sorted(hidden_libraries(cap)))
+            view = (f"catalog:{int(bool(sees_movies))}{int(bool(sees_shows))}{int(bool(sees_youtube))}:{cap}"
+                    + (f":hide{gone}" if gone else ""))
             day = guide_day.frozen(
                 player_db(), view, shaped,
                 keep=lambda c: bool(c.get("movies") or c.get("shows") or c.get("youtube")),
@@ -2067,6 +2100,87 @@ def player_admin_user_downloads(target_profile_id: int):
         return _bad("max_items must be a number")
     perm = downloads.set_permission(player_db(), target_profile_id, allow, max_items)
     return jsonify({"success": True, "profile_id": target_profile_id, **perm})
+
+
+# ── libraries: their own pages in the player, and who can't see them ────────
+
+@bp.route("/api/player/libraries", methods=["GET"])
+@device_playback
+@requires_any("movies.access", "tv.access")
+def player_libraries_list():
+    """the video libraries this profile can see: {id, kind, name, own_page,
+    main}. a library with own_page gets its own entry and page in the player;
+    the rest are part of Movies / TV Shows. (core/player/libraries.py)"""
+    sees_movies, sees_shows, _yt, _cap = _video_view()
+    return jsonify({"success": True, "libraries": _visible_libraries(sees_movies, sees_shows)})
+
+
+@bp.route("/api/player/admin/libraries", methods=["GET"])
+@device_playback
+@self_only
+def player_admin_libraries():
+    """admin: every library with whether it has its own page and the
+    profiles it is hidden from, and the profiles to pick from"""
+    from core.player import libraries as player_libraries
+    from core.video import libraries as video_libraries
+    if _profile() is None:
+        return _signed_out()
+    if not _is_player_admin():
+        return jsonify({"success": False, "error": "forbidden", "message": "Admin access required."}), 403
+    try:
+        vdb = get_video_db()
+        rows = player_libraries.admin_view(player_db(), video_libraries.list_libraries(vdb),
+                                           vdb.library_title_counts())
+        profiles = [{"id": p.get("id"), "name": p.get("name"), "is_admin": bool(p.get("is_admin"))}
+                    for p in (get_database().get_all_profiles() or [])]
+        return jsonify({"success": True, "libraries": rows, "profiles": profiles})
+    except Exception:  # noqa: BLE001
+        return _failed("player libraries read")
+
+
+@bp.route("/api/player/admin/libraries/<int:library_id>", methods=["PUT"])
+@device_playback
+@self_only
+def player_admin_library_update(library_id: int):
+    """admin: {own_page?: bool, hidden_from?: [profile id]} for one library.
+    the main library can't have a second page; an admin profile can't have a
+    library hidden from it (it would see it anyway)."""
+    from core.player import libraries as player_libraries
+    from core.video import libraries as video_libraries
+    if _profile() is None:
+        return _signed_out()
+    if not _is_player_admin():
+        return jsonify({"success": False, "error": "forbidden", "message": "Admin access required."}), 403
+    body = request.get_json(silent=True) or {}
+    try:
+        vdb = get_video_db()
+        lib = video_libraries.get_library(vdb, library_id)
+        if not lib:
+            return jsonify({"success": False, "error": "not_found", "message": "No such library."}), 404
+        db = player_db()
+        if "own_page" in body:
+            if body.get("own_page") and lib.get("builtin") == "main":
+                return _bad("The main library is Movies / TV Shows itself.")
+            player_libraries.set_own_page(db, library_id, bool(body.get("own_page")))
+        if "hidden_from" in body:
+            wanted = body.get("hidden_from")
+            if not isinstance(wanted, list):
+                return _bad("hidden_from is a list of profile ids")
+            admins = {p.get("id") for p in (get_database().get_all_profiles() or []) if p.get("is_admin")}
+            player_libraries.set_hidden_from(db, library_id, [p for p in wanted if p not in admins])
+            _forget_catalog_views()
+        rows = player_libraries.admin_view(db, video_libraries.list_libraries(vdb), vdb.library_title_counts())
+        return jsonify({"success": True, "library": next((r for r in rows if r["id"] == library_id), None)})
+    except player_libraries.LibraryError as e:
+        return _bad(e)
+    except Exception:  # noqa: BLE001
+        return _failed("player library save")
+
+
+def _forget_catalog_views():
+    """who sees what just changed: the next catalog read is a fresh one"""
+    with _cache_lock:
+        _cache.clear()
 
 
 # ── player media issue reports (all media types: movie/episode/youtube/track/podcast/audiobook) ──

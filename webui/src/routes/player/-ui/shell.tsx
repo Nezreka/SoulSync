@@ -6,7 +6,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { Link, Outlet, useRouter, useRouterState } from '@tanstack/react-router';
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { Fragment, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 
 import { useCardSize, type CardSizeRange } from '@/components/card-size';
@@ -15,6 +15,7 @@ import { appURL } from '@/platform/url-base';
 import {
   playerSettingsQuery,
   profilesQuery,
+  playerLibrariesQuery,
   watchingNowQuery,
   type PlayerAccentColor,
 } from '../-player.api';
@@ -186,6 +187,18 @@ function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => 
   // how many others are playing something right now
   const watching = useQuery(watchingNowQuery()).data?.sessions.filter((x) => !x.you).length ?? 0;
   const [more, setMore] = useState(false);
+  // libraries with a page of their own (none until an admin sets one up)
+  const ownPages = (
+    useQuery({ ...playerLibrariesQuery(), enabled: sections.video }).data ?? []
+  ).filter((lib) => lib.own_page);
+  const libraryParam = useRouterState({
+    select: (r) => Number((r.location.search as { library?: unknown }).library) || 0,
+  });
+  const onLibrary =
+    (pathname === '/player/movies' || pathname === '/player/tv') &&
+    ownPages.some((lib) => lib.id === libraryParam)
+      ? libraryParam
+      : 0;
   return (
     <nav className={s.side} aria-label="Player" data-collapsed={collapsed ? 'true' : undefined}>
       <div className={s.brand}>
@@ -204,26 +217,47 @@ function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => 
           >
             {group.label ? <div className={s.navGroupLabel}>{group.label}</div> : null}
             {items.map((entry) => (
-              <Link
-                key={entry.to}
-                to={entry.to as '/player'}
-                className={s.navLink}
-                data-tab={entry.tab ? 'true' : undefined}
-                activeOptions={{ exact: true }}
-                data-current={entry === current ? 'true' : undefined}
-                aria-current={entry === current ? 'page' : undefined}
-                title={collapsed ? entry.label : undefined}
-                data-nav
-              >
-                <span className={s.navIcon}>{entry.icon}</span>
-                <span className={s.navLabel}>{entry.label}</span>
-                {entry.to === '/player/watching' && watching ? (
-                  <span className={s.navBadge} aria-label={`${watching} playing`}>
-                    {watching}
-                  </span>
-                ) : null}
-                {entry.short ? <span className={s.navShort}>{entry.short}</span> : null}
-              </Link>
+              <Fragment key={entry.to}>
+                <Link
+                  to={entry.to as '/player'}
+                  className={s.navLink}
+                  data-tab={entry.tab ? 'true' : undefined}
+                  activeOptions={{ exact: true }}
+                  data-current={entry === current && !onLibrary ? 'true' : undefined}
+                  aria-current={entry === current && !onLibrary ? 'page' : undefined}
+                  title={collapsed ? entry.label : undefined}
+                  data-nav
+                >
+                  <span className={s.navIcon}>{entry.icon}</span>
+                  <span className={s.navLabel}>{entry.label}</span>
+                  {entry.to === '/player/watching' && watching ? (
+                    <span className={s.navBadge} aria-label={`${watching} playing`}>
+                      {watching}
+                    </span>
+                  ) : null}
+                  {entry.short ? <span className={s.navShort}>{entry.short}</span> : null}
+                </Link>
+                {/* the libraries an admin gave a page of their own, under the page they are a kind of */}
+                {ownPages
+                  .filter(
+                    (lib) => entry.to === (lib.kind === 'movie' ? '/player/movies' : '/player/tv'),
+                  )
+                  .map((lib) => (
+                    <Link
+                      key={`lib-${lib.id}`}
+                      to={entry.to as '/player/movies'}
+                      search={{ library: lib.id }}
+                      className={s.navLink}
+                      data-current={onLibrary === lib.id ? 'true' : undefined}
+                      aria-current={onLibrary === lib.id ? 'page' : undefined}
+                      title={collapsed ? lib.name : undefined}
+                      data-nav
+                    >
+                      <span className={s.navIcon}>{entry.icon}</span>
+                      <span className={s.navLabel}>{lib.name}</span>
+                    </Link>
+                  ))}
+              </Fragment>
             ))}
           </div>
         );
