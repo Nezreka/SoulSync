@@ -255,7 +255,9 @@ def toggle_mirrored_playlist_autosync_endpoint(playlist_id):
         database = get_database()
         playlist = _owned_mirrored_playlist(database, playlist_id)
         if not playlist:
-            return jsonify({'success': False, 'error': 'Playlist not found'}), 404
+            # (the same words as every other gated route here: a playlist that
+            # isn't yours answers exactly as one that doesn't exist)
+            return jsonify({'success': False, "error": "Playlist not found"}), 404
 
         data = request.get_json(silent=True) or {}
         conn = database._get_connection()

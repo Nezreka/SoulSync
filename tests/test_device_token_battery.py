@@ -87,6 +87,8 @@ OPTED_IN = {
     "player.get_guide_lineup": A.PLAYBACK,
     "player.put_guide_lineup": A.PLAYBACK,
     "player.guide_watched": A.PLAYBACK,
+    # the evening's premieres: server-decided, every device shows the same
+    "player.guide_premieres": A.PLAYBACK,
     "player.guide_people": A.PLAYBACK,
     "player.guide_person": A.PLAYBACK,
     "player.guide_reminders": A.PLAYBACK,
