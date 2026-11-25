@@ -142,3 +142,36 @@ def test_a_suffix_both_share_still_cannot_join_two_songs():
         candidate_title="Someday At Christmas - Piano Version", candidate_artists=["X"],
         candidate_duration_ms=200000)
     assert score < 0.70
+
+
+def test_two_artists_who_share_a_name_both_stay_on_the_watchlist():
+    """the repair merged on the name alone and deleted the rest: a second
+    artist of the same name came off the watchlist. rows whose ids disagree
+    are two artists."""
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.execute("""CREATE TABLE watchlist_artists (id INTEGER PRIMARY KEY, profile_id INTEGER,
+        artist_name TEXT, spotify_artist_id TEXT, itunes_artist_id TEXT, deezer_artist_id TEXT,
+        discogs_artist_id TEXT, musicbrainz_artist_id TEXT, image_url TEXT)""")
+    conn.execute("CREATE TABLE lib2_artists (id INTEGER PRIMARY KEY, name TEXT, external_ids TEXT, image_url TEXT)")
+    conn.execute("""INSERT INTO watchlist_artists VALUES
+        (1, 1, 'Nirvana', 'sp_us', NULL, '415', NULL, 'mb_us', NULL),
+        (2, 1, 'Nirvana', 'sp_uk', NULL, NULL, NULL, 'mb_uk', NULL),
+        (3, 1, 'nirvana', NULL, '112018', NULL, NULL, 'mb_us', NULL)""")
+    conn.commit()
+
+    class _FakeScanner(WatchlistScanner):
+        def __init__(self, db):
+            self._db = db
+
+        @property
+        def database(self):
+            return self._db
+
+    stats = _FakeScanner(SimpleNamespace(_get_connection=lambda: conn)).repair_watchlist_duplicates_and_ids(profile_id=1)
+    rows = {r["id"]: dict(r) for r in conn.execute("SELECT * FROM watchlist_artists")}
+    # the british Nirvana is untouched; the two rows of the american one fold
+    assert sorted(rows) == [1, 2]
+    assert stats["merged_duplicates"] == 1
+    assert rows[2]["spotify_artist_id"] == "sp_uk" and rows[2]["musicbrainz_artist_id"] == "mb_uk"
+    assert rows[1]["spotify_artist_id"] == "sp_us" and rows[1]["itunes_artist_id"] == "112018"

@@ -820,6 +820,20 @@ def _edition_explicit_flag(album_data, tracks) -> bool:
     return False
 
 
+_WATCHLIST_ID_COLUMNS = ('spotify_artist_id', 'itunes_artist_id', 'deezer_artist_id',
+                         'discogs_artist_id', 'musicbrainz_artist_id')
+
+
+def _watchlist_ids_disagree(first, second) -> bool:
+    """two watchlist rows that both hold an id from one source, and not the
+    same one: two artists, whatever their names say"""
+    for col in _WATCHLIST_ID_COLUMNS:
+        a, b = str(first[col] or '').strip(), str(second[col] or '').strip()
+        if a and b and a != b:
+            return True
+    return False
+
+
 @dataclass
 class ScanResult:
     """Result of scanning a single artist"""
@@ -1407,10 +1421,23 @@ class WatchlistScanner:
                     continue
                 keeper = group[0]
                 merged_vals = {col: keeper[col] for col in id_cols}
+                # a name is not an identity: two artists can share one (the
+                # american Nirvana and the british one). rows are the same
+                # artist only while none of their ids disagree. the first cut
+                # of this merged on the name alone and deleted the rest, so a
+                # second artist of the same name was taken off the watchlist
+                # and its ids poured into the first.
+                same_artist = []
                 for dup in group[1:]:
+                    if _watchlist_ids_disagree(merged_vals, dup):
+                        continue
+                    same_artist.append(dup)
                     for col in id_cols:
                         if not merged_vals[col] and dup[col]:
                             merged_vals[col] = dup[col]
+                if not same_artist:
+                    continue
+                group = [keeper] + same_artist
                 cursor.execute("""
                     UPDATE watchlist_artists
                     SET spotify_artist_id = ?, itunes_artist_id = ?, deezer_artist_id = ?,
