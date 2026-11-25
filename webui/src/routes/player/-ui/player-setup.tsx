@@ -309,7 +309,15 @@ function PlayerSetup({ data, firstTime }: { data: SetupPayload; firstTime: boole
                   >
                     <span className={s.stack} aria-hidden="true">
                       {f.sample.slice(0, 3).map((id) => (
-                        <img key={id} src={posterSet(kind, id).src} alt="" loading="lazy" />
+                        <img
+                          key={id}
+                          src={posterSet(kind, id).src}
+                          alt=""
+                          loading="lazy"
+                          onError={(e) => {
+                            e.currentTarget.hidden = true;
+                          }}
+                        />
                       ))}
                     </span>
                     <span className={s.folderText}>

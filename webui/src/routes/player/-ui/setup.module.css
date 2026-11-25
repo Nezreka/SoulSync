@@ -395,13 +395,16 @@
   min-width: 0;
 }
 
+/* the whole path, always: it is how you tell two folders apart. a long
+   one wraps at any character instead of being cut off */
 .folderPath {
-  overflow: hidden;
   color: var(--pl-text);
-  font-size: calc(var(--u) * 0.85);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: calc(var(--u) * 0.8);
   font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  user-select: text;
 }
 
 .break {
