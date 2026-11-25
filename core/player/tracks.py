@@ -105,6 +105,30 @@ def sidecars(video_path: str) -> List[Dict[str, Any]]:
     return out
 
 
+def parse_chapters(data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """ffprobe's chapters as ``[{start, end, title}]`` in seconds, in order.
+    pure. a file with one chapter (or none that say when they start) has no
+    chapters worth showing; a chapter with no name is "Chapter N"."""
+    out: List[Dict[str, Any]] = []
+    for ch in data.get("chapters") or []:
+        try:
+            start = float(ch.get("start_time"))
+            end = float(ch.get("end_time")) if ch.get("end_time") is not None else None
+        except (TypeError, ValueError):
+            continue
+        if start < 0 or (end is not None and end <= start):
+            continue
+        tags = {k.lower(): v for k, v in (ch.get("tags") or {}).items()}
+        out.append({"start": round(start, 3), "end": round(end, 3) if end is not None else None,
+                    "title": str(tags.get("title") or "").strip()})
+    out.sort(key=lambda c: c["start"])
+    if len(out) < 2:
+        return []
+    for i, c in enumerate(out):
+        c["title"] = c["title"] or f"Chapter {i + 1}"
+    return out[:200]
+
+
 def probe(ffprobe: str, source: str, key: Any) -> Dict[str, List[Dict[str, Any]]]:
     """the source's own tracks, kept per ``key``. can't read it: none."""
     with _probe_lock:
@@ -113,10 +137,13 @@ def probe(ffprobe: str, source: str, key: Any) -> Dict[str, List[Dict[str, Any]]
         return hit
     cmd = [ffprobe, "-v", "error", "-show_entries",
            "stream=index,codec_type,codec_name,channels,channel_layout:stream_tags=language,title"
-           ":stream_disposition=default,forced", "-of", "json", source]
+           ":stream_disposition=default,forced"
+           ":chapter=start_time,end_time:chapter_tags=title", "-of", "json", source]
     try:
         out = subprocess.run(cmd, capture_output=True, text=True, errors="replace", timeout=60).stdout  # noqa: S603 - our own argv
-        tracks = parse_probe(json.loads(out or "{}"))
+        data = json.loads(out or "{}")
+        tracks = parse_probe(data)
+        tracks["chapters"] = parse_chapters(data)
     except Exception:  # noqa: BLE001 - no tracks is still a playable video
         logger.warning("couldn't read the tracks of %s", source if "://" not in source else "a relayed stream",
                        exc_info=True)
@@ -133,13 +160,14 @@ def all_tracks(ffprobe: str, source: str, key: Any, local_path: Optional[str]) -
     this box: a relayed stream has no folder to look in)"""
     own = probe(ffprobe, source, key)
     subs = list(own["subtitles"]) + (sidecars(local_path) if local_path else [])
-    return {"audio": own["audio"], "subtitles": subs}
+    return {"audio": own["audio"], "subtitles": subs, "chapters": own.get("chapters") or []}
 
 
 def public(tracks: Dict[str, Any]) -> Dict[str, Any]:
     """what a client sees: never a sidecar's path"""
     return {"audio": tracks["audio"],
-            "subtitles": [{k: v for k, v in s.items() if k != "path"} for s in tracks["subtitles"]]}
+            "subtitles": [{k: v for k, v in s.items() if k != "path"} for s in tracks["subtitles"]],
+            "chapters": tracks.get("chapters") or []}
 
 
 # ── WebVTT ───────────────────────────────────────────────────────────────

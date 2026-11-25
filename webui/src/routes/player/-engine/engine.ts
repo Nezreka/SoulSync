@@ -758,7 +758,12 @@ export class PlayerEngine {
       (saved && !saved.finished && saved.position > RESUME_MIN ? saved.position : 0);
     this.set({
       parts: playable.parts ?? [],
-      chapters: playable.chapters ?? [],
+      // a book's chapters come with it; a video's are read off the file with its tracks
+      chapters: playable.chapters?.length
+        ? playable.chapters
+        : kind === 'video'
+          ? (this.state.tracks?.chapters ?? [])
+          : [],
       verdict: playable.verdict ?? null,
       duration,
       position: start,

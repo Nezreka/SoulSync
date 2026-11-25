@@ -18,7 +18,7 @@ import type { PlayerState } from '../../-engine/engine';
 
 import { converting } from '../../-engine/describe';
 import { current, nextIndex } from '../../-engine/queue';
-import { clock } from '../../-engine/timeline';
+import { clock, skippableAt } from '../../-engine/timeline';
 import { NextIcon, PauseIcon, PlayIcon } from '../icons';
 import { ReportIssueButton } from '../report-issue';
 import { inPlayer } from '../trailer';
@@ -231,6 +231,7 @@ function FullPlayer({ state, onLeave }: { state: PlayerState; onLeave: () => voi
       ) : null}
 
       <PartyReactionsOverlay hudVisible={!idle} />
+      <SkipMark state={state} />
       <div className={s.fullTop}>
         <button
           type="button"
@@ -457,5 +458,20 @@ export function VideoPlayer() {
     ) : (
       <MiniPlayer onOpen={() => setOpen(true)} />
     ),
+  );
+}
+
+/**
+ * "Skip intro" (or recap, or credits) while the file's own chapter of that
+ * name plays. only a video whose file marks it gets one: nothing is guessed.
+ */
+function SkipMark({ state }: { state: PlayerState }) {
+  if (state.kind !== 'video' || state.status === 'error') return null;
+  const skip = skippableAt(state.chapters, state.position, state.duration);
+  if (!skip) return null;
+  return (
+    <button type="button" className={s.skipMark} onClick={() => getEngine().seek(skip.to)} data-nav>
+      {skip.label}
+    </button>
   );
 }

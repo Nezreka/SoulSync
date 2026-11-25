@@ -3250,3 +3250,7 @@ curl -H "Authorization: Bearer sk_..." \
 `GET /api/playlists/public-search?q=<name>&source=deezer|spotify&limit=15`
 
 Public playlists by name, from the services that can be searched without anyone's account. `source` narrows it to one. Each result has `id`, `title`, `creator`, `track_count`, `image_url`, `source` and `link`; adding one is the same as pasting its `link` into Add Playlist. A service that fails or is not set up is left out. Needs the playlist sync permission.
+
+### Video chapters
+
+`GET /api/player/tracks/<type>/<id>` also returns `chapters`: the file's own chapter marks as `[{start, end, title}]` in seconds (empty when the file has fewer than two). The web player lists them in its chapter menu and offers Skip intro, Skip recap or Skip credits while a chapter with that name plays.
