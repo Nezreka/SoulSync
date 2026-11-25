@@ -302,6 +302,52 @@ def _count_version_kw(text, kw) -> int:
 _VERSION_MARKER_SEPARATORS = '-–—:|/'
 
 
+# words a folder may leave out or spell another way without it being another
+# artist: "Beatles/" for The Beatles, "Peter, Paul & Mary/" for Peter, Paul
+# and Mary (the "&" is a space once normalised, so the word "and" is simply
+# not there). the check wanted every word of the artist's name in one folder
+# and turned both away.
+_ARTIST_FILLER_WORDS = frozenset({'the', 'and'})
+
+
+def _artist_word_sets(artists, alias_words=()):
+    """each artist name (and alias) as the set of words a path segment must
+    hold to name them. filler words are not required, unless the name is
+    nothing else ("The The")."""
+    sets = []
+    for artist_name in artists or ():
+        words = set(matching_engine.normalize_string(artist_name).split())
+        if words:
+            sets.append((words - _ARTIST_FILLER_WORDS) or words)
+    for words in alias_words or ():
+        words = set(words)
+        if words:
+            sets.append((words - _ARTIST_FILLER_WORDS) or words)
+    return sets
+
+
+def _path_names_an_artist(filename, artist_word_sets) -> bool:
+    """one folder or the file name holds every word of one artist's name.
+    per segment, not the whole path: a short name like "Sia" must not be
+    found inside a folder called "Enthusiastic"."""
+    for segment in re.split(r'[/\\]', filename or ''):
+        if not segment:
+            continue
+        seg_words = set(matching_engine.normalize_string(segment).split())
+        if seg_words and any(words.issubset(seg_words) for words in artist_word_sets):
+            return True
+    return False
+
+
+def _results_naming_the_artist(candidates, spotify_track, alias_words=()):
+    """the results whose path names the artist, or [] when there is no artist
+    to look for"""
+    sets = _artist_word_sets(getattr(spotify_track, 'artists', None) or [], alias_words)
+    if not sets:
+        return []
+    return [c for c in candidates if _path_names_an_artist(getattr(c, 'filename', ''), sets)]
+
+
 def _has_version_marker(text, kw) -> bool:
     """A version keyword that actually QUALIFIES the title.
 
@@ -1146,11 +1192,30 @@ def _match_filename_candidates(results, spotify_track, profile_id=None, why=None
         # Filter by user's quality profile before artist verification (Soulseek only)
         # Use existing download_orchestrator to avoid re-initializing (which accesses download_path filesystem)
         soulseek = download_orchestrator.client('soulseek')
+        # the artist first, then the quality. the quality filter keeps only
+        # the best tier present, and it ran before anyone asked whose files
+        # they were: FLAC copies in folders that never name the artist
+        # ("Album (2010)/01 - Song.flac") won the tier, were then dropped for
+        # not naming the artist, and the MP3 320 copies filed properly under
+        # "Artist/..." had already been thrown away. "none passed", not found,
+        # with the right file in the results. when at least one result names
+        # the artist only those are ranked; when none does, nothing changes
+        # (the check below turns them away and says why).
+        _named = _results_naming_the_artist(initial_candidates, spotify_track, alias_words)
+        _pool = _named or initial_candidates
         quality_filtered_candidates = soulseek.filter_results_by_quality_preference(
-            initial_candidates, profile_id=profile_id)
+            _pool, profile_id=profile_id)
         if why is not None:
             _note_soulseek_quality_drops(
-                initial_candidates, quality_filtered_candidates, soulseek, why)
+                _pool, quality_filtered_candidates, soulseek, why)
+            if _named:
+                _named_ids = {id(c) for c in _named}
+                for _c in initial_candidates:
+                    if id(_c) not in _named_ids:
+                        _note(why, _c, 'artist_mismatch',
+                              f"no folder or filename names "
+                              f"{', '.join(map(str, spotify_track.artists or []))}",
+                              getattr(_c, 'confidence', None))
 
         # IMPORTANT: Respect empty results from quality filter
         # If user has strict quality requirements (e.g., FLAC-only with fallback disabled),
@@ -1165,13 +1230,7 @@ def _match_filename_candidates(results, spotify_track, profile_id=None, why=None
 
     # Pre-normalize all artist names into word sets using the matching engine
     # This handles Cyrillic, accents, special chars ($), separators, etc.
-    artist_word_sets = []
-    for artist_name in spotify_artists:
-        normalized = matching_engine.normalize_string(artist_name)
-        words = set(normalized.split())
-        if words:
-            artist_word_sets.append(words)
-    artist_word_sets.extend(alias_words)
+    artist_word_sets = _artist_word_sets(spotify_artists, alias_words)
 
     for candidate in quality_filtered_candidates:
         # Streaming results: the matching engine already scored the title.
@@ -1221,24 +1280,7 @@ def _match_filename_candidates(results, spotify_track, profile_id=None, why=None
         # This prevents false positives where a short artist name like "Sia" accidentally
         # matches inside a folder name like "Enthusiastic" — by checking words within
         # individual segments rather than a flat substring of the entire path.
-        path_segments = re.split(r'[/\\]', candidate.filename)
-
-        artist_found = False
-        for segment in path_segments:
-            if not segment:
-                continue
-            seg_words = set(matching_engine.normalize_string(segment).split())
-            if not seg_words:
-                continue
-
-            # Check if ANY artist's words are ALL present in this segment
-            for artist_words in artist_word_sets:
-                if artist_words.issubset(seg_words):
-                    artist_found = True
-                    break
-
-            if artist_found:
-                break
+        artist_found = _path_names_an_artist(candidate.filename, artist_word_sets)
 
         if artist_found:
             verified_candidates.append(candidate)

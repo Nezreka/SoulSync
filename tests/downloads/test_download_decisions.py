@@ -474,3 +474,50 @@ def test_a_different_artist_does_not_pass_on_confidence_alone(env):
     assert not d.accepted and d.code == 'artist_mismatch'
     right = _row(username='qobuz', filename='qb||8', artist='Lil Yee', title='Alive')
     assert _decision_for(evaluate_candidates([right], want, 'q'), right).accepted
+
+
+# ── whose files they are is asked before which tier wins ────────────────────
+
+class _BestTierOnly(_Slsk):
+    """the real filter keeps only the best tier present"""
+
+    def filter_results_by_quality_preference(self, rows, profile_id=None):
+        rows = super().filter_results_by_quality_preference(rows, profile_id)
+        flac = [r for r in rows if r.quality == 'flac']
+        return flac or rows
+
+
+def test_a_better_tier_that_does_not_name_the_artist_does_not_hide_the_right_file(env, monkeypatch):
+    """FLAC copies in a folder that never names the artist won the tier,
+    were then dropped for not naming the artist, and the MP3 320 filed under
+    the artist had already been thrown away: not found, with the right file
+    in the results"""
+    monkeypatch.setattr(validation, 'download_orchestrator', _Orch(_BestTierOnly()))
+    stray_flac = _row(username='bob', filename='So Tonight (1993)/04 - Fade Into You.flac',
+                      artist=None, title=None)
+    filed_mp3 = _row(username='carol', filename='Mazzy Star/So Tonight/04 - Fade Into You.mp3',
+                     quality='mp3', bitrate=320, bit_depth=None, sample_rate=None,
+                     artist=None, title=None)
+    pairs = evaluate_candidates([stray_flac, filed_mp3], WANT, 'q')
+    assert _decision_for(pairs, filed_mp3).accepted
+    assert not _decision_for(pairs, stray_flac).accepted
+
+
+@pytest.mark.parametrize("artist,folder", [
+    ('The Beatles', 'Beatles'),
+    ('Peter, Paul and Mary', 'Peter, Paul & Mary'),
+    ('Simon & Garfunkel', 'Simon and Garfunkel'),
+    ('The The', 'The The'),
+])
+def test_a_folder_may_spell_the_artist_its_own_way(env, artist, folder):
+    want = _Track(name='Fade Into You', artists=(artist,), album='')
+    row = _row(username='dave', filename=f'{folder}/Album/04 - Fade Into You.flac',
+               artist=None, title=None)
+    assert _decision_for(evaluate_candidates([row], want, 'q'), row).accepted
+
+
+def test_another_artists_folder_is_still_another_artist(env):
+    want = _Track(name='Fade Into You', artists=('The Beatles',), album='')
+    row = _row(username='dave', filename='Mazzy Star/Album/04 - Fade Into You.flac',
+               artist=None, title=None)
+    assert not _decision_for(evaluate_candidates([row], want, 'q'), row).accepted
