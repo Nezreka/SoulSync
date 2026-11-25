@@ -348,8 +348,11 @@ def normalize(p: Any, *, server_name: str = "SoulSync", profile: Optional[Dict[s
         "progress_pct": max(0, min(100, round(100 * offset_ms / duration_ms))) if duration_ms else 0,
         "user": str(who.get("name") or "Someone"),
         "user_id": str(pid),
-        # an uploaded picture is ours (/api/profiles/<id>/avatar); anything else isn't fetched
-        "user_avatar": avatar if isinstance(avatar, str) and avatar.startswith("/api/") else None,
+        # the profile's picture as the rest of the app shows it: one uploaded
+        # here (/api/profiles/<id>/avatar) or a web address (a steam or plex
+        # picture); nothing else (a data: uri, a file path) is passed on
+        "user_avatar": avatar if isinstance(avatar, str) and (
+            avatar.startswith("/api/") or avatar.startswith(("https://", "http://"))) else None,
         "player": {"product": client.get("product") or "SoulSync player", "version": client.get("version"),
                    "platform": client.get("platform"), "platform_version": None,
                    "device": client.get("device"), "model": None, "name": client.get("name")},
