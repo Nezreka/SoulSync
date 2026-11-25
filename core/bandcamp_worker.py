@@ -429,7 +429,10 @@ class BandcampWorker:
             )
             if entity_type == 'album':
                 # Expected track count for the Album Completeness repair job.
-                set_expected_track_count(conn, entity_id, result.get('total_tracks'))
+                set_expected_track_count(
+                    conn, entity_id, result.get('total_tracks'),
+                    source='bandcamp', provider_id=bandcamp_url,
+                )
             record_attempt(conn, entity_type=entity_type, entity_id=entity_id,
                            service='bandcamp', status='matched')
             conn.commit()

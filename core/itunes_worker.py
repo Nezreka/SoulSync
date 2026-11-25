@@ -643,7 +643,10 @@ class iTunesWorker:
             )
             if entity_type == 'album':
                 # The authoritative expected total for the Album Completeness job.
-                set_expected_track_count(conn, entity_id, total_tracks)
+                set_expected_track_count(
+                    conn, entity_id, total_tracks,
+                    source='itunes', provider_id=provider_id,
+                )
             record_attempt(conn, entity_type=entity_type, entity_id=entity_id,
                            service='itunes', status='matched')
             conn.commit()
