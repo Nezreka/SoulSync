@@ -28,6 +28,7 @@ from core.download_plugins.album_bundle import (
 from core.download_plugins.base import DownloadSourcePlugin
 from core.quality.model import QualityTarget, filter_and_rank, v2_qualities_to_ranked_targets
 from core.quality.source_map import AUDIO_EXTENSIONS, format_from_extension
+from core.slskd_transfer import acknowledged_transfer_id
 from utils.async_helpers import run_async
 
 logger = get_logger("soulseek_client")
@@ -878,8 +879,7 @@ class SoulseekClient(DownloadSourcePlugin):
             # is deliberately not recorded: two clients can download the same
             # file from the same user, and a filename match would hand the
             # other client's transfer to our cleanup (#1499 through the side
-            # door). Fail closed: an enqueue whose response carried no id is
-            # left for scope=all or manual cleanup, like pre-restart transfers.
+            # door). Keep the guard for legacy callers and saved state.
             self._remember_own_download(username, token)
         return token
 
@@ -887,156 +887,30 @@ class SoulseekClient(DownloadSourcePlugin):
         if not self.base_url:
             logger.debug("Soulseek client not configured")
             return None
-        
-        try:
-            logger.debug(f"Attempting to download: {filename} from {username} (size: {file_size})")
-            
-            # Use the exact format observed in the web interface
-            # Payload: [{filename: "...", size: 123}] - array of files
-            # Try adding path parameter to see if slskd supports custom download paths
-            download_data = [
-                {
-                    "filename": filename,
-                    "size": file_size,
-                    "path": str(self.download_path)  # Try custom download path
-                }
-            ]
-            
-            logger.debug(f"Using web interface API format: {download_data}")
-            
-            # Use the correct endpoint pattern from web interface: /api/v0/transfers/downloads/{username}
-            endpoint = f'transfers/downloads/{username}'
-            logger.debug(f"Trying web interface endpoint: {endpoint}")
-            
-            try:
-                response = await self._make_request('POST', endpoint, json=download_data)
-                if response is not None:  # 201 Created might return download info
-                    logger.info(f"[SUCCESS] Started download: {filename} from {username}")
-                    # Try to extract download ID from response if available
-                    transfer_id = self._extract_transfer_id(response, filename)
-                    if transfer_id is not None:
-                        logger.debug(f"Got download ID from response: {transfer_id}")
-                        return transfer_id
-                    # Fallback to filename if no ID in response
-                    logger.debug(f"No ID in response, using filename as fallback: {response}")
-                    return filename
-                else:
-                    logger.debug("Web interface endpoint returned no response")
-                    
-            except Exception as e:
-                logger.debug(f"Web interface endpoint failed: {e}")
-            
-            # Fallback: Try alternative patterns if the main one fails
-            logger.debug("Web interface endpoint failed, trying alternatives...")
-            
-            # Try different username-based endpoint patterns
-            username_endpoints_to_try = [
-                f'transfers/{username}/enqueue',
-                f'users/{username}/downloads', 
-                f'users/{username}/enqueue'
-            ]
-            
-            # Try with array format first
-            for endpoint in username_endpoints_to_try:
-                logger.debug(f"Trying endpoint: {endpoint} with array format")
-                
-                try:
-                    response = await self._make_request('POST', endpoint, json=download_data)
-                    if response is not None:
-                        logger.info(f"[SUCCESS] Started download: {filename} from {username} using endpoint: {endpoint}")
-                        # Try to extract download ID from response if available
-                        transfer_id = self._extract_transfer_id(response, filename)
-                        if transfer_id is not None:
-                            logger.debug(f"Got download ID from response: {transfer_id}")
-                            return transfer_id
-                        # Fallback to filename if no ID in response
-                        logger.debug(f"No ID in response, using filename as fallback: {response}")
-                        return filename
-                    else:
-                        logger.debug(f"Endpoint {endpoint} returned no response")
-                        
-                except Exception as e:
-                    logger.debug(f"Endpoint {endpoint} failed: {e}")
-                    continue
-            
-            # Try with old format as final fallback
-            logger.debug("Array format failed, trying old object format")
-            fallback_data = {
-                "files": [
-                    {
-                        "filename": filename,
-                        "size": file_size
-                    }
-                ]
-            }
-            
-            for endpoint in username_endpoints_to_try:
-                logger.debug(f"Trying endpoint: {endpoint} with object format")
-                
-                try:
-                    response = await self._make_request('POST', endpoint, json=fallback_data)
-                    if response is not None:
-                        logger.info(f"[SUCCESS] Started download: {filename} from {username} using fallback endpoint: {endpoint}")
-                        # Try to extract download ID from response if available
-                        transfer_id = self._extract_transfer_id(response, filename)
-                        if transfer_id is not None:
-                            logger.debug(f"Got download ID from response: {transfer_id}")
-                            return transfer_id
-                        # Fallback to filename if no ID in response
-                        logger.debug(f"No ID in response, using filename as fallback: {response}")
-                        return filename
-                    else:
-                        logger.debug(f"Fallback endpoint {endpoint} returned no response")
-                        
-                except Exception as e:
-                    logger.debug(f"Fallback endpoint {endpoint} failed: {e}")
-                    continue
-            
-            logger.error(f"All download endpoints failed for {filename} from {username}")
-            return None
-            
-        except Exception as e:
-            logger.error(f"Error starting download: {e}")
-            return None
-    
-    @staticmethod
-    def _extract_transfer_id(response, filename: str):
-        """Pull the slskd transfer id out of an enqueue reply, or None.
 
-        slskd 0.25.x/0.26 answers POST transfers/downloads/{user} with
-        ``201 {"enqueued": [Transfer, ...], "failed": [...]}``: no top-level
-        ``id``. Match the enqueued transfer by filename; a single-file
-        request has one entry, so fall back to it when the filename was
-        normalised by the peer. The older bare ``{"id": ...}`` / ``[{"id":
-        ...}]`` shapes are still read.
-        """
-        if isinstance(response, dict):
-            enqueued = response.get('enqueued')
-            if isinstance(enqueued, list):
-                items = [t for t in enqueued if isinstance(t, dict) and t.get('id')]
-                for t in items:
-                    if t.get('filename') == filename:
-                        return t['id']
-                if len(items) == 1:
-                    return items[0]['id']
-                return None
-            if 'id' in response:
-                return response['id']
-        elif isinstance(response, list) and response and isinstance(response[0], dict) \
-                and 'id' in response[0]:
-            return response[0]['id']
+        # A timeout or unreadable reply does not prove the POST had no effect.
+        # Replaying it through guessed endpoints can enqueue the same file twice.
+        try:
+            response = await self._make_request(
+                'POST', f'transfers/downloads/{self._quote(username)}',
+                json=[{'filename': filename, 'size': file_size}],
+            )
+            transfer_id = acknowledged_transfer_id(response, username, filename)
+            if transfer_id:
+                logger.debug("slskd confirmed enqueue of %s from %s (ID: %s)", filename, username, transfer_id)
+                return transfer_id
+            logger.warning("slskd did not confirm enqueue of %s from %s", filename, username)
+        except Exception as error:
+            logger.error("Error starting download of %s from %s: %s", filename, username, error)
         return None
 
     @staticmethod
     def _looks_like_transfer_id(value: str) -> bool:
         """Whether this is a slskd transfer UUID rather than a filename.
 
-        ``download()`` returns the FILENAME when an enqueue response carries no
-        id, which slskd 0.26 does. Putting a filename in
-        ``transfers/downloads/{id}`` makes slskd answer 400/405, the monitor
-        read that as a failure, and a perfectly good transfer was cancelled
-        seconds after starting (#1229). A filename always contains a path
-        separator or a dot; a UUID contains neither.
+        Legacy history may contain a filename in place of a transfer ID.
+        Putting it in ``transfers/downloads/{id}`` makes slskd answer 400/405
+        (#1229). A filename contains a path separator or a dot; an ID does not.
         """
         text = str(value or "").strip()
         if not text:

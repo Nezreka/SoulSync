@@ -5,7 +5,7 @@ Thin wrapper over slskd's transfer API (the same shared instance the music side 
   - ``list_downloads()``                         → GET  /transfers/downloads (flattened)
 The flatten + state-classification helpers are pure (unit-tested); the HTTP is glue.
 
-Isolated: stdlib + requests + shared ``config_manager``; no music imports.
+Uses shared slskd response parsing and config; no music imports.
 """
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ from typing import Any
 from urllib.parse import quote
 
 import requests
+from core.slskd_transfer import acknowledged_transfer_id
 
 
 def _conn():
@@ -29,10 +30,16 @@ def start_download(username: str, filename: str, size_bytes: int = 0) -> dict:
     if not base:
         return {"ok": False, "error": "slskd isn't configured"}
     try:
-        r = requests.post(base + "/api/v0/transfers/downloads/" + quote(str(username or "")),
+        r = requests.post(base + "/api/v0/transfers/downloads/" + quote(str(username or ""), safe=""),
                           json=[{"filename": filename, "size": int(size_bytes or 0)}],
                           headers=headers, timeout=15)
         r.raise_for_status()
+        try:
+            response = r.json()
+        except requests.exceptions.JSONDecodeError:
+            response = None
+        if not acknowledged_transfer_id(response, username, filename):
+            return {"ok": False, "error": "slskd did not confirm the download enqueue"}
         return {"ok": True}
     except Exception as e:   # noqa: BLE001 - surface any slskd/network failure to the caller
         return {"ok": False, "error": str(e)}
