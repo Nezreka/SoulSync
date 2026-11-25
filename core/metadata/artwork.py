@@ -574,6 +574,31 @@ def _library_artwork_bytes(art_url: str):
     return None
 
 
+def _media_server_art_bytes(reference: str):
+    """``(bytes, mime)`` for a cover reference only the media server can
+    answer, else ``(None, None)``. asks the active server's client for the
+    address to download from; a client without one has no such references."""
+    try:
+        from core.media_server.engine import get_media_server_engine
+        client = get_media_server_engine().active_client()
+        hook = getattr(client, "image_fetch_url", None)
+        url = hook(reference) if callable(hook) else None
+        if not url or not str(url).startswith(("http://", "https://")):
+            return None, None
+        import requests
+        response = requests.get(url, timeout=10)      # the user's own media server
+        if response.status_code != 200 or not response.content:
+            return None, None
+        mime = (response.headers.get("Content-Type") or "image/jpeg").split(";")[0].strip()
+        if not mime.startswith("image/"):
+            # a subsonic error comes back as 200 with an xml or json body
+            return None, None
+        return response.content, mime
+    except Exception as exc:  # noqa: BLE001 - no cover is the answer, never a failed tag write
+        logger.debug("media-server cover fetch failed for %s: %s", reference, exc)
+        return None, None
+
+
 def _fetch_art_bytes(art_url: str):
     """Fetch artwork bytes at the highest resolution the source serves.
 
@@ -596,7 +621,11 @@ def _fetch_art_bytes(art_url: str):
         local = _library_artwork_bytes(str(art_url))
         if local is not None:
             return local
-        return None, None
+        # a media server's own cover reference (navidrome's
+        # /rest/getCoverArt?id=..., or its proxy path): fetched from the
+        # server, signed in. taking it as "no art" left every album whose art
+        # came from navidrome without an embedded cover or a cover.jpg (#2293)
+        return _media_server_art_bytes(str(art_url))
     upgraded = _upgrade_art_url(art_url)
     is_caa_original = "coverartarchive.org" in upgraded and upgraded.endswith("/front")
 

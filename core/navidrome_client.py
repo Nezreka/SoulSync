@@ -544,6 +544,28 @@ class NavidromeClient(MediaServerBase):
     # exposed either way (only its salted md5).
     _COVER_ART_SALT = 'soulsync-cover'
 
+    def image_fetch_url(self, thumb) -> Optional[str]:
+        """the absolute, authenticated URL SoulSync's OWN code downloads an
+        image from. ``image_url`` answers for the browser: a getCoverArt
+        reference becomes the proxy path /api/navidrome/cover/<id>, which a
+        page can load and a server-side download can't. the re-tagger and
+        the cover.jpg writer took that path, found it wasn't http, and
+        wrote no cover for any album whose art came from Navidrome (#2293).
+        takes the stored reference or the proxy path."""
+        if not thumb:
+            return None
+        from urllib.parse import parse_qs, unquote, urlparse
+        parsed = urlparse(str(thumb))
+        cover_id = ''
+        if parsed.path.rstrip('/').endswith('getCoverArt'):
+            cover_id = parse_qs(parsed.query).get('id', [''])[0]
+        elif parsed.path.startswith('/api/navidrome/cover/'):
+            cover_id = unquote(parsed.path[len('/api/navidrome/cover/'):])
+        if cover_id:
+            return self.build_cover_art_url(cover_id)
+        url = self.image_url(thumb)
+        return url if url and str(url).startswith(('http://', 'https://')) else None
+
     def build_cover_art_url(self, cover_id, size=None) -> Optional[str]:
         """Absolute, Subsonic-authenticated getCoverArt URL for ``cover_id``.
 
