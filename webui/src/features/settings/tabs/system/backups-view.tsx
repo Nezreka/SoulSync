@@ -77,6 +77,161 @@ async function confirm(title: string, message: string, confirmText: string) {
   return (await window.showConfirmDialog?.({ title, message, confirmText })) ?? false;
 }
 
+interface DbHealth {
+  healthy: boolean | null;
+  detail: string;
+  checked_at: number | null;
+  checking: boolean;
+  repair_tool: boolean;
+}
+
+interface RepairAnswer {
+  success?: boolean;
+  healthy?: boolean;
+  repaired?: boolean;
+  message?: string;
+  error?: string;
+  kept?: string;
+  backup?: string | null;
+}
+
+/** when it was checked, in words */
+export function checkedWhen(at: number | null, now = Date.now()): string {
+  if (!at) return 'Not checked yet';
+  const mins = Math.floor((now - at * 1000) / 60000);
+  if (mins < 1) return 'Checked just now';
+  if (mins < 60) return `Checked ${mins} min ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `Checked ${hours} h ago`;
+  return `Checked ${new Date(at * 1000).toLocaleDateString()}`;
+}
+
+/**
+ * the music database's health, at the top of the page. a damaged database
+ * stops every backup (they refuse to copy damage), so this says so loudly and
+ * offers the repair: the damaged files are kept first, then a repaired copy is
+ * checked and swapped in. when it can't be repaired, the newest good backup.
+ */
+function DatabaseHealth({
+  shown,
+  onRestore,
+}: {
+  shown: boolean;
+  onRestore: (filename: string) => void;
+}) {
+  const [health, setHealth] = useState<DbHealth | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [answer, setAnswer] = useState<RepairAnswer | null>(null);
+
+  const read = useCallback(async (check = false) => {
+    try {
+      const res = await fetch(`/api/database/health${check ? '?check=1' : ''}`);
+      const data = (await res.json()) as DbHealth & { success?: boolean };
+      if (data.success) setHealth(data);
+    } catch {
+      setHealth(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!shown) return;
+    void read();
+  }, [shown, read]);
+
+  // a check runs in the background: ask again until it has answered
+  useEffect(() => {
+    if (!shown || !health?.checking) return;
+    const t = window.setTimeout(() => void read(), 3000);
+    return () => window.clearTimeout(t);
+  }, [shown, health, read]);
+
+  const repair = async () => {
+    if (
+      !(await confirm(
+        'Repair the music database',
+        'The damaged files are kept first, in a folder of their own beside the database. Then a repaired copy is made, checked, and swapped in. This can take a few minutes on a large library, and SoulSync is busy while it runs.',
+        'Repair',
+      ))
+    )
+      return;
+    setBusy(true);
+    setAnswer(null);
+    try {
+      const res = await fetch('/api/database/repair', { method: 'POST' });
+      const data = (await res.json()) as RepairAnswer;
+      setAnswer(data);
+      if (data.repaired) toast('Database repaired. Restart SoulSync to finish.', 'success');
+      else if (data.healthy) toast('Your database is healthy. Nothing to repair.', 'info');
+      else toast(`Not repaired: ${data.error ?? 'unknown error'}`, 'error');
+    } catch {
+      toast('The repair did not answer. Check the logs, then try again.', 'error');
+    } finally {
+      setBusy(false);
+      await read();
+    }
+  };
+
+  const damaged = health?.healthy === false;
+  return (
+    <Card
+      title="Database health"
+      danger={damaged}
+      hint={
+        damaged
+          ? 'Your music database is damaged. Backups have stopped, because a backup never copies damage.'
+          : 'Every backup checks the database first. You can check it now too.'
+      }
+      actions={
+        damaged ? (
+          <Btn kind="primary" small busy={busy} onClick={() => void repair()}>
+            Repair
+          </Btn>
+        ) : (
+          <Btn small busy={health?.checking} onClick={() => void read(true)}>
+            Check now
+          </Btn>
+        )
+      }
+    >
+      <Row
+        label={
+          health?.checking
+            ? 'Checking…'
+            : damaged
+              ? 'Damaged'
+              : health?.healthy
+                ? 'Healthy'
+                : 'Not checked yet'
+        }
+        help={health ? checkedWhen(health.checked_at) : undefined}
+      />
+      {damaged && health?.detail ? <Note>{health.detail}</Note> : null}
+      {answer?.repaired ? (
+        <Note info>
+          {answer.message} The damaged files are kept in {answer.kept}. Restart SoulSync to finish.
+        </Note>
+      ) : null}
+      {answer && answer.success === false && !answer.repaired ? (
+        <Note
+          action={
+            answer.backup ? (
+              <Btn small onClick={() => onRestore(answer.backup!)}>
+                Restore {stampOf(answer.backup)}
+              </Btn>
+            ) : undefined
+          }
+        >
+          {answer.error}
+          {answer.kept ? ` The damaged files are kept in ${answer.kept}.` : ''}
+          {answer.backup
+            ? ' The newest healthy backup can be restored instead.'
+            : ' There is no healthy backup to restore.'}
+        </Note>
+      ) : null}
+    </Card>
+  );
+}
+
 export function BackupsView({ shown, opened }: { shown: boolean; opened: number }) {
   const [music, setMusic] = useState<BackupListResponse | null>(null);
   const [others, setOthers] = useState<CompanionList | null>(null);
@@ -202,6 +357,7 @@ export function BackupsView({ shown, opened }: { shown: boolean; opened: number 
 
   return (
     <div className={s.cards}>
+      <DatabaseHealth shown={shown} onRestore={(name) => void restoreMusic(name)} />
       <Card
         title="Music"
         hint="The library, playlists, wishlist, listening history and every setting. The newest five are kept."
