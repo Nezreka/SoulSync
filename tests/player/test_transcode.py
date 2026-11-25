@@ -255,3 +255,37 @@ def test_a_noisy_ffmpeg_does_not_stall(tmp_path):
     t.start()
     t.join(timeout=20)
     assert out == [b"done"]
+
+
+def test_an_admin_stop_ends_the_screen_conversion(monkeypatch):
+    procs = []
+    monkeypatch.setattr(T, "_slots", __import__("threading").BoundedSemaphore(2))
+    monkeypatch.setattr(T, "_owners", {})
+    monkeypatch.setattr(T.subprocess, "Popen", lambda *a, **k: procs.append(FakeProc([b"ab"])) or procs[-1])
+    T.stream(["ffmpeg"], owner="1:tv")
+    T.stream(["ffmpeg"], owner="1:phone")
+    assert T.stop_owner("1:tv") is True and T.stop_owner("1:tv") is False
+    assert [p.killed for p in procs] == [True, False] and T._owners.keys() == {"1:phone"}
+
+
+def test_a_stopped_screen_item_is_not_served_for_a_while(client, monkeypatch):
+    """an admin stopped this profile on this film (server activity): asking
+    again for it is refused, with the admin's words; other films still play"""
+    from core.player import presence
+    monkeypatch.setattr("core.profile_context.get_current_profile_id", lambda: 1)
+    monkeypatch.setattr(T, "stream", lambda cmd, owner=None: iter([b"mp4"]))
+    presence._sessions.clear()
+    presence._stops.clear()
+    presence.beat(1, {"session": "tv", "item_type": "movie", "item_id": "ac3", "position": 1, "duration": 100,
+                      "playing": True})
+    presence.order_stop(1, "tv", "Bedtime")
+    try:
+        for url in ("/api/player/playable/movie/ac3", "/api/player/stream/movie/ac3",
+                    "/api/player/transcode/movie/ac3"):
+            res = client.get(url)
+            assert res.status_code == 403, url
+            assert res.get_json() == {"success": False, "error": "stopped", "message": "Bedtime"}
+        assert client.get("/api/player/playable/movie/fine").status_code == 200
+    finally:
+        presence._sessions.clear()
+        presence._stops.clear()

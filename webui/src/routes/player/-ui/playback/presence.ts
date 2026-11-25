@@ -3,9 +3,13 @@
  *   * the profile's playback settings go to the engine (autoplay the next
  *     episode, when to ask "are you still watching?")
  *   * watching now: while something plays, this screen tells the server
- *     what and where, every 15 seconds and at once when it starts, pauses or
- *     changes; and that it stopped. a profile that doesn't share sends
- *     nothing (and the server wouldn't keep it anyway).
+ *     what, where and how it plays, every 8 seconds and at once when it
+ *     starts, pauses or changes; and that it stopped. every screen says so:
+ *     the admin's Server Activity sees every stream, while other members see
+ *     only profiles that share (the server keeps that line).
+ *   * the answer carries what the admin said from Server Activity: a stop
+ *     (playback stops and the admin's words show) or a message (shown, still
+ *     playing). a stop lands within one beat, so within 8 seconds.
  */
 
 import { useQuery } from '@tanstack/react-query';
@@ -15,17 +19,31 @@ import { appURL } from '@/platform/url-base';
 
 import type { PlayerState } from '../../-engine/engine';
 
+import { screenId } from '../../-engine/browser';
 import { playerSettingsQuery } from '../../-player.api';
+import { showServerOrder } from './server-orders';
 import { currentChannel } from './tuner';
 import { getEngine, usePlayer } from './use-player';
 
-const BEAT_MS = 15_000;
+export const BEAT_MS = 8_000;
 
-// one id per page load. sessionStorage was copied when a tab was
-// duplicated, so two tabs shared an id and one's goodbye removed the other
-const PAGE_SESSION = Math.random().toString(36).slice(2, 12);
-function sessionId(): string {
-  return PAGE_SESSION;
+/** how it plays, once the server has said where the bytes come from */
+function stream(state: PlayerState) {
+  if (!state.source) return undefined;
+  return {
+    via: state.source.via,
+    file_id: state.source.fileId ?? undefined,
+    mime: state.source.mime ?? undefined,
+    transcode: state.transcode
+      ? {
+          video: state.transcode.video,
+          audio: state.transcode.audio,
+          quality: state.transcode.quality,
+          reasons: state.transcode.reasons,
+          encoder: state.transcode.encoder ?? null,
+        }
+      : null,
+  };
 }
 
 function payload(state: PlayerState, session: string) {
@@ -49,17 +67,55 @@ function payload(state: PlayerState, session: string) {
       parent_id: item.parentId,
       parent_title: item.parentTitle,
     },
+    stream: stream(state),
   };
 }
 
-function send(method: 'POST' | 'DELETE', body?: unknown, session?: string) {
-  const url = appURL(
-    method === 'DELETE' ? `/api/player/presence?session=${session ?? ''}` : '/api/player/presence',
-  );
-  void fetch(url, {
-    method,
-    headers: body ? { 'content-type': 'application/json' } : undefined,
-    body: body ? JSON.stringify(body) : undefined,
+export interface BeatAnswer {
+  stop?: { message?: string };
+  message?: { header?: string; text?: string };
+}
+
+const STOPPED = 'The server administrator stopped this stream.';
+
+/** the admin's orders for this screen: stop and say why, or just say */
+export function actOn(answer: BeatAnswer | null | undefined) {
+  if (!answer) return;
+  if (answer.stop) {
+    getEngine().stop();
+    showServerOrder({
+      kind: 'stop',
+      title: 'Stream stopped',
+      text: answer.stop.message?.trim() || STOPPED,
+    });
+    return;
+  }
+  const text = answer.message?.text?.trim();
+  if (text) {
+    showServerOrder({
+      kind: 'message',
+      title: answer.message?.header?.trim() || 'A message from the server',
+      text,
+    });
+  }
+}
+
+function beat(body: unknown) {
+  void fetch(appURL('/api/player/presence'), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+    keepalive: true,
+    credentials: 'same-origin',
+  })
+    .then((res) => (res.ok ? (res.json() as Promise<BeatAnswer>) : null))
+    .then(actOn)
+    .catch(() => undefined);
+}
+
+function goodbye(session: string) {
+  void fetch(appURL(`/api/player/presence?session=${encodeURIComponent(session)}`), {
+    method: 'DELETE',
     keepalive: true,
     credentials: 'same-origin',
   }).catch(() => undefined);
@@ -68,8 +124,9 @@ function send(method: 'POST' | 'DELETE', body?: unknown, session?: string) {
 export function usePlayerSync() {
   const settings = useQuery(playerSettingsQuery());
   const state = usePlayer();
-  const session = useRef(sessionId());
-  const sharing = settings.data?.settings.share_activity ?? false;
+  // one id per page load, the same one the converter knows this screen by,
+  // so an admin's stop also ends its conversion
+  const session = useRef(screenId());
 
   useEffect(() => {
     const s = settings.data?.settings;
@@ -83,26 +140,26 @@ export function usePlayerSync() {
   const key = state.item ? `${state.item.type}:${state.item.id}` : null;
   const playing = state.status === 'playing' || state.status === 'buffering';
   const active = !!key && state.status !== 'idle' && state.status !== 'error';
+  const transcoding = state.transcode ? `${state.transcode.video}:${state.transcode.audio}` : '';
 
-  // at once: a start, a pause, a change
+  // at once: a start, a pause, a change (of item, or of how it plays)
   useEffect(() => {
-    if (!sharing) return;
-    if (active) send('POST', payload(getEngine().getState(), session.current));
-    else send('DELETE', undefined, session.current);
-  }, [sharing, key, playing, active]);
+    if (active) beat(payload(getEngine().getState(), session.current));
+    else goodbye(session.current);
+  }, [key, playing, active, transcoding]);
 
-  // and every 15 seconds while it plays
+  // and every few seconds while it plays
   useEffect(() => {
-    if (!sharing || !active) return;
+    if (!active) return;
     const t = window.setInterval(() => {
       const now = getEngine().getState();
-      if (now.item) send('POST', payload(now, session.current));
+      if (now.item) beat(payload(now, session.current));
     }, BEAT_MS);
-    const gone = () => send('DELETE', undefined, session.current);
+    const gone = () => goodbye(session.current);
     window.addEventListener('pagehide', gone);
     return () => {
       window.clearInterval(t);
       window.removeEventListener('pagehide', gone);
     };
-  }, [sharing, active]);
+  }, [active]);
 }

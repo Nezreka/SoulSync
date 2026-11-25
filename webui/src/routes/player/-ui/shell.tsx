@@ -41,6 +41,7 @@ import { useNowPlaying } from './now-playing';
 import { MusicView } from './playback/music-view';
 import { usePlayerSync } from './playback/presence';
 import { ReminderBell } from './playback/reminders';
+import { ServerOrderHost } from './playback/server-orders';
 import { TransportBar } from './playback/transport-bar';
 import { ChannelBanner } from './playback/tuner';
 import { VideoPlayer } from './playback/video-player';
@@ -518,6 +519,7 @@ export function PlayerShell({ profileId }: { profileId: number | null }) {
       <MusicView />
       <ChannelBanner />
       <NoticeHost />
+      <ServerOrderHost />
       <ReminderBell />
       <AddToPlaylistHost />
       <ContextMenuHost />

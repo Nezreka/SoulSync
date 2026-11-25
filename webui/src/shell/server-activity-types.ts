@@ -4,7 +4,8 @@
  * proxy. Times are unix seconds (float) unless the name ends in _ms.
  */
 
-export type ServerKind = 'plex' | 'jellyfin';
+/** soulsync is its own player (the screens that play through SoulSync) */
+export type ServerKind = 'plex' | 'jellyfin' | 'soulsync';
 export type MediaKind =
   | 'movie'
   | 'episode'
@@ -62,8 +63,9 @@ export interface StreamPair<T> {
 }
 
 export interface Playback {
-  method: PlayMethod;
-  method_label: 'Direct Play' | 'Direct Stream' | 'Transcode';
+  /** null: the player never said how it plays (an older app) */
+  method: PlayMethod | null;
+  method_label: 'Direct Play' | 'Direct Stream' | 'Transcode' | null;
   video: StreamPair<VideoSide> | null;
   audio: StreamPair<AudioSide> | null;
   subtitles: {
@@ -97,7 +99,7 @@ export interface Transcoder {
   speed: number | null; // 2.4
   buffered_s: number | null; // plex only
   throttled: boolean | null; // plex only; true = "resting"
-  progress_pct: number;
+  progress_pct: number | null; // null: soulsync's converter doesn't say
   video: string | null;
   audio: string | null;
 }
@@ -167,7 +169,7 @@ export type SessionLink =
   | { kind: 'audiobook'; id: string; source: 'library' };
 
 export interface Session {
-  id: string; // "plex:27" | "jellyfin:<id>"
+  id: string; // "plex:27" | "jellyfin:<id>" | "soulsync:<profile>:<screen>"
   server: ServerKind;
   server_name: string;
   session_key: string; // what stop/message take
@@ -197,7 +199,9 @@ export interface Session {
     progress: BookProgress | null;
     asin?: string | null;
   } | null;
-  thumb: string; // pass to /api/server-activity/image?path=
+  /** the guide channel a soulsync screen is tuned to */
+  channel?: { id: string; name: string; number: number | null } | null;
+  thumb: string; // pass to /api/server-activity/image?path= (soulsync's: its own url)
   art: string;
   /** the proxy query for the poster, with the item's family to fall back on */
   image?: string | null;

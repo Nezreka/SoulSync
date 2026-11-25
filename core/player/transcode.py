@@ -321,6 +321,17 @@ def stream(cmd: List[str], owner: Optional[str] = None) -> Iterator[bytes]:
     return run
 
 
+def stop_owner(owner: str) -> bool:
+    """end this screen's running conversion (an admin stopped it). True when
+    one was running"""
+    with _owners_lock:
+        run = _owners.get(owner)
+    if run is None:
+        return False
+    run.close()
+    return True
+
+
 def ffprobe_for(ffmpeg: str) -> str:
     """ffprobe sits beside ffmpeg in every build we ship or find"""
     import os

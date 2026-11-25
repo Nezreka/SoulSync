@@ -33,6 +33,7 @@ import {
   shortDate,
   timeOfDay,
   whereLabel,
+  serverWord,
 } from './format';
 import h from './history.module.css';
 import { ChevronDown, ClockIcon, OpenIcon, SearchIcon } from './icons';
@@ -288,9 +289,8 @@ function FilterBar({
     })),
   ];
   const servers: MenuOption[] = [
-    { value: '', label: 'Both servers' },
-    { value: 'plex', label: 'Plex' },
-    { value: 'jellyfin', label: 'Jellyfin' },
+    { value: '', label: (facets?.servers.length ?? 0) > 2 ? 'Every server' : 'Both servers' },
+    ...(facets?.servers ?? []).map((server) => ({ value: server, label: serverWord(server) })),
   ];
 
   return (
@@ -647,7 +647,7 @@ function GroupDetail({ g, onNavigate }: { g: HistoryGroup; onNavigate: () => voi
   const paused = pausedPhrase(detail.pause_count, detail.paused_ms);
   const plays = playsFact(detail);
   const quality = qualityFact(detail);
-  const server = detail.server === 'plex' ? 'Plex' : 'Jellyfin';
+  const server = serverWord(detail.server);
   const serverName =
     detail.server_name && detail.server_name.toLowerCase() !== detail.server
       ? `${server} · ${detail.server_name}`

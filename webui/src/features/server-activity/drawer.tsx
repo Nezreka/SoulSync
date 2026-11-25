@@ -11,7 +11,7 @@ import { useCallback, useEffect, useId, useRef, useState } from 'react';
 
 import { getSettings } from './api';
 import d from './drawer.module.css';
-import { browserZone } from './format';
+import { browserZone, serverWord } from './format';
 import { History, prefetchHistory } from './history';
 import { CloseIcon, NarrowIcon, WidenIcon } from './icons';
 import { useLiveActivity, useNow } from './live';
@@ -167,7 +167,7 @@ export function Drawer({ open, tab, onTab, onClose }: DrawerProps) {
           {servers.length ? (
             <ul className={d.servers} aria-label="Servers">
               {servers.map((srv) => {
-                const word = srv.server === 'plex' ? 'Plex' : 'Jellyfin';
+                const word = serverWord(srv.server);
                 const named =
                   srv.name && srv.name.toLowerCase() !== srv.server
                     ? `${word} · ${srv.name}`

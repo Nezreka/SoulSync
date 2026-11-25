@@ -24013,7 +24013,8 @@ _activity_sids_lock = threading.Lock()
 def _emit_server_activity_loop():
     """push live server activity to open drawers every 3 s, and keep sampling
     every 10 s while nobody looks so the play log records every play. does
-    nothing at all without a plex or jellyfin server."""
+    nothing at all without a plex or jellyfin server or anyone playing on
+    soulsync's own player."""
     from core.server_activity import run_sampler_forever
 
     def _has_subscribers():
