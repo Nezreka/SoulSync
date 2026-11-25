@@ -165,7 +165,11 @@ def _to_wav(src: Path, dst: Path) -> None:
     """
     try:
         subprocess.run(
-            ["ffmpeg", "-nostdin", "-v", "error", "-y", "-i", str(src),
+            # the clip is someone's upload: ffmpeg may read only that file. a
+            # playlist format (hls, concat) inside it would otherwise make the
+            # server fetch whatever addresses the file names
+            ["ffmpeg", "-nostdin", "-v", "error", "-y",
+             "-protocol_whitelist", "file", "-i", str(src),
              "-t", str(CLIP_SECONDS), "-ac", "1", "-ar", "16000",
              "-c:a", "pcm_s16le", str(dst)],
             check=True, capture_output=True, timeout=FFMPEG_TIMEOUT_S,
@@ -409,7 +413,12 @@ def identify_song():
     if not engine["ok"]:
         return _error("engine_unavailable", engine["reason"], 503)
 
-    length = request.content_length or 0
+    # a chunked upload declares no length, and the size check after the save
+    # came too late: the whole body was already on disk. a clip says how big
+    # it is, and nothing past the cap is ever read
+    length = request.content_length
+    if length is None:
+        return _error("length_required", "Send the clip with its size (Content-Length).", 411)
     if length > MAX_UPLOAD_BYTES:
         return _error(
             "too_large",
