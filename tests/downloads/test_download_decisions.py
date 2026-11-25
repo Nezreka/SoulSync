@@ -446,3 +446,31 @@ def test_automatic_path_records_nothing(env, monkeypatch):
     env['slsk'].formats = {'flac'}
     out = get_valid_candidates(_pool(), WANT, 'q')
     assert out
+
+
+# ── a source that states the artist: tribute acts and a different artist ────
+
+def test_a_tribute_act_is_not_the_artist_on_a_streaming_source(env):
+    """'mazzy star' is found as words inside 'mazzy star tribute band': the
+    artist read as a perfect match on every source that states one, and the
+    same title at the same length was accepted"""
+    real = _row(username='qobuz', filename='qb||2', artist='Mazzy Star', title='Fade Into You')
+    assert _decision_for(evaluate_candidates([real], WANT, 'q'), real).accepted
+    tribute = _row(username='qobuz', filename='qb||1', artist='Mazzy Star Tribute Band',
+                   title='Fade Into You')
+    d = _decision_for(evaluate_candidates([tribute], WANT, 'q'), tribute)
+    assert not d.accepted and d.code == 'artist_mismatch'
+    karaoke = _row(username='qobuz', filename='qb||3',
+                   artist='Karaoke Hits In the Style of Mazzy Star', title='Fade Into You')
+    assert not _decision_for(evaluate_candidates([karaoke], WANT, 'q'), karaoke).accepted
+
+
+def test_a_different_artist_does_not_pass_on_confidence_alone(env):
+    """Lil Jon's "Alive" for Lil Yee's: the shared first word lifted the
+    engine's confidence to 0.87, over the 0.85 that waives a weak artist"""
+    want = _Track(name='Alive', artists=('Lil Yee',), album='')
+    wrong = _row(username='qobuz', filename='qb||9', artist='Lil Jon', title='Alive')
+    d = _decision_for(evaluate_candidates([wrong], want, 'q'), wrong)
+    assert not d.accepted and d.code == 'artist_mismatch'
+    right = _row(username='qobuz', filename='qb||8', artist='Lil Yee', title='Alive')
+    assert _decision_for(evaluate_candidates([right], want, 'q'), right).accepted

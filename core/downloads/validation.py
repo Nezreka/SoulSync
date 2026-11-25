@@ -787,6 +787,24 @@ def _score_streaming_candidates(results, spotify_track, why=None):
             if _best_artist < 0.5 and _credited_in_title(
                     expected_artists, _cand_artist_raw, r.title):
                 _best_artist = 1.0
+            # a tribute or karaoke act is not the artist it is named after.
+            # "queen" is found as a word inside "queen tribute band", which
+            # made the artist a perfect match on every source but torrents:
+            # same title, same length, accepted. the soulseek scorer turns
+            # these away by the folder name; this is the same rule for a
+            # source that states the artist.
+            _is_derivative = getattr(matching_engine, '_segment_is_derivative_act', None)
+            if callable(_is_derivative) and any(
+                    _is_derivative(matching_engine.normalize_string(_ea), _cand_artist)
+                    for _ea in expected_artists if _ea):
+                logger.info(
+                    "[%s] Rejecting a tribute/karaoke act: expected=%s candidate=%r title=%r",
+                    source_label, list(expected_artists), _cand_artist_raw, r.title or '')
+                if why is not None:
+                    _note(why, r, 'artist_mismatch',
+                          f"{_cand_artist_raw} is a tribute or karaoke act, not "
+                          f"{', '.join(expected_artists) or '?'}", confidence)
+                continue
             # #2249: YouTube Topic channels often use romanized artist names (e.g.
             # "Saishinonana - Topic" for "彩糸乃七"). Check MusicBrainz/known aliases
             # before rejecting YouTube results on artist score.
@@ -853,7 +871,14 @@ def _score_streaming_candidates(results, spotify_track, why=None):
                           f"{_cand_artist_raw or 'no artist'} vs {', '.join(expected_artists) or '?'}",
                           confidence)
                 continue
-            elif _best_artist < 0.5 and confidence < 0.85:
+            # a near-perfect match may carry an artist spelled its own way
+            # (confidence >= 0.85 waives a middling artist score). it must
+            # not carry a DIFFERENT artist: the confidence is the engine's,
+            # whose artist part still counts a shared first word, so "Lil Jon"
+            # scored 0.87 for Lil Yee's song and walked through, undoing the
+            # prefix fix above. an artist that is nothing alike (< 0.25 once
+            # the common first word is set aside) is refused at any confidence.
+            elif _best_artist < 0.5 and (confidence < 0.85 or _best_artist < 0.25):
                 if why is not None:
                     _note(why, r, 'artist_mismatch',
                           f"{_cand_artist_raw or 'no artist'} vs {', '.join(expected_artists) or '?'}",
