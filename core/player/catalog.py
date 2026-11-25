@@ -19,7 +19,7 @@ result by what the profile may see (kinds and rating caps).
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 EPISODE_SAMPLE = 10
 RECENT_EPISODES = 40
@@ -27,9 +27,10 @@ YOUTUBE_MAX = 3000
 
 MOVIE_FIELDS = ("id", "title", "year", "runtime_seconds", "content_rating", "rating",
                 "genre_ids", "added_at", "has_poster", "has_backdrop", "studio", "tmdb_id",
-                "collection_id", "collection")
+                "collection_id", "collection", "library_id")
 SHOW_FIELDS = ("id", "title", "year", "network", "content_rating", "rating", "genre_ids",
-               "added_at", "has_poster", "has_backdrop", "episode_count", "episodes", "tmdb_id")
+               "added_at", "has_poster", "has_backdrop", "episode_count", "episodes", "tmdb_id",
+               "library_id")
 
 
 def _genre_map(conn, table: str, key: str) -> Dict[int, List[int]]:
@@ -43,7 +44,18 @@ def genre_names(conn) -> Dict[int, str]:
     return {r[0]: r[1] for r in conn.execute("SELECT id, name FROM genres")}
 
 
+def _main_library(conn, kind: str) -> Optional[int]:
+    """the main library of a kind: where a title in no library folder counts"""
+    try:
+        row = conn.execute("SELECT id FROM video_libraries WHERE kind = ? AND builtin = 'main'",
+                           (kind,)).fetchone()
+        return int(row[0]) if row else None
+    except Exception:  # noqa: BLE001 - a db from before libraries: every title is in "none"
+        return None
+
+
 def owned_movies(conn) -> List[list]:
+    main = _main_library(conn, "movie")
     files: Dict[int, Tuple[Any, Any]] = {}
     for r in conn.execute("""
             SELECT movie_id, MAX(runtime_seconds), MAX(added_at) FROM media_files
@@ -54,7 +66,7 @@ def owned_movies(conn) -> List[list]:
     for r in conn.execute("""
             SELECT id, title, year, runtime_minutes, content_rating, rating, added_at,
                    poster_url IS NOT NULL, backdrop_url IS NOT NULL, studio, tmdb_id,
-                   tmdb_collection_id, tmdb_collection_name
+                   tmdb_collection_id, tmdb_collection_name, video_library_id
             FROM movies WHERE has_file = 1"""):
         file_seconds, file_added = files.get(r[0], (None, None))
         seconds = file_seconds or ((r[3] or 0) * 60) or None
@@ -62,7 +74,8 @@ def owned_movies(conn) -> List[list]:
                     round(r[5], 1) if r[5] else None, genres.get(r[0], []),
                     file_added or r[6], 1 if r[7] else 0, 1 if r[8] else 0, r[9], r[10],
                     # the franchise (0 means tmdb says none)
-                    r[11] or None, r[12] if r[11] else None])
+                    r[11] or None, r[12] if r[11] else None,
+                    r[13] if r[13] is not None else main])
     return out
 
 
@@ -83,7 +96,7 @@ def owned_shows(conn, sample: int = EPISODE_SAMPLE) -> List[list]:
     shows: Dict[int, list] = {}
     for r in conn.execute("""
             SELECT id, title, year, network, content_rating, rating, added_at, runtime_minutes,
-                   poster_url IS NOT NULL, backdrop_url IS NOT NULL, tmdb_id
+                   poster_url IS NOT NULL, backdrop_url IS NOT NULL, tmdb_id, video_library_id
             FROM shows"""):
         shows[r[0]] = list(r)
     episodes: Dict[int, list] = {}
@@ -93,6 +106,7 @@ def owned_shows(conn, sample: int = EPISODE_SAMPLE) -> List[list]:
             ORDER BY show_id, season_number = 0, season_number, episode_number"""):
         episodes.setdefault(r[0], []).append(r)
     genres = _genre_map(conn, "show_genres", "show_id")
+    main = _main_library(conn, "show")
     out = []
     for show_id, eps in episodes.items():
         s = shows.get(show_id)
@@ -103,7 +117,7 @@ def owned_shows(conn, sample: int = EPISODE_SAMPLE) -> List[list]:
                   for e in sample_evenly(eps, sample)]
         out.append([s[0], s[1], s[2], s[3], s[4], round(s[5], 1) if s[5] else None,
                     genres.get(show_id, []), s[6], 1 if s[8] else 0, 1 if s[9] else 0,
-                    len(eps), picked, s[10]])
+                    len(eps), picked, s[10], s[11] if s[11] is not None else main])
     return out
 
 
