@@ -77,8 +77,9 @@ def _band_level(path: str, start: float, filters: str) -> Optional[float]:
                "-t", str(SAMPLE_SECONDS), "-i", path, "-af", f"{filters},volumedetect",
                "-f", "null", "-"]
     try:
-        done = subprocess.run(command, capture_output=True, text=True, encoding="utf-8",
-                              errors="replace", timeout=120)
+        # errors= on the line with text=True: one odd byte in a tag must not kill the call
+        done = subprocess.run(command, capture_output=True, timeout=120,
+                              text=True, encoding="utf-8", errors="replace")
     except (OSError, subprocess.SubprocessError) as exc:
         logger.debug("band level failed for %s: %s", os.path.basename(path), exc)
         return None

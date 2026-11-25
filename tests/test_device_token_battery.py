@@ -58,6 +58,25 @@ OPTED_IN = {
     "player.get_home_layout": A.PLAYBACK,
     "player.put_home_layout": A.PLAYBACK,
     "player.reset_home_layout": A.PLAYBACK,
+    # the rows of the movies, tv, music and youtube pages, and the libraries
+    # (the app draws the same pages the web player does)
+    "player.get_page_layout": A.PLAYBACK,
+    "player.put_page_layout": A.PLAYBACK,
+    "player.reset_page_layout": A.PLAYBACK,
+    "player.music_listening": A.PLAYBACK,
+    "player.player_libraries_list": A.PLAYBACK,
+    "player.player_admin_libraries": A.PLAYBACK,
+    "player.player_admin_library_update": A.PLAYBACK,
+    # the app's music rows read the profile's own listening stats (5914aef37
+    # opted these in; this list was not told)
+    "stats.stats_cached": A.PLAYBACK,
+    "stats.stats_top_artists": A.PLAYBACK,
+    "stats.stats_top_albums": A.PLAYBACK,
+    "stats.stats_top_tracks": A.PLAYBACK,
+    "stats.stats_genres": A.PLAYBACK,
+    "stats.stats_recent": A.PLAYBACK,
+    "stats.stats_resolve_track": A.PLAYBACK,
+    "lib2_artist_your_plays": A.PLAYBACK,
     "player.maker_titles": A.PLAYBACK,
     "player.title_logos": A.PLAYBACK,
     "player.keyword_titles": A.PLAYBACK,
