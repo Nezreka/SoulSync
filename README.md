@@ -336,7 +336,7 @@ An inbox for everything in your staging folder, with a Picard-style matcher.
 - **Library health score** with a findings inbox that turns thousands of findings into a few decisions, and **Fix all safe** for metadata-only repairs.
 - Findings sorted by what a fix would do (safe, needs your call, review only), **undo** on every dismiss, and keyboard triage (`j` / `k` / `f` / `d`).
 - **Over 40 maintenance jobs**, each with its own schedule.
-- **Database updater** (incremental, full refresh or deep scan), manual library matching, **backups with restore**, a metadata cache browser, and **config export/import** (optionally with credentials).
+- **Database updater** (incremental, full refresh or deep scan), manual library matching, **backups with restore** (each backup is checked, the newest five are kept, the player's and audiobooks' databases are backed up with the music one, and a restore checks the backup and keeps a copy of what was there before it touches anything), a metadata cache browser, and **config export/import** (optionally with credentials).
 - **Update file locations** after moving the music library folder: the library's records follow the files to the new folder (checked, grouped by folder, undoable; scans do it on their own once the old folder is gone).
 
 <details>

@@ -1332,7 +1332,11 @@ def _backup_music_now(db_path, max_backups, DBIntegrityError, safe_backup, rotat
     # Rolling cleanup, counted in backups (not in the files beside them), and
     # never dropping the most-recent verified-healthy one.
     rotate_backups(db_path, max_backups)
-    return jsonify({"success": True, "backup_path": backup_path, "size_mb": size_mb, "version": SOULSYNC_VERSION})
+    # the player's and the audiobooks' databases ride along (core/backup_companions.py)
+    from core.backup_companions import backup_companions
+    also = backup_companions(timestamp, max_backups)
+    return jsonify({"success": True, "backup_path": backup_path, "size_mb": size_mb,
+                    "version": SOULSYNC_VERSION, "also": also})
 
 @bp.route('/api/database/backups', methods=['GET'])
 @admin_only

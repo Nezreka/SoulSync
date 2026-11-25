@@ -86,7 +86,7 @@ Action blocks have an optional **Delay** field (in minutes). The action waits th
 | **Clean Up Wishlist** | Remove duplicate/already-owned tracks from wishlist | — |
 | **Update Discovery** | Refresh discovery pool with new tracks | — |
 | **Run Quality Scan** | Scan for low-quality audio files | Scope: Watchlist Artists or Full Library |
-| **Backup Database** | Create timestamped database backup | — |
+| **Backup Database** | Create a timestamped, verified backup of the music database, and of the player and audiobook databases with it. Keeps the newest five of each | — |
 
 ---
 

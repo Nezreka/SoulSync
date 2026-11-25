@@ -457,6 +457,19 @@ class TestHandlerInvocation:
 
         register_all(deps)
 
+        # No handler reaches the network from here. One that talks to a service
+        # reads its address from the settings, and a developer's settings name
+        # real services: the ext.to fresh-releases refresh spent this test
+        # scraping through a real FlareSolverr until the run was killed. A
+        # refused connection is the error path every handler already has.
+        import requests
+
+        def _no_network(*_a, **_k):
+            raise requests.ConnectionError("tests don't use the network")
+
+        original_request = requests.sessions.Session.request
+        requests.sessions.Session.request = _no_network
+
         try:
             for name, entry in engine.action_handlers.items():
                 handler = entry['handler']
@@ -471,3 +484,4 @@ class TestHandlerInvocation:
                 )
         finally:
             maint_mod.time.sleep = original_sleep
+            requests.sessions.Session.request = original_request

@@ -64,6 +64,21 @@ def ensure_schema(db: Any) -> None:
     _ready.add(key)
 
 
+def _read(db: Any, sql: str, args: tuple = ()) -> list:
+    """rows for a read. the tables are made by the first WRITE, never by a
+    read: every video request asks what is hidden, and a GET that created a
+    table was a GET that writes (a read-only api key's request did). no table
+    yet is nothing set yet."""
+    import sqlite3
+    try:
+        with db._get_connection() as conn:
+            return conn.execute(sql, args).fetchall()
+    except sqlite3.OperationalError as e:
+        if "no such table" in str(e).lower():
+            return []
+        raise
+
+
 def hidden_for(db: Any, profile_id: Optional[int]) -> FrozenSet[int]:
     """the library ids hidden from this profile (empty for no profile)"""
     if profile_id is None:
@@ -73,10 +88,7 @@ def hidden_for(db: Any, profile_id: Optional[int]) -> FrozenSet[int]:
         hit = _hidden_cache.get(key, {}).get(int(profile_id))
     if hit is not None:
         return hit
-    ensure_schema(db)
-    with db._get_connection() as conn:
-        rows = conn.execute(f"SELECT library_id FROM {HIDDEN} WHERE profile_id = ?",
-                            (int(profile_id),)).fetchall()
+    rows = _read(db, f"SELECT library_id FROM {HIDDEN} WHERE profile_id = ?", (int(profile_id),))
     out = frozenset(int(r[0]) for r in rows)
     with _lock:
         _hidden_cache.setdefault(key, {})[int(profile_id)] = out
@@ -89,9 +101,7 @@ def _forget(db: Any) -> None:
 
 
 def own_page_ids(db: Any) -> FrozenSet[int]:
-    ensure_schema(db)
-    with db._get_connection() as conn:
-        return frozenset(int(r[0]) for r in conn.execute(f"SELECT library_id FROM {PAGES}").fetchall())
+    return frozenset(int(r[0]) for r in _read(db, f"SELECT library_id FROM {PAGES}"))
 
 
 def set_own_page(db: Any, library_id: int, on: bool) -> None:
@@ -155,10 +165,8 @@ def visible(db: Any, video_libs: List[Dict[str, Any]], profile_id: Optional[int]
 
 def admin_view(db: Any, video_libs: List[Dict[str, Any]], counts: Dict[int, int]) -> List[Dict[str, Any]]:
     """every library with what the player does with it, for the admin page"""
-    ensure_schema(db)
     pages = own_page_ids(db)
-    with db._get_connection() as conn:
-        rows = conn.execute(f"SELECT library_id, profile_id FROM {HIDDEN}").fetchall()
+    rows = _read(db, f"SELECT library_id, profile_id FROM {HIDDEN}")
     hidden: Dict[int, List[int]] = {}
     for lib_id, pid in rows:
         hidden.setdefault(int(lib_id), []).append(int(pid))

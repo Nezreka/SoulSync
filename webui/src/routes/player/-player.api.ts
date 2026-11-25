@@ -423,6 +423,10 @@ export interface PlayerSettings {
   commercials_enabled?: boolean;
   commercials_era?: CommercialEra;
   commercials_mode?: CommercialMode;
+  /** the sidebar's places in this profile's order ("/player/movies", "lib:5") */
+  sidebar_order?: string[];
+  /** places left out of the sidebar */
+  sidebar_hidden?: string[];
 }
 
 export interface CommercialClip {

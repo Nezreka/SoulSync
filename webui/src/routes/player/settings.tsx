@@ -64,6 +64,7 @@ import {
   type SubtitleSize,
 } from './-ui/playback/use-subtitle-style';
 import { setVisual, useVisual } from './-ui/playback/visuals';
+import { SidebarSettings } from './-ui/sidebar-settings';
 import s from './-ui/social.module.css';
 import { useTrailersSetting } from './-ui/trailer';
 
@@ -825,6 +826,15 @@ function SettingsPage() {
               <ChevronIcon />
             </Link>
           </Row>
+        </Group>
+
+        <Group
+          icon={<HomeIcon />}
+          title="Sidebar"
+          badge="This profile"
+          note="Move the places in the sidebar and leave out the ones you don't use. It follows your profile to every screen. A hidden place still opens from a link or search."
+        >
+          <SidebarSettings />
         </Group>
 
         <Group
