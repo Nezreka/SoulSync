@@ -839,6 +839,29 @@ a.nowTitle:hover {
   cursor: pointer;
 }
 
+/* skip intro / recap / credits, while that chapter plays */
+.skipMark {
+  position: absolute;
+  left: calc(var(--u) * 2);
+  bottom: calc(var(--u) * 8);
+  z-index: 2;
+  padding: calc(var(--u) * 0.7) calc(var(--u) * 1.4);
+  border: 1px solid var(--white-a40);
+  border-radius: var(--radius-md);
+  background: var(--black-a80);
+  color: var(--pl-text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  backdrop-filter: blur(12px);
+  animation: fullIn var(--dur-moderate) var(--pl-ease) both;
+}
+.skipMark:hover,
+.skipMark:focus-visible {
+  background: var(--pl-text);
+  color: var(--pl-bg);
+}
+
 .upNextWrap {
   position: absolute;
   right: calc(var(--u) * 2);
