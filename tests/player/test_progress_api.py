@@ -392,8 +392,14 @@ def test_the_layout_contract_cleans_what_it_hands_out():
 
 def test_watchlist_store(db, monkeypatch):
     from core.player import watchlist
+    # only THIS thread's clock is scripted: watchlist.time is the time module
+    # itself, and a worker another test left running that asks the time would
+    # use one of the three values up (StopIteration, in whichever test ran next)
+    import threading
+    real_time, me = watchlist.time.time, threading.get_ident()
     times = iter([100.0, 200.0, 300.0])
-    monkeypatch.setattr(watchlist.time, "time", lambda: next(times))
+    monkeypatch.setattr(watchlist.time, "time",
+                        lambda: next(times) if threading.get_ident() == me else real_time())
     watchlist.add(db, 1, "movie", "41")
     watchlist.add(db, 1, "youtube", "dQw4w9WgXcQ",
                   {"title": "A video", "artwork": "https://i.ytimg.com/vi/x/hq.jpg",
