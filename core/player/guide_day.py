@@ -40,6 +40,59 @@ def today(now: Optional[_dt.datetime] = None) -> str:
     return (now or _dt.datetime.now()).date().isoformat()
 
 
+def zone_name() -> Optional[str]:
+    """the server's timezone by its IANA name ("America/Los_Angeles"), or
+    None when the machine doesn't say. a name, not an offset: the offset
+    changes twice a year and a device has to lay out other days too."""
+    import os
+    candidates = [os.environ.get("TZ")]
+    try:
+        with open("/etc/timezone", encoding="utf-8") as fh:
+            candidates.append(fh.read().strip())
+    except OSError:
+        pass
+    try:
+        link = os.path.realpath("/etc/localtime")
+        if "zoneinfo/" in link:
+            candidates.append(link.split("zoneinfo/", 1)[1])
+    except OSError:
+        pass
+    try:
+        import tzlocal  # windows, and anywhere the files above are missing
+        candidates.append(str(tzlocal.get_localzone_name() or ""))
+    except Exception:  # noqa: BLE001, S110 - not installed: the offset below still answers
+        pass
+    for name in candidates:
+        name = str(name or "").strip().lstrip(":")
+        if not name or "/" not in name and name.upper() not in ("UTC", "GMT"):
+            continue
+        try:
+            from zoneinfo import ZoneInfo
+            ZoneInfo(name)
+            return name
+        except Exception:  # noqa: BLE001, S112 - not a zone this machine knows
+            continue
+    return None
+
+
+def clock(now: Optional[_dt.datetime] = None) -> dict:
+    """the clock the guide runs on: the server's.
+
+    every device lays the guide out from "the start of today" and seeds each
+    channel by the date. they each used their OWN midnight and their own
+    date, so a phone in another timezone (or a server whose TZ wasn't the
+    house's) had a different guide from the tv in the living room. the server
+    hands its clock out with the day's pool, and every device counts days by
+    it; what a device shows is still its own local time for those instants.
+
+    ``tz`` is the zone's name when the machine says; ``offset_minutes`` is
+    the server's offset from utc right now, the fallback when it doesn't."""
+    local = (now or _dt.datetime.now()).astimezone()
+    offset = local.utcoffset() or _dt.timedelta(0)
+    return {"tz": zone_name(), "offset_minutes": int(offset.total_seconds() // 60),
+            "day": today(now)}
+
+
 def _ensure(db: Any) -> None:
     # by the file, not the object: a new object can reuse a dead one's id()
     key = str(getattr(db, "database_path", None) or getattr(db, "db_path", None) or id(db))

@@ -32,6 +32,7 @@ import type {
 } from './-player.types';
 
 import { decodeCatalog, type CatalogWire } from './-lib/catalog';
+import { setGuideClock } from './-lib/schedule';
 
 const MINUTE = 60_000;
 
@@ -104,12 +105,15 @@ export const videoCatalogQuery = () =>
 export const guideCatalogQuery = () =>
   queryOptions({
     queryKey: ['player', 'video-catalog', 'guide'],
-    queryFn: async (): Promise<VideoCatalog> =>
-      decodeCatalog(
-        await apiClient
-          .get('player/video-catalog', { searchParams: { guide: '1' } })
-          .json<CatalogWire>(),
-      ),
+    queryFn: async (): Promise<VideoCatalog> => {
+      const wire = await apiClient
+        .get('player/video-catalog', { searchParams: { guide: '1' } })
+        .json<CatalogWire>();
+      // before anything is scheduled from this pool: days are counted on
+      // the server's clock, so every device lays out the same guide
+      if (wire.clock) setGuideClock(wire.clock);
+      return decodeCatalog(wire);
+    },
     // it only changes once a day; a check now and then catches the new day
     staleTime: 10 * 60_000,
     refetchInterval: 15 * 60_000,
