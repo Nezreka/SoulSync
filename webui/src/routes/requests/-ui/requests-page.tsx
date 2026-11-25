@@ -66,6 +66,7 @@ import {
   whoAsked,
 } from '../-requests.helpers';
 import { Route } from '../route';
+import { AccessRequests } from './access-requests';
 import { ApprovalSettingsDialog } from './approval-settings';
 import { PickQueue, pickItems, type PickItem } from './pick-queue';
 import styles from './requests-page.module.css';
@@ -181,6 +182,27 @@ export function RequestsPage() {
     void invalidateMusicRequests(queryClient);
     refreshBadge();
   };
+
+  // one song of a playlist's request, answered on its own (#2302)
+  const answerSong = useMutation({
+    mutationFn: ({ item, trackId, yes }: { item: RequestItem; trackId: string; yes: boolean }) => {
+      if (item.source !== 'pending') throw new Error('That request isn’t waiting any more');
+      const body = {
+        profile_id: item.group.profile_id,
+        key: item.group.key,
+        track_ids: [trackId],
+      };
+      return yes ? approveMusicRequest(profileId, body) : declineMusicRequest(profileId, body);
+    },
+    onSuccess: (_data, { yes }) => {
+      toast(yes ? 'Approved that song' : 'Declined that song', yes ? 'success' : 'info');
+      afterChange();
+    },
+    onError: (error) => {
+      failToast(error, 'Could not answer that song');
+      afterChange();
+    },
+  });
 
   const approve = useMutation({
     // acquisition: the approver's choice for this one (#2199); left out, the
@@ -436,6 +458,7 @@ export function RequestsPage() {
           ))}
         </div>
 
+        {isAdmin ? <AccessRequests /> : null}
         {tab === 'pick' && decider ? (
           <PickQueue
             items={picks}
@@ -469,7 +492,8 @@ export function RequestsPage() {
             {visible.map((item) => (
               <RequestRow
                 key={itemKey(item)}
-                busy={busy}
+                onSong={(trackId, yes) => answerSong.mutate({ item, trackId, yes })}
+                busy={busy || answerSong.isPending}
                 answer={canAnswer(item, answerRights, profileId)}
                 showNames={showNames}
                 viewerId={profileId}
@@ -520,7 +544,10 @@ function RequestRow({
   onDecline,
   onRemove,
   onWithdraw,
+  onSong,
 }: {
+  /** approve or decline one song of a playlist's request */
+  onSong: (trackId: string, yes: boolean) => void;
   busy: boolean;
   /** may approve or decline this one (an admin, or a moderator and not theirs) */
   answer: boolean;
@@ -565,13 +592,15 @@ function RequestRow({
           <span className={styles.thumbGlyph}>
             {kind === 'album'
               ? '◎'
-              : kind === 'track'
-                ? '♪'
-                : kind === 'audiobook'
-                  ? '▤'
-                  : kind === 'podcast'
-                    ? '◉'
-                    : '▶'}
+              : kind === 'playlist'
+                ? '≡'
+                : kind === 'track'
+                  ? '♪'
+                  : kind === 'audiobook'
+                    ? '▤'
+                    : kind === 'podcast'
+                      ? '◉'
+                      : '▶'}
           </span>
         )}
       </div>
@@ -587,7 +616,34 @@ function RequestRow({
         {showTracks && tracks.length > 0 ? (
           <ol className={styles.tracks}>
             {tracks.map((t) => (
-              <li key={t.id}>{t.title}</li>
+              <li key={t.id}>
+                {t.title}
+                {t.artist && kind === 'playlist' ? ` · ${t.artist}` : ''}
+                {/* a playlist's songs can each be answered on their own */}
+                {kind === 'playlist' && pending && answer && tracks.length > 1 ? (
+                  <>
+                    {' '}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={busy}
+                      aria-label={`Approve ${t.title}`}
+                      onClick={() => onSong(t.id, true)}
+                    >
+                      Approve
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={busy}
+                      aria-label={`Decline ${t.title}`}
+                      onClick={() => onSong(t.id, false)}
+                    >
+                      Decline
+                    </Button>
+                  </>
+                ) : null}
+              </li>
             ))}
           </ol>
         ) : null}

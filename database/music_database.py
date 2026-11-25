@@ -29554,7 +29554,7 @@ class MusicDatabase:
                 cursor = conn.cursor()
                 self._ensure_music_request_schema(cursor)
                 cursor.execute(
-                    "SELECT spotify_track_id, spotify_data, source_type, date_added "
+                    "SELECT spotify_track_id, spotify_data, source_type, source_info, date_added "
                     "FROM wishlist_tracks WHERE profile_id = ? AND request_status IS NULL "
                     "ORDER BY date_added DESC", (int(profile_id),))
                 out = []
@@ -29563,8 +29563,15 @@ class MusicDatabase:
                         data = json.loads(row['spotify_data'])
                     except (ValueError, TypeError):
                         data = {}
+                    # where the ask came from (a playlist sync names its playlist):
+                    # the requests page groups by it (#2302)
+                    try:
+                        info = json.loads(row['source_info']) if row['source_info'] else {}
+                    except (ValueError, TypeError):
+                        info = {}
                     out.append({'spotify_track_id': row['spotify_track_id'], 'spotify_data': data,
-                                'source_type': row['source_type'], 'date_added': row['date_added']})
+                                'source_type': row['source_type'], 'date_added': row['date_added'],
+                                'source_info': info if isinstance(info, dict) else {}})
                 return out
         except Exception as e:
             logger.error("Error reading pending music requests: %s", e)

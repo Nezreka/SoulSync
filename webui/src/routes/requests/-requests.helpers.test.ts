@@ -9,7 +9,9 @@ import {
   filterRequestItems,
   itemImage,
   itemKey,
+  itemKind,
   itemTitle,
+  kindLabel,
   parseServerTime,
   quotaLine,
   relativeTime,
@@ -223,5 +225,35 @@ describe('quotaLine', () => {
   it('is empty with no limit', () => {
     expect(quotaLine(null)).toBe('');
     expect(quotaLine(undefined)).toBe('');
+  });
+});
+
+// #2302: the songs a playlist sync asked for are one request
+describe('a playlist request', () => {
+  const item = {
+    source: 'pending',
+    status: 'pending',
+    group: {
+      key: 'playlist:pl42',
+      profile_id: 3,
+      requester_name: 'Kid',
+      kind: 'playlist',
+      title: 'Road Trip',
+      artist: '',
+      track_ids: ['t1', 't2', 't3'],
+      tracks: [
+        { id: 't1', title: 'One', artist: 'A' },
+        { id: 't2', title: 'Two', artist: 'B' },
+        { id: 't3', title: 'Three', artist: 'A' },
+      ],
+      track_count: 3,
+      created_at: '2026-11-25 10:00:00',
+    },
+  } as unknown as Parameters<typeof itemKind>[0];
+
+  it('is labelled a playlist and says how many songs were asked for', () => {
+    expect(itemKind(item)).toBe('playlist');
+    expect(kindLabel('playlist')).toBe('Playlist');
+    expect(subLine(item)).toBe('3 songs from this playlist');
   });
 });

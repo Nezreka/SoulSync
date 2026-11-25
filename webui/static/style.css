@@ -60594,6 +60594,20 @@ select.ma-input { appearance: auto; }
     font-size: 12.5px; line-height: 1.5; color: rgba(var(--text-bright-rgb), 0.62);
 }
 .ma-can-never b { color: rgba(var(--text-bright-rgb), 0.82); font-weight: 600; }
+/* what a member can ask an admin for: one press each (#2304) */
+.ma-can-asks { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.ma-can-ask-chip {
+  padding: 5px 11px;
+  border: 1px solid rgba(var(--text-bright-rgb), 0.16);
+  border-radius: 999px;
+  background: rgba(var(--text-bright-rgb), 0.06);
+  color: rgba(var(--text-bright-rgb), 0.9);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.ma-can-ask-chip:hover { background: rgba(var(--text-bright-rgb), 0.12); }
+.ma-can-ask-chip[data-asked='true'] { cursor: default; opacity: 0.6; }
 .ma-can-ask { margin: 12px 0 0; font-size: 12.5px; line-height: 1.5; color: rgba(var(--text-bright-rgb), 0.55); }
 
 @media (max-width: 520px) {
