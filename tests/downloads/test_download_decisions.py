@@ -521,3 +521,43 @@ def test_another_artists_folder_is_still_another_artist(env):
     row = _row(username='dave', filename='Mazzy Star/Album/04 - Fade Into You.flac',
                artist=None, title=None)
     assert not _decision_for(evaluate_candidates([row], want, 'q'), row).accepted
+
+
+# ── "never download clean versions" on a source that isn't soulseek ─────────
+
+def test_a_clean_cut_is_refused_on_a_streaming_source_when_the_setting_is_on(env, monkeypatch):
+    """#2081 was only checked on soulseek: "Song (Clean)" scored like the
+    original everywhere else, the bracket being stripped before the compare"""
+    clean = _row(username='qobuz', filename='qb||1', title='Fade Into You (Clean)')
+    plain = _row(username='qobuz', filename='qb||2', title='Fade Into You')
+    monkeypatch.setattr(validation, '_never_clean_versions', lambda: True)
+    pairs = evaluate_candidates([clean, plain], WANT, 'q')
+    assert not _decision_for(pairs, clean).accepted
+    assert _decision_for(pairs, clean).code == 'version_conflict'
+    assert _decision_for(pairs, plain).accepted
+    # the clean cut asked for by name is the one wanted
+    want_clean = _Track(name='Fade Into You (Clean)', artists=('Mazzy Star',))
+    assert _decision_for(evaluate_candidates([clean], want_clean, 'q'), clean).accepted
+
+
+def test_with_the_setting_off_a_clean_cut_is_taken_as_before(env, monkeypatch):
+    monkeypatch.setattr(validation, '_never_clean_versions', lambda: False)
+    clean = _row(username='qobuz', filename='qb||1', title='Fade Into You (Clean)')
+    assert _decision_for(evaluate_candidates([clean], WANT, 'q'), clean).accepted
+
+
+@pytest.mark.parametrize("title,clean", [
+    ('song (clean)', True), ('song [clean version]', True), ('song - clean', True),
+    ('song (edited version)', True), ('mr. clean', False), ('clean', False),
+    ('clean bandit - rather be', False), ('song', False),
+])
+def test_what_counts_as_marked_clean(title, clean):
+    assert validation._marked_clean(title) is clean
+
+
+def test_a_song_called_clean_is_not_a_clean_version(env, monkeypatch):
+    monkeypatch.setattr(validation, '_never_clean_versions', lambda: True)
+    want = _Track(name='Clean', artists=('Mazzy Star',))
+    row = _row(username='qobuz', filename='qb||1', title='Mazzy Star - Clean')
+    d = _decision_for(evaluate_candidates([row], want, 'q'), row)
+    assert d.code != 'version_conflict'

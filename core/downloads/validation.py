@@ -302,6 +302,24 @@ def _count_version_kw(text, kw) -> int:
 _VERSION_MARKER_SEPARATORS = '-–—:|/'
 
 
+# a title that says it is the clean cut. bracket- or dash-bound and whole
+# phrases only: a song called "Mr. Clean" or "Clean" must never match. the
+# same marks the soulseek scorer reads (matching_engine.detect_version_type).
+_CLEAN_MARKS = (r'\(\s*clean[^)]*\)', r'\[\s*clean[^\]]*\]', r'[-–—]\s*clean\b',
+                r'\bclean\s+(?:version|edit)\b', r'\bcensored\b', r'\bedited\s+version\b')
+
+
+def _marked_clean(title_lower: str) -> bool:
+    return any(re.search(mark, title_lower or '') for mark in _CLEAN_MARKS)
+
+
+def _never_clean_versions() -> bool:
+    try:
+        return bool(matching_engine._exclude_clean_enabled())
+    except Exception:  # noqa: BLE001 - a setting that can't be read is a setting that is off
+        return False
+
+
 # words a folder may leave out or spell another way without it being another
 # artist: "Beatles/" for The Beatles, "Peter, Paul & Mary/" for Peter, Paul
 # and Mary (the "&" is a space once normalised, so the word "and" is simply
@@ -797,6 +815,21 @@ def _score_streaming_candidates(results, spotify_track, why=None):
                     is_wrong_version = True
                     version_detail = f"asked for the {kw} version, this isn't marked {kw}"
                     break
+
+        # "Never download clean versions" (#2081) was only ever checked on
+        # Soulseek: on every other source a "Song (Clean)" scored like the
+        # original, because the title cleaner strips the bracket before the
+        # titles are compared. a clean cut is another version here too,
+        # unless the clean cut is what was asked for.
+        # (a wanted title with the word in it at all is left alone: on a
+        # source that puts the artist in the title, Taylor Swift's song is
+        # "Taylor Swift - Clean")
+        if (not is_wrong_version and _marked_clean(r_title_lower)
+                and not re.search(r'\bclean\b', expected_title_lower)
+                and _never_clean_versions()):
+            confidence *= 0.4
+            is_wrong_version = True
+            version_detail = "clean version, and clean versions are switched off"
 
         # Artist gate — streaming APIs (Tidal/Qobuz/HiFi/Deezer) have reliable metadata,
         # so "My Will" by "B. Starr" should never match expected "B小町".
