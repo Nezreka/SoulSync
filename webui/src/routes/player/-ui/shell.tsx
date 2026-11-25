@@ -6,12 +6,15 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { Link, Outlet, useRouter, useRouterState } from '@tanstack/react-router';
-import { Fragment, useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 
 import { useCardSize, type CardSizeRange } from '@/components/card-size';
 import { appURL } from '@/platform/url-base';
 
+import type { PlayerLibrary } from '../-player.types';
+
+import { arrangeNav } from '../-lib/nav-order';
 import {
   playerSettingsQuery,
   profilesQuery,
@@ -178,6 +181,26 @@ function MoreSheet({
   );
 }
 
+/** a place in the sidebar: a page, or a library with a page of its own */
+export interface NavPlace {
+  id: string;
+  label: string;
+  entry: NavEntry;
+  library?: PlayerLibrary;
+}
+
+/** the sidebar's places in their usual order */
+export function navPlaces(entries: NavEntry[], ownPages: PlayerLibrary[]): NavPlace[] {
+  const out: NavPlace[] = [];
+  for (const entry of entries) {
+    out.push({ id: entry.to, label: entry.label, entry });
+    for (const lib of ownPages)
+      if (entry.to === (lib.kind === 'movie' ? '/player/movies' : '/player/tv'))
+        out.push({ id: `lib:${lib.id}`, label: lib.name, entry, library: lib });
+  }
+  return out;
+}
+
 function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
   const sections = useSections();
   const entries = NAV.filter((entry) => entry.visible(sections));
@@ -199,6 +222,15 @@ function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => 
     ownPages.some((lib) => lib.id === libraryParam)
       ? libraryParam
       : 0;
+  // every place, in this profile's order: the pages, and each library with a
+  // page of its own after the page it is a kind of
+  const mine = useQuery(playerSettingsQuery()).data?.settings;
+  const places = arrangeNav(
+    navPlaces(entries, ownPages),
+    mine?.sidebar_order,
+    mine?.sidebar_hidden,
+  );
+  const currentId = onLibrary ? `lib:${onLibrary}` : (current?.to ?? '');
   return (
     <nav className={s.side} aria-label="Player" data-collapsed={collapsed ? 'true' : undefined}>
       <div className={s.brand}>
@@ -206,7 +238,7 @@ function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => 
         <span className={s.brandWord}>SoulSync</span>
       </div>
       {NAV_GROUPS.map((group) => {
-        const items = entries.filter((e) => e.group === group.id);
+        const items = places.filter((p) => p.entry.group === group.id);
         if (!items.length) return null;
         return (
           <div
@@ -216,48 +248,30 @@ function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => 
             aria-label={group.label ?? 'Main'}
           >
             {group.label ? <div className={s.navGroupLabel}>{group.label}</div> : null}
-            {items.map((entry) => (
-              <Fragment key={entry.to}>
-                <Link
-                  to={entry.to as '/player'}
-                  className={s.navLink}
-                  data-tab={entry.tab ? 'true' : undefined}
-                  activeOptions={{ exact: true }}
-                  data-current={entry === current && !onLibrary ? 'true' : undefined}
-                  aria-current={entry === current && !onLibrary ? 'page' : undefined}
-                  title={collapsed ? entry.label : undefined}
-                  data-nav
-                >
-                  <span className={s.navIcon}>{entry.icon}</span>
-                  <span className={s.navLabel}>{entry.label}</span>
-                  {entry.to === '/player/watching' && watching ? (
-                    <span className={s.navBadge} aria-label={`${watching} playing`}>
-                      {watching}
-                    </span>
-                  ) : null}
-                  {entry.short ? <span className={s.navShort}>{entry.short}</span> : null}
-                </Link>
-                {/* the libraries an admin gave a page of their own, under the page they are a kind of */}
-                {ownPages
-                  .filter(
-                    (lib) => entry.to === (lib.kind === 'movie' ? '/player/movies' : '/player/tv'),
-                  )
-                  .map((lib) => (
-                    <Link
-                      key={`lib-${lib.id}`}
-                      to={entry.to as '/player/movies'}
-                      search={{ library: lib.id }}
-                      className={s.navLink}
-                      data-current={onLibrary === lib.id ? 'true' : undefined}
-                      aria-current={onLibrary === lib.id ? 'page' : undefined}
-                      title={collapsed ? lib.name : undefined}
-                      data-nav
-                    >
-                      <span className={s.navIcon}>{entry.icon}</span>
-                      <span className={s.navLabel}>{lib.name}</span>
-                    </Link>
-                  ))}
-              </Fragment>
+            {items.map((item) => (
+              <Link
+                key={item.id}
+                to={item.entry.to as '/player/movies'}
+                search={item.library ? { library: item.library.id } : undefined}
+                className={s.navLink}
+                data-tab={item.entry.tab && !item.library ? 'true' : undefined}
+                activeOptions={{ exact: true }}
+                data-current={item.id === currentId ? 'true' : undefined}
+                aria-current={item.id === currentId ? 'page' : undefined}
+                title={collapsed ? item.label : undefined}
+                data-nav
+              >
+                <span className={s.navIcon}>{item.entry.icon}</span>
+                <span className={s.navLabel}>{item.label}</span>
+                {item.id === '/player/watching' && watching ? (
+                  <span className={s.navBadge} aria-label={`${watching} playing`}>
+                    {watching}
+                  </span>
+                ) : null}
+                {item.entry.short && !item.library ? (
+                  <span className={s.navShort}>{item.entry.short}</span>
+                ) : null}
+              </Link>
             ))}
           </div>
         );
