@@ -14,9 +14,11 @@ import { EnhanceQualityModal } from './enhance-quality-modal';
 import styles from './library-v2-page.module.css';
 
 // dev's album "upgrade n": the album's files below their quality profile,
-// picked in the same enhance modal the artist toolbar uses. it reads the
-// artist's enhance list (already fetched for the toolbar) so a page of albums
-// costs no extra requests.
+// picked in the same enhance modal the artist toolbar uses. on an artist's
+// page it reads the artist's enhance list (already fetched for the toolbar)
+// so a page of albums costs no extra requests. on the album's own page there
+// is no artist list to read, and the button was simply not there (#2287): it
+// asks for the album's own list.
 
 export function AlbumUpgradeButton({
   albumId,
@@ -38,10 +40,14 @@ export function AlbumUpgradeButton({
   const live = useMusicGet().mode === 'download';
   const canUpgrade = canWish && enabled?.canDownload === true && live;
   const enhance = useQuery({
-    ...libraryV2EnhanceQueryOptions('artists', artistId ?? 0),
-    enabled: artistId != null && canUpgrade,
+    ...(artistId != null
+      ? libraryV2EnhanceQueryOptions('artists', artistId)
+      : libraryV2EnhanceQueryOptions('albums', albumId)),
+    enabled: canUpgrade,
   });
-  const tracks = (enhance.data?.tracks ?? []).filter((t) => t.album_id === albumId);
+  const tracks = (enhance.data?.tracks ?? []).filter(
+    (t) => artistId == null || t.album_id === albumId,
+  );
   if (!canUpgrade || tracks.length === 0) return null;
   return (
     <>
@@ -61,7 +67,11 @@ export function AlbumUpgradeButton({
         <EnhanceQualityModal
           title={albumTitle}
           tracks={tracks}
-          scope={artistId != null ? { entity: 'artists', id: artistId, albumId } : undefined}
+          scope={
+            artistId != null
+              ? { entity: 'artists', id: artistId, albumId }
+              : { entity: 'albums', id: albumId }
+          }
           canChooseTarget={canWrite}
           onClose={() => setOpen(false)}
           onEnhance={(trackIds, targetProfileId) => {

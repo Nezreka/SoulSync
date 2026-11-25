@@ -5313,7 +5313,16 @@ body:has(.chat-web-modal-overlay--open) #gsearch-bar,
 body:has(.chat-web-modal-overlay--open) #gsearch-aura,
 body:has(.chat-web-modal-overlay--open) #notif-bell-btn,
 body:has(.chat-web-modal-overlay--open) #helper-float-btn,
-body:has(.chat-web-modal-overlay--open) #activity-float-btn {
+body:has(.chat-web-modal-overlay--open) #activity-float-btn,
+/* and the download discography sheet (#2299): at 375x667 the centre of its
+   "Wishlist + Watchlist" button resolved to the activity button, on screen
+   and untappable. the overlay carries .visible only while it is open */
+body:has(.discog-modal-overlay.visible) #gsearch-bar,
+body:has(.discog-modal-overlay.visible) #gsearch-aura,
+body:has(.discog-modal-overlay.visible) #notif-bell-btn,
+body:has(.discog-modal-overlay.visible) #helper-float-btn,
+body:has(.discog-modal-overlay.visible) #activity-float-btn,
+body:has(.discog-modal-overlay.visible) .activity-float-btn {
     display: none !important;
 }
 

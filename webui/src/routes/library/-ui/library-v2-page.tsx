@@ -6765,6 +6765,11 @@ function AlbumDetailView({ albumId }: { albumId: number }) {
                     }
                   />
                 ) : null}
+                {/* #2287: the album's files below their quality profile, from
+                    the album's own page too */}
+                {album.tracks_present > 0 ? (
+                  <AlbumUpgradeButton albumId={album.id} albumTitle={album.title} />
+                ) : null}
                 <AlbumOverflowMenu
                   album={{
                     id: album.id,
