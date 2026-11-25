@@ -144,7 +144,19 @@ def _backup_db_at(db_path: str, deps: AutomationDeps, automation_id) -> Dict[str
 def auto_backup_database(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str, Any]:
     """Hot SQLite backup of the MUSIC database (``DATABASE_PATH``)."""
     db_path = os.environ.get('DATABASE_PATH', 'database/music_library.db')
-    return _backup_db_at(db_path, deps, config.get('_automation_id'))
+    result = _backup_db_at(db_path, deps, config.get('_automation_id'))
+    if result.get('status') == 'completed':
+        # the player's and the audiobooks' databases ride along with it
+        from core.backup_companions import backup_companions
+        stamp = os.path.basename(result['backup_path']).rsplit('.backup_', 1)[-1]
+        for also in backup_companions(stamp, _MAX_BACKUPS):
+            deps.update_progress(
+                config.get('_automation_id'),
+                log_line=(f"Also backed up the {also['name']} database ({also['file']})" if also['ok']
+                          else f"The {also['name']} database was NOT backed up: {also['error']}"),
+                log_type='success' if also['ok'] else 'error',
+            )
+    return result
 
 
 def auto_backup_video_database(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str, Any]:
