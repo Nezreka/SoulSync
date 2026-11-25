@@ -241,3 +241,14 @@ def test_members_never_see_where_a_screen_is():
     (row,) = presence.visible_to(3, presence.everyone(), shares=lambda p: True, may_see=lambda s: True)
     assert not {"ip", "client", "stream", "shared"} & set(row)
     presence._sessions.clear()
+
+
+def test_a_profile_picture_from_the_web_shows_and_a_data_uri_does_not():
+    presence._sessions.clear()
+    s = _session()
+    web = ss.normalize(s, server_name="Den", profile={"name": "Ada", "avatar_url": "https://avatars.example/a.jpg"},
+                       facts={"title": "Heat"})
+    assert web["user_avatar"] == "https://avatars.example/a.jpg"
+    other = ss.normalize(s, server_name="Den", profile={"name": "Ada", "avatar_url": "data:image/png;base64,AAAA"},
+                         facts={"title": "Heat"})
+    assert other["user_avatar"] is None
