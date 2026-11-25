@@ -180,6 +180,21 @@ def duration_reference_for_context(expected_ms: Any, context: Any) -> Any:
     """
     if isinstance(context, dict) and '_preferred_version_duration_ms' in context:
         return context.get('_preferred_version_duration_ms') or None
+    # no length known for the track at all (a wishlist row saved without one):
+    # the check was skipped outright, so a transfer cut short went in. the
+    # length the peer listed for THIS file is an honest reference for that. it
+    # cannot tell a preview that is honestly listed as 30 seconds from a
+    # 30-second song; only the track's real length can, which is why it is
+    # second choice and never replaces a known one.
+    if not expected_ms and isinstance(context, dict):
+        try:
+            listed = int(context.get('_advertised_duration_ms') or 0)
+        except (TypeError, ValueError):
+            listed = 0
+        # (a value under ten seconds is a length given in seconds, or no
+        # length worth measuring against)
+        if listed >= 10_000:
+            return listed
     return expected_ms
 
 

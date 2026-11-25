@@ -1704,3 +1704,23 @@ def test_post_process_does_not_adopt_junk_or_self_named_file_albums(tmp_path, mo
         assert library_calls, "post-processing never reached the library entry"
         assert library_calls[0]["album_name"] != album_tag
         assert library_calls[0]["is_album"] is False
+
+
+# ── no length known for the track: the peer's listed length stands in ───────
+
+def test_an_unknown_track_length_falls_back_to_what_the_peer_listed():
+    from core.imports.file_integrity import duration_reference_for_context
+    assert duration_reference_for_context(None, {'_advertised_duration_ms': 241_000}) == 241_000
+    assert duration_reference_for_context(0, {'_advertised_duration_ms': 241_000}) == 241_000
+
+
+def test_a_known_track_length_is_never_replaced_by_the_peers():
+    from core.imports.file_integrity import duration_reference_for_context
+    assert duration_reference_for_context(200_000, {'_advertised_duration_ms': 30_000}) == 200_000
+
+
+def test_nothing_listed_or_a_length_in_seconds_is_no_reference():
+    from core.imports.file_integrity import duration_reference_for_context
+    assert duration_reference_for_context(None, {}) is None
+    assert duration_reference_for_context(None, {'_advertised_duration_ms': 241}) is None
+    assert duration_reference_for_context(None, None) is None
