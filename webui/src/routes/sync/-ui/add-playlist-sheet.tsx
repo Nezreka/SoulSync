@@ -21,7 +21,7 @@
  * of the part of this page that actually works.
  */
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import {
   DETECTED_SOURCE_SERVICE_LABELS,
@@ -93,6 +93,65 @@ export interface AddPlaylistSheetProps {
   onClose: () => void;
 }
 
+/** a public playlist a name search found (#2305) */
+interface FoundPlaylist {
+  id: string;
+  title: string;
+  creator: string;
+  track_count: number;
+  image_url: string;
+  link: string;
+  source: string;
+}
+
+/** words, not a link: nothing in it that a url has */
+export function looksLikeSearch(text: string): boolean {
+  const t = text.trim();
+  return t.length >= 2 && !/[/:]|www\.|\.[a-z]{2,}\b/i.test(t);
+}
+
+/**
+ * Public playlists by name (#2305). Typed words that aren't a link are a
+ * search; a result is added by handing its link to the same route a pasted
+ * link takes, so nothing about importing is new.
+ */
+function usePublicPlaylists(text: string): {
+  found: FoundPlaylist[];
+  state: 'idle' | 'busy' | 'done';
+} {
+  const [found, setFound] = useState<FoundPlaylist[]>([]);
+  const [state, setState] = useState<'idle' | 'busy' | 'done'>('idle');
+  const query = looksLikeSearch(text) ? text.trim() : '';
+  useEffect(() => {
+    if (!query) {
+      setFound([]);
+      setState('idle');
+      return;
+    }
+    setState('busy');
+    const stop = new AbortController();
+    // wait for a pause in typing
+    const timer = window.setTimeout(() => {
+      fetch(`/api/playlists/public-search?q=${encodeURIComponent(query)}`, { signal: stop.signal })
+        .then((r) => (r.ok ? r.json() : { playlists: [] }))
+        .then((d: { playlists?: FoundPlaylist[] }) => {
+          setFound(d.playlists ?? []);
+          setState('done');
+        })
+        .catch(() => {
+          if (stop.signal.aborted) return;
+          setFound([]);
+          setState('done');
+        });
+    }, 350);
+    return () => {
+      window.clearTimeout(timer);
+      stop.abort();
+    };
+  }, [query]);
+  return { found, state };
+}
+
 export function AddPlaylistSheet({ onRoute, onNew, onClose }: AddPlaylistSheetProps) {
   const [input, setInput] = useState('');
   const [submitted, setSubmitted] = useState(false);
@@ -110,13 +169,30 @@ export function AddPlaylistSheet({ onRoute, onNew, onClose }: AddPlaylistSheetPr
    * someone their link is wrong while they are still halfway through pasting it
    * is just noise.
    */
+  const searching = looksLikeSearch(trimmed);
+  const { found, state: searchState } = usePublicPlaylists(trimmed);
   const hint = recognised
     ? `${DETECTED_SOURCE_SERVICE_LABELS[detection.source]} recognised`
-    : submitted && trimmed
-      ? detection.error
-      : null;
+    : searching
+      ? searchState === 'busy'
+        ? 'Searching public playlists…'
+        : found.length
+          ? 'Pick one to add it'
+          : 'No public playlists by that name'
+      : submitted && trimmed
+        ? detection.error
+        : null;
+
+  const pick = (p: FoundPlaylist) => {
+    const d = detectPlaylistUrl(p.link);
+    if (!isDetected(d)) return;
+    onRoute(DETECTED_SOURCE_TAB_IDS[d.source], p.link);
+    onClose();
+  };
 
   const submit = () => {
+    // words are a search, already running: enter is not a bad link
+    if (searching) return;
     setSubmitted(true);
     if (!recognised) return;
     onRoute(DETECTED_SOURCE_TAB_IDS[detection.source], trimmed);
@@ -196,9 +272,9 @@ export function AddPlaylistSheet({ onRoute, onNew, onClose }: AddPlaylistSheetPr
             id="add-playlist-url"
             type="text"
             autoFocus
-            aria-label="Paste a link"
+            aria-label="Paste a link or search by name"
             value={input}
-            placeholder="Paste a playlist or album link"
+            placeholder="Paste a link, or search public playlists by name"
             onChange={(e) => {
               setInput(e.target.value);
               setSubmitted(false);
@@ -219,11 +295,38 @@ export function AddPlaylistSheet({ onRoute, onNew, onClose }: AddPlaylistSheetPr
         </label>
         <p
           className={`${styles.hint}${
-            recognised ? ` ${styles.hintOk}` : hint ? ` ${styles.hintBad}` : ''
+            recognised ? ` ${styles.hintOk}` : hint && !searching ? ` ${styles.hintBad}` : ''
           }`}
         >
           {hint ?? ''}
         </p>
+
+        {searching && found.length > 0 ? (
+          <ul className={styles.found} aria-label="Public playlists">
+            {found.map((p) => (
+              <li key={`${p.source}:${p.id}`}>
+                <button type="button" className={styles.foundRow} onClick={() => pick(p)}>
+                  {p.image_url ? (
+                    <img className={styles.foundArt} src={p.image_url} alt="" loading="lazy" />
+                  ) : (
+                    <span className={styles.foundArt} aria-hidden="true" />
+                  )}
+                  <span className={styles.foundText}>
+                    <span className={styles.tileName}>{p.title}</span>
+                    <span className={styles.tileDesc}>
+                      {[p.creator, p.track_count ? `${p.track_count} songs` : '']
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </span>
+                  </span>
+                  <span className={styles.foundSource} aria-hidden="true">
+                    <SourceIcon source={p.source} />
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
 
         <div className={styles.groupLabel}>From your accounts</div>
         <div className={styles.tiles}>{ADD_PLAYLIST_ACCOUNTS.map(tile)}</div>
