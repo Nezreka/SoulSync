@@ -304,6 +304,43 @@ def upsert_album(cursor, *, server_source: str, server_id: str, artist_id: int,
     return album_id
 
 
+def _file_name(path: Any) -> str:
+    return str(path or "").replace("\\", "/").rsplit("/", 1)[-1].casefold()
+
+
+def owned_track_by_file_twin(cursor, file_path: Any, file_size: Any, *,
+                             owner_sql: str = "", owner_params: tuple = ()) -> Optional[int]:
+    """the one owned track whose live file has this file's name and byte size.
+
+    the media server reports a file by ITS path, and that is often not the
+    path SoulSync holds: the server sees a different mount of the same folder
+    (a container's /music for SoulSync's /app/Transfer), or a path mapping
+    was never set. the exact-path match then fails, the track is recognised
+    only if its album, title and track number all line up, and when they
+    don't the song SoulSync owns is never tied to the server's copy: it is in
+    the library, plays in SoulSync, and is left out of every playlist pushed
+    to the server (#2288, #2290).
+
+    a file's name and exact size name the file itself, whatever folder it is
+    reached through. None unless exactly one track answers: two copies of one
+    file are a question, not an answer."""
+    name = _file_name(file_path)
+    try:
+        size = int(file_size or 0)
+    except (TypeError, ValueError):
+        size = 0
+    if not name or size <= 0:
+        return None
+    rows = cursor.execute(
+        "SELECT f.track_id, f.path FROM lib2_track_files f "
+        "WHERE f.size=? AND f.track_id IS NOT NULL "
+        "AND COALESCE(f.file_state,'active')='active' "
+        "AND f.path IS NOT NULL AND TRIM(f.path)<>'' " + owner_sql + " LIMIT 50",
+        (size, *owner_params)).fetchall()
+    tracks = {int(row[0]) for row in rows if _file_name(row[1]) == name}
+    return tracks.pop() if len(tracks) == 1 else None
+
+
 def upsert_track(cursor, *, server_source: str, server_id: str, album_id: int,
                  artist_id: int, title: str, track_number=None, disc_number=None,
                  duration=None, track_artist: Optional[str] = None,
@@ -326,6 +363,11 @@ def upsert_track(cursor, *, server_source: str, server_id: str, album_id: int,
             "SELECT t.id FROM lib2_tracks t JOIN lib2_track_files f ON f.track_id=t.id"
             " WHERE f.path=? AND f.file_state='active' LIMIT 1", (file_path,)
         ).fetchone() if file_path else None
+    if row is None:
+        # the same file under another path (owned_track_by_file_twin)
+        twin = owned_track_by_file_twin(cursor, file_path, file_size)
+        if twin is not None:
+            row = (twin,)
     if row is None:
         candidates = cursor.execute(
             "SELECT id FROM lib2_tracks"

@@ -320,6 +320,12 @@ _INDEXES = (
     "CREATE INDEX IF NOT EXISTS idx_lib2_track_files_track ON lib2_track_files(track_id)",
     "CREATE INDEX IF NOT EXISTS idx_lib2_track_files_hash ON lib2_track_files(content_hash)",
     "CREATE INDEX IF NOT EXISTS idx_lib2_track_files_path ON lib2_track_files(path)",
+    # a file is known by its name and its byte size when its path is not the
+    # one on record: the media server's view of a mount, a library that moved
+    # (core/library2/media_server_sync.owned_track_by_file_twin). the size
+    # narrows it to a handful of rows; without this every such lookup read
+    # the whole table.
+    "CREATE INDEX IF NOT EXISTS idx_lib2_track_files_size ON lib2_track_files(size)",
     # upstream 0ca4b0dc5: lookups ask `LOWER(title) = LOWER(?)` (playable check,
     # exports, stats, history importers); LOWER() on the column skips a plain
     # index, so each one read the whole table. Same rows match.
