@@ -1283,63 +1283,65 @@ _BACKUP_FILENAME_RE = re.compile(r'^music_library\.db\.backup_\d{8}_\d{6}$')
 def backup_database_endpoint():
     """Create a rolling backup of the database (max 5)."""
     try:
-        import glob as _glob
-        from core.db_integrity import DBIntegrityError, safe_backup, prune_backups
+        from core.db_integrity import (DBIntegrityError, backup_lock, room_for, rotate_backups,
+                                       safe_backup)
         db_path = os.environ.get('DATABASE_PATH', 'database/music_library.db')
         if not os.path.exists(db_path):
             return jsonify({"success": False, "error": "Database file not found"}), 404
         max_backups = 5
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        backup_path = f"{db_path}.backup_{timestamp}"
-        # safe_backup verifies the SOURCE is healthy before copying and the
-        # RESULT after — so a corrupt DB can never silently produce a backup
-        # (the incident where every rolling backup copied the corruption).
+        # a backup is a second copy of the database: say so before filling the drive
+        short = room_for(db_path, os.path.getsize(db_path))
+        if short:
+            return jsonify({"success": False, "error": short, "no_space": True}), 507
+        if not backup_lock.acquire(blocking=False):
+            return jsonify({"success": False, "busy": True,
+                            "error": "Another backup or restore is running. Try again when it finishes."}), 409
         try:
-            safe_backup(db_path, backup_path)
-        except DBIntegrityError as integ:
-            logger.error("Backup refused — database integrity check failed: %s", integ)
-            return jsonify({
-                "success": False,
-                "error": "Database failed its integrity check — backup refused to avoid "
-                         "saving a corrupt copy. Your existing backups are untouched. " + str(integ),
-                "integrity_failed": True,
-            }), 409
-        size_mb = round(os.path.getsize(backup_path) / (1024 * 1024), 1)
-        # Write version metadata sidecar
-        meta_path = backup_path + '.meta.json'
-        try:
-            with open(meta_path, 'w') as mf:
-                json.dump({"version": SOULSYNC_VERSION, "created": timestamp}, mf)
-        except Exception as e:
-            logger.debug("backup meta sidecar write: %s", e)
-        # Rolling cleanup — prune_backups never deletes the most-recent
-        # VERIFIED-HEALTHY backup, even to honor max_backups, so a run of bad
-        # backups can't evict your last good snapshot (the incident).
-        existing = [f for f in _glob.glob(f"{db_path}.backup_*")
-                    if not f.endswith('.meta.json')]
-        for removed in prune_backups(existing, max_backups):
-            try:
-                os.remove(removed)
-                if os.path.exists(removed + '.meta.json'):
-                    os.remove(removed + '.meta.json')
-            except Exception as e:
-                logger.debug("rolling backup cleanup failed: %s", e)
-        return jsonify({"success": True, "backup_path": backup_path, "size_mb": size_mb, "version": SOULSYNC_VERSION})
+            return _backup_music_now(db_path, max_backups, DBIntegrityError, safe_backup, rotate_backups)
+        finally:
+            backup_lock.release()
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+def _backup_music_now(db_path, max_backups, DBIntegrityError, safe_backup, rotate_backups):
+    """the backup itself, with the lock held"""
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    backup_path = f"{db_path}.backup_{timestamp}"
+    # safe_backup verifies the SOURCE is healthy before copying and the
+    # RESULT after — so a corrupt DB can never silently produce a backup
+    # (the incident where every rolling backup copied the corruption).
+    try:
+        safe_backup(db_path, backup_path)
+    except DBIntegrityError as integ:
+        logger.error("Backup refused — database integrity check failed: %s", integ)
+        return jsonify({
+            "success": False,
+            "error": "Database failed its integrity check — backup refused to avoid "
+                     "saving a corrupt copy. Your existing backups are untouched. " + str(integ),
+            "integrity_failed": True,
+        }), 409
+    size_mb = round(os.path.getsize(backup_path) / (1024 * 1024), 1)
+    # Write version metadata sidecar
+    meta_path = backup_path + '.meta.json'
+    try:
+        with open(meta_path, 'w') as mf:
+            json.dump({"version": SOULSYNC_VERSION, "created": timestamp}, mf)
+    except Exception as e:
+        logger.debug("backup meta sidecar write: %s", e)
+    # Rolling cleanup, counted in backups (not in the files beside them), and
+    # never dropping the most-recent verified-healthy one.
+    rotate_backups(db_path, max_backups)
+    return jsonify({"success": True, "backup_path": backup_path, "size_mb": size_mb, "version": SOULSYNC_VERSION})
 
 @bp.route('/api/database/backups', methods=['GET'])
 @admin_only
 def list_backups_endpoint():
     """List all database backups with metadata."""
     try:
-        import glob as _glob
+        from core.db_integrity import list_backups
         db_path = os.environ.get('DATABASE_PATH', 'database/music_library.db')
-        backup_files = sorted(
-            _glob.glob(f"{db_path}.backup_*"),
-            key=os.path.getmtime,
-            reverse=True
-        )
+        backup_files = sorted(list_backups(db_path), key=os.path.getmtime, reverse=True)
         backups = []
         for fp in backup_files:
             fname = os.path.basename(fp)
@@ -1382,17 +1384,69 @@ def delete_backup_endpoint(filename):
         backup_path = os.path.join(os.path.dirname(db_path), filename)
         if not os.path.exists(backup_path):
             return jsonify({"success": False, "error": "Backup not found"}), 404
-        os.remove(backup_path)
-        # Also remove sidecar metadata if present
-        meta_path = backup_path + '.meta.json'
-        if os.path.exists(meta_path):
-            try:
-                os.remove(meta_path)
-            except Exception as e:
-                logger.debug("backup sidecar removal failed: %s", e)
+        from core.db_integrity import remove_backup
+        remove_backup(backup_path)      # the backup and everything beside it
         return jsonify({"success": True, "deleted": filename})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
+
+PRE_RESTORE_KEEP = 3
+
+
+def _restore_schema_problem(db_path, backup_path, dbi):
+    """a sentence when the backup's schema is newer than this database's
+    (a backup made by a newer SoulSync), else None. can't tell is no problem."""
+    theirs, ours = dbi.schema_version(backup_path), dbi.schema_version(db_path)
+    if theirs is None or ours is None or theirs <= ours:
+        return None
+    return (f"That backup is from a newer SoulSync (database version {theirs}; this one runs "
+            f"{ours}). Restoring it here would leave tables this version can't read. "
+            "Update SoulSync first, then restore it. Nothing was changed.")
+
+
+def _prune_pre_restore_copies(db_dir):
+    """keep the newest few "what was there before a restore" copies"""
+    try:
+        names = sorted(n for n in os.listdir(db_dir or ".")
+                       if re.match(r'^music_library\.db\.pre-restore_\d{8}_\d{6}$', n))
+    except OSError:
+        return
+    from core.db_integrity import remove_backup
+    for old in names[:-PRE_RESTORE_KEEP]:
+        remove_backup(os.path.join(db_dir or ".", old))
+
+
+def _forget_database_initialized(db_path):
+    """make the next open of ``db_path`` run schema creation and migrations again"""
+    try:
+        from database import music_database as mdb
+        with getattr(mdb, "_database_initialization_lock", _NO_LOCK):
+            for key in list(mdb._database_initialized_paths):
+                if os.path.abspath(str(key)) == os.path.abspath(db_path):
+                    mdb._database_initialized_paths.discard(key)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("could not re-arm database init after restore: %s", e)
+
+
+class _NoLock:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_a):
+        return False
+
+
+_NO_LOCK = _NoLock()
+
+
+def _reload_config_after_restore():
+    try:
+        from core.settings import config_manager
+        config_manager.load_config()
+        logger.info("settings reloaded from the restored database")
+    except Exception as e:  # noqa: BLE001
+        logger.warning("could not reload settings after restore (restart to pick them up): %s", e)
+
 
 @bp.route('/api/database/backups/<filename>/restore', methods=['POST'])
 @admin_only
@@ -1436,31 +1490,66 @@ def restore_backup_endpoint(filename):
                 }), 409
             version_warning = f"Restored from v{backup_version} backup (current: v{SOULSYNC_VERSION})"
 
-        # Create safety backup of current DB before restoring
-        safety_ts = datetime.now().strftime('%Y%m%d_%H%M%S')
-        safety_filename = f"music_library.db.backup_{safety_ts}"
-        safety_path = os.path.join(db_dir, safety_filename)
-        src_conn = sqlite3.connect(db_path)
-        dst_conn = sqlite3.connect(safety_path)
-        src_conn.backup(dst_conn)
-        dst_conn.close()
-        src_conn.close()
-        # Write version metadata for the safety backup too
+        from core import db_integrity as dbi
+
+        # 1. the backup itself, before anything is touched. nothing checked it:
+        #    a backup that had gone bad on disk was written straight over the
+        #    live database.
+        if not dbi.is_healthy(backup_path):
+            return jsonify({"success": False, "backup_corrupt": True,
+                            "error": "That backup failed its integrity check, so it was not restored. "
+                                     "Your database is untouched."}), 409
+        # 2. a database from a NEWER SoulSync: this version doesn't know its
+        #    tables, and nothing would migrate it back
+        problem = _restore_schema_problem(db_path, backup_path, dbi)
+        if problem:
+            return jsonify({"success": False, "newer_schema": True, "error": problem}), 409
+        # 3. room for the copy of the current database that is kept first
+        short = dbi.room_for(db_path, os.path.getsize(db_path) if os.path.exists(db_path) else 0)
+        if short:
+            return jsonify({"success": False, "no_space": True,
+                            "error": short + " Nothing was changed."}), 507
+        if not dbi.backup_lock.acquire(blocking=False):
+            return jsonify({"success": False, "busy": True,
+                            "error": "Another backup or restore is running. Try again when it finishes."}), 409
         try:
-            with open(safety_path + '.meta.json', 'w') as mf:
-                json.dump({"version": SOULSYNC_VERSION, "created": safety_ts}, mf)
-        except Exception as e:
-            logger.debug("safety backup metadata write failed: %s", e)
+            # 4. keep what is there now, as a verified copy OUTSIDE the rolling
+            #    backups: it used to be one of them, so the next backup could
+            #    rotate away the only way back. if it can't be made, stop here.
+            safety_ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+            safety_filename = f"music_library.db.pre-restore_{safety_ts}"
+            safety_path = os.path.join(db_dir, safety_filename)
+            try:
+                dbi.safe_backup(db_path, safety_path, verify_source=False)
+            except Exception as e:  # noqa: BLE001 - no way back, no restore
+                logger.error("restore stopped: the safety copy could not be made: %s", e)
+                return jsonify({"success": False,
+                                "error": "Could not keep a copy of the current database first, so "
+                                         f"nothing was restored. ({e})"}), 500
+            _prune_pre_restore_copies(db_dir)
 
-        # Restore using SQLite backup API (handles concurrent access safely)
-        from database.music_database import close_database, get_database
-        close_database()
+            # Restore using SQLite backup API (handles concurrent access safely)
+            from database.music_database import close_database, get_database
+            close_database()
 
-        src_restore = sqlite3.connect(backup_path)
-        dst_restore = sqlite3.connect(db_path)
-        src_restore.backup(dst_restore)
-        dst_restore.close()
-        src_restore.close()
+            src_restore = sqlite3.connect(backup_path)
+            dst_restore = sqlite3.connect(db_path)
+            try:
+                src_restore.backup(dst_restore)
+            finally:
+                dst_restore.close()
+                src_restore.close()
+            # 5. the restored file is whatever schema the backup had. opening it
+            #    must run the migrations again; they are remembered as done for
+            #    this path, so an older backup ran on unmigrated tables until the
+            #    next restart ("no such table").
+            _forget_database_initialized(db_path)
+        finally:
+            dbi.backup_lock.release()
+        # 6. the settings live in this database. the ones in memory are the old
+        #    database's, and the next settings save would write them over the
+        #    restored ones.
+        _reload_config_after_restore()
 
         # Reinitialize database and verify
         db = get_database()
