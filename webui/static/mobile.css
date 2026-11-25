@@ -4330,6 +4330,68 @@ body:has(.artist-map-container) #gsearch-bar {
     }
 }
 
+/* --- Download Discography footer on phones (#2299, Jygijiji) ---
+   .discog-footer is one non-wrapping flex row: info, Cancel (min-width
+   84px), "Add N to Wishlist" (min-width 200px) and the combined
+   "Wishlist + Watchlist" button. on a 390x844 phone the actions measure
+   430px inside a 388px footer, and the sheet is overflow:hidden, so the
+   combined button sat past the edge with nothing to scroll to it. stack on
+   phones: the main action keeps a full row, the combined button and Cancel
+   share the next, and the footer clears the home indicator. the same footer
+   is the discover "your albums" batch modal's and the playlist explorer's. */
+@media (max-width: 768px) {
+    .discog-footer {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10px;
+        padding-bottom: max(14px, env(safe-area-inset-bottom));
+    }
+
+    .discog-footer-info {
+        font-size: 12px;
+    }
+
+    .discog-footer-actions {
+        width: 100%;
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+
+    /* in the page they come Cancel, submit, combined: the main action first */
+    .discog-footer-actions .discog-submit-btn {
+        flex: 1 1 100%;
+        width: 100%;
+        min-width: 0;
+        order: 1;
+    }
+
+    .discog-footer-actions .discog-both-btn,
+    .discog-footer-actions .discog-cancel-btn {
+        flex: 1 1 0;
+        min-width: 0;
+        order: 2;
+    }
+}
+
+/* short screens: the stacked footer plus the hero, filter bar and future
+   block are taller than the viewport, and overflow:hidden cut the footer off
+   (its bottom at 674 in a 667px viewport, 770 in a 568px one, 475 in a 390px
+   landscape one). the sheet itself scrolls and the list is capped, so the
+   footer is one gesture away. taller phones keep the pinned footer. */
+@media (max-width: 900px) and (max-height: 800px) {
+    .discog-modal {
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .discog-modal .discog-grid {
+        flex: 0 0 auto;
+        min-height: 140px;
+        max-height: 45dvh;
+    }
+}
+
 /* --- Mirrored playlist detail modal on phones: every action reachable ---
    Tacobell444's screenshot (#1691): on a phone the modal's action bar ran
    off the right edge — "Sync & download", Close and Identify were past
