@@ -251,3 +251,18 @@ def test_two_owned_copies_of_one_file_are_a_question_not_an_answer(lib):
         conn.execute("INSERT INTO lib2_track_files(track_id, path, size) VALUES(?,?,?)",
                      (second, "/other/01 Plug In Baby.flac", size))
         assert owned_track_by_file_twin(conn.cursor(), "/x/01 Plug In Baby.flac", size) is None
+
+
+def test_a_second_file_on_this_disk_is_not_a_view_of_the_first(lib):
+    """the same song on two releases: two files, one name, one size. the twin
+    rule is for a path that can't be opened from here, never for a file that
+    is right there beside the other"""
+    from core.library2.media_server_sync import owned_track_by_file_twin
+    db, music, _ = lib
+    path, track_id = _owned(db, music)
+    second = _file(music / "Muse" / "Origin of Symmetry (Deluxe)")
+    assert second.stat().st_size == path.stat().st_size and second.name == path.name
+    with db._get_connection() as conn:
+        assert owned_track_by_file_twin(conn.cursor(), str(second), second.stat().st_size) is None
+        # the very same file, asked by its own path, is itself
+        assert owned_track_by_file_twin(conn.cursor(), str(path), path.stat().st_size) == track_id

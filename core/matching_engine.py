@@ -532,6 +532,46 @@ class MusicMatchingEngine:
 
         return standard_ratio
     
+    # words that make a folder a tribute or karaoke act's, not the artist's.
+    # narrower than derivative_artist_keywords on purpose: this is read off a
+    # folder name, where "orchestra", "covers" and "instrumental" are honest
+    # album words ("S&M with the San Francisco Symphony Orchestra").
+    _DERIVATIVE_ACT_WORDS = ('tribute', 'karaoke', 'soundalike', 'sound alike', 'cover band',
+                             'backing track', 'backing tracks', 'salute to', 'parody',
+                             'in the style of', 'made famous by', 'originally performed by')
+
+    def _segment_is_derivative_act(self, artist_norm: str, segment_norm: str) -> bool:
+        """a path segment that names the artist AND a tribute/karaoke word the
+        artist's own name doesn't have"""
+        if not artist_norm or not segment_norm:
+            return False
+        if not re.search(r'\b' + re.escape(artist_norm) + r'\b', segment_norm):
+            return False
+        return any(re.search(r'\b' + re.escape(word) + r'\b', segment_norm)
+                   and not re.search(r'\b' + re.escape(word) + r'\b', artist_norm)
+                   for word in self._DERIVATIVE_ACT_WORDS)
+
+    @staticmethod
+    def duration_is_another_recording(wanted_ms, candidate_ms) -> bool:
+        """both lengths known, and the candidate is far shorter (a clip, an
+        edit: over 15% and 10 seconds short) or far longer (an extended mix,
+        a medley: over 25% and 30 seconds long)"""
+        try:
+            wanted, candidate = int(wanted_ms or 0), int(candidate_ms or 0)
+        except (TypeError, ValueError):
+            return False
+        if wanted <= 0 or candidate <= 0:
+            return False
+        # a result whose length came in seconds (some callers and fixtures do
+        # that) is read as seconds. a real ten-second clip of a song is still
+        # caught: read either way it is nowhere near the length asked for.
+        if candidate < 10_000 and wanted >= 30_000:
+            candidate *= 1000
+        diff = candidate - wanted
+        if diff < 0:
+            return -diff > max(10_000, 0.15 * wanted)
+        return diff > max(30_000, 0.25 * wanted)
+
     def duration_similarity(self, duration1: Optional[int], duration2: Optional[int]) -> float:
         """Calculates similarity score based on track duration (in ms)."""
         if not duration1 or not duration2:
@@ -1208,8 +1248,23 @@ class MusicMatchingEngine:
         # Calculate full-string similarity ratio (0.0 to 1.0) like Soularr does
         title_ratio = SequenceMatcher(None, spotify_cleaned_title, slskd_filename_norm).ratio()
 
-        # Boost score if title appears as a complete word in filename
-        has_word_boundary = bool(re.search(r'\b' + re.escape(spotify_cleaned_title) + r'\b', slskd_filename_norm))
+        # Boost score if title appears as a complete word in the file's own
+        # name. it was looked for in the whole path, album folder included, so
+        # on a self-titled album every track got it: asked for "Paranoid",
+        # ".../Paranoid/02 - Planet Caravan.flac" scored 0.67 and "Iron Man"
+        # 0.69, both over the bar, and the wrong song was downloaded.
+        _song_norm = self.normalize_string(self._candidate_song_text(candidate_text))
+        # the file's name as the WHOLE path's normalising left it, too: a
+        # path with CJK in it keeps other scripts as they are, where the file
+        # name normalised on its own would transliterate them (#2246)
+        _folders_norm = self.normalize_string(
+            ' '.join(re.split(r'[/\\]', candidate_text)[:-1])) if not is_youtube else ''
+        _file_in_path_norm = (slskd_filename_norm[len(_folders_norm):]
+                              if _folders_norm and slskd_filename_norm.startswith(_folders_norm)
+                              else '')
+        _title_word = r'\b' + re.escape(spotify_cleaned_title) + r'\b'
+        has_word_boundary = bool(spotify_cleaned_title) and bool(
+            re.search(_title_word, _song_norm) or re.search(_title_word, _file_in_path_norm))
 
         if has_word_boundary:
             # Title exists as complete word - significant bonus
@@ -1265,6 +1320,22 @@ class MusicMatchingEngine:
 
         # 3. Duration Score: Increased weight for better accuracy
         duration_score = self.duration_similarity(spotify_track.duration_ms, slskd_track.duration if slskd_track.duration else 0)
+        # a length that is far off is another recording, not a weak match.
+        # duration was only a weight here (15%), so a ten-minute extended mix
+        # of a four-minute song scored 0.66 and a half-length clip could pass
+        # too. the streaming sources have had a hard limit all along. generous
+        # on purpose: a peer's listed length and the catalogue's can honestly
+        # differ by a fade or a gap.
+        # (a file that SAYS it is an extended or long version is not judged
+        # here: that is a version, weighed and preferred or not below)
+        if not is_youtube and not re.search(
+                r'\b(?:extended|full\s*version|long\s*version|12\s*(?:inch|"))\b', candidate_text.lower()) \
+                and self.duration_is_another_recording(
+                    spotify_track.duration_ms, slskd_track.duration):
+            logger.debug(f"Duration reject: '{spotify_track.name}' wants "
+                         f"{spotify_track.duration_ms}ms, '{slskd_track.filename[:60]}' is "
+                         f"{slskd_track.duration}ms")
+            return 0.0
 
         # 4. Quality Bonus: Reduced to prevent boosting bad matches
         quality_bonus = 0.0
@@ -1327,13 +1398,31 @@ class MusicMatchingEngine:
         _JUNK_ARTISTS = {'various artists', 'va', 'unknown artist', 'unknown album',
                          'various artist'}
         if not is_youtube:
+            # ...unless the file's own name carries the artist: a compilation
+            # filed the way beets and most rippers file one ("Various Artists/
+            # Now 80s/05 - a-ha - Take On Me.flac") names its artist exactly
+            # where it can be trusted, and a song that only ever came out on a
+            # soundtrack or a compilation could not be found at all.
+            _artist_in_song = any(
+                a and re.search(r'\b' + re.escape(a) + r'\b', _song_norm) for a in spotify_artists_norm)
             for seg_norm in _artist_segments_norm:
-                if seg_norm in _JUNK_ARTISTS:
+                if seg_norm in _JUNK_ARTISTS and not _artist_in_song:
                     logger.debug(
                         f"Junk artist reject: '{spotify_track.name}' — path segment "
                         f"'{seg_norm}' in '{slskd_track.filename[:80]}'"
                     )
                     return 0.0
+            # a tribute or karaoke act is not the artist it is named after.
+            # "Queen Tribute Band/Greatest Hits/01 - Bohemian Rhapsody.flac"
+            # holds the word "queen", which was all the artist check asked
+            # for: it scored 1.00.
+            for artist in spotify_artists_norm:
+                for seg_norm in _artist_segments_norm:
+                    if self._segment_is_derivative_act(artist, seg_norm):
+                        logger.debug(
+                            f"Derivative artist reject: '{spotify_track.name}' — "
+                            f"'{seg_norm}' is not {artist!r}")
+                        return 0.0
 
         # --- Minimum Title Gate ---
         # Reject matches where the title has almost no resemblance to the target.
@@ -1442,6 +1531,56 @@ class MusicMatchingEngine:
 
         return confident_results
     
+    # a version asked for in a TITLE: the word sits where a qualifier does
+    # (brackets, after a dash, "live at"), not inside the song's name
+    _ASKED_VERSION_PATTERNS = {
+        'live': (r'[\(\[][^\)\]]*\blive\b[^\)\]]*[\)\]]', r'[-–—:]\s*live\b',
+                 r'\blive\s+(?:at|from|in|version|recording)\b'),
+        'remix': (r'[\(\[][^\)\]]*\b(?:remix|rmx)\b[^\)\]]*[\)\]]', r'[-–—:]\s*[^-–—:]*\b(?:remix|rmx)\b\s*$'),
+        'acoustic': (r'[\(\[][^\)\]]*\b(?:acoustic|unplugged)\b[^\)\]]*[\)\]]',
+                     r'[-–—:]\s*(?:acoustic|unplugged)\b', r'\bacoustic\s+version\b'),
+        'instrumental': (r'[\(\[][^\)\]]*\binstrumental\b[^\)\]]*[\)\]]',
+                         r'[-–—:]\s*instrumental\b', r'\binstrumental\s+version\b'),
+    }
+
+    def _title_asks_for_version(self, title: str) -> Optional[str]:
+        """'live', 'remix', 'acoustic' or 'instrumental' when the title asks
+        for that cut ("Wonderwall (Live)", "Song - Acoustic"); None for a
+        title that only contains the word ("Live Forever")."""
+        lowered = str(title or '').lower()
+        for version, patterns in self._ASKED_VERSION_PATTERNS.items():
+            if any(re.search(p, lowered) for p in patterns):
+                return version
+        return None
+
+    def _version_scan_text(self, candidate_text: str, spotify_track) -> str:
+        """the candidate's text with the asked-for title, album and artist
+        names taken out: what is left is where a version word means a
+        version. the title comes out of the file's own name only (its base
+        name, without any "(...)" of its own), the album and artists out of
+        the whole path."""
+        text = str(candidate_text or '').lower()
+        title = re.split(r'\s*[\(\[]|\s+[-–—]\s+', str(getattr(spotify_track, 'name', '') or '').strip(),
+                         maxsplit=1)[0].lower().strip()
+        names = [str(getattr(spotify_track, 'album', '') or '').lower().strip()]
+        names += [str(a or '').lower().strip() for a in (getattr(spotify_track, 'artists', None) or [])]
+        if not title or len(title) < 3:
+            title = str(getattr(spotify_track, 'name', '') or '').lower().strip()
+        for name in [title] + names:
+            if len(name) >= 3:
+                text = re.sub(r'(?<!\w)' + re.escape(name) + r'(?!\w)', ' ', text)
+        return text
+
+    def _path_has_album(self, candidate_text: str, album: Optional[str]) -> bool:
+        """a folder of the candidate's path is the asked-for album"""
+        album_norm = self.normalize_string(str(album or ''))
+        if len(album_norm) < 3:
+            return False
+        folders = re.split(r'[/\\]', str(candidate_text or ''))[:-1]
+        return any(album_norm == self.normalize_string(f) or
+                   re.search(r'\b' + re.escape(album_norm) + r'\b', self.normalize_string(f))
+                   for f in folders if f.strip())
+
     def detect_version_type(self, filename: str) -> Tuple[str, float]:
         """
         Detect version type from filename and return (version_type, penalty).
@@ -1540,7 +1679,13 @@ class MusicMatchingEngine:
         # Detect version type in Soulseek result
         candidate_text = self._candidate_text(slskd_track)
         is_youtube = getattr(slskd_track, 'username', None) == 'youtube'
-        version_type, penalty = self.detect_version_type(candidate_text)
+        # a version word only says "this is another version" when it is not
+        # part of what was asked for. the whole path was read for the words,
+        # so Oasis' "Live Forever", "Live and Let Die", every track in the
+        # albums "Stripped" and "Live Through This", and "Tour de France"
+        # were all rejected as live or acoustic cuts: 0.00, never downloaded.
+        version_type, penalty = self.detect_version_type(
+            self._version_scan_text(candidate_text, spotify_track))
 
         # --- Base-title veto (#1626) ---
         # A shared version qualifier inflates whole-path similarity enough to
@@ -1605,6 +1750,16 @@ class MusicMatchingEngine:
         # below only reject a versioned candidate, so the plain studio file
         # scored 0.73 for "Devil Eyes - Slowed" and got imported as it.
         _wanted_version = self.detect_version_type(spotify_track.name)[0]
+        # the other direction: a live, remix, acoustic or instrumental cut was
+        # asked for and this file is none of those. only the candidate's own
+        # version was ever checked, so asking for "Wonderwall (Live)" took the
+        # studio track at 0.71. the streaming sources halve such a match; so
+        # does this. a file in the asked-for album's own folder is that
+        # album's track, marked or not (a live album's files rarely say live).
+        _asked_version = self._title_asks_for_version(spotify_track.name)
+        if (_asked_version and version_type != _asked_version and not _wanted_on_purpose
+                and not self._path_has_album(candidate_text, getattr(spotify_track, 'album', None))):
+            base_confidence *= 0.5
         if ((version_type in self.TEMPO_EDITS or _wanted_version in self.TEMPO_EDITS)
                 and version_type != _wanted_version):
             return 0.0, 'rejected_version_mismatch'

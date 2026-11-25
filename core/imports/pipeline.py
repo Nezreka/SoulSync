@@ -787,6 +787,26 @@ def import_rejection_reason(context: dict) -> str | None:
     return None
 
 
+def _discard_redundant_download(file_path: str, config_manager) -> bool:
+    """Remove a download the library did not need, when it sits in the
+    downloads folder. A file anywhere else (the import folder, a staging
+    tree) is not SoulSync's to delete. True when it was removed."""
+    try:
+        downloads = os.path.realpath(docker_resolve_path(
+            config_manager.get('soulseek.download_path', './downloads')))
+        target = os.path.realpath(file_path)
+        if not downloads or os.path.commonpath([downloads, target]) != downloads or target == downloads:
+            return False
+        os.remove(target)
+        logger.info("[Protection] Removed the download the library did not need: %s",
+                    os.path.basename(target))
+        cleanup_empty_directories(downloads, file_path)
+        return True
+    except (OSError, ValueError) as exc:
+        logger.debug("[Protection] redundant download not removed (%s): %s", file_path, exc)
+        return False
+
+
 def kept_existing_library_file(context: dict) -> bool:
     """the pipeline found this track already at its library path and left
     that copy alone (not an improvement, or already tagged). nothing was
@@ -1953,6 +1973,16 @@ def _post_process_matched_download(context_key, context, file_path, runtime, met
             else:
                 logger.info("Moving to music library folder root (single track)")
 
+            # a different file already at that name is not replaced: this
+            # path judges nothing about the two (free_destination)
+            from core.imports.file_ops import free_destination
+            _free = free_destination(file_path, destination)
+            if str(_free) != str(destination):
+                logger.warning(
+                    "A different file is already at %s; filing this download as %s",
+                    destination, os.path.basename(str(_free)))
+                destination = type(destination)(_free)
+                filename = os.path.basename(str(_free))
             safe_move_file(file_path, destination)
             logger.info(f"Moved simple download to: {destination}")
             from core.imports.file_ops import move_companion_sidecars
@@ -2545,6 +2575,11 @@ def _post_process_matched_download(context_key, context, file_path, runtime, met
                 # Keep the staged source; optional staging cleanup owns it.
                 if _confirm_existing_file_bookkeeping(context, artist_context, album_info):
                     context['_kept_existing_library_file'] = True
+                    # ...a file in the import/staging folder is the person's
+                    # own and stays. a file SoulSync downloaded is not: it was
+                    # left in the downloads folder for good, and the next grab
+                    # of the track then found that stale copy by its name.
+                    _discard_redundant_download(file_path, config_manager)
                 return
             try:
                 from mutagen import File as MutagenFile

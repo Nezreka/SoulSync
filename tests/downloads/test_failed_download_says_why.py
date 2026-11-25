@@ -14,6 +14,8 @@ api answer is faked.
 
 from __future__ import annotations
 
+from core.downloads.monitor import MAX_PEER_RETRIES  # the cap is peers tried, and it moved from 3
+
 import asyncio
 import time
 from types import SimpleNamespace
@@ -100,7 +102,7 @@ def test_the_reason_reaches_the_users_error_message(mon, monkeypatch):
         'track_info': {'name': 'Numb'}, 'username': 'deezer_dl',
         'filename': '3135556||Linkin Park - Numb', 'download_id': download_id,
         'status': 'downloading', 'batch_id': 'b1', 'status_change_time': time.time(),
-        'error_retry_count': 3,   # retries already spent, this is the give-up
+        'error_retry_count': MAX_PEER_RETRIES,   # retries already spent, this is the give-up
     }
     ops = []
     mon._should_retry_task('t1', task, live, time.time(), ops)
@@ -113,8 +115,8 @@ def test_a_reasonless_failure_keeps_the_old_message(mon):
     task = {
         'track_info': {'name': 'Numb'}, 'username': 'somepeer', 'filename': 'x.flac',
         'download_id': 'd1', 'status': 'downloading', 'batch_id': 'b1',
-        'status_change_time': time.time(), 'error_retry_count': 3,
+        'status_change_time': time.time(), 'error_retry_count': MAX_PEER_RETRIES,
     }
     live = {'somepeer::x.flac': {'state': 'Completed, Errored'}}
     mon._should_retry_task('t1', task, live, time.time(), [])
-    assert task['error_message'].startswith('Soulseek transfer errored 3 times')
+    assert task['error_message'].startswith(f'Soulseek transfer errored {MAX_PEER_RETRIES} times')
