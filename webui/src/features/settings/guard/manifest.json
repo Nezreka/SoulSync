@@ -1540,23 +1540,6 @@
       "asked": "http://guard.example:4321",
       "shows": ["prowlarr.url"]
     },
-    "#flaresolverr-url": {
-      "sel": "#flaresolverr-url",
-      "kind": "text",
-      "sides": ["music", "video"],
-      "scenario": "music",
-      "from": "",
-      "to": "http://guard.example:4321",
-      "saves": {
-        "settings": {
-          "flaresolverr": {
-            "url": "http://guard.example:4321"
-          }
-        }
-      },
-      "asked": "http://guard.example:4321",
-      "shows": ["flaresolverr.url"]
-    },
     "#prowlarr-api-key": {
       "sel": "#prowlarr-api-key",
       "kind": "text",
@@ -1573,6 +1556,23 @@
       },
       "asked": "guard-secret",
       "shows": ["prowlarr.api_key"]
+    },
+    "#flaresolverr-url": {
+      "sel": "#flaresolverr-url",
+      "kind": "text",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "http://guard.example:4321",
+      "saves": {
+        "settings": {
+          "flaresolverr": {
+            "url": "http://guard.example:4321"
+          }
+        }
+      },
+      "asked": "http://guard.example:4321",
+      "shows": ["flaresolverr.url"]
     },
     "#prowlarr-search-min-gap": {
       "sel": "#prowlarr-search-min-gap",
@@ -7845,6 +7845,23 @@
       "asked": true,
       "shows": ["security.require_login"]
     },
+    "#security-share-connected-accounts": {
+      "sel": "#security-share-connected-accounts",
+      "kind": "checkbox",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": false,
+      "to": true,
+      "saves": {
+        "settings": {
+          "security": {
+            "share_connected_accounts": true
+          }
+        }
+      },
+      "asked": true,
+      "shows": ["security.share_connected_accounts"]
+    },
     "#security-plex-signin": {
       "sel": "#security-plex-signin",
       "kind": "checkbox",
@@ -11507,6 +11524,13 @@
       "sides": ["music", "video"],
       "scenario": "music"
     },
+    "#video-server-pick \"Standalone\"": {
+      "label": "Standalone",
+      "anchor": "video-server-pick",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
     "#video-server-sheet \"Close\"": {
       "label": "Close",
       "anchor": "video-server-sheet",
@@ -12360,7 +12384,7 @@
     "#lidarr-download-settings-container \"More about this setting\"": {
       "label": "More about this setting",
       "anchor": "lidarr-download-settings-container",
-      "count": 2,
+      "count": 3,
       "sides": ["music", "video"],
       "scenario": "music"
     },
@@ -12387,7 +12411,7 @@
     "#prowlarr-settings-container \"More about this setting\"": {
       "label": "More about this setting",
       "anchor": "prowlarr-settings-container",
-      "count": 4,
+      "count": 5,
       "sides": ["music", "video"],
       "scenario": "music"
     },
@@ -13949,7 +13973,7 @@
     "#stg-view-advanced-security \"More about this setting\"": {
       "label": "More about this setting",
       "anchor": "stg-view-advanced-security",
-      "count": 8,
+      "count": 9,
       "sides": ["music", "video"],
       "scenario": "music"
     },
@@ -14123,6 +14147,13 @@
     "#quarantine-clear-btn": {
       "id": "quarantine-clear-btn",
       "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#stg-view-advanced-backups \"Back up now\"": {
+      "label": "Back up now",
+      "anchor": "stg-view-advanced-backups",
+      "count": 2,
       "sides": ["music", "video"],
       "scenario": "music"
     },
