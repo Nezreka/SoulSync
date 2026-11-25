@@ -1,0 +1,1483 @@
+{
+ "compilation.flac": {
+  "album": [
+   "Now 46"
+  ],
+  "albumartist": [
+   "Various Artists"
+  ],
+  "albumartistsort": [
+   "Coldplay"
+  ],
+  "artist": [
+   "Coldplay, Guest"
+  ],
+  "artists": [
+   "Coldplay",
+   "Guest"
+  ],
+  "artistsort": [
+   "Coldplay"
+  ],
+  "barcode": [
+   "724352778324"
+  ],
+  "bpm": [
+   "87"
+  ],
+  "compilation": [
+   "1"
+  ],
+  "composer": [
+   "Guy Berryman",
+   "Chris Martin"
+  ],
+  "copyright": [
+   "(P) 2000 Parlophone Records Ltd"
+  ],
+  "date": [
+   "2000-07-10"
+  ],
+  "deezer_track_id": [
+   "3135556"
+  ],
+  "discnumber": [
+   "2"
+  ],
+  "disctotal": [
+   "2"
+  ],
+  "encoder": [
+   "Lavf62.3.100"
+  ],
+  "genius_url": [
+   "https://genius.com/Coldplay-yellow-lyrics"
+  ],
+  "genre": [
+   "Alternative Rock",
+   "Britpop",
+   "Indie",
+   "EDM"
+  ],
+  "initialkey": [
+   "B"
+  ],
+  "isrc": [
+   "GBAYE0000351"
+  ],
+  "label": [
+   "Parlophone"
+  ],
+  "lastfm_url": [
+   "https://www.last.fm/music/Coldplay/_/Yellow"
+  ],
+  "mood": [
+   "Happy"
+  ],
+  "musicbrainz_albumid": [
+   "33333333-3333-4333-8333-333333333333"
+  ],
+  "musicbrainz_artistid": [
+   "22222222-2222-4222-8222-222222222222"
+  ],
+  "musicbrainz_trackid": [
+   "11111111-1111-4111-8111-111111111111"
+  ],
+  "quality": [
+   "FLAC 16bit"
+  ],
+  "replaygain_track_gain": [
+   "-7.10 dB"
+  ],
+  "style": [
+   "Rock/Pop"
+  ],
+  "title": [
+   "Yellow"
+  ],
+  "totaldiscs": [
+   "2"
+  ],
+  "totaltracks": [
+   "40"
+  ],
+  "tracktotal": [
+   "40"
+  ]
+ },
+ "compilation.m4a": {
+  "----:com.apple.iTunes:ARTISTS": [
+   "Coldplay",
+   "Guest"
+  ],
+  "----:com.apple.iTunes:BARCODE": [
+   "724352778324"
+  ],
+  "----:com.apple.iTunes:DEEZER_TRACK_ID": [
+   "3135556"
+  ],
+  "----:com.apple.iTunes:GENIUS_URL": [
+   "https://genius.com/Coldplay-yellow-lyrics"
+  ],
+  "----:com.apple.iTunes:ISRC": [
+   "GBAYE0000351"
+  ],
+  "----:com.apple.iTunes:LABEL": [
+   "Parlophone"
+  ],
+  "----:com.apple.iTunes:LASTFM_URL": [
+   "https://www.last.fm/music/Coldplay/_/Yellow"
+  ],
+  "----:com.apple.iTunes:MOOD": [
+   "Happy"
+  ],
+  "----:com.apple.iTunes:MusicBrainz Album Id": [
+   "33333333-3333-4333-8333-333333333333"
+  ],
+  "----:com.apple.iTunes:MusicBrainz Artist Id": [
+   "22222222-2222-4222-8222-222222222222"
+  ],
+  "----:com.apple.iTunes:MusicBrainz Track Id": [
+   "11111111-1111-4111-8111-111111111111"
+  ],
+  "----:com.apple.iTunes:QUALITY": [
+   "FLAC 16bit"
+  ],
+  "----:com.apple.iTunes:STYLE": [
+   "Rock/Pop"
+  ],
+  "----:com.apple.iTunes:iTunSMPB": [
+   " 00000000 00000840 000001C0 000000000000AC44"
+  ],
+  "----:com.apple.iTunes:replaygain_track_gain": [
+   "-7.10 dB"
+  ],
+  "aART": [
+   "Various Artists"
+  ],
+  "cpil": true,
+  "cprt": [
+   "(P) 2000 Parlophone Records Ltd"
+  ],
+  "disk": [
+   [
+    2,
+    2
+   ]
+  ],
+  "pgap": true,
+  "soaa": [
+   "Coldplay"
+  ],
+  "soar": [
+   "Coldplay"
+  ],
+  "tmpo": [
+   87
+  ],
+  "©ART": [
+   "Coldplay",
+   "Guest"
+  ],
+  "©alb": [
+   "Now 46"
+  ],
+  "©day": [
+   "2000-07-10"
+  ],
+  "©gen": [
+   "Alternative Rock",
+   "Britpop",
+   "Indie",
+   "EDM"
+  ],
+  "©nam": [
+   "Yellow"
+  ],
+  "©too": [
+   "Lavf62.3.100"
+  ],
+  "©wrt": [
+   "Guy Berryman",
+   "Chris Martin"
+  ]
+ },
+ "compilation.mp3": {
+  "TALB": [
+   "Now 46"
+  ],
+  "TBPM": [
+   "87"
+  ],
+  "TCMP": [
+   "1"
+  ],
+  "TCOM": [
+   "Guy Berryman",
+   "Chris Martin"
+  ],
+  "TCON": [
+   "Alternative Rock",
+   "Britpop",
+   "Indie",
+   "EDM"
+  ],
+  "TCOP": [
+   "(P) 2000 Parlophone Records Ltd"
+  ],
+  "TDRC": [
+   "2000-07-10"
+  ],
+  "TIT2": [
+   "Yellow"
+  ],
+  "TKEY": [
+   "B"
+  ],
+  "TPE1": [
+   "Coldplay, Guest"
+  ],
+  "TPE2": [
+   "Various Artists"
+  ],
+  "TPOS": [
+   "2/2"
+  ],
+  "TPUB": [
+   "Parlophone"
+  ],
+  "TSO2": [
+   "Coldplay"
+  ],
+  "TSOP": [
+   "Coldplay"
+  ],
+  "TSRC": [
+   "GBAYE0000351"
+  ],
+  "TSSE": [
+   "Lavf62.3.100"
+  ],
+  "TXXX:Artists": [
+   "Coldplay",
+   "Guest"
+  ],
+  "TXXX:BARCODE": [
+   "724352778324"
+  ],
+  "TXXX:DEEZER_TRACK_ID": [
+   "3135556"
+  ],
+  "TXXX:GENIUS_URL": [
+   "https://genius.com/Coldplay-yellow-lyrics"
+  ],
+  "TXXX:LASTFM_URL": [
+   "https://www.last.fm/music/Coldplay/_/Yellow"
+  ],
+  "TXXX:MOOD": [
+   "Happy"
+  ],
+  "TXXX:MusicBrainz Album Id": [
+   "33333333-3333-4333-8333-333333333333"
+  ],
+  "TXXX:MusicBrainz Artist Id": [
+   "22222222-2222-4222-8222-222222222222"
+  ],
+  "TXXX:QUALITY": [
+   "FLAC 16bit"
+  ],
+  "TXXX:REPLAYGAIN_TRACK_GAIN": [
+   "-7.10 dB"
+  ],
+  "TXXX:STYLE": [
+   "Rock/Pop"
+  ],
+  "UFID:http://musicbrainz.org": "11111111-1111-4111-8111-111111111111"
+ },
+ "compilation.ogg": {
+  "album": [
+   "Now 46"
+  ],
+  "albumartist": [
+   "Various Artists"
+  ],
+  "albumartistsort": [
+   "Coldplay"
+  ],
+  "artist": [
+   "Coldplay, Guest"
+  ],
+  "artists": [
+   "Coldplay",
+   "Guest"
+  ],
+  "artistsort": [
+   "Coldplay"
+  ],
+  "barcode": [
+   "724352778324"
+  ],
+  "bpm": [
+   "87"
+  ],
+  "compilation": [
+   "1"
+  ],
+  "composer": [
+   "Guy Berryman",
+   "Chris Martin"
+  ],
+  "copyright": [
+   "(P) 2000 Parlophone Records Ltd"
+  ],
+  "date": [
+   "2000-07-10"
+  ],
+  "deezer_track_id": [
+   "3135556"
+  ],
+  "discnumber": [
+   "2"
+  ],
+  "disctotal": [
+   "2"
+  ],
+  "encoder": [
+   "Lavc62.11.100 libvorbis"
+  ],
+  "genius_url": [
+   "https://genius.com/Coldplay-yellow-lyrics"
+  ],
+  "genre": [
+   "Alternative Rock",
+   "Britpop",
+   "Indie",
+   "EDM"
+  ],
+  "initialkey": [
+   "B"
+  ],
+  "isrc": [
+   "GBAYE0000351"
+  ],
+  "label": [
+   "Parlophone"
+  ],
+  "lastfm_url": [
+   "https://www.last.fm/music/Coldplay/_/Yellow"
+  ],
+  "mood": [
+   "Happy"
+  ],
+  "musicbrainz_albumid": [
+   "33333333-3333-4333-8333-333333333333"
+  ],
+  "musicbrainz_artistid": [
+   "22222222-2222-4222-8222-222222222222"
+  ],
+  "musicbrainz_trackid": [
+   "11111111-1111-4111-8111-111111111111"
+  ],
+  "quality": [
+   "FLAC 16bit"
+  ],
+  "replaygain_track_gain": [
+   "-7.10 dB"
+  ],
+  "style": [
+   "Rock/Pop"
+  ],
+  "title": [
+   "Yellow"
+  ],
+  "totaldiscs": [
+   "2"
+  ],
+  "totaltracks": [
+   "40"
+  ],
+  "tracktotal": [
+   "40"
+  ]
+ },
+ "compilation.opus": {
+  "album": [
+   "Now 46"
+  ],
+  "albumartist": [
+   "Various Artists"
+  ],
+  "albumartistsort": [
+   "Coldplay"
+  ],
+  "artist": [
+   "Coldplay, Guest"
+  ],
+  "artists": [
+   "Coldplay",
+   "Guest"
+  ],
+  "artistsort": [
+   "Coldplay"
+  ],
+  "barcode": [
+   "724352778324"
+  ],
+  "bpm": [
+   "87"
+  ],
+  "compilation": [
+   "1"
+  ],
+  "composer": [
+   "Guy Berryman",
+   "Chris Martin"
+  ],
+  "copyright": [
+   "(P) 2000 Parlophone Records Ltd"
+  ],
+  "date": [
+   "2000-07-10"
+  ],
+  "deezer_track_id": [
+   "3135556"
+  ],
+  "discnumber": [
+   "2"
+  ],
+  "disctotal": [
+   "2"
+  ],
+  "encoder": [
+   "Lavc62.11.100 libopus"
+  ],
+  "genius_url": [
+   "https://genius.com/Coldplay-yellow-lyrics"
+  ],
+  "genre": [
+   "Alternative Rock",
+   "Britpop",
+   "Indie",
+   "EDM"
+  ],
+  "initialkey": [
+   "B"
+  ],
+  "isrc": [
+   "GBAYE0000351"
+  ],
+  "label": [
+   "Parlophone"
+  ],
+  "lastfm_url": [
+   "https://www.last.fm/music/Coldplay/_/Yellow"
+  ],
+  "mood": [
+   "Happy"
+  ],
+  "musicbrainz_albumid": [
+   "33333333-3333-4333-8333-333333333333"
+  ],
+  "musicbrainz_artistid": [
+   "22222222-2222-4222-8222-222222222222"
+  ],
+  "musicbrainz_trackid": [
+   "11111111-1111-4111-8111-111111111111"
+  ],
+  "quality": [
+   "FLAC 16bit"
+  ],
+  "replaygain_track_gain": [
+   "-7.10 dB"
+  ],
+  "style": [
+   "Rock/Pop"
+  ],
+  "title": [
+   "Yellow"
+  ],
+  "totaldiscs": [
+   "2"
+  ],
+  "totaltracks": [
+   "40"
+  ],
+  "tracktotal": [
+   "40"
+  ]
+ },
+ "guests.flac": {
+  "album": [
+   "Mylo Xyloto"
+  ],
+  "albumartist": [
+   "Coldplay"
+  ],
+  "albumartistsort": [
+   "Coldplay"
+  ],
+  "artist": [
+   "Coldplay"
+  ],
+  "artists": [
+   "Coldplay",
+   "Rihanna"
+  ],
+  "artistsort": [
+   "Coldplay"
+  ],
+  "barcode": [
+   "724352778324"
+  ],
+  "bpm": [
+   "87"
+  ],
+  "composer": [
+   "Guy Berryman",
+   "Chris Martin"
+  ],
+  "copyright": [
+   "(P) 2000 Parlophone Records Ltd"
+  ],
+  "date": [
+   "2000-07-10"
+  ],
+  "deezer_track_id": [
+   "3135556"
+  ],
+  "discnumber": [
+   "1"
+  ],
+  "encoder": [
+   "Lavf62.3.100"
+  ],
+  "genius_url": [
+   "https://genius.com/Coldplay-yellow-lyrics"
+  ],
+  "genre": [
+   "Pop",
+   "R&B",
+   "Alternative Rock",
+   "Britpop",
+   "Indie"
+  ],
+  "initialkey": [
+   "B"
+  ],
+  "isrc": [
+   "GBAYE0000351"
+  ],
+  "label": [
+   "Parlophone"
+  ],
+  "lastfm_url": [
+   "https://www.last.fm/music/Coldplay/_/Yellow"
+  ],
+  "mood": [
+   "Happy"
+  ],
+  "musicbrainz_albumid": [
+   "33333333-3333-4333-8333-333333333333"
+  ],
+  "musicbrainz_artistid": [
+   "22222222-2222-4222-8222-222222222222"
+  ],
+  "musicbrainz_trackid": [
+   "11111111-1111-4111-8111-111111111111"
+  ],
+  "quality": [
+   "FLAC 16bit"
+  ],
+  "replaygain_track_gain": [
+   "-7.10 dB"
+  ],
+  "style": [
+   "Rock/Pop"
+  ],
+  "title": [
+   "Princess of China (feat. Rihanna)"
+  ],
+  "totaltracks": [
+   "14"
+  ],
+  "tracknumber": [
+   "10"
+  ],
+  "tracktotal": [
+   "14"
+  ]
+ },
+ "guests.m4a": {
+  "----:com.apple.iTunes:ARTISTS": [
+   "Coldplay",
+   "Rihanna"
+  ],
+  "----:com.apple.iTunes:BARCODE": [
+   "724352778324"
+  ],
+  "----:com.apple.iTunes:DEEZER_TRACK_ID": [
+   "3135556"
+  ],
+  "----:com.apple.iTunes:GENIUS_URL": [
+   "https://genius.com/Coldplay-yellow-lyrics"
+  ],
+  "----:com.apple.iTunes:ISRC": [
+   "GBAYE0000351"
+  ],
+  "----:com.apple.iTunes:LABEL": [
+   "Parlophone"
+  ],
+  "----:com.apple.iTunes:LASTFM_URL": [
+   "https://www.last.fm/music/Coldplay/_/Yellow"
+  ],
+  "----:com.apple.iTunes:MOOD": [
+   "Happy"
+  ],
+  "----:com.apple.iTunes:MusicBrainz Album Id": [
+   "33333333-3333-4333-8333-333333333333"
+  ],
+  "----:com.apple.iTunes:MusicBrainz Artist Id": [
+   "22222222-2222-4222-8222-222222222222"
+  ],
+  "----:com.apple.iTunes:MusicBrainz Track Id": [
+   "11111111-1111-4111-8111-111111111111"
+  ],
+  "----:com.apple.iTunes:QUALITY": [
+   "FLAC 16bit"
+  ],
+  "----:com.apple.iTunes:STYLE": [
+   "Rock/Pop"
+  ],
+  "----:com.apple.iTunes:iTunSMPB": [
+   " 00000000 00000840 000001C0 000000000000AC44"
+  ],
+  "----:com.apple.iTunes:replaygain_track_gain": [
+   "-7.10 dB"
+  ],
+  "aART": [
+   "Coldplay"
+  ],
+  "cprt": [
+   "(P) 2000 Parlophone Records Ltd"
+  ],
+  "disk": [
+   [
+    1,
+    0
+   ]
+  ],
+  "pgap": true,
+  "soaa": [
+   "Coldplay"
+  ],
+  "soar": [
+   "Coldplay"
+  ],
+  "tmpo": [
+   87
+  ],
+  "trkn": [
+   [
+    10,
+    14
+   ]
+  ],
+  "©ART": [
+   "Coldplay"
+  ],
+  "©alb": [
+   "Mylo Xyloto"
+  ],
+  "©day": [
+   "2000-07-10"
+  ],
+  "©gen": [
+   "Pop",
+   "R&B",
+   "Alternative Rock",
+   "Britpop",
+   "Indie"
+  ],
+  "©nam": [
+   "Princess of China (feat. Rihanna)"
+  ],
+  "©too": [
+   "Lavf62.3.100"
+  ],
+  "©wrt": [
+   "Guy Berryman",
+   "Chris Martin"
+  ]
+ },
+ "guests.mp3": {
+  "TALB": [
+   "Mylo Xyloto"
+  ],
+  "TBPM": [
+   "87"
+  ],
+  "TCOM": [
+   "Guy Berryman",
+   "Chris Martin"
+  ],
+  "TCON": [
+   "Pop",
+   "R&B",
+   "Alternative Rock",
+   "Britpop",
+   "Indie"
+  ],
+  "TCOP": [
+   "(P) 2000 Parlophone Records Ltd"
+  ],
+  "TDRC": [
+   "2000-07-10"
+  ],
+  "TIT2": [
+   "Princess of China (feat. Rihanna)"
+  ],
+  "TKEY": [
+   "B"
+  ],
+  "TPE1": [
+   "Coldplay"
+  ],
+  "TPE2": [
+   "Coldplay"
+  ],
+  "TPOS": [
+   "1"
+  ],
+  "TPUB": [
+   "Parlophone"
+  ],
+  "TRCK": [
+   "10/14"
+  ],
+  "TSO2": [
+   "Coldplay"
+  ],
+  "TSOP": [
+   "Coldplay"
+  ],
+  "TSRC": [
+   "GBAYE0000351"
+  ],
+  "TSSE": [
+   "Lavf62.3.100"
+  ],
+  "TXXX:Artists": [
+   "Coldplay",
+   "Rihanna"
+  ],
+  "TXXX:BARCODE": [
+   "724352778324"
+  ],
+  "TXXX:DEEZER_TRACK_ID": [
+   "3135556"
+  ],
+  "TXXX:GENIUS_URL": [
+   "https://genius.com/Coldplay-yellow-lyrics"
+  ],
+  "TXXX:LASTFM_URL": [
+   "https://www.last.fm/music/Coldplay/_/Yellow"
+  ],
+  "TXXX:MOOD": [
+   "Happy"
+  ],
+  "TXXX:MusicBrainz Album Id": [
+   "33333333-3333-4333-8333-333333333333"
+  ],
+  "TXXX:MusicBrainz Artist Id": [
+   "22222222-2222-4222-8222-222222222222"
+  ],
+  "TXXX:QUALITY": [
+   "FLAC 16bit"
+  ],
+  "TXXX:REPLAYGAIN_TRACK_GAIN": [
+   "-7.10 dB"
+  ],
+  "TXXX:STYLE": [
+   "Rock/Pop"
+  ],
+  "UFID:http://musicbrainz.org": "11111111-1111-4111-8111-111111111111"
+ },
+ "guests.ogg": {
+  "album": [
+   "Mylo Xyloto"
+  ],
+  "albumartist": [
+   "Coldplay"
+  ],
+  "albumartistsort": [
+   "Coldplay"
+  ],
+  "artist": [
+   "Coldplay"
+  ],
+  "artists": [
+   "Coldplay",
+   "Rihanna"
+  ],
+  "artistsort": [
+   "Coldplay"
+  ],
+  "barcode": [
+   "724352778324"
+  ],
+  "bpm": [
+   "87"
+  ],
+  "composer": [
+   "Guy Berryman",
+   "Chris Martin"
+  ],
+  "copyright": [
+   "(P) 2000 Parlophone Records Ltd"
+  ],
+  "date": [
+   "2000-07-10"
+  ],
+  "deezer_track_id": [
+   "3135556"
+  ],
+  "discnumber": [
+   "1"
+  ],
+  "encoder": [
+   "Lavc62.11.100 libvorbis"
+  ],
+  "genius_url": [
+   "https://genius.com/Coldplay-yellow-lyrics"
+  ],
+  "genre": [
+   "Pop",
+   "R&B",
+   "Alternative Rock",
+   "Britpop",
+   "Indie"
+  ],
+  "initialkey": [
+   "B"
+  ],
+  "isrc": [
+   "GBAYE0000351"
+  ],
+  "label": [
+   "Parlophone"
+  ],
+  "lastfm_url": [
+   "https://www.last.fm/music/Coldplay/_/Yellow"
+  ],
+  "mood": [
+   "Happy"
+  ],
+  "musicbrainz_albumid": [
+   "33333333-3333-4333-8333-333333333333"
+  ],
+  "musicbrainz_artistid": [
+   "22222222-2222-4222-8222-222222222222"
+  ],
+  "musicbrainz_trackid": [
+   "11111111-1111-4111-8111-111111111111"
+  ],
+  "quality": [
+   "FLAC 16bit"
+  ],
+  "replaygain_track_gain": [
+   "-7.10 dB"
+  ],
+  "style": [
+   "Rock/Pop"
+  ],
+  "title": [
+   "Princess of China (feat. Rihanna)"
+  ],
+  "totaltracks": [
+   "14"
+  ],
+  "tracknumber": [
+   "10"
+  ],
+  "tracktotal": [
+   "14"
+  ]
+ },
+ "guests.opus": {
+  "album": [
+   "Mylo Xyloto"
+  ],
+  "albumartist": [
+   "Coldplay"
+  ],
+  "albumartistsort": [
+   "Coldplay"
+  ],
+  "artist": [
+   "Coldplay"
+  ],
+  "artists": [
+   "Coldplay",
+   "Rihanna"
+  ],
+  "artistsort": [
+   "Coldplay"
+  ],
+  "barcode": [
+   "724352778324"
+  ],
+  "bpm": [
+   "87"
+  ],
+  "composer": [
+   "Guy Berryman",
+   "Chris Martin"
+  ],
+  "copyright": [
+   "(P) 2000 Parlophone Records Ltd"
+  ],
+  "date": [
+   "2000-07-10"
+  ],
+  "deezer_track_id": [
+   "3135556"
+  ],
+  "discnumber": [
+   "1"
+  ],
+  "encoder": [
+   "Lavc62.11.100 libopus"
+  ],
+  "genius_url": [
+   "https://genius.com/Coldplay-yellow-lyrics"
+  ],
+  "genre": [
+   "Pop",
+   "R&B",
+   "Alternative Rock",
+   "Britpop",
+   "Indie"
+  ],
+  "initialkey": [
+   "B"
+  ],
+  "isrc": [
+   "GBAYE0000351"
+  ],
+  "label": [
+   "Parlophone"
+  ],
+  "lastfm_url": [
+   "https://www.last.fm/music/Coldplay/_/Yellow"
+  ],
+  "mood": [
+   "Happy"
+  ],
+  "musicbrainz_albumid": [
+   "33333333-3333-4333-8333-333333333333"
+  ],
+  "musicbrainz_artistid": [
+   "22222222-2222-4222-8222-222222222222"
+  ],
+  "musicbrainz_trackid": [
+   "11111111-1111-4111-8111-111111111111"
+  ],
+  "quality": [
+   "FLAC 16bit"
+  ],
+  "replaygain_track_gain": [
+   "-7.10 dB"
+  ],
+  "style": [
+   "Rock/Pop"
+  ],
+  "title": [
+   "Princess of China (feat. Rihanna)"
+  ],
+  "totaltracks": [
+   "14"
+  ],
+  "tracknumber": [
+   "10"
+  ],
+  "tracktotal": [
+   "14"
+  ]
+ },
+ "plain.flac": {
+  "album": [
+   "Parachutes"
+  ],
+  "albumartist": [
+   "Coldplay"
+  ],
+  "albumartistsort": [
+   "Coldplay"
+  ],
+  "artist": [
+   "Coldplay"
+  ],
+  "artistsort": [
+   "Coldplay"
+  ],
+  "barcode": [
+   "724352778324"
+  ],
+  "bpm": [
+   "87"
+  ],
+  "composer": [
+   "Guy Berryman",
+   "Chris Martin"
+  ],
+  "copyright": [
+   "(P) 2000 Parlophone Records Ltd"
+  ],
+  "date": [
+   "2000-07-10"
+  ],
+  "deezer_track_id": [
+   "3135556"
+  ],
+  "discnumber": [
+   "1"
+  ],
+  "disctotal": [
+   "1"
+  ],
+  "encoder": [
+   "Lavf62.3.100"
+  ],
+  "genius_url": [
+   "https://genius.com/Coldplay-yellow-lyrics"
+  ],
+  "genre": [
+   "Rock, Alternative Rock, Britpop, Indie, EDM"
+  ],
+  "initialkey": [
+   "B"
+  ],
+  "isrc": [
+   "GBAYE0000351"
+  ],
+  "label": [
+   "Parlophone"
+  ],
+  "lastfm_url": [
+   "https://www.last.fm/music/Coldplay/_/Yellow"
+  ],
+  "mood": [
+   "Happy"
+  ],
+  "musicbrainz_albumid": [
+   "33333333-3333-4333-8333-333333333333"
+  ],
+  "musicbrainz_artistid": [
+   "22222222-2222-4222-8222-222222222222"
+  ],
+  "musicbrainz_trackid": [
+   "11111111-1111-4111-8111-111111111111"
+  ],
+  "quality": [
+   "FLAC 16bit"
+  ],
+  "replaygain_track_gain": [
+   "-7.10 dB"
+  ],
+  "style": [
+   "Rock/Pop"
+  ],
+  "title": [
+   "Yellow"
+  ],
+  "totaldiscs": [
+   "1"
+  ],
+  "totaltracks": [
+   "10"
+  ],
+  "tracknumber": [
+   "5"
+  ],
+  "tracktotal": [
+   "10"
+  ]
+ },
+ "plain.m4a": {
+  "----:com.apple.iTunes:BARCODE": [
+   "724352778324"
+  ],
+  "----:com.apple.iTunes:DEEZER_TRACK_ID": [
+   "3135556"
+  ],
+  "----:com.apple.iTunes:GENIUS_URL": [
+   "https://genius.com/Coldplay-yellow-lyrics"
+  ],
+  "----:com.apple.iTunes:ISRC": [
+   "GBAYE0000351"
+  ],
+  "----:com.apple.iTunes:LABEL": [
+   "Parlophone"
+  ],
+  "----:com.apple.iTunes:LASTFM_URL": [
+   "https://www.last.fm/music/Coldplay/_/Yellow"
+  ],
+  "----:com.apple.iTunes:MOOD": [
+   "Happy"
+  ],
+  "----:com.apple.iTunes:MusicBrainz Album Id": [
+   "33333333-3333-4333-8333-333333333333"
+  ],
+  "----:com.apple.iTunes:MusicBrainz Artist Id": [
+   "22222222-2222-4222-8222-222222222222"
+  ],
+  "----:com.apple.iTunes:MusicBrainz Track Id": [
+   "11111111-1111-4111-8111-111111111111"
+  ],
+  "----:com.apple.iTunes:QUALITY": [
+   "FLAC 16bit"
+  ],
+  "----:com.apple.iTunes:STYLE": [
+   "Rock/Pop"
+  ],
+  "----:com.apple.iTunes:iTunSMPB": [
+   " 00000000 00000840 000001C0 000000000000AC44"
+  ],
+  "----:com.apple.iTunes:replaygain_track_gain": [
+   "-7.10 dB"
+  ],
+  "aART": [
+   "Coldplay"
+  ],
+  "cprt": [
+   "(P) 2000 Parlophone Records Ltd"
+  ],
+  "disk": [
+   [
+    1,
+    1
+   ]
+  ],
+  "pgap": true,
+  "soaa": [
+   "Coldplay"
+  ],
+  "soar": [
+   "Coldplay"
+  ],
+  "tmpo": [
+   87
+  ],
+  "trkn": [
+   [
+    5,
+    10
+   ]
+  ],
+  "©ART": [
+   "Coldplay"
+  ],
+  "©alb": [
+   "Parachutes"
+  ],
+  "©day": [
+   "2000-07-10"
+  ],
+  "©gen": [
+   "Rock, Alternative Rock, Britpop, Indie, EDM"
+  ],
+  "©nam": [
+   "Yellow"
+  ],
+  "©too": [
+   "Lavf62.3.100"
+  ],
+  "©wrt": [
+   "Guy Berryman",
+   "Chris Martin"
+  ]
+ },
+ "plain.mp3": {
+  "TALB": [
+   "Parachutes"
+  ],
+  "TBPM": [
+   "87"
+  ],
+  "TCOM": [
+   "Guy Berryman",
+   "Chris Martin"
+  ],
+  "TCON": [
+   "Rock, Alternative Rock, Britpop, Indie, EDM"
+  ],
+  "TCOP": [
+   "(P) 2000 Parlophone Records Ltd"
+  ],
+  "TDRC": [
+   "2000-07-10"
+  ],
+  "TIT2": [
+   "Yellow"
+  ],
+  "TKEY": [
+   "B"
+  ],
+  "TPE1": [
+   "Coldplay"
+  ],
+  "TPE2": [
+   "Coldplay"
+  ],
+  "TPOS": [
+   "1/1"
+  ],
+  "TPUB": [
+   "Parlophone"
+  ],
+  "TRCK": [
+   "5/10"
+  ],
+  "TSO2": [
+   "Coldplay"
+  ],
+  "TSOP": [
+   "Coldplay"
+  ],
+  "TSRC": [
+   "GBAYE0000351"
+  ],
+  "TSSE": [
+   "Lavf62.3.100"
+  ],
+  "TXXX:BARCODE": [
+   "724352778324"
+  ],
+  "TXXX:DEEZER_TRACK_ID": [
+   "3135556"
+  ],
+  "TXXX:GENIUS_URL": [
+   "https://genius.com/Coldplay-yellow-lyrics"
+  ],
+  "TXXX:LASTFM_URL": [
+   "https://www.last.fm/music/Coldplay/_/Yellow"
+  ],
+  "TXXX:MOOD": [
+   "Happy"
+  ],
+  "TXXX:MusicBrainz Album Id": [
+   "33333333-3333-4333-8333-333333333333"
+  ],
+  "TXXX:MusicBrainz Artist Id": [
+   "22222222-2222-4222-8222-222222222222"
+  ],
+  "TXXX:QUALITY": [
+   "FLAC 16bit"
+  ],
+  "TXXX:REPLAYGAIN_TRACK_GAIN": [
+   "-7.10 dB"
+  ],
+  "TXXX:STYLE": [
+   "Rock/Pop"
+  ],
+  "UFID:http://musicbrainz.org": "11111111-1111-4111-8111-111111111111"
+ },
+ "plain.ogg": {
+  "album": [
+   "Parachutes"
+  ],
+  "albumartist": [
+   "Coldplay"
+  ],
+  "albumartistsort": [
+   "Coldplay"
+  ],
+  "artist": [
+   "Coldplay"
+  ],
+  "artistsort": [
+   "Coldplay"
+  ],
+  "barcode": [
+   "724352778324"
+  ],
+  "bpm": [
+   "87"
+  ],
+  "composer": [
+   "Guy Berryman",
+   "Chris Martin"
+  ],
+  "copyright": [
+   "(P) 2000 Parlophone Records Ltd"
+  ],
+  "date": [
+   "2000-07-10"
+  ],
+  "deezer_track_id": [
+   "3135556"
+  ],
+  "discnumber": [
+   "1"
+  ],
+  "disctotal": [
+   "1"
+  ],
+  "encoder": [
+   "Lavc62.11.100 libvorbis"
+  ],
+  "genius_url": [
+   "https://genius.com/Coldplay-yellow-lyrics"
+  ],
+  "genre": [
+   "Rock, Alternative Rock, Britpop, Indie, EDM"
+  ],
+  "initialkey": [
+   "B"
+  ],
+  "isrc": [
+   "GBAYE0000351"
+  ],
+  "label": [
+   "Parlophone"
+  ],
+  "lastfm_url": [
+   "https://www.last.fm/music/Coldplay/_/Yellow"
+  ],
+  "mood": [
+   "Happy"
+  ],
+  "musicbrainz_albumid": [
+   "33333333-3333-4333-8333-333333333333"
+  ],
+  "musicbrainz_artistid": [
+   "22222222-2222-4222-8222-222222222222"
+  ],
+  "musicbrainz_trackid": [
+   "11111111-1111-4111-8111-111111111111"
+  ],
+  "quality": [
+   "FLAC 16bit"
+  ],
+  "replaygain_track_gain": [
+   "-7.10 dB"
+  ],
+  "style": [
+   "Rock/Pop"
+  ],
+  "title": [
+   "Yellow"
+  ],
+  "totaldiscs": [
+   "1"
+  ],
+  "totaltracks": [
+   "10"
+  ],
+  "tracknumber": [
+   "5"
+  ],
+  "tracktotal": [
+   "10"
+  ]
+ },
+ "plain.opus": {
+  "album": [
+   "Parachutes"
+  ],
+  "albumartist": [
+   "Coldplay"
+  ],
+  "albumartistsort": [
+   "Coldplay"
+  ],
+  "artist": [
+   "Coldplay"
+  ],
+  "artistsort": [
+   "Coldplay"
+  ],
+  "barcode": [
+   "724352778324"
+  ],
+  "bpm": [
+   "87"
+  ],
+  "composer": [
+   "Guy Berryman",
+   "Chris Martin"
+  ],
+  "copyright": [
+   "(P) 2000 Parlophone Records Ltd"
+  ],
+  "date": [
+   "2000-07-10"
+  ],
+  "deezer_track_id": [
+   "3135556"
+  ],
+  "discnumber": [
+   "1"
+  ],
+  "disctotal": [
+   "1"
+  ],
+  "encoder": [
+   "Lavc62.11.100 libopus"
+  ],
+  "genius_url": [
+   "https://genius.com/Coldplay-yellow-lyrics"
+  ],
+  "genre": [
+   "Rock, Alternative Rock, Britpop, Indie, EDM"
+  ],
+  "initialkey": [
+   "B"
+  ],
+  "isrc": [
+   "GBAYE0000351"
+  ],
+  "label": [
+   "Parlophone"
+  ],
+  "lastfm_url": [
+   "https://www.last.fm/music/Coldplay/_/Yellow"
+  ],
+  "mood": [
+   "Happy"
+  ],
+  "musicbrainz_albumid": [
+   "33333333-3333-4333-8333-333333333333"
+  ],
+  "musicbrainz_artistid": [
+   "22222222-2222-4222-8222-222222222222"
+  ],
+  "musicbrainz_trackid": [
+   "11111111-1111-4111-8111-111111111111"
+  ],
+  "quality": [
+   "FLAC 16bit"
+  ],
+  "replaygain_track_gain": [
+   "-7.10 dB"
+  ],
+  "style": [
+   "Rock/Pop"
+  ],
+  "title": [
+   "Yellow"
+  ],
+  "totaldiscs": [
+   "1"
+  ],
+  "totaltracks": [
+   "10"
+  ],
+  "tracknumber": [
+   "5"
+  ],
+  "tracktotal": [
+   "10"
+  ]
+ }
+}

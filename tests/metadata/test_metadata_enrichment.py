@@ -566,7 +566,7 @@ def test_enhance_file_metadata_forwards_runtime_to_source_embedding(monkeypatch)
     monkeypatch.setattr(
         me,
         "embed_source_ids",
-        lambda audio_file, metadata, context, runtime=None: seen.setdefault("runtime", runtime),
+        lambda audio_file, metadata, context, runtime=None, **kw: seen.setdefault("runtime", runtime),
     )
     monkeypatch.setattr(me, "embed_album_art_metadata", lambda *args, **kwargs: None)
     monkeypatch.setattr(me, "verify_metadata_written", lambda file_path: True)

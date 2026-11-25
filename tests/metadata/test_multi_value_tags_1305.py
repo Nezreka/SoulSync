@@ -35,11 +35,11 @@ def test_the_writers_use_the_lists():
     import core.metadata.source as source
     src = inspect.getsource(source)
     assert "label_values = split_values(final_label)" in src
-    assert 'audio_file["LABEL"] = label_values' in src
+    # (every container's write goes through the one field table now)
+    assert 'tagfields.write(audio_file, symbols, "label", label_values)' in src
     assert "genre_values(genres," in src
     enr = inspect.getsource(enrichment)
-    assert 'audio_file["genre"] = genres_out' in enr
-    assert "text=genres_out" in enr
+    assert '_put("genre", genres_out)' in enr
 
 
 def test_a_list_lands_as_separate_values_in_vorbis_and_id3(tmp_path):

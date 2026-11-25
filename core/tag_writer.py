@@ -30,15 +30,13 @@ READABLE_EXTENSIONS = SUPPORTED_EXTENSIONS | {'.wav'}
 
 # File-field vocabulary shared by repairs. A selected-field write never
 # derives a second field (for example ALBUMARTIST) from an ARTIST change.
-_TEXT_TAGS = {
-    'title': ('TIT2', 'title', '\xa9nam'),
-    'artist': ('TPE1', 'artist', '\xa9ART'),
-    'album_artist': ('TPE2', 'albumartist', 'aART'),
-    'album': ('TALB', 'album', '\xa9alb'),
-    'year': ('TDRC', 'date', '\xa9day'),
-    'genre': ('TCON', 'genre', '\xa9gen'),
-    'bpm': ('TBPM', 'bpm', 'tmpo'),
-}
+# (the addresses themselves come from the one table every tag writer shares,
+# core/metadata/tagfields.py; this is only which fields a repair may name)
+from core.metadata.tagfields import FIELDS as _FIELDS
+
+_TEXT_TAGS = {name: tuple(_FIELDS[field][:3]) for name, field in (
+    ('title', 'title'), ('artist', 'artist'), ('album_artist', 'album_artist'), ('album', 'album'),
+    ('year', 'date'), ('genre', 'genre'), ('bpm', 'bpm'))}
 _FIELD_ALIASES = {'albumartist': 'album_artist', 'date': 'year',
                   'musicbrainz_albumid': 'MUSICBRAINZ_RELEASE_ID',
                   'musicbrainz_releasegroupid': 'MUSICBRAINZ_RELEASEGROUPID'}
@@ -922,18 +920,12 @@ def write_tags_to_file(file_path: str, db_data: Dict[str, Any],
         # as before. Backward compatible for callers that don't pass it.
         artists_list = _resolve_artists_list_for_write(db_data)
 
-        if isinstance(audio.tags, ID3):
-            written = _write_id3(audio, title, artist, album_artist, album,
-                                 year, genre_str, track_num, total_tracks,
-                                 disc_num, bpm, artists_list=artists_list)
-        elif isinstance(audio, (FLAC, OggVorbis)) or type(audio).__name__ == 'OggOpus':
-            written = _write_vorbis(audio, title, artist, album_artist, album,
+        written = []
+        if isinstance(audio.tags, ID3) or isinstance(audio, (FLAC, OggVorbis, MP4)) \
+                or type(audio).__name__ == 'OggOpus':
+            written = _write_fields(audio, title, artist, album_artist, album,
                                     year, genre_str, track_num, total_tracks,
                                     disc_num, bpm, artists_list=artists_list)
-        elif isinstance(audio, MP4):
-            written = _write_mp4(audio, title, artist, album_artist, album,
-                                 year, genre_str, track_num, total_tracks,
-                                 disc_num, bpm, artists_list=artists_list)
 
         total_discs = db_data.get('total_discs')
         if disc_num is not None and total_discs:
@@ -1066,153 +1058,73 @@ def _date_to_write(existing: Optional[str], year) -> str:
     return year_str
 
 
-def _write_id3(audio, title, artist, album_artist, album, year, genre,
-               track_num, total_tracks, disc_num, bpm,
-               artists_list: Optional[List[str]] = None) -> List[str]:
-    written = []
-    if title:
-        audio.tags.delall('TIT2')
-        audio.tags.add(TIT2(encoding=3, text=[title]))
-        written.append('title')
-    if artist:
-        audio.tags.delall('TPE1')
-        audio.tags.add(TPE1(encoding=3, text=[artist]))
-        written.append('artist')
-        # TPE1 stays as the joined display string. When the caller
-        # supplied a multi-value list AND the user has the
-        # write_multi_artist setting on, ALSO write the per-artist
-        # list to a TXXX:Artists frame (Picard convention). Mirrors
-        # the post-download enrichment writer at
-        # core/metadata/enrichment.py.
-        if artists_list and len(artists_list) > 1 and _multi_artist_write_enabled():
-            audio.tags.delall('TXXX:Artists')
-            audio.tags.add(TXXX(encoding=3, desc='Artists', text=list(artists_list)))
-            written.append('artists_multi')
-    if album_artist:
-        audio.tags.delall('TPE2')
-        audio.tags.add(TPE2(encoding=3, text=[album_artist]))
-        written.append('album_artist')
-    if album:
-        audio.tags.delall('TALB')
-        audio.tags.add(TALB(encoding=3, text=[album]))
-        written.append('album')
-    if year is not None:
-        existing_date = _id3_text(audio.tags, 'TDRC')
-        audio.tags.delall('TDRC')
-        audio.tags.add(TDRC(encoding=3, text=[_date_to_write(existing_date, year)]))
-        written.append('year')
-    if genre:
-        audio.tags.delall('TCON')
-        audio.tags.add(TCON(encoding=3, text=_genre_frame_values(genre)))
-        written.append('genre')
-    if track_num is not None:
-        audio.tags.delall('TRCK')
-        trk_str = f"{track_num}/{total_tracks}" if total_tracks else str(track_num)
-        audio.tags.add(TRCK(encoding=3, text=[trk_str]))
-        written.append('track_number')
-    if disc_num is not None:
-        audio.tags.delall('TPOS')
-        audio.tags.add(TPOS(encoding=3, text=[str(disc_num)]))
-        written.append('disc_number')
-    stored_bpm = _stored_bpm(bpm)
-    if stored_bpm is not None:
-        audio.tags.delall('TBPM')
-        audio.tags.add(TBPM(encoding=3, text=[str(stored_bpm)]))
-        written.append('bpm')
-    return written
+def _feat_in_title_enabled() -> bool:
+    try:
+        from core.settings import config_manager
+        return bool(config_manager.get('metadata_enhancement.tags.feat_in_title', False))
+    except Exception:
+        return False
 
 
-def _write_vorbis(audio, title, artist, album_artist, album, year, genre,
+def _write_fields(audio, title, artist, album_artist, album, year, genre,
                   track_num, total_tracks, disc_num, bpm,
                   artists_list: Optional[List[str]] = None) -> List[str]:
+    """the re-tagger's core fields, in any container.
+
+    this was three functions, one per container, each a copy of the download
+    tagger's own three. they had drifted from it: an M4A's artist atom took
+    the whole artist list even with feat_in_title on (guests in the title AND
+    the artist), and got no ARTISTS list. every write now goes through the
+    one table the download tagger uses (core/metadata/tagfields.py), so a
+    re-tag writes a file the way a download does."""
+    from core.metadata import tagfields
+    from core.metadata.common import get_mutagen_symbols
+    from core.metadata.track_number_format import track_number_known
+    symbols = get_mutagen_symbols()
+    kind = tagfields.container(audio, symbols)
+    put = lambda name, value: tagfields.write(audio, symbols, name, value)  # noqa: E731
     written = []
     if title:
-        audio['title'] = [title]
+        put('title', title)
         written.append('title')
     if artist:
-        audio['artist'] = [artist]
+        # the artist tag is the joined display string; with write_multi_artist
+        # the per-artist list goes beside it (TXXX:Artists / ARTISTS, the
+        # Picard convention). an M4A's artist atom holds the list itself
+        # (#587), except with feat_in_title, where the guests are in the title.
+        multi = bool(artists_list and len(artists_list) > 1 and _multi_artist_write_enabled())
+        display = [artist]
+        if multi and kind == 'mp4' and not _feat_in_title_enabled():
+            display = list(artists_list)
+        put('artist', display)
         written.append('artist')
-        # Vorbis-style multi-value: write the per-artist list to the
-        # `artists` key (separate from `artist`, picard convention) when
-        # the caller supplied a list AND the user has multi-value write
-        # enabled. Mirrors enrichment.py.
-        if artists_list and len(artists_list) > 1 and _multi_artist_write_enabled():
-            audio['artists'] = list(artists_list)
+        if multi:
+            put('artists', list(artists_list))
             written.append('artists_multi')
     if album_artist:
-        audio['albumartist'] = [album_artist]
+        put('album_artist', album_artist)
         written.append('album_artist')
     if album:
-        audio['album'] = [album]
+        put('album', album)
         written.append('album')
     if year is not None:
-        audio['date'] = [_date_to_write(_vorbis_first(audio, 'date'), year)]
+        existing = tagfields.read(audio, symbols, 'date')
+        put('date', _date_to_write(existing[0] if existing else None, year))
         written.append('year')
     if genre:
-        audio['genre'] = _genre_frame_values(genre)
+        put('genre', _genre_frame_values(genre))
         written.append('genre')
-    if track_num is not None:
-        # Bare number + separate total: Vorbis does not share ID3's "N/M"
-        # convention, and the combined form displayed literally as "1/1"
-        # (Discord, mrderekibmusic — Picard splits the fields correctly).
-        from core.metadata.track_number_format import format_vorbis_track_fields
-        _num, _total = format_vorbis_track_fields(track_num, total_tracks)
-        audio['tracknumber'] = [_num]
-        if _total is not None:
-            audio['tracktotal'] = [_total]
-            audio['totaltracks'] = [_total]   # legacy readers
+    if track_num is not None and track_number_known(track_num):
+        # (a 0 is the database's "position unknown": no number is written
+        # for it, as the download tagger writes none)
+        tagfields.write_track_position(audio, symbols, track_num, total_tracks)
         written.append('track_number')
     if disc_num is not None:
-        audio['discnumber'] = [str(disc_num)]
+        tagfields.write_disc_position(audio, symbols, disc_num, None)
         written.append('disc_number')
     stored_bpm = _stored_bpm(bpm)
     if stored_bpm is not None:
-        audio['bpm'] = [str(stored_bpm)]
-        written.append('bpm')
-    return written
-
-
-def _write_mp4(audio, title, artist, album_artist, album, year, genre,
-               track_num, total_tracks, disc_num, bpm,
-               artists_list: Optional[List[str]] = None) -> List[str]:
-    written = []
-    if title:
-        audio['\xa9nam'] = [title]
-        written.append('title')
-    if artist:
-        # MP4 \xa9ART can carry a list directly. When caller supplied
-        # a multi-value list AND user has multi-value write enabled,
-        # write the list. Otherwise single-string. Mirrors enrichment.py
-        # MP4 path.
-        if artists_list and len(artists_list) > 1 and _multi_artist_write_enabled():
-            audio['\xa9ART'] = list(artists_list)
-            written.append('artist')
-            written.append('artists_multi')
-        else:
-            audio['\xa9ART'] = [artist]
-            written.append('artist')
-    if album_artist:
-        audio['aART'] = [album_artist]
-        written.append('album_artist')
-    if album:
-        audio['\xa9alb'] = [album]
-        written.append('album')
-    if year is not None:
-        audio['\xa9day'] = [_date_to_write(_mp4_first(audio, '\xa9day'), year)]
-        written.append('year')
-    if genre:
-        audio['\xa9gen'] = _genre_frame_values(genre)
-        written.append('genre')
-    if track_num is not None:
-        total = total_tracks or 0
-        audio['trkn'] = [(track_num, total)]
-        written.append('track_number')
-    if disc_num is not None:
-        audio['disk'] = [(disc_num, 0)]
-        written.append('disc_number')
-    stored_bpm = _stored_bpm(bpm)
-    if stored_bpm is not None:
-        audio['tmpo'] = [stored_bpm]
+        put('bpm', stored_bpm)
         written.append('bpm')
     return written
 
