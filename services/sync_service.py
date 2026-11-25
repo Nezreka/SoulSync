@@ -1811,6 +1811,23 @@ class PlaylistSyncService:
                         if _cand_conf > confidence:
                             db_track, confidence = _cand_track, _cand_conf
 
+                    # #2308: the artist's pool can miss a track the library has
+                    # (a credit spelled another way, a track filed under a
+                    # featured artist), and a pool that scores nothing is a
+                    # miss. the wishlist step then asks the library without a
+                    # pool, finds it at 1.0 and calls it owned, so the song was
+                    # neither on the playlist nor downloaded. ask the same way
+                    # here before calling it missing, so the two always agree.
+                    if confidence < 0.7:
+                        for _try_title, _try_artist in _attempts:
+                            _cand_track, _cand_conf = db.check_track_exists(
+                                _try_title, _try_artist,
+                                confidence_threshold=0.7, server_source=active_server,
+                                album=getattr(spotify_track, 'album', None) or None,
+                            )
+                            if _cand_conf > confidence:
+                                db_track, confidence = _cand_track, _cand_conf
+
                     if db_track and confidence >= 0.7 and self._match_was_rejected(
                             spotify_track, active_server, db_track.id):
                         logger.info(f"Skipping '{db_track.title}' for '{original_title}': the user unmatched that pairing")
