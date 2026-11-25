@@ -363,6 +363,8 @@
                         </svg>
                     </button>
                 </div>
+                <!-- one row: the Audio / Video switch, and the way into the player beside it -->
+                <div class="side-row">
                 <!-- Audio ↔ Video side toggle (shell-only; wired by video/video-side.js) -->
                 <div class="side-toggle" data-tour="shell.side-switch" role="group" aria-label="Switch between Audio and Video">
                     <span class="side-toggle-thumb" aria-hidden="true"></span>
@@ -391,12 +393,13 @@
                     </button>
                 </div>
                 <!-- the player: watch and listen, a separate app (it has "Back to SoulSync") -->
-                <a class="open-player" href="{{ request.script_root }}/player" title="Open the player" data-tour="shell.open-player">
+                <a class="open-player" href="{{ request.script_root }}/player" title="Open the player" aria-label="Open the player" data-tour="shell.open-player">
                     <svg class="open-player-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                         <path d="M8 5.14v13.72a1 1 0 0 0 1.5.86l11.1-6.86a1 1 0 0 0 0-1.72L9.5 4.28A1 1 0 0 0 8 5.14z" />
                     </svg>
-                    <span class="open-player-label">Open the player</span>
+                    <span class="open-player-label">Player</span>
                 </a>
+                </div>
                 <div id="profile-indicator" class="profile-indicator" data-tour="shell.profile" style="display: none;">
                     <!-- opens the quick switch menu (init.js toggleProfileQuickSwitch) -->
                     <button type="button" id="profile-indicator-button" class="profile-indicator-main"
