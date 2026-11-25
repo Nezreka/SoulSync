@@ -1596,6 +1596,63 @@ def restore_backup_endpoint(filename):
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
+@bp.route('/api/database/companions', methods=['GET'])
+@admin_only
+def list_companion_backups_endpoint():
+    """The databases that ride along with a music backup (player, audiobooks),
+    each with its backups, and whether the encryption key file is there."""
+    try:
+        from core.backup_companions import companions_overview, key_file_path
+        return jsonify({"success": True, "companions": companions_overview(),
+                        "key_file": os.path.isfile(key_file_path())})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@bp.route('/api/database/companions/<name>/restore', methods=['POST'])
+@admin_only
+def restore_companion_endpoint(name):
+    """Restore the player or audiobook database from one of its backups."""
+    from core.backup_companions import CompanionRestoreError, restore_companion
+    body = request.get_json(silent=True) or {}
+    try:
+        result = restore_companion(name, body.get('filename'))
+    except CompanionRestoreError as e:
+        return jsonify({"success": False, "error": str(e)}), e.status
+    except Exception as e:
+        logger.exception("companion restore failed")
+        return jsonify({"success": False, "error": str(e)}), 500
+    _forget_player_caches()
+    return jsonify({"success": True, **result})
+
+
+def _forget_player_caches():
+    """what is held in memory about the player database is the old one's"""
+    try:
+        from core.player import libraries as _pl, settings as _ps
+        with _pl._lock:
+            _pl._hidden_cache.clear()
+        with _ps._lock:
+            _ps._cache.clear()
+    except Exception as e:  # noqa: BLE001
+        logger.debug("player caches not cleared after restore: %s", e)
+
+
+@bp.route('/api/database/encryption-key/download', methods=['GET'])
+@admin_only
+def download_encryption_key_endpoint():
+    """The key every saved credential is encrypted with. A backup restored on
+    another machine needs it, or the logins and api keys saved in Settings are
+    unreadable there."""
+    from core.backup_companions import key_file_path
+    path = key_file_path()
+    if not os.path.isfile(path):
+        return jsonify({"success": False, "error": "There is no key file yet."}), 404
+    response = send_file(os.path.abspath(path), as_attachment=True, download_name="soulsync.encryption_key")
+    response.headers['Cache-Control'] = 'no-store'
+    return response
+
+
 @bp.route('/api/database/backups/<filename>/download', methods=['GET'])
 @admin_only
 def download_backup_endpoint(filename):
