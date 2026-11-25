@@ -297,6 +297,8 @@ def test_a_deep_scan_never_moves_an_album_that_is_still_downloading(tmp_path, mo
 def _standalone(tmp_path, monkeypatch, **settings):
     import web_server
     from api import database_admin as db_admin
+    # the files here are stand-ins, not real audio
+    monkeypatch.setattr(db_admin, "_readable_audio", lambda p: True)
 
     transfer = tmp_path / "Transfer"
     staging = tmp_path / "Staging"
