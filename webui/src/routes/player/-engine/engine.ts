@@ -102,6 +102,14 @@ export interface EngineDeps {
   save: (item: PlayItem, position: number, duration: number | null, finished: boolean) => void;
   /** a movie or episode is into its credits: mark it watched (library + media server) */
   watched?: (item: PlayItem) => void;
+  /**
+   * a song has really been listened to (ten seconds in): it goes into the
+   * listening history. resolves to the play's id, or null when it wasn't
+   * recorded (a private session, a failed request).
+   */
+  listened?: (item: PlayItem, duration: number | null) => Promise<number | null>;
+  /** that play has counted (half the song or four minutes): it may be scrobbled */
+  counted?: (playId: number) => void;
   store: { get: (key: string) => string | null; set: (key: string, value: string) => void };
   now: () => number;
   /** amplify an element past full volume (a web audio gain); absent: no boost */
@@ -171,6 +179,9 @@ export const STILL_WATCHING_AFTER = 3;
 
 /** a movie or episode counts as watched this far through (into the credits, like plex) */
 export const WATCHED_AT = 0.92;
+/** seconds of a song heard before it is a play, and before the play counts */
+const LISTENED_AFTER = 10;
+const COUNTED_AFTER = 240;
 
 /** the audio track, and a picture subtitle drawn in by the converter */
 export interface TrackPick {
@@ -666,6 +677,9 @@ export class PlayerEngine {
       // a new play of the same title can count as watched again
       ...(options.keepTracks ? {} : { watchedKey: null }),
     });
+    // a new play is a new listen (the same song again counts again)
+    if (!options.keepTracks)
+      this.listen = { run: this.listen.run + 1, logged: false, counted: false, id: null };
     this.setPhase('locating');
     const key = `${item.type}:${item.id}:${item.part ?? ''}`;
     if (!options.keepTracks || this.tracksFor !== key) {
@@ -836,6 +850,7 @@ export class PlayerEngine {
         this.streamOffset + bookTime(this.state.parts, this.partIndex, el.currentTime);
       this.set({ position });
       this.checkWatched(position);
+      this.checkListened(el.currentTime);
       this.checkSleep();
       this.checkCrossfadeAndPrefetch(el, position);
       this.updatePositionState();
@@ -903,6 +918,42 @@ export class PlayerEngine {
   }
 
   /** once per play: into the credits of a movie or episode, it's watched (guide/live only marks movies) */
+  /**
+   * a song played here is a play: it goes into the listening history ten
+   * seconds in, and counts for scrobbling at half its length or four
+   * minutes, the same two marks the old web player used. /player sent
+   * neither, so nothing heard here reached stats, Last.fm, ListenBrainz or
+   * the recommendations built from what you play.
+   *
+   * by the element's own clock, not the position: a song joined mid-way on a
+   * music channel is listened to from where it was joined.
+   */
+  private checkListened(heard: number) {
+    const item = this.state.item;
+    if (!item || item.type !== 'track' || !this.deps.listened) return;
+    if (!Number.isFinite(heard)) return;
+    const listen = this.listen;
+    if (!listen.logged && heard >= LISTENED_AFTER) {
+      listen.logged = true; // first, so a slow request can't fire twice
+      const run = listen.run;
+      this.deps
+        .listened(item, this.state.duration ?? item.duration ?? null)
+        .then((id) => {
+          // a late answer for a song already skipped must not claim this one
+          if (this.listen.run === run) this.listen.id = id;
+        })
+        .catch(() => {});
+    }
+    if (listen.id !== null && !listen.counted) {
+      const duration = this.state.duration ?? item.duration ?? 0;
+      const mark = duration > 0 ? Math.min(duration / 2, COUNTED_AFTER) : COUNTED_AFTER;
+      if (heard >= mark) {
+        listen.counted = true;
+        this.deps.counted?.(listen.id);
+      }
+    }
+  }
+
   private checkWatched(position: number) {
     const item = this.state.item;
     const duration = this.state.duration;
@@ -930,6 +981,13 @@ export class PlayerEngine {
   }
 
   private autoRun = 0;
+  /** this play of a song, for the listening history (checkListened) */
+  private listen: { run: number; logged: boolean; counted: boolean; id: number | null } = {
+    run: 0,
+    logged: false,
+    counted: false,
+    id: null,
+  };
 
   /** the profile's playback settings (player settings): a video plays on into the next, and when to ask */
   private prefsAuto = { autoplayNext: true, stillWatchingAfter: STILL_WATCHING_AFTER };
