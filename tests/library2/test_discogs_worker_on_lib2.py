@@ -317,3 +317,24 @@ def test_album_search_rejects_mismatched_full_release_title(worker):
 
     assert "discogs" not in json.loads(row["external_ids"] or "{}")
     assert worker.stats["matched"] == 0
+
+
+# follow-up to #2297: the artist gate compares names, and the two sides spell
+# the same artist differently
+import pytest as _pytest
+
+
+@_pytest.mark.parametrize("library,discogs,same", [
+    ("Beyoncé", "Beyonce", True),
+    ("The Beatles", "Beatles, The", True),
+    ("Simon & Garfunkel", "Simon And Garfunkel", True),
+    ("AC/DC", "AC DC", True),
+    ("P!nk", "P!NK", True),
+    ("!!!", "!!!", True),
+    ("Akon", "Various", False),
+    ("Akon", "Akon & Friends", False),
+    ("Unknown Artist", "Unknown Artist", False),
+])
+def test_the_artist_gate_reads_past_spelling_and_nothing_else(library, discogs, same):
+    from core.discogs_worker import DiscogsWorker
+    assert DiscogsWorker._album_artist_matches(library, [discogs]) is same
