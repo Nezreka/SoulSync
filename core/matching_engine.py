@@ -467,8 +467,15 @@ class MusicMatchingEngine:
             extra_normalized = extra_content.lower().strip(' -()[]')
 
             # Check for remasters first - apply light penalty (might still match)
+            # ...unless the extra also names another recording. "Hotel
+            # California - Live; 1994 Remaster" is a live cut that was later
+            # remastered, and the remaster word alone made it 0.75, a match
+            # for the studio track: owning one counted as owning the other.
+            _another_recording = any(
+                re.search(r'\b' + re.escape(k) + r'\b', extra_normalized)
+                for k in different_version_keywords)
             for keyword in remaster_keywords:
-                if keyword in extra_normalized:
+                if keyword in extra_normalized and not _another_recording:
                     # Light penalty for remasters (same song, different mastering)
                     # 0.75 = 75% match - likely still matches with 0.70 threshold
                     # With 50/50 title/artist split: 0.75 * 0.5 + 1.0 * 0.5 = 0.875 > 0.7 threshold

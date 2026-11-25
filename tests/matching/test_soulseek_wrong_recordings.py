@@ -121,3 +121,17 @@ def test_a_marked_extended_mix_is_left_to_the_version_rules():
     decides, not the length gate"""
     assert score(want("Blue Monday", "New Order", "", 240),
                  cand("New Order\\Singles\\Blue Monday (Extended Mix).flac", 450)) >= BAR
+
+
+@pytest.mark.parametrize("a,b,same", [
+    ("Hotel California - Live; 1994 Remaster", "Hotel California", False),
+    ("Hotel California (Live) [Remastered]", "Hotel California", False),
+    ("Song - Acoustic, 2011 Remaster", "Song", False),
+    ("Song - 2012 Remaster", "Song", True),
+    ("Song (Remastered 2009)", "Song", True),
+])
+def test_a_remastered_live_cut_is_not_the_studio_track(a, b, same):
+    """the remaster word was checked first and returned 0.75, a match, before
+    the live word was looked at"""
+    value = engine.similarity_score(engine.normalize_string(a), engine.normalize_string(b))
+    assert (value >= 0.70) is same, value
