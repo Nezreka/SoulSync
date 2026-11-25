@@ -1,4 +1,5 @@
-"""the live view: one poll of every configured server, merged, with the pulse
+"""the live view: one poll of every configured server (and soulsync's own
+player, always there), merged, with the pulse
 (streams, bandwidth, transcoders, cpu), a 10 minute bandwidth series kept
 server side, and the play recorder fed from the same poll.
 
@@ -18,6 +19,7 @@ import core.server_activity as sa
 from core.server_activity import geo, images, links, store
 from core.server_activity import jellyfin as jf
 from core.server_activity import plex as px
+from core.server_activity import soulsync as ss
 from core.server_activity.quality import summarize_playback
 from core.server_activity.recorder import Recorder, Writer
 
@@ -275,18 +277,25 @@ def _both_servers(db=None) -> tuple:
 def poll(db=None, now: Optional[float] = None) -> Dict[str, Any]:
     now = time.time() if now is None else now
     (plex_sessions, plex_info), (jf_sessions, jf_info) = _both_servers(db)
-    servers = [i for i in (plex_info, jf_info) if i is not None]
-    sessions = plex_sessions + jf_sessions
+    own_sessions, own_info = ss.sessions(now)
+    media_servers = [i for i in (plex_info, jf_info) if i is not None]
+    servers = media_servers + [own_info]
+    sessions = plex_sessions + jf_sessions + own_sessions
     from core.server_activity.settings import get_settings
     settings = get_settings()
 
     for s in sessions:
-        hint = s.get("_link") or {}
-        s["keys"] = {"rating_key": hint.get("rating_key") or None, "parent_key": hint.get("parent_key") or None,
-                     "grandparent_key": hint.get("grandparent_key") or None}
-        # the proxy queries for the poster and the backdrop, with the family to fall back on
-        s["image"] = images.row_image(s)
-        s["backdrop"] = images.row_image(dict(s, thumb=s.get("art") or s.get("thumb")), role="art")
+        if s["server"] == ss.SERVER:
+            # the player's own art is a soulsync url the browser loads itself
+            s["image"] = s["backdrop"] = None
+        else:
+            hint = s.get("_link") or {}
+            s["keys"] = {"rating_key": hint.get("rating_key") or None,
+                         "parent_key": hint.get("parent_key") or None,
+                         "grandparent_key": hint.get("grandparent_key") or None}
+            # the proxy queries for the poster and the backdrop, with the family to fall back on
+            s["image"] = images.row_image(s)
+            s["backdrop"] = images.row_image(dict(s, thumb=s.get("art") or s.get("thumb")), role="art")
         conn = s["connection"]
         if conn.get("remote"):
             conn["location"] = geo.lookup(conn.get("public_ip") or conn.get("ip"), now)
@@ -298,7 +307,8 @@ def poll(db=None, now: Optional[float] = None) -> Dict[str, Any]:
                 _session_ids[f"{s['server']}:{s['session_key']}"] = s["_session_id"]
         s.pop("_user_thumb", None)
         s.pop("_session_id", None)
-    links.resolve(sessions, now)
+    # the player's sessions came with their links
+    links.resolve([s for s in sessions if s["server"] != ss.SERVER], now)
 
     _ensure_recorder_loaded(now)
     for info in servers:
@@ -319,7 +329,7 @@ def poll(db=None, now: Optional[float] = None) -> Dict[str, Any]:
         if srv is not None:
             cpu = px.cpu(srv)
     summary = _summary(sessions, cpu, settings.get("upload_mbps"))
-    if servers:
+    if media_servers or own_sessions:
         _sample(now, summary)
         if summary["streams"]:
             writer.put([("minute", int(now // 60), summary["streams"], summary["transcodes"],
@@ -338,9 +348,10 @@ def poll(db=None, now: Optional[float] = None) -> Dict[str, Any]:
         "bandwidth": bandwidth_series(now),
         "sessions": sessions,
     }
-    if not servers:
-        out.update(ok=False, reason="no_server", message="No Plex or Jellyfin server configured.")
-    elif not any(i["reachable"] for i in servers):
+    # soulsync's player is always a server: a down plex or jellyfin is only
+    # the view's error while nobody plays on the player (the servers list
+    # still says which one isn't answering)
+    if media_servers and not any(i["reachable"] for i in media_servers) and not own_sessions:
         out.update(ok=False, reason="unreachable", message="Couldn't reach the media server.")
     return out
 
@@ -410,11 +421,18 @@ def _find(session_key: str) -> Optional[Dict[str, Any]]:
 
 def stop_session(session_key: str, message: str = "", db=None) -> Dict[str, Any]:
     """end a stream with a message the viewer sees. ``session_key`` is the
-    session's ``session_key`` (plex) or ``jellyfin:<id>``."""
+    session's ``session_key`` (plex), ``jellyfin:<id>`` or
+    ``soulsync:<profile>:<screen>``."""
     key = str(session_key or "").strip()
     if not key:
         return {"ok": False, "error": "no session"}
     text = str(message or "").strip()[:500] or "The server administrator ended this stream."
+    if key.startswith(ss.PREFIX):
+        res = ss.stop(key, text)
+        if res.get("ok"):
+            with _poll_lock:
+                _snapshot.update(at=0.0)
+        return res
     if key.startswith("plex:"):
         key = key[5:]
     if key.startswith("jellyfin:"):
@@ -442,8 +460,11 @@ def stop_session(session_key: str, message: str = "", db=None) -> Dict[str, Any]
 
 
 def message_session(session_key: str, message: str, header: str = "", db=None) -> Dict[str, Any]:
-    """a message without stopping. jellyfin only: plex has no such call."""
+    """a message without stopping. jellyfin and soulsync's player: plex has
+    no such call."""
     key = str(session_key or "").strip()
+    if key.startswith(ss.PREFIX):
+        return ss.message(key, message, header=header)
     if not key.startswith("jellyfin:"):
         return {"ok": False, "error": "Plex can't show a message without stopping the stream."}
     cfg = sa._jellyfin_config(db)
@@ -481,11 +502,18 @@ def _maybe_maintain(now: float) -> None:
     threading.Thread(target=_maintenance, name="server-activity-maint", daemon=True).start()
 
 
+def _soulsync_plays_open() -> bool:
+    """a player play still open in the log: one more poll closes it"""
+    with recorder.lock:
+        return any(k[0] == ss.SERVER for k in recorder.open)
+
+
 def sampler_tick(has_subscribers: bool, emit: Optional[Callable[[Dict[str, Any]], None]] = None,
                  now: Optional[float] = None) -> Optional[Dict[str, Any]]:
-    """one round: poll when a server is configured, feed the recorder (the poll
-    does), push to open drawers. returns the payload it used."""
-    if not sa.any_server_configured():
+    """one round: poll when a server is configured or the player is playing,
+    feed the recorder (the poll does), push to open drawers. returns the
+    payload it used."""
+    if not sa.any_server_configured() and not ss.is_active() and not _soulsync_plays_open():
         return None
     data = get_activity(max_age=LIVE_INTERVAL - 0.5 if has_subscribers else IDLE_INTERVAL - 0.5, stale_ok=0)
     if has_subscribers and emit is not None:
@@ -498,7 +526,8 @@ def run_sampler_forever(sleep: Callable[[float], None], should_stop: Callable[[]
                         has_subscribers: Callable[[], bool],
                         emit: Callable[[Dict[str, Any]], None]) -> None:
     """the loop web_server starts once. 3 s while a drawer is open, 10 s while
-    nobody looks (so plays are still recorded), nothing without a server."""
+    nobody looks (so plays are still recorded), nothing with no server and
+    nobody playing on the player."""
     while not should_stop():
         try:
             subs = bool(has_subscribers())

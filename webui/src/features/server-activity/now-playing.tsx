@@ -36,6 +36,7 @@ import {
   transcoderLine,
   transcoderMix,
   whoLine,
+  serverWord,
 } from './format';
 import { ChevronDown, MessageIcon, OpenIcon, QuietIcon, ServerIcon, StopIcon } from './icons';
 import { linkLabel, openLink } from './links';
@@ -534,11 +535,9 @@ function StreamDetail({
   const c = s.connection;
   const p = s.player;
   const paused = pausedPhrase(s.pause_count, s.paused_ms);
-  const serverWord = s.server === 'plex' ? 'Plex' : 'Jellyfin';
+  const word = serverWord(s.server);
   const server =
-    s.server_name && s.server_name.toLowerCase() !== s.server
-      ? `${serverWord} · ${s.server_name}`
-      : serverWord;
+    s.server_name && s.server_name.toLowerCase() !== s.server ? `${word} · ${s.server_name}` : word;
   const reason = s.reason ? splitReason(s.reason.text) : null;
   const playerDetail = [
     [p.platform, p.platform_version].filter(Boolean).join(' '),
@@ -583,11 +582,19 @@ function StreamDetail({
         ) : (
           <Fact
             label="Stream"
-            value={s.bandwidth_kbps ? mbps(s.bandwidth_kbps) : METHOD_LABEL[s.playback.method]}
+            value={
+              s.bandwidth_kbps
+                ? mbps(s.bandwidth_kbps)
+                : s.playback.method
+                  ? METHOD_LABEL[s.playback.method]
+                  : 'Not reported'
+            }
             sub={
               s.playback.method === 'direct_play'
                 ? 'Sent as stored, nothing converted'
-                : 'Repackaged, the picture and sound untouched'
+                : s.playback.method
+                  ? 'Repackaged, the picture and sound untouched'
+                  : "The player didn't say how it plays"
             }
           />
         )}

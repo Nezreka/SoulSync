@@ -1169,8 +1169,9 @@ def put_player_settings():
         return _bad(e)
     except Exception:  # noqa: BLE001
         return _failed("settings save", "Couldn't save that setting.")
-    if not out["share_activity"]:
-        presence.forget_profile(pid)
+    # its screens are still kept (the admin's Server Activity sees every
+    # stream); members stop seeing them at once
+    presence.set_shared(pid, bool(out["share_activity"]))
     if out.get("commercials_enabled"):
         try:
             from core.player import commercials
@@ -1398,24 +1399,43 @@ def _profiles_by_id() -> dict:
     return _who["map"]
 
 
+def _beat_client() -> dict:
+    """what the screen is, from the request: a paired device's own name and
+    platform, else the browser and system its user agent names"""
+    from flask import g
+    dev = getattr(g, "device", None) if getattr(g, "device_auth", False) else None
+    if isinstance(dev, dict) and dev:
+        return {k: v for k, v in (("product", dev.get("app")), ("name", dev.get("name")),
+                                  ("platform", dev.get("platform"))) if v}
+    from core.security.devices import device_label
+    label = device_label(request.headers.get("User-Agent", ""))
+    browser, _, system = label.partition(" on ")
+    return {k: v for k, v in (("product", "SoulSync player"), ("device", browser),
+                              ("platform", system)) if v}
+
+
 @bp.route("/api/player/presence", methods=["POST"])
 @device_playback
 @self_only
 def presence_beat():
     """a screen plays something: {session, item_type, item_id, position,
-    duration, playing, live, channel?, meta?}, every few seconds. a profile
-    that doesn't share is never kept (shared: false)"""
+    duration, playing, live, channel?, meta?, stream?, client?}, every few
+    seconds. every beat is kept, marked with whether the profile shares
+    (members only ever see profiles that share; the admin's Server Activity
+    sees all). the answer carries the admin's orders for this screen:
+    {stop: {message}} or {message: {header, text}}"""
     from core.player import presence
     pid = _profile()
     if pid is None:
         return _signed_out()
-    if not _shares(pid):
-        return jsonify({"success": True, "shared": False})
+    body = request.get_json(silent=True)
+    shared = _shares(pid)
     try:
-        presence.beat(pid, request.get_json(silent=True))
+        presence.beat(pid, body, shared=shared, ip=request.remote_addr, client=_beat_client())
     except presence.PresenceError as e:
         return _bad(e)
-    return jsonify({"success": True, "shared": True})
+    return jsonify({"success": True, "shared": shared,
+                    **presence.orders(pid, str((body or {}).get("session") or ""))})
 
 
 @bp.route("/api/player/presence", methods=["DELETE"])

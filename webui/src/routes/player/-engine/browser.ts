@@ -40,6 +40,11 @@ const SCREEN = (() => {
   }
 })();
 
+/** this screen's id: the converter's owner, and its watching-now session */
+export function screenId(): string {
+  return SCREEN;
+}
+
 function tagScreen(url: string): string {
   if (!url.includes('/api/player/transcode/')) return url;
   return `${url}${url.includes('?') ? '&' : '?'}ps=${SCREEN}`;

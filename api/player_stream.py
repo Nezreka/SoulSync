@@ -44,6 +44,20 @@ def _refused(e):
     return jsonify({"success": False, "error": e.code, "message": e.message}), e.status
 
 
+def _admin_stopped(item_type, item_id):
+    """an admin just stopped this profile's screen on this item (Server
+    Activity): it isn't served again for a little while. None otherwise"""
+    from core.player import presence
+    from core.profile_context import get_current_profile_id
+    try:
+        message = presence.refused(get_current_profile_id(), item_type, item_id)
+    except (TypeError, ValueError):
+        return None
+    if not message:
+        return None
+    return jsonify({"success": False, "error": "stopped", "message": message}), 403
+
+
 VIDEO_TYPES = ("movie", "episode", "youtube")
 
 
@@ -91,6 +105,9 @@ def playable(item_type, item_id):
     import time
 
     from core.player.playable import Refused, resolve
+    stopped = _admin_stopped(item_type, item_id)
+    if stopped:
+        return stopped
     part = request.args.get("part")
     started = time.monotonic()
     try:
@@ -155,6 +172,9 @@ def _offer_transcode(out, source, item_type, item_id, part, quality, audio=0, bu
 def stream(item_type, item_id):
     from core.player.playable import Refused, resolve
     from core.player.relay import relay
+    stopped = _admin_stopped(item_type, item_id)
+    if stopped:
+        return stopped
     try:
         source = resolve(item_type, item_id, request.args.get("part"))
     except Refused as e:
@@ -546,6 +566,9 @@ def transcode(item_type, item_id):
     from core.player.playable import Refused, resolve
     if item_type not in VIDEO_TYPES:
         return jsonify({"success": False, "error": "not_video", "message": "Only video is converted."}), 400
+    stopped = _admin_stopped(item_type, item_id)
+    if stopped:
+        return stopped
     try:
         start = max(0.0, float(request.args.get("t") or 0))
     except ValueError:
