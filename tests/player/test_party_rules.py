@@ -90,3 +90,19 @@ def test_old_cooldowns_and_reactions_are_forgotten(monkeypatch):
     parties._forget_old(10_000_000.0)
     assert parties._pee_cooldowns == {}
     assert parties._reaction_timestamps == {}
+
+
+# ── a party's id is not a way round the rating cap ──────────────────────────
+
+def test_a_party_over_the_rating_cap_cannot_be_opened_or_joined_by_its_id(db):
+    """the list of parties left out titles a profile may not see; opening or
+    joining one by its id did not"""
+    p = parties.create_party(db, HOST, {"item_type": "movie", "item_id": "r-rated", "title": "Heat"})
+    kid_sees = lambda item_type, item_id: item_id != "r-rated"   # noqa: E731
+    assert parties.get_party(db, p["id"], STRANGER, may_see=kid_sees) is None
+    with pytest.raises(parties.PartyError):
+        parties.join_party(db, p["id"], STRANGER, may_see=kid_sees)
+    # the host's own party, and a profile the cap doesn't hide it from
+    assert parties.get_party(db, p["id"], HOST, may_see=kid_sees)["id"] == p["id"]
+    assert parties.get_party(db, p["id"], MEMBER, may_see=lambda *a: True)["id"] == p["id"]
+    parties.join_party(db, p["id"], MEMBER, may_see=lambda *a: True)

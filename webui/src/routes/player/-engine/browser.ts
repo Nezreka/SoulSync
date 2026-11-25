@@ -244,6 +244,31 @@ function analyser(el: HTMLMediaElement): AnalyserNode | null {
   return graph(el)?.analyser ?? null;
 }
 
+/** a song heard here goes into the listening history, as a play from the old
+ *  web player does: the same endpoint, so one pile, one set of rules */
+async function listened(item: PlayItem, duration: number | null): Promise<number | null> {
+  const numeric = /^\d+$/.test(item.id);
+  const out = await apiClient
+    .post('library/log-play', {
+      json: {
+        track: {
+          id: item.id,
+          lib2_track_id: numeric ? Number(item.id) : null,
+          title: item.title,
+          artist: item.subtitle ?? '',
+          album: item.parentTitle ?? '',
+        },
+        duration_ms: duration ? Math.round(duration * 1000) : 0,
+      },
+    })
+    .json<{ play_id?: number | null }>();
+  return typeof out.play_id === 'number' ? out.play_id : null;
+}
+
+function counted(playId: number) {
+  void apiClient.post('library/log-play/eligible', { json: { play_id: playId } }).catch(() => {});
+}
+
 export function browserDeps(): EngineDeps {
   return {
     createMedia,
@@ -256,6 +281,8 @@ export function browserDeps(): EngineDeps {
     subtitle,
     save,
     watched,
+    listened,
+    counted,
     store,
     now: () => Date.now(),
     mediaSession:

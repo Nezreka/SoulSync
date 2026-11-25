@@ -66,6 +66,8 @@ function setup(opts: {
   slowPlayable?: (item: PlayItem) => Promise<Playable> | null;
   saved?: SavedPosition | null;
   tracks?: Tracks;
+  listened?: EngineDeps['listened'];
+  counted?: EngineDeps['counted'];
 }) {
   const media: Partial<Record<MediaKind, FakeMedia>> = {};
   const saves: { id: string; position: number; finished: boolean }[] = [];
@@ -83,6 +85,8 @@ function setup(opts: {
     // copied video starts at the keyframe before: here, the whole second below
     transcodeStart: async (_url, t) => ({ start: Math.floor(t), seek: Math.floor(t) + 0.3 }),
     save: (item, position, _d, finished) => saves.push({ id: item.id, position, finished }),
+    listened: opts.listened,
+    counted: opts.counted,
     store: { get: (k) => store.get(k) ?? null, set: (k, v) => void store.set(k, v) },
     now: () => now,
     mediaSession: null,
@@ -799,5 +803,68 @@ describe('saving the start', () => {
     el.tick(0);
     t.engine.saveNow();
     expect(t.saves.at(-1)).toEqual({ id: '1', position: 0, finished: false });
+  });
+});
+
+describe('a song played here is a play', () => {
+  it('goes into the listening history ten seconds in, once, and counts at half way', async () => {
+    const heard: string[] = [];
+    const counted: number[] = [];
+    const t = setup({
+      listened: async (item) => {
+        heard.push(item.id);
+        return 77;
+      },
+      counted: (id) => counted.push(id),
+    });
+    t.engine.playItems([track('a')]);
+    await t.flush();
+    const el = t.media.audio!;
+    el.tick(9);
+    expect(heard).toEqual([]);
+    el.tick(10);
+    el.tick(12);
+    await t.flush();
+    expect(heard).toEqual(['a']); // once, however many ticks
+    el.tick(49);
+    expect(counted).toEqual([]);
+    el.tick(50); // half of the 100 second song
+    el.tick(60);
+    expect(counted).toEqual([77]);
+  });
+
+  it('the next song is its own play, and a film is not a listen', async () => {
+    const heard: string[] = [];
+    const t = setup({
+      listened: async (item) => {
+        heard.push(item.id);
+        return 1;
+      },
+    });
+    t.engine.playItems([track('a'), track('b')]);
+    await t.flush();
+    t.media.audio!.tick(11);
+    await t.flush();
+    t.engine.next();
+    await t.flush();
+    t.media.audio!.tick(11);
+    await t.flush();
+    expect(heard).toEqual(['a', 'b']);
+    t.engine.playItems([movie('m')]);
+    await t.flush();
+    t.media.video!.tick(30);
+    await t.flush();
+    expect(heard).toEqual(['a', 'b']);
+  });
+
+  it('a play that was not recorded is never counted', async () => {
+    const counted: number[] = [];
+    const t = setup({ listened: async () => null, counted: (id) => counted.push(id) });
+    t.engine.playItems([track('a')]);
+    await t.flush();
+    t.media.audio!.tick(11);
+    await t.flush();
+    t.media.audio!.tick(90);
+    expect(counted).toEqual([]);
   });
 });

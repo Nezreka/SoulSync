@@ -150,8 +150,12 @@ def fill(channels: List[Dict[str, Any]], tracks_by_album: Dict[int, List[list]],
     return out
 
 
-def read(conn) -> List[Dict[str, Any]]:
-    """owned tracks in the caller's library scope, grouped into channels."""
+def read(conn, *, hide_explicit: bool = False) -> List[Dict[str, Any]]:
+    """owned tracks in the caller's library scope, grouped into channels.
+
+    ``hide_explicit``: the profile hides explicit music. its channels were
+    built from every track all the same, so a kids profile's guide listed
+    songs that were then refused when their turn came."""
     from core.library2.sql_util import owned_sql, scope_visibility_sql
 
     where = [owned_sql("track", "t")]
@@ -159,13 +163,17 @@ def read(conn) -> List[Dict[str, Any]]:
     if visible:
         where.append(visible)
     owned = " AND ".join(where)
+    clean = ""
+    if hide_explicit:
+        from core.subsonic.library import _has_overrides, track_explicit_sql
+        clean = f" AND NOT {track_explicit_sql('t', 'al', _has_overrides(conn))}"
     albums = conn.execute(f"""
         SELECT al.id, al.genres, ar.genres,
                COALESCE(NULLIF(al.mood, ''), NULLIF(ar.mood, '')), COUNT(t.id)
         FROM lib2_tracks t
         JOIN lib2_albums al ON al.id = t.album_id
         LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id
-        WHERE {owned}
+        WHERE {owned}{clean}
         GROUP BY al.id
     """).fetchall()  # noqa: S608 - the fragments are the library's own sql builders
     track_moods = conn.execute(f"""
@@ -185,7 +193,7 @@ def read(conn) -> List[Dict[str, Any]]:
             FROM lib2_tracks t
             JOIN lib2_albums al ON al.id = t.album_id
             LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id
-            WHERE t.album_id IN ({",".join("?" for _ in chunk)}) AND {owned}
+            WHERE t.album_id IN ({",".join("?" for _ in chunk)}) AND {owned}{clean}
         """, chunk).fetchall()  # noqa: S608
         for r in rows:
             seconds = int(r[3] / 1000) if r[3] else 0
