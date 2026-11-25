@@ -111,3 +111,34 @@ def test_watchlist_repair_fixes_bogus_deezer_ids_artwork_and_duplicates_2274_227
     assert dp_rows[0]["deezer_artist_id"] == "27"
     assert dp_rows[0]["musicbrainz_artist_id"] == "mb_dp"
     assert dp_rows[0]["image_url"] == "https://cdn.example/dp.jpg"
+
+
+# the first cut of #2254 capped every title that scored under 0.65 on its bare
+# letters, which undid the suffix cleaning: a track with a guest or a remaster
+# note in its title stopped matching the same track without one, fell under the
+# 0.70 a library match needs, and read as missing.
+import pytest as _pytest
+
+
+@_pytest.mark.parametrize("a,b,least", [
+    ("Stay (feat. Justin Bieber)", "Stay", 0.95),
+    ("Song 2", "Song 2 - 2012 Remaster", 0.80),
+    ("Yesterday (Remastered 2009)", "Yesterday", 0.80),
+    ("Hurt", "Hurt (Quiet)", 0.70),
+    ("Fade Into You", "Fade Into You Lyrics Video HD", 0.70),
+])
+def test_a_suffix_on_one_side_only_still_matches(a, b, least):
+    from core.matching_engine import MusicMatchingEngine
+    score, _ = MusicMatchingEngine().score_track_match(
+        source_title=a, source_artists=["X"], source_duration_ms=200000,
+        candidate_title=b, candidate_artists=["X"], candidate_duration_ms=200000)
+    assert score >= least
+
+
+def test_a_suffix_both_share_still_cannot_join_two_songs():
+    from core.matching_engine import MusicMatchingEngine
+    score, _ = MusicMatchingEngine().score_track_match(
+        source_title="Mele Kalikimaka - Piano Version", source_artists=["X"], source_duration_ms=200000,
+        candidate_title="Someday At Christmas - Piano Version", candidate_artists=["X"],
+        candidate_duration_ms=200000)
+    assert score < 0.70

@@ -150,6 +150,10 @@ def test_scheduled_party_auto_opens_lobby_and_everyone_control(tmp_path):
     assert pre_show["status"] == "lobby"
     assert pre_show["can_control"] is True
 
-    # Guest can seek/play in 'everyone' mode
+    # Guest can seek/play in 'everyone' mode, once in the party: a party is
+    # steered by the people in it, and looking at one is not joining it
+    with pytest.raises(parties.PartyError):
+        parties.update_state(db, p["id"], profile_id=2, body={"action": "start"}, now=t0 + 3590)
+    parties.join_party(db, p["id"], profile_id=2, ready=True, now=t0 + 3595)
     playing = parties.update_state(db, p["id"], profile_id=2, body={"action": "start"}, now=t0 + 3600)
     assert playing["status"] == "playing"

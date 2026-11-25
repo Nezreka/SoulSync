@@ -616,25 +616,35 @@ class MusicMatchingEngine:
         candidate_title_cleaned = self.clean_title(candidate_title)
 
         title_score = self.similarity_score(source_title_cleaned, candidate_title_cleaned)
-        # #2254: A shared trailing suffix (e.g. "- Piano Version", "(Remastered)")
-        # must never inflate two different songs by the same artist into a >=0.70 match
-        # ("Mele Kalikimaka - Piano Version" vs "Someday At Christmas - Piano Version").
-        _src_base = self.normalize_string(re.split(r'\s+[-–—]\s+|\s*[\(\[]', source_title.strip(), maxsplit=1)[0])
-        _cand_base = self.normalize_string(re.split(r'\s+[-–—]\s+|\s*[\(\[]', candidate_title.strip(), maxsplit=1)[0])
-        if _src_base and _cand_base and (
-            _src_base != source_title_cleaned or _cand_base != candidate_title_cleaned
-        ):
-            base_title_score = self.similarity_score(_src_base, _cand_base)
-            title_score = min(title_score, base_title_score)
-        if source_core_title and candidate_core_title:
-            core_title_score = self.similarity_score(source_core_title, candidate_core_title)
-            title_score = min(title_score, core_title_score)
+        # #2254: a suffix BOTH titles carry ("- Piano Version", "(Remastered)")
+        # must never lift two different songs by one artist into a match:
+        # "Mele Kalikimaka - Piano Version" vs "Someday At Christmas - Piano
+        # Version" scored 0.80 on the shared words alone. so when both have a
+        # suffix, the part before it is compared on its own and the lower
+        # score counts.
+        #
+        # only then. the first cut of this also compared every pair's bare
+        # letters and capped any title under 0.65, which undid clean_title:
+        # "Stay (feat. Justin Bieber)" vs "Stay" fell from 1.00 to 0.55,
+        # "Song 2 - 2012 Remaster" vs "Song 2" from 0.85 to 0.55, both under
+        # the 0.70 a library match needs, so owned tracks read as missing.
+        _suffix_split = r'\s+[-–—]\s+|\s*[\(\[]'
+        _src_parts = re.split(_suffix_split, source_title.strip(), maxsplit=1)
+        _cand_parts = re.split(_suffix_split, candidate_title.strip(), maxsplit=1)
+        _bases_disagree = False
+        if len(_src_parts) > 1 and len(_cand_parts) > 1:
+            _src_base = self.normalize_string(_src_parts[0])
+            _cand_base = self.normalize_string(_cand_parts[0])
+            if _src_base and _cand_base:
+                base_title_score = self.similarity_score(_src_base, _cand_base)
+                title_score = min(title_score, base_title_score)
+                _bases_disagree = base_title_score < 0.65
         duration_score = self.duration_similarity(source_duration_ms, candidate_duration_ms)
 
         confidence = (title_score * 0.60) + (artist_score * 0.30) + (duration_score * 0.10)
-        # If the base/core titles themselves clearly disagree (< 0.65), cap confidence
-        # below the 0.70 sync match threshold even when artist + duration agree 100%.
-        if (source_core_title or _src_base) and (candidate_core_title or _cand_base) and title_score < 0.65:
+        # two suffixed titles whose own names clearly differ stay under the 0.70
+        # a library match needs, even when artist and duration agree fully
+        if _bases_disagree:
             confidence = min(confidence, 0.55)
 
         # Apply duration penalty when there is a significant duration mismatch (>15s and >15%)

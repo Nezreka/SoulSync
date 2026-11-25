@@ -1123,7 +1123,9 @@ def test_the_search_carries_the_song_with_its_own_artist():
     assert sk.hint_calls
     for hint in sk.hint_calls:
         assert {k: v for k, v in hint.items() if k != 'catalogue_context'} == {
-            "title": "How Far I'll Go", "artist": "Auli'i Cravalho", "album": "Moana", "deezer_id": "136340808"}
+            "title": "How Far I'll Go", "artist": "Auli'i Cravalho", "album": "Moana", "deezer_id": "136340808",
+            # the hint also carries the length and a tidal id (none for a deezer track)
+            "duration_ms": 163000, "tidal_id": None}
         assert hint['catalogue_context']['track_info']['artists'] == [{'name': "Auli'i Cravalho"}]
         assert hint['catalogue_context']['album']['artists'] == [{'name': 'Various Artists'}]
     # one dict for the whole task, so a source can cache in it
