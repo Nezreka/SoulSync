@@ -1378,6 +1378,11 @@ def tidal_disconnect():
 def get_tidal_playlists():
     """Fetches all user playlists from Tidal with full track data (like sync.py)."""
     client = get_tidal_client_for_profile() or _tidal_client()
+    # a member who hasn't connected their own Tidal is not shown the server's (#2301)
+    from core.playlists.account_isolation import refusal_for_request
+    _blocked = refusal_for_request("tidal", own_connected=client is not _tidal_client())
+    if _blocked:
+        return jsonify(_blocked), 401
     if not client or not client.is_authenticated():
         return jsonify({"error": "Tidal not authenticated."}), 401
     try:
@@ -2480,6 +2485,11 @@ def get_deezer_arl_status():
 @requires("music.playlist_sync")
 def get_deezer_arl_playlists():
     """Fetch user playlists via Deezer ARL authentication (like /api/spotify/playlists)."""
+    # the ARL is the server's own account: a member only sees it when it is shared (#2301)
+    from core.playlists.account_isolation import refusal_for_request
+    _blocked = refusal_for_request("deezer")
+    if _blocked:
+        return jsonify(_blocked), 401
     try:
         deezer_dl = download_orchestrator.client("deezer_dl") if download_orchestrator and hasattr(download_orchestrator, 'client') else None
         if not deezer_dl or not deezer_dl.is_authenticated():
@@ -3044,6 +3054,10 @@ def get_qobuz_playlists():
     matches the Tidal + Deezer behaviour so the Sync page renderer can
     treat all three services uniformly.
     """
+    from core.playlists.account_isolation import refusal_for_request
+    _blocked = refusal_for_request("qobuz")
+    if _blocked:
+        return jsonify(_blocked), 401
     qobuz = _get_qobuz_client_for_sync()
     if not qobuz or not qobuz.is_authenticated():
         return jsonify({"error": "Qobuz not authenticated."}), 401
@@ -4767,6 +4781,10 @@ ytmusic_discovery_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefi
 def get_ytmusic_playlists():
     """List the signed-in YouTube Music account's own library playlists, Liked Music first."""
     from core.ytmusic_library import fetch_library_playlists, fetch_liked_music_row, library_playlists_to_rows
+    from core.playlists.account_isolation import refusal_for_request
+    _blocked = refusal_for_request("ytmusic")
+    if _blocked:
+        return jsonify(_blocked), 401
     auth = _ytmusic_auth_headers()
     if not auth:
         return jsonify({"error": "YouTube Music not authenticated. Settings → Downloads → Download Source: YouTube Only → Paste cookies.txt → Save."}), 401

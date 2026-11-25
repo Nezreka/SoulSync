@@ -560,6 +560,18 @@ export function SecurityView({ store }: { store: SettingsStore }) {
           </Row>
 
           <Row
+            label="Share my connected accounts' playlists"
+            htmlFor="security-share-connected-accounts"
+            help="Off: someone who hasn't connected their own Spotify or Tidal is asked to, and never sees yours."
+            more="On: everyone can browse and import the playlists of the accounts connected to this server (Spotify, Tidal, Deezer, Qobuz, YouTube Music), liked songs included. Playlists already imported keep syncing either way."
+          >
+            <Switch
+              id="security-share-connected-accounts"
+              checked={on('share_connected_accounts')}
+              onChange={(event) => set('share_connected_accounts', event.target.checked)}
+            />
+          </Row>
+          <Row
             label="Sign in with Plex"
             htmlFor="security-plex-signin"
             help="Adds a Sign in with Plex button. Anyone with access to your Plex server signs in with their Plex account."

@@ -874,10 +874,14 @@ describe('What you can do', () => {
     await opened();
     await vi.waitFor(() => expect(card()).not.toBeNull());
     expect(card().textContent).toContain(
-      'You get music, movies, shows, audiobooks and podcast episodes right away.',
+      'Add music, movies, shows, audiobooks and podcast episodes whenever you like.',
     );
-    expect(row('music')).toContain('Downloads right away');
-    expect(row('requests')).toContain('Nothing to ask: it comes right away');
+    expect(row('music')).toContain('Add anything you like');
+    expect(row('requests')).toContain('Nothing to wait for: what you add comes right away');
+    // #2303: no policy words, and no account of what isn't switched off
+    expect(card().textContent).not.toContain('explicit shown');
+    expect(card().textContent).not.toContain('Not part of your profile');
+    expect(card().textContent).not.toContain('settings and people');
     expect(card().textContent).not.toContain('Ask Boulder');
     // read-only: nothing in it can be pressed or switched
     expect(card().querySelector('button, input, select')).toBeNull();
@@ -905,21 +909,37 @@ describe('What you can do', () => {
     await vi.waitFor(() => expect(row('music')).toContain('5 asks a week, 2 used'));
     expect(row('movies')).toContain('3 asks a week, 1 used');
     expect(card().textContent).toContain(
-      'You ask first for music, movies and shows, 5 music asks a week and 3 movie asks a week.',
+      'You can ask for music, movies and shows, 5 music asks a week and 3 movie asks a week, and an admin approves it.',
     );
+    expect(row('music')).toContain('Ask for it and an admin approves');
+    expect(card().textContent).not.toContain('you see only your own');
     expect(row('requests')).toContain('5 music asks a week and 3 movie asks a week');
     expect(row('movies')).toContain('up to PG-13');
     expect(row('tv')).toContain('up to TV-14');
     expect(row('tv')).not.toContain('asks a week');
   });
 
-  it('books off: says so and who to ask', async () => {
+  it('what is switched off is not listed as denied: there is who to ask (#2303)', async () => {
     mockAccount({
-      perms: { ...MEMBER_PERMS, 'books.access': false, 'podcasts.access': false },
+      perms: {
+        ...MEMBER_PERMS,
+        'books.access': false,
+        'podcasts.access': false,
+        'music.explorer': false,
+        'chat.use': false,
+      },
     });
     await opened();
-    await vi.waitFor(() => expect(row('books')).toContain('Not part of your profile'));
-    expect(card().textContent).toContain('Ask Boulder');
+    await vi.waitFor(() => expect(card()).not.toBeNull());
+    await vi.waitFor(() => expect(card().textContent).toContain('Boulder'));
+    // no row for something they don't have, and nothing called "not part of your profile"
+    expect(document.querySelector('#ma-cando [data-can="books"]')).toBeNull();
+    expect(card().textContent).not.toContain('Not part of your profile');
+    expect(card().textContent).not.toContain('settings and people');
+    // the rest is offered as something to ask for
+    expect(card().textContent).toContain("There's more you can ask Boulder for:");
+    expect(card().textContent).toContain('Playlist Explorer');
+    expect(card().textContent).toContain('Chat & Arcade');
   });
 
   it('a moderator is told what they answer', async () => {

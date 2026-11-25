@@ -393,8 +393,18 @@ function ratingWords(perms: MyPermissions, media: 'movies' | 'tv'): string {
  */
 export function describePermissions(
   perms: MyPermissions,
-  opts: { used?: Partial<Record<LimitKind, number | null>> | null } = {},
+  opts: {
+    used?: Partial<Record<LimitKind, number | null>> | null;
+    /**
+     * written for the member reading their own account (#2303): what they
+     * can do, in everyday words, without the things they can't (a list of
+     * switched-off features and "settings and people" read like a policy
+     * dump). the admin's editor keeps the full account, limits and all.
+     */
+    forMember?: boolean;
+  } = {},
 ): CanDo {
+  const me = opts.forMember === true;
   if (perms.isAdmin) {
     return {
       sentence: 'You’re an admin: everything here is yours, including settings and people.',
@@ -416,7 +426,17 @@ export function describePermissions(
     off: true,
   });
   const modeLead = (mode: PermMode, none: string) =>
-    mode === 'download' ? 'Downloads right away' : mode === 'ask' ? 'Asks first' : none;
+    me
+      ? mode === 'download'
+        ? 'Add anything you like'
+        : mode === 'ask'
+          ? 'Ask for it and an admin approves'
+          : none
+      : mode === 'download'
+        ? 'Downloads right away'
+        : mode === 'ask'
+          ? 'Asks first'
+          : none;
   // each kind's own limit, on its own row: "5 asks a week, 2 used"
   const limits: { kind: LimitKind; limit: RequestLimit }[] = [];
   const limitDetail = (kind: LimitKind, mode: PermMode): string[] => {
@@ -430,8 +450,10 @@ export function describePermissions(
   // music
   if (hasAccess(perms, 'music')) {
     const mode = modeFor(perms, 'music');
+    const clean = eff['music.hide_explicit'] === true;
     const detail = [
-      eff['music.hide_explicit'] === true ? 'clean versions only' : 'explicit shown',
+      // a member is told a limit, not the absence of one
+      ...(clean ? ['clean versions only'] : me ? [] : ['explicit shown']),
       ...limitDetail('music', mode),
     ];
     rows.push({
@@ -444,7 +466,7 @@ export function describePermissions(
     });
     if (mode === 'download') gets.push('music');
     else if (mode === 'ask') asks.push('music');
-  } else rows.push(offRow('music', 'Music'));
+  } else if (!me) rows.push(offRow('music', 'Music'));
 
   // movies, tv
   for (const [media, label, noun] of [
@@ -452,7 +474,7 @@ export function describePermissions(
     ['tv', 'TV shows', 'shows'],
   ] as const) {
     if (!hasAccess(perms, media)) {
-      rows.push(offRow(media, label));
+      if (!me) rows.push(offRow(media, label));
       continue;
     }
     const mode = modeFor(perms, media);
@@ -472,17 +494,24 @@ export function describePermissions(
   // books and podcasts share a row, like the editor's rail
   const books = hasAccess(perms, 'books');
   const pods = hasAccess(perms, 'podcasts');
-  if (!books && !pods) rows.push(offRow('books', 'Books & podcasts'));
-  else {
+  if (!books && !pods) {
+    if (!me) rows.push(offRow('books', 'Books & podcasts'));
+  } else {
     const bits: string[] = [];
     if (books) {
       const m = modeFor(perms, 'books');
       bits.push(
-        m === 'download'
-          ? 'audiobooks right away'
-          : m === 'ask'
-            ? 'audiobooks on request'
-            : 'audiobooks to browse',
+        me
+          ? m === 'download'
+            ? 'add any audiobook'
+            : m === 'ask'
+              ? 'ask for audiobooks'
+              : 'browse audiobooks'
+          : m === 'download'
+            ? 'audiobooks right away'
+            : m === 'ask'
+              ? 'audiobooks on request'
+              : 'audiobooks to browse',
       );
       if (m === 'download') gets.push('audiobooks');
       else if (m === 'ask') asks.push('audiobooks');
@@ -490,25 +519,45 @@ export function describePermissions(
     if (pods) {
       const m = modeFor(perms, 'podcasts');
       bits.push(
-        m === 'download'
-          ? 'podcasts download'
-          : m === 'ask'
-            ? 'podcast episodes on request'
-            : 'podcasts to follow and play',
+        me
+          ? m === 'download'
+            ? 'follow podcasts and keep episodes'
+            : m === 'ask'
+              ? 'ask for podcast episodes'
+              : 'follow and play podcasts'
+          : m === 'download'
+            ? 'podcasts download'
+            : m === 'ask'
+              ? 'podcast episodes on request'
+              : 'podcasts to follow and play',
       );
       if (m === 'download') gets.push('podcast episodes');
       else if (m === 'ask') asks.push('podcast episodes');
     }
     const detail: string[] = [];
-    if (!books) detail.push('no audiobooks');
-    if (!pods) detail.push('no podcasts');
+    if (!me) {
+      if (!books) detail.push('no audiobooks');
+      if (!pods) detail.push('no podcasts');
+    }
     const lead = bits.join(', ');
     rows.push({
       id: 'books',
-      label: 'Books & podcasts',
+      label: me
+        ? books && pods
+          ? 'Books & podcasts'
+          : books
+            ? 'Audiobooks'
+            : 'Podcasts'
+        : 'Books & podcasts',
       lead: lead.charAt(0).toUpperCase() + lead.slice(1),
       detail,
-      strong: bits.some((b) => b.endsWith('right away') || b.endsWith('download')),
+      strong: bits.some(
+        (b) =>
+          b.endsWith('right away') ||
+          b.endsWith('download') ||
+          b.startsWith('add any') ||
+          b.endsWith('keep episodes'),
+      ),
       off: false,
     });
   }
@@ -527,14 +576,16 @@ export function describePermissions(
   const reqDetail: string[] = [];
   if (moderator) reqDetail.push('you answer everyone’s asks but your own');
   else if (seeAll) reqDetail.push('you see everyone’s');
-  else if (asks.length) reqDetail.push('you see only your own');
+  else if (asks.length && !me) reqDetail.push('you see only your own');
   rows.push({
     id: 'requests',
     label: moderator ? 'Requests · moderator' : 'Requests',
     lead: asks.length
-      ? limitWords || 'No limit on asks'
+      ? limitWords || (me ? 'Ask for as much as you like' : 'No limit on asks')
       : gets.length
-        ? 'Nothing to ask: it comes right away'
+        ? me
+          ? 'Nothing to wait for: what you add comes right away'
+          : 'Nothing to ask: it comes right away'
         : 'Nothing to ask for',
     detail: reqDetail,
     strong: false,
@@ -543,9 +594,17 @@ export function describePermissions(
 
   // the sentence
   const parts: string[] = [];
-  if (gets.length) parts.push(`You get ${joinWords(gets)} right away.`);
+  if (gets.length) {
+    parts.push(
+      me ? `Add ${joinWords(gets)} whenever you like.` : `You get ${joinWords(gets)} right away.`,
+    );
+  }
   if (asks.length) {
-    parts.push(`You ask first for ${joinWords(asks)}${limitWords ? `, ${limitWords}` : ''}.`);
+    parts.push(
+      me
+        ? `You can ask for ${joinWords(asks)}${limitWords ? `, ${limitWords}` : ''}, and an admin approves it.`
+        : `You ask first for ${joinWords(asks)}${limitWords ? `, ${limitWords}` : ''}.`,
+    );
   }
   if (!parts.length) parts.push('You can browse and play what’s here.');
 
@@ -559,7 +618,9 @@ export function describePermissions(
   }
   for (const [id, label] of OTHER_LABELS) if (eff[id] === false) never.push(label);
   const anyOff = never.length > 0 || rows.some((r) => r.off);
-  never.push('settings and people');
+  // for the member, ``never`` is what they could ask for: the admin's own
+  // places are no part of that
+  if (!me) never.push('settings and people');
 
   return { sentence: parts.join(' '), rows, never, anyOff };
 }
