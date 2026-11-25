@@ -806,17 +806,23 @@ def _expand_artist_discography(
                            image_url = COALESCE(image_url, ?),
                            release_date = COALESCE(release_date, ?),
                            year = COALESCE(year, ?),
-                           expected_track_count = MAX(
-                               COALESCE(expected_track_count, 0),
-                               COALESCE(?, 0)
-                           ),
+                           expected_track_count = CASE
+                               WHEN COALESCE(canonical_locked, 0) = 1
+                                    OR ?
+                               THEN expected_track_count
+                               ELSE MAX(
+                                   COALESCE(expected_track_count, 0),
+                                   COALESCE(?, 0)
+                               )
+                           END,
                            external_ids = ?,
                            musicbrainz_release_group_id = COALESCE(
                                NULLIF(musicbrainz_release_group_id, ''), ?),
                            updated_at = CURRENT_TIMESTAMP
                        WHERE id = ?""",
-                    (spotify_id, image_url, release_date, year, track_count,
-                     merged_external_ids, release_group_id, existing["id"]),
+                    (spotify_id, image_url, release_date, year,
+                    bool(id_conflict), track_count,
+                    merged_external_ids, release_group_id, existing["id"]),
                 )
                 existing["external_ids"] = merged_external_ids
                 if release_group_id and not existing["musicbrainz_release_group_id"]:
