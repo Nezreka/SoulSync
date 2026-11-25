@@ -1540,3 +1540,167 @@ def test_a_release_group_404_is_not_an_error(monkeypatch):
     monkeypatch.setattr(mbc.logger, "error", lambda msg, *a, **k: logged.append(msg))
     assert client.get_release_group("rel-1") is None
     assert logged == []
+
+
+def _exact_release_fixture(release_id):
+    return {
+        'id': release_id,
+        'title': 'Standard Album',
+        'artist-credit': [{'name': 'Test Artist'}],
+        'release-group': {
+            'id': 'test-release-group',
+            'primary-type': 'Album',
+        },
+        'media': [{
+            'position': 1,
+            'tracks': [{
+                'position': 1,
+                'number': '1',
+                'recording': {
+                    'id': 'recording-1',
+                    'title': 'First Track',
+                    'length': 180000,
+                },
+            }],
+        }],
+    }
+
+
+def test_exact_album_tracks_fetches_concrete_release_only():
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+
+    client._client.get_release.return_value = (
+        _exact_release_fixture('exact-release')
+    )
+
+    result = client.get_album_tracks(
+        'exact-release', allow_fallback=False,
+    )
+
+    assert result is not None
+    assert result['total'] == 1
+    assert result['provider'] == 'musicbrainz'
+    assert result['provider_entity_id'] == 'exact-release'
+    assert result['items'][0]['id'] == 'recording-1'
+
+    client._client.get_release.assert_called_once_with(
+        'exact-release',
+        includes=['recordings', 'artist-credits', 'release-groups'],
+    )
+    client._client.get_release_group.assert_not_called()
+
+
+def test_exact_album_tracks_never_resolves_release_group():
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+
+    client._client.get_release.return_value = None
+    client._client.get_release_group.return_value = {
+        'id': 'test-release-group',
+        'releases': [{'id': 'representative-release'}],
+    }
+
+    assert client.get_album_tracks(
+        'test-release-group', allow_fallback=False,
+    ) is None
+
+    client._client.get_release_group.assert_not_called()
+    client._client.get_release.assert_called_once()
+
+
+@pytest.mark.parametrize("returned_id", [
+    'different-release',
+    None,
+    '',
+])
+def test_exact_album_tracks_rejects_unverified_response_id(
+        returned_id):
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+
+    release = _exact_release_fixture(returned_id)
+
+    if returned_id is None:
+        release.pop('id')
+
+    client._client.get_release.return_value = release
+
+    assert client.get_album_tracks(
+        'requested-release', allow_fallback=False,
+    ) is None
+
+    client._client.get_release_group.assert_not_called()
+
+
+def test_exact_album_tracks_handles_provider_error():
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+
+    client._client.get_release.side_effect = RuntimeError(
+        'Provider unavailable'
+    )
+
+    assert client.get_album_tracks(
+        'unavailable-release', allow_fallback=False,
+    ) is None
+
+    client._client.get_release_group.assert_not_called()
+
+
+def test_album_tracks_default_preserves_group_resolution():
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+
+    client._client.get_release_group.return_value = {
+        'id': 'browsable-group',
+        'title': 'Standard Album',
+        'primary-type': 'Album',
+        'releases': [{
+            'id': 'representative-release',
+            'status': 'Official',
+        }],
+    }
+
+    client._client.get_release.return_value = (
+        _exact_release_fixture('representative-release')
+    )
+
+    result = client.get_album_tracks('browsable-group')
+
+    assert result is not None
+    assert result['total'] == 1
+    assert result['items'][0]['id'] == 'recording-1'
+
+    client._client.get_release_group.assert_called_once()
+    client._client.get_release.assert_called_once()
+
+
+def test_provider_adapter_uses_exact_musicbrainz_lookup(monkeypatch):
+    from core.library2.provider_adapters import (
+        fetch_album_release_tracklist,
+    )
+
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.get_release_group.return_value = None
+
+    client._client.get_release.return_value = (
+        _exact_release_fixture('adapter-release')
+    )
+
+    monkeypatch.setattr(
+        'core.metadata.registry.get_client_for_source',
+        lambda source: client if source == 'musicbrainz' else None,
+    )
+
+    result = fetch_album_release_tracklist(
+        'musicbrainz', 'adapter-release',
+    )
+
+    assert result is not None
+    assert result.provider == 'musicbrainz'
+    assert result.provider_entity_id == 'adapter-release'
+    assert len(result.tracks) == 1
+
+    client._client.get_release_group.assert_not_called()
