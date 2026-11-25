@@ -621,7 +621,9 @@ def test_torrent_release_copies_best_matching_audio_to_transfer(tmp_path):
     pp.run_post_processing_worker('t1', 'b1', deps)
 
     copied = transfer_dir / '02 - Money.flac'
-    assert copied.exists()
+    # the stand-in import took nothing, so the copy is not left loose in the
+    # library root (it was, for good); the release keeps its original
+    assert not copied.exists()
     assert right.exists()
     assert any(c[0] == 'post_process' and c[1][2] == str(copied) for c in rec.calls)
 
@@ -665,7 +667,7 @@ def test_torrent_release_prefers_task_title_over_release_context(tmp_path):
     pp.run_post_processing_worker('t1', 'b1', deps)
 
     copied = transfer_dir / '10.Harry Styles - American Girls.flac'
-    assert copied.exists()
+    assert not copied.exists()      # handed to the import (below), not taken, not left behind
     assert any(c[0] == 'post_process' and c[1][2] == str(copied) for c in rec.calls)
 
 

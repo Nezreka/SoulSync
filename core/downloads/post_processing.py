@@ -138,6 +138,28 @@ def _copy_release_audio_to_transfer(source_path: str, transfer_dir: str) -> Opti
         return None
 
 
+def _discard_unused_release_copy(copy_path: Optional[str]) -> bool:
+    """Remove the copy of a torrent/usenet track the import did not take.
+
+    The requested track is COPIED out of the release into the music library
+    folder's root and handed to the import, which moves it into place. When
+    the import does not move it (the library's own file was kept, the
+    existing file could not be measured, the artist context was missing, the
+    import raised), the copy stayed where it was: a loose file in the library
+    root, picked up by the media server, and a requeue added ``_release_1``,
+    ``_release_2`` beside it. The release folder still has the original, so
+    the copy is ours to remove. True when one was removed."""
+    try:
+        if copy_path and os.path.isfile(copy_path):
+            os.remove(copy_path)
+            logger.info("[Post-Processing] Removed the release copy the import did not use: %s",
+                        os.path.basename(copy_path))
+            return True
+    except OSError as exc:
+        logger.warning("[Post-Processing] Could not remove unused release copy %s: %s", copy_path, exc)
+    return False
+
+
 def _remove_imported_usenet_job(download_id: str) -> None:
     """Best-effort Remove Completed for a single-track usenet grab."""
     try:
@@ -679,6 +701,10 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
                     context.pop('_pipeline_import_succeeded', None)  # this attempt's outcome only
                 # Run the existing post-processing logic with verification
                 deps.post_process_with_verification(context_key, context, found_file, task_id, batch_id)
+                if release_album and not context.get('_pipeline_import_succeeded'):
+                    # (only an import that did not succeed: one that did may
+                    # have filed the track right where the copy was)
+                    _discard_unused_release_copy(found_file)
                 album_tracks_ok = True
                 if release_album and context.get('_pipeline_import_succeeded') and deps.process_release_file:
                     # The requested track is done and its task completed. The
