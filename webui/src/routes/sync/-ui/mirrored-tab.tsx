@@ -105,6 +105,7 @@ import {
   pinLikedFirst,
   removeFromUserPlaylist,
   reorderUserPlaylist,
+  uploadPlaylistCover,
 } from '../../../features/playlists/user-playlists';
 import { AutoSyncWeeklyEditor } from './autosync-weekly';
 import { CoverArtSheet } from './cover-art-sheet';
@@ -1728,6 +1729,19 @@ export function MirroredTab({
             setEditingRef(settingsRow);
           }}
           onGenerateCover={() => setCoverArtFor(settingsRow)}
+          onUploadCover={(file) => {
+            uploadPlaylistCover(settingsRow.id, file)
+              .then(() => {
+                window.showToast?.('Cover updated', 'success');
+                reload();
+              })
+              .catch((err: unknown) =>
+                window.showToast?.(
+                  err instanceof Error ? err.message : 'Could not use that image',
+                  'error',
+                ),
+              );
+          }}
           onRestoreCover={() => {
             restoreOriginalCover(settingsRow.id)
               .then(() => {

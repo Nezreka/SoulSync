@@ -12119,6 +12119,17 @@ class MusicDatabase:
                             (recording_id, title, duration, duration),
                         ).fetchall()
                     if len(candidates) != 1:
+                        # the same file under another path: its name and byte
+                        # size name it whatever mount it is reached through
+                        # (#2288, #2290)
+                        from core.library2.media_server_sync import owned_track_by_file_twin
+                        _twin = owned_track_by_file_twin(
+                            cursor, server_path or file_path, file_size, owner_sql=owned_scope)
+                        if _twin is not None:
+                            candidates = cursor.execute(
+                                "SELECT t.id,t.album_id,al.primary_artist_id FROM lib2_tracks t "
+                                "JOIN lib2_albums al ON al.id=t.album_id WHERE t.id=?", (_twin,)).fetchall()
+                    if len(candidates) != 1:
                         if adopt_scanned_file(cursor, file_path, server_path, server_source,
                                               server_info=server_track_names(track_obj)):
                             self._log_scanned_import(track_obj, file_path, server_source)
