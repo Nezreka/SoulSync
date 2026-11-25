@@ -20198,6 +20198,11 @@ def _invalidate_sync_fingerprint(playlist_id):
 def get_spotify_playlists():
     """Fetches all user playlists from Spotify and enriches them with local sync status."""
     client = get_spotify_client_for_profile()
+    # a member who hasn't connected their own Spotify is not shown the server's (#2301)
+    from core.playlists.account_isolation import refusal_for_request
+    _blocked = refusal_for_request("spotify", own_connected=client is not get_spotify_client())
+    if _blocked:
+        return jsonify(_blocked), 401
     if not client or not client.is_authenticated():
         return jsonify({"error": "Spotify not authenticated."}), 401
     try:
