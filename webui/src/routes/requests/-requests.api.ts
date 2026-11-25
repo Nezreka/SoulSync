@@ -118,7 +118,14 @@ export async function fetchMusicRequestCounts(profileId: number): Promise<MusicR
 
 export async function approveMusicRequest(
   profileId: number,
-  body: { profile_id: number; key: string; response?: string; acquisition?: AcquisitionMode },
+  body: {
+    profile_id: number;
+    key: string;
+    response?: string;
+    acquisition?: AcquisitionMode;
+    /** some of a playlist request's songs; left out, the whole request (#2302) */
+    track_ids?: string[];
+  },
 ): Promise<void> {
   const payload = await readJson<Ok>(
     apiClient.post('requests/music/approve', { headers: headersFor(profileId), json: body }),
@@ -128,7 +135,7 @@ export async function approveMusicRequest(
 
 export async function declineMusicRequest(
   profileId: number,
-  body: { profile_id: number; key: string; response?: string },
+  body: { profile_id: number; key: string; response?: string; track_ids?: string[] },
 ): Promise<void> {
   const payload = await readJson<Ok>(
     apiClient.post('requests/music/decline', { headers: headersFor(profileId), json: body }),

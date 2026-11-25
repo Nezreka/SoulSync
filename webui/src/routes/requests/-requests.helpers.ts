@@ -157,7 +157,7 @@ export function itemTitle(item: RequestItem): string {
   return (item.source === 'pending' ? item.group.title : item.row.title) || 'Untitled';
 }
 
-export type RequestItemKind = 'album' | 'track' | 'video' | 'audiobook' | 'podcast';
+export type RequestItemKind = 'album' | 'track' | 'playlist' | 'video' | 'audiobook' | 'podcast';
 
 export function itemKind(item: RequestItem): RequestItemKind {
   if (item.source === 'video-pending' || item.source === 'video-history') return 'video';
@@ -170,6 +170,7 @@ export function kindLabel(kind: RequestItemKind): string {
   return {
     album: 'Album',
     track: 'Track',
+    playlist: 'Playlist',
     video: 'Music video',
     audiobook: 'Audiobook',
     podcast: 'Podcast episode',
@@ -210,7 +211,10 @@ export function subLine(item: RequestItem): string {
       : item.row.track_count || item.row.tracks.length;
   const bits: string[] = [];
   if (artist) bits.push(artist);
-  if (itemKind(item) === 'album') {
+  if (itemKind(item) === 'playlist') {
+    // a playlist is many artists: the line says how much was asked for
+    if (count) bits.push(`${count} song${count === 1 ? '' : 's'} from this playlist`);
+  } else if (itemKind(item) === 'album') {
     if (count) bits.push(`${count} track${count === 1 ? '' : 's'}`);
   } else if (
     item.source === 'pending' &&

@@ -359,7 +359,13 @@ def _group_from_body(db):
     except (TypeError, ValueError):
         return None, None, body
     key = str(body.get("key") or "")
-    return owner, (_find_group(db, owner, key) if key else None), body
+    group = _find_group(db, owner, key) if key else None
+    # some of a playlist's songs (#2302): {key, track_ids} answers only those
+    picked = body.get("track_ids")
+    if group and isinstance(picked, list) and picked:
+        from core.requests.music import narrow
+        group = narrow(group, picked)
+    return owner, group, body
 
 
 @bp.route("/api/requests/music/approve", methods=["POST"])
