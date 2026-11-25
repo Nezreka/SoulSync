@@ -736,3 +736,43 @@ def test_every_field_in_the_table_reads_back_what_was_written(tmp_path, ext, nam
 ])
 def test_only_guests_the_title_does_not_credit_are_added(title, guests, added):
     assert ms._guests_missing_from_title(title, guests) == added
+
+
+# ── the re-tagger writes a file the way a download does ─────────────────────
+
+def test_a_retagged_m4a_does_not_repeat_the_guests_either(tmp_path):
+    """the re-tagger had its own copy of the M4A writer, with the fault the
+    download tagger's had (8): the whole artist list in the artist atom even
+    with the guests already in the title, and no ARTISTS list"""
+    from core import tag_writer
+    path = _audio(tmp_path, "m4a")
+    audio = _open(path)
+    with patch.object(tag_writer, "_multi_artist_write_enabled", return_value=True), \
+         patch.object(tag_writer, "_feat_in_title_enabled", return_value=True):
+        tag_writer._write_fields(audio, "Umbrella (feat. JAY-Z)", "Rihanna", None, None, None, None,
+                                 None, None, None, None, artists_list=["Rihanna", "JAY-Z"])
+    assert audio["\xa9ART"] == ["Rihanna"]
+    assert [bytes(v).decode() for v in audio["----:com.apple.iTunes:ARTISTS"]] == ["Rihanna", "JAY-Z"]
+    audio = _open(_audio(tmp_path, "m4a", "two"))
+    with patch.object(tag_writer, "_multi_artist_write_enabled", return_value=True), \
+         patch.object(tag_writer, "_feat_in_title_enabled", return_value=False):
+        tag_writer._write_fields(audio, "Umbrella", "Rihanna, JAY-Z", None, None, None, None,
+                                 None, None, None, None, artists_list=["Rihanna", "JAY-Z"])
+    assert audio["\xa9ART"] == ["Rihanna", "JAY-Z"]            # #587, unchanged
+
+
+@pytest.mark.parametrize("ext", FORMATS)
+def test_the_retagger_and_the_download_tagger_write_the_same_core_tags(tmp_path, ext):
+    from core import tag_writer
+    from core.metadata import tagfields
+    downloaded = _audio(tmp_path, ext, "dl")
+    ok, _ = _enhance(downloaded, {**CORE, "date": "2000", "genre": "Rock"})
+    assert ok
+    retagged = _open(_audio(tmp_path, ext, "rt"))
+    tag_writer._write_fields(retagged, "Yellow", "Coldplay", "Coldplay", "Parachutes", 2000, "Rock",
+                             5, 10, 1, None)
+    want = _open(downloaded)
+    for name in ("title", "artist", "album_artist", "album", "date", "genre"):
+        assert tagfields.read(retagged, SYMBOLS, name) == tagfields.read(want, SYMBOLS, name), name
+    for key in ("TRCK", "TPOS") if ext == "mp3" else ("trkn", "disk") if ext == "m4a" else ("tracknumber", "tracktotal", "discnumber"):
+        assert str(retagged[key]) == str(want[key]), key
