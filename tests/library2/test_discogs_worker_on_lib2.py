@@ -203,3 +203,117 @@ def test_the_worker_holds_no_legacy_sql_at_all():
     usage = count_legacy_usage(pathlib.Path("core/discogs_worker.py").read_text())
 
     assert (usage.reads, usage.writes) == (0, 0)
+
+
+@pytest.mark.parametrize("credits,accepted", [
+    (["Rone"], True),
+    (["rOnE"], True),
+    ([" Rone "], True),
+    (["Rone", "Another Artist"], True),
+    (["Various Artists"], False),
+    (["Unrelated Artist"], False),
+    (["Rones"], False),
+    ([], False),
+])
+def test_album_search_requires_matching_release_artist(
+        worker, credits, accepted):
+
+    class _Client:
+        @staticmethod
+        def search_albums(query, limit=5):
+            return [_Result("r999", "Tohu Bohu")]
+
+        @staticmethod
+        def _fetch_and_cache_album(rid):
+            return {
+                "id": 999,
+                "type": "release",
+                "title": "Tohu Bohu",
+                "artists": [{"name": name} for name in credits],
+                "tracklist": [
+                    {"title": "Bora", "type_": "track"},
+                ],
+            }
+
+    worker.client = _Client()
+    worker._search_and_match_album(1, "Tohu Bohu", "Rone")
+
+    row = _row(worker, "lib2_albums")
+    ids = json.loads(row["external_ids"] or "{}")
+
+    with closing(worker.db._get_connection()) as conn:
+        state = attempt_state(
+            conn, entity_type="album", entity_id=1
+        )
+
+    if accepted:
+        assert ids["discogs"] == "r999"
+        assert row["expected_track_count"] == 1
+        assert state["discogs"]["status"] == "matched"
+        assert worker.stats["matched"] == 1
+    else:
+        assert "discogs" not in ids
+        assert row["expected_track_count"] is None
+        assert state["discogs"]["status"] == "not_found"
+        assert worker.stats["matched"] == 0
+
+
+def test_album_search_skips_wrong_artist_and_accepts_next(worker):
+
+    class _Client:
+        @staticmethod
+        def search_albums(query, limit=5):
+            return [
+                _Result("r100", "Tohu Bohu"),
+                _Result("r200", "Tohu Bohu"),
+            ]
+
+        @staticmethod
+        def _fetch_and_cache_album(rid):
+            wrong = rid == "r100"
+            return {
+                "id": 100 if wrong else 200,
+                "type": "release",
+                "title": "Tohu Bohu",
+                "artists": [
+                    {"name": "Various Artists" if wrong else "Rone"}
+                ],
+                "tracklist": [
+                    {"title": f"Track {i}", "type_": "track"}
+                    for i in range(40 if wrong else 12)
+                ],
+            }
+
+    worker.client = _Client()
+    worker._search_and_match_album(1, "Tohu Bohu", "Rone")
+
+    row = _row(worker, "lib2_albums")
+
+    assert json.loads(row["external_ids"])["discogs"] == "r200"
+    assert row["expected_track_count"] == 12
+    assert worker.stats["matched"] == 1
+
+
+def test_album_search_rejects_mismatched_full_release_title(worker):
+
+    class _Client:
+        @staticmethod
+        def search_albums(query, limit=5):
+            return [_Result("r999", "Tohu Bohu")]
+
+        @staticmethod
+        def _fetch_and_cache_album(rid):
+            return {
+                "id": 999,
+                "type": "release",
+                "title": "Completely Different Album",
+                "artists": [{"name": "Rone"}],
+            }
+
+    worker.client = _Client()
+    worker._search_and_match_album(1, "Tohu Bohu", "Rone")
+
+    row = _row(worker, "lib2_albums")
+
+    assert "discogs" not in json.loads(row["external_ids"] or "{}")
+    assert worker.stats["matched"] == 0

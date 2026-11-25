@@ -252,6 +252,111 @@ class TestTheExpectedTrackCount:
             (album,)).fetchone()[0] == 12
 
 
+
+    @pytest.mark.parametrize("source,provider_id", [
+        ("itunes", "deluxe"),
+        ("spotify", "different-release"),
+        ("deezer", "12345"),
+        (None, None),
+        ("spotify", None),
+        (None, "standard"),
+    ])
+    def test_locked_release_rejects_unrelated_counts(
+        self, conn, source, provider_id
+    ):
+        from core.library2.worker_support import set_expected_track_count
+
+        artist = _artist(conn, "Rone")
+        album = _album(
+            conn, artist, "Tohu Bohu", expected_track_count=12
+        )
+
+        conn.execute(
+            """UPDATE lib2_albums
+                  SET canonical_locked=1,
+                      canonical_source='spotify',
+                      canonical_album_id='standard',
+                      canonical_track_count=12
+                WHERE id=?""",
+            (album,),
+        )
+
+        set_expected_track_count(
+            conn, album, 18,
+            source=source, provider_id=provider_id,
+        )
+
+        row = conn.execute(
+            """SELECT expected_track_count, canonical_track_count
+                 FROM lib2_albums WHERE id=?""",
+            (album,),
+        ).fetchone()
+
+        assert tuple(row) == (12, 12)
+
+    def test_exact_locked_release_can_update_its_count(self, conn):
+        from core.library2.worker_support import set_expected_track_count
+
+        artist = _artist(conn, "Rone")
+        album = _album(
+            conn, artist, "Tohu Bohu", expected_track_count=18
+        )
+
+        conn.execute(
+            """UPDATE lib2_albums
+                  SET canonical_locked=1,
+                      canonical_source='spotify',
+                      canonical_album_id='standard',
+                      canonical_track_count=18
+                WHERE id=?""",
+            (album,),
+        )
+
+        set_expected_track_count(
+            conn, album, 12,
+            source="spotify", provider_id="standard",
+        )
+
+        row = conn.execute(
+            """SELECT expected_track_count, canonical_track_count
+                 FROM lib2_albums WHERE id=?""",
+            (album,),
+        ).fetchone()
+
+        assert tuple(row) == (12, 12)
+
+    def test_locked_release_without_cached_canonical_count(self, conn):
+        from core.library2.worker_support import set_expected_track_count
+
+        artist = _artist(conn, "Rone")
+        album = _album(
+            conn, artist, "Tohu Bohu", expected_track_count=12
+        )
+
+        conn.execute(
+            """UPDATE lib2_albums
+                  SET canonical_locked=1,
+                      canonical_source='musicbrainz',
+                      canonical_album_id='standard',
+                      canonical_track_count=NULL
+                WHERE id=?""",
+            (album,),
+        )
+
+        set_expected_track_count(
+            conn, album, 40,
+            source="discogs", provider_id="compilation",
+        )
+
+        row = conn.execute(
+            """SELECT expected_track_count, canonical_track_count
+                 FROM lib2_albums WHERE id=?""",
+            (album,),
+        ).fetchone()
+
+        assert tuple(row) == (12, None)
+
+
 class _Db:
     """The tight-connection contract honor_stored_match keeps: it takes the
     database, not a connection, so the id read is closed before the provider call

@@ -185,7 +185,11 @@ def owned_album_titles(conn, artist_id: Any) -> List[str]:
     return [row[0] for row in rows if row and row[0]]
 
 
-def set_expected_track_count(conn, album_id: Any, count: Any) -> None:
+def set_expected_track_count(
+    conn, album_id: Any, count: Any, *,
+    source: Optional[str] = None,
+    provider_id: Any = None,
+) -> None:
     """Cache a metadata source's total for an album.
 
     lib2's ``expected_track_count`` is what legacy called ``api_track_count``: the
@@ -195,9 +199,12 @@ def set_expected_track_count(conn, album_id: Any, count: Any) -> None:
 
     Non-positive and non-numeric counts are skipped rather than written, so a
     source carrying no track info cannot blank a good value another source gave.
-    Last write wins otherwise, as on legacy: any provider count beats the observed
-    fallback, and keeping the maximum would leave a deluxe edition's total making a
-    standard album look permanently incomplete.
+    For unlocked albums, last write wins as before. For a locked canonical
+    release, only a count from the exact pinned provider and release may update
+    the expected total. Counts without release identity cannot override a pin.
+
+    An accepted canonical count also updates canonical_track_count, which
+    edition consumers prefer over the general expected count.
 
     The caller owns the transaction; this does not commit.
     """
@@ -208,9 +215,30 @@ def set_expected_track_count(conn, album_id: Any, count: Any) -> None:
     if count <= 0:
         return
     try:
+        source = str(source or "").strip().lower()
+        provider_id = str(provider_id or "").strip()
+
         conn.execute(
-            "UPDATE lib2_albums SET expected_track_count=?, "
-            "updated_at=CURRENT_TIMESTAMP WHERE id=?", (count, album_id))
+            """UPDATE lib2_albums
+                  SET expected_track_count=?,
+                      canonical_track_count=CASE
+                          WHEN COALESCE(canonical_locked,0)=1
+                          THEN ?
+                          ELSE canonical_track_count
+                      END,
+                      updated_at=CURRENT_TIMESTAMP
+                WHERE id=?
+                  AND (
+                      COALESCE(canonical_locked,0)=0
+                      OR (
+                          ? <> '' AND ? <> ''
+                          AND LOWER(COALESCE(canonical_source,''))=?
+                          AND COALESCE(canonical_album_id,'')=?
+                      )
+                  )""",
+            (count, count, album_id,
+             source, provider_id, source, provider_id),
+        )
     except Exception as exc:
         # A worker batches several album writes into one transaction; a failure
         # here must not roll back the provider data it just fetched.

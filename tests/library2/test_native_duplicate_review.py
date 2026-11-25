@@ -67,6 +67,29 @@ def states(library):
         return {r[0]: r[1] for r in conn.execute("SELECT id,file_state FROM lib2_track_files")}
 
 
+def test_scans_ignore_indexed_deleted_quarantine_files(library):
+    from core.library2.scan import rescan_files
+
+    db, _, root, _ = library
+    _, live_id, _ = copy(library, album="Single", fmt="mp3")
+    _, other_id, _ = copy(library, album="Other", fmt="flac")
+    _, deleted_id, path = copy(library, album="Album", fmt="flac")
+    quarantine = root / ".deleted"
+    quarantine.mkdir()
+    deleted = path.rename(quarantine / path.name)
+    with closing(db._get_connection()) as conn:
+        conn.execute("UPDATE lib2_track_files SET path=? WHERE id=?", (str(deleted), deleted_id))
+        conn.commit()
+
+    candidates = review(library)
+    assert len(candidates) == 1
+    assert {row["file_id"] for row in candidates[0]["tracks"]} == {live_id, other_id}
+
+    stats = rescan_files(db, file_ids=[deleted_id])
+    assert stats["scanned"] == stats["missing"] == 0
+    assert deleted.is_file()
+
+
 def test_unlinked_cross_format_candidates_do_not_create_canonical_links(library):
     a, af, _ = copy(library, album="Single", fmt="mp3", bitrate=320)
     b, bf, _ = copy(library, album="Album", fmt="flac", bitrate=0)

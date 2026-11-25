@@ -340,25 +340,69 @@ class DiscogsWorker:
         self.stats['not_found'] += 1
         logger.debug(f"No confident match for artist '{artist_name}'")
 
+    @staticmethod
+    def _album_artist_matches(artist_name, artists):
+        """Require a matching release-level artist credit."""
+        import unicodedata
+
+        def normalize(name):
+            return " ".join(
+                unicodedata.normalize("NFKC", name or "")
+                .casefold().split()
+            )
+
+        expected = normalize(artist_name)
+        if not expected or expected == "unknown artist":
+            return False
+
+        return any(
+            normalize(name) == expected
+            for name in (artists or [])
+        )
+
     def _search_and_match_album(self, album_id, album_name: str, artist_name: str):
         """Search Discogs for an album and store metadata if matched."""
-        # Search with artist + album for better precision
+        from core.discogs_client import Album
+
         query = f"{artist_name} {album_name}" if artist_name else album_name
         results = self.client.search_albums(query, limit=5)
+
         if not results:
             self._mark_status('album', album_id, 'not_found')
             self.stats['not_found'] += 1
             return
 
         for result in results:
-            if self._name_matches(album_name, result.name):
-                # Fetch full release detail (uses cache)
-                data = self.client._fetch_and_cache_album(result.id)
-                if data:
-                    self._update_album(album_id, data)
-                    self.stats['matched'] += 1
-                    logger.info(f"Matched album '{album_name}' -> Discogs ID: {result.id}")
-                    return
+            if not self._name_matches(album_name, result.name):
+                continue
+
+            # Search cards may have incomplete or combined artist credits.
+            # Validate against the full release before accepting the match.
+            data = self.client._fetch_and_cache_album(result.id)
+            if not data:
+                continue
+
+            candidate = Album.from_discogs_release(data)
+
+            if not self._name_matches(album_name, candidate.name):
+                continue
+
+            # Full release details must identify the album artist.
+            # Do not accept a title-only match or a track-level credit.
+            if not data.get('artists') and not data.get('artist'):
+                continue
+
+            if not self._album_artist_matches(artist_name, candidate.artists):
+                logger.debug(
+                    "Rejected Discogs release %s for album '%s': artist mismatch",
+                    result.id, album_name,
+                )
+                continue
+
+            self._update_album(album_id, data)
+            self.stats['matched'] += 1
+            logger.info(f"Matched album '{album_name}' -> Discogs ID: {result.id}")
+            return
 
         self._mark_status('album', album_id, 'not_found')
         self.stats['not_found'] += 1
@@ -470,7 +514,9 @@ class DiscogsWorker:
             # for why we accept both `type_ == 'track'` and empty `type_`
             # (kettui's PR #374 review — narrower filter undercounted).
             set_expected_track_count(
-                conn, album_id, count_discogs_real_tracks(data.get('tracklist')))
+                conn, album_id, count_discogs_real_tracks(data.get('tracklist')),
+                source='discogs', provider_id=discogs_id,
+            )
 
             record_attempt(conn, entity_type='album', entity_id=album_id,
                            service='discogs', status='matched')

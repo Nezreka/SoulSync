@@ -1873,3 +1873,136 @@ def test_an_edition_you_ask_for_is_not_up_to_the_edition_preference(imported_con
     assert _monitored(legacy_db, deluxe) == []
     D.approve_release(legacy_db, _Config(), deluxe, requested=True)
     assert _monitored(legacy_db, deluxe) == ["Nutshell"]
+
+
+def test_locked_album_count_survives_discography_enrichment(
+        legacy_db, imported_conn, monkeypatch):
+    """A discography card must not override a locked release's count."""
+    aid = _artist_id(imported_conn)
+    album_id = _seed_library_album(
+        imported_conn, aid,
+        title="Canonical Count Test",
+        release_date="2020-01-01",
+        expected_track_count=12,
+        external_ids=json.dumps({"musicbrainz": "standard"}),
+    )
+
+    imported_conn.execute(
+        """UPDATE lib2_albums
+              SET canonical_locked=1,
+                  canonical_source='musicbrainz',
+                  canonical_album_id='standard',
+                  canonical_track_count=12
+            WHERE id=?""",
+        (album_id,),
+    )
+    imported_conn.commit()
+
+    _fake_discography_by_name(monkeypatch, {
+        "Drake": _cards_from(
+            "deezer",
+            ("albums", {
+                "id": "dz-larger",
+                "title": "Canonical Count Test",
+                "album_type": "album",
+                "release_date": "2020-01-01",
+                "year": "2020",
+                "track_count": 18,
+                "image_url": None,
+            }),
+        )
+    })
+
+    stats = D.expand_artist_discography(legacy_db, aid)
+    assert stats["enriched"] >= 1
+
+    row = imported_conn.execute(
+        """SELECT expected_track_count, canonical_track_count
+             FROM lib2_albums WHERE id=?""",
+        (album_id,),
+    ).fetchone()
+
+    assert tuple(row) == (12, 12)
+
+
+def test_alternative_edition_does_not_inflate_original_count(
+        legacy_db, imported_conn, monkeypatch):
+    """A different release ID owns its own count, not the default's."""
+    aid = _artist_id(imported_conn)
+    album_id = _seed_library_album(
+        imported_conn, aid,
+        title="Edition Count Test",
+        release_date="2020-01-01",
+        expected_track_count=12,
+        external_ids=json.dumps({"deezer": "10001"}),
+    )
+
+    _fake_discography_by_name(monkeypatch, {
+        "Drake": _cards_from(
+            "deezer",
+            ("albums", {
+                "id": "10002",
+                "title": "Edition Count Test",
+                "album_type": "album",
+                "release_date": "2020-01-01",
+                "year": "2020",
+                "track_count": 18,
+                "image_url": None,
+            }),
+        )
+    })
+
+    stats = D.expand_artist_discography(legacy_db, aid)
+    assert stats["enriched"] >= 1
+
+    row = imported_conn.execute(
+        """SELECT expected_track_count, external_ids
+             FROM lib2_albums WHERE id=?""",
+        (album_id,),
+    ).fetchone()
+
+    assert row["expected_track_count"] == 12
+    assert json.loads(row["external_ids"])["deezer"] == "10001"
+
+    alts = _alt_editions(imported_conn, album_id)
+    assert len(alts) == 1
+    assert json.loads(alts[0]["external_ids"])["deezer"] == "10002"
+    assert alts[0]["track_count"] == 18
+
+
+def test_unlocked_same_release_can_enrich_track_count(
+        legacy_db, imported_conn, monkeypatch):
+    """Preserve existing enrichment behaviour for an unlocked release."""
+    aid = _artist_id(imported_conn)
+    album_id = _seed_library_album(
+        imported_conn, aid,
+        title="Unlocked Count Test",
+        release_date="2020-01-01",
+        expected_track_count=8,
+        external_ids=json.dumps({"deezer": "10003"}),
+    )
+
+    _fake_discography_by_name(monkeypatch, {
+        "Drake": _cards_from(
+            "deezer",
+            ("albums", {
+                "id": "10003",
+                "title": "Unlocked Count Test",
+                "album_type": "album",
+                "release_date": "2020-01-01",
+                "year": "2020",
+                "track_count": 12,
+                "image_url": None,
+            }),
+        )
+    })
+
+    stats = D.expand_artist_discography(legacy_db, aid)
+    assert stats["enriched"] >= 1
+
+    row = imported_conn.execute(
+        "SELECT expected_track_count FROM lib2_albums WHERE id=?",
+        (album_id,),
+    ).fetchone()
+
+    assert row["expected_track_count"] == 12

@@ -360,6 +360,9 @@ def rescan_files(
             )
         ]
 
+    from core.library.path_resolver import is_deleted_quarantine_path
+
+    rows = [row for row in rows if not is_deleted_quarantine_path(row["path"])]
     total = len(rows)
     presence: List[int] = []
     confirmed: List[int] = []

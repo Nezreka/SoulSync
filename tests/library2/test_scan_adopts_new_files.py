@@ -81,6 +81,16 @@ def test_a_file_the_server_found_joins_the_catalogue_unmonitored(lib):
     assert reconciles == [True]
 
 
+def test_server_scan_skips_deleted_quarantine(lib):
+    db, music, _ = lib
+    path = _file(music / ".deleted" / "Muse" / "Origin of Symmetry")
+
+    assert db.insert_or_update_media_track(_Track(path), "al-new", "ar-new",
+                                           server_source="plex") is False
+    assert _count(db, "lib2_track_files") == 0
+    assert path.is_file()
+
+
 def test_the_next_scan_maps_it_and_creates_nothing(lib):
     db, music, _ = lib
     path = _file(music / "Muse" / "Origin of Symmetry")
