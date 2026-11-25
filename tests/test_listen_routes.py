@@ -42,10 +42,16 @@ def test_web_server_registers_the_blueprint_with_live_deps():
     assert "app.register_blueprint(_create_listen_blueprint())" in source
 
 
-def test_static_sheet_is_loaded_by_the_page():
+def test_the_button_lives_in_the_react_search_bar():
+    """note sonar is part of the search field now: no sheet or script of its own on the page."""
     index = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8", errors="replace")
-    assert "filename='note-sonar.css'" in index
-    assert "filename='note-sonar.js'" in index
+    assert "note-sonar.css" not in index
+    assert "note-sonar.js" not in index
+    bar = (_ROOT / "webui" / "src" / "routes" / "search" / "-ui" / "search-bar.tsx").read_text(
+        encoding="utf-8"
+    )
+    assert "<NoteSonar" in bar
+    assert (_ROOT / "webui" / "static" / "note-sonar.png").is_file()
 
 
 @pytest.fixture()

@@ -1,0 +1,356 @@
+/* note sonar: the song-recognition button in the search field and its sheet.
+ *
+ * the mark is the note sonar raster (static/note-sonar.png) used as a mask, so
+ * the button and the orb paint it in the current colour. the url is set inline
+ * by the component, since it has to carry the app's url base. */
+
+.mic {
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  min-height: 0;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-circle);
+  border: 1px solid var(--white-a14);
+  background: var(--white-a06);
+  color: var(--text-1);
+  cursor: pointer;
+  transition:
+    color var(--dur-base) ease,
+    background var(--dur-base) ease,
+    border-color var(--dur-base) ease;
+}
+
+.mic:hover {
+  color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.12);
+  border-color: rgba(var(--accent-rgb), 0.32);
+}
+
+.mic:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.mark {
+  display: block;
+  width: 23px;
+  height: 23px;
+  background: currentColor;
+  mask-position: center;
+  mask-size: contain;
+  mask-repeat: no-repeat;
+}
+
+/* the sheet: the viewport is the backdrop and the drop target. it sits on the
+   floating chrome's layer and, opened last, above it */
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-float);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: var(--black-a70);
+  backdrop-filter: blur(8px);
+}
+
+.sheet {
+  position: relative;
+  width: 100%;
+  max-width: 440px;
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  background: var(--sa-panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sheet);
+  padding: 26px 24px 22px;
+  box-shadow: 0 24px 64px var(--black-a60);
+  text-align: center;
+  animation: sheet-in var(--dur-slow) var(--ease-spring);
+}
+
+@keyframes sheet-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* a file held over the page while the sheet is up */
+.dragging .sheet {
+  border-color: rgba(var(--accent-rgb), 0.7);
+  box-shadow:
+    0 0 0 2px rgba(var(--accent-rgb), 0.28),
+    0 24px 64px var(--black-a60);
+}
+
+.close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-circle);
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-3);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.close:hover {
+  color: var(--text-1);
+  border-color: var(--white-a15);
+}
+
+.orb {
+  width: 112px;
+  height: 112px;
+  margin: 6px auto 14px;
+  padding: 0;
+  border-radius: var(--radius-circle);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+  background: radial-gradient(
+    circle at 50% 40%,
+    rgba(var(--accent-rgb), 0.22),
+    rgba(var(--accent-rgb), 0.04) 70%
+  );
+  border: 1.5px solid rgba(var(--accent-rgb), 0.35);
+  cursor: default;
+  transition:
+    border-color var(--dur-base) ease,
+    box-shadow var(--dur-base) ease;
+}
+
+.orb .mark {
+  width: 50px;
+  height: 50px;
+}
+
+.orbListening {
+  animation: pulse 1.6s var(--ease-standard) infinite;
+  cursor: pointer;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(var(--accent-rgb), 0.34);
+    border-color: rgba(var(--accent-rgb), 0.35);
+  }
+  50% {
+    box-shadow: 0 0 0 18px rgba(var(--accent-rgb), 0);
+    border-color: rgba(var(--accent-rgb), 0.65);
+  }
+}
+
+.title {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text-1);
+  margin: 0 0 4px;
+}
+
+.status {
+  font-size: 13px;
+  color: var(--text-2);
+  min-height: 18px;
+  margin: 0 0 10px;
+}
+
+.statusError {
+  color: var(--danger);
+}
+
+/* 15 bars, their heights set from the analyser while recording */
+.meter {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 3px;
+  height: 34px;
+  margin: 0 0 16px;
+}
+
+.bar {
+  width: 4px;
+  min-height: 3px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+  opacity: 0.55;
+  transition:
+    height 90ms linear,
+    opacity 90ms linear;
+}
+
+/* the third party that gets the clip, named before any capture or upload */
+.disclosure {
+  margin: 0 0 14px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-3);
+}
+
+.actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.btn {
+  width: 100%;
+  padding: 11px 14px;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--line);
+  background: var(--bg-raised-2);
+  color: var(--text-1);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    border-color var(--dur-base) ease,
+    background var(--dur-base) ease;
+}
+
+.btn:hover {
+  border-color: var(--white-a25);
+  background: var(--bg-surface);
+}
+
+.primary {
+  background: var(--accent);
+  border-color: transparent;
+  color: var(--help-on-accent);
+  font-weight: 700;
+}
+
+.primary:hover {
+  background: var(--accent);
+  border-color: transparent;
+  filter: brightness(1.06);
+}
+
+.ghost {
+  background: transparent;
+  color: var(--text-2);
+}
+
+.note {
+  margin-top: 12px;
+  padding: 9px 11px;
+  border-radius: 9px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  text-align: left;
+  color: var(--text-2);
+  background: rgba(var(--warning-rgb), 0.1);
+  border: 1px solid rgba(var(--warning-rgb), 0.35);
+}
+
+.note code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-1);
+}
+
+/* "or upload a clip", only when no action button already says it */
+.alt {
+  margin-top: 14px;
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+.altLink {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+@media (max-width: 768px) {
+  /* 38px is the mobile tap floor every standalone button gets, so the disc
+     matches it rather than fighting it into an oval */
+  .mic {
+    width: 38px;
+    height: 38px;
+  }
+
+  .mic .mark {
+    width: 24px;
+    height: 24px;
+  }
+
+  .sheet {
+    max-width: none;
+    padding: 22px 18px 18px;
+  }
+
+  .orb {
+    width: 92px;
+    height: 92px;
+    margin-bottom: 12px;
+  }
+
+  .orb .mark {
+    width: 44px;
+    height: 44px;
+  }
+}
+
+/* short windows: the sheet must not scroll just to show a status and two buttons */
+@media (max-height: 700px) {
+  .sheet {
+    padding-top: 18px;
+  }
+
+  .orb {
+    width: 76px;
+    height: 76px;
+    margin: 0 auto 8px;
+  }
+
+  .orb .mark {
+    width: 32px;
+    height: 32px;
+  }
+
+  .title {
+    font-size: 15px;
+  }
+
+  .status {
+    margin-bottom: 8px;
+  }
+
+  .disclosure {
+    margin-bottom: 10px;
+  }
+
+  .meter {
+    height: 26px;
+    margin-bottom: 10px;
+  }
+}

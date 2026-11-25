@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 
 import { Spinner } from '@/components/primitives';
 
+import { NoteSonar } from './note-sonar';
 import styles from './search.module.css';
 
 /** Marker the native listener stamps on an event it has already reported. */
@@ -37,6 +38,7 @@ export function SearchBar({
   onSubmit,
   onClear,
   picker,
+  onIdentified,
   searching = false,
   placeholder = 'Artists, albums, tracks, or paste a link',
 }: {
@@ -48,6 +50,8 @@ export function SearchBar({
   onClear: () => void;
   /** the source pill at the end of the field */
   picker?: React.ReactNode;
+  /** note sonar named a song and its analysis box couldn't open: search for it */
+  onIdentified?: (query: string) => void;
   searching?: boolean;
   placeholder?: string;
 }) {
@@ -108,10 +112,42 @@ export function SearchBar({
           ×
         </button>
       ) : null}
+      {onIdentified ? (
+        <NoteSonar
+          onSearch={(found) => {
+            onIdentified(found);
+            focusAtStart(inputRef.current, found);
+          }}
+        />
+      ) : null}
       {/* where the results come from sits at the end of the box (#1909). up
           front it was the first thing a new user read, and they came to type,
           not to pick a catalogue */}
       {picker}
     </div>
   );
+}
+
+/**
+ * focus the field and show the start of the query, not its tail: a phone field
+ * is narrower than "artist title". react commits the value a moment later and
+ * puts the caret back at the end, so it is parked again after that.
+ */
+function focusAtStart(input: HTMLInputElement | null, query: string) {
+  if (!input) return;
+  const park = () => {
+    if (!input.isConnected || input.value !== query) return;
+    try {
+      input.setSelectionRange(0, 0);
+      input.scrollLeft = 0;
+    } catch {
+      // no selection support
+    }
+  };
+  window.setTimeout(() => {
+    input.focus();
+    park();
+    window.setTimeout(park, 60);
+    window.setTimeout(park, 220);
+  });
 }

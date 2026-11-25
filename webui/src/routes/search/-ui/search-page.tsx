@@ -446,6 +446,10 @@ export function SearchPage() {
               query={query}
               onQueryChange={setQuery}
               onSubmit={() => runSearch(query)}
+              onIdentified={(found) => {
+                setQuery(found);
+                runSearch(found);
+              }}
               onClear={() => {
                 setQuery('');
                 setDismissed(true);
