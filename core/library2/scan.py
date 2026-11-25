@@ -624,6 +624,29 @@ def _observe_missing(database, rows, *, stats, manual: bool, ambiguous,
     """Phase 3: what survived the drift check is genuinely absent."""
     from core.library2.paths import missing_path_root_is_healthy
 
+    # a record of where a file used to be, when the same file is on disk
+    # under another record: settled now, not after the two-scan wait, and
+    # never handed on as "this song is gone" (core/library2/moved_file_records).
+    #
+    # BEFORE the outage check, and not counted by it (#2289). a settled record
+    # needs its twin present on disk, which is exactly what an outage can't
+    # show, so settling is safe whatever the numbers. it used to run only when
+    # the outage check passed: a library that had been moved between mounts a
+    # few times (681 records for 124 songs) had most of its records absent,
+    # read as "storage is away" on every scan, and the old records were never
+    # settled. the duplicate and re-tag jobs went on reading all of them.
+    if rows:
+        try:
+            from core.library2.moved_file_records import settle_absent_rows
+            settled = settle_absent_rows(database, rows)
+        except Exception as exc:  # noqa: BLE001 - the ordinary lifecycle still runs
+            logger.error("moved-file settle failed during rescan: %s", exc, exc_info=True)
+            settled = {}
+        if settled:
+            stats["moved_records"] = stats.get("moved_records", 0) + len(settled)
+            stats["missing"] += len(settled)
+            rows = [row for row in rows if int(row["id"]) not in settled]
+
     # a file already confirmed missing is a known miss, not news of an outage:
     # a library someone emptied and confirmed would otherwise read as a
     # dropped mount on every scan after it (#2005)
@@ -636,20 +659,6 @@ def _observe_missing(database, rows, *, stats, manual: bool, ambiguous,
             "Library scan: %d of %d files unreachable at once - treating it as "
             "a storage outage, no file is marked missing", len(rows),
             stats["scanned"] + len(rows))
-    elif rows:
-        # a record of where a file used to be, when the same file is on disk
-        # under another record: settled now, not after the two-scan wait, and
-        # never handed on as "this song is gone" (core/library2/moved_file_records)
-        try:
-            from core.library2.moved_file_records import settle_absent_rows
-            settled = settle_absent_rows(database, rows)
-        except Exception as exc:  # noqa: BLE001 - the ordinary lifecycle still runs
-            logger.error("moved-file settle failed during rescan: %s", exc, exc_info=True)
-            settled = {}
-        if settled:
-            stats["moved_records"] = stats.get("moved_records", 0) + len(settled)
-            stats["missing"] += len(settled)
-            rows = [row for row in rows if int(row["id"]) not in settled]
     pending: list = []
     for row in rows:
         stats["missing"] += 1

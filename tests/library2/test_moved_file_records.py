@@ -209,14 +209,23 @@ def test_the_scan_settles_it_and_does_not_report_the_song_as_gone(library, monke
 
 
 def test_a_storage_outage_settles_nothing(library, monkeypatch):
+    """with the storage away no record has a twin that is PRESENT, so none is
+    settled. (the settle is asked before the outage check now, #2289: what
+    keeps an outage safe is that it needs a file on disk, not that it is
+    skipped.)"""
     from core.library2 import scan
 
-    called = []
-    monkeypatch.setattr(moved, "settle_absent_rows", lambda *a, **k: called.append(1) or {})
+    monkeypatch.setattr("core.library2.paths.resolve_lib2_path",
+                        lambda _path, config_manager=None: None)
     rows = _rows(library["db"], library["old_record"]) * scan.MASS_MISSING_MIN
-    scan._observe_missing(library["db"], rows, stats={"scanned": 0, "missing": 0}, manual=False,
-                          ambiguous=set())
-    assert called == []
+    stats = {"scanned": 0, "missing": 0}
+    scan._observe_missing(library["db"], rows, stats=stats, manual=False, ambiguous=set())
+    assert not stats.get("moved_records")
+    assert stats["mass_missing_deferred"] == scan.MASS_MISSING_MIN
+    with closing(library["db"]._get_connection()) as conn:
+        state = conn.execute("SELECT COALESCE(file_state,'active') FROM lib2_track_files WHERE id=?",
+                             (library["old_record"],)).fetchone()[0]
+    assert state == "active"
 
 
 def test_the_file_can_then_be_moved_onto_the_track_it_belongs_to(library):
