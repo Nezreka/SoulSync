@@ -393,3 +393,36 @@ def test_recognize_failure_still_closes_the_session(monkeypatch):
         listen._recognize(Path("clip.wav"))
 
     assert _BrokenShazam.instances and _BrokenShazam.instances[0].closed, "Shazam was not closed"
+
+
+def test_a_clip_with_no_declared_size_is_refused_before_it_is_read(client, monkeypatch):
+    """a chunked upload says nothing about its size; it is refused instead of
+    being written to disk and measured after"""
+    _ok_engine(monkeypatch)
+    saved = []
+    monkeypatch.setattr("werkzeug.datastructures.FileStorage.save", lambda self, dst: saved.append(dst))
+
+    import io
+    raw = b"--x\r\nContent-Disposition: form-data; name=\"audio\"; filename=\"c\"\r\n\r\nabc\r\n--x--\r\n"
+    response = client.post("/api/listen/identify", input_stream=io.BytesIO(raw),
+                           headers={"Content-Type": "multipart/form-data; boundary=x",
+                                    "Transfer-Encoding": "chunked"})
+    assert response.status_code == 411
+    assert response.get_json()["error"] == "length_required"
+    assert saved == []
+
+
+def test_ffmpeg_reads_only_the_uploaded_file(monkeypatch, tmp_path):
+    import api.listen_routes as lr
+    seen = []
+
+    def fake_run(argv, **kw):
+        seen.append(argv)
+        (tmp_path / "out.wav").write_bytes(b"x" * 100)
+        return subprocess.CompletedProcess(argv, 0)
+
+    monkeypatch.setattr(lr.subprocess, "run", fake_run)
+    lr._to_wav(tmp_path / "in", tmp_path / "out.wav")
+    argv = seen[0]
+    assert argv[argv.index("-protocol_whitelist") + 1] == "file"
+    assert argv.index("-protocol_whitelist") < argv.index("-i")
