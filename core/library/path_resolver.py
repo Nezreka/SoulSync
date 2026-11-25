@@ -189,6 +189,11 @@ def library_base_dirs(
     return _collect_base_dirs(transfer_folder, download_folder, config_manager, plex_client)
 
 
+def is_deleted_quarantine_path(path: Any) -> bool:
+    """Recognize SoulSync's recycle directory in local and server paths."""
+    return isinstance(path, str) and ".deleted" in path.replace("\\", "/").lower().split("/")
+
+
 def resolve_library_file_path(
     file_path: Any,
     *,
@@ -260,7 +265,7 @@ def resolve_library_file_path_with_diagnostic(
         had_plex_client=plex_client is not None,
     )
 
-    if not isinstance(file_path, str) or not file_path:
+    if not isinstance(file_path, str) or not file_path or is_deleted_quarantine_path(file_path):
         return None, attempt
 
     from core.library.path_mappings import foreign_rooted
@@ -299,7 +304,8 @@ def resolve_library_file_path_with_diagnostic(
 
     def allowed(candidate):
         return (
-            (not library_root or _inside_library_root(candidate, library_root))
+            not is_deleted_quarantine_path(candidate)
+            and (not library_root or _inside_library_root(candidate, library_root))
             and (not stored_root or _matching_root(candidate, known_roots) == stored_root)
         )
 
@@ -488,7 +494,7 @@ def _resolve_via_sibling_album_folder(
             except OSError:
                 continue
             candidate = os.path.join(entry.path, basename)
-            if os.path.exists(candidate) and candidate not in matches:
+            if not is_deleted_quarantine_path(candidate) and os.path.exists(candidate) and candidate not in matches:
                 matches.append(candidate)
 
     if not matches:
@@ -637,7 +643,7 @@ def _resolve_via_synthesized_filename(
         album_dirs = []
         for e in artist_entries:
             try:
-                if e.is_dir():
+                if not is_deleted_quarantine_path(e.path) and e.is_dir():
                     album_dirs.append(e)
             except OSError:
                 continue
@@ -701,7 +707,7 @@ def resolve_via_last_resort_fallbacks(
 
     Expects every exact strategy to have failed already.
     """
-    if not isinstance(file_path, str) or not file_path or not base_dirs:
+    if not isinstance(file_path, str) or not file_path or not base_dirs or is_deleted_quarantine_path(file_path):
         return None
     path_parts = file_path.replace("\\", "/").split("/")
     return _unless_another_records(
