@@ -425,6 +425,22 @@ Every row on home is from the profile's own library.
 
 `device` is an id your app makes once and keeps: 8 to 64 letters, numbers, `-` or `_`.
 
+The Movies, TV, Music and YouTube pages have the same contract, one layout per page:
+
+- `GET /api/player/page-layout/<page>?device=<id>`: `{layout, scope, inherited, catalog}`. `<page>` is `movies`, `tv`, `music` or `youtube`, or one library's page `movies:lib:<id>` / `tv:lib:<id>`. `layout.rows` is `[{id, style, on}]` in order. `catalog.rows` lists every row the page can show with its `label`, `hint`, the `styles` it takes and whether it is `on` by default; the rows that are off by default are the extra ones a person can switch on. `catalog.genre_row` is the pattern for a genre row (`genre:movie:<name>`, `genre:show:<name>`), or `null` where the page has none. A library's page with no layout of its own follows its page's (`inherited: true`).
+- `PUT /api/player/page-layout/<page>` with `{layout, device}` and `DELETE /api/player/page-layout/<page>?device=<id>`: as for home. A row that isn't the page's, or a style that isn't one, is `400`.
+- Draw the rows that are on, in order, in their style. Skip a row you don't know or have nothing to show for.
+- `GET /api/player/music/listening`: the Music page's listening rows, `{recent, heavy_rotation, top_albums, top_tracks, all_time_artists}`. Plays that matched a library track, as that library's albums (`album_id`), artists (`artist_id`) and tracks (`track_id`), each with `image_url`. Only what the profile may see.
+
+Libraries:
+
+- `GET /api/player/libraries`: the video libraries this profile can see, `[{id, kind, name, own_page, main}]`. `kind` is `movie` or `show`. A library with `own_page` gets its own entry and page in the player; the rest are part of Movies / TV. A library an admin hid from the profile is never sent, and its titles are refused everywhere the video API answers.
+- `GET /api/player/video-catalog` also carries `libraries`, and every movie and show row ends with `library_id` (read it by name from `fields`). A title in no library folder is in its kind's main library.
+- `GET /api/player/admin/libraries` (admin): `{libraries: [{id, kind, name, main, own_page, titles, hidden_from}], profiles}`.
+- `PUT /api/player/admin/libraries/<id>` (admin) with `{own_page?: bool, hidden_from?: [profile id]}`. The main library can't have a second page, and an admin profile is dropped from `hidden_from` (admins see every library).
+
+The sidebar's order is two of the profile's player settings (`GET` / `PUT /api/player/settings`): `sidebar_order` and `sidebar_hidden`, each a list of places, a page (`/player/movies`) or a library with its own page (`lib:<id>`). Places stay in their section; one the order doesn't name keeps its usual spot after the ones it does. Home can't be hidden.
+
 ### Playback
 
 How the player, and paired apps, play something. Both routes take the signed-in session or a paired device's token (`X-Device-Token`), and both go through one check (`core/player/playable.py`):

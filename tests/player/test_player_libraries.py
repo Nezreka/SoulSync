@@ -189,3 +189,23 @@ def test_only_an_admin_manages_libraries(db, monkeypatch):
     assert client.get("/api/player/admin/libraries").status_code == 403
     assert client.put("/api/player/admin/libraries/5", json={"own_page": True}).status_code == 403
     assert pl.own_page_ids(db) == frozenset()
+
+
+# ── the sidebar's order, per profile ──────────────────────────────────────
+
+def test_sidebar_order_and_hidden_are_saved_and_checked(db):
+    from core.player import settings as ps
+    assert ps.get(db, 3)["sidebar_order"] == [] and ps.get(db, 3)["sidebar_hidden"] == []
+    saved = ps.put(db, 3, {"sidebar_order": ["/player/tv", "lib:5", "/player/movies", "lib:5"],
+                           "sidebar_hidden": ["/player/podcasts"]})
+    assert saved["sidebar_order"] == ["/player/tv", "lib:5", "/player/movies"]
+    assert saved["sidebar_hidden"] == ["/player/podcasts"]
+    assert ps.get(db, 4)["sidebar_order"] == [], "another profile keeps its own"
+    # a default that is a list is never shared between profiles
+    ps.get(db, 4)["sidebar_order"].append("/player/tv")
+    assert ps.get(db, 4)["sidebar_order"] == [] and ps.defaults()["sidebar_order"] == []
+    for bad in ({"sidebar_order": "x"}, {"sidebar_order": ["../etc"]}, {"sidebar_order": ["lib:x"]},
+                {"sidebar_order": [5]}, {"sidebar_hidden": ["/player"]},
+                {"sidebar_order": ["/player/tv"] * 0 + [f"lib:{i}" for i in range(200)]}):
+        with pytest.raises(ps.SettingsError):
+            ps.put(db, 3, bad)
