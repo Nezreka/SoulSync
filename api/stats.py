@@ -16,6 +16,7 @@ from urllib.parse import quote, urlparse
 
 from flask import Blueprint, jsonify, request
 
+from core.connect.device_access import device_playback
 from core.metadata import is_internal_image_host
 from core.profile_context import get_current_profile_id, is_admin_request
 from utils.logging_config import get_logger
@@ -67,6 +68,7 @@ from core.stats import queries as _stats_queries
 
 
 @bp.route('/api/stats/cached', methods=['GET'])
+@device_playback
 @requires("music.access")
 def stats_cached():
     """Get all pre-computed stats for a time range from cache. Instant response."""
@@ -193,6 +195,7 @@ def stats_overview():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @bp.route('/api/stats/top-artists', methods=['GET'])
+@device_playback
 @requires("music.stats")
 def stats_top_artists():
     """Get top artists by play count."""
@@ -206,6 +209,7 @@ def stats_top_artists():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @bp.route('/api/stats/top-albums', methods=['GET'])
+@device_playback
 @requires("music.stats")
 def stats_top_albums():
     """Get top albums by play count."""
@@ -219,6 +223,7 @@ def stats_top_albums():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @bp.route('/api/stats/top-tracks', methods=['GET'])
+@device_playback
 @requires("music.stats")
 def stats_top_tracks():
     """Get top tracks by play count."""
@@ -245,6 +250,7 @@ def stats_timeline():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @bp.route('/api/stats/genres', methods=['GET'])
+@device_playback
 @requires("music.stats")
 def stats_genres():
     """Get genre distribution by play count."""
@@ -292,6 +298,7 @@ def stats_library_disk_usage():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @bp.route('/api/stats/recent', methods=['GET'])
+@device_playback
 @requires("music.access")
 def stats_recent():
     """Get recently played tracks."""
@@ -546,6 +553,7 @@ def lyrics_answer(title, artist, album=None, duration=None, local_path=None):
 
 
 @bp.route('/api/stats/resolve-track', methods=['POST'])
+@device_playback
 @requires("music.access")
 def stats_resolve_track():
     """Resolve a track by title+artist to get its file_path for playback."""
