@@ -2726,6 +2726,47 @@ def search_public_playlists():
                     "sources": [name for name, rows in lists.items() if rows]})
 
 
+@bp.route('/api/playlists/public-preview', methods=['GET'])
+@requires("music.playlist_sync")
+def preview_public_playlist():
+    """The first songs of a public playlist a search found, so you can look
+    before adding it (#2305): ?source=deezer|spotify&id=. ``{songs: [{title,
+    artist}], total}``; a service that can't answer gives no songs, never an
+    error the sheet has to explain."""
+    source = (request.args.get('source') or '').strip().lower()
+    pid = (request.args.get('id') or '').strip()
+    if not pid or len(pid) > 64 or not re.match(r'^[A-Za-z0-9]+$', pid):
+        return jsonify({"success": False, "error": "no such playlist"}), 400
+    songs, total = [], 0
+    try:
+        if source == 'deezer':
+            client = _get_deezer_client()
+            got = client.get_playlist(pid) if client else None
+            tracks = (got or {}).get('tracks') or []
+            total = int((got or {}).get('track_count') or len(tracks))
+            for t in tracks[:50]:
+                artists = t.get('artists') or []
+                songs.append({'title': t.get('name') or '', 'artist': str(artists[0]) if artists else ''})
+        elif source == 'spotify':
+            from core.metadata.registry import get_spotify_client
+            client = get_spotify_client()
+            if (client and getattr(client, 'sp', None) and client.is_spotify_authenticated()
+                    and not _spotify_rate_limited()):
+                page = client.sp.playlist_items(pid, limit=50, additional_types=('track',)) or {}
+                total = int(page.get('total') or 0)
+                for item in page.get('items') or []:
+                    t = (item or {}).get('track') or {}
+                    if not t.get('name'):
+                        continue
+                    artists = t.get('artists') or []
+                    songs.append({'title': t['name'], 'artist': (artists[0] or {}).get('name', '') if artists else ''})
+        else:
+            return jsonify({"success": False, "error": "no such source"}), 400
+    except Exception as exc:  # noqa: BLE001 - a preview that fails shows nothing
+        logger.debug("public playlist preview failed (%s %s): %s", source, pid, exc)
+    return jsonify({"success": True, "songs": songs, "total": max(total, len(songs))})
+
+
 @bp.route('/api/search/browse/deezer', methods=['GET'])
 @requires("music.access")
 def get_search_browse_deezer():
