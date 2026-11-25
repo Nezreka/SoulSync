@@ -111,6 +111,9 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='media-player-v2.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='mobile.css', v=static_v) }}">
+    <!-- Song identification (the Search bar's listen button). Its own sheet and
+         field-sized control, so it sits with the other isolated page styles. -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='note-sonar.css', v=static_v) }}">
     <!-- Automations visual redesign — a pure reskin loaded after style/mobile so it
          wins by cascade; no JS-referenced selectors change (see file header). -->
     <link rel="stylesheet" href="{{ url_for('static', filename='automations-redesign.css', v=static_v) }}">
@@ -4411,6 +4414,10 @@
          floating-orb animation around the SoulSync logo on the video dashboard) -->
     <script src="{{ url_for('static', filename='video/video-worker-orbs.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='config-migration.js', v=static_v) }}"></script>
+    <!-- Song identification: adopts the Search bar's field, records a short
+         clip (or takes a dropped file), and hands the answer to the ordinary
+         search / analysis-box seams. Standalone; no other module depends on it. -->
+    <script src="{{ url_for('static', filename='note-sonar.js', v=static_v) }}"></script>
 </body>
 
 </html>
