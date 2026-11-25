@@ -3244,3 +3244,9 @@ curl -H "Authorization: Bearer sk_..." \
 | POST | `/api-keys` | Generate new key |
 | DELETE | `/api-keys/<id>` | Revoke key |
 | POST | `/api-keys/bootstrap` | Bootstrap first key (no key, admin only) |
+
+### Public playlist search
+
+`GET /api/playlists/public-search?q=<name>&source=deezer|spotify&limit=15`
+
+Public playlists by name, from the services that can be searched without anyone's account. `source` narrows it to one. Each result has `id`, `title`, `creator`, `track_count`, `image_url`, `source` and `link`; adding one is the same as pasting its `link` into Add Playlist. A service that fails or is not set up is left out. Needs the playlist sync permission.

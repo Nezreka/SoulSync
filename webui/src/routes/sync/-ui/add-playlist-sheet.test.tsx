@@ -18,7 +18,7 @@ function renderSheet() {
   const onRoute = vi.fn();
   const onClose = vi.fn();
   const { unmount } = render(<AddPlaylistSheet onRoute={onRoute} onClose={onClose} />);
-  const input = screen.getByLabelText('Paste a link') as HTMLInputElement;
+  const input = screen.getByLabelText('Paste a link or search by name') as HTMLInputElement;
   const type = (value: string) => fireEvent.change(input, { target: { value } });
   const add = () => fireEvent.click(screen.getByRole('button', { name: 'Add' }));
   return { onRoute, onClose, input, type, add, unmount };
@@ -106,7 +106,8 @@ describe('what it says while you type', () => {
 
   it('clears the error once you start editing again', () => {
     const { type, add } = renderSheet();
-    type('nonsense');
+    // a link we can't read (plain words are a search now, #2305)
+    type('https://tidal.com/browse/playlist/abc');
     add();
     expect(screen.getByText(/not one we can read/)).toBeInTheDocument();
     type('https://open.spotify.com/playlist/abc');
@@ -209,5 +210,28 @@ describe('every source wears its own logo', () => {
       expect(tile.querySelector('.tab-icon'), s.tab).not.toBeNull();
     }
     expect(container.querySelector('.tab-icon.ytmusic-icon')).not.toBeNull();
+  });
+});
+
+// #2305: words that aren't a link search public playlists
+describe('searching public playlists by name', () => {
+  it('tells words from a link', async () => {
+    const { looksLikeSearch } = await import('./add-playlist-sheet');
+    expect(looksLikeSearch('lofi beats')).toBe(true);
+    expect(looksLikeSearch('a')).toBe(false);
+    expect(looksLikeSearch('https://open.spotify.com/playlist/x')).toBe(false);
+    expect(looksLikeSearch('deezer.com/playlist/1')).toBe(false);
+    expect(looksLikeSearch('open.spotify')).toBe(false);
+  });
+});
+
+describe('words are a search, not a bad link (#2305)', () => {
+  it('enter on words shows no link error and routes nowhere', () => {
+    const { onRoute, type, add } = renderSheet();
+    type('lofi beats');
+    add();
+    expect(screen.queryByText(/not one we can read/)).toBeNull();
+    expect(screen.getByText('Searching public playlists…')).toBeInTheDocument();
+    expect(onRoute).not.toHaveBeenCalled();
   });
 });

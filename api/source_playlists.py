@@ -2659,6 +2659,73 @@ def get_deezer_editorial_playlists():
         return jsonify({"success": True, "playlists": [], "count": 0, "error": str(e)})
 
 
+def _spotify_public_playlists(query: str, limit: int) -> list:
+    """public spotify playlists by name, through the server's app. a search
+    reads nobody's account: it is the same catalogue anyone sees."""
+    try:
+        from core.metadata.registry import get_spotify_client
+        client = get_spotify_client()
+        if (not client or not getattr(client, "sp", None)
+                or not client.is_spotify_authenticated() or _spotify_rate_limited()):
+            return []
+        found = client.sp.search(q=query, type='playlist', limit=max(1, min(limit, 20)))
+    except Exception as exc:  # noqa: BLE001 - one source failing is an empty source
+        logger.debug("public playlist search: spotify failed: %s", exc)
+        return []
+    out = []
+    for p in (((found or {}).get('playlists') or {}).get('items') or []):
+        if not p or not p.get('id'):
+            continue
+        link = (p.get('external_urls') or {}).get('spotify') or f"https://open.spotify.com/playlist/{p['id']}"
+        images = p.get('images') or []
+        out.append({
+            'id': str(p['id']), 'title': p.get('name') or '',
+            'creator': (p.get('owner') or {}).get('display_name') or 'Spotify',
+            'track_count': int((p.get('tracks') or {}).get('total') or 0),
+            'image_url': (images[0].get('url') if images else '') or '',
+            'link': link, 'source': 'spotify',
+        })
+    return out
+
+
+@bp.route('/api/playlists/public-search', methods=['GET'])
+@requires("music.playlist_sync")
+def search_public_playlists():
+    """Public playlists by name, across the services that can be searched
+    without anyone's account (#2305): ?q=, and ?source=deezer|spotify to
+    narrow it. Each result carries its ``link``; adding one is the same as
+    pasting that link into Add Playlist, so it goes through the import that
+    already exists. A source that fails or isn't set up is left out, never
+    an error."""
+    query = (request.args.get('q') or '').strip()
+    only = (request.args.get('source') or '').strip().lower()
+    try:
+        limit = max(1, min(int(request.args.get('limit') or 15), 30))
+    except (TypeError, ValueError):
+        limit = 15
+    if len(query) < 2:
+        return jsonify({"success": True, "playlists": [], "sources": []})
+    lists = {}
+    if only in ('', 'deezer'):
+        try:
+            client = _get_deezer_client()
+            lists['deezer'] = [p for p in (client.search_playlists(query, limit=limit) if client else [])
+                               if p.get('link')]
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("public playlist search: deezer failed: %s", exc)
+            lists['deezer'] = []
+    if only in ('', 'spotify'):
+        lists['spotify'] = _spotify_public_playlists(query, limit)
+    # one from each in turn, so one service doesn't bury the other
+    merged, queues = [], [list(v) for v in lists.values()]
+    while any(queues):
+        for q in queues:
+            if q:
+                merged.append(q.pop(0))
+    return jsonify({"success": True, "playlists": merged[:limit * 2],
+                    "sources": [name for name, rows in lists.items() if rows]})
+
+
 @bp.route('/api/search/browse/deezer', methods=['GET'])
 @requires("music.access")
 def get_search_browse_deezer():

@@ -185,7 +185,7 @@ describe('the modal mount', () => {
  */
 function routeViaAddPlaylist(url: string): void {
   fireEvent.click(screen.getByText('Add playlist'));
-  fireEvent.change(screen.getByLabelText('Paste a link'), { target: { value: url } });
+  fireEvent.change(screen.getByLabelText('Paste a link or search by name'), { target: { value: url } });
   fireEvent.click(screen.getByRole('button', { name: 'Add' }));
 }
 
