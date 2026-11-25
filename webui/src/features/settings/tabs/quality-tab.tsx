@@ -1220,14 +1220,17 @@ export function MusicQualityTab({ store }: SettingsTabProps) {
           <Row
             label="Verify real audio with ffmpeg"
             htmlFor="audio-completeness-check"
-            help="Decodes every download to catch padded 30-second previews and mostly silent files."
+            help="Decodes every download to catch padded 30-second previews, mostly silent files and fake lossless files."
             more={
               <>
                 These are files whose header lies about the length, so the usual checks cannot catch
-                them. <strong>Off by default:</strong> it fully decodes each file, the most
-                CPU-heavy step after a download. Most sources (HiFi, Qobuz) already catch previews,
-                so only turn this on if padded or silent files slip through. Applies to every
-                download source.
+                them. It also listens for a lossless file that was made from a low-bitrate MP3 or
+                AAC: those have a hard cut where the music stops, around 16 kHz. Only that clear
+                case is turned away; a file made from a high-bitrate source can sound the same as a
+                soft master and is let through. <strong>Off by default:</strong> it fully decodes
+                each file, the most CPU-heavy step after a download. Most sources (HiFi, Qobuz)
+                already catch previews, so only turn this on if padded, silent or fake lossless
+                files slip through. Applies to every download source.
               </>
             }
           >
