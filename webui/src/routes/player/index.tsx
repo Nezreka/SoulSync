@@ -8,8 +8,8 @@ import type { CatalogMovie, CatalogShow, ExtraTitle } from './-player.types';
 import { autoChannels, numberChannels } from './-lib/channels';
 import { deviceId } from './-lib/device';
 import { guideScheduleOptions, sharedCommercials } from './-lib/guide-schedule';
-import { parseGenreRow, type HomeLayout, type RowStyle } from './-lib/home-layout';
-import { backdropSet, remoteImage, WIDE_SIZES } from './-lib/images';
+import { parseGenreRow, type HomeLayout } from './-lib/home-layout';
+import { remoteImage } from './-lib/images';
 import { premiereItem, premieresFor, premiereWhen, upcomingPremieres } from './-lib/premieres';
 import {
   continueRails,
@@ -46,11 +46,11 @@ import {
 } from './-player.api';
 import { Billboard, type Slide } from './-ui/billboard';
 import { HomeEditor } from './-ui/home-editor';
-import { CardRail, Empty, Rail, SkeletonRail, styles as s, type CardAction } from './-ui/kit';
+import { Empty, Rail, SkeletonRail, styles as s, type CardAction } from './-ui/kit';
 import { DiscoverCard } from './-ui/music/discover-card';
 import { notifyError } from './-ui/notice';
+import { StyledRow } from './-ui/page-rows';
 import { useSections } from './-ui/sections';
-import { RankedRail } from './-ui/top10';
 
 export const Route = createFileRoute('/player/')({
   validateSearch: (search: Record<string, unknown>): { customize?: boolean } =>
@@ -75,33 +75,6 @@ const FALLBACK_ROWS = [
 ];
 
 const day = () => new Date().toISOString().slice(0, 10);
-
-/** a poster card as a wide still: the title's backdrop when it has one */
-function toWide(card: RailCard): RailCard {
-  if (card.shape === 'wide' || !card.preview) return card;
-  const set = backdropSet(card.preview.kind, card.preview.id);
-  return { ...card, shape: 'wide', art: set.src, artSet: set.srcSet, artSizes: WIDE_SIZES };
-}
-
-function StyledRow({
-  style,
-  title,
-  cards,
-  more,
-  actionsFor,
-}: {
-  style: RowStyle;
-  title: string;
-  cards: RailCard[];
-  more?: { to: string; label?: string };
-  actionsFor?: (card: RailCard) => CardAction[];
-}) {
-  if (!cards.length) return null;
-  if (style === 'ranked') return <RankedRail title={title} cards={cards} />;
-  const shown = style === 'wide' ? cards.map(toWide) : cards;
-  const rail = <CardRail title={title} cards={shown} more={more} actionsFor={actionsFor} />;
-  return style === 'large' ? <div className={s.rowLarge}>{rail}</div> : rail;
-}
 
 /** today's chart from tmdb, narrowed to what you have, as your library's cards */
 function useTopToday(
@@ -588,9 +561,9 @@ function PlayerHome() {
         </div>
       </div>
 
-      {editing && draft ? (
+      {editing ? (
         <HomeEditor
-          layout={draft}
+          layout={layout}
           catalog={saved.data?.catalog}
           scope={saved.data?.scope ?? null}
           movieGenres={movies ? genresOf(movies) : []}
@@ -598,7 +571,7 @@ function PlayerHome() {
           onChange={setDraft}
           onSave={async (where) => {
             await saveHomeLayout(
-              draft,
+              layout,
               where === 'all' ? '*' : device,
               where === 'all' ? device : undefined,
             );

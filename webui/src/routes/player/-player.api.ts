@@ -1551,6 +1551,41 @@ export async function resetHomeLayout(device?: string) {
   });
 }
 
+// ── the rows of the movies, tv, music and youtube pages ────────────────
+
+export const pageLayoutQuery = (page: string, device: string) =>
+  queryOptions({
+    queryKey: ['player', 'page-layout', page, device],
+    queryFn: async () =>
+      await apiClient
+        .get(`player/page-layout/${encodeURIComponent(page)}`, { searchParams: { device } })
+        .json<{
+          layout?: { rows: HomeLayout['rows'] };
+          scope?: 'device' | 'all' | null;
+          catalog?: LayoutCatalog;
+        }>(),
+    staleTime: 5 * MINUTE,
+  });
+
+/** save for this screen, or for every screen of the profile ('*') */
+export async function savePageLayout(
+  page: string,
+  layout: unknown,
+  device: string,
+  fromDevice?: string,
+) {
+  await apiClient.put(`player/page-layout/${encodeURIComponent(page)}`, {
+    json: { layout, device, ...(fromDevice ? { from_device: fromDevice } : {}) },
+  });
+}
+
+/** this screen follows the shared layout again; without a device, the page goes to its default */
+export async function resetPageLayout(page: string, device?: string) {
+  await apiClient.delete(`player/page-layout/${encodeURIComponent(page)}`, {
+    searchParams: device ? { device } : {},
+  });
+}
+
 // ── watchlist (per profile, in player.db) ──────────────────────────────
 
 export type WatchlistKind = 'movie' | 'show' | 'youtube';
