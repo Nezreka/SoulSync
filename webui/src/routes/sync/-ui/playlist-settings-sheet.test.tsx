@@ -177,6 +177,33 @@ describe('the cover restore row', () => {
     return onRestoreCover;
   }
 
+  it('uploads a photo of your own from Settings (#2280)', () => {
+    stubPreview();
+    const onUploadCover = vi.fn();
+    render(
+      <PlaylistSettingsSheet
+        row={{ id: 7, name: 'Mix', source: 'spotify' }}
+        name="Mix"
+        sourceLabel="Spotify"
+        scheduleLabel="Daily"
+        onRename={vi.fn()}
+        onToggleOrganize={vi.fn()}
+        onSetSyncMode={vi.fn()}
+        onUploadCover={onUploadCover}
+        onDelete={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+    const file = new File(['x'], 'cover.png', { type: 'image/png' });
+    fireEvent.change(screen.getByLabelText('Upload artwork'), { target: { files: [file] } });
+    expect(onUploadCover).toHaveBeenCalledWith(file);
+  });
+
+  it('has no upload row when it is not offered', () => {
+    renderWithRestore({ custom_cover: false });
+    expect(screen.queryByLabelText('Upload artwork')).toBeNull();
+  });
+
   it('is hidden while the playlist has its original cover', () => {
     renderWithRestore({ custom_cover: false, source_image_url: 'https://src/a.jpg' });
     expect(screen.queryByRole('button', { name: 'Restore original' })).toBeNull();
