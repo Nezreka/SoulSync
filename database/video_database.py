@@ -14899,58 +14899,6 @@ class VideoDatabase:
         finally:
             conn.close()
 
-    def main_library_ids(self) -> dict:
-        """{'movie': id, 'show': id} of the main libraries (a title in no
-        library folder counts as its kind's main library)."""
-        conn = self._get_connection()
-        try:
-            return {r[0]: int(r[1]) for r in conn.execute(
-                "SELECT kind, id FROM video_libraries WHERE builtin = 'main'")}
-        except sqlite3.Error:
-            return {}
-        finally:
-            conn.close()
-
-    def library_ids_by_id(self, kind: str, ids) -> dict:
-        """{title id: the library it is in} for movies or shows. a title in
-        no library folder is in its kind's main library. the player hides a
-        library from a profile by these (core/player/libraries.py)."""
-        tbl = {"movie": "movies", "movies": "movies", "show": "shows", "shows": "shows"}.get(kind)
-        ids = [int(i) for i in (ids or []) if i is not None]
-        if not tbl or not ids:
-            return {}
-        main = self.main_library_ids().get("movie" if tbl == "movies" else "show")
-        out = {}
-        conn = self._get_connection()
-        try:
-            for i in range(0, len(ids), 500):
-                chunk = ids[i:i + 500]
-                q = ",".join("?" * len(chunk))
-                for r in conn.execute(
-                        f"SELECT id, video_library_id FROM {tbl} WHERE id IN ({q})", chunk):
-                    out[r[0]] = r[1] if r[1] is not None else main
-            return out
-        finally:
-            conn.close()
-
-    def library_title_counts(self) -> dict:
-        """{library id: how many owned movies or shows are in it}"""
-        main = self.main_library_ids()
-        out: dict = {}
-        conn = self._get_connection()
-        try:
-            for kind, sql in (
-                    ("movie", "SELECT video_library_id, COUNT(*) FROM movies WHERE has_file = 1 GROUP BY 1"),
-                    ("show", "SELECT s.video_library_id, COUNT(*) FROM shows s WHERE EXISTS "
-                             "(SELECT 1 FROM episodes e WHERE e.show_id = s.id AND e.has_file = 1) GROUP BY 1")):
-                for lib_id, n in conn.execute(sql):
-                    key = lib_id if lib_id is not None else main.get(kind)
-                    if key is not None:
-                        out[int(key)] = out.get(int(key), 0) + int(n)
-            return out
-        finally:
-            conn.close()
-
     def content_ratings_by_tmdb(self, kind: str, tmdb_ids) -> dict:
         """{tmdb id: [content_rating, ...]} for movies or shows, every server's
         row. the caller takes the strictest when servers disagree."""

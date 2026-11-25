@@ -79,7 +79,9 @@ def _in_hidden_library(db, cap, k, ids) -> set:
     if not hidden or not ids:
         return set()
     try:
-        where = db.library_ids_by_id(k, ids)
+        from core.player.libraries import library_ids_for
+        from database.player_database import get_player_database
+        where = library_ids_for(db, get_player_database(), k, ids)
     except Exception:  # noqa: BLE001
         logger.exception("hidden libraries: lookup failed for %s", k)
         return {int(i) for i in ids}

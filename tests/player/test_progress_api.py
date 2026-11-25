@@ -270,7 +270,7 @@ def test_every_player_route_declares_its_access():
            or r.rule.endswith("/settings") or "/presence" in r.rule
            or "/note" in r.rule or "/guide/channels" in r.rule or "/guide/lineup" in r.rule
            or "/guide/reminders" in r.rule or "/parties" in r.rule
-           or "/downloads" in r.rule or "/admin/users" in r.rule or "/admin/libraries" in r.rule
+           or "/downloads" in r.rule or "/admin/users" in r.rule or r.rule.endswith("/player/setup")
            or "/commercials" in r.rule or "/issues" in r.rule]
     music = [r for r in rules if r.rule.endswith("/music-channels") or r.rule.endswith("/music/listening")]
     discover = [r for r in rules if "/discover-playlists" in r.rule]
