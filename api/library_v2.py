@@ -2318,12 +2318,13 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         if data is None:
             return _fail("Artist not found", 404)
         _apply_artwork_urls(data, "artist")
-        for entry in data.get("albums", []) + data.get("eps", []) + data.get("singles", []):
+        for entry in data.get("albums", []) + data.get("eps", []) + data.get("singles", []) + data.get("appears_on", []):
             _apply_artwork_urls(entry, "album",
                                 prefer_remote=_is_uncached_discography_row(entry))
         return jsonify({"success": True, "artist": data})
 
     @_route("/api/library/v2/artists/<int:artist_id>/your-plays")
+    @device_playback
     def lib2_artist_your_plays(artist_id):
         """you and this artist: your own plays of them from your listening
         pile (plays, first and last listened, rank, the last 12 months and
