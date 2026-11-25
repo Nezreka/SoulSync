@@ -148,8 +148,16 @@ function PlayerSetup({ data, firstTime }: { data: SetupPayload; firstTime: boole
       const body: Record<string, unknown> = { done: true };
       if (!defaultsOnly) {
         body.server_name = name;
-        body.sidebar_order = order;
-        body.sidebar_hidden = gone;
+        // a library not saved yet is named by its place in the list; one
+        // removed again after being arranged is dropped
+        const sent = (ids: string[]) =>
+          ids.flatMap((id) => {
+            if (!id.startsWith('draft:')) return [id];
+            const at = libs.findIndex((l) => l.key === id.slice(6) && l.id === null);
+            return at >= 0 ? [`lib:new:${at}`] : [];
+          });
+        body.sidebar_order = sent(order);
+        body.sidebar_hidden = sent(gone);
         body.libraries = libs.map((l) => ({
           ...(l.id !== null ? { id: l.id } : {}),
           kind: l.kind,
@@ -316,7 +324,22 @@ function PlayerSetup({ data, firstTime }: { data: SetupPayload; firstTime: boole
   };
 
   const people = (data.profiles ?? []).filter((p) => !p.is_admin);
-  const places = NAV.map((e) => ({ id: e.to, label: e.label, group: e.group }));
+  // every page, and after Movies and TV the libraries made here: one that
+  // isn't saved yet goes by its draft key here, and by its place in the list in the save
+  const places = NAV.flatMap((e) => [
+    { id: e.to, label: e.label, group: e.group },
+    ...libs.flatMap((l) =>
+      !l.isDefault && e.to === (l.kind === 'movie' ? '/player/movies' : '/player/tv')
+        ? [
+            {
+              id: l.id !== null ? `lib:${l.id}` : `draft:${l.key}`,
+              label: l.name.trim() || 'New library',
+              group: e.group,
+            },
+          ]
+        : [],
+    ),
+  ]);
   const ordered = [
     ...order.filter((id) => places.some((p) => p.id === id)),
     ...places.map((p) => p.id).filter((id) => !order.includes(id)),
