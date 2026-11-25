@@ -126,6 +126,21 @@ describe('MirroredDetailModal', () => {
     expect(onRefreshFromSource).toHaveBeenCalled();
   });
 
+  it('Sync only pushes to the server without the wishlist, beside Sync & download', () => {
+    const onSyncOnly = vi.fn();
+    const on = renderModal({ name: 'A', source: 'spotify', tracks: [] }, { onSyncOnly });
+    const button = screen.getByRole('button', { name: 'Sync only' });
+    expect(button.title).toMatch(/aren't added to the wishlist or downloaded/);
+    fireEvent.click(button);
+    expect(onSyncOnly).toHaveBeenCalled();
+    expect(on.onRunPipeline).not.toHaveBeenCalled();
+  });
+
+  it('no handler, no Sync only button', () => {
+    renderModal({ name: 'A', source: 'spotify', tracks: [] });
+    expect(screen.queryByRole('button', { name: 'Sync only' })).toBeNull();
+  });
+
   it('no handler, no refresh button', () => {
     renderModal({ name: 'A', source: 'youtube', tracks: [] });
     openMore();
