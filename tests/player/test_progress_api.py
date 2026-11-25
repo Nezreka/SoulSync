@@ -265,6 +265,7 @@ def test_every_player_route_declares_its_access():
     rules = [r for r in app.url_map.iter_rules() if r.rule.startswith("/api/player/")]
     own = [r for r in rules if "/progress" in r.rule or r.rule.endswith("/continue")
            or "/favorites" in r.rule or r.rule.endswith("/home-layout")
+           or "/page-layout/" in r.rule
            or r.rule.endswith("/watchlist") or r.rule == "/api/player/watched"
            or r.rule.endswith("/settings") or "/presence" in r.rule
            or "/note" in r.rule or "/guide/channels" in r.rule or "/guide/lineup" in r.rule
@@ -275,7 +276,7 @@ def test_every_player_route_declares_its_access():
     discover = [r for r in rules if "/discover-playlists" in r.rule]
     playlists = [r for r in rules if r not in discover and ("/playlists" in r.rule or r.rule.endswith("/top") or r.rule.endswith("/request-track"))]
     library = [r for r in rules if r not in own and r not in music and r not in playlists and r not in discover]
-    assert len(own) == 58 and len(library) == 12 and len(music) == 1 and len(playlists) == 4
+    assert len(own) == 61 and len(library) == 12 and len(music) == 1 and len(playlists) == 4
     # soulsync's discovery playlists: the manager's discover gate, the same as its discover page
     assert len(discover) == 3
     for rule in discover:
