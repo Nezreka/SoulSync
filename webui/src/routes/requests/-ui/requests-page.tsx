@@ -66,6 +66,7 @@ import {
   whoAsked,
 } from '../-requests.helpers';
 import { Route } from '../route';
+import { AccessRequests } from './access-requests';
 import { ApprovalSettingsDialog } from './approval-settings';
 import { PickQueue, pickItems, type PickItem } from './pick-queue';
 import styles from './requests-page.module.css';
@@ -457,6 +458,7 @@ export function RequestsPage() {
           ))}
         </div>
 
+        {isAdmin ? <AccessRequests /> : null}
         {tab === 'pick' && decider ? (
           <PickQueue
             items={picks}
