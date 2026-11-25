@@ -193,9 +193,11 @@ function lb(over: Partial<ListenBrainzSectionProps> = {}): ListenBrainzSectionPr
     hasData: { recommendations: true, user: true, collaborative: false },
     mixes: [mix('lb_1', 'Weekly Jams')],
     loaded: true,
+    showsConnect: false,
     onSelectTab: vi.fn(),
     onSelectGroup: vi.fn(),
     onRefresh: vi.fn(),
+    onRetry: vi.fn(),
     onConnect: vi.fn(),
     onOpenMix: vi.fn(),
     ...over,
@@ -233,6 +235,7 @@ describe('ListenBrainz', () => {
     // and points at where the token lives (3479-3489).
     const p = lb({
       username: null,
+      showsConnect: true,
       hasData: { recommendations: false, user: false, collaborative: false },
       mixes: [],
     });
@@ -267,16 +270,43 @@ describe('ListenBrainz', () => {
     expect(screen.getByTitle('Refresh playlists from ListenBrainz')).toBeInTheDocument();
   });
 
+  it('does not treat a valid empty response without username as disconnected', () => {
+    const { container } = render(
+      <ListenBrainzSection
+        {...lb({
+          username: null,
+          hasData: { recommendations: false, user: false, collaborative: false },
+          mixes: [],
+        })}
+      />,
+    );
+    expect(container.querySelector('.lb-empty-state')).toBeNull();
+    expect(screen.getByText(/No ListenBrainz playlists yet/)).toBeInTheDocument();
+  });
+
+  it('keeps confirmed cards visible during a partial failure and offers retry', () => {
+    const p = lb({ error: true });
+    const { container } = render(<ListenBrainzSection {...p} />);
+    expect(container.querySelector('.discover-grid .mix-card-open')).not.toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry loading playlists' }));
+    expect(p.onRetry).toHaveBeenCalledOnce();
+    expect(container.querySelector('.lb-empty-state')).toBeNull();
+  });
+
   it('distinguishes a failed load from "not connected"', () => {
-    const { container } = render(<ListenBrainzSection {...lb({ error: true, mixes: [] })} />);
-    expect(container.querySelector('.discover-empty p')!.textContent).toBe(
+    const { container } = render(
+      <ListenBrainzSection {...lb({ error: true, hasData: {}, mixes: [] })} />,
+    );
+    expect(container.querySelector('.listenbrainz-recovery p')!.textContent).toBe(
       'Failed to load playlists',
     );
     expect(container.querySelector('.lb-empty-state')).toBeNull();
   });
 
   it('shows a spinner instead of tabs while loading, and no connect card', () => {
-    const { container } = render(<ListenBrainzSection {...lb({ loading: true })} />);
+    const { container } = render(
+      <ListenBrainzSection {...lb({ loading: true, hasData: {}, mixes: [] })} />,
+    );
     expect(container.querySelector('.loading-spinner')).not.toBeNull();
     expect(container.querySelector('.decade-tab')).toBeNull();
     expect(container.querySelector('.lb-empty-state')).toBeNull();
