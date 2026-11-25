@@ -1596,6 +1596,103 @@ def restore_backup_endpoint(filename):
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
+# ── a damaged database: its health, and the repair ─────────────────────────
+
+_health_running = threading.Lock()
+
+
+def _db_path():
+    return os.environ.get('DATABASE_PATH', 'database/music_library.db')
+
+
+def _check_health_in_background():
+    """a full check of a large file takes a while: it runs off the request"""
+    from core import db_repair
+    if not _health_running.acquire(blocking=False):
+        return
+
+    def run():
+        try:
+            db_repair.check(_db_path())
+        except Exception:  # noqa: BLE001
+            logger.exception("database health check failed to run")
+        finally:
+            _health_running.release()
+    threading.Thread(target=run, name="db-health-check", daemon=True).start()
+
+
+@bp.route('/api/database/health', methods=['GET'])
+@admin_only
+def database_health():
+    """{healthy: true|false|null, detail, checked_at, checking}. the answer the
+    last backup or check gave; ?check=1 (or none known yet, or one over six
+    hours old) starts a fresh one in the background"""
+    from core import db_repair
+    health = db_repair.last_health()
+    stale = health["checked_at"] is None or time.time() - health["checked_at"] > 6 * 3600
+    if request.args.get('check') == '1' or stale:
+        _check_health_in_background()
+    return jsonify({"success": True, **health, "checking": _health_running.locked(),
+                    "repair_tool": bool(db_repair.sqlite_cli())})
+
+
+@bp.route('/api/database/repair', methods=['POST'])
+@admin_only
+def repair_database():
+    """repair a damaged database: the damaged files are kept first (raw, in
+    their own folder), a repaired copy is made and checked, and only then
+    swapped in, the way a restore is. when it can't be repaired the answer
+    names the newest healthy backup to restore instead."""
+    from core import db_integrity as dbi
+    from core import db_repair
+    db_path = _db_path()
+    db_dir = os.path.dirname(db_path)
+    health = db_repair.check(db_path)
+    if health["healthy"]:
+        return jsonify({"success": True, "healthy": True,
+                        "message": "Your database passed its check. There is nothing to repair."})
+    if not dbi.backup_lock.acquire(blocking=False):
+        return jsonify({"success": False, "busy": True,
+                        "error": "A backup or restore is running. Try again when it finishes."}), 409
+    try:
+        try:
+            kept = db_repair.keep_damaged(db_path)
+        except OSError as e:
+            return jsonify({"success": False,
+                            "error": f"Couldn't keep a copy of the damaged files first, so nothing was "
+                                     f"changed. {e}"}), 507
+        stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        repaired = os.path.join(db_dir, f"music_library.db.repaired_{stamp}")
+        result = db_repair.rebuild(db_path, repaired)
+        if not result["ok"]:
+            backup = db_repair.newest_healthy_backup(db_path)
+            logger.warning("database repair failed: %s", result["detail"])
+            return jsonify({"success": False, "repaired": False, "kept": os.path.basename(kept),
+                            "error": result["detail"], "missing_tables": result["missing_tables"],
+                            "backup": backup}), 422
+        # swapped in the way a restore is: every connection closed, the file
+        # replaced, the old -wal and -shm (part of the damage) gone, the
+        # migrations and settings read again
+        from database.music_database import close_database, get_database
+        close_database()
+        os.replace(repaired, db_path)
+        for side in ('-wal', '-shm'):
+            try:
+                os.remove(db_path + side)
+            except OSError:
+                pass
+        _forget_database_initialized(db_path)
+    finally:
+        dbi.backup_lock.release()
+    _reload_config_after_restore()
+    get_database()
+    after = db_repair.check(db_path)
+    logger.info("database repaired (%s); damaged files kept in %s", result["method"], kept)
+    return jsonify({"success": True, "repaired": True, "method": result["method"],
+                    "message": result["detail"], "kept": os.path.basename(kept),
+                    "healthy": after["healthy"]})
+
+
 @bp.route('/api/database/companions', methods=['GET'])
 @admin_only
 def list_companion_backups_endpoint():
