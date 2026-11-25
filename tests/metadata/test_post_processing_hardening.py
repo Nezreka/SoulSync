@@ -163,7 +163,7 @@ def test_an_album_artist_corrected_during_enrichment_is_written(tmp_path, ext):
     path = _audio(tmp_path, ext)
     meta = {**CORE, "artist": "DJ Evol", "album_artist": "DJ Evol", "album": "The End"}
 
-    def embed(audio_file, metadata, context, runtime=None):
+    def embed(audio_file, metadata, context, runtime=None, on_resolved=None):
         metadata["album_artist"] = "12th Planet"
 
     ok, _ = _enhance(path, meta, embed=embed)
@@ -629,3 +629,110 @@ def test_a_tag_written_is_a_tag_read(tmp_path, ext, tag, value):
     write_tag(audio, tag, value, SYMBOLS)
     audio.save()
     assert read_tag(_open(path), tag, SYMBOLS) == value
+
+
+# ── what the file says about the recording is kept ──────────────────────────
+
+def _pre(path, ext):
+    audio = _open(path)
+    if ext == "mp3":
+        from mutagen.id3 import COMM, TCOM, TIPL, TKEY, TXXX
+        for f in (TCOM(encoding=3, text=["Chris Martin"]), TKEY(encoding=3, text=["B"]),
+                  TIPL(encoding=3, people=[["producer", "Ken Nelson"]]),
+                  COMM(encoding=3, lang="eng", desc="", text=["ripped by xX"]),
+                  TXXX(encoding=3, desc="MusicBrainz Album Id", text=["stale"]),
+                  TXXX(encoding=3, desc="RIPPER", text=["xX"])):
+            audio.tags.add(f)
+    elif ext == "m4a":
+        ff = lambda v: [SYMBOLS.MP4FreeForm(v.encode())]  # noqa: E731
+        audio["\xa9wrt"] = ["Chris Martin"]
+        audio["pgap"] = True
+        audio["----:com.apple.iTunes:iTunSMPB"] = ff(" 00000000 00000840 000001C0")
+        audio["----:com.apple.iTunes:PRODUCER"] = ff("Ken Nelson")
+        audio["\xa9cmt"] = ["ripped by xX"]
+        audio["----:com.apple.iTunes:MusicBrainz Album Id"] = ff("stale")
+    else:
+        audio["composer"] = ["Chris Martin"]
+        audio["INITIALKEY"] = ["B"]
+        audio["producer"] = ["Ken Nelson"]
+        audio["comment"] = ["ripped by xX"]
+        audio["musicbrainz_albumid"] = ["stale"]
+        audio["ripper"] = ["xX"]
+    audio.save()
+
+
+@pytest.mark.parametrize("ext", FORMATS)
+def test_the_recordings_own_facts_survive_and_the_uploaders_junk_does_not(tmp_path, ext):
+    """the clear is for what the file says about the RELEASE (an uploader's
+    ids and comments). who wrote the song, its key, its credits and an M4A's
+    gapless padding are facts about the recording, and no source SoulSync
+    asks gives them back."""
+    path = _audio(tmp_path, ext)
+    _pre(path, ext)
+    ok, _ = _enhance(path, dict(CORE))
+    assert ok
+    audio = _open(path)
+    assert _tag(audio, "TCOM", "composer", "\xa9wrt") == ["Chris Martin"]
+    if ext == "mp3":
+        assert _tag(audio, "TKEY", "", "") == ["B"]
+        assert audio.tags.getall("TIPL")[0].people == [["producer", "Ken Nelson"]]
+        assert not audio.tags.getall("COMM") and not audio.tags.getall("TXXX:RIPPER")
+        assert not audio.tags.getall("TXXX:MusicBrainz Album Id")
+    elif ext == "m4a":
+        assert audio["pgap"] is True and "----:com.apple.iTunes:iTunSMPB" in audio
+        assert _tag(audio, "", "", "----:com.apple.iTunes:PRODUCER") == ["Ken Nelson"]
+        assert "\xa9cmt" not in audio and "----:com.apple.iTunes:MusicBrainz Album Id" not in audio
+    else:
+        assert audio["initialkey"] == ["B"] and audio["producer"] == ["Ken Nelson"]
+        assert "comment" not in audio and "ripper" not in audio and "musicbrainz_albumid" not in audio
+
+
+@pytest.mark.parametrize("ext", FORMATS)
+def test_a_value_soulsync_has_replaces_the_kept_one(tmp_path, ext):
+    from core.metadata import tagfields
+    path = _audio(tmp_path, ext)
+    audio = _open(path)
+    tagfields.write(audio, SYMBOLS, "bpm", 173)
+    audio.save()
+
+    def embed(audio_file, metadata, context, runtime=None, on_resolved=None):
+        on_resolved()
+        tagfields.write(audio_file, SYMBOLS, "bpm", 87)
+
+    ok, _ = _enhance(path, dict(CORE), embed=embed)
+    assert ok
+    assert tagfields.read(_open(path), SYMBOLS, "bpm") == ["87"]
+
+
+# ── the one table ───────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("ext", FORMATS)
+@pytest.mark.parametrize("name", sorted(__import__("core.metadata.tagfields", fromlist=["FIELDS"]).FIELDS))
+def test_every_field_in_the_table_reads_back_what_was_written(tmp_path, ext, name):
+    from core.metadata import tagfields
+    path = _audio(tmp_path, ext)
+    audio = _open(path)
+    kind = tagfields.FIELDS[name].kind
+    text = "2001-02-03" if name == "date" else "value one"     # an ID3 date frame holds only a date
+    value = True if kind == "flag" else 120 if kind == "int" else text
+    assert tagfields.write(audio, SYMBOLS, name, value) is True
+    audio.save()
+    back = tagfields.read(_open(path), SYMBOLS, name)
+    assert back == (["True"] if kind == "flag" and ext == "m4a" else ["1"] if kind == "flag"
+                    else ["120"] if kind == "int" else [text])
+    again = _open(path)
+    assert tagfields.remove(again, SYMBOLS, name) is True
+    again.save()
+    assert tagfields.read(_open(path), SYMBOLS, name) == []
+
+
+@pytest.mark.parametrize("title,guests,added", [
+    ("Umbrella", ["JAY-Z"], ["JAY-Z"]),
+    ("Umbrella (feat. JAY-Z)", ["JAY-Z"], []),
+    ("Princess of China (with Rihanna)", ["Rihanna"], []),
+    ("Stay (Rihanna Remix)", ["Rihanna"], []),
+    ("Back to the Future", ["Future"], ["Future"]),          # a word in a title is not a credit
+    ("Song (with A)", ["A", "B"], ["B"]),                    # only the one not yet credited
+])
+def test_only_guests_the_title_does_not_credit_are_added(title, guests, added):
+    assert ms._guests_missing_from_title(title, guests) == added

@@ -30,15 +30,13 @@ READABLE_EXTENSIONS = SUPPORTED_EXTENSIONS | {'.wav'}
 
 # File-field vocabulary shared by repairs. A selected-field write never
 # derives a second field (for example ALBUMARTIST) from an ARTIST change.
-_TEXT_TAGS = {
-    'title': ('TIT2', 'title', '\xa9nam'),
-    'artist': ('TPE1', 'artist', '\xa9ART'),
-    'album_artist': ('TPE2', 'albumartist', 'aART'),
-    'album': ('TALB', 'album', '\xa9alb'),
-    'year': ('TDRC', 'date', '\xa9day'),
-    'genre': ('TCON', 'genre', '\xa9gen'),
-    'bpm': ('TBPM', 'bpm', 'tmpo'),
-}
+# (the addresses themselves come from the one table every tag writer shares,
+# core/metadata/tagfields.py; this is only which fields a repair may name)
+from core.metadata.tagfields import FIELDS as _FIELDS
+
+_TEXT_TAGS = {name: tuple(_FIELDS[field][:3]) for name, field in (
+    ('title', 'title'), ('artist', 'artist'), ('album_artist', 'album_artist'), ('album', 'album'),
+    ('year', 'date'), ('genre', 'genre'), ('bpm', 'bpm'))}
 _FIELD_ALIASES = {'albumartist': 'album_artist', 'date': 'year',
                   'musicbrainz_albumid': 'MUSICBRAINZ_RELEASE_ID',
                   'musicbrainz_releasegroupid': 'MUSICBRAINZ_RELEASEGROUPID'}

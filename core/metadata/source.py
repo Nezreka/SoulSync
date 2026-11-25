@@ -31,6 +31,7 @@ from core.imports.collab_artist import collab_primary, library_has_artist, libra
 from core.imports.compilation import VARIOUS_ARTIST_NAMES
 from core.imports.library_names import library_names, swap_credit, swap_names
 from core.metadata.artist_resolution import resolve_track_artists
+from core.metadata import tagfields
 from core.metadata.registry import get_itunes_client
 from database.music_database import get_database
 from core.metadata.common import (
@@ -1186,15 +1187,7 @@ def _process_beatport_source(pp: dict, metadata: dict, cfg, runtime, track_title
 
 
 def _write_initial_key(audio_file, key: str, symbols) -> None:
-    if isinstance(audio_file.tags, symbols.ID3):
-        factory = getattr(symbols, "TKEY", None)
-        if factory is None:
-            from mutagen.id3 import TKEY as factory
-        audio_file.tags.add(factory(encoding=3, text=[key]))
-    elif is_vorbis_like(audio_file, symbols):
-        audio_file["INITIALKEY"] = [key]
-    elif isinstance(audio_file, symbols.MP4):
-        audio_file["----:com.apple.iTunes:initialkey"] = [symbols.MP4FreeForm(key.encode("utf-8"))]
+    tagfields.write(audio_file, symbols, "key", key)
 
 
 def _process_source_enrichment(source_name: str, pp: dict, metadata: dict, cfg, runtime, track_title: str, artist_name: str, provenance=None, audio_file=None, track_artist_name: str = None) -> None:
@@ -1680,12 +1673,7 @@ def _write_genre_frame(audio_file, genres: list[str], cfg, symbols, source: str 
     genre_string = ", ".join(genres)
     from core.metadata.multi_value import genre_values
     genres_out = genre_values(genres, bool(cfg.get("metadata_enhancement.tags.write_multi_artist", False)))
-    if isinstance(audio_file.tags, symbols.ID3):
-        audio_file.tags.add(symbols.TCON(encoding=3, text=genres_out))
-    elif is_vorbis_like(audio_file, symbols):
-        audio_file["GENRE"] = genres_out
-    elif isinstance(audio_file, symbols.MP4):
-        audio_file["\xa9gen"] = genres_out
+    tagfields.write(audio_file, symbols, "genre", genres_out)
     logger.info("Genres %s: %s", source, genre_string)
 
 
@@ -1781,6 +1769,23 @@ def _title_has_featuring(title, featured=()) -> bool:
     return False
 
 
+def _guests_missing_from_title(title, featured) -> list:
+    """the guests the title doesn't already credit: the ones to add.
+
+    none when the title has a featuring credit of its own. otherwise a guest
+    named inside brackets is credited already, however it is worded: "Song
+    (with Rihanna)" and "Song (Rihanna Remix)" each became "... (feat.
+    Rihanna)" as well. a name loose in the title is not a credit: the guest
+    Future is not credited by "Back to the Future"."""
+    text = str(title or "")
+    guests = [str(g).strip() for g in (featured or ()) if str(g or "").strip()]
+    if _title_has_featuring(text, guests):
+        return []
+    bracketed = " ".join(re.findall(r"[\(\[]([^\)\]]*)[\)\]]", text))
+    return [g for g in guests
+            if not re.search(r"(?<!\w)" + re.escape(g) + r"(?!\w)", bracketed, re.IGNORECASE)]
+
+
 def _apply_metadata_reference(metadata: dict, reference: dict) -> None:
     """a metadata reference (a release the person pointed this file at)
     overrides the names and numbers. an artist it replaces takes the list
@@ -1851,12 +1856,7 @@ def _write_embedded_metadata(audio_file, metadata: dict, pp: dict, cfg, symbols)
 
     if release_year and not metadata.get("date"):
         metadata["date"] = release_year
-        if isinstance(audio_file.tags, symbols.ID3):
-            audio_file.tags.add(symbols.TDRC(encoding=3, text=[release_year]))
-        elif is_vorbis_like(audio_file, symbols):
-            audio_file["date"] = [release_year]
-        elif isinstance(audio_file, symbols.MP4):
-            audio_file["\xa9day"] = [release_year]
+        tagfields.write(audio_file, symbols, "date", release_year)
         logger.info("Date tag: %s", release_year)
 
     beatport = pp.get("beatport") or {}
@@ -1893,12 +1893,7 @@ def _write_embedded_metadata(audio_file, metadata: dict, pp: dict, cfg, symbols)
                 bpm_source, bpm_int = cand_source, stored
                 break
         if bpm_int is not None:
-            if isinstance(audio_file.tags, symbols.ID3):
-                audio_file.tags.add(symbols.TBPM(encoding=3, text=[str(bpm_int)]))
-            elif is_vorbis_like(audio_file, symbols):
-                audio_file["BPM"] = [str(bpm_int)]
-            elif isinstance(audio_file, symbols.MP4):
-                audio_file["tmpo"] = [bpm_int]
+            tagfields.write(audio_file, symbols, "bpm", bpm_int)
             logger.info("BPM (%s): %s", bpm_source, bpm_int)
 
     if beatport.get("key") and _tag_enabled(cfg, "beatport.tags.key"):
@@ -1909,20 +1904,10 @@ def _write_embedded_metadata(audio_file, metadata: dict, pp: dict, cfg, symbols)
             logger.info("Key (Beatport): %s", initial_key)
 
     if _tag_enabled(cfg, "audiodb.tags.mood") and pp["audiodb_mood"]:
-        if isinstance(audio_file.tags, symbols.ID3):
-            audio_file.tags.add(symbols.TXXX(encoding=3, desc="MOOD", text=[pp["audiodb_mood"]]))
-        elif is_vorbis_like(audio_file, symbols):
-            audio_file["MOOD"] = [pp["audiodb_mood"]]
-        elif isinstance(audio_file, symbols.MP4):
-            audio_file["----:com.apple.iTunes:MOOD"] = [symbols.MP4FreeForm(pp["audiodb_mood"].encode("utf-8"))]
+        tagfields.write(audio_file, symbols, "MOOD", pp["audiodb_mood"])
 
     if _tag_enabled(cfg, "audiodb.tags.style") and pp["audiodb_style"]:
-        if isinstance(audio_file.tags, symbols.ID3):
-            audio_file.tags.add(symbols.TXXX(encoding=3, desc="STYLE", text=[pp["audiodb_style"]]))
-        elif is_vorbis_like(audio_file, symbols):
-            audio_file["STYLE"] = [pp["audiodb_style"]]
-        elif isinstance(audio_file, symbols.MP4):
-            audio_file["----:com.apple.iTunes:STYLE"] = [symbols.MP4FreeForm(pp["audiodb_style"].encode("utf-8"))]
+        tagfields.write(audio_file, symbols, "STYLE", pp["audiodb_style"])
 
     if _tag_enabled(cfg, "metadata_enhancement.tags.genre_merge"):
         enrichment_genres = []
@@ -2019,12 +2004,7 @@ def _write_embedded_metadata(audio_file, metadata: dict, pp: dict, cfg, symbols)
         copyright_candidates.append(("HiFi", pp["hifi_copyright"]))
     if copyright_candidates:
         copyright_source, final_copyright = copyright_candidates[0]
-        if isinstance(audio_file.tags, symbols.ID3):
-            audio_file.tags.add(symbols.TCOP(encoding=3, text=[final_copyright]))
-        elif is_vorbis_like(audio_file, symbols):
-            audio_file["COPYRIGHT"] = [final_copyright]
-        elif isinstance(audio_file, symbols.MP4):
-            audio_file["cprt"] = [final_copyright]
+        tagfields.write(audio_file, symbols, "copyright", final_copyright)
         logger.info("Copyright (%s): %s", copyright_source, final_copyright[:60])
 
     label_candidates = []
@@ -2040,29 +2020,14 @@ def _write_embedded_metadata(audio_file, metadata: dict, pp: dict, cfg, symbols)
         # "a;b;c" from a provider is three labels, written as three values (#1305)
         from core.metadata.multi_value import split_values
         label_values = split_values(final_label) or [final_label]
-        if isinstance(audio_file.tags, symbols.ID3):
-            audio_file.tags.add(symbols.TPUB(encoding=3, text=label_values))
-        elif is_vorbis_like(audio_file, symbols):
-            audio_file["LABEL"] = label_values
-        elif isinstance(audio_file, symbols.MP4):
-            audio_file["----:com.apple.iTunes:LABEL"] = [symbols.MP4FreeForm(v.encode("utf-8")) for v in label_values]
+        tagfields.write(audio_file, symbols, "label", label_values)
         logger.info("Label (%s): %s", label_source, final_label)
 
     if _tag_enabled(cfg, "lastfm.tags.url") and pp["lastfm_url"]:
-        if isinstance(audio_file.tags, symbols.ID3):
-            audio_file.tags.add(symbols.TXXX(encoding=3, desc="LASTFM_URL", text=[pp["lastfm_url"]]))
-        elif is_vorbis_like(audio_file, symbols):
-            audio_file["LASTFM_URL"] = [pp["lastfm_url"]]
-        elif isinstance(audio_file, symbols.MP4):
-            audio_file["----:com.apple.iTunes:LASTFM_URL"] = [symbols.MP4FreeForm(pp["lastfm_url"].encode("utf-8"))]
+        tagfields.write(audio_file, symbols, "LASTFM_URL", pp["lastfm_url"])
 
     if _tag_enabled(cfg, "genius.tags.url") and pp["genius_url"]:
-        if isinstance(audio_file.tags, symbols.ID3):
-            audio_file.tags.add(symbols.TXXX(encoding=3, desc="GENIUS_URL", text=[pp["genius_url"]]))
-        elif is_vorbis_like(audio_file, symbols):
-            audio_file["GENIUS_URL"] = [pp["genius_url"]]
-        elif isinstance(audio_file, symbols.MP4):
-            audio_file["----:com.apple.iTunes:GENIUS_URL"] = [symbols.MP4FreeForm(pp["genius_url"].encode("utf-8"))]
+        tagfields.write(audio_file, symbols, "GENIUS_URL", pp["genius_url"])
 
     if (beatport.get("catalog_number") and "CATALOGNUMBER" not in filtered_tags
             and _tag_enabled(cfg, "beatport.tags.catalog_number")):
@@ -2073,12 +2038,7 @@ def _write_embedded_metadata(audio_file, metadata: dict, pp: dict, cfg, symbols)
         write_tag(audio_file, "BEATPORT_TRACK_ID", str(beatport["beatport_id"]), symbols)
 
     if _tag_enabled(cfg, "bandcamp.tags.url") and pp["bandcamp_url"]:
-        if isinstance(audio_file.tags, symbols.ID3):
-            audio_file.tags.add(symbols.TXXX(encoding=3, desc="BANDCAMP_URL", text=[pp["bandcamp_url"]]))
-        elif is_vorbis_like(audio_file, symbols):
-            audio_file["BANDCAMP_URL"] = [pp["bandcamp_url"]]
-        elif isinstance(audio_file, symbols.MP4):
-            audio_file["----:com.apple.iTunes:BANDCAMP_URL"] = [symbols.MP4FreeForm(pp["bandcamp_url"].encode("utf-8"))]
+        tagfields.write(audio_file, symbols, "BANDCAMP_URL", pp["bandcamp_url"])
 
     return release_year
 
@@ -2783,9 +2743,10 @@ def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> di
             # (no period, brackets), etc. Word-boundary regex catches
             # `feat`, `feat.`, `featuring`, `ft`, `ft.` regardless of
             # surrounding punctuation. Case-insensitive.
-            already_has_feat = _title_has_featuring(existing_title, featured)
-            if existing_title and not already_has_feat:
-                metadata["title"] = f"{existing_title} (feat. {', '.join(featured)})"
+            # only the guests the title doesn't credit yet are added
+            _to_add = _guests_missing_from_title(existing_title, featured)
+            if existing_title and _to_add:
+                metadata["title"] = f"{existing_title} (feat. {', '.join(_to_add)})"
             logger.info(
                 "Metadata: feat_in_title — primary='%s', featured=%s, title='%s'",
                 metadata["artist"], featured, metadata["title"],
@@ -3161,7 +3122,19 @@ def _blank_post_process_state() -> dict:
     }
 
 
-def embed_source_ids(audio_file, metadata: dict, context: dict = None, runtime=None):
+def embed_source_ids(audio_file, metadata: dict, context: dict = None, runtime=None, on_resolved=None):
+    """ask every metadata source about this track, then write what they said.
+
+    two halves. the first only LOOKS: it fills ``pp`` and corrects
+    ``metadata`` (the album artist a release really has, a fuller date).
+    the second only WRITES ``pp`` into the file. ``on_resolved`` is called
+    between them, exactly once, whether or not the lookups worked: the
+    tagger writes its core tags there, from metadata as the sources left it.
+    it used to write them first, and a correction made here stayed in memory
+    while the file kept the value from before it (#2259).
+
+    an error in ``on_resolved`` is the caller's and is raised to it; an
+    error in either half is logged and tagging goes on."""
     cfg = get_config_manager()
     symbols = get_mutagen_symbols()
     if not symbols:
@@ -3307,6 +3280,17 @@ def embed_source_ids(audio_file, metadata: dict, context: dict = None, runtime=N
             pp["_lf_client_for_genre_fallback"] = lastfm_worker.client if lastfm_worker else None
             pp["_artist_name_for_genre_fallback"] = artist_name
 
+    except Exception as exc:
+        logger.error("Error embedding source IDs (non-fatal): %s", exc)
+        if on_resolved is not None:
+            on_resolved()
+        return
+
+    # everything the sources had to say is in `metadata` and `pp` now
+    if on_resolved is not None:
+        on_resolved()
+
+    try:
         # Skip the early return when the genre fallback is on — there may be
         # genres to write even if no other metadata was enriched.
         if not _has_embedded_metadata_to_write(pp, metadata, fallback_enabled):
