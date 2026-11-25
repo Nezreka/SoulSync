@@ -628,3 +628,69 @@ class TestRestoreReArmsTheMigration:
         finally:
             release.set()
             web_server._lib2_bootstrap_autostart_thread.join(timeout=5)
+
+
+class TestTheGateNeverTouchesASavedSwitch:
+    """the repair worker's pause() IS the music automations master toggle,
+    saved in the database. the gate pauses at every start and resumes a
+    minute later: a restart inside that minute left the toggle off for good,
+    and a toggle the person had turned off was turned back on."""
+
+    class _Db:
+        def __init__(self):
+            self.writes = []
+
+        def get_metadata(self, key):
+            return "1"
+
+        def set_metadata(self, key, value):
+            self.writes.append((key, value))
+
+    def _repair_worker(self, db):
+        from core.repair_worker import RepairWorker
+        worker = RepairWorker.__new__(RepairWorker)
+        worker.db = db
+        worker._config_manager = None
+        worker.enabled = True
+        worker.running = True
+        worker._held = False
+        return worker
+
+    def test_a_migration_holds_the_repair_worker_and_writes_nothing(self, monkeypatch):
+        monkeypatch.setattr(migration_gate, "WORKER_STAGGER_SECONDS", 0)
+        db = self._Db()
+        worker = self._repair_worker(db)
+        active = {"on": True}
+        supervisor = MigrationPauseSupervisor(
+            object(), lambda: [worker], _FakeEngine(), is_active=lambda _db: active["on"])
+        supervisor.tick()
+        assert worker._held is True
+        assert worker.enabled is True and db.writes == []      # the saved toggle: untouched
+        active["on"] = False
+        supervisor.tick()
+        assert worker._held is False and db.writes == []
+
+    def test_a_toggle_the_person_turned_off_stays_off_through_a_migration(self, monkeypatch):
+        monkeypatch.setattr(migration_gate, "WORKER_STAGGER_SECONDS", 0)
+        db = self._Db()
+        worker = self._repair_worker(db)
+        worker.enabled = False
+        active = {"on": True}
+        supervisor = MigrationPauseSupervisor(
+            object(), lambda: [worker], _FakeEngine(), is_active=lambda _db: active["on"])
+        supervisor.tick()
+        active["on"] = False
+        supervisor.tick()
+        assert worker.enabled is False and db.writes == []
+
+    def test_a_worker_with_no_hold_is_still_paused_and_resumed(self, monkeypatch):
+        monkeypatch.setattr(migration_gate, "WORKER_STAGGER_SECONDS", 0)
+        worker = _FakeWorker()
+        active = {"on": True}
+        supervisor = MigrationPauseSupervisor(
+            object(), lambda: [worker], _FakeEngine(), is_active=lambda _db: active["on"])
+        supervisor.tick()
+        assert worker.paused is True
+        active["on"] = False
+        supervisor.tick()
+        assert worker.paused is False
