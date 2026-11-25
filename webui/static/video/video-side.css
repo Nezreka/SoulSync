@@ -114,85 +114,93 @@ html[data-sidebar="collapsed"] .side-toggle-btn .side-toggle-icon {
     height: 16px;
 }
 
-/* ── The way into the player, beside the toggle ─────────────────────────
-   one row, so the sidebar doesn't spend a second full-width bar on it: the
-   switch takes the room, the player is a square play key at its end, lit in
-   the accent like the switch's thumb so it reads as the thing to press. */
-.side-row {
-    display: flex;
-    align-items: stretch;
-    gap: 6px;
-    margin-top: 12px;
-}
-.side-row .side-toggle {
-    flex: 1;
-    min-width: 0;
-    margin-top: 0;
-}
+/* ── The way into the player, under the toggle ───────────────────────────
+   its own card: a lit play key, what it is in words, an arrow. a full row,
+   but one that reads as the door to the other half of the app. */
 .open-player {
-    position: relative;
     display: flex;
-    flex: none;
-    flex-direction: column;
     align-items: center;
-    justify-content: center;
-    gap: 1px;
-    width: 46px;
-    /* the SoulSync mark's own colours as its edge: not another switch state */
-    border: 1.5px solid transparent;
-    border-radius: 11px;
-    background:
-        linear-gradient(var(--bg-secondary), var(--bg-secondary)) padding-box,
-        conic-gradient(from 210deg, hotpink, orange, deepskyblue, mediumpurple, hotpink) border-box;
-    box-shadow: 0 3px 14px color-mix(in srgb, mediumpurple 30%, transparent);
+    gap: 10px;
+    margin-top: 10px;
+    padding: 8px 10px 8px 8px;
+    border: 1px solid rgba(var(--accent-rgb), 0.32);
+    border-radius: 12px;
+    background: linear-gradient(135deg,
+        rgba(var(--accent-rgb), 0.2),
+        rgba(var(--accent-rgb), 0.06));
     color: var(--text-primary);
-    font-size: 9.5px;
-    font-weight: 700;
-    letter-spacing: 0.04em;
     text-decoration: none;
-    text-transform: uppercase;
-    transition: transform var(--dur-base) ease, box-shadow var(--dur-base) ease;
+    transition: border-color var(--dur-base) ease, background var(--dur-base) ease, transform var(--dur-base) ease;
 }
 .open-player:hover,
 .open-player:focus-visible {
-    transform: translateY(-1px);
-    box-shadow: 0 6px 20px color-mix(in srgb, deepskyblue 35%, transparent);
+    border-color: rgba(var(--accent-rgb), 0.6);
+    background: linear-gradient(135deg,
+        rgba(var(--accent-rgb), 0.3),
+        rgba(var(--accent-rgb), 0.1));
 }
 .open-player:active {
-    transform: translateY(0) scale(0.97);
+    transform: scale(0.98);
+}
+.open-player-key {
+    display: grid;
+    flex: none;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    border-radius: 9px;
+    background: linear-gradient(135deg, rgb(var(--accent-rgb)), rgba(var(--accent-rgb), 0.8));
+    box-shadow: 0 3px 10px rgba(var(--accent-rgb), 0.4);
+    color: var(--text-primary);
 }
 .open-player-icon {
-    width: 15px;
-    height: 15px;
-    flex: none;
+    width: 13px;
+    height: 13px;
+    margin-left: 2px;
 }
-/* only one side on this server: no switch, so the player gets the row and its
-   whole name */
-html.side-locked .open-player {
+.open-player-text {
+    display: grid;
     flex: 1;
-    flex-direction: row;
-    gap: 8px;
-    padding: 9px 10px;
-    font-size: 12px;
-    letter-spacing: 0.02em;
-    text-transform: none;
+    min-width: 0;
+    line-height: 1.2;
 }
-html[data-sidebar="collapsed"] .side-row {
-    flex-direction: column;
-    align-items: center;
-    gap: 8px;
-    margin-top: 10px;
+.open-player-label {
+    overflow: hidden;
+    font-size: 13px;
+    font-weight: 700;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
-html[data-sidebar="collapsed"] .side-row .side-toggle {
+.open-player-sub {
+    color: var(--text-secondary);
+    font-size: 11px;
+}
+.open-player-chevron {
+    width: 14px;
+    height: 14px;
     flex: none;
-    margin-top: 0;
+    color: var(--text-secondary);
+    transition: transform var(--dur-base) ease;
+}
+.open-player:hover .open-player-chevron {
+    transform: translateX(2px);
 }
 html[data-sidebar="collapsed"] .open-player {
+    justify-content: center;
     width: 46px;
-    height: 40px;
-    border-radius: 13px;
+    margin-left: auto;
+    margin-right: auto;
+    padding: 0;
+    border: 0;
+    background: none;
 }
-html[data-sidebar="collapsed"] .open-player-label {
+html[data-sidebar="collapsed"] .open-player-key {
+    width: 40px;
+    height: 40px;
+    border-radius: 12px;
+}
+html[data-sidebar="collapsed"] .open-player-text,
+html[data-sidebar="collapsed"] .open-player-chevron {
     display: none;
 }
 
