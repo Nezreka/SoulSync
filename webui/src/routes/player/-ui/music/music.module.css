@@ -168,6 +168,13 @@
   white-space: nowrap;
 }
 
+.trackTitleText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .track[data-playing='true'] .trackTitle {
   color: var(--accent-light);
 }

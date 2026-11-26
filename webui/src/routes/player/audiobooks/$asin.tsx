@@ -6,12 +6,10 @@ import { plainText, remaining, runtime } from '../-lib/format';
 import { bookItem } from '../-lib/play-items';
 import { bookCover } from '../-lib/rails';
 import { booksQuery, catalogBookQuery, playableQuery, progressLookupQuery } from '../-player.api';
-import { DownloadButton } from '../-ui/download-button';
-import { InfoButton } from '../-ui/item-info';
+import { MoreButton } from '../-ui/context-menu';
 import { Empty, Hero, PlayButton, styles as s } from '../-ui/kit';
 import { NotFound, NotPartOfProfile } from '../-ui/not-part';
 import { getEngine, playItems, usePlayer } from '../-ui/playback/use-player';
-import { ReportIssueButton } from '../-ui/report-issue';
 import { useSections } from '../-ui/sections';
 
 export const Route = createFileRoute('/player/audiobooks/$asin')({
@@ -91,19 +89,23 @@ function BookPage() {
                 onPlay={() => playItems([bookItem(book)], 0, { startAt: 0 })}
               />
             ) : null}
-            <DownloadButton type="audiobook" id={book.asin} title={book.title} />
-            <ReportIssueButton
-              entityType="audiobook"
-              entityId={book.asin}
-              title={book.title}
-              subtitle={book.author ?? undefined}
-            />
-            <InfoButton
-              type="audiobook"
-              id={book.asin}
-              title={book.title}
-              className={s.btn}
-              labelled
+            <MoreButton
+              label={book.title}
+              heroClassName={s.btn}
+              target={() => ({
+                kind: 'audiobook',
+                page: true,
+                id: book.asin,
+                title: book.title,
+                subtitle: book.author ?? null,
+                download: { type: 'audiobook', id: book.asin },
+                report: {
+                  entityType: 'audiobook',
+                  entityId: book.asin,
+                  title: book.title,
+                  subtitle: book.author ?? undefined,
+                },
+              })}
             />
           </>
         }

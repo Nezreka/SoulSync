@@ -12,7 +12,7 @@ import { apiClient } from '@/app/api-client';
 import { appURL } from '@/platform/url-base';
 
 import { deviceId } from './device';
-import { formatBytes } from './downloads';
+import { formatBytes, type DownloadItemType } from './downloads';
 
 export { formatBytes };
 
@@ -526,3 +526,14 @@ export function countWords(n: number, kind: OfflineKind, type?: string): string 
               : 'song';
   return `${n} ${noun}${n === 1 ? '' : 's'}`;
 }
+
+/** a single download's item type, as the download sheet groups it */
+export const GROUP_OF: Record<DownloadItemType, GroupType> = {
+  movie: 'movie',
+  episode: 'episode',
+  youtube: 'youtube',
+  podcast: 'podcast',
+  audiobook: 'audiobook',
+  track: 'track',
+  album: 'album',
+};

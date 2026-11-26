@@ -1,15 +1,18 @@
 /**
- * Universal right-click / hold context menu for every media card and track row
- * in /player (movies, shows, seasons, episodes, albums, tracks, audiobooks,
- * podcasts, YouTube). Mounted once in PlayerShell via <ContextMenuHost />.
+ * Universal More menu for every media card, row and page in /player (movies,
+ * shows, seasons, episodes, albums, tracks, audiobooks, podcasts, YouTube,
+ * home videos). Right-click, a long press or a ⋯ <MoreButton> opens it.
+ * Mounted once in PlayerShell via <ContextMenuHost />, which also holds the
+ * download and report sheets its items open.
  */
 
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
-import { useEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 
-import { triggerBrowserDownload, type DownloadItemType } from '../-lib/downloads';
+import type { DownloadItemType } from '../-lib/downloads';
+
+import { GROUP_OF, offlineSettingsQuery, type GroupType } from '../-lib/offline';
 import { albumItems, bookItem, episodeItems, movieItem } from '../-lib/play-items';
 import {
   addToWatchlist,
@@ -21,9 +24,24 @@ import {
   type InfoItemType,
   type SongRef,
 } from '../-player.api';
+import m from './context-menu.module.css';
+import { DownloadSheet } from './download-sheet';
+import {
+  DownloadIcon,
+  HeartIcon,
+  InfoIcon,
+  MoreIcon,
+  PlayIcon,
+  PlusIcon,
+  ShuffleIcon,
+  WatchlistIcon,
+  XIcon,
+} from './icons';
 import { openItemInfo } from './item-info';
 import { openAddToPlaylist } from './music/add-to-playlist';
 import { getEngine, playItems } from './playback/use-player';
+import { FlagIcon, ReportIssueDialog, type ReportTarget } from './report-issue';
+import { inPlayer } from './trailer';
 
 export interface ContextMenuExtraAction {
   label: string;
@@ -34,6 +52,8 @@ export interface ContextMenuExtraAction {
 export interface ContextMenuTarget {
   x: number;
   y: number;
+  /** the ⋯ button it opened from: the menu hangs off it and focus goes back to it */
+  anchor?: HTMLElement | null;
   kind:
     | 'movie'
     | 'show'
@@ -52,6 +72,8 @@ export interface ContextMenuTarget {
   href?: string | null;
   /** Optional custom play handler (e.g. TrackList row play, YouTube onOpen, etc.) */
   onPlay?: () => void;
+  /** play it after the one playing (only offered while something plays) */
+  onPlayNext?: () => void;
   /** Optional custom queue handler */
   onQueue?: () => void;
   /** Optional like toggle for tracks */
@@ -62,6 +84,10 @@ export interface ContextMenuTarget {
   /** Optional Download itemType override */
   downloadType?: DownloadItemType | null;
   downloadId?: string | null;
+  /** what the download sheet offers, when it isn't the download type and id above */
+  download?: { type: GroupType; id: string; title?: string } | null;
+  /** what Report an issue files against; null: not offered */
+  report?: ReportTarget | null;
   /** Whether the user actually owns/has this item locally (default true) */
   owned?: boolean;
   /** Optional request action for missing/unowned items */
@@ -70,6 +96,8 @@ export interface ContextMenuTarget {
   extraActions?: ContextMenuExtraAction[];
   /** what the Info sheet asks about, when it isn't the kind and id above */
   info?: { type: InfoItemType; id: string } | null;
+  /** a page's own ⋯: its hero already plays, queues and keeps a watchlist */
+  page?: boolean;
 }
 
 /** the Info sheet's item for a menu target: its own, else its kind and id */
@@ -226,16 +254,62 @@ const KIND_LABELS: Record<ContextMenuTarget['kind'], string> = {
   other: 'Media',
 };
 
+/** what the download sheet offers for a menu target, if anything */
+export function downloadFor(
+  target: ContextMenuTarget,
+): { type: GroupType; id: string; title: string } | null {
+  if (target.owned === false) return null;
+  if (target.download !== undefined) {
+    return target.download ? { title: target.title, ...target.download } : null;
+  }
+  if (target.downloadType && target.downloadId) {
+    return { type: GROUP_OF[target.downloadType], id: target.downloadId, title: target.title };
+  }
+  return null;
+}
+
+const MENU_W = 268;
+const GAP = 4;
+const EDGE = 12;
+
+interface MenuItem {
+  key: string;
+  label: string;
+  icon: ReactNode;
+  tone?: 'accent' | 'danger';
+  /** run after the menu closes; false keeps it open (it shows its own busy line) */
+  run: () => void | Promise<void>;
+  keepOpen?: boolean;
+}
+
+type Sheet =
+  | { kind: 'download'; type: GroupType; id: string; title: string }
+  | ({ kind: 'report' } & ReportTarget);
+
+/** the menu's items, focusable, in order */
+function menuItems(menu: HTMLElement | null): HTMLElement[] {
+  if (!menu) return [];
+  return [...menu.querySelectorAll<HTMLElement>('[role="menuitem"]:not(:disabled)')];
+}
+
 export function ContextMenuHost() {
   const [target, setTarget] = useState<ContextMenuTarget | null>(currentTarget);
   const [busyMsg, setBusyMsg] = useState<string | null>(null);
   const [statusNote, setStatusNote] = useState<string | null>(null);
+  const [sheet, setSheet] = useState<Sheet | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const returnTo = useRef<HTMLElement | null>(null);
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const offline = useQuery({ ...offlineSettingsQuery(), retry: false });
+  const downloadsOff = !!offline.data && !offline.data.allow_downloads && !offline.data.is_admin;
 
   useEffect(() => {
     const fn: Listener = (next) => {
+      if (next) {
+        const active = document.activeElement;
+        returnTo.current = next.anchor ?? (active instanceof HTMLElement ? active : null);
+      }
       setTarget(next);
       setBusyMsg(null);
       setStatusNote(null);
@@ -246,31 +320,96 @@ export function ContextMenuHost() {
     };
   }, []);
 
+  /** close and put focus back where it was */
+  const closeAndReturn = () => {
+    const back = returnTo.current;
+    closeContextMenu();
+    if (back?.isConnected) back.focus();
+  };
+
   useEffect(() => {
     if (!target) return;
+    const inside = (node: EventTarget | null, el: HTMLElement | null | undefined) =>
+      node instanceof Node && !!el?.contains(node);
     const onDown = (e: MouseEvent) => {
-      if (!menuRef.current?.contains(e.target as Node)) closeContextMenu();
+      if (inside(e.target, menuRef.current)) return;
+      // the ⋯ button toggles the menu itself
+      if (inside(e.target, target.anchor)) return;
+      closeContextMenu();
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') closeContextMenu();
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        closeAndReturn();
+      }
     };
-    const onScroll = () => closeContextMenu();
+    const onScroll = (e: Event) => {
+      if (inside(e.target, menuRef.current)) return;
+      closeContextMenu();
+    };
+    const onResize = () => closeContextMenu();
     window.addEventListener('mousedown', onDown);
     window.addEventListener('keydown', onKey);
     window.addEventListener('scroll', onScroll, true);
+    window.addEventListener('resize', onResize);
     return () => {
       window.removeEventListener('mousedown', onDown);
       window.removeEventListener('keydown', onKey);
       window.removeEventListener('scroll', onScroll, true);
+      window.removeEventListener('resize', onResize);
     };
   }, [target]);
 
-  if (!target) return null;
+  // place it (under the ⋯ button, or at the pointer), flipping up when there's
+  // no room below, then put focus on the first item
+  useLayoutEffect(() => {
+    const menu = menuRef.current;
+    if (!target || !menu) return;
+    const w = menu.offsetWidth || MENU_W;
+    const h = menu.offsetHeight;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    let left: number;
+    let top: number;
+    const rect = target.anchor?.isConnected ? target.anchor.getBoundingClientRect() : null;
+    if (rect) {
+      left = rect.right - w;
+      top = rect.bottom + GAP;
+      if (top + h > vh - EDGE && rect.top - h - GAP >= EDGE) top = rect.top - h - GAP;
+    } else {
+      left = target.x;
+      top = target.y;
+      if (top + h > vh - EDGE && target.y - h >= EDGE) top = target.y - h;
+    }
+    menu.style.left = `${Math.max(EDGE, Math.min(left, vw - w - EDGE))}px`;
+    menu.style.top = `${Math.max(EDGE, Math.min(top, vh - h - EDGE))}px`;
+  }, [target, busyMsg, statusNote]);
 
-  const menuW = 268;
-  const approxH = 340;
-  const left = Math.max(12, Math.min(target.x, window.innerWidth - menuW - 12));
-  const top = Math.max(12, Math.min(target.y, window.innerHeight - approxH - 12));
+  useEffect(() => {
+    if (target) menuItems(menuRef.current)[0]?.focus();
+  }, [target]);
+
+  const sheetNode = sheet ? (
+    sheet.kind === 'download' ? (
+      <DownloadSheet
+        type={sheet.type}
+        id={sheet.id}
+        title={sheet.title}
+        onClose={() => setSheet(null)}
+      />
+    ) : (
+      <ReportIssueDialog
+        entityType={sheet.entityType}
+        entityId={sheet.entityId}
+        title={sheet.title}
+        subtitle={sheet.subtitle}
+        positionSec={sheet.positionSec}
+        onClose={() => setSheet(null)}
+      />
+    )
+  ) : null;
+
+  if (!target) return sheetNode;
 
   const runPlay = async (shuffle = false) => {
     if (target.onPlay) {
@@ -332,8 +471,8 @@ export function ContextMenuHost() {
 
   const runQueue = async () => {
     if (target.onQueue) {
+      closeAndReturn();
       target.onQueue();
-      closeContextMenu();
       return;
     }
     const idNum = target.id ? Number(target.id) : NaN;
@@ -392,25 +531,6 @@ export function ContextMenuHost() {
     }
   };
 
-  const runDownload = async () => {
-    if (!target.downloadType || !target.downloadId) return;
-    setBusyMsg('Preparing download…');
-    const res = await triggerBrowserDownload({
-      itemType: target.downloadType,
-      itemId: target.downloadId,
-      title: target.title,
-      subtitle: target.subtitle,
-      artwork: target.artwork,
-    });
-    if (res.ok) {
-      void qc.invalidateQueries({ queryKey: ['player', 'downloads'] });
-      closeContextMenu();
-    } else {
-      setBusyMsg(null);
-      setStatusNote(res.error || 'Download blocked');
-    }
-  };
-
   const runWatchlist = async (add: boolean) => {
     if (!target.id || (target.kind !== 'movie' && target.kind !== 'show')) return;
     setBusyMsg(add ? 'Saving to watchlist…' : 'Removing from watchlist…');
@@ -427,8 +547,11 @@ export function ContextMenuHost() {
 
   const isOwned = target.owned !== false;
   const info = infoFor(target);
+  const download = downloadsOff ? null : downloadFor(target);
+  const report = target.report ?? null;
 
   const canPlayDirect =
+    !target.page &&
     isOwned &&
     (!!target.onPlay ||
       target.kind === 'movie' ||
@@ -437,320 +560,334 @@ export function ContextMenuHost() {
       target.kind === 'audiobook');
 
   const canQueue =
+    !target.page &&
     isOwned &&
     (!!target.onQueue ||
       target.kind === 'album' ||
       target.kind === 'movie' ||
       target.kind === 'audiobook');
 
-  const itemStyle: React.CSSProperties = {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 10,
-    width: '100%',
-    padding: '9px 12px',
-    border: 'none',
-    borderRadius: 9,
-    background: 'transparent',
-    color: '#f1f5f9',
-    fontSize: 13,
-    fontWeight: 500,
-    textAlign: 'left',
-    cursor: 'pointer',
+  const items: MenuItem[] = [];
+  if (canPlayDirect) {
+    items.push({
+      key: 'play',
+      label: 'Play now',
+      icon: <PlayIcon />,
+      run: () => runPlay(false),
+      keepOpen: true,
+    });
+  }
+  if (!target.page && isOwned && target.kind === 'album') {
+    items.push({
+      key: 'shuffle',
+      label: 'Shuffle album',
+      icon: <ShuffleIcon />,
+      run: () => runPlay(true),
+      keepOpen: true,
+    });
+  }
+  if (isOwned && target.onPlayNext) {
+    const fn = target.onPlayNext;
+    items.push({ key: 'next', label: 'Play next', icon: <QueueIcon />, run: fn });
+  }
+  if (canQueue) {
+    items.push({
+      key: 'queue',
+      label: 'Add to queue',
+      icon: <QueueIcon />,
+      run: () => runQueue(),
+      keepOpen: true,
+    });
+  }
+  if (isOwned && target.onToggleLike) {
+    const fn = target.onToggleLike;
+    items.push({
+      key: 'like',
+      label: target.liked ? 'Remove from Liked Songs' : 'Add to Liked Songs',
+      icon: <HeartIcon filled={target.liked} />,
+      run: fn,
+    });
+  }
+  if (isOwned && (target.song || target.kind === 'album')) {
+    const song = target.song;
+    items.push({
+      key: 'playlist',
+      label: 'Add to playlist',
+      icon: <PlusIcon />,
+      run: song ? () => openAddToPlaylist([song]) : () => runAddAlbumToPlaylist(),
+      keepOpen: !song,
+    });
+  }
+  if (!isOwned && target.onRequest) {
+    const fn = target.onRequest;
+    items.push({
+      key: 'request',
+      label: `Request ${KIND_LABELS[target.kind].toLowerCase()}`,
+      icon: <PlusIcon />,
+      tone: 'accent',
+      run: fn,
+    });
+  }
+  if (!target.page && (target.kind === 'movie' || target.kind === 'show') && target.id && isOwned) {
+    items.push(
+      {
+        key: 'watchlist-add',
+        label: 'Add to Watchlist',
+        icon: <WatchlistIcon />,
+        run: () => runWatchlist(true),
+        keepOpen: true,
+      },
+      {
+        key: 'watchlist-remove',
+        label: 'Remove from Watchlist',
+        icon: <XIcon />,
+        run: () => runWatchlist(false),
+        keepOpen: true,
+      },
+    );
+  }
+  if (download) {
+    items.push({
+      key: 'download',
+      label: 'Download',
+      icon: <DownloadIcon />,
+      run: () => setSheet({ kind: 'download', ...download }),
+    });
+  }
+  if (info) {
+    items.push({
+      key: 'info',
+      label: 'Info',
+      icon: <InfoIcon />,
+      run: () => openItemInfo({ ...info, title: target.title }),
+    });
+  }
+  if (report) {
+    items.push({
+      key: 'report',
+      label: 'Report an issue',
+      icon: <FlagIcon />,
+      run: () => setSheet({ kind: 'report', ...report }),
+    });
+  }
+  if (target.href && !target.page) {
+    const to = target.href;
+    items.push({
+      key: 'open',
+      label: 'Open details',
+      icon: <OpenIcon />,
+      run: () => void navigate({ to: to as '/player' }),
+    });
+  }
+  for (const act of target.extraActions ?? []) {
+    items.push({
+      key: `extra:${act.label}`,
+      label: act.label,
+      icon: <DotIcon />,
+      tone: act.danger ? 'danger' : undefined,
+      run: act.onSelect,
+    });
+  }
+
+  const choose = (item: MenuItem) => {
+    if (item.keepOpen) {
+      void item.run();
+      return;
+    }
+    closeAndReturn();
+    void item.run();
   };
 
-  return createPortal(
-    <div
-      ref={menuRef}
-      role="menu"
-      aria-label={`Actions for ${target.title}`}
-      style={{
-        position: 'fixed',
-        left,
-        top,
-        width: menuW,
-        zIndex: 100000,
-        borderRadius: 15,
-        background: 'rgba(18, 20, 31, 0.96)',
-        backdropFilter: 'blur(20px)',
-        border: '1px solid rgba(255,255,255,0.13)',
-        boxShadow: '0 24px 64px rgba(0,0,0,0.72), 0 0 0 1px rgba(255,255,255,0.04) inset',
-        padding: 6,
-        color: '#fff',
-      }}
-      onContextMenu={(e) => e.preventDefault()}
-    >
-      {/* Header Preview */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 10,
-          padding: '8px 10px 10px',
-          borderBottom: '1px solid rgba(255,255,255,0.08)',
-          marginBottom: 4,
-        }}
-      >
-        {target.artwork ? (
-          <img
-            src={target.artwork}
-            alt=""
-            style={{
-              width: 38,
-              height: 38,
-              borderRadius: 8,
-              objectFit: 'cover',
-              flexShrink: 0,
-              background: 'rgba(255,255,255,0.06)',
-            }}
-          />
-        ) : null}
-        <div style={{ minWidth: 0, flex: 1 }}>
-          <div
-            style={{
-              fontSize: 13,
-              fontWeight: 700,
-              whiteSpace: 'nowrap',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-            }}
-          >
-            {target.title}
-          </div>
-          <div
-            style={{
-              fontSize: 11,
-              color: 'rgba(255,255,255,0.58)',
-              whiteSpace: 'nowrap',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-            }}
-          >
-            {KIND_LABELS[target.kind]}
-            {target.subtitle ? ` · ${target.subtitle}` : ''}
-          </div>
-        </div>
-      </div>
+  const onMenuKey = (e: React.KeyboardEvent) => {
+    const list = menuItems(menuRef.current);
+    if (!list.length) return;
+    const at = list.indexOf(document.activeElement as HTMLElement);
+    let next = -1;
+    if (e.key === 'ArrowDown') next = at < 0 ? 0 : (at + 1) % list.length;
+    else if (e.key === 'ArrowUp') next = at <= 0 ? list.length - 1 : at - 1;
+    else if (e.key === 'Home') next = 0;
+    else if (e.key === 'End') next = list.length - 1;
+    else if (e.key === 'Tab') {
+      e.preventDefault();
+      closeAndReturn();
+      return;
+    }
+    if (next >= 0) {
+      e.preventDefault();
+      e.stopPropagation();
+      list[next].focus();
+    }
+  };
 
-      {busyMsg ? (
-        <div style={{ padding: '10px 12px', fontSize: 12.5, color: '#a5b4fc', fontWeight: 600 }}>
-          {busyMsg}
-        </div>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-          {canPlayDirect && (
-            <button
-              type="button"
-              role="menuitem"
-              style={itemStyle}
-              onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.08)')}
-              onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-              onClick={() => void runPlay(false)}
-            >
-              <span>▶</span>
-              <span>Play now</span>
-            </button>
-          )}
+  const width = Math.min(MENU_W, window.innerWidth - EDGE * 2);
 
-          {isOwned && target.kind === 'album' && (
-            <button
-              type="button"
-              role="menuitem"
-              style={itemStyle}
-              onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.08)')}
-              onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-              onClick={() => void runPlay(true)}
-            >
-              <span>🔀</span>
-              <span>Shuffle album</span>
-            </button>
-          )}
-
-          {canQueue && (
-            <button
-              type="button"
-              role="menuitem"
-              style={itemStyle}
-              onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.08)')}
-              onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-              onClick={() => void runQueue()}
-            >
-              <span>☰</span>
-              <span>Add to queue</span>
-            </button>
-          )}
-
-          {isOwned && target.onToggleLike && (
-            <button
-              type="button"
-              role="menuitem"
-              style={itemStyle}
-              onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.08)')}
-              onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-              onClick={() => {
-                target.onToggleLike?.();
-                closeContextMenu();
-              }}
-            >
-              <span>{target.liked ? '♥' : '♡'}</span>
-              <span>{target.liked ? 'Remove from Liked Songs' : 'Add to Liked Songs'}</span>
-            </button>
-          )}
-
-          {isOwned && (target.song || target.kind === 'album') && (
-            <button
-              type="button"
-              role="menuitem"
-              style={itemStyle}
-              onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.08)')}
-              onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-              onClick={() => {
-                if (target.song) {
-                  const song = target.song;
-                  closeContextMenu();
-                  openAddToPlaylist([song]);
-                } else {
-                  void runAddAlbumToPlaylist();
-                }
-              }}
-            >
-              <span>＋</span>
-              <span>Add to playlist</span>
-            </button>
-          )}
-
-          {!isOwned && target.onRequest && (
-            <button
-              type="button"
-              role="menuitem"
-              style={{ ...itemStyle, color: '#a5b4fc', fontWeight: 600 }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(129,140,248,0.16)')}
-              onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-              onClick={() => {
-                const fn = target.onRequest;
-                closeContextMenu();
-                fn?.();
-              }}
-            >
-              <span>＋</span>
-              <span>Request {KIND_LABELS[target.kind].toLowerCase()}</span>
-            </button>
-          )}
-
-          {(target.kind === 'movie' || target.kind === 'show') && target.id && isOwned && (
-            <>
-              <button
-                type="button"
-                role="menuitem"
-                style={itemStyle}
-                onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.08)')}
-                onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-                onClick={() => void runWatchlist(true)}
-              >
-                <span>🔖</span>
-                <span>Add to Watchlist</span>
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                style={itemStyle}
-                onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.08)')}
-                onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-                onClick={() => void runWatchlist(false)}
-              >
-                <span>✕</span>
-                <span>Remove from Watchlist</span>
-              </button>
-            </>
-          )}
-
-          {isOwned && target.downloadType && target.downloadId && (
-            <button
-              type="button"
-              role="menuitem"
-              style={itemStyle}
-              onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.08)')}
-              onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-              onClick={() => void runDownload()}
-            >
-              <span>⬇</span>
-              <span>Download for offline</span>
-            </button>
-          )}
-
-          {info && (
-            <button
-              type="button"
-              role="menuitem"
-              style={itemStyle}
-              onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.08)')}
-              onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-              onClick={() => {
-                closeContextMenu();
-                openItemInfo({ ...info, title: target.title });
-              }}
-            >
-              <span>ⓘ</span>
-              <span>Info</span>
-            </button>
-          )}
-
-          {target.href && (
-            <button
-              type="button"
-              role="menuitem"
-              style={itemStyle}
-              onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.08)')}
-              onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-              onClick={() => {
-                const to = target.href!;
-                closeContextMenu();
-                void navigate({ to: to as '/player' });
-              }}
-            >
-              <span>↗</span>
-              <span>Open details</span>
-            </button>
-          )}
-
-          {target.extraActions?.map((act) => (
-            <button
-              key={act.label}
-              type="button"
-              role="menuitem"
-              style={{
-                ...itemStyle,
-                color: act.danger ? '#fda4af' : '#f1f5f9',
-              }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.08)')}
-              onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-              onClick={() => {
-                closeContextMenu();
-                act.onSelect();
-              }}
-            >
-              <span>•</span>
-              <span>{act.label}</span>
-            </button>
-          ))}
-        </div>
-      )}
-
-      {statusNote ? (
+  return (
+    <>
+      {sheetNode}
+      {inPlayer(
         <div
+          ref={menuRef}
+          role="menu"
+          aria-label={`Actions for ${target.title}`}
+          className={m.menu}
           style={{
-            marginTop: 6,
-            padding: '6px 10px',
-            borderRadius: 8,
-            background: 'rgba(244,63,94,0.14)',
-            color: '#fda4af',
-            fontSize: 11.5,
+            left: Math.max(EDGE, Math.min(target.x, window.innerWidth - width - EDGE)),
+            top: Math.max(EDGE, target.y),
+            width,
+            zIndex: 100000,
           }}
+          onContextMenu={(e) => e.preventDefault()}
+          onKeyDown={onMenuKey}
+          onClick={(e) => e.stopPropagation()}
         >
-          {statusNote}
-        </div>
-      ) : null}
-    </div>,
-    document.body,
+          <div className={m.head}>
+            {target.artwork ? <img src={target.artwork} alt="" className={m.headArt} /> : null}
+            <div className={m.headText}>
+              <div className={m.headTitle}>{target.title}</div>
+              <div className={m.headSub}>
+                {KIND_LABELS[target.kind]}
+                {target.subtitle ? ` · ${target.subtitle}` : ''}
+              </div>
+            </div>
+          </div>
+
+          {busyMsg ? (
+            <div className={m.busy}>{busyMsg}</div>
+          ) : (
+            <div className={m.items}>
+              {items.map((item) => (
+                <button
+                  key={item.key}
+                  type="button"
+                  role="menuitem"
+                  tabIndex={-1}
+                  className={m.item}
+                  data-tone={item.tone}
+                  onClick={() => choose(item)}
+                >
+                  <span className={m.glyph}>{item.icon}</span>
+                  <span>{item.label}</span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {statusNote ? <div className={m.note}>{statusNote}</div> : null}
+        </div>,
+      )}
+    </>
+  );
+}
+
+function QueueIcon() {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M3 6h13" />
+      <path d="M3 12h9" />
+      <path d="M3 18h9" />
+      <path d="M18 14v6" />
+      <path d="M15 17h6" />
+    </svg>
+  );
+}
+
+function OpenIcon() {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M7 17 17 7" />
+      <path d="M8 7h9v9" />
+    </svg>
+  );
+}
+
+function DotIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="2.5" fill="currentColor" />
+    </svg>
+  );
+}
+
+/** is the menu open on this ⋯ button */
+function useMenuOn(ref: React.RefObject<HTMLElement | null>): boolean {
+  const [on, setOn] = useState(false);
+  useEffect(() => {
+    const fn: Listener = (next) => setOn(!!next && !!ref.current && next.anchor === ref.current);
+    listeners.add(fn);
+    return () => {
+      listeners.delete(fn);
+    };
+  }, [ref]);
+  return on;
+}
+
+/**
+ * the ⋯ button on a row or at the end of a page's buttons: opens the More
+ * menu under it (a second press closes it). `target` is built on press, so
+ * rows pay nothing until it's used.
+ */
+export function MoreButton({
+  target,
+  className,
+  heroClassName,
+  label,
+}: {
+  target: () => Omit<ContextMenuTarget, 'x' | 'y' | 'anchor'>;
+  /** a row's own round button class, in place of the plain one */
+  className?: string;
+  /** at the end of a page's hero buttons: the page's button class */
+  heroClassName?: string;
+  /** what the button is for, read out: "More for <title>" */
+  label: string;
+}) {
+  const ref = useRef<HTMLButtonElement>(null);
+  const on = useMenuOn(ref);
+  return (
+    <button
+      ref={ref}
+      type="button"
+      className={heroClassName ? `${heroClassName} ${m.moreHero}` : (className ?? m.more)}
+      aria-haspopup="menu"
+      aria-expanded={on}
+      aria-label={`More for ${label}`}
+      title="More"
+      onClick={(e) => {
+        e.stopPropagation();
+        if (on) {
+          closeContextMenu();
+          return;
+        }
+        const r = e.currentTarget.getBoundingClientRect();
+        openContextMenu({ ...target(), x: r.right, y: r.bottom, anchor: e.currentTarget });
+      }}
+      onKeyDown={(e) => {
+        // a row that plays on enter mustn't also play
+        if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();
+      }}
+      onContextMenu={(e) => e.stopPropagation()}
+      data-nav
+    >
+      <MoreIcon />
+    </button>
   );
 }

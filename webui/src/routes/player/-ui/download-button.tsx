@@ -11,6 +11,7 @@ import type { DownloadItemType } from '../-lib/downloads';
 
 import {
   devicesQuery,
+  GROUP_OF,
   itemKey,
   offlineSettingsQuery,
   savedFiles,
@@ -173,16 +174,6 @@ export function DownloadButton({
     </>
   );
 }
-
-const GROUP_OF: Record<DownloadItemType, GroupType> = {
-  movie: 'movie',
-  episode: 'episode',
-  youtube: 'youtube',
-  podcast: 'podcast',
-  audiobook: 'audiobook',
-  track: 'track',
-  album: 'album',
-};
 
 /** the older name, kept for the pages that already place it */
 export function DownloadMediaButton({
