@@ -80,6 +80,7 @@ export const RELEASES: Release[] = [
       'Watch parties with a waiting room, countdown and reactions, and Chromecast that plays anything.',
       'Player streams show in Server Activity beside Plex and Jellyfin, recorded in history, and an admin can stop one with a message.',
       'Identify a song by listening, from the search bar (thanks Jygijiji, #2307).',
+      'The SoulSync Companion extension 0.3.0: badges check a whole page in one request, short and accented artist names match, and SoundCloud uploads can be added exactly as they are.',
       'SoulSync Standalone: video with no media server, scanning your movie and TV folders itself. A download is in the library the moment it lands.',
       'Plex and Jellyfin as one library (off by default), extras on a title’s page, and YouTube channels as libraries you manage.',
       'One Backups page: every database is backed up and restorable, a restore checks the backup first, and a damaged database can be repaired. Keep 5 keeping only one is fixed.',

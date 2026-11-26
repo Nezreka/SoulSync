@@ -182,7 +182,6 @@ export function libraryNameFor(path: string, kind: Kind): string {
 
 const IDEAS: { re: RegExp; name: string; kinds: Kind[] }[] = [
   { re: /\b4k\b|\buhd\b|2160/i, name: '4K', kinds: ['movie', 'show'] },
-  { re: /camera|\bcam\b|home ?videos?/i, name: 'Home Videos', kinds: ['movie'] },
   { re: /\bkids?\b|family|children/i, name: 'Kids', kinds: ['movie', 'show'] },
   { re: /anime/i, name: 'Anime', kinds: ['movie', 'show'] },
   { re: /documentar/i, name: 'Documentaries', kinds: ['movie', 'show'] },
@@ -190,6 +189,10 @@ const IDEAS: { re: RegExp; name: string; kinds: Kind[] }[] = [
 
 /** libraries worth offering, read off folder names: a folder called 4K
  *  MOVIES could be its own 4K library. none that already exist by name */
+/** a movie or tv folder that is really home videos ("cam" is a theater
+ * recording, not a home video) */
+export const HOME_LIKE = /\bhome ?(videos?|movies)\b|camcorder|family videos?/i;
+
 export function librarySuggestions(
   kind: Kind,
   folders: { folder: string; path: string }[],
@@ -372,9 +375,13 @@ function PlayerSetup({ data, firstTime }: { data: SetupPayload; firstTime: boole
     const shot = (id: number) =>
       kind === 'home' ? appURL(`/api/player/home/thumb/${id}`) : posterSet(kind, id).src;
     // a home root reads as where it is: the server, or the folder's drive
+    // a server's home library sits on the drive its clips live on, beside the
+    // other folders there; only when that isn't known does it sit under the server
     const whereIs = (f: SetupFolder) =>
       kind === 'home' && f.source && f.source !== 'disk'
-        ? { root: f.source === 'plex' ? 'Plex' : 'Jellyfin', parts: [f.label ?? f.path] }
+        ? f.where
+          ? splitFolderPath(f.where)
+          : { root: f.source === 'plex' ? 'Plex' : 'Jellyfin', parts: [f.label ?? f.path] }
         : splitFolderPath(f.path);
     const libOf = (f: SetupFolder) => where[`${kind}|${f.folder}`] ?? main?.key ?? '';
     const colorOf = (key: string) =>
@@ -407,6 +414,12 @@ function PlayerSetup({ data, firstTime }: { data: SetupPayload; firstTime: boole
         .map((f) => ({ folder: f.folder, path: f.path })),
       mine.map((l) => l.name),
     );
+    const homeLike =
+      kind === 'home'
+        ? []
+        : folders
+            .map((f) => splitFolderPath(f.path).parts.at(-1) ?? '')
+            .filter((name) => HOME_LIKE.test(name));
     const acceptIdeas = () => {
       for (const idea of ideas) {
         const key = `new:${Date.now()}:${Math.random().toString(36).slice(2, 6)}`;
@@ -561,6 +574,22 @@ function PlayerSetup({ data, firstTime }: { data: SetupPayload; firstTime: boole
           </button>
         </div>
 
+        {kind !== 'home' && homeLike.length ? (
+          <div className={s.ideas} role="note">
+            <p>
+              <b>{homeLike.join(', ')}</b> {homeLike.length === 1 ? 'looks' : 'look'} like home
+              videos. They get their own library, without movie or show lookups.
+            </p>
+            <button
+              type="button"
+              className={k.btnPrimary}
+              onClick={() => setStep(STEPS.findIndex((x) => x.label === 'Home videos'))}
+              data-nav
+            >
+              Set up in Home videos
+            </button>
+          </div>
+        ) : null}
         {ideas.length && !hideHint[kind] ? (
           <div className={s.ideas} role="note">
             <p>
