@@ -178,11 +178,24 @@ describe('hero truthful watchlist acknowledgements', () => {
         HttpResponse.json({ success: true, is_watching: false }),
       ),
     );
-    await act(() => result.current.toggleWatchlist());
-    expect(result.current.watchlist?.watching).toBe(false);
-    expect(toasts.at(-1)?.level).toBe('info');
+    // one press: the check answers not watching, so it adds
     await act(() => result.current.toggleWatchlist());
     expect(result.current.watchlist?.watching).toBe(true);
+    expect(toasts.at(-1)?.level).toBe('success');
+  });
+
+  it('does not add twice when the check finds them already on the watchlist', async () => {
+    server.use(http.post('/api/watchlist/check', () => HttpResponse.json({ success: false })));
+    const { result } = mount();
+    await act(() => result.current.toggleWatchlist());
+    server.use(
+      http.post('/api/watchlist/check', () =>
+        HttpResponse.json({ success: true, is_watching: true }),
+      ),
+    );
+    await act(() => result.current.toggleWatchlist());
+    expect(result.current.watchlist?.watching).toBe(true);
+    expect(toasts.at(-1)?.level).toBe('info');
   });
 
   it('does not infer unchecked membership from a malformed check', async () => {
