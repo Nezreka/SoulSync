@@ -248,7 +248,8 @@ def report(db: Any, profile_id: int, body: Dict[str, Any], *, paired_id: Optiona
                     used_bytes = excluded.used_bytes, wifi_only = excluded.wifi_only,
                     paired_id = excluded.paired_id, last_seen = excluded.last_seen""",
             (pid, dev_id, _clip(body.get("device_name"), 120) or "Device", platform,
-             _int_or_none(body.get("free_bytes")), _int_or_none(body.get("limit_bytes")),
+             # a limit of 0 is no limit: kept as none
+             _int_or_none(body.get("free_bytes")), _int_or_none(body.get("limit_bytes")) or None,
              _int_or_none(body.get("used_bytes")), 1 if body.get("wifi_only", True) else 0, bound, now))
         conn.execute(f"DELETE FROM {ITEMS} WHERE profile_id = ? AND device_id = ?", (pid, dev_id))
         for (itype, iid), it in items.items():

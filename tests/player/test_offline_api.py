@@ -545,3 +545,20 @@ def test_a_deleted_profile_takes_its_devices_with_it(db, library):
     db.delete_profile_data(2)
     assert c.get("/api/player/offline/devices").get_json()["devices"] == []
     assert S.rules(db, 2) == [] and len(keep.get("/api/player/offline/devices").get_json()["devices"]) == 1
+
+
+def test_a_limit_of_0_is_no_limit(db, library):
+    c = _client(db, profile_id=1)
+    _report(c, limit_bytes=0)
+    assert c.get("/api/player/offline/devices").get_json()["devices"][0]["limit_bytes"] is None
+    assert c.get("/api/player/offline/plan?type=season&id=7:2&device=pixel").get_json()["limit_bytes"] is None
+
+
+def test_wanted_is_only_that_devices(db, library):
+    c = _client(db, profile_id=1)
+    _report(c, device="pixel")
+    _report(c, device="tablet")
+    c.post("/api/player/offline/wishes", json={"device_id": "tablet", "action": "add", "type": "episode",
+                                               "id": "103", "quality": "original"})
+    assert c.get("/api/player/offline/devices/pixel/wanted").get_json()["add"] == []
+    assert [a["item_id"] for a in c.get("/api/player/offline/devices/tablet/wanted").get_json()["add"]] == ["103"]
