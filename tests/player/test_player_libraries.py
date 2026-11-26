@@ -301,3 +301,39 @@ def test_sidebar_order_and_hidden_are_saved_and_checked(db):
                 {"sidebar_order": ["/player/tv"] * 0 + [f"lib:{i}" for i in range(200)]}):
         with pytest.raises(ps.SettingsError):
             ps.put(db, 3, bad)
+
+
+# a library made in setup can be placed in the sidebar in the same save
+
+def test_setup_save_gives_a_new_library_its_place_in_the_sidebar(tmp_path, monkeypatch):
+    import api.player as P
+    from core.player import libraries as L
+    from core.player import setup as S
+
+    saved = {}
+    monkeypatch.setattr(P, "_profile", lambda: 1)
+    monkeypatch.setattr(P, "_is_player_admin", lambda: True)
+    monkeypatch.setattr(P, "player_db", lambda: object())
+    monkeypatch.setattr(P, "get_video_db", lambda: object())
+    monkeypatch.setattr(P, "_forget_catalog_views", lambda: None)
+    monkeypatch.setattr(P, "player_setup_get", lambda: ("ok", 200))
+    monkeypatch.setattr(L, "save", lambda db, vdb, wanted, hidden: [
+        {"id": 1, "kind": "movie", "name": "Movies"}, {"id": 2, "kind": "show", "name": "TV Shows"},
+        {"id": 7, "kind": "movie", "name": "Cam Movies"}])
+    monkeypatch.setattr(S, "put", lambda db, values: saved.update(values))
+
+    from flask import Flask
+    app = Flask(__name__)
+    body = {"libraries": [{"id": 1, "kind": "movie", "name": "Movies", "folders": []},
+                          {"id": 2, "kind": "show", "name": "TV Shows", "folders": []},
+                          {"kind": "movie", "name": "  cam   movies ", "folders": ["/m/cam"]}],
+            "sidebar_order": ["/player", "lib:new:2", "/player/movies", "lib:new:9"],
+            "sidebar_hidden": ["lib:new:2"]}
+    with app.test_request_context("/api/player/setup", method="PUT", json=body):
+        fn = P.player_setup_put
+        while hasattr(fn, "__wrapped__"):
+            fn = fn.__wrapped__
+        assert fn() == ("ok", 200)
+    # the new library by its real id; a place that names no library in the save is dropped
+    assert saved["sidebar_order"] == ["/player", "lib:7", "/player/movies"]
+    assert saved["sidebar_hidden"] == ["lib:7"]

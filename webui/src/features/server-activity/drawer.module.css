@@ -94,7 +94,7 @@
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 4px 14px;
+  gap: 8px;
   min-width: 0;
   margin: 0 0 0 auto;
   padding: 0;
@@ -104,16 +104,36 @@
 }
 
 .servers li {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  white-space: nowrap;
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-md);
+  background: var(--white-a06);
 }
 
+.servers img {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+}
+
+.serverLetter {
+  color: var(--white-a70);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* its health, a dot on the corner of its mark */
 .servers i {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
   display: block;
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
+  border: 2px solid var(--bg-surface);
   border-radius: var(--radius-circle);
   background: var(--danger-light);
 }

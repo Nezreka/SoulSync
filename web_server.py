@@ -24013,7 +24013,8 @@ _activity_sids_lock = threading.Lock()
 def _emit_server_activity_loop():
     """push live server activity to open drawers every 3 s, and keep sampling
     every 10 s while nobody looks so the play log records every play. does
-    nothing at all without a plex or jellyfin server."""
+    nothing at all without a plex or jellyfin server or anyone playing on
+    soulsync's own player."""
     from core.server_activity import run_sampler_forever
 
     def _has_subscribers():
@@ -24749,6 +24750,17 @@ _configure_stats_api(get_database=get_database, config_manager=config_manager,
                      listenbrainz_import_workers_getter=lambda: listenbrainz_import_workers,
                      lastfm_import_workers_getter=lambda: lastfm_import_workers)
 app.register_blueprint(_create_stats_blueprint())
+
+# Song identification (the Search bar's listen button): ffmpeg + shazamio
+# fingerprint a short clip against Shazam, then the ordinary search resolves
+# the answer to a downloadable row. The blueprint takes only the deps it names.
+from api.listen_routes import configure as _configure_listen_api, create_blueprint as _create_listen_blueprint
+_configure_listen_api(get_database=get_database,
+                      build_search_deps=_build_search_deps,
+                      library_check=_search_library_check,
+                      media_server_engine=lambda: media_server_engine,
+                      config_manager=config_manager)
+app.register_blueprint(_create_listen_blueprint())
 
 # Media server descriptors for the UI (settings page, wizard, quick-switch).
 from api.media_servers import configure as _configure_media_servers_api, create_blueprint as _create_media_servers_blueprint

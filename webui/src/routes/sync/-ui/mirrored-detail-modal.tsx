@@ -66,6 +66,8 @@ export interface MirroredDetailModalProps {
   onExport?: () => void;
   /** 1151 — Auto-Sync (runMirroredPlaylistPipeline). */
   onRunPipeline: () => void;
+  /** the same sync without the wishlist: on the server, nothing downloaded */
+  onSyncOnly?: () => void;
   /** pull the source + discover the new tracks, nothing pushed (#1413) */
   onRefreshFromSource?: () => void;
   /** 1153 — Discover (discoverMirroredPlaylist). */
@@ -435,6 +437,7 @@ export function MirroredDetailModal({
   onEditSource,
   onExport,
   onRunPipeline,
+  onSyncOnly,
   onRefreshFromSource,
   onDiscover,
   discoverLabel = 'Identify',
@@ -1009,6 +1012,16 @@ export function MirroredDetailModal({
                 >
                   Sync & download
                 </button>
+                {onSyncOnly ? (
+                  <button
+                    type="button"
+                    className="mm-pill mm-pill--quiet"
+                    title="Match and push the playlist to your server. Songs you don't have aren't added to the wishlist or downloaded."
+                    onClick={onSyncOnly}
+                  >
+                    Sync only
+                  </button>
+                ) : null}
                 {onOpenEditor ? (
                   <button
                     type="button"

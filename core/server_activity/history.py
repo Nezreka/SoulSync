@@ -68,7 +68,7 @@ def _where(f: Dict[str, Any]) -> Tuple[str, List[Any]]:
     if f.get("method") in METHODS:
         clauses.append("method = ?")
         args.append(f["method"])
-    if f.get("server") in ("plex", "jellyfin"):
+    if f.get("server") in ("plex", "jellyfin", "soulsync"):
         clauses.append("server = ?")
         args.append(f["server"])
     if f.get("start") is not None:
@@ -267,7 +267,7 @@ def _facets(f: Dict[str, Any]) -> Dict[str, Any]:
     users = [{"user": r["user"], "avatar": r["avatar"], "plays": r["n"]} for r in store.query(
         f"SELECT user, MAX(user_avatar) AS avatar, COUNT(*) AS n FROM server_plays WHERE {fw} "
         "GROUP BY user ORDER BY n DESC", fa)]
-    servers = [name for name in ("plex", "jellyfin") if store.query(
+    servers = [name for name in ("plex", "jellyfin", "soulsync") if store.query(
         f"SELECT 1 AS x FROM server_plays WHERE server = ? AND {fw} LIMIT 1", [name, *fa])]
     return {"users": users, "servers": servers}
 

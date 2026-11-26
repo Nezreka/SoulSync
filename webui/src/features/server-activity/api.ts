@@ -14,6 +14,7 @@ import type {
 } from '@/shell/server-activity-types';
 
 import { appURL } from '@/platform/url-base';
+import { remoteImage } from '@/routes/player/-lib/images';
 
 const BASE = '/api/server-activity';
 
@@ -50,16 +51,24 @@ async function request<T>(path: string, init?: RequestInit): Promise<Result<T>> 
 
 const post = (body: unknown): RequestInit => ({ method: 'POST', body: JSON.stringify(body) });
 
+/** a SoulSync player stream's art is SoulSync's own url (or a web image), not a server path */
+function ownArt(thumb: string): boolean {
+  return /^https?:\/\//.test(thumb) || /^(\/[^/]+)?\/api\//.test(thumb);
+}
+
 /**
  * A picture at the width it is drawn. `image` is the query the server built
  * for the row (its own picture plus the family to fall back on); a bare
  * thumb path still works. The server rounds the width up to a few sizes.
+ * Art from SoulSync's own player loads the way the player loads it.
  */
 export function imageSrc(
   image: string | null | undefined,
   thumb: string | null | undefined,
   width: number,
 ): string {
+  if (!image && thumb && ownArt(thumb))
+    return remoteImage(thumb, width > 400 ? 'hero' : 'card') ?? '';
   const query = image || (thumb ? `path=${encodeURIComponent(thumb)}` : '');
   return query ? appURL(`${BASE}/image?${query}&w=${Math.round(width)}`) : '';
 }

@@ -58,6 +58,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libarchive-tools \
     libchromaprint-tools \
     rubberband-cli \
+    sqlite3 \
     unzip \
     && rm -rf /var/lib/apt/lists/*
 

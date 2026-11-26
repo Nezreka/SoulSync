@@ -205,8 +205,9 @@ Bring a playlist in from anywhere, keep a mirror of it, and keep your media serv
 
 ## Search & downloads
 
-One search box with three modes.
+One search box with three modes, and a note button that identifies what is playing.
 
+- **Identify a song**: the note button in the search field records a short clip (or takes an audio file you drop in) and asks Shazam to name it, then opens the song's usual analysis box with Add to Wishlist. The clip goes to Shazam, a third-party service; SoulSync does not keep it. Microphone capture needs an https address — over plain http the button offers the file path instead.
 - **Catalog**: search Spotify, Apple Music, Deezer, Discogs, MusicBrainz or Amazon, or **All sources** at once with the same release shown once. Results show *In library* and *In wishlist*; albums open a download-missing view, artists and labels open their pages.
 - **Videos**: official music videos from YouTube, downloaded straight into your library.
 - **Files**: search a download source directly (like classic Soulseek), filter by format and quality, then choose how it comes in:

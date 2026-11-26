@@ -7,6 +7,7 @@ is no way to name someone else's.
 
 from __future__ import annotations
 
+import re
 import threading
 import time
 
@@ -1168,8 +1169,9 @@ def put_player_settings():
         return _bad(e)
     except Exception:  # noqa: BLE001
         return _failed("settings save", "Couldn't save that setting.")
-    if not out["share_activity"]:
-        presence.forget_profile(pid)
+    # its screens are still kept (the admin's Server Activity sees every
+    # stream); members stop seeing them at once
+    presence.set_shared(pid, bool(out["share_activity"]))
     if out.get("commercials_enabled"):
         try:
             from core.player import commercials
@@ -1397,24 +1399,43 @@ def _profiles_by_id() -> dict:
     return _who["map"]
 
 
+def _beat_client() -> dict:
+    """what the screen is, from the request: a paired device's own name and
+    platform, else the browser and system its user agent names"""
+    from flask import g
+    dev = getattr(g, "device", None) if getattr(g, "device_auth", False) else None
+    if isinstance(dev, dict) and dev:
+        return {k: v for k, v in (("product", dev.get("app")), ("name", dev.get("name")),
+                                  ("platform", dev.get("platform"))) if v}
+    from core.security.devices import device_label
+    label = device_label(request.headers.get("User-Agent", ""))
+    browser, _, system = label.partition(" on ")
+    return {k: v for k, v in (("product", "SoulSync player"), ("device", browser),
+                              ("platform", system)) if v}
+
+
 @bp.route("/api/player/presence", methods=["POST"])
 @device_playback
 @self_only
 def presence_beat():
     """a screen plays something: {session, item_type, item_id, position,
-    duration, playing, live, channel?, meta?}, every few seconds. a profile
-    that doesn't share is never kept (shared: false)"""
+    duration, playing, live, channel?, meta?, stream?, client?}, every few
+    seconds. every beat is kept, marked with whether the profile shares
+    (members only ever see profiles that share; the admin's Server Activity
+    sees all). the answer carries the admin's orders for this screen:
+    {stop: {message}} or {message: {header, text}}"""
     from core.player import presence
     pid = _profile()
     if pid is None:
         return _signed_out()
-    if not _shares(pid):
-        return jsonify({"success": True, "shared": False})
+    body = request.get_json(silent=True)
+    shared = _shares(pid)
     try:
-        presence.beat(pid, request.get_json(silent=True))
+        presence.beat(pid, body, shared=shared, ip=request.remote_addr, client=_beat_client())
     except presence.PresenceError as e:
         return _bad(e)
-    return jsonify({"success": True, "shared": True})
+    return jsonify({"success": True, "shared": shared,
+                    **presence.orders(pid, str((body or {}).get("session") or ""))})
 
 
 @bp.route("/api/player/presence", methods=["DELETE"])
@@ -2186,16 +2207,42 @@ def player_setup_put():
     try:
         db = player_db()
         plain = {k: body[k] for k in ("server_name", "sidebar_order", "sidebar_hidden", "done") if k in body}
+        # a library made in this same save has no id yet: the sidebar names it
+        # by its place in the list ("lib:new:2") until the save gives it one
+        wanted = body.get("libraries") if isinstance(body.get("libraries"), list) else []
+
+        def _places(value, ids):
+            if not isinstance(value, list):
+                return value
+            out = []
+            for v in value:
+                m = re.match(r"^lib:new:(\d{1,3})$", v) if isinstance(v, str) else None
+                if not m:
+                    out.append(v)
+                elif int(m.group(1)) in ids:
+                    out.append(f"lib:{ids[int(m.group(1))]}")
+            return out
+
         # checked before anything is written, so a bad name doesn't leave the libraries half saved
+        maybe = {n: 0 for n, item in enumerate(wanted) if isinstance(item, dict) and item.get("id") is None}
         for k, v in plain.items():
-            player_setup._clean(k, v)
+            player_setup._clean(k, _places(v, maybe) if k.startswith("sidebar_") else v)
         if "libraries" in body:
             hidden = body.get("hidden")
             if isinstance(hidden, dict):
                 admins = {p.get("id") for p in (get_database().get_all_profiles() or []) if p.get("is_admin")}
                 hidden = {k: [p for p in (v or []) if p not in admins] for k, v in hidden.items()}
-            player_libraries.save(db, get_video_db(), body.get("libraries"), hidden)
+            saved = player_libraries.save(db, get_video_db(), body.get("libraries"), hidden)
             _forget_catalog_views()
+            by_name = {(lib["kind"], lib["name"].casefold()): lib["id"] for lib in saved}
+            new_ids = {}
+            for n in maybe:
+                key = (str(wanted[n].get("kind") or ""), " ".join(str(wanted[n].get("name") or "").split()).casefold())
+                if key in by_name:
+                    new_ids[n] = by_name[key]
+            for k in ("sidebar_order", "sidebar_hidden"):
+                if k in plain:
+                    plain[k] = _places(plain[k], new_ids)
         if plain:
             player_setup.put(db, plain)
         return player_setup_get()

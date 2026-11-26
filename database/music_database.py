@@ -20840,6 +20840,57 @@ class MusicDatabase:
                 [(v,) for v in values],
             )
 
+    def _played_source_ids(self, cursor, profile_id: int = 1, limit: int = 150) -> set:
+        """the similar_artists source ids of the artists this profile plays:
+        the last 30 days, or the last 12 months when the month is quiet. keyed
+        the way the similar-artist worker keys them, so a candidate can say
+        whether it came from an artist you actually listen to."""
+        from core.similar_artists_worker import pick_source_artist_id
+        owner = self._listening_owner(profile_id)
+        out: set = set()
+        for window in ('30d', '12m'):
+            where = self._listening_time_filter(window, alias='lh', owner=owner)
+            try:
+                cursor.execute(f"""
+                    SELECT ar.spotify_id, ar.musicbrainz_id, ar.external_ids, COUNT(*) AS plays
+                    FROM listening_history lh
+                    JOIN lib2_tracks t ON t.id = lh.lib2_track_id
+                    JOIN lib2_albums al ON al.id = t.album_id
+                    JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+                    {where}
+                      AND lh.lib2_track_id IS NOT NULL
+                    GROUP BY ar.id
+                    ORDER BY plays DESC
+                    LIMIT ?
+                """, (limit,))
+            except Exception as exc:  # noqa: BLE001 - no history tables: nothing played
+                logger.debug("played source ids: %s", exc)
+                return out
+            for row in cursor.fetchall():
+                sid = pick_source_artist_id({'spotify_id': row[0], 'musicbrainz_id': row[1], 'external_ids': row[2]})
+                if sid:
+                    out.add(sid)
+            if len(out) >= 10:
+                break
+        return out
+
+    @staticmethod
+    def favor_played(items: list, from_played: list, limit: int, share: float = 2 / 3) -> list:
+        """the pool's picks with room kept for what you listen to: up to
+        ``share`` of ``limit`` goes to candidates similar to an artist you
+        play, the rest to the others (watchlist and library), each in the
+        order it came in (the rotation). a side that runs short leaves its
+        room to the other. pure."""
+        played = [x for x, f in zip(items, from_played, strict=True) if f]
+        other = [x for x, f in zip(items, from_played, strict=True) if not f]
+        want = min(len(played), int(round(limit * share)))
+        picked = played[:want] + other[:max(0, limit - want)]
+        if len(picked) < limit:
+            picked += played[want:want + (limit - len(picked))]
+        chosen = set(map(id, picked))
+        # back in rotation order, so what was featured longest ago still leads
+        return [x for x in items if id(x) in chosen][:limit]
+
     @staticmethod
     def _watchlist_exclusion_keys(cursor, profile_id: int = 1) -> Dict[str, set]:
         """The ids + names of this profile's watchlist artists, for exclusion.
@@ -21035,6 +21086,11 @@ class MusicDatabase:
                 # are tens of thousands.
                 stray_sources = self._stray_similar_artist_sources(cursor, profile_id)
                 excl = self._watchlist_exclusion_keys(cursor, profile_id)
+                # candidates similar to what you play get room of their own, so
+                # the pool follows your listening, not only the watchlist
+                played_sources = self._played_source_ids(cursor, profile_id)
+                if played_sources:
+                    sql_limit = max(sql_limit, limit * 4)
 
                 # the watchlist exclusion was a LEFT JOIN with four OR'd predicates and
                 # no index to serve any of them — every row of similar_artists scanned
@@ -21045,9 +21101,12 @@ class MusicDatabase:
                 self._temp_key_set(cursor, 'sa_excl_spotify', excl['spotify'])
                 self._temp_key_set(cursor, 'sa_excl_itunes', excl['itunes'])
                 self._temp_key_set(cursor, 'sa_excl_deezer', excl['deezer'])
+                self._temp_key_set(cursor, 'sa_played_sources', played_sources)
 
                 cursor.execute(f"""
                     SELECT
+                        MAX(CASE WHEN sa.source_artist_id IN (SELECT v FROM sa_played_sources)
+                                 THEN 1 ELSE 0 END) as from_played,
                         MAX(sa.id) as id,
                         MAX(sa.source_artist_id) as source_artist_id,
                         MAX(sa.similar_artist_spotify_id) as similar_artist_spotify_id,
@@ -21079,6 +21138,7 @@ class MusicDatabase:
 
                 rows = cursor.fetchall()
                 results = []
+                played_flags = []
                 for row in rows:
                     if library_artist_keys:
                         spotify_id = row['similar_artist_spotify_id']
@@ -21115,9 +21175,12 @@ class MusicDatabase:
                         genres=genres_list,
                         popularity=row['popularity'] if 'popularity' in row.keys() else 0,
                     ))
-                    if len(results) >= limit:
+                    played_flags.append(bool(row['from_played']))
+                    if not played_sources and len(results) >= limit:
                         break
-                return results
+                if played_sources:
+                    return self.favor_played(results, played_flags, limit)
+                return results[:limit]
 
         except Exception as e:
             logger.error(f"Error getting top similar artists: {e}")

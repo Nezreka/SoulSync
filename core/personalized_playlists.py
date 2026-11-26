@@ -74,6 +74,21 @@ def clear_owned_pool_cache() -> None:
         _owned_pool_cache.clear()
 
 
+def recency_weighted_genres(top, recent, genres_by_name, recent_share: float = 2 / 3):
+    """[(genres, weight)] for the genre taste: each artist's share of your
+    plays ever and of your plays this month, blended about two thirds recent
+    (as the artist seeds are). no recent plays: the lifetime shares alone"""
+    def shares(rows):
+        total = float(sum((r.get('play_count') or 0) for r in rows)) or 0.0
+        return {(r.get('name') or '').strip().lower(): (r.get('play_count') or 0) / total
+                for r in rows if total and r.get('name')}
+    ever, month = shares(top or []), shares(recent or [])
+    w_recent = recent_share if month else 0.0
+    weight = {n: (1 - w_recent) * ever.get(n, 0.0) + w_recent * month.get(n, 0.0)
+              for n in set(ever) | set(month)}
+    return [(genres_by_name.get(n, []), w) for n, w in weight.items() if w > 0]
+
+
 def _owned_pool_stamp(conn) -> tuple:
     """Moves when a file is added or the pool gains rows."""
     return (conn.execute("SELECT MAX(id) FROM lib2_track_files").fetchone()[0],
@@ -946,11 +961,12 @@ class PersonalizedPlaylistsService:
             from core.discovery.listening_recommendations import build_genre_taste_profile
             pid = profile_id if profile_id is not None else _blocklist_profile()
             top = self.database.get_top_artists('all', 300, profile_id=pid) or []
-            genres_by_name = self.database.get_artist_genres_by_name(
-                [t.get('name') for t in top if t.get('name')]) or {}
-            weighted = [(genres_by_name.get((t.get('name') or '').strip().lower(), []),
-                         t.get('play_count', 1) or 1) for t in top]
-            return build_genre_taste_profile(weighted)
+            # this month counts for more than its share of a lifetime: a genre
+            # you moved into lately leads, the way the artist seeds do
+            recent = self.database.get_top_artists('30d', 100, profile_id=pid) or []
+            names = [t.get('name') for t in list(top) + list(recent) if t.get('name')]
+            genres_by_name = self.database.get_artist_genres_by_name(list(dict.fromkeys(names))) or {}
+            return build_genre_taste_profile(recency_weighted_genres(top, recent, genres_by_name))
         except Exception as e:  # noqa: BLE001 - ranking is a nicety
             logger.debug(f"genre taste profile failed: {e}")
             return {}

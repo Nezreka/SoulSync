@@ -257,8 +257,12 @@ def spec_from_args(args) -> Dict[str, Any]:
 def image_query(server: Optional[str], kind: Optional[str], thumb: Optional[str], rk: Any = None,
                 pk: Any = None, gk: Any = None, role: Optional[str] = None) -> Optional[str]:
     """the proxy query for one picture of a row, built server side so the
-    browser only adds the width. None when there is nothing to try."""
+    browser only adds the width. None when there is nothing to try, and
+    always for soulsync's own player: its art is a soulsync url the browser
+    loads itself (its ids aren't plex's, so no plex fallback)."""
     from urllib.parse import urlencode
+    if server and server not in ("plex", "jellyfin"):
+        return None
     spec = {"path": thumb or "", "s": server or "", "k": kind or "", "r": role or "",
             "rk": str(rk or ""), "pk": str(pk or ""), "gk": str(gk or "")}
     if not candidates(spec_from_args(spec)):

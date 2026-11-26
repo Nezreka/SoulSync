@@ -15,9 +15,10 @@
  */
 
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 
 import { apiClient } from '@/app/api-client';
+import { appURL } from '@/platform/url-base';
 
 import { posterSet } from '../-lib/images';
 import { moveNav } from '../-lib/nav-order';
@@ -87,7 +88,14 @@ const subscribe = (fn: () => void) => {
   return () => void listeners.delete(fn);
 };
 
-const STEPS = ['Name', 'Movies', 'TV', 'People', 'Sidebar'] as const;
+const STEPS = [
+  { label: 'Welcome', group: '' },
+  { label: 'Movies', group: 'Libraries' },
+  { label: 'TV', group: 'Libraries' },
+  { label: 'Who sees what', group: '' },
+  { label: 'Sidebar', group: '' },
+  { label: 'Done', group: '' },
+] as const;
 
 /** mounts in the player shell: shows setup when it is due or asked for */
 export function PlayerSetupHost() {
@@ -98,6 +106,39 @@ export function PlayerSetupHost() {
   if (!asked && data.done) return null;
   if (!data.libraries || !data.folders) return null;
   return <PlayerSetup data={data} firstTime={!data.done} />;
+}
+
+/**
+ * a folder's path as where it lives (the share's server, or the drive) and
+ * the folders down to it, so a long path breaks between folder names, never
+ * inside one. "\\192.168.86.36\easystore1\PLEX\MOVIES" is
+ * { root: "192.168.86.36", parts: ["easystore1", "PLEX", "MOVIES"] }
+ */
+export function splitFolderPath(path: string): { root: string; parts: string[] } {
+  const raw = String(path || '').trim();
+  const bits = raw.split(/[\\/]+/).filter(Boolean);
+  if (!bits.length) return { root: '', parts: [] };
+  // a network share (\\server\share or //server/share): the server is the root
+  if (/^(\\\\|\/\/)/.test(raw)) return { root: bits[0], parts: bits.slice(1) };
+  // a drive letter (H:\Music): the drive
+  if (/^[A-Za-z]:$/.test(bits[0])) return { root: bits[0], parts: bits.slice(1) };
+  // a unix path (/mnt/media/movies): no root of its own
+  return { root: '', parts: bits };
+}
+
+/** the SoulSync mark with the boot screen's light passing over it */
+function Mark({ size = 'sm' }: { size?: 'sm' | 'md' | 'hero' }) {
+  const src = appURL('/static/soulsync-mark.png');
+  return (
+    <span className={s.logo} data-size={size} aria-hidden="true">
+      {size === 'hero' ? <span className={s.logoAura} /> : null}
+      <img src={src} alt="" />
+      <span
+        className={s.logoSheen}
+        style={{ WebkitMaskImage: `url("${src}")`, maskImage: `url("${src}")` }}
+      />
+    </span>
+  );
 }
 
 function PlayerSetup({ data, firstTime }: { data: SetupPayload; firstTime: boolean }) {
@@ -148,8 +189,16 @@ function PlayerSetup({ data, firstTime }: { data: SetupPayload; firstTime: boole
       const body: Record<string, unknown> = { done: true };
       if (!defaultsOnly) {
         body.server_name = name;
-        body.sidebar_order = order;
-        body.sidebar_hidden = gone;
+        // a library not saved yet is named by its place in the list; one
+        // removed again after being arranged is dropped
+        const sent = (ids: string[]) =>
+          ids.flatMap((id) => {
+            if (!id.startsWith('draft:')) return [id];
+            const at = libs.findIndex((l) => l.key === id.slice(6) && l.id === null);
+            return at >= 0 ? [`lib:new:${at}`] : [];
+          });
+        body.sidebar_order = sent(order);
+        body.sidebar_hidden = sent(gone);
         body.libraries = libs.map((l) => ({
           ...(l.id !== null ? { id: l.id } : {}),
           kind: l.kind,
@@ -187,107 +236,189 @@ function PlayerSetup({ data, firstTime }: { data: SetupPayload; firstTime: boole
     }
   };
 
+  const moveFolder = (kind: Kind, folder: string, toKey: string | null) => {
+    let target = toKey;
+    if (!target) {
+      // dropped on New library: a library made for it, named after the folder
+      target = `new:${Date.now()}`;
+      const base = folder.split(/[\\/]/).filter(Boolean).pop() || 'New library';
+      const name = base.charAt(0).toUpperCase() + base.slice(1);
+      setLibs((all) => [...all, { key: target!, id: null, kind, name, isDefault: false }]);
+    }
+    setWhere((w) => ({ ...w, [`${kind}|${folder}`]: target! }));
+  };
+
+  // a folder being dragged, and the card it is over
+  const dragging = useRef<{ kind: Kind; folder: string } | null>(null);
+  const [over, setOver] = useState<string | null>(null);
+
   const libraryStep = (kind: Kind) => {
     const mine = libs.filter((l) => l.kind === kind);
     const main = mine.find((l) => l.isDefault);
     const folders = (data.folders?.[kind] ?? []).filter((f) => f.folder);
     const loose = (data.folders?.[kind] ?? []).find((f) => !f.folder);
     const noun = kind === 'movie' ? 'films' : 'shows';
+    const dropProps = (key: string | null) => ({
+      onDragOver: (e: React.DragEvent) => {
+        if (dragging.current?.kind !== kind) return;
+        e.preventDefault();
+        setOver(key ?? 'new');
+      },
+      onDragLeave: () => setOver((o) => (o === (key ?? 'new') ? null : o)),
+      onDrop: (e: React.DragEvent) => {
+        e.preventDefault();
+        setOver(null);
+        const d = dragging.current;
+        dragging.current = null;
+        if (d && d.kind === kind) moveFolder(kind, d.folder, key);
+      },
+    });
     return (
       <>
-        {mine.map((lib) => {
-          const inIt = folders.filter(
-            (f) => (where[`${kind}|${f.folder}`] ?? main?.key) === lib.key,
-          );
-          return (
-            <section key={lib.key} className={s.library} aria-label={lib.name}>
-              <div className={s.libraryHead}>
-                <input
-                  className={s.field}
-                  value={lib.name}
-                  maxLength={60}
-                  aria-label="Library name"
-                  onChange={(e) =>
-                    setLibs((all) =>
-                      all.map((x) => (x.key === lib.key ? { ...x, name: e.target.value } : x)),
-                    )
-                  }
-                  data-nav
-                />
-                {lib.isDefault ? (
-                  <span className={s.note}>The main one</span>
-                ) : (
-                  <button
-                    type="button"
-                    className={k.btn}
-                    onClick={() => {
-                      setLibs((all) => all.filter((x) => x.key !== lib.key));
-                      setWhere((w) =>
-                        Object.fromEntries(Object.entries(w).filter(([, v]) => v !== lib.key)),
-                      );
-                    }}
+        <div className={s.board}>
+          {mine.map((lib) => {
+            const inIt = folders.filter(
+              (f) => (where[`${kind}|${f.folder}`] ?? main?.key) === lib.key,
+            );
+            const total =
+              inIt.reduce((n, f) => n + f.titles, 0) + (lib.isDefault ? (loose?.titles ?? 0) : 0);
+            return (
+              <section
+                key={lib.key}
+                className={s.lib}
+                data-over={over === lib.key ? 'true' : undefined}
+                aria-label={lib.name || 'Unnamed library'}
+                {...dropProps(lib.key)}
+              >
+                <div className={s.libHead}>
+                  <input
+                    className={s.libName}
+                    value={lib.name}
+                    maxLength={60}
+                    aria-label="Library name"
+                    onChange={(e) =>
+                      setLibs((all) =>
+                        all.map((x) => (x.key === lib.key ? { ...x, name: e.target.value } : x)),
+                      )
+                    }
                     data-nav
+                  />
+                  {lib.isDefault ? (
+                    <span className={s.chip} data-tone="accent">
+                      Main
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      className={s.textBtn}
+                      onClick={() => {
+                        setLibs((all) => all.filter((x) => x.key !== lib.key));
+                        setWhere((w) =>
+                          Object.fromEntries(Object.entries(w).filter(([, v]) => v !== lib.key)),
+                        );
+                      }}
+                      data-nav
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+                <div className={s.libCount}>
+                  {total.toLocaleString()} {noun}
+                </div>
+                {inIt.map((f) => (
+                  <div
+                    key={f.folder}
+                    className={s.folder}
+                    draggable
+                    onDragStart={(e) => {
+                      dragging.current = { kind, folder: f.folder };
+                      e.dataTransfer.effectAllowed = 'move';
+                      e.dataTransfer.setData('text/plain', f.folder);
+                    }}
+                    onDragEnd={() => {
+                      dragging.current = null;
+                      setOver(null);
+                    }}
                   >
-                    Remove
-                  </button>
-                )}
-              </div>
-              {inIt.length ? (
-                inIt.map((f) => (
-                  <div key={f.folder} className={s.folder}>
-                    <div>
-                      <div className={s.folderPath} title={f.path}>
-                        {f.path}
-                      </div>
-                      <div className={s.note}>
+                    <span className={s.stack} aria-hidden="true">
+                      {f.sample.slice(0, 3).map((id) => (
+                        <img
+                          key={id}
+                          src={posterSet(kind, id).src}
+                          alt=""
+                          loading="lazy"
+                          onError={(e) => {
+                            e.currentTarget.hidden = true;
+                          }}
+                        />
+                      ))}
+                    </span>
+                    <span className={s.folderText}>
+                      {(() => {
+                        const { root, parts } = splitFolderPath(f.path);
+                        return (
+                          <>
+                            {root ? <span className={s.folderRoot}>{root}</span> : null}
+                            <span className={s.folderPath} title={f.path}>
+                              {parts.map((part, i) => (
+                                <span key={`${i}-${part}`} className={s.crumb}>
+                                  {i > 0 ? (
+                                    <span className={s.crumbSep} aria-hidden="true">
+                                      ›
+                                    </span>
+                                  ) : null}
+                                  {part}
+                                </span>
+                              ))}
+                            </span>
+                          </>
+                        );
+                      })()}
+                      <span className={s.muted}>
                         {f.titles.toLocaleString()} {noun}
-                      </div>
-                      {f.sample.length ? (
-                        <div className={s.posters} aria-hidden="true">
-                          {f.sample.map((id) => (
-                            <img key={id} src={posterSet(kind, id).src} alt="" loading="lazy" />
-                          ))}
-                        </div>
-                      ) : null}
-                    </div>
-                    {mine.length > 1 ? (
-                      <select
-                        className={s.pick}
-                        value={lib.key}
-                        aria-label={`Library for ${f.path}`}
-                        onChange={(e) =>
-                          setWhere((w) => ({ ...w, [`${kind}|${f.folder}`]: e.target.value }))
-                        }
-                        data-nav
-                      >
-                        {mine.map((o) => (
-                          <option key={o.key} value={o.key}>
-                            {o.name || 'Unnamed'}
-                          </option>
-                        ))}
-                      </select>
-                    ) : null}
+                      </span>
+                    </span>
+                    {/* the same move without a mouse: a remote, a keyboard, a phone */}
+                    <span className={s.break} aria-hidden="true" />
+                    <select
+                      className={s.move}
+                      value={lib.key}
+                      aria-label={`Library for ${f.path}`}
+                      onChange={(e) =>
+                        e.target.value === '+'
+                          ? moveFolder(kind, f.folder, null)
+                          : setWhere((w) => ({ ...w, [`${kind}|${f.folder}`]: e.target.value }))
+                      }
+                      data-nav
+                    >
+                      {mine.map((o) => (
+                        <option key={o.key} value={o.key}>
+                          {o.name || 'Unnamed'}
+                        </option>
+                      ))}
+                      <option value="+">New library…</option>
+                    </select>
                   </div>
-                ))
-              ) : (
-                <div className={s.note}>
-                  {lib.isDefault
-                    ? 'Every folder is in another library.'
-                    : 'No folders yet. Pick this library on a folder to move it here.'}
-                </div>
-              )}
-              {lib.isDefault && loose ? (
-                <div className={s.note}>
-                  Plus {loose.titles.toLocaleString()} {noun} that sit outside these folders.
-                </div>
-              ) : null}
-            </section>
-          );
-        })}
-        <div>
+                ))}
+                {!inIt.length ? (
+                  <div className={s.dropHint}>
+                    {lib.isDefault ? 'Every folder is in another library' : 'Drop folders here'}
+                  </div>
+                ) : null}
+                {lib.isDefault && loose ? (
+                  <div className={s.muted}>
+                    Plus {loose.titles.toLocaleString()} {noun} outside these folders
+                  </div>
+                ) : null}
+              </section>
+            );
+          })}
           <button
             type="button"
-            className={k.btn}
+            className={s.newLib}
+            aria-label="Add a library"
+            data-over={over === 'new' ? 'true' : undefined}
             onClick={() =>
               setLibs((all) => [
                 ...all,
@@ -300,258 +431,495 @@ function PlayerSetup({ data, firstTime }: { data: SetupPayload; firstTime: boole
                 },
               ])
             }
+            {...dropProps(null)}
             data-nav
           >
+            <span className={s.plus} aria-hidden="true">
+              +
+            </span>
             Add a library
+            <span className={s.muted}>or drop a folder here</span>
           </button>
         </div>
         {!folders.length ? (
-          <div className={s.note}>
+          <p className={s.muted}>
             No {kind === 'movie' ? 'movie' : 'TV'} folders are set up in SoulSync yet (Settings,
             Folders).
-          </div>
-        ) : null}
+          </p>
+        ) : (
+          <p className={s.muted}>
+            Drag a folder onto another library, or pick one from its menu. A library you add gets
+            its own page in the sidebar.
+          </p>
+        )}
       </>
     );
   };
 
   const people = (data.profiles ?? []).filter((p) => !p.is_admin);
-  const places = NAV.map((e) => ({ id: e.to, label: e.label, group: e.group }));
+  // every page, and after Movies and TV the libraries made here: one that
+  // isn't saved yet goes by its draft key here, and by its place in the list in the save
+  const places = NAV.flatMap((e) => [
+    { id: e.to, label: e.label, group: e.group, lib: null as DraftLibrary | null },
+    ...libs.flatMap((l) =>
+      !l.isDefault && e.to === (l.kind === 'movie' ? '/player/movies' : '/player/tv')
+        ? [
+            {
+              id: l.id !== null ? `lib:${l.id}` : `draft:${l.key}`,
+              label: l.name.trim() || 'New library',
+              group: e.group,
+              lib: l,
+            },
+          ]
+        : [],
+    ),
+  ]);
   const ordered = [
     ...order.filter((id) => places.some((p) => p.id === id)),
     ...places.map((p) => p.id).filter((id) => !order.includes(id)),
   ];
 
+  // the live preview: whose sidebar it shows
+  const [as, setAs] = useState<number | null>(null);
+  const previewPlaces = useMemo(() => {
+    const isOff = (lib: DraftLibrary | null) =>
+      lib !== null && as !== null && (hidden[lib.key] ?? []).includes(as);
+    const mainOf = (id: string) =>
+      libs.find(
+        (l) => l.isDefault && (l.kind === 'movie' ? '/player/movies' : '/player/tv') === id,
+      ) ?? null;
+    return ordered
+      .map((id) => places.find((p) => p.id === id)!)
+      .filter((p) => p && !gone.includes(p.id) && !isOff(p.lib) && !isOff(mainOf(p.id)));
+  }, [ordered, places, gone, hidden, as, libs]);
+
+  // sidebar drag: the place being dragged and the one it is over
+  const draggingPlace = useRef<string | null>(null);
+  const [overPlace, setOverPlace] = useState<string | null>(null);
+  const dropPlace = (target: string) => {
+    const from = draggingPlace.current;
+    draggingPlace.current = null;
+    setOverPlace(null);
+    if (!from || from === target || from === '/player') return;
+    const groupOf = (id: string) => places.find((p) => p.id === id)?.group;
+    if (groupOf(from) !== groupOf(target)) return;
+    const next = ordered.filter((id) => id !== from);
+    next.splice(next.indexOf(target), 0, from);
+    setOrder(next);
+  };
+
+  const counts = (['movie', 'show'] as const).map((kind) => {
+    const all = data.folders?.[kind] ?? [];
+    return {
+      kind,
+      titles: all.reduce((n, f) => n + f.titles, 0),
+      folders: all.filter((f) => f.folder).length,
+    };
+  });
+  const madeHere = libs.filter((l) => !l.isDefault).length;
+  const keptFrom = Object.values(hidden).reduce((n, list) => n + list.length, 0);
+  const last = STEPS.length - 1;
+
+  const toggle = (on: boolean, label: string, onClick: () => void, extra?: React.ReactNode) => (
+    <button
+      type="button"
+      className={s.toggle}
+      aria-pressed={on}
+      aria-label={label}
+      onClick={onClick}
+      data-nav
+    >
+      <span className={s.switch} aria-hidden="true" />
+      {extra}
+    </button>
+  );
+
   return inPlayer(
     <div className={s.veil} role="dialog" aria-modal="true" aria-label="Player setup">
-      <div className={s.sheet}>
-        <ol className={s.steps}>
-          {STEPS.map((label, i) => (
-            <li
-              key={label}
-              className={s.step}
-              data-on={i === step ? 'true' : undefined}
-              data-done={i < step ? 'true' : undefined}
-            >
-              {label}
-            </li>
-          ))}
-        </ol>
-
-        {step === 0 ? (
-          <div className={s.body}>
-            <h1 className={s.title}>{firstTime ? 'Set up your player' : 'Player setup'}</h1>
-            <p className={s.lead}>
-              A few choices for everyone on this server: what it is called, how your folders are
-              grouped into libraries, who sees which, and the sidebar. Every one has a default, so
-              you can change only what you care about.
-            </p>
-            <label className={s.note} htmlFor="player-server-name">
-              What should this server be called?
-            </label>
-            <input
-              id="player-server-name"
-              className={s.field}
-              value={name}
-              maxLength={60}
-              placeholder="SoulSync"
-              onChange={(e) => setName(e.target.value)}
-              data-nav
-            />
+      <div className={s.stage}>
+        <nav className={s.rail} aria-label="Setup steps">
+          <div className={s.brand}>
+            <Mark size="md" />
+            <span>
+              {name.trim() || 'SoulSync'}
+              <small>Player setup</small>
+            </span>
           </div>
-        ) : null}
-
-        {step === 1 ? (
-          <div className={s.body}>
-            <h1 className={s.title}>Movies</h1>
-            <p className={s.lead}>
-              These are the folders SoulSync keeps films in. They are all one library unless you
-              make more. A library you add gets its own place in the sidebar and its own page.
-            </p>
-            {libraryStep('movie')}
+          <div className={s.progress} aria-hidden="true">
+            <span style={{ width: `${Math.round((step / (STEPS.length - 1)) * 100)}%` }} />
           </div>
-        ) : null}
+          <ol className={s.steps}>
+            {STEPS.map((st, i) => (
+              <li key={st.label}>
+                {st.group && STEPS[i - 1]?.group !== st.group ? (
+                  <div className={s.stepGroup}>{st.group}</div>
+                ) : null}
+                <button
+                  type="button"
+                  className={s.step}
+                  aria-current={i === step ? 'step' : undefined}
+                  data-done={i < step ? 'true' : undefined}
+                  onClick={() => setStep(i)}
+                  data-nav
+                >
+                  <span className={s.dot} aria-hidden="true">
+                    {i < step ? '✓' : i + 1}
+                  </span>
+                  {st.label}
+                </button>
+              </li>
+            ))}
+          </ol>
+        </nav>
 
-        {step === 2 ? (
-          <div className={s.body}>
-            <h1 className={s.title}>TV</h1>
-            <p className={s.lead}>The same for shows.</p>
-            {libraryStep('show')}
-          </div>
-        ) : null}
+        <main className={s.main}>
+          {step === 0 ? (
+            <div className={s.body}>
+              <Mark size="hero" />
+              <div className={s.eyebrow}>{firstTime ? 'Welcome' : 'Player setup'}</div>
+              <h1 className={s.title}>
+                {firstTime ? 'Let’s set up your player' : 'Your player’s setup'}
+              </h1>
+              <p className={s.lead}>
+                A few minutes, once, for everyone on this server. Every step has a default, so skip
+                anything you don’t care about and change it later from the player’s settings.
+              </p>
+              <label className={s.name} htmlFor="player-server-name">
+                <input
+                  id="player-server-name"
+                  value={name}
+                  maxLength={60}
+                  placeholder="SoulSync"
+                  onChange={(e) => setName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') setStep(1);
+                  }}
+                  data-nav
+                />
+                <span className={s.muted}>Your server’s name</span>
+              </label>
+              <div className={s.found} aria-label="What SoulSync found">
+                {counts.map((c) => (
+                  <div key={c.kind}>
+                    <b>{c.titles.toLocaleString()}</b>
+                    <span>
+                      {c.kind === 'movie' ? 'films' : 'shows'} in {c.folders}{' '}
+                      {c.folders === 1 ? 'folder' : 'folders'}
+                    </span>
+                  </div>
+                ))}
+                <div>
+                  <b>{people.length}</b>
+                  <span>{people.length === 1 ? 'person' : 'people'} besides the admins</span>
+                </div>
+              </div>
+            </div>
+          ) : null}
 
-        {step === 3 ? (
-          <div className={s.body}>
-            <h1 className={s.title}>Who sees what</h1>
-            <p className={s.lead}>
-              Untick a library for someone and it is gone for them everywhere: lists, search, and
-              the titles themselves. Admins always see everything. Age ratings are set per person in
-              Settings, People.
-            </p>
-            {people.length ? (
-              <table className={s.grid}>
-                <thead>
-                  <tr>
-                    <th scope="col">Library</th>
-                    {people.map((p) => (
-                      <th key={p.id} scope="col">
-                        {p.name}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {libs.map((lib) => (
-                    <tr key={lib.key}>
-                      <td>{lib.name || 'Unnamed'}</td>
-                      {people.map((p) => {
+          {step === 1 || step === 2 ? (
+            <div className={s.body}>
+              <div className={s.eyebrow}>Libraries · {step === 1 ? 'Movies' : 'TV'}</div>
+              <h1 className={s.title}>
+                How should {step === 1 ? 'movies' : 'TV shows'} be grouped?
+              </h1>
+              <p className={s.lead}>
+                These are the folders SoulSync keeps {step === 1 ? 'films' : 'shows'} in. They start
+                as one library. Split some off (4K, Kids, Anime) and each gets its own page.
+              </p>
+              {libraryStep(step === 1 ? 'movie' : 'show')}
+            </div>
+          ) : null}
+
+          {step === 3 ? (
+            <div className={s.body}>
+              <div className={s.eyebrow}>People</div>
+              <h1 className={s.title}>Who sees what</h1>
+              <p className={s.lead}>
+                Switch a library off for someone and it is gone for them everywhere: pages, search,
+                the guide, home rows and links. Admins always see everything. Age ratings stay per
+                person in Settings, People.
+              </p>
+              {people.length ? (
+                <div className={s.people}>
+                  {people.map((p) => (
+                    <section key={p.id} className={s.person} aria-label={p.name}>
+                      <div className={s.personHead}>
+                        <span className={s.avatar} aria-hidden="true">
+                          {p.name.charAt(0).toUpperCase()}
+                        </span>
+                        <b>{p.name}</b>
+                      </div>
+                      {libs.map((lib) => {
                         const off = (hidden[lib.key] ?? []).includes(p.id);
                         return (
-                          <td key={p.id}>
-                            <input
-                              type="checkbox"
-                              checked={!off}
-                              aria-label={`${p.name} can see ${lib.name}`}
-                              onChange={(e) =>
-                                setHidden((h) => {
-                                  const set = new Set(h[lib.key] ?? []);
-                                  if (e.target.checked) set.delete(p.id);
-                                  else set.add(p.id);
-                                  return { ...h, [lib.key]: [...set] };
-                                })
-                              }
-                              data-nav
-                            />
-                          </td>
+                          <div
+                            key={lib.key}
+                            className={s.personRow}
+                            data-off={off ? 'true' : undefined}
+                          >
+                            {toggle(!off, `${p.name} can see ${lib.name}`, () =>
+                              setHidden((h) => {
+                                const set = new Set(h[lib.key] ?? []);
+                                if (off) set.delete(p.id);
+                                else set.add(p.id);
+                                return { ...h, [lib.key]: [...set] };
+                              }),
+                            )}
+                            <span className={s.personLib}>{lib.name || 'Unnamed'}</span>
+                            <span className={s.muted}>
+                              {lib.kind === 'movie' ? 'Movies' : 'TV'}
+                            </span>
+                          </div>
                         );
                       })}
-                    </tr>
+                    </section>
                   ))}
-                </tbody>
-              </table>
-            ) : (
-              <div className={s.note}>
-                There is nobody but admins on this server yet. Add people in Settings, People.
-              </div>
-            )}
-          </div>
-        ) : null}
+                </div>
+              ) : (
+                <p className={s.muted}>
+                  There is nobody but admins on this server yet. Add people in Settings, People.
+                </p>
+              )}
+            </div>
+          ) : null}
 
-        {step === 4 ? (
-          <div className={s.body}>
-            <h1 className={s.title}>Sidebar</h1>
-            <p className={s.lead}>
-              The order everyone starts from, and the places nobody on this server gets. Each person
-              can still arrange their own in their settings.
-            </p>
+          {step === 4 ? (
+            <div className={s.body}>
+              <div className={s.eyebrow}>Sidebar</div>
+              <h1 className={s.title}>Arrange the sidebar</h1>
+              <p className={s.lead}>
+                Drag to reorder, switch off what nobody here uses. This is where everyone starts;
+                each person can arrange their own afterwards.
+              </p>
+              <div className={s.order}>
+                {NAV_GROUPS.map((group) => {
+                  const inGroup = ordered.filter(
+                    (id) => places.find((p) => p.id === id)?.group === group.id,
+                  );
+                  return (
+                    <div key={group.id} role="group" aria-label={group.label ?? 'Main'}>
+                      {group.label ? <div className={s.stepGroup}>{group.label}</div> : null}
+                      {inGroup.map((id, i) => {
+                        const place = places.find((p) => p.id === id)!;
+                        const fixed = id === '/player';
+                        const off = gone.includes(id);
+                        const move = (stepBy: -1 | 1) => {
+                          const next = moveNav(inGroup, id, stepBy);
+                          let n = 0;
+                          setOrder(ordered.map((x) => (inGroup.includes(x) ? next[n++] : x)));
+                        };
+                        return (
+                          <div
+                            key={id}
+                            className={s.place}
+                            data-off={off ? 'true' : undefined}
+                            data-over={overPlace === id ? 'true' : undefined}
+                            draggable={!fixed}
+                            onDragStart={(e) => {
+                              draggingPlace.current = id;
+                              e.dataTransfer.effectAllowed = 'move';
+                              e.dataTransfer.setData('text/plain', id);
+                            }}
+                            onDragOver={(e) => {
+                              if (!draggingPlace.current) return;
+                              e.preventDefault();
+                              setOverPlace(id);
+                            }}
+                            onDrop={(e) => {
+                              e.preventDefault();
+                              dropPlace(id);
+                            }}
+                            onDragEnd={() => {
+                              draggingPlace.current = null;
+                              setOverPlace(null);
+                            }}
+                          >
+                            <span className={s.grip} aria-hidden="true">
+                              ⋮⋮
+                            </span>
+                            <span className={s.placeLabel}>{place.label}</span>
+                            {place.lib ? (
+                              <span className={s.chip} data-tone="accent">
+                                Library
+                              </span>
+                            ) : null}
+                            <span className={s.grow} />
+                            <span className={s.arrows}>
+                              <button
+                                type="button"
+                                onClick={() => move(-1)}
+                                disabled={i === 0 || fixed}
+                                aria-label={`Move ${place.label} up`}
+                                data-nav
+                              >
+                                ↑
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => move(1)}
+                                disabled={i === inGroup.length - 1 || fixed}
+                                aria-label={`Move ${place.label} down`}
+                                data-nav
+                              >
+                                ↓
+                              </button>
+                            </span>
+                            {fixed ? (
+                              <span className={s.muted}>Always there</span>
+                            ) : (
+                              toggle(!off, `${place.label} is in the sidebar`, () =>
+                                setGone((g) => (off ? g.filter((x) => x !== id) : [...g, id])),
+                              )
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
+
+          {step === last ? (
+            <div className={s.body}>
+              <Mark size="hero" />
+              <div className={s.eyebrow}>All set</div>
+              <h1 className={s.title}>{(name.trim() || 'SoulSync') + ' is ready'}</h1>
+              <p className={s.lead}>
+                Here is what you set up. The preview shows the sidebar each person gets. You can
+                come back to any of this from the player’s settings, under Player setup.
+              </p>
+              <div className={s.found}>
+                <div>
+                  <b>{libs.length}</b>
+                  <span>
+                    libraries, {madeHere} with {madeHere === 1 ? 'its' : 'their'} own page
+                  </span>
+                </div>
+                <div>
+                  <b>{keptFrom}</b>
+                  <span>
+                    {keptFrom === 1 ? 'library kept from someone' : 'libraries kept from someone'}
+                  </span>
+                </div>
+                <div>
+                  <b>{gone.length}</b>
+                  <span>{gone.length === 1 ? 'place' : 'places'} off for everyone</span>
+                </div>
+              </div>
+              {/* pairing stays in Settings, Devices: it is open whether or not
+                  setup ran, so this only points the way */}
+              <div className={s.next}>
+                <div className={s.stepGroup}>Next, your devices</div>
+                <a className={s.nextCard} href={appURL('/settings?tab=devices')} data-nav>
+                  <b>The SoulSync app</b>
+                  <span>Phones, tablets and TVs pair with a one-time code or a QR.</span>
+                </a>
+                <a className={s.nextCard} href={appURL('/settings?tab=devices')} data-nav>
+                  <b>Any music app</b>
+                  <span>Symfonium, Feishin and other Subsonic apps play one profile’s music.</span>
+                </a>
+              </div>
+            </div>
+          ) : null}
+
+          <div className={s.foot}>
+            {error ? (
+              <span className={s.error} role="alert">
+                {error}
+              </span>
+            ) : (
+              <span className={s.muted}>
+                Step {step + 1} of {STEPS.length}
+              </span>
+            )}
+            <span className={s.grow} />
+            {firstTime && step < last ? (
+              <button
+                type="button"
+                className={s.ghost}
+                disabled={busy}
+                onClick={() => void save(true)}
+                data-nav
+              >
+                Use the defaults
+              </button>
+            ) : null}
+            {!firstTime ? (
+              <button type="button" className={s.ghost} onClick={closePlayerSetup} data-nav>
+                Close
+              </button>
+            ) : null}
+            {step > 0 ? (
+              <button type="button" className={k.btn} onClick={() => setStep(step - 1)} data-nav>
+                Back
+              </button>
+            ) : null}
+            {step < last ? (
+              <button
+                type="button"
+                className={k.btnPrimary}
+                onClick={() => setStep(step + 1)}
+                data-nav
+              >
+                Next: {STEPS[step + 1].label}
+              </button>
+            ) : null}
+            {step === last || !firstTime ? (
+              <button
+                type="button"
+                className={k.btnPrimary}
+                disabled={busy}
+                onClick={() => void save()}
+                data-nav
+              >
+                {busy ? 'Saving…' : firstTime ? 'Finish' : 'Save'}
+              </button>
+            ) : null}
+          </div>
+        </main>
+
+        <aside className={s.preview} aria-label="Live preview">
+          <div className={s.stepGroup}>Live preview</div>
+          <div className={s.who} role="group" aria-label="Preview as">
+            <button type="button" aria-pressed={as === null} onClick={() => setAs(null)} data-nav>
+              You
+            </button>
+            {people.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                aria-pressed={as === p.id}
+                onClick={() => setAs(p.id)}
+                data-nav
+              >
+                {p.name}
+              </button>
+            ))}
+          </div>
+          <div className={s.mini}>
+            <div className={s.miniName}>
+              <Mark />
+              {name.trim() || 'SoulSync'}
+            </div>
             {NAV_GROUPS.map((group) => {
-              const inGroup = ordered.filter(
-                (id) => places.find((p) => p.id === id)?.group === group.id,
-              );
+              const items = previewPlaces.filter((p) => p.group === group.id);
+              if (!items.length) return null;
               return (
-                <div key={group.id} role="group" aria-label={group.label ?? 'Main'}>
-                  {group.label ? <div className={s.note}>{group.label}</div> : null}
-                  {inGroup.map((id, i) => {
-                    const place = places.find((p) => p.id === id)!;
-                    const move = (stepBy: -1 | 1) => {
-                      const next = moveNav(inGroup, id, stepBy);
-                      let n = 0;
-                      setOrder(ordered.map((x) => (inGroup.includes(x) ? next[n++] : x)));
-                    };
-                    return (
-                      <div key={id} className={s.place}>
-                        <input
-                          type="checkbox"
-                          checked={!gone.includes(id)}
-                          disabled={id === '/player'}
-                          aria-label={`${place.label} is in the sidebar`}
-                          onChange={(e) =>
-                            setGone((g) =>
-                              e.target.checked ? g.filter((x) => x !== id) : [...g, id],
-                            )
-                          }
-                          data-nav
-                        />
-                        <span>{place.label}</span>
-                        <span className={k.editorMove}>
-                          <button
-                            type="button"
-                            onClick={() => move(-1)}
-                            disabled={i === 0}
-                            aria-label={`Move ${place.label} up`}
-                            data-nav
-                          >
-                            ↑
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => move(1)}
-                            disabled={i === inGroup.length - 1}
-                            aria-label={`Move ${place.label} down`}
-                            data-nav
-                          >
-                            ↓
-                          </button>
-                        </span>
-                      </div>
-                    );
-                  })}
+                <div key={group.id}>
+                  {group.label ? <div className={s.miniGroup}>{group.label}</div> : null}
+                  {items.map((p) => (
+                    <div key={p.id} className={s.miniItem} data-lib={p.lib ? 'true' : undefined}>
+                      {p.label}
+                    </div>
+                  ))}
                 </div>
               );
             })}
           </div>
-        ) : null}
-
-        <div className={s.foot}>
-          {error ? (
-            <span className={s.error} role="alert">
-              {error}
-            </span>
-          ) : null}
-          <span className={s.grow} />
-          {step === 0 && firstTime ? (
-            <button
-              type="button"
-              className={k.btn}
-              disabled={busy}
-              onClick={() => void save(true)}
-              data-nav
-            >
-              Use the defaults
-            </button>
-          ) : null}
-          {!firstTime ? (
-            <button type="button" className={k.btn} onClick={closePlayerSetup} data-nav>
-              Close
-            </button>
-          ) : null}
-          {step > 0 ? (
-            <button type="button" className={k.btn} onClick={() => setStep(step - 1)} data-nav>
-              Back
-            </button>
-          ) : null}
-          {step < STEPS.length - 1 ? (
-            <button
-              type="button"
-              className={k.btnPrimary}
-              onClick={() => setStep(step + 1)}
-              data-nav
-            >
-              Next
-            </button>
-          ) : null}
-          {step === STEPS.length - 1 || !firstTime ? (
-            <button
-              type="button"
-              className={k.btnPrimary}
-              disabled={busy}
-              onClick={() => void save()}
-              data-nav
-            >
-              {busy ? 'Saving…' : firstTime ? 'Finish' : 'Save'}
-            </button>
-          ) : null}
-        </div>
+          <p className={s.muted}>Updates as you change things.</p>
+        </aside>
       </div>
     </div>,
   );

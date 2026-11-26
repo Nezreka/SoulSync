@@ -18,6 +18,7 @@ import type { LibraryV2ArtistSummary } from '../-library-v2.types';
 
 import {
   LIBRARY_V2_QUERY_KEY,
+  deleteLibraryV2Entity,
   fetchLibraryV2ArtistIds,
   fetchLibraryV2JobStatus,
   libraryV2QualityProfilesQueryOptions,
@@ -404,6 +405,27 @@ export function ArtistBulkBar({
     }
   };
 
+  // remove several artists at once (#2300): the single remove's own route,
+  // one artist at a time. the library rows go, the files on disk stay
+  const remove = async () => {
+    const list = ids();
+    if (
+      !(await confirmed({
+        title: 'Remove from library',
+        message: `Remove ${plural(list.length, 'artist')} and their releases from your library? Their files stay on disk, and they come off every watchlist. An artist your media server has comes back on its next sync.`,
+        confirmText: `Remove ${plural(list.length, 'artist')}`,
+        destructive: true,
+      }))
+    )
+      return;
+    const result = await runBulk('Remove from library', list, async (id) => {
+      await deleteLibraryV2Entity('artists', id);
+      return 'done';
+    });
+    selection.clear();
+    finish(result);
+  };
+
   const applyProfile = async () => {
     const chosen = (profiles.data ?? []).find((p) => String(p.id) === profile);
     if (!chosen) return;
@@ -570,6 +592,14 @@ export function ArtistBulkBar({
                 onClick={() => void lock(false)}
               >
                 Unlock
+              </button>
+              <button
+                type="button"
+                className={styles.btnGhost}
+                disabled={busy || !canWrite}
+                onClick={() => void remove()}
+              >
+                Remove from library
               </button>
             </>
           ) : null}

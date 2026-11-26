@@ -32,6 +32,8 @@ def refresh(monkeypatch, tmp_path):
     monkeypatch.setattr(da, "config_manager",
                         SimpleNamespace(get=lambda key, default=None: str(transfer)))
     monkeypatch.setattr(da, "docker_resolve_path", lambda p: p)
+    # the files here are stand-ins, not real audio: this is about collisions
+    monkeypatch.setattr(da, "_readable_audio", lambda p: True)
     monkeypatch.setattr(da, "get_database", lambda: db)
     monkeypatch.setattr(da, "_db_update_phase_callback", lambda *a: None)
     monkeypatch.setattr(da, "_db_update_error_callback",
