@@ -412,7 +412,7 @@ export function TrackList({
               ) : null}
             </span>
             <span className={s.trackEnd}>
-              {row.end}
+              {row.end ? <span className={s.trackNote}>{row.end}</span> : null}
               <span>{row.duration ? clock(row.duration) : ''}</span>
             </span>
           </div>
