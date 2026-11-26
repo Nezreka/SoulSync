@@ -429,7 +429,7 @@ def _make_organizer(db):
                            ids=ids,
                            series_name=_series_name(db, dl, named, ids, owned_dir),
                            locked=title_locked(db, dl),
-                           absolute_of=absolute_lookup(db, ids, named))
+                           absolute_of=absolute_lookup(db, ids, named, dl))
         if _pre_persist_dest and plan["action"] in ("import", "upgrade") and plan.get("dest"):
             try:
                 db.update_video_download(dl["id"], dest_path=plan["dest"]["path"])
@@ -739,16 +739,33 @@ def naming_series_type(db, dl, settings):
     return None
 
 
-def absolute_lookup(db, ids, settings):
+def absolute_lookup(db, ids, settings, dl=None):
     """``absolute_of`` for plan_import: an episode's absolute number from the
     show's episode list, by the show's TMDB id in ``ids`` (template_ids).
     None when the episode template has no $absolute, or there's no id to
-    look it up by, so a library that doesn't name by it asks nothing."""
+    look it up by, so a library that doesn't name by it asks nothing.
+
+    it counts on the show row the file is named by (a library re-grab's own
+    row, else episode_naming_show_id), the row mass rename and the naming
+    check count on, so a show on two servers gets one number either way."""
     tmpl = str((settings or {}).get("episode_template") or "")
     tmdb_id = (ids or {}).get("tmdb_id")
     if not tmdb_id or ("$absolute" not in tmpl and "${absolute}" not in tmpl):
         return None
-    return lambda season, episode: db.episode_absolute_number(tmdb_id, season, episode)
+    dl = dl or {}
+    own_row = None
+    if str(dl.get("media_source") or "").lower() == "library" \
+            and str(dl.get("kind") or "").lower() != "movie":
+        try:
+            own_row = int(dl.get("media_id"))
+        except (TypeError, ValueError):
+            own_row = None
+
+    def look(season, episode):
+        row = own_row if own_row is not None else \
+            db.episode_naming_show_id(tmdb_id, season, episode)
+        return db.episode_absolute_number(tmdb_id, season, episode, show_id=row)
+    return look
 
 
 def write_sidecars(db, dl, dest_path, settings, fs):

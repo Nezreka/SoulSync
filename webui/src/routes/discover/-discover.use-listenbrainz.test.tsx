@@ -211,6 +211,56 @@ it('preserves the selected tab and its last confirmed cards when its response is
   expect(toasts.some((toast) => toast.level === 'success')).toBe(false);
 });
 
+it('drops a malformed playlist row and keeps the rest of the shelf', async () => {
+  stub({
+    user: [null, { playlist: 'nope' }, pl('u2', 'Good Mix'), { playlist: { title: 'no id' } }],
+  });
+  const { result } = mount();
+  await waitFor(() => expect(result.current.loaded).toBe(true));
+  act(() => result.current.selectTab('user'));
+  expect(result.current.sourceErrors).toEqual({});
+  expect(result.current.mixes.map((mix) => mix.title)).toEqual(['Good Mix']);
+});
+
+it('clears a failed refresh message when the shelf is retried', async () => {
+  server.use(
+    http.post('/api/discover/listenbrainz/refresh', () =>
+      HttpResponse.json(refreshAck, { status: 503 }),
+    ),
+  );
+  const { result } = mount();
+  await waitFor(() => expect(result.current.loaded).toBe(true));
+  await act(() => result.current.refresh());
+  expect(result.current.refreshError).toBeTruthy();
+  await act(() => result.current.retry());
+  expect(result.current.refreshError).toBeNull();
+});
+
+it.each([
+  { summary: { ...refreshAck.summary, listens: zeroCounts } },
+  {
+    summary: {
+      created_for: { new: 1, updated: 0 },
+      user: { new: 0, updated: 2, skipped: 1, failed: 0 },
+      collaborative: { new: 0, updated: 0 },
+    },
+  },
+])(
+  'accepts a refresh summary with the needed counts and extras ($summary)',
+  async ({ summary }) => {
+    server.use(
+      http.post('/api/discover/listenbrainz/refresh', () =>
+        HttpResponse.json({ success: true, summary }),
+      ),
+    );
+    const { result } = mount();
+    await waitFor(() => expect(result.current.loaded).toBe(true));
+    await act(() => result.current.refresh());
+    expect(result.current.refreshError).toBeNull();
+    expect(toasts.at(-1)?.level).toBe('success');
+  },
+);
+
 it('retries the shelf reads without another refresh and falls back when the selected tab confirms empty', async () => {
   let posts = 0;
   stub({ createdForStatus: 500 });
@@ -254,6 +304,10 @@ it.each([
   { status: 200, body: { success: true, summary: { ...refreshAck.summary, user: {} } } },
   { status: 200, body: { success: 'true', summary: {} } },
   { status: 200, body: { success: true, summary: { user: { updated: '10' } } } },
+  {
+    status: 200,
+    body: { success: true, summary: { ...refreshAck.summary, user: { new: 1, updated: '2' } } },
+  },
 ])(
   'keeps an unacknowledged refresh error visible without reloading the shelf ($status $body)',
   async ({ status, body }) => {
