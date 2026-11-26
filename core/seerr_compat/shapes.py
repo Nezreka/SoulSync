@@ -36,7 +36,8 @@ PERM_REQUEST_VIEW = 16384
 PERM_REQUEST_MOVIE = 262144
 PERM_REQUEST_TV = 524288
 
-# jellyfin user, the type seerr gives accounts imported from jellyfin
+# the types seerr gives accounts imported from plex and from jellyfin
+USER_TYPE_PLEX = 1
 USER_TYPE_JELLYFIN = 3
 
 VERSION = "2.7.3"
@@ -282,12 +283,16 @@ def combined_credits(p: Dict[str, Any], infos: Dict[tuple, Optional[Dict[str, An
 # ---- users and requests -------------------------------------------------------
 
 def user(uid: int, name: str, *, permissions: int, jellyfin_id: Optional[str] = None,
-         jellyfin_name: Optional[str] = None, request_count: int = 0) -> Dict[str, Any]:
+         jellyfin_name: Optional[str] = None, request_count: int = 0,
+         plex_name: Optional[str] = None) -> Dict[str, Any]:
+    # a profile linked to a plex account (#2319) is a plex user to seerr,
+    # unless a jellyfin user maps to it
+    plex = bool(plex_name) and not jellyfin_id
     return {"id": int(uid), "email": "", "username": name or "",
             "displayName": jellyfin_name or name or "",
             "jellyfinUsername": jellyfin_name or name or "",
-            "jellyfinUserId": jellyfin_id or None, "plexUsername": None,
-            "userType": USER_TYPE_JELLYFIN, "permissions": int(permissions),
+            "jellyfinUserId": jellyfin_id or None, "plexUsername": plex_name or None,
+            "userType": USER_TYPE_PLEX if plex else USER_TYPE_JELLYFIN, "permissions": int(permissions),
             "avatar": "", "requestCount": int(request_count),
             "movieQuotaLimit": None, "movieQuotaDays": None,
             "tvQuotaLimit": None, "tvQuotaDays": None,

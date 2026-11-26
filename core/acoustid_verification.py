@@ -572,6 +572,10 @@ class AcoustIDVerification:
                     context['_acoustid_status'] = status
                     if lookup.get('invalid_key'):
                         context['_acoustid_invalid_key'] = True
+                    if lookup.get('needs_user_key'):
+                        # every lookup will fail the same way until the
+                        # account is linked (#2318)
+                        context['_acoustid_needs_user_key'] = True
                 # Something is broken (not the track's fault) — never quarantine
                 # on this; surface it so the user can fix it.
                 return VerificationResult.ERROR, lookup.get('error', 'AcoustID lookup failed')

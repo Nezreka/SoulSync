@@ -218,6 +218,16 @@ How much of the media server's music SoulSync can read directly, folder by folde
 
 An override renames a folder: "the server's `/data/music` is `/music` here". It never gives SoulSync access to a drive. Every server path SoulSync turns into its own asks the overrides first (the longest matching server folder wins, Windows paths compare without case), then the mounts it learned itself, then the trailing-folder match against its library folders. An override whose folder is missing is skipped, so it never hides a file.
 
+### AcoustID account linking (web UI routes, admins only)
+
+From 1 January 2027 an AcoustID lookup needs the person's own AcoustID key with SoulSync's application key (error 21 without it). These link that key. No answer ever carries a key.
+
+- `GET /api/acoustid/account`: `{has_user_key, source: ""|"linked"|"pasted", state: ""|"pending"|"approved"|"declined"|"expired"|"revoked"|"unknown", code, url, expires, has_app_key, builtin_app_key, can_link, link_unavailable_message, required_from, required_now, needs_link, message}`. `?check=1` first asks AcoustID about a pending link; a declined, expired, revoked or unknown key is discarded.
+- `POST /api/acoustid/link` `{return_url?}`: asks AcoustID for a link (`/v2/user/request_link`), stores the user key at once and answers as above with `state: "pending"`, the `code` and the `url` to open. `return_url` (http or https) is where AcoustID sends the person after they approve or decline. Linking needs SoulSync's own application key (built in, or the `ACOUSTID_APP_KEY` env var), as a link only works with the key that asked for it; without one it answers `409` with "Linking with one click arrives in a coming update; paste your key from acoustid.org for now." and `can_link` is false.
+- `POST /api/acoustid/unlink`: forgets the user key.
+
+Settings: `acoustid.user_key` (a secret, redacted like the others), `acoustid.api_key` (an application key the install registered itself; SoulSync's own is used when it has one, or the `ACOUSTID_APP_KEY` env var). Every lookup sends the user key in the `Acoustid-User-Key` header.
+
 ### Paired devices: listen anywhere (web UI and app routes)
 
 Settings > Devices pairs music apps with this server. A device gets its own token, never an API key. The admin routes are `@admin_only`; the device's own routes take the token in `X-Device-Token: sdt_...` (or `Authorization: Bearer sdt_...`) and no cookie. A request may carry a device token or an API key, not both (`400 device_one_credential`).
@@ -248,6 +258,8 @@ The device itself:
 - `GET /api/devices/me`: `{device, server}`: its name, `state`, profile and how long it has left to pick.
 - `GET /api/devices/me/profiles`: `{profiles: [{id, name, avatar_color, avatar_url, needs}]}`, the profiles it may pick. `needs` is `password` in login mode, `pin` for a profile with a PIN, else null. A music app only sees profiles with **Use music apps** (`music.apps`). `409` once it has picked.
 - `POST /api/devices/me/profile` `{profile_id, pin?, password?}`: the pick, once. The same checks as `POST /api/profiles/select` (wrong tries throttled the same way); a profile with a PIN always asks for it here. `404` for a profile that isn't on its list, `409` once picked or past its 15 minutes.
+
+Import Plex users (#2319) is Settings > People > Import from Plex, admin only. `GET /api/profiles/plex-import` lists everyone the Plex server is shared with (friends and home users who can see this server): `{users: [{id, username, title, name, email, thumb, home, managed, profile, match}], signin_enabled, signup_template_id}`. `match` is `linked` for the profile already linked to that Plex account, `home` or `name` for one that only looks like them, else null. `POST /api/profiles/plex-import` takes `{users: [{id, profile_id?}], template_id?}`: each `id` gets a new profile linked to the Plex account on that template (the sign-up template when left out), or with `profile_id` that profile gets the link (never an admin, never one linked to another Plex account). Users are read from Plex again, so nothing but the ids is taken from the request. It answers `{results: [{plex_id, name, status, profile_id, message}]}`, `status` one of `created`, `linked`, `exists`, `skipped`, `failed`; importing again answers `exists`. `503` when Plex can't be reached, `404` for a missing template. Sign in with Plex then lands on that profile, and the Seerr API lists profiles linked to Plex with `userType` 1 and their `plexUsername`.
 
 Person invites are the same as Settings > People > Invites: `GET/POST /api/profiles/invites` (admin, or an admin API key). `POST` takes `{preset: {template_id}, note?, expires_hours?}`; a new one lasts a week (168 hours, 1 to 720) unless `expires_hours` says otherwise, works once, and whoever opens it makes their own profile following that template.
 

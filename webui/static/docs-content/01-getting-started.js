@@ -121,7 +121,7 @@ If you skipped the wizard (or want to double-check), open **Settings** and confi
 | **Navidrome** | Media server — auto-detects changes, audio streaming | URL + Username + Password |
 | **Last.fm** | Enrichment — listener stats, tags, bios, similar artists | API Key |
 | **Genius** | Enrichment — lyrics, descriptions, alternate names | Access Token |
-| **AcoustID** | Audio fingerprint verification of downloads | API Key |
+| **AcoustID** | Audio fingerprint verification of downloads | Your linked AcoustID account (from 2027) |
 | **ListenBrainz** | Listening history and recommendations | Token |
 
 ![The Services panel in Settings: a card for every integration, each showing whether it is configured, not set up, or needs no key](gs-connecting.jpg)

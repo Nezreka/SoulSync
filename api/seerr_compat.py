@@ -111,11 +111,42 @@ def _server():
         return None
 
 
+def _plex_names() -> dict:
+    """{profile id: plex username} for profiles linked to a plex account
+    (plex sign-in or an import from plex, #2319), so a seerr client that
+    matches people by their plex name finds them"""
+    try:
+        with get_database()._get_connection() as conn:
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(profiles)").fetchall()}
+            if "plex_account_id" not in cols:
+                return {}
+            rows = conn.execute(
+                "SELECT id, name, plex_home_user_title FROM profiles "
+                "WHERE plex_account_id IS NOT NULL AND plex_account_id != ''").fetchall()
+        return {int(r[0]): (r[2] or r[1] or "") for r in rows}
+    except Exception:  # noqa: BLE001 - the names are a nicety
+        logger.debug("seerr compat: plex names failed", exc_info=True)
+        return {}
+
+
+def _get_profile(pid):
+    p = get_database().get_profile(pid)
+    if p:
+        p = dict(p)
+        name = _plex_names().get(int(p["id"]))
+        if name:
+            p["plex_username"] = name
+    return p
+
+
 def _list_profiles():
     db = get_database()
     out = []
+    plex = _plex_names()
     for p in db.get_all_profiles() or []:
         p = dict(p)
+        if plex.get(int(p["id"])):
+            p["plex_username"] = plex[int(p["id"])]
         try:
             p["jellyfin_user_id"] = (db.get_profile_server_library(p["id"]) or {}).get("jellyfin_user_id")
         except Exception:  # noqa: BLE001
@@ -190,7 +221,7 @@ def service() -> SeerrCompat:
             _service = SeerrCompat(
                 engine=_engine, video_db=_video_db,
                 store=SeerrStore(lambda: _video_db()._get_connection()),
-                get_profile=lambda pid: get_database().get_profile(pid),
+                get_profile=_get_profile,
                 list_profiles=_list_profiles, jellyfin_users=_jellyfin_users,
                 fallback_profile_id=fallback_profile_id, server=_server,
                 title_allowed=_title_allowed, filter_titles=_filter_titles,
