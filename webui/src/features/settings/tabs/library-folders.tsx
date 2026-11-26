@@ -238,7 +238,7 @@ export function MusicFolders({ store }: { store: SettingsStore }) {
             onChange={(v) => store.set('soulseek', 'transfer_path', v)}
             warn={
               installDefault
-                ? 'Still the install folder default. Every finished download lands on the disk SoulSync is installed on, and on a Proxmox LXC that is often an 8 GB root that fills until the container hangs. Unlock the field and point it at your real music folder.'
+                ? 'Still the install folder default, so music fills the disk SoulSync runs on (on a small Proxmox LXC that can hang it). Unlock it and point it at your real music folder.'
                 : null
             }
           />
@@ -393,12 +393,9 @@ export function MusicFolders({ store }: { store: SettingsStore }) {
           />
         </div>
         <p className={s.cardFoot}>
-          <strong>You don&apos;t need to repeat it here.</strong> Add a folder only for an{' '}
-          <em>extra</em> library (a second collection, an archive drive), or when your media server
-          sees the same files at a different path than SoulSync can. Used for tag writing, streaming
-          and file detection. <strong>Docker:</strong> mount the extra folder into the SoulSync
-          container read-write, then add the <em>container-side</em> path here (like{' '}
-          <code>/music2</code>).
+          Only for <em>extra</em> music, like a second collection or an archive drive. Your music
+          library folder is already read. <strong>Docker:</strong> mount the folder into the
+          container read-write and add its container path here (like <code>/music2</code>).
         </p>
       </Card>
 
