@@ -68,7 +68,7 @@ def _commercial_mode(v: Any) -> str:
 
 # a place in the player's sidebar: one of its pages ("/player/movies") or a
 # library with a page of its own ("lib:5")
-_NAV_ID = re.compile(r"^(?:/player(?:/[a-z][a-z-]{0,30})?|lib:\d{1,9})$")
+_NAV_ID = re.compile(r"^(?:/player(?:/[a-z][a-z-]{0,30}){0,3}|lib:\d{1,9})$")
 MAX_NAV_IDS = 80
 
 
