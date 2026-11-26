@@ -384,3 +384,66 @@ describe('home videos in setup', () => {
     ]);
   });
 });
+
+describe('a finished setup with home videos, as a real server has it', () => {
+  it('Edit libraries and Open player setup still open with a home library listed first', async () => {
+    const base = admin(true);
+    state.payload = {
+      ...base,
+      server_name: 'ThomasClan',
+      libraries: [
+        {
+          id: 3,
+          kind: 'home',
+          name: 'Home videos',
+          is_default: true,
+          in_guide: false,
+          folders: [],
+        },
+        ...base.libraries.map((l) => ({ ...l, in_guide: true })),
+      ],
+      folders: {
+        movie: [
+          {
+            folder: '/mnt/easystore3/PLEX/Movies',
+            path: '/mnt/easystore3/PLEX/Movies',
+            titles: 900,
+            sample: [1, 2],
+            library_id: 1,
+          },
+          { folder: '', path: '', titles: 4, sample: [], library_id: 1 },
+        ],
+        show: [
+          {
+            folder: '/mnt/easystore3/PLEX/TV',
+            path: '/mnt/easystore3/PLEX/TV',
+            titles: 300,
+            sample: [3],
+            library_id: 2,
+          },
+        ],
+        home: [
+          {
+            folder: 'plex:home videos',
+            path: 'Home Videos',
+            label: 'Home Videos',
+            source: 'plex',
+            titles: 58,
+            sample: [11, 12],
+            library_id: 3,
+            where: '/mnt/easystore3/PLEX/Home Movies',
+          },
+        ],
+      },
+    };
+    const { openLibrarySetup, openPlayerSetup } = await import('./player-setup');
+    await mount();
+    act(() => openLibrarySetup());
+    expect(await screen.findByText('How should movies be grouped?')).toBeInTheDocument();
+    // the home folder shows on its drive in the movies step
+    expect(screen.getByText(/58 home videos/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    act(() => openPlayerSetup());
+    expect(await screen.findByRole('button', { name: 'Close' })).toBeInTheDocument();
+  });
+});
