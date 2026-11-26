@@ -52,6 +52,7 @@ export interface DiscoverHeroProps {
    */
   watchlist: HeroWatchlistButton | null;
   watchAllPhase: WatchAllPhase;
+  watchlistPending?: boolean;
   discographyHref: string;
   onNavigate: (direction: number) => void;
   onJump: (index: number) => void;
@@ -173,6 +174,7 @@ export function DiscoverHero({
   onViewRecommended,
   onOpenBlacklist,
   loading = false,
+  watchlistPending = false,
   artists,
   onPauseChange,
   glowRgb,
@@ -400,6 +402,8 @@ export function DiscoverHero({
                   className={`discover-hero-button primary watchlist-toggle-btn${watchlist?.watching ? ' watching' : ''}`}
                   id="discover-hero-add"
                   onClick={onToggleWatchlist}
+                  disabled={watchlistPending}
+                  aria-busy={watchlistPending}
                 >
                   <span className="watchlist-icon" aria-hidden="true">
                     {watchlist?.watching ? (
@@ -497,7 +501,8 @@ export function DiscoverHero({
                   ? 'discover-hero-watch-all all-watched'
                   : 'discover-hero-watch-all'
               }
-              disabled={watchAll.disabled}
+              disabled={watchAll.disabled || watchlistPending}
+              aria-busy={watchAllPhase === 'busy' || watchlistPending}
               onClick={onWatchAll}
             >
               <span className="watch-all-text">

@@ -1600,6 +1600,7 @@ export function DiscoverPage() {
                 index={hero.index}
                 watchlist={hero.watchlist}
                 watchAllPhase={hero.watchAllPhase}
+                watchlistPending={hero.watchlistPending}
                 discographyHref={
                   hero.artist?.artist_id != null
                     ? detailPath(hero.artist.artist_id, hero.artist.source ?? null)
