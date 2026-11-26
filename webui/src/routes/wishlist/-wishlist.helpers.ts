@@ -66,11 +66,27 @@ export function parseWishlistTrack(
     }
   }
 
+  // the album's own artist, for an album row: 93 Empire's album credits
+  // every track to a guest and was split into one orb per guest (#2300)
+  let albumArtist = '';
+  if (type === 'album' && typeof rawAlbum === 'object' && rawAlbum !== null) {
+    const credits = (rawAlbum as { artists?: unknown }).artists;
+    const lead: unknown = Array.isArray(credits) ? credits[0] : undefined;
+    const name =
+      typeof lead === 'string'
+        ? lead
+        : lead && typeof lead === 'object'
+          ? (lead as { name?: unknown }).name
+          : '';
+    albumArtist = typeof name === 'string' ? name.trim() : '';
+  }
+
   const source = parseSourceInfo(row.source_info);
   const retry = Number(row.retry_count) || 0;
   return {
     track: sd.name || 'Unknown',
     artist,
+    ...(albumArtist && albumArtist !== artist ? { albumArtist } : {}),
     album: albumName,
     image: albumImage,
     imageFallback: albumImageFallback,
@@ -165,7 +181,8 @@ export function buildArtistImageFallbackMap(
 /**
  * Group parsed tracks into artist orbs, busiest first.
  *
- * Album tracks nest under their album; singles hang off the artist directly.
+ * Album tracks nest under their album, filed under the album's artist;
+ * singles hang off the track's artist directly.
  * Insertion order is preserved inside each artist so albums appear in the order
  * the API returned them.
  */
@@ -188,7 +205,7 @@ export function groupWishlistArtists(
   };
 
   for (const track of albumTracks) {
-    const entry = ensure(track.artist);
+    const entry = ensure(track.albumArtist || track.artist);
     let album = entry.albums.get(track.album);
     if (!album) {
       album = { image: track.image, imageFallback: track.imageFallback ?? '', tracks: [] };

@@ -112,9 +112,16 @@ def _intent_fields(
         album.get("album_type") or album_context.get("album_type")
     ).lower() or ("single" if albumless or total_tracks in (1, "1") else "album")
 
+    # whose release it is: a guest leading a track keeps the album where
+    # its album artist is (#2300)
+    album_artist = _first_artist(album) or _first_artist(album_context)
+    album_artist_name = _text(album_artist.get("name"))
     return {
         "artist_name": artist_name,
         "track_title": track_title,
+        "album_artist_name": album_artist_name or None,
+        "album_artist_provider_id": (
+            _text(album_artist.get("id")) or None) if album_artist_name else None,
         "album_title": album_title,
         "album_type": album_type,
         "artist_provider_id": _text(

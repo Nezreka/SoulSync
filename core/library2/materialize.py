@@ -59,6 +59,8 @@ def materialize_track_intent(
     provenance: str = PROVENANCE_WISHLIST,
     profile_id: int = 1,
     source: Optional[str] = None,
+    album_artist_name: Optional[str] = None,
+    album_artist_provider_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Resolve-or-create Artist/Release/Track, optionally pin an explicit
     track profile, mark the concrete track monitored/wanted, and return the
@@ -69,6 +71,12 @@ def materialize_track_intent(
     legacy ``add_to_wishlist``); this only guarantees the lib2 entity, the
     explicit profile (when one was actually chosen) and the wanted rule
     exist first. Idempotent: safe to call repeatedly for the same track.
+
+    ``album_artist_name``: whose release the track is on, when the source
+    says. the release files under it and the track keeps its own lead as a
+    credit, the way the finished download links (#2142). without it every
+    guest on a various-artists style album got the album filed under them
+    and turned up on the Library page (#2300).
     """
     if not artist_name or not track_title:
         raise ValueError("materialize_track_intent requires artist_name and track_title")
@@ -81,8 +89,17 @@ def materialize_track_intent(
     if artist_id is None:
         raise ValueError(f"could not resolve or create artist {artist_name!r}")
 
+    release_artist_id = artist_id
+    release_name = _release_artist_name(artist_name, album_artist_name)
+    if release_name:
+        named_as_given = str(album_artist_name or "").strip() == release_name
+        release_artist_id = find_or_create_artist(
+            conn, release_name,
+            spotify_id=album_artist_provider_id if named_as_given else None,
+            source=source) or artist_id
+
     album_id = find_or_create_album(
-        conn, artist_id, album_title or track_title,
+        conn, release_artist_id, album_title or track_title,
         album_type=album_type, spotify_album_id=album_identity,
         source=source, monitored=0)
 
@@ -90,6 +107,11 @@ def materialize_track_intent(
         conn, album_id, artist_id, track_title,
         track_number=track_number, spotify_track_id=track_identity,
         disc_number=disc_number, source=source, monitored=1 if int(profile_id) == 1 else 0)
+    if release_artist_id != artist_id:
+        # the performer, as the player and presence checks read it
+        conn.execute(
+            "UPDATE lib2_tracks SET track_artist=COALESCE(NULLIF(track_artist,''), ?) "
+            "WHERE id=?", (artist_name, track_id))
     if int(profile_id) == 1:
         conn.execute('UPDATE lib2_tracks SET monitored=1 WHERE id=? AND monitored=0', (track_id,))
 
@@ -105,6 +127,24 @@ def materialize_track_intent(
         "track_id": track_id,
         "quality_profile": effective_quality_profile(conn, "tracks", track_id),
     }
+
+
+def _release_artist_name(lead: str, album_artist: Optional[str]) -> Optional[str]:
+    """the album artist when the release isn't the lead's own, else None.
+    same rule the finished download files by (autolink, #2142 #2240)."""
+    if not str(album_artist or "").strip():
+        return None
+    from .autolink import _release_artist_name as release_artist_of
+    return release_artist_of("", {"artists": [{"name": str(album_artist).strip()}]}, lead)
+
+
+def _album_artist(album: Dict[str, Any]) -> Dict[str, Any]:
+    """the release's first credited artist, as ``{"name", "id"}``."""
+    artists = album.get("artists") if isinstance(album, dict) else None
+    first = artists[0] if isinstance(artists, list) and artists else None
+    if isinstance(first, str):
+        return {"name": first}
+    return first if isinstance(first, dict) else {}
 
 
 def _int_or_none(value: Any) -> Optional[int]:
@@ -223,6 +263,7 @@ def materialize_from_spotify_track(
     ).strip().lower() or "spotify"
     track_id_raw = (str(spotify_track_data["id"])
                     if spotify_track_data.get("id") else None)
+    album_artist = _album_artist(album)
     return materialize_track_intent(
         conn,
         artist_name=str(artist_name),
@@ -235,6 +276,8 @@ def materialize_from_spotify_track(
         track_number=_int_or_none(spotify_track_data.get("track_number")),
         disc_number=_int_or_none(spotify_track_data.get("disc_number")),
         source=source,
+        album_artist_name=str(album_artist.get("name") or "").strip() or None,
+        album_artist_provider_id=(str(album_artist["id"]) if album_artist.get("id") else None),
         **kwargs,
     )
 
