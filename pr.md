@@ -32,6 +32,14 @@ the player also comes as an android app for phones, tablets and android tv (shie
 - **downloads on phones and tablets:** pick original, high, phone or small with real sizes, download a whole season, album or playlist, smart downloads that keep the next episodes ready and delete what's watched, a queue that keeps going with the app closed, wi-fi only and a storage limit, and offline play that syncs your progress when you're back. the web player's downloads page manages every device's downloads, and the tv app sends things to a phone.
 - it needs this release (3.7.0) on the server.
 
+## the soulsync companion extension
+
+the browser extension (chrome and firefox) has a new release, 0.3.0: https://github.com/Nezreka/soulsync-extension/releases/tag/v0.3.0
+
+- **one request per page instead of dozens.** this release adds batch checks the extension uses: 50 artists went from about 14 s to under 0.3 s on a 31k-artist library, and a row of movie or show cards is one call instead of 60 to 80. older servers keep working on the old calls.
+- **more accurate badges.** short and accented names (low, yes, air, beyoncé, ac/dc, björk) match, tmdb pages show real states, big catalogues are read in full, remasters count as the album, and an episode is only "on wishlist" when it is.
+- **exact soundcloud uploads** go to the wishlist or a playlist as they are, with no catalogue match.
+
 ## video without a media server
 
 - **SoulSync Standalone.** pick it as the video source and soulsync scans your movie and tv folders itself: it identifies titles from .nfo files, folder tags, names and a file hash, reads editions, and watches the folders for changes.
