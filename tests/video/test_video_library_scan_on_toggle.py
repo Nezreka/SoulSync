@@ -206,6 +206,8 @@ def api(tmp_path, monkeypatch):
     monkeypatch.setattr(vs, "resolve_video_server", lambda *a, **k: "plex")
     monkeypatch.setattr(vs, "video_plex_config", lambda db=None: {"base_url": "http://plex", "token": "t"})
     started = []
+    import api.video.libraries as libraries_api
+    monkeypatch.setattr(libraries_api, "_asked", set())
     monkeypatch.setattr(library_scan, "start", lambda db, libs, keep=None, **kw: started.append(
         (list(libs), sorted(keep or []))) or bool(libs))
     app = Flask(__name__)
@@ -342,3 +344,24 @@ def test_the_folders_list_offers_it_and_never_saves_it(db):
     rows = {r["server"]: r for r in drive_map.server_folders(
         db, fetch=lambda: listed, exists=lambda p: False, isdir=lambda p: True)}
     assert "suggest" not in rows[NEW]
+
+
+class _Settings:
+    def __init__(self):
+        self.d = {}
+
+    def get_setting(self, k, default=None):
+        return self.d.get(k, default)
+
+    def set_setting(self, k, v):
+        self.d[k] = v
+
+
+def test_an_extra_library_on_before_reading_on_switch_on_is_read_once():
+    from core.video import library_scan as L
+    db = _Settings()
+    sel = {"movies": "Movies", "tv": "TV Shows", "movies_more": ["4K Movies"], "tv_more": []}
+    # the main picks are a full scan's job; the extra one was never read
+    assert L.unread_extras(db, sel) == [("movie", "4K Movies")]
+    L.mark_read(db, "movie", "4K Movies")
+    assert L.unread_extras(db, sel) == []
