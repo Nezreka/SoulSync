@@ -21,6 +21,7 @@ import { type ReactNode, useEffect, useId, useLayoutEffect, useRef, useState } f
 import {
   Btn,
   Card,
+  FieldLine,
   NumberField,
   PathField,
   Pre,
@@ -769,6 +770,8 @@ function DriveMap({ loads }: { loads: number }) {
   const timers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const localNow = useRef(local);
   localNow.current = local;
+  // found on their own (they read "Already reached") but not in the saved map
+  const unsaved = (drives ?? []).filter((d) => d.auto && d.local).length;
 
   function render(folders: Drive[]) {
     // a drive's folders side by side, so filling one fills its neighbours
@@ -911,7 +914,10 @@ function DriveMap({ loads }: { loads: number }) {
                   {head}
                   <div className={s.driveLocal}>
                     <div className={s.driveKnown}>{d.local}</div>
-                    <StatusWords tone="ok">{d.role || 'Already reached'}</StatusWords>
+                    <StatusWords tone="idle">
+                      {d.role || 'Already reached'} · not saved yet, so its files aren&apos;t sorted
+                      into libraries until you Save folders
+                    </StatusWords>
                   </div>
                 </div>
               );
@@ -962,11 +968,18 @@ function DriveMap({ loads }: { loads: number }) {
           })
         )}
       </div>
-      <div>
+      <FieldLine wrap>
         <Btn small id="video-drive-map-save" onClick={() => void save()}>
           Save folders
         </Btn>
-      </div>
+        {unsaved ? (
+          <span className={s.check} data-tone="idle" data-drive-unsaved={unsaved}>
+            {unsaved === 1
+              ? '1 folder SoulSync found on its own isn’t saved yet.'
+              : `${unsaved} folders SoulSync found on its own aren’t saved yet.`}
+          </span>
+        ) : null}
+      </FieldLine>
     </>
   );
 }
