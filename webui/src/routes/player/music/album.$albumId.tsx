@@ -278,7 +278,8 @@ function AlbumPage() {
             const trackQ = playable ? fileQuality(track.file) : null;
             return {
               key: rowKey,
-              title: track.title,
+              // a song the tracklist hasn't named yet reads as its place
+              title: track.title?.trim() || `Track ${track.track_number ?? index + 1}`,
               trackId: playable ? Number(track.id) : null,
               number:
                 discs > 1
@@ -290,8 +291,16 @@ function AlbumPage() {
               playable,
               why: playable ? undefined : 'not in your library',
               end: playable ? trackQ : undefined,
-              onMissingAction: playable ? undefined : () => void requestOne(rowKey, track, index),
-              missingActionLabel: playable ? undefined : missingLabel,
+              // a song without its name yet can't be asked for by name
+              onMissingAction:
+                playable || !track.title?.trim()
+                  ? undefined
+                  : () => void requestOne(rowKey, track, index),
+              missingActionLabel: playable
+                ? undefined
+                : track.title?.trim()
+                  ? missingLabel
+                  : 'Finding its name…',
               missingActionDone: st === 'wishlist' || st === 'requested' || st === 'owned',
               missingActionBusy: st === 'sending',
               song: playable
