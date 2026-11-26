@@ -352,7 +352,9 @@ def _device_public(db, pid, dev):
                           "title": i.get("title") or i["item_id"], "subtitle": i.get("subtitle"),
                           "artwork": i.get("artwork"), "duration_s": i.get("duration_s"),
                           "group": i.get("group"), "kind": C.kind_of(i["item_type"]),
-                          "watched": watched, "position_s": pos})
+                          "watched": watched, "position_s": pos,
+                          # when it got there (a download's finish), for newest first
+                          "downloaded_at": _iso(i.get("updated_at"))})
     _regroup_playlists(db, pid, dev["device_id"], out_items)
     return {"device_id": dev["device_id"], "device_name": dev["device_name"], "platform": dev["platform"],
             "last_seen": _iso(dev["last_seen"]), "free_bytes": dev["free_bytes"],

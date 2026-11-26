@@ -9,6 +9,7 @@ import { useSyncExternalStore } from 'react';
 
 import {
   itemKey,
+  type ItemGroup,
   prepare,
   preparedStatus,
   rememberSaved,
@@ -28,6 +29,8 @@ export interface LocalJob {
   quality: string;
   /** the group it was asked for with ("season:12:2"), so its button shows it */
   group?: string;
+  /** that group's name and art, kept with the saved file so the page can file it */
+  groupInfo?: ItemGroup | null;
   status: 'waiting' | 'queued' | 'converting' | 'saving' | 'done' | 'failed';
   progress: number;
   error?: string | null;
@@ -65,6 +68,7 @@ async function runOne(job: LocalJob) {
     subtitle: job.subtitle,
     artwork: job.artwork,
     saved_at: new Date().toISOString(),
+    group: job.groupInfo ?? null,
   });
 }
 

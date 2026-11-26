@@ -1,10 +1,12 @@
 /**
- * downloads: pick a device and see what's on it, from any screen. a phone's
- * shows, films, albums, playlists, books and podcasts in groups, each with
- * what it is doing (on the phone, 60%, waiting, watched), and what can be
- * done about it (add the rest, smart settings, remove). changes reach the
- * phone the next time it's online. "this computer" lists the files saved
- * from this browser, each downloadable again in another quality.
+ * downloads: pick a device and see what's on it, from any screen. what's
+ * still coming sits on top; the rest is filed by kind (tv shows with their
+ * seasons, movies, youtube, music by album and playlist, audiobooks,
+ * podcasts, home videos), each section folding away, newest first or by
+ * name. every card says what it is doing and what can be done about it (add
+ * the rest, smart settings, remove). changes reach the phone the next time
+ * it's online. "this computer" files what this browser saved the same way,
+ * each downloadable again in another quality.
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -34,10 +36,22 @@ import {
   type Wish,
 } from './-lib/offline';
 import { useLocalJobs } from './-lib/offline-jobs';
+import {
+  organize,
+  SECTIONS,
+  sectionOf,
+  stamp,
+  type Card,
+  type Section,
+  type SectionId,
+  type SortBy,
+} from './-lib/organize';
 import { DownloadSheet } from './-ui/download-sheet';
 import p from './-ui/downloads-page.module.css';
 import {
   BookIcon,
+  CamcorderIcon,
+  ChevronDownIcon,
   LaptopIcon,
   MovieIcon,
   MusicIcon,
@@ -45,6 +59,7 @@ import {
   PodcastIcon,
   SparkIcon,
   TvIcon,
+  YoutubeIcon,
 } from './-ui/icons';
 import { Art, PageTitle } from './-ui/kit';
 import { notify, notifyError } from './-ui/notice';
@@ -54,44 +69,27 @@ export const Route = createFileRoute('/player/downloads')({
   component: DownloadsPage,
 });
 
-type Shelf = 'movies' | 'tv' | 'music' | 'books' | 'podcasts';
-type Filter = 'all' | Shelf;
-const FILTERS: { id: Filter; label: string }[] = [
-  { id: 'all', label: 'All' },
-  { id: 'tv', label: 'TV' },
-  { id: 'movies', label: 'Movies' },
-  { id: 'music', label: 'Music' },
-  { id: 'books', label: 'Books' },
-  { id: 'podcasts', label: 'Podcasts' },
-];
-const SHELF_WORDS: Record<Shelf, string> = {
-  tv: 'TV',
-  movies: 'Movies',
-  music: 'Music',
-  books: 'Books',
-  podcasts: 'Podcasts',
-};
+type Filter = 'all' | SectionId;
 
-function shelfOf(t: string): Shelf {
-  if (t === 'movie' || t === 'youtube') return 'movies';
-  if (t === 'episode' || t === 'season' || t === 'show') return 'tv';
-  if (t === 'audiobook') return 'books';
-  if (t === 'podcast_episode' || t === 'podcast') return 'podcasts';
-  return 'music';
-}
-
-const SHELF_ICON: Record<Shelf, () => React.ReactNode> = {
+const SECTION_ICON: Record<SectionId, () => React.ReactNode> = {
   tv: TvIcon,
   movies: MovieIcon,
+  youtube: YoutubeIcon,
   music: MusicIcon,
   books: BookIcon,
   podcasts: PodcastIcon,
+  home: CamcorderIcon,
 };
 
+const SECTION_WORDS = Object.fromEntries(SECTIONS.map((x) => [x.id, x.label])) as Record<
+  SectionId,
+  string
+>;
+
 /** a small picture, or the kind's icon when there isn't one */
-function Pic({ src, alt, shelf }: { src?: string | null; alt: string; shelf: Shelf }) {
+function Pic({ src, alt, shelf }: { src?: string | null; alt: string; shelf: SectionId }) {
   const url = remoteImage(src);
-  const Icon = SHELF_ICON[shelf];
+  const Icon = SECTION_ICON[shelf];
   return url ? (
     <Art src={url} alt={alt} />
   ) : (
@@ -101,56 +99,184 @@ function Pic({ src, alt, shelf }: { src?: string | null; alt: string; shelf: She
   );
 }
 
-// ── grouping ────────────────────────────────────────────────────────────
-
-interface Group {
-  key: string;
-  /** what the sheet and a remove act on */
-  type: GroupType;
-  id: string;
-  title: string;
-  artwork?: string | null;
-  shelf: Shelf;
-  items: DeviceItem[];
-  /** a show's seasons on the device ("12:2"), for "add the rest" */
-  seasons: string[];
+/** the card's picture shape: posters for films and shows, squares for sound, wide for clips */
+function artShape(shelf: SectionId): 'poster' | 'square' | 'wide' {
+  if (shelf === 'tv' || shelf === 'movies') return 'poster';
+  if (shelf === 'youtube' || shelf === 'home') return 'wide';
+  return 'square';
 }
 
-/** a device's items as the page's groups: seasons fold into their show */
-function groupItems(items: DeviceItem[]): Group[] {
-  const out = new Map<string, Group>();
-  for (const it of items) {
-    const g = it.group;
-    let type: GroupType =
-      g?.type ?? (it.item_type === 'podcast_episode' ? 'podcast' : it.item_type);
-    let id = g?.id ?? it.item_id;
-    if (type === 'season') {
-      type = 'show';
-      id = (g?.id ?? '').split(':')[0] || id;
-    }
-    const key = `${type}:${id}`;
-    let group = out.get(key);
-    if (!group) {
-      group = {
-        key,
-        type,
-        id,
-        title: g?.title || it.title || 'Untitled',
-        artwork: g?.artwork ?? it.artwork,
-        shelf: shelfOf(it.item_type),
-        items: [],
-        seasons: [],
-      };
-      out.set(key, group);
-    }
-    group.items.push(it);
-    if (g?.type === 'season' && !group.seasons.includes(g.id)) group.seasons.push(g.id);
+// ── how the page is sorted and folded (this browser remembers) ──────────
+
+const PREFS_KEY = 'ss-downloads-view';
+
+function readPrefs(): { sort: SortBy; folded: SectionId[] } {
+  try {
+    const raw = JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}') as {
+      sort?: unknown;
+      folded?: unknown;
+    };
+    return {
+      sort: raw.sort === 'az' ? 'az' : 'recent',
+      folded: Array.isArray(raw.folded)
+        ? (raw.folded.filter((x) => SECTIONS.some((s) => s.id === x)) as SectionId[])
+        : [],
+    };
+  } catch {
+    return { sort: 'recent', folded: [] };
   }
-  const order: Shelf[] = ['tv', 'movies', 'music', 'books', 'podcasts'];
-  return [...out.values()].sort(
-    (a, b) => order.indexOf(a.shelf) - order.indexOf(b.shelf) || a.title.localeCompare(b.title),
+}
+
+function usePrefs() {
+  const [prefs, setPrefs] = useState(readPrefs);
+  const save = (next: typeof prefs) => {
+    setPrefs(next);
+    try {
+      localStorage.setItem(PREFS_KEY, JSON.stringify(next));
+    } catch {
+      // no storage: this visit only
+    }
+  };
+  return {
+    sort: prefs.sort,
+    setSort: (sort: SortBy) => save({ ...prefs, sort }),
+    folded: (id: SectionId) => prefs.folded.includes(id),
+    toggle: (id: SectionId) =>
+      save({
+        ...prefs,
+        folded: prefs.folded.includes(id)
+          ? prefs.folded.filter((x) => x !== id)
+          : [...prefs.folded, id],
+      }),
+  };
+}
+
+/** the kind chips (all, or one section) and newest first or a to z */
+function Toolbar({
+  sections,
+  filter,
+  onFilter,
+  sort,
+  onSort,
+}: {
+  sections: Section<unknown>[];
+  filter: Filter;
+  onFilter: (f: Filter) => void;
+  sort: SortBy;
+  onSort: (s: SortBy) => void;
+}) {
+  if (!sections.length) return null;
+  return (
+    <div className={p.toolbar}>
+      {sections.length > 1 ? (
+        <div className={p.chips} role="radiogroup" aria-label="Show">
+          {[{ id: 'all' as Filter, label: 'All' }, ...sections].map((f) => (
+            <button
+              key={f.id}
+              type="button"
+              role="radio"
+              aria-checked={filter === f.id}
+              className={p.chip}
+              onClick={() => onFilter(f.id)}
+              data-nav
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+      <div className={p.sortBy} role="radiogroup" aria-label="Sort">
+        {(
+          [
+            ['recent', 'Recent'],
+            ['az', 'A-Z'],
+          ] as const
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            role="radio"
+            aria-checked={sort === id}
+            className={p.chip}
+            onClick={() => onSort(id)}
+            data-nav
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
+
+/** a kind's heading: its name, how many and how big; tap to fold it away */
+function KindSection({
+  section,
+  folded,
+  onToggle,
+  noun,
+  children,
+}: {
+  section: Section<unknown>;
+  folded: boolean;
+  onToggle: () => void;
+  noun: (n: number) => string;
+  children: React.ReactNode;
+}) {
+  const Icon = SECTION_ICON[section.id];
+  const bodyId = `dl-kind-${section.id}`;
+  return (
+    <section className={p.kind} aria-label={section.label} data-kind={section.id}>
+      <button
+        type="button"
+        className={p.kindHead}
+        aria-expanded={!folded}
+        aria-controls={bodyId}
+        onClick={onToggle}
+        data-nav
+      >
+        <span className={p.kindIcon} data-shelf={section.id}>
+          <Icon />
+        </span>
+        <b>{section.label}</b>
+        <span className={p.kindCount}>
+          {noun(section.count)}
+          {section.bytes ? ` · ${bytes(section.bytes)}` : ''}
+        </span>
+        <span className={p.chev} aria-hidden="true">
+          <ChevronDownIcon />
+        </span>
+      </button>
+      {folded ? null : (
+        <div id={bodyId} className={p.kindBody}>
+          {children}
+        </div>
+      )}
+    </section>
+  );
+}
+
+/** "12 episodes", "3 songs": what a section holds, in its own words */
+function kindNoun(id: SectionId) {
+  const word =
+    id === 'tv' || id === 'podcasts'
+      ? 'episode'
+      : id === 'movies'
+        ? 'movie'
+        : id === 'books'
+          ? 'book'
+          : id === 'music'
+            ? 'song'
+            : 'video';
+  return (n: number) => `${n.toLocaleString()} ${word}${n === 1 ? '' : 's'}`;
+}
+
+/** the sections a filter shows */
+function shownSections<E>(all: Section<E>[], filter: Filter) {
+  return filter === 'all' ? all : all.filter((x) => x.id === filter);
+}
+
+// ── a phone's downloads ─────────────────────────────────────────────────
 
 function phoneWord(device: Device) {
   return /tablet|\btab\b|ipad/i.test(device.device_name) ? 'tablet' : 'phone';
@@ -177,12 +303,38 @@ function ruleWords(r: Rule): string {
   return bits.join(' · ');
 }
 
-const sizeOf = (list: DeviceItem[]) => list.reduce((n, it) => n + (it.size_bytes || 0), 0);
+const sizeOf = (list: { size_bytes?: number | null }[]) =>
+  list.reduce((n, it) => n + (it.size_bytes || 0), 0);
 
-function nounFor(g: Group) {
-  if (g.type === 'show') return 'episode';
-  if (g.type === 'podcast') return 'podcast';
+type DeviceCard = Card<DeviceItem>;
+
+function nounFor(c: DeviceCard) {
+  if (c.type === 'show') return 'episode';
+  if (c.type === 'podcast') return 'podcast';
   return undefined;
+}
+
+/** a show's episodes under their season, anything else as one list */
+function Rows<E>({ card, row }: { card: Card<E>; row: (it: E) => React.ReactNode }) {
+  if (card.type === 'show' && card.seasons.length) {
+    return (
+      <div className={p.items}>
+        {card.seasons.map((season) => (
+          <div key={season.id || 'loose'} className={p.season}>
+            <span className={p.seasonTitle}>
+              {season.label}
+              <span className={p.dim}>
+                {' '}
+                · {season.items.length} episode{season.items.length === 1 ? '' : 's'}
+              </span>
+            </span>
+            {season.items.map(row)}
+          </div>
+        ))}
+      </div>
+    );
+  }
+  return <div className={p.items}>{card.items.map(row)}</div>;
 }
 
 // ── storage ─────────────────────────────────────────────────────────────
@@ -198,12 +350,12 @@ function StorageBar({ device }: { device: Device }) {
   const { used, cap } = deviceRoom(device);
   // the bar's full width: the limit, else what the phone has room for
   const scale = cap || used + (device.free_bytes ?? 0);
-  const by = new Map<Shelf, number>();
+  const by = new Map<SectionId, number>();
   for (const it of device.items) {
-    const shelf = shelfOf(it.item_type);
+    const shelf = sectionOf(it.item_type);
     by.set(shelf, (by.get(shelf) ?? 0) + (it.size_bytes || 0));
   }
-  const parts = [...by.entries()].filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]);
+  const parts = SECTIONS.map((x) => [x.id, by.get(x.id) ?? 0] as const).filter(([, n]) => n > 0);
   return (
     <div className={p.storage}>
       <div className={p.storageHead}>
@@ -233,7 +385,7 @@ function StorageBar({ device }: { device: Device }) {
           {parts.map(([shelf, n]) => (
             <span key={shelf}>
               <b data-shelf={shelf} />
-              {SHELF_WORDS[shelf]} {bytes(n)}
+              {SECTION_WORDS[shelf]} {bytes(n)}
             </span>
           ))}
           {device.wifi_only ? <span className={p.wifi}>Wi-Fi only</span> : null}
@@ -249,6 +401,7 @@ type SheetAsk = { type: GroupType; id: string; title: string };
 
 function GroupBlock({
   g,
+  shelf,
   device,
   rule,
   removing,
@@ -256,20 +409,24 @@ function GroupBlock({
   onRemove,
   onRemoveAll,
 }: {
-  g: Group;
+  g: DeviceCard;
+  shelf: SectionId;
   device: Device;
   rule?: Rule;
   removing: Set<string>;
   onSheet: (ask: SheetAsk) => void;
   onRemove: (type: string, id: string) => void;
-  onRemoveAll: (g: Group) => void;
+  onRemoveAll: (g: DeviceCard) => void;
 }) {
   const first = g.items[0];
-  const one = g.items.length === 1 && g.type !== 'show' && g.type !== 'podcast';
+  const one =
+    g.items.length === 1 && g.type !== 'show' && g.type !== 'podcast' && g.type !== 'songs';
   const groupGone = removing.has(`${g.type}:${g.id}`);
-  const size = bytes(sizeOf(g.items));
+  const size = bytes(g.bytes);
+  const seasons = g.seasons.filter((x) => x.id);
   const sub = one
     ? [
+        g.subtitle,
         qualityWord(first.quality),
         size,
         first.position_s && !first.watched && first.duration_s
@@ -277,17 +434,24 @@ function GroupBlock({
           : null,
       ]
     : [
+        g.type === 'playlist' ? 'Playlist' : g.type === 'album' ? g.subtitle || 'Album' : null,
+        seasons.length > 1 ? `${seasons.length} seasons` : null,
         `${countWords(g.items.length, first.kind ?? 'video', nounFor(g))} on ${device.device_name}`,
         size,
       ];
   const st = stateWords(first, device, groupGone);
-  const square = g.shelf === 'music' || g.shelf === 'podcasts' || g.shelf === 'books';
-  const oneSeason = g.type === 'show' && g.seasons.length === 1 ? g.seasons[0] : null;
+  const shape = artShape(shelf);
+  const oneSeason = g.type === 'show' && seasons.length === 1 ? seasons[0].id : null;
+  const groupType = g.type === 'songs' ? null : g.type;
   return (
     <section className={p.group} aria-label={g.title}>
       <div className={p.ghead}>
-        <span className={p.art} data-shape={square ? 'square' : 'poster'}>
-          <Art src={remoteImage(g.artwork)} alt={g.title} />
+        <span className={p.art} data-shape={shape}>
+          {g.artwork ? (
+            <Art src={remoteImage(g.artwork)} alt={g.title} />
+          ) : (
+            <Pic alt={g.title} shelf={shelf} />
+          )}
         </span>
         <span className={p.gtext}>
           <b>{g.title}</b>
@@ -304,7 +468,7 @@ function GroupBlock({
           ) : null}
         </span>
         <span className={p.acts}>
-          {!one ? (
+          {!one && groupType ? (
             <button
               type="button"
               className={p.pill}
@@ -312,7 +476,7 @@ function GroupBlock({
                 onSheet(
                   oneSeason
                     ? { type: 'season', id: oneSeason, title: g.title }
-                    : { type: g.type, id: g.id, title: g.title },
+                    : { type: groupType, id: g.id, title: g.title },
                 )
               }
               data-nav
@@ -322,11 +486,11 @@ function GroupBlock({
                 : 'Add the rest'}
             </button>
           ) : null}
-          {g.type === 'show' || g.type === 'playlist' || g.type === 'podcast' ? (
+          {groupType === 'show' || groupType === 'playlist' || groupType === 'podcast' ? (
             <button
               type="button"
               className={p.pill}
-              onClick={() => onSheet({ type: g.type, id: g.id, title: g.title })}
+              onClick={() => onSheet({ type: groupType, id: g.id, title: g.title })}
               data-nav
             >
               Smart settings
@@ -340,40 +504,33 @@ function GroupBlock({
             onClick={() => (one ? onRemove(first.item_type, first.item_id) : onRemoveAll(g))}
             data-nav
           >
-            {one ? (first.state === 'downloaded' ? 'Remove' : 'Cancel') : 'Remove all'}
+            {one ? 'Remove' : 'Remove all'}
           </button>
         </span>
       </div>
-      {one && first.state === 'downloading' ? (
-        <span className={p.prog} data-wide="true">
-          <i style={{ width: `${Math.round((first.progress ?? 0) * 100)}%` }} />
-        </span>
-      ) : null}
       {!one ? (
-        <div className={p.items}>
-          {g.items.map((it) => {
+        <Rows
+          card={g}
+          row={(it) => {
             const gone = groupGone || removing.has(`${it.item_type}:${it.item_id}`);
             const ist = stateWords(it, device, gone);
-            const going = it.state !== 'downloaded';
             return (
               <div key={`${it.item_type}:${it.item_id}`} className={p.item}>
-                <span className={p.thumb} data-shape={square ? 'small' : 'wide'}>
+                <span className={p.thumb} data-shape={shape === 'square' ? 'small' : 'wide'}>
                   <Pic
-                    src={it.artwork ?? (square ? g.artwork : null)}
+                    src={it.artwork ?? (shape === 'square' ? g.artwork : null)}
                     alt={it.title ?? ''}
-                    shelf={g.shelf}
+                    shelf={shelf}
                   />
                 </span>
                 <span className={p.rowText}>
                   <b>{it.title || it.item_id}</b>
                   <span>
-                    {[qualityWord(it.quality), bytes(it.size_bytes)].filter(Boolean).join(' · ')}
+                    {[g.type === 'songs' ? it.subtitle : null, qualityWord(it.quality)]
+                      .concat(bytes(it.size_bytes))
+                      .filter(Boolean)
+                      .join(' · ')}
                   </span>
-                  {it.state === 'downloading' ? (
-                    <span className={p.prog}>
-                      <i style={{ width: `${Math.round((it.progress ?? 0) * 100)}%` }} />
-                    </span>
-                  ) : null}
                 </span>
                 <span className={p.state} data-tone={ist.tone}>
                   {ist.text}
@@ -385,12 +542,12 @@ function GroupBlock({
                   onClick={() => onRemove(it.item_type, it.item_id)}
                   data-nav
                 >
-                  {going ? 'Cancel' : 'Remove'}
+                  Remove
                 </button>
               </div>
             );
-          })}
-        </div>
+          }}
+        />
       ) : null}
     </section>
   );
@@ -398,33 +555,47 @@ function GroupBlock({
 
 function DeviceView({ device }: { device: Device }) {
   const queryClient = useQueryClient();
+  const prefs = usePrefs();
   const [filter, setFilter] = useState<Filter>('all');
   const [sheet, setSheet] = useState<SheetAsk | null>(null);
-  const [confirm, setConfirm] = useState<Group | null>(null);
+  const [confirm, setConfirm] = useState<DeviceCard | null>(null);
   const wishes = device.wishes ?? [];
   const removing = new Set(
     wishes.filter((w) => w.action === 'remove').map((w) => `${w.type}:${w.id}`),
   );
   const adds = wishes.filter((w) => w.action === 'add');
-  const all = groupItems(device.items);
-  const groups = all.filter((g) => filter === 'all' || g.shelf === filter);
-  const shelves = new Set(all.map((g) => g.shelf));
-  const ruleFor = (g: Group) => device.rules.find((r) => r.type === g.type && r.id === g.id);
+  // still coming: on top, with its progress; what's there is filed by kind
+  const coming = device.items.filter((it) => it.state !== 'downloaded');
+  const sections = organize(
+    device.items.filter((it) => it.state === 'downloaded'),
+    (it) => stamp(it.downloaded_at),
+    prefs.sort,
+  );
+  const shown = shownSections(sections, filter);
+  const ruleFor = (g: DeviceCard) => device.rules.find((r) => r.type === g.type && r.id === g.id);
   // rules with nothing on the device yet still show, so they can be changed
   const looseRules = device.rules.filter(
-    (r) => !all.some((g) => g.type === r.type && g.id === r.id),
+    (r) =>
+      !sections.some((x) => x.cards.some((g) => g.type === r.type && g.id === r.id)) &&
+      !coming.some((it) => it.group?.type === r.type && it.group.id === r.id),
   );
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: offlineKeys.devices });
   const remove = useMutation({
-    mutationFn: ({ type, id }: { type: string; id: string }) =>
-      sendWish(device.device_id, 'remove', type, id),
+    mutationFn: async (targets: { type: string; id: string }[]) => {
+      for (const t of targets) await sendWish(device.device_id, 'remove', t.type, t.id);
+    },
     onSuccess: () => {
       notify(`It comes off ${device.device_name} the next time it's online.`);
       void refresh();
     },
     onError: notifyError("Couldn't remove that."),
   });
+  const removeCard = (g: DeviceCard) =>
+    // loose songs have no group of their own: each one goes
+    g.type === 'songs'
+      ? g.items.map((it) => ({ type: it.item_type, id: it.item_id }))
+      : [{ type: g.type, id: g.id }];
   const cancelWish = useMutation({
     mutationFn: (w: Wish) => sendWish(device.device_id, 'remove', w.type, w.id),
     onSuccess: () => void refresh(),
@@ -443,22 +614,51 @@ function DeviceView({ device }: { device: Device }) {
     <div className={p.body}>
       <StorageBar device={device} />
 
-      {shelves.size > 1 ? (
-        <div className={p.chips} role="radiogroup" aria-label="Show">
-          {FILTERS.filter((f) => f.id === 'all' || shelves.has(f.id)).map((f) => (
-            <button
-              key={f.id}
-              type="button"
-              role="radio"
-              aria-checked={filter === f.id}
-              className={p.chip}
-              onClick={() => setFilter(f.id)}
-              data-nav
-            >
-              {f.label}
-            </button>
-          ))}
-        </div>
+      {coming.length ? (
+        <section className={p.section} aria-label="Downloading">
+          <h2 className={p.sectionTitle}>Downloading · {coming.length}</h2>
+          {coming.map((it) => {
+            const shelf = sectionOf(it.item_type);
+            const gone = removing.has(`${it.item_type}:${it.item_id}`);
+            const st = stateWords(it, device, gone);
+            const from = it.group && it.group.type !== it.item_type ? it.group.title : null;
+            return (
+              <div key={`${it.item_type}:${it.item_id}`} className={p.row}>
+                <span
+                  className={p.thumb}
+                  data-shape={artShape(shelf) === 'square' ? 'small' : 'wide'}
+                >
+                  <Pic src={it.artwork ?? it.group?.artwork} alt={it.title ?? ''} shelf={shelf} />
+                </span>
+                <span className={p.rowText}>
+                  <b>{it.title || it.item_id}</b>
+                  <span>
+                    {[from, qualityWord(it.quality), bytes(it.size_bytes)]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </span>
+                  {it.state === 'downloading' ? (
+                    <span className={p.prog}>
+                      <i style={{ width: `${Math.round((it.progress ?? 0) * 100)}%` }} />
+                    </span>
+                  ) : null}
+                </span>
+                <span className={p.state} data-tone={st.tone}>
+                  {st.text}
+                </span>
+                <button
+                  type="button"
+                  className={p.pill}
+                  disabled={gone}
+                  onClick={() => remove.mutate([{ type: it.item_type, id: it.item_id }])}
+                  data-nav
+                >
+                  Cancel
+                </button>
+              </div>
+            );
+          })}
+        </section>
       ) : null}
 
       {adds.length ? (
@@ -467,7 +667,7 @@ function DeviceView({ device }: { device: Device }) {
           {adds.map((w) => (
             <div key={w.wish_id} className={p.row}>
               <span className={p.thumb} data-shape="small">
-                <Pic src={w.artwork} alt={w.title ?? ''} shelf={shelfOf(w.type)} />
+                <Pic src={w.artwork} alt={w.title ?? ''} shelf={sectionOf(w.type)} />
               </span>
               <span className={p.rowText}>
                 <b>{w.title || 'Something you sent'}</b>
@@ -532,20 +732,40 @@ function DeviceView({ device }: { device: Device }) {
         </section>
       ) : null}
 
-      {groups.map((g) => (
-        <GroupBlock
-          key={g.key}
-          g={g}
-          device={device}
-          rule={ruleFor(g)}
-          removing={removing}
-          onSheet={setSheet}
-          onRemove={(type, id) => remove.mutate({ type, id })}
-          onRemoveAll={setConfirm}
-        />
+      <Toolbar
+        sections={sections}
+        filter={filter}
+        onFilter={setFilter}
+        sort={prefs.sort}
+        onSort={prefs.setSort}
+      />
+
+      {shown.map((section) => (
+        <KindSection
+          key={section.id}
+          section={section}
+          // picking a kind opens it
+          folded={filter === 'all' && prefs.folded(section.id)}
+          onToggle={() => prefs.toggle(section.id)}
+          noun={kindNoun(section.id)}
+        >
+          {section.cards.map((g) => (
+            <GroupBlock
+              key={g.key}
+              g={g}
+              shelf={section.id}
+              device={device}
+              rule={ruleFor(g)}
+              removing={removing}
+              onSheet={setSheet}
+              onRemove={(type, id) => remove.mutate([{ type, id }])}
+              onRemoveAll={setConfirm}
+            />
+          ))}
+        </KindSection>
       ))}
 
-      {!all.length && !adds.length && !looseRules.length ? (
+      {!device.items.length && !adds.length && !looseRules.length ? (
         <div className={p.empty}>
           <b>Nothing on {device.device_name} yet</b>
           <span>
@@ -580,14 +800,11 @@ function DeviceView({ device }: { device: Device }) {
           busy={remove.isPending}
           onClose={() => setConfirm(null)}
           onConfirm={() =>
-            remove.mutate(
-              { type: confirm.type, id: confirm.id },
-              { onSettled: () => setConfirm(null) },
-            )
+            remove.mutate(removeCard(confirm), { onSettled: () => setConfirm(null) })
           }
         >
           {countWords(confirm.items.length, confirm.items[0]?.kind ?? 'video', nounFor(confirm))} (
-          {bytes(sizeOf(confirm.items))}) come off {device.device_name} the next time it's online.
+          {bytes(confirm.bytes)}) come off {device.device_name} the next time it's online.
           {ruleFor(confirm)
             ? ' Its smart download stays on; turn it off in Smart settings to stop new ones.'
             : ''}
@@ -599,17 +816,120 @@ function DeviceView({ device }: { device: Device }) {
 
 // ── this computer ───────────────────────────────────────────────────────
 
+function SavedCard({
+  g,
+  shelf,
+  onAgain,
+  onForget,
+}: {
+  g: Card<SavedFile>;
+  shelf: SectionId;
+  onAgain: (f: SavedFile) => void;
+  onForget: (files: SavedFile[], title: string) => void;
+}) {
+  const first = g.items[0];
+  const one = g.items.length === 1 && g.type !== 'show' && g.type !== 'songs';
+  const shape = artShape(shelf);
+  const sub = one
+    ? [first.subtitle, qualityWord(first.quality), bytes(first.size_bytes)]
+    : [
+        g.type === 'playlist' ? 'Playlist' : g.type === 'album' ? g.subtitle || 'Album' : null,
+        `${g.items.length} file${g.items.length === 1 ? '' : 's'}`,
+        bytes(g.bytes),
+      ];
+  return (
+    <section className={p.group} aria-label={g.title}>
+      <div className={p.ghead}>
+        <span className={p.art} data-shape={shape}>
+          {g.artwork ? (
+            <Art src={remoteImage(g.artwork)} alt={g.title} />
+          ) : (
+            <Pic alt={g.title} shelf={shelf} />
+          )}
+        </span>
+        <span className={p.gtext}>
+          <b>{g.title}</b>
+          <span>{sub.filter(Boolean).join(' · ')}</span>
+        </span>
+        <span className={p.acts}>
+          {one ? (
+            <button type="button" className={p.pill} onClick={() => onAgain(first)} data-nav>
+              Download again
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className={p.pill}
+            onClick={() => onForget(g.items, g.title)}
+            data-nav
+          >
+            {one ? 'Forget' : 'Forget all'}
+          </button>
+        </span>
+      </div>
+      {!one ? (
+        <Rows
+          card={g}
+          row={(f) => (
+            <div key={`${f.item_type}:${f.item_id}`} className={p.item}>
+              <span className={p.thumb} data-shape={shape === 'square' ? 'small' : 'wide'}>
+                <Pic
+                  src={f.artwork ?? (shape === 'square' ? g.artwork : null)}
+                  alt={f.title}
+                  shelf={shelf}
+                />
+              </span>
+              <span className={p.rowText}>
+                <b>{f.title}</b>
+                <span>
+                  {[
+                    g.type === 'songs' ? f.subtitle : null,
+                    qualityWord(f.quality),
+                    bytes(f.size_bytes),
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
+                </span>
+              </span>
+              <span className={p.acts}>
+                <button type="button" className={p.pill} onClick={() => onAgain(f)} data-nav>
+                  Download again
+                </button>
+                <button
+                  type="button"
+                  className={p.pill}
+                  onClick={() => onForget([f], f.title)}
+                  data-nav
+                >
+                  Forget
+                </button>
+              </span>
+            </div>
+          )}
+        />
+      ) : null}
+    </section>
+  );
+}
+
 function ThisComputer() {
   const jobs = useLocalJobs();
+  const prefs = usePrefs();
+  const [filter, setFilter] = useState<Filter>('all');
   const [files, setFiles] = useState<SavedFile[]>(() => savedFiles());
   const [sheet, setSheet] = useState<SavedFile | null>(null);
-  const [forget, setForget] = useState<SavedFile | null>(null);
+  const [forget, setForget] = useState<{ files: SavedFile[]; title: string } | null>(null);
   useEffect(() => {
     // a finished job adds a file: read the list again
     setFiles(savedFiles());
   }, [jobs]);
   const working = jobs.filter((j) => j.status !== 'done');
   const total = files.reduce((n, f) => n + (f.size_bytes || 0), 0);
+  const sections = useMemo(
+    () => organize(files, (f) => stamp(f.saved_at), prefs.sort),
+    [files, prefs.sort],
+  );
+  const shown = shownSections(sections, filter);
 
   return (
     <div className={p.body}>
@@ -629,7 +949,7 @@ function ThisComputer() {
           {working.map((j) => (
             <div key={j.key} className={p.row}>
               <span className={p.thumb} data-shape="small">
-                <Pic src={j.artwork} alt={j.title} shelf={shelfOf(j.item_type)} />
+                <Pic src={j.artwork} alt={j.title} shelf={sectionOf(j.item_type)} />
               </span>
               <span className={p.rowText}>
                 <b>{j.title}</b>
@@ -654,42 +974,40 @@ function ThisComputer() {
         </section>
       ) : null}
 
-      {files.length ? (
-        <section className={p.section} aria-label="Saved files">
-          <h2 className={p.sectionTitle}>Saved files</h2>
-          {files.map((f) => (
-            <div key={`${f.item_type}:${f.item_id}`} className={p.row}>
-              <span
-                className={p.thumb}
-                data-shape={f.item_type === 'episode' || f.item_type === 'movie' ? 'wide' : 'small'}
-              >
-                <Pic src={f.artwork} alt={f.title} shelf={shelfOf(f.item_type)} />
-              </span>
-              <span className={p.rowText}>
-                <b>{f.title}</b>
-                <span>
-                  {[f.subtitle, qualityWord(f.quality), bytes(f.size_bytes)]
-                    .filter(Boolean)
-                    .join(' · ')}
-                </span>
-              </span>
-              <span className={p.acts}>
-                <button type="button" className={p.pill} onClick={() => setSheet(f)} data-nav>
-                  Download again
-                </button>
-                <button type="button" className={p.pill} onClick={() => setForget(f)} data-nav>
-                  Forget
-                </button>
-              </span>
-            </div>
+      <Toolbar
+        sections={sections}
+        filter={filter}
+        onFilter={setFilter}
+        sort={prefs.sort}
+        onSort={prefs.setSort}
+      />
+
+      {shown.map((section) => (
+        <KindSection
+          key={section.id}
+          section={section}
+          folded={filter === 'all' && prefs.folded(section.id)}
+          onToggle={() => prefs.toggle(section.id)}
+          noun={(n) => `${n.toLocaleString()} file${n === 1 ? '' : 's'}`}
+        >
+          {section.cards.map((g) => (
+            <SavedCard
+              key={g.key}
+              g={g}
+              shelf={section.id}
+              onAgain={setSheet}
+              onForget={(list, title) => setForget({ files: list, title })}
+            />
           ))}
-        </section>
-      ) : !working.length ? (
+        </KindSection>
+      ))}
+
+      {!files.length && !working.length ? (
         <div className={p.empty}>
           <b>Nothing saved here yet</b>
           <span>
-            Press Download on a movie, an episode or an album and pick This computer. The file lands
-            in your browser's downloads.
+            Press Download on a movie, an episode, an album or a playlist and pick This computer.
+            The file lands in your browser's downloads.
           </span>
         </div>
       ) : null}
@@ -712,13 +1030,15 @@ function ThisComputer() {
           confirm="Forget"
           onClose={() => setForget(null)}
           onConfirm={() => {
-            forgetSaved(forget.item_type, forget.item_id);
+            for (const f of forget.files) forgetSaved(f.item_type, f.item_id);
             setFiles(savedFiles());
             setForget(null);
             void reportThisComputer().catch(() => {});
           }}
         >
-          It comes off this list. The file you saved stays on this computer.
+          {forget.files.length === 1
+            ? 'It comes off this list. The file you saved stays on this computer.'
+            : `${forget.files.length} files come off this list. The files you saved stay on this computer.`}
         </ConfirmSheet>
       ) : null}
     </div>

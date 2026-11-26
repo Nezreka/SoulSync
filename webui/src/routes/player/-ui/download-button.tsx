@@ -91,6 +91,7 @@ export function DownloadButton({
   compact = false,
   small = false,
   label = 'Download',
+  why,
 }: {
   type: GroupType;
   id: string;
@@ -99,12 +100,30 @@ export function DownloadButton({
   /** a pill for a section head, not a hero button */
   small?: boolean;
   label?: string;
+  /** there's nothing to download yet: the button shows, greyed, saying why */
+  why?: string;
 }) {
   const [open, setOpen] = useState(false);
   const settings = useQuery(offlineSettingsQuery());
   const devices = useQuery(devicesQuery());
   const jobs = useLocalJobs();
   if (settings.data && !settings.data.allow_downloads && !settings.data.is_admin) return null;
+  if (why) {
+    return (
+      <button
+        type="button"
+        className={`${s.btn} ${d.button}${small ? ` ${d.small}` : ''}`}
+        data-state="idle"
+        disabled
+        title={why}
+        aria-label={`${label}: ${why}`}
+        data-nav
+      >
+        <DownloadIcon />
+        {label}
+      </button>
+    );
+  }
   const st = buttonState(type, id, devices.data ?? [], jobs, savedFiles());
   const words =
     st.tone === 'idle'

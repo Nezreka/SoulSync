@@ -135,6 +135,8 @@ export interface DeviceItem {
   watched?: boolean;
   position_s?: number | null;
   duration_s?: number | null;
+  /** when it got to its state (a download's finish), iso */
+  downloaded_at?: string | null;
 }
 
 export interface Wish {
@@ -342,6 +344,8 @@ export interface SavedFile {
   subtitle?: string | null;
   artwork?: string | null;
   saved_at: string;
+  /** the season, album or playlist it was saved with, so the page can file it */
+  group?: ItemGroup | null;
 }
 
 const SAVED_KEY = 'ss-offline-saved';
@@ -366,10 +370,13 @@ function writeSaved(list: SavedFile[]) {
 }
 
 export function rememberSaved(file: SavedFile) {
-  const rest = savedFiles().filter(
-    (f) => !(f.item_type === file.item_type && f.item_id === file.item_id),
-  );
-  writeSaved([file, ...rest]);
+  const all = savedFiles();
+  const same = (f: SavedFile) => f.item_type === file.item_type && f.item_id === file.item_id;
+  const before = all.find(same);
+  // saved again on its own: it stays filed under its season, album or playlist
+  const loose = !file.group || file.group.type === file.item_type;
+  const group = loose && before?.group ? before.group : file.group;
+  writeSaved([{ ...file, group }, ...all.filter((f) => !same(f))]);
 }
 
 export function forgetSaved(itemType: string, itemId: string) {
@@ -429,6 +436,7 @@ export function reportThisComputer() {
               size_bytes: f.size_bytes,
               state: 'downloaded',
               progress: 1,
+              downloaded_at: f.saved_at,
             })),
           },
         })

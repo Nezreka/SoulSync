@@ -263,4 +263,73 @@ describe('the download button', () => {
     const { container } = mount(<DownloadButton type="movie" id="5" title="Dune" />);
     await waitFor(() => expect(container.querySelector('button')).toBeNull());
   });
+
+  it('with nothing to download it shows greyed, saying why', async () => {
+    const { DownloadButton } = await import('./download-button');
+    mount(
+      <DownloadButton type="playlist" id="mirror:4" title="Mix" why="None of these are here." />,
+    );
+    const b = screen.getByRole('button', { name: 'Download: None of these are here.' });
+    expect((b as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+describe('a playlist to this computer', () => {
+  it('saves each song filed under the playlist', async () => {
+    const track = (n: number) => ({
+      item_type: 'track',
+      item_id: String(n),
+      title: `Song ${n}`,
+      duration_s: 200,
+      size_bytes: 3e7,
+    });
+    answers['GET player/offline/plan'] = [
+      {
+        kind: 'audio',
+        title: 'Road Trip',
+        subtitle: 'Playlist',
+        artwork: null,
+        items: [track(1), track(2)],
+        qualities: [
+          {
+            id: 'original',
+            label: 'Original',
+            total_bytes: 6e7,
+            per_item_bytes: { 'track:1': 3e7, 'track:2': 3e7 },
+          },
+        ],
+        free_bytes: null,
+      },
+    ];
+    let n = 0;
+    answers['POST player/offline/prepare'] = [
+      {
+        id: 'p1',
+        status: 'ready',
+        progress: 1,
+        url: '/api/player/offline/file/p1',
+        size_bytes: 3e7,
+      },
+    ];
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {
+      n += 1;
+    });
+    const { DownloadSheet } = await import('./download-sheet');
+    mount(<DownloadSheet type="playlist" id="user:4" onClose={() => {}} />);
+    await waitFor(() => screen.getByRole('button', { name: /Download 2 songs/ }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Download 2 songs/ }));
+    });
+    await waitFor(() => expect(n).toBe(2));
+    expect(calls.find((c) => c.url === 'player/offline/plan')?.body).toMatchObject({
+      type: 'playlist',
+      id: 'user:4',
+    });
+    const { savedFiles } = await import('../-lib/offline');
+    await waitFor(() => expect(savedFiles()).toHaveLength(2));
+    expect(savedFiles().map((f) => f.group)).toEqual([
+      { type: 'playlist', id: 'user:4', title: 'Road Trip', subtitle: 'Playlist', artwork: null },
+      { type: 'playlist', id: 'user:4', title: 'Road Trip', subtitle: 'Playlist', artwork: null },
+    ]);
+  });
 });

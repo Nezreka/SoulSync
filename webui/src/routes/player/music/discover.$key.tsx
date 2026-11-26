@@ -141,8 +141,17 @@ function DiscoverPlaylistPage() {
               <ShuffleIcon />
               Shuffle
             </button>
-            {queue.length ? (
-              <DownloadButton type="playlist" id={`discover:${key}`} title={p.name} />
+            {p.songs.length ? (
+              <DownloadButton
+                type="playlist"
+                id={`discover:${key}`}
+                title={p.name}
+                why={
+                  queue.length
+                    ? undefined
+                    : 'None of these are in your library yet. Get them and they download here.'
+                }
+              />
             ) : null}
             {toGet.length ? (
               <button

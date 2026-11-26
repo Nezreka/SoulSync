@@ -421,6 +421,9 @@ def playlist_tracks(playlist_key: str) -> Tuple[Dict[str, Any], List[int]]:
     from core.player.playable import current_profile_id
     pid = current_profile_id()
     kind, _, ref = str(playlist_key or "").partition(":")
+    if kind.isdigit() and not ref:
+        # a bare playlist id: yours and mirrored share one id space
+        kind, ref = "user", kind
     scope, hide = _music_scope()
     db = _music_db()
     if kind in ("user", "mirror") and ref.isdigit():

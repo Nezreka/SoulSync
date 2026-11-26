@@ -109,12 +109,20 @@ describe('the downloads page', () => {
     await mount();
     await waitFor(() => expect(screen.getByRole('region', { name: 'Severance' })).toBeTruthy());
     const show = screen.getByRole('region', { name: 'Severance' });
-    expect(within(show).getByText(/3 episodes on Pixel 8/)).toBeTruthy();
+    expect(within(show).getByText(/2 episodes on Pixel 8/)).toBeTruthy();
     expect(within(show).getByText(/Smart · next 3 unwatched · deletes watched/)).toBeTruthy();
+    expect(within(show).getByText('Season 2')).toBeTruthy();
     expect(within(show).getByText('Watched')).toBeTruthy();
     expect(within(show).getByText('On the phone')).toBeTruthy();
-    expect(within(show).getByText('Downloading 60%')).toBeTruthy();
     expect(within(show).getByRole('button', { name: 'Add the rest of season 2' })).toBeTruthy();
+    // what's still coming sits on top, not in its show
+    const coming = screen.getByRole('region', { name: 'Downloading' });
+    expect(within(coming).getByText('Downloading 60%')).toBeTruthy();
+    expect(within(show).queryByText('Downloading 60%')).toBeNull();
+    // filed by kind, tv shows first
+    const kinds = screen.getAllByRole('button', { expanded: true }).map((b) => b.textContent);
+    expect(kinds[0]).toMatch(/^TV shows2 episodes/);
+    expect(kinds[1]).toMatch(/^Movies1 movie/);
     const dune = screen.getByRole('region', { name: 'Dune: Part Two' });
     expect(within(dune).getByText(/1080p · 3.6 GB · watched 40%/)).toBeTruthy();
     // the switcher: the phone with its room and when it was seen, and this computer
@@ -169,9 +177,116 @@ describe('the downloads page', () => {
     );
     devices = [];
     await mount();
-    await waitFor(() => screen.getByText('Saved files', { selector: 'h2' }));
+    await waitFor(() => screen.getByRole('region', { name: 'Movies' }));
     expect(screen.getByText('Dune: Part Two', { selector: 'b' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Download again' })).toBeTruthy();
     expect(screen.getByText(/Get the SoulSync app on your phone/)).toBeTruthy();
+  });
+
+  it('files music by album and playlist, loose songs together, and sorts newest or a to z', async () => {
+    const track = (n: number, group: Record<string, unknown> | null, at: string) => ({
+      item_type: 'track',
+      item_id: String(n),
+      quality: '256',
+      size_bytes: 8e6,
+      state: 'downloaded',
+      title: `Song ${n}`,
+      subtitle: 'Band',
+      kind: 'audio',
+      group,
+      downloaded_at: at,
+    });
+    devices = [
+      {
+        ...PIXEL,
+        items: [
+          ...PIXEL.items,
+          track(1, { type: 'playlist', id: 'user:4', title: 'Road Trip' }, '2026-11-20T10:00:00Z'),
+          track(2, { type: 'playlist', id: 'user:4', title: 'Road Trip' }, '2026-11-20T10:00:00Z'),
+          track(3, { type: 'album', id: '9', title: 'Abbey Road' }, '2026-10-01T10:00:00Z'),
+          track(4, { type: 'track', id: '4', title: 'Song 4' }, '2026-11-01T10:00:00Z'),
+          track(5, null, '2026-11-02T10:00:00Z'),
+        ],
+      },
+    ];
+    await mount();
+    const music = await waitFor(() => screen.getByRole('region', { name: 'Music' }));
+    const cards = () =>
+      within(music)
+        .getAllByRole('region')
+        .map((r) => r.getAttribute('aria-label'));
+    // newest download first
+    expect(cards()).toEqual(['Road Trip', 'Songs', 'Abbey Road']);
+    expect(within(music).getByText(/^Playlist · 2 songs on Pixel 8/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('radio', { name: 'A-Z' }));
+    expect(cards()).toEqual(['Abbey Road', 'Road Trip', 'Songs']);
+    // loose songs go one by one
+    const songs = within(music).getByRole('region', { name: 'Songs' });
+    fireEvent.click(within(songs).getByRole('button', { name: 'Remove all' }));
+    fireEvent.click(
+      within(screen.getByRole('dialog', { name: 'Remove Songs?' })).getByRole('button', {
+        name: 'Remove all',
+      }),
+    );
+    await waitFor(() =>
+      expect(calls.filter((c) => c.url === 'player/offline/wishes').map((c) => c.body)).toEqual([
+        { device_id: 'pixel', action: 'remove', type: 'track', id: '5' },
+        { device_id: 'pixel', action: 'remove', type: 'track', id: '4' },
+      ]),
+    );
+  });
+
+  it('a section folds away and stays folded; a kind chip shows just that kind', async () => {
+    await mount();
+    const head = await waitFor(() => screen.getByRole('button', { name: /^Movies/ }));
+    expect(screen.getByRole('region', { name: 'Dune: Part Two' })).toBeTruthy();
+    fireEvent.click(head);
+    expect(head.getAttribute('aria-expanded')).toBe('false');
+    expect(screen.queryByRole('region', { name: 'Dune: Part Two' })).toBeNull();
+    expect(JSON.parse(localStorage.getItem('ss-downloads-view') ?? '{}').folded).toEqual([
+      'movies',
+    ]);
+    fireEvent.click(screen.getByRole('radio', { name: 'TV shows' }));
+    expect(screen.queryByRole('region', { name: 'Movies' })).toBeNull();
+    expect(screen.getByRole('region', { name: 'Severance' })).toBeTruthy();
+    // picking movies opens it, folded or not
+    fireEvent.click(screen.getByRole('radio', { name: 'Movies' }));
+    expect(screen.getByRole('region', { name: 'Dune: Part Two' })).toBeTruthy();
+  });
+
+  it('this computer files what it saved by its season, album or playlist', async () => {
+    const f = (n: number, group: Record<string, unknown>) => ({
+      item_type: 'track',
+      item_id: String(n),
+      quality: 'original',
+      size_bytes: 3e7,
+      title: `Song ${n}`,
+      saved_at: `2026-11-2${n}T10:00:00Z`,
+      group,
+    });
+    localStorage.setItem(
+      'ss-offline-saved',
+      JSON.stringify([
+        f(1, { type: 'playlist', id: 'mirror:8', title: 'Night Drive' }),
+        f(2, { type: 'playlist', id: 'mirror:8', title: 'Night Drive' }),
+        {
+          item_type: 'episode',
+          item_id: '101',
+          quality: 'phone',
+          size_bytes: 7e8,
+          title: 'S1 E1 · Pilot',
+          saved_at: '2026-11-20T10:00:00Z',
+          group: { type: 'season', id: '12:1', title: 'Severance', subtitle: 'Season 1' },
+        },
+      ]),
+    );
+    devices = [];
+    await mount();
+    const music = await waitFor(() => screen.getByRole('region', { name: 'Music' }));
+    const list = within(music).getByRole('region', { name: 'Night Drive' });
+    expect(within(list).getByText(/Playlist · 2 files/)).toBeTruthy();
+    const tv = screen.getByRole('region', { name: 'TV shows' });
+    expect(within(tv).getByRole('region', { name: 'Severance' })).toBeTruthy();
+    expect(within(tv).getByText('Season 1')).toBeTruthy();
   });
 });

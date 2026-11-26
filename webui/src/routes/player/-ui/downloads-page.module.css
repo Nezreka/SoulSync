@@ -26,6 +26,16 @@
   background: var(--gold);
 }
 
+.bar i[data-shelf='youtube'],
+.legend b[data-shelf='youtube'] {
+  background: var(--danger-light);
+}
+
+.bar i[data-shelf='home'],
+.legend b[data-shelf='home'] {
+  background: var(--wanted);
+}
+
 /* ── the device switcher ─────────────────────────────────────────────── */
 
 .devices {
@@ -244,6 +254,145 @@
   gap: calc(var(--u) * 0.3);
 }
 
+/* the kind chips on the left, newest first or a to z on the right */
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--u) * 0.6);
+}
+
+.sortBy {
+  display: flex;
+  gap: calc(var(--u) * 0.3);
+  margin-left: auto;
+}
+
+/* a kind of thing: a heading that folds it away, then its cards */
+.kind {
+  display: grid;
+  gap: calc(var(--u) * 0.2);
+}
+
+.kindHead {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 0.65);
+  width: 100%;
+  min-height: calc(var(--u) * 3);
+  padding: calc(var(--u) * 0.5) calc(var(--u) * 0.7);
+  border: 1px solid var(--white-a06);
+  border-radius: var(--radius-lg);
+  background: var(--white-a03);
+  color: var(--pl-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--dur-fast) ease;
+}
+
+.kindHead:hover {
+  background: var(--white-a06);
+}
+
+.kindHead b {
+  font-size: calc(var(--u) * 1.05);
+  font-weight: 750;
+  letter-spacing: -0.01em;
+}
+
+.kindIcon {
+  display: grid;
+  flex: none;
+  width: calc(var(--u) * 1.9);
+  height: calc(var(--u) * 1.9);
+  place-items: center;
+  border-radius: var(--radius-md);
+  background: var(--white-a06);
+  color: var(--pl-text-2);
+}
+
+.kindIcon svg {
+  width: calc(var(--u) * 1.05);
+  height: calc(var(--u) * 1.05);
+}
+
+.kindIcon[data-shelf='tv'] {
+  color: var(--info);
+}
+
+.kindIcon[data-shelf='movies'] {
+  color: var(--accent-light);
+}
+
+.kindIcon[data-shelf='youtube'] {
+  color: var(--danger-light);
+}
+
+.kindIcon[data-shelf='music'] {
+  color: var(--warning);
+}
+
+.kindIcon[data-shelf='books'] {
+  color: var(--hires);
+}
+
+.kindIcon[data-shelf='podcasts'] {
+  color: var(--gold);
+}
+
+.kindIcon[data-shelf='home'] {
+  color: var(--wanted);
+}
+
+.kindCount {
+  overflow: hidden;
+  color: var(--pl-text-3);
+  font-size: calc(var(--u) * 0.84);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chev {
+  display: grid;
+  margin-left: auto;
+  color: var(--pl-text-3);
+  transition: transform var(--dur-fast) ease;
+}
+
+.chev svg {
+  width: calc(var(--u) * 1.1);
+  height: calc(var(--u) * 1.1);
+}
+
+.kindHead[aria-expanded='false'] .chev {
+  transform: rotate(-90deg);
+}
+
+.kindBody {
+  display: grid;
+  gap: calc(var(--u) * 0.2);
+  padding: 0 calc(var(--u) * 0.2);
+}
+
+/* a show's season inside its card */
+.season {
+  display: grid;
+  gap: 2px;
+}
+
+.season + .season {
+  margin-top: calc(var(--u) * 0.5);
+}
+
+.seasonTitle {
+  padding: calc(var(--u) * 0.3) 0 calc(var(--u) * 0.15) calc(var(--u) * 0.55);
+  color: var(--pl-text-2);
+  font-size: calc(var(--u) * 0.8);
+  font-weight: 700;
+}
+
 .sectionTitle {
   margin: 0 0 calc(var(--u) * 0.3);
   color: var(--pl-text-3);
@@ -280,6 +429,16 @@
 
 .art[data-shape='square'] {
   height: calc(var(--u) * 3.6);
+}
+
+.art[data-shape='wide'] {
+  width: calc(var(--u) * 5.6);
+  height: calc(var(--u) * 3.15);
+}
+
+.art > .noArt {
+  position: absolute;
+  inset: 0;
 }
 
 .art img,
@@ -587,5 +746,13 @@
 
   .wifi {
     margin-left: 0;
+  }
+
+  .sortBy {
+    margin-left: 0;
+  }
+
+  .seasonTitle {
+    padding-left: 0;
   }
 }

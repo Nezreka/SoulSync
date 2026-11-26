@@ -181,6 +181,7 @@ export function DownloadSheet({
           artwork: it.artwork ?? p.artwork,
           quality: picked.id,
           group: itemKey(type, id),
+          groupInfo: { type, id, title: p.title, subtitle: p.subtitle, artwork: p.artwork },
         })),
       );
       return;
