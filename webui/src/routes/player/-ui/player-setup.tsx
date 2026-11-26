@@ -17,7 +17,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 
-import { apiClient } from '@/app/api-client';
+import { apiClient, refusalText } from '@/app/api-client';
 import { appURL } from '@/platform/url-base';
 
 import { posterSet } from '../-lib/images';
@@ -280,15 +280,7 @@ function PlayerSetup({ data, firstTime }: { data: SetupPayload; firstTime: boole
       ]);
       closePlayerSetup();
     } catch (e) {
-      let message = 'Could not save. Try again in a moment.';
-      try {
-        const res = (e as { response?: Response }).response;
-        const body = res ? ((await res.json()) as { error?: string; message?: string }) : null;
-        message = body?.message ?? body?.error ?? message;
-      } catch {
-        // the plain message stands
-      }
-      setError(message);
+      setError(await refusalText(e, 'Could not save. Try again in a moment.'));
     } finally {
       setBusy(false);
     }

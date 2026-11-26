@@ -2247,6 +2247,8 @@ def player_setup_put():
             player_setup.put(db, plain)
         return player_setup_get()
     except (player_libraries.LibraryError, player_setup.SetupError) as e:
+        # said in the log too: the page shows it, but a person may only see the 400
+        logger.warning("player setup save refused: %s", e)
         return _bad(e)
     except Exception:  # noqa: BLE001
         return _failed("player setup save")
