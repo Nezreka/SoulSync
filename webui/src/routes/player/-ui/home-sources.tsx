@@ -32,6 +32,16 @@ function scanWords(src: HomeSources): string {
   }`.trim();
 }
 
+/** a folder's count; clips the server also gives are said, not hidden */
+export function folderWords(f: { videos: number; shared?: number; shared_with?: string | null }) {
+  const plural = (n: number) => `${n.toLocaleString()} ${n === 1 ? 'video' : 'videos'}`;
+  const shared = f.shared ?? 0;
+  if (!shared) return plural(f.videos);
+  const where = f.shared_with ? `in ${f.shared_with}` : 'from your server';
+  if (!f.videos) return `${plural(shared)}, all already ${where}, so counted there`;
+  return `${plural(f.videos + shared)} · ${shared.toLocaleString()} already ${where}`;
+}
+
 export function HomeSourcesPanel({ onChanged }: { onChanged?: () => void }) {
   const queryClient = useQueryClient();
   const sources = useQuery({
@@ -160,11 +170,7 @@ export function HomeSourcesPanel({ onChanged }: { onChanged?: () => void }) {
               </span>
               <span className={s.homeText}>
                 <b title={f.path}>{f.path}</b>
-                <span className={s.muted}>
-                  {reading
-                    ? scanWords(src)
-                    : `${f.videos.toLocaleString()} ${f.videos === 1 ? 'video' : 'videos'}`}
-                </span>
+                <span className={s.muted}>{reading ? scanWords(src) : folderWords(f)}</span>
                 {reading ? (
                   <span className={s.homeBar} aria-hidden="true">
                     <i />

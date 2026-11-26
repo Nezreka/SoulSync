@@ -536,6 +536,33 @@ def _server_identities(db, server_roots: List[str]) -> Tuple[set, set]:
     return ids, paths
 
 
+TWINS_KEY = "home_twins"
+
+
+def _note_twins(db, root: str, count: int, server_label: str) -> None:
+    """how many of a folder's clips are a server's over again, so setup can
+    say "58 videos, already in Home Videos", not "0 videos"."""
+    import json
+    try:
+        have = json.loads(db.get_setting(TWINS_KEY) or "{}")
+        if count > 0:
+            have[root] = {"count": int(count), "with": server_label}
+        else:
+            have.pop(root, None)
+        db.set_setting(TWINS_KEY, json.dumps(have))
+    except Exception:  # noqa: BLE001 - only words on a card
+        logger.debug("home twins note failed", exc_info=True)
+
+
+def twins(db) -> Dict[str, Dict[str, Any]]:
+    import json
+    try:
+        got = json.loads(db.get_setting(TWINS_KEY) or "{}")
+        return got if isinstance(got, dict) else {}
+    except (ValueError, TypeError):
+        return {}
+
+
 def _drop_twins(conn, disk_root: str, ids: set, paths: set) -> int:
     """a folder's rows that are a server's clips over again, gone: unless
     someone edited one, then it stays as theirs"""
@@ -582,6 +609,8 @@ def scan(db, *, only: Optional[str] = None, server_source: Any = None) -> Dict[s
                     if len(found) != before:
                         logger.info("home videos: %s holds %d clips a server already gave, kept once",
                                     root["label"], before - len(found))
+                    _note_twins(db, root["id"], before - len(found),
+                                next((r["label"] for r in all_roots if r["source"] != "disk"), ""))
                     c2 = db._get_connection()
                     try:
                         _drop_twins(c2, root["id"], ids, paths)

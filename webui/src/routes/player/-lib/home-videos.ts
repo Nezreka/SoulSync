@@ -82,7 +82,13 @@ export interface HomeEdit {
 export interface HomeSources {
   server: 'plex' | 'jellyfin' | null;
   libraries: { title: string; count: number | null; on: boolean; root: string; videos?: number }[];
-  folders: { path: string; root: string; videos: number }[];
+  folders: {
+    path: string;
+    root: string;
+    videos: number;
+    shared?: number;
+    shared_with?: string | null;
+  }[];
   error?: string | null;
   scan: HomeScan;
 }
