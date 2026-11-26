@@ -10,7 +10,13 @@
 
 import { appURL } from '@/platform/url-base';
 
-import type { CatalogMovie, CatalogShow, CatalogYoutube, VideoCatalog } from '../-player.types';
+import type {
+  CatalogHome,
+  CatalogMovie,
+  CatalogShow,
+  CatalogYoutube,
+  VideoCatalog,
+} from '../-player.types';
 import type { GuideItem, ScheduleOptions } from './schedule';
 
 import { youtubeThumb } from './images';
@@ -105,6 +111,19 @@ export function episodeItems(show: CatalogShow): GuideItem[] {
   }));
   episodeCache.set(show, items);
   return items;
+}
+
+/** a home video as a guide item */
+export function homeGuideItem(video: CatalogHome): GuideItem {
+  return {
+    key: `home:${video.id}`,
+    title: video.title,
+    subtitle: video.album || undefined,
+    seconds: video.duration_s ?? 0,
+    art: video.thumb_url ? appURL(video.thumb_url) : null,
+    kind: 'home',
+    href: '/player/home-videos',
+  };
 }
 
 export function youtubeItem(video: CatalogYoutube): GuideItem {
@@ -218,6 +237,14 @@ export function autoChannels(
     kind: 'type',
     blurb: 'your downloaded videos',
     pool: youtube.map(youtubeItem),
+  });
+  // home libraries an admin switched into the guide (off by default)
+  add(out, {
+    id: 'type-home',
+    name: 'Home videos',
+    kind: 'type',
+    blurb: 'your own clips',
+    pool: (catalog.home ?? []).map(homeGuideItem),
   });
   const music = musicTypeChannel(tracks);
   if (music) out.push(music);

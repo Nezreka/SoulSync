@@ -204,6 +204,42 @@ function OtherTv() {
   );
 }
 
+/** the home video libraries, each with a Scan switch: read into the player's
+ *  home videos, never matched or renamed (core/video/home_videos.py) */
+function HomeLibraries() {
+  const { libs } = useVideoServer();
+  const home = libs?.home ?? [];
+  const tick = (title: string, on: boolean) => {
+    if (!libs) return;
+    const rest = (libs.homeMore ?? []).filter((t) => t !== title);
+    void videoServer.setLibs({ homeMore: on ? [...rest, title] : rest });
+  };
+  if (!home.length) return null;
+  return (
+    <div data-video-lib-home-row="">
+      {home.map((l) => (
+        <Row
+          key={l.title}
+          sub
+          field
+          label={l.title}
+          help={`Home videos${l.count != null ? ` (${l.count.toLocaleString()})` : ''}. Scan reads them into the player's Home videos, never looked up or renamed.`}
+        >
+          <label className={s.inlineSwitch}>
+            Scan
+            <Switch
+              data-video-lib-home-scan={l.title}
+              aria-label={`Scan ${l.title} as home videos`}
+              checked={(libs!.homeMore ?? []).includes(l.title)}
+              onChange={(event) => tick(l.title, event.target.checked)}
+            />
+          </label>
+        </Row>
+      ))}
+    </div>
+  );
+}
+
 /** plex and jellyfin as one library: shown only with both connected */
 function LinkServers() {
   const { links } = useVideoServer();
@@ -306,6 +342,7 @@ export function VideoServerConnection({ onView }: { onView?: () => void }) {
             <OtherMovies />
             <LibraryRow kind="tv" />
             <OtherTv />
+            <HomeLibraries />
             <LinkServers />
           </div>
           <p className={s.cardFoot}>

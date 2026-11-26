@@ -34,6 +34,8 @@ PLEX_SCAN_TIMEOUT = 120
 _plex_srv_cache: Dict[str, Any] = {"srv": None, "at": 0.0, "key": ""}
 _plex_status_cache: Dict[str, Any] = {"srv": None, "at": 0.0, "key": ""}
 _plex_cache_lock = threading.RLock()
+# the agents of a plex library that is never matched ("other videos", personal media)
+PLEX_HOME_AGENTS = ("com.plexapp.agents.none", "tv.plex.agents.none")
 
 
 def invalidate_video_source_cache() -> None:
@@ -684,7 +686,50 @@ class PlexVideoSource:
         return {
             "movies": [{"title": s.title} for s in self._sections("movie")],
             "tv": [{"title": s.title} for s in self._sections("show")],
+            "home": [{"title": s.title, "count": int(getattr(s, "totalSize", 0) or 0)}
+                     for s in self.home_sections()],
         }
+
+    def home_sections(self, name=None):
+        """the "other videos" / personal media libraries: a movie library
+        with no agent, which plex never matches"""
+        secs = [s for s in self._server.library.sections()
+                if s.type == "movie" and str(getattr(s, "agent", "") or "") in PLEX_HOME_AGENTS]
+        if name is not None:
+            names = _title_list(name)
+            secs = [s for s in secs if s.title in names]
+        return secs
+
+    def iter_home(self, title):
+        """every clip in one home video library: (its folders, [item]) as
+        core/video/home_videos.py reads them. raises when it can't be read,
+        so nothing is marked missing for a library that didn't answer."""
+        secs = self.home_sections(title)
+        if not secs:
+            raise LookupError("Plex has no home video library called %s" % title)
+        section = secs[0]
+        roots = [str(loc) for loc in (getattr(section, "locations", None) or [])]
+        items = []
+        for v in section.all():
+            media = (getattr(v, "media", None) or [None])[0]
+            part = ((getattr(media, "parts", None) or [None])[0]) if media is not None else None
+            if part is None or not getattr(part, "file", None):
+                continue
+            dur = getattr(v, "duration", None)
+            items.append({
+                "source_key": str(v.ratingKey),
+                "path": str(part.file),
+                "stream_key": getattr(part, "key", None),
+                "size_bytes": int(getattr(part, "size", 0) or 0) or None,
+                "server_title": getattr(v, "title", None),
+                "server_date": _iso_dt(getattr(v, "originallyAvailableAt", None)),
+                "duration_s": (dur / 1000.0) if dur else None,
+                "width": _to_int(getattr(media, "width", None)),
+                "height": _to_int(getattr(media, "height", None)),
+                "video_codec": getattr(media, "videoCodec", None),
+                "audio_codec": getattr(media, "audioCodec", None),
+            })
+        return roots, items
 
     def library_folders(self) -> list:
         """every folder the picked libraries read, the way plex sees it:
@@ -1538,7 +1583,54 @@ class JellyfinVideoSource:
         return {
             "movies": [{"title": v.get("Name")} for v in self._views("movies")],
             "tv": [{"title": v.get("Name")} for v in self._views("tvshows")],
+            "home": [{"title": v.get("Name"), "count": v.get("ChildCount")} for v in self.home_views()],
         }
+
+    def home_views(self, name=None):
+        """the libraries made as "home videos and photos" """
+        resp = self._req(f"/Users/{self.uid}/Views") or {}
+        views = [v for v in resp.get("Items", [])
+                 if (v.get("CollectionType") or "").lower() == "homevideos"]
+        if name is not None:
+            names = _title_list(name)
+            views = [v for v in views if v.get("Name") in names]
+        return views
+
+    def iter_home(self, title):
+        """every clip in one home video library: (its folders, [item]).
+        raises when it can't be read (see PlexVideoSource.iter_home)."""
+        views = self.home_views(title)
+        if not views:
+            raise LookupError("Jellyfin has no home video library called %s" % title)
+        view = views[0]
+        roots = []
+        for v in self._req("/Library/VirtualFolders") or []:
+            if isinstance(v, dict) and v.get("Name") == view.get("Name"):
+                roots = [str(x) for x in v.get("Locations") or []]
+        items = []
+        params = {"ParentId": view.get("Id"), "Recursive": "true", "IncludeItemTypes": "Video,Movie",
+                  "Fields": "Path,MediaSources,PremiereDate,DateCreated"}
+        for it in self._paged(f"/Users/{self.uid}/Items", params):
+            f = self._file(it)
+            if not f or not f.get("relative_path"):
+                continue
+            src = (it.get("MediaSources") or [{}])[0]
+            vid = next((x for x in src.get("MediaStreams") or [] if x.get("Type") == "Video"), {})
+            ticks = it.get("RunTimeTicks")
+            items.append({
+                "source_key": str(it.get("Id")),
+                "path": f["relative_path"],
+                "stream_key": None,
+                "size_bytes": f.get("size_bytes"),
+                "server_title": it.get("Name"),
+                "server_date": _iso_dt(it.get("PremiereDate")),
+                "duration_s": (ticks / 10_000_000) if ticks else None,
+                "width": _to_int(vid.get("Width")),
+                "height": _to_int(vid.get("Height")),
+                "video_codec": f.get("video_codec"),
+                "audio_codec": f.get("audio_codec"),
+            })
+        return roots, items
 
     def library_folders(self) -> list:
         """every folder the picked libraries read, the way jellyfin sees it

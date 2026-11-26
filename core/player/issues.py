@@ -16,6 +16,7 @@ ALLOWED_ITEM_TYPES = frozenset({
     "movie",
     "episode",
     "youtube",
+    "home",
     "track",
     "podcast",
     "podcast_episode",

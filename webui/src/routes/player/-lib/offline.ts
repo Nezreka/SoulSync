@@ -17,13 +17,22 @@ import { formatBytes } from './downloads';
 export { formatBytes };
 
 export type OfflineKind = 'video' | 'audio';
-export type ItemType = 'movie' | 'episode' | 'youtube' | 'track' | 'audiobook' | 'podcast_episode';
+export type ItemType =
+  | 'movie'
+  | 'episode'
+  | 'youtube'
+  | 'home'
+  | 'track'
+  | 'audiobook'
+  | 'podcast_episode';
 export type GroupType =
   | 'movie'
   | 'episode'
   | 'season'
   | 'show'
   | 'youtube'
+  | 'home'
+  | 'home_album'
   | 'track'
   | 'album'
   | 'artist'

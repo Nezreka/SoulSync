@@ -103,9 +103,9 @@ function VideoPath({
 }
 
 /** the extra folders of one kind: rows of their own, saved when left */
-function ExtraPaths({ kind }: { kind: 'movies' | 'tv' }) {
+function ExtraPaths({ kind }: { kind: 'movies' | 'tv' | 'home' }) {
   const { config, loads } = useVideoDownloads();
-  const key = `${kind}_additional_paths`;
+  const key = kind === 'home' ? 'home_paths' : `${kind}_additional_paths`;
   const rows = (config?.[key] as string[] | undefined) || [];
   const commitAll = useCommit<HTMLDivElement>(() => void videoDownloads.save());
   return (
@@ -120,9 +120,21 @@ function ExtraPaths({ kind }: { kind: 'movies' | 'tv' }) {
       onAdd={(next) => {
         if (loads) videoDownloads.edit({ [key]: next });
       }}
-      placeholder={kind === 'movies' ? '/media/movies2' : '/media/tv2'}
-      itemLabel={kind === 'movies' ? 'Additional movie library path' : 'Additional TV library path'}
-      check={checkAttrs('video', kind === 'movies' ? 'Movie folder' : 'TV folder', 'existing')}
+      placeholder={
+        kind === 'movies' ? '/media/movies2' : kind === 'tv' ? '/media/tv2' : '/media/family-videos'
+      }
+      itemLabel={
+        kind === 'movies'
+          ? 'Additional movie library path'
+          : kind === 'tv'
+            ? 'Additional TV library path'
+            : 'Home videos folder'
+      }
+      check={checkAttrs(
+        'video',
+        kind === 'movies' ? 'Movie folder' : kind === 'tv' ? 'TV folder' : 'Home videos folder',
+        'existing',
+      )}
       addAttrs={{ 'data-video-add-path': kind }}
     />
   );
@@ -1373,6 +1385,16 @@ export function VideoFolders({ docker }: { docker: boolean | null }) {
         </Row>
         <Row stack label="TV folders">
           <ExtraPaths kind="tv" />
+        </Row>
+      </Card>
+
+      <SectionLabel
+        title="Home videos folders"
+        hint="Clips from your phone or camera, for the player's Home videos. Never looked up or renamed; each folder becomes an album. Read straight off the disk, with or without a media server."
+      />
+      <Card>
+        <Row stack label="Folders">
+          <ExtraPaths kind="home" />
         </Row>
       </Card>
 

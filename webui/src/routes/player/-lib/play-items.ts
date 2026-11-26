@@ -185,6 +185,7 @@ const GUIDE_TYPES: ReadonlySet<string> = new Set([
   'movie',
   'episode',
   'youtube',
+  'home',
   'track',
   'commercial',
 ]);

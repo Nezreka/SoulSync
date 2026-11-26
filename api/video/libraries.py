@@ -2,7 +2,7 @@
 
 GET  /api/video/libraries -> discover the active server's Movies/TV libraries
                              + the user's current selection.
-POST /api/video/libraries -> save {movies, movies_more?, tv, tv_more?, anime?}
+POST /api/video/libraries -> save {movies, movies_more?, tv, tv_more?, anime?, home_more?}
                              (library titles) for the active server. The scanner
                              then reads only those: each main pick plus its
                              ``*_more`` list. ``anime``
@@ -424,7 +424,11 @@ def register_routes(bp):
             get_video_db().set_library_selection(
                 server, body.get("movies"), body.get("tv"),
                 tv_more=listed("tv_more"), anime=listed("anime"),
-                movies_more=listed("movies_more"))
+                movies_more=listed("movies_more"), home_more=listed("home_more"))
+            if listed("home_more") is not None:
+                # a home video library switched on is read now, not at the next scan
+                from core.video import home_videos
+                home_videos.scan_async(get_video_db())
             # the folders list follows the picks at once, not in 10 minutes
             from core.video import drive_map
             drive_map.forget_server_folders()

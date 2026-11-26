@@ -130,7 +130,7 @@ def test_folders_move_into_named_libraries_and_titles_follow(db, vdb):
     (_two_defaults([{"kind": "movie", "name": "A", "folders": ["/media/kids"]},
                     {"kind": "movie", "name": "B", "folders": ["/media/kids"]}]), "in two libraries"),
     (_two_defaults([{"kind": "movie", "name": "movies", "folders": []}]), "two libraries are called"),
-    (_two_defaults([{"kind": "book", "name": "X", "folders": []}]), "of movies or of shows"),
+    (_two_defaults([{"kind": "book", "name": "X", "folders": []}]), "of movies, shows or home videos"),
     (_two_defaults([{"kind": "movie", "name": "  ", "folders": []}]), "1 to 60"),
     (_two_defaults([{"id": 99, "kind": "movie", "name": "X", "folders": []}]), "no such library"),
     (_two_defaults([{"kind": "show", "name": "X", "folders": ["/media/kids"]}]), "not one of the TV folders"),
@@ -252,13 +252,14 @@ def test_hidden_libraries_ride_on_whatever_cap_the_profile_has(monkeypatch):
 
 def test_setup_is_not_done_until_an_admin_says_so_and_is_checked(db):
     from core.player import setup as ps
-    assert ps.get(db) == {"done": False, "server_name": "", "sidebar_order": [], "sidebar_hidden": []}
+    assert ps.get(db) == {"done": False, "server_name": "", "sidebar_order": [], "sidebar_hidden": [],
+                          "home_editors": "admins"}
     out = ps.put(db, {"server_name": "  The   Den ", "done": True, "sidebar_hidden": ["/player/podcasts"],
                       "sidebar_order": ["/player/tv", "/player/movies"]})
     assert out == {"done": True, "server_name": "The Den", "sidebar_order": ["/player/tv", "/player/movies"],
-                   "sidebar_hidden": ["/player/podcasts"]}
+                   "sidebar_hidden": ["/player/podcasts"], "home_editors": "admins"}
     for bad in ({"done": "yes"}, {"server_name": "x" * 61}, {"sidebar_hidden": ["/player"]},
-                {"sidebar_order": ["nope"]}, {"colour": "red"}, "x"):
+                {"sidebar_order": ["nope"]}, {"colour": "red"}, {"home_editors": "kids"}, "x"):
         with pytest.raises(ps.SetupError):
             ps.put(db, bad)
     assert ps.get(db)["server_name"] == "The Den"

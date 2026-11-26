@@ -9,6 +9,7 @@ export type ItemType =
   | 'movie'
   | 'episode'
   | 'youtube'
+  | 'home'
   | 'audiobook'
   | 'podcast_episode'
   | 'commercial';
@@ -47,6 +48,7 @@ export const MEDIA_KIND: Record<ItemType, MediaKind> = {
   movie: 'video',
   episode: 'video',
   youtube: 'video',
+  home: 'video',
   commercial: 'video',
 };
 

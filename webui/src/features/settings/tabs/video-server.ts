@@ -42,6 +42,9 @@ export interface Libraries {
   /** the other TV libraries ticked Scan, and those ticked Anime */
   tvMore: string[];
   anime: string[];
+  /** home video libraries (plex "other videos", jellyfin "home videos") and those ticked Scan */
+  home: (Library & { count?: number | null })[];
+  homeMore: string[];
 }
 
 /** plex and jellyfin as one library (core/video/server_links.py) */
@@ -120,8 +123,14 @@ export function connNote(
 
 /** the other TV libraries (the main pick is always scanned) */
 export const otherTv = (libs: Libraries) => libs.tv.filter((l) => l.title && l.title !== libs.show);
+/** a home video library isn't offered as a movie one, unless it already is one */
 export const otherMovies = (libs: Libraries) =>
-  libs.movies.filter((l) => l.title && l.title !== libs.movie);
+  libs.movies.filter(
+    (l) =>
+      l.title &&
+      l.title !== libs.movie &&
+      (!(libs.home ?? []).some((h) => h.title === l.title) || libs.moviesMore.includes(l.title)),
+  );
 
 const toast = (message: string, type: string) =>
   (window as Window & { showToast?: (m: string, t: string) => void }).showToast?.(message, type);
@@ -248,7 +257,9 @@ function createVideoServer() {
             error?: string;
             movies?: Library[];
             tv?: Library[];
+            home?: (Library & { count?: number | null })[];
             selected?: {
+              home_more?: string[];
               movies?: string;
               movies_more?: string[];
               tv?: string;
@@ -270,6 +281,8 @@ function createVideoServer() {
         moviesMore: sel.movies_more || [],
         tvMore: sel.tv_more || [],
         anime: sel.anime || [],
+        home: d.home || [],
+        homeMore: sel.home_more || [],
       };
       // a pick the server no longer lists shows None, as the page's select did
       if (!libs.movies.some((l) => l.title === libs.movie)) libs.movie = '';
@@ -340,7 +353,17 @@ function createVideoServer() {
     try {
       const r = await fetch(
         LIBS_URL,
-        json({ movies: l.movie, movies_more: moviesMore, tv: l.show, tv_more: tvMore, anime }),
+        json({
+          movies: l.movie,
+          movies_more: moviesMore,
+          tv: l.show,
+          tv_more: tvMore,
+          anime,
+          // only a server that has home video libraries sends the list
+          ...((l.home ?? []).length
+            ? { home_more: (l.homeMore ?? []).filter((t) => l.home.some((h) => h.title === t)) }
+            : {}),
+        }),
       );
       await r.json();
       set({ status: 'Saved' });

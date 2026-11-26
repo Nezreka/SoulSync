@@ -48,6 +48,7 @@ KIND_PERMISSIONS: Dict[str, Tuple[str, ...]] = {
     "movie": ("movies.access",),
     "episode": ("tv.access",),
     "youtube": ("movies.access", "tv.access"),
+    "home": ("movies.access", "tv.access"),
     "audiobook": ("books.access",),
     "podcast_episode": ("podcasts.access",),
 }

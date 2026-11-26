@@ -7,15 +7,29 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-const state: { payload: unknown; saved: unknown } = { payload: null, saved: null };
+const NO_SOURCES = { server: null, libraries: [], folders: [], scan: { state: 'idle' } };
+const state: { payload: unknown; saved: unknown; sources: unknown; homePuts: unknown[] } = {
+  payload: null,
+  saved: null,
+  sources: NO_SOURCES,
+  homePuts: [],
+};
 
 vi.mock('@/app/api-client', () => ({
+  refusalText: async (_e: unknown, fallback: string) => fallback,
   apiClient: {
-    get: () => ({ json: async () => state.payload }),
-    put: (_url: string, opts: { json: unknown }) => {
+    get: (url: string) => ({
+      json: async () => (url.includes('home/sources') ? state.sources : state.payload),
+    }),
+    put: (url: string, opts: { json: unknown }) => {
+      if (url.includes('home/sources')) {
+        state.homePuts.push(opts.json);
+        return Object.assign(Promise.resolve({}), { json: async () => state.sources });
+      }
       state.saved = opts.json;
-      return Promise.resolve({});
+      return Object.assign(Promise.resolve({}), { json: async () => ({}) });
     },
+    post: () => ({ json: async () => ({ ok: true, message: 'Found 48 videos.', videos: 48 }) }),
   },
 }));
 vi.mock('@tanstack/react-router', () => ({
@@ -61,6 +75,8 @@ const next = () => fireEvent.click(screen.getByRole('button', { name: /^Next/ })
 afterEach(() => {
   state.payload = null;
   state.saved = null;
+  state.sources = NO_SOURCES;
+  state.homePuts = [];
 });
 
 describe('player setup', () => {
@@ -96,6 +112,7 @@ describe('player setup', () => {
     const kids = [...pick.options].find((o) => o.textContent === 'Kids')!;
     fireEvent.change(pick, { target: { value: kids.value } });
     next(); // tv
+    next(); // home videos
     next(); // people
     fireEvent.click(screen.getByLabelText('Kid can see Movies'));
     next(); // sidebar
@@ -108,10 +125,11 @@ describe('player setup', () => {
       server_name: 'The Den',
       sidebar_order: [],
       sidebar_hidden: ['/player/podcasts'],
+      home_editors: 'admins',
       libraries: [
-        { id: 1, kind: 'movie', name: 'Movies', folders: [] },
-        { id: 2, kind: 'show', name: 'TV Shows', folders: [] },
-        { kind: 'movie', name: 'Kids', folders: ['/media/kids'] },
+        { id: 1, kind: 'movie', name: 'Movies', in_guide: true, folders: [] },
+        { id: 2, kind: 'show', name: 'TV Shows', in_guide: true, folders: [] },
+        { kind: 'movie', name: 'Kids', in_guide: true, folders: ['/media/kids'] },
       ],
       hidden: { '1': [3], '2': [], 'new:2': [] },
     });
@@ -126,6 +144,7 @@ describe('player setup', () => {
     const names = screen.getAllByLabelText('Library name') as HTMLInputElement[];
     fireEvent.change(names[0], { target: { value: 'Cam Movies' } });
     next(); // tv
+    next(); // home videos
     next(); // people
     next(); // sidebar
     // it is there, by its name, and can be switched off like any other place
@@ -167,6 +186,7 @@ describe('the setup screen itself', () => {
     await waitFor(() => expect(screen.getByText('Let’s set up your player')).toBeTruthy());
     next(); // movies
     next(); // tv
+    next(); // home videos
     next(); // people
     fireEvent.click(screen.getByLabelText('Kid can see TV Shows'));
     const preview = screen.getByRole('complementary', { name: 'Live preview' });
@@ -243,5 +263,124 @@ describe('coming back to it later', () => {
     expect(await screen.findByText('How should movies be grouped?')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Close' })).toBeInTheDocument();
+  });
+});
+
+describe('home videos in setup', () => {
+  const plex = (on: boolean) => ({
+    server: 'plex',
+    libraries: [
+      { title: 'Home Videos', count: 412, on, root: 'plex:home videos', videos: on ? 412 : 0 },
+    ],
+    folders: [],
+    scan: { state: 'idle' },
+  });
+  const withHome = () => {
+    const base = admin(false);
+    return {
+      ...base,
+      libraries: [
+        ...base.libraries,
+        {
+          id: 7,
+          kind: 'home',
+          name: 'Home videos',
+          is_default: true,
+          in_guide: false,
+          folders: [],
+        },
+      ],
+      folders: {
+        ...base.folders,
+        home: [
+          {
+            folder: 'plex:home videos',
+            path: 'Home Videos',
+            label: 'Home Videos',
+            source: 'plex',
+            titles: 412,
+            sample: [],
+            library_id: 7,
+          },
+          {
+            folder: '/media/family',
+            path: '/media/family',
+            label: 'family',
+            source: 'disk',
+            titles: 58,
+            sample: [],
+            library_id: 7,
+          },
+        ],
+      },
+    };
+  };
+
+  it('offers the server’s home video library and adds it from the wizard', async () => {
+    state.payload = admin(false);
+    state.sources = plex(false);
+    await mount();
+    await waitFor(() => expect(screen.getByText('Let’s set up your player')).toBeTruthy());
+    next(); // movies
+    next(); // tv
+    next(); // home videos
+    await waitFor(() => expect(screen.getByText('Plex has Home Videos')).toBeTruthy());
+    expect(screen.getByText('412 videos')).toBeTruthy();
+    // no home library yet: nothing to group
+    expect(screen.queryByLabelText(/is in the guide/)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Add it' }));
+    await waitFor(() => expect(state.homePuts).toEqual([{ home_more: ['Home Videos'] }]));
+  });
+
+  it('adds a folder once its check says it can be read', async () => {
+    state.payload = admin(false);
+    await mount();
+    await waitFor(() => expect(screen.getByText('Let’s set up your player')).toBeTruthy());
+    next();
+    next();
+    next(); // home videos
+    const add = await screen.findByRole('button', { name: 'Add' });
+    expect((add as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText('A folder of home videos'), {
+      target: { value: '/media/family' },
+    });
+    await waitFor(() => expect(screen.getByText('Found 48 videos.')).toBeTruthy(), {
+      timeout: 2000,
+    });
+    fireEvent.click(add);
+    await waitFor(() => expect(state.homePuts).toEqual([{ folders: ['/media/family'] }]));
+  });
+
+  it('groups home videos like the others: out of the guide, renamable, in who sees what', async () => {
+    state.payload = withHome();
+    state.sources = plex(true);
+    await mount();
+    await waitFor(() => expect(screen.getByText('Let’s set up your player')).toBeTruthy());
+    next();
+    next();
+    next(); // home videos
+    await waitFor(() => expect(screen.getByText('Added · 412 videos')).toBeTruthy());
+    const guide = screen.getByLabelText('Home videos is in the guide');
+    expect(guide.getAttribute('aria-pressed')).toBe('false');
+    // the main home library can be renamed
+    const name = screen.getAllByLabelText('Library name')[0] as HTMLInputElement;
+    expect(name.value).toBe('Home videos');
+    fireEvent.change(name, { target: { value: 'Our family' } });
+    // the folder goes to its own library
+    const pick = screen.getByLabelText('Library for /media/family') as HTMLSelectElement;
+    fireEvent.change(pick, { target: { value: '+' } });
+    next(); // people
+    expect(screen.getByLabelText('Kid can see Our family')).toBeTruthy();
+    expect(screen.getByRole('note').textContent).toContain('guests');
+    next(); // sidebar
+    expect(screen.getByLabelText('Family is in the sidebar')).toBeTruthy();
+    next(); // done
+    fireEvent.click(screen.getByRole('button', { name: 'Finish' }));
+    await waitFor(() => expect(state.saved).not.toBeNull());
+    const saved = state.saved as { libraries: Record<string, unknown>[] };
+    expect(saved.libraries.filter((l) => l.kind === 'home')).toEqual([
+      { id: 7, kind: 'home', name: 'Our family', in_guide: false, folders: [] },
+      { kind: 'home', name: 'Family', in_guide: false, folders: ['/media/family'] },
+    ]);
   });
 });

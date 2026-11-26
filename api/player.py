@@ -217,14 +217,39 @@ def _library_of(video_db):
 
 def _visible_libraries(sees_movies=True, sees_shows=True):
     """the video libraries this profile can see, as the player lists them.
-    never fails a page: no libraries is the player as it always was."""
+    never fails a page: no libraries is the player as it always was. a home
+    video library shows while there are home videos to put in it."""
     try:
         from core.player import libraries as player_libraries
         kinds = [k for k, on in (("movie", sees_movies), ("show", sees_shows)) if on]
+        if (sees_movies or sees_shows) and _has_home_roots():
+            kinds.append("home")
         return player_libraries.visible(player_db(), _profile(), is_admin=_is_player_admin(), kinds=kinds)
     except Exception:  # noqa: BLE001
         logger.exception("player libraries failed")
         return []
+
+
+def _has_home_roots():
+    try:
+        from core.video import home_videos
+        return bool(home_videos.roots(get_video_db()))
+    except Exception:  # noqa: BLE001 - no home videos is the player as it was
+        logger.debug("home video roots unreadable", exc_info=True)
+        return False
+
+
+def guide_pool(catalog, off):
+    """the guide's pool without the titles of libraries kept out of the guide
+    (in_guide off, core/player/libraries.py). pure."""
+    if not off:
+        return catalog
+    out = dict(catalog)
+    out["movies"] = [m for m in catalog.get("movies", []) if m[-1] not in off]
+    out["shows"] = [s for s in catalog.get("shows", []) if s[-1] not in off]
+    kept = {s[0] for s in out["shows"]}
+    out["recent_episodes"] = [e for e in catalog.get("recent_episodes", []) if e.get("show_id") in kept]
+    return out
 
 
 RATING = 4  # content_rating's place in a movie or show row (catalog.MOVIE_FIELDS)
@@ -358,10 +383,29 @@ def video_catalog():
             # a profile with a library hidden gets its own frozen pool: the day's
             # guide for everyone else must not be built from, or shown to, it
             gone = ",".join(str(i) for i in sorted(hidden_libraries(cap)))
+            # libraries kept out of the guide (home videos by default)
+            from core.player import libraries as player_libraries
+            off = player_libraries.guide_off(player_db())
             view = (f"catalog:{int(bool(sees_movies))}{int(bool(sees_shows))}{int(bool(sees_youtube))}:{cap}"
-                    + (f":hide{gone}" if gone else ""))
+                    + (f":hide{gone}" if gone else "")
+                    + (f":off{','.join(str(i) for i in sorted(off))}" if off else ""))
+            def pool():
+                out = guide_pool(shaped(), off)
+                # home video libraries switched into the guide (off by default)
+                try:
+                    from api.player_home import guide_items
+                    out["home"] = guide_items(player_db(), get_video_db(), hidden_libraries(cap))
+                except Exception:  # noqa: BLE001 - a guide without home videos, never a broken one
+                    logger.debug("guide: home videos unreadable", exc_info=True)
+                    out["home"] = []
+                return out
+
+            home_on = ",".join(str(lib["id"]) for lib in player_libraries.libraries(player_db())
+                               if lib["kind"] == "home" and lib["in_guide"])
+            if home_on:
+                view += f":home{home_on}"
             day = guide_day.frozen(
-                player_db(), view, shaped,
+                player_db(), view, pool,
                 keep=lambda c: bool(c.get("movies") or c.get("shows") or c.get("youtube")),
             )
             # and the clock the day is counted on, so every device seeds the
@@ -2175,9 +2219,15 @@ def player_setup_get():
         if not out["is_admin"]:
             return jsonify(out)
         vdb = get_video_db()
+        # home videos found since the last look get their library now
+        try:
+            player_libraries.ensure_home(db, vdb)
+        except Exception:  # noqa: BLE001 - setup still opens without it
+            logger.debug("player setup: home library not made", exc_info=True)
         out.update({
             "sidebar_order": state["sidebar_order"],
             "sidebar_hidden": state["sidebar_hidden"],
+            "home_editors": state["home_editors"],
             "libraries": player_libraries.libraries(db),
             "folders": player_libraries.folder_overview(vdb, db),
             "hidden": {str(k): v for k, v in player_libraries.hidden_map(db).items()},
@@ -2206,7 +2256,8 @@ def player_setup_put():
     body = request.get_json(silent=True) or {}
     try:
         db = player_db()
-        plain = {k: body[k] for k in ("server_name", "sidebar_order", "sidebar_hidden", "done") if k in body}
+        plain = {k: body[k] for k in ("server_name", "sidebar_order", "sidebar_hidden", "done", "home_editors")
+                 if k in body}
         # a library made in this same save has no id yet: the sidebar names it
         # by its place in the list ("lib:new:2") until the save gives it one
         wanted = body.get("libraries") if isinstance(body.get("libraries"), list) else []

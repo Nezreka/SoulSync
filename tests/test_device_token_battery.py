@@ -67,6 +67,19 @@ OPTED_IN = {
     "player.player_libraries_list": A.PLAYBACK,
     "player.player_setup_get": A.PLAYBACK,
     "player.player_setup_put": A.PLAYBACK,
+    # home videos (api/player_home.py): the app's home videos page, and
+    # setup's home video sources for an admin's phone
+    "player_home.home_overview": A.PLAYBACK,
+    "player_home.home_videos_page": A.PLAYBACK,
+    "player_home.home_video_get": A.PLAYBACK,
+    "player_home.home_video_put": A.PLAYBACK,
+    "player_home.home_thumb": A.PLAYBACK,
+    "player_home.home_frame": A.PLAYBACK,
+    "player_home.home_sources_get": A.PLAYBACK,
+    "player_home.home_sources_put": A.PLAYBACK,
+    "player_home.home_scan_status": A.PLAYBACK,
+    "player_home.home_scan_start": A.PLAYBACK,
+    "player_home.home_folder_check": A.PLAYBACK,
     # the app's music rows read the profile's own listening stats (5914aef37
     # opted these in; this list was not told)
     "stats.stats_cached": A.PLAYBACK,

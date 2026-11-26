@@ -22,14 +22,14 @@ from utils.logging_config import get_logger
 
 logger = get_logger("player.offline")
 
-VIDEO_KINDS = ("movie", "episode", "youtube")
+VIDEO_KINDS = ("movie", "episode", "youtube", "home")
 AUDIO_KINDS = ("track", "audiobook", "podcast_episode")
 ITEM_KINDS = VIDEO_KINDS + AUDIO_KINDS
-GROUP_TYPES = ("movie", "episode", "season", "show", "youtube", "track", "album", "artist",
-               "playlist", "audiobook", "podcast")
+GROUP_TYPES = ("movie", "episode", "season", "show", "youtube", "home", "home_album", "track", "album",
+               "artist", "playlist", "audiobook", "podcast")
 # the kind of item a group holds
 GROUP_ITEM = {"movie": "movie", "episode": "episode", "season": "episode", "show": "episode",
-              "youtube": "youtube", "track": "track", "album": "track", "artist": "track",
+              "youtube": "youtube", "home": "home", "home_album": "home", "track": "track", "album": "track", "artist": "track",
               "playlist": "track", "audiobook": "audiobook", "podcast": "podcast_episode"}
 
 PODCAST_DEFAULT = 5
@@ -268,6 +268,51 @@ def _youtube(ids: List[str]) -> List[Dict[str, Any]]:
                        "hdr": None, "audio_codec": None, "bitrate_kbps": None},
             "group": {"type": "youtube", "id": vid, "title": entry.get("title") or "Video",
                       "subtitle": channel, "artwork": art},
+            "_has_file": True,
+        })
+    return out
+
+
+def _home(ids: List[Any], *, checked: bool = True, album: Optional[str] = None) -> List[Dict[str, Any]]:
+    """home videos (core/video/home_videos.py) by id, or a whole album
+    (``album``: its key) oldest first. checked: only the ones in a home
+    library this profile can see, with a file."""
+    from api.player import player_db
+    from core.player import home_access
+    from core.video import home_videos as H
+    db = _video_db()
+    labels = {r["id"]: r["label"] for r in H.roots(db)}
+    seen = None
+    if checked:
+        seen = set(home_access.visible_roots(player_db(), db, home_access.hidden_now()))
+    conn = db._get_connection()
+    try:
+        if album is not None:
+            rows = [H._row(r) for r in conn.execute(
+                f"SELECT {H._COLS} FROM home_videos WHERE album_key = ? AND missing_since IS NULL "  # noqa: S608
+                "ORDER BY sort_at, id", (album,))]
+        else:
+            got = H.titles_of(conn, ids)
+            rows = [got[str(i)] for i in ids if str(i) in got]
+    finally:
+        conn.close()
+    out = []
+    for r in rows:
+        if seen is not None and (r["root"] not in seen or r.get("missing_since")):
+            continue
+        v = H.video_json(r, labels)
+        when = H.format_when(v["filmed_at"], with_time=False)
+        art = v["thumb_url"]
+        out.append({
+            "item_type": "home", "item_id": str(r["id"]), "title": v["title"],
+            "subtitle": " · ".join(x for x in (v["album"], when) if x),
+            "artwork": art, "duration_s": int(r["duration_s"]) if r.get("duration_s") else None,
+            "size_bytes": int(r.get("size_bytes") or 0),
+            "source": {"container": _ext(r.get("path")), "video_codec": r.get("video_codec"),
+                       "height": r.get("height"), "hdr": None, "audio_codec": r.get("audio_codec"),
+                       "bitrate_kbps": _kbps(r.get("size_bytes"), r.get("duration_s"))},
+            "group": {"type": "home_album", "id": r.get("album_key") or "", "title": v["album"] or "Home videos",
+                      "subtitle": "Home videos", "artwork": art},
             "_has_file": True,
         })
     return out
@@ -556,6 +601,18 @@ def expand(group_type: str, group_id: Any, *, count: int = PODCAST_DEFAULT) -> T
             raise Refused(404, "not_found", "That video isn't downloaded on the server.")
         y = items[0]
         return {"title": y["title"], "subtitle": y["subtitle"], "artwork": y["artwork"]}, items
+    if gtype == "home":
+        items = _home([_int(gid)])
+        if not items:
+            raise Refused(404, "not_found", "That home video isn't in your library.")
+        h = items[0]
+        return {"title": h["title"], "subtitle": h["subtitle"], "artwork": h["artwork"]}, items
+    if gtype == "home_album":
+        items = _home([], album=gid)
+        if not items:
+            raise Refused(404, "not_found", "That album has nothing to download.")
+        g = items[0]["group"]
+        return {"title": g["title"], "subtitle": f"{len(items)} home videos", "artwork": items[-1]["artwork"]}, items
     if gtype == "track":
         items = _tracks([_int(gid)])
         if not items:
@@ -606,6 +663,8 @@ def describe(items: Iterable[Tuple[str, str]]) -> Dict[str, Dict[str, Any]]:
                               owned_only=False))
         if by.get("youtube"):
             add(_youtube(by["youtube"]))
+        if by.get("home"):
+            add(_home([i for i in by["home"] if i.isdigit()], checked=False))
         if by.get("track"):
             add(_tracks([int(i) for i in by["track"] if i.isdigit()], checked=False))
         for b in by.get("audiobook") or []:

@@ -98,6 +98,11 @@ def _video(kind):
     return run
 
 
+def _home(item_id, part=None):
+    from core.player.sources import home
+    return home.locate(item_id)
+
+
 def _youtube(item_id, part=None):
     from core.player.sources import youtube
     return youtube.locate(item_id)
@@ -130,6 +135,8 @@ KINDS: Dict[str, Kind] = {
     "movie": Kind(("movies.access",), _video("movie")),
     "episode": Kind(("tv.access",), _video("episode")),
     "youtube": Kind(("movies.access", "tv.access"), _youtube),
+    # a home video (core/video/home_videos.py): any of the video side
+    "home": Kind(("movies.access", "tv.access"), _home),
     "audiobook": Kind(("books.access",), _audiobook),
     "commercial": Kind(("movies.access", "tv.access"), _commercial),
 }
