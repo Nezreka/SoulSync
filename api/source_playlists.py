@@ -29,7 +29,7 @@ import threading
 import time
 import traceback
 import uuid
-from concurrent.futures import ThreadPoolExecutor
+from core.idle_executor import IdleThreadPool
 from datetime import datetime, timedelta
 from urllib.parse import urlparse, parse_qs
 
@@ -1574,7 +1574,7 @@ def get_tidal_playlist_tracks(playlist_id):
 
 # Global state for Tidal playlist discovery management
 tidal_discovery_states = {}  # Key: playlist_id, Value: discovery state
-tidal_discovery_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="tidal_discovery")
+tidal_discovery_executor = IdleThreadPool(max_workers=3, thread_name_prefix="tidal_discovery")
 
 def _ensure_tidal_mirror(playlist_id, playlist, profile_id):
     """the mirror for this tidal playlist: its skipped counts brought up to
@@ -2296,7 +2296,7 @@ def cancel_tidal_sync(playlist_id):
 
 # Global state for Deezer playlist discovery management
 deezer_discovery_states = {}  # Key: playlist_id, Value: discovery state
-deezer_discovery_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="deezer_discovery")
+deezer_discovery_executor = IdleThreadPool(max_workers=3, thread_name_prefix="deezer_discovery")
 deezer_playlist_load_jobs = {}
 deezer_playlist_load_lock = threading.Lock()
 
@@ -3134,7 +3134,7 @@ def cancel_deezer_sync(playlist_id):
 
 # Global state for Qobuz playlist discovery management
 qobuz_discovery_states = {}  # Key: playlist_id, Value: discovery state
-qobuz_discovery_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="qobuz_discovery")
+qobuz_discovery_executor = IdleThreadPool(max_workers=3, thread_name_prefix="qobuz_discovery")
 
 
 def _get_qobuz_client_for_sync():
@@ -3461,11 +3461,11 @@ def cancel_qobuz_sync(playlist_id):
 
 # Global state for Spotify Public playlist management
 spotify_public_discovery_states = {}  # Key: url_hash, Value: discovery state
-spotify_public_discovery_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="spotify_public_discovery")
+spotify_public_discovery_executor = IdleThreadPool(max_workers=3, thread_name_prefix="spotify_public_discovery")
 
 # Global state for iTunes/Apple Music link imports
 itunes_link_discovery_states = {}  # Key: url_hash, Value: discovery state
-itunes_link_discovery_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="itunes_link_discovery")
+itunes_link_discovery_executor = IdleThreadPool(max_workers=3, thread_name_prefix="itunes_link_discovery")
 
 def _build_itunes_link_state(response_data):
     return {
@@ -4182,15 +4182,15 @@ def _run_itunes_link_discovery_worker(url_hash):
 
 # Global state for YouTube playlist management (persistent across page reloads)
 youtube_playlist_states = {}  # Key: url_hash, Value: persistent playlist state
-youtube_discovery_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="youtube_discovery")
+youtube_discovery_executor = IdleThreadPool(max_workers=3, thread_name_prefix="youtube_discovery")
 
 # Global state for Beatport chart management (persistent across page reloads)
 beatport_chart_states = {}  # Key: url_hash, Value: persistent chart state
-beatport_discovery_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="beatport_discovery")
+beatport_discovery_executor = IdleThreadPool(max_workers=3, thread_name_prefix="beatport_discovery")
 
 # Global state for ListenBrainz playlist management (persistent across page reloads)
 listenbrainz_playlist_states = {}  # Key: playlist_mbid, Value: persistent playlist state
-listenbrainz_discovery_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="listenbrainz_discovery")
+listenbrainz_discovery_executor = IdleThreadPool(max_workers=3, thread_name_prefix="listenbrainz_discovery")
 
 @bp.route('/api/youtube/parse', methods=['POST'])
 @requires("music.playlist_sync")
@@ -4884,7 +4884,7 @@ def convert_youtube_results_to_spotify_tracks(discovery_results):
 
 # Global state for the YouTube Music management (persistent across page reloads)
 ytmusic_discovery_states = {}  # Key: YT Music playlist id ('LM' for Liked Music), Value: persistent playlist state
-ytmusic_discovery_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="ytmusic_discovery")
+ytmusic_discovery_executor = IdleThreadPool(max_workers=3, thread_name_prefix="ytmusic_discovery")
 
 
 @bp.route('/api/ytmusic/playlists', methods=['GET'])

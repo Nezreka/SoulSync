@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import re
 import threading
-from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Optional
 
+from core.idle_executor import IdleThreadPool
 from core.metadata import registry as metadata_registry
 from core.metadata.discography import _extract_lookup_value
 from utils.logging_config import get_logger
@@ -332,7 +332,7 @@ def _candidate_pool():
     if _candidate_pool_instance is None:
         with _candidate_pool_lock:
             if _candidate_pool_instance is None:
-                _candidate_pool_instance = ThreadPoolExecutor(
+                _candidate_pool_instance = IdleThreadPool(
                     max_workers=_CANDIDATE_POOL_MAX_WORKERS,
                     thread_name_prefix="soulsync-art-candidate",
                 )

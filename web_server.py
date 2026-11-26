@@ -21,6 +21,7 @@ from pathlib import Path
 from urllib.parse import quote, urlparse
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from core.idle_executor import IdleThreadPool
 
 # localhost connects try the loopback address that answers, before any client
 # opens one: ::1 first cost ~2s per connection to an IPv4-only server on
@@ -1779,7 +1780,8 @@ stream_lock = stream_state.lock
 # behind each other. Single-user behavior is unchanged (one cookie → one session).
 stream_background_task = None                # legacy alias (default session)
 stream_tasks = {}                            # session_id -> Future
-stream_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="StreamPrep")
+# idle threads end (#2253); stream prep is a fetch, nothing to finish at exit
+stream_executor = IdleThreadPool(max_workers=4, thread_name_prefix="StreamPrep")
 
 
 def _stream_session_id():

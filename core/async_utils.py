@@ -8,31 +8,35 @@ import concurrent.futures
 import contextvars
 from typing import Any, Callable, TypeVar
 
+from core.idle_executor import IdleThreadPool
+
 
 _T = TypeVar("_T")
 
 # how long a lost wake-up can delay an await (see _run); not a poll interval
 _FALLBACK_POLL_SECONDS = 0.05
 
-_SLOW_IO_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+# their threads end after a minute with nothing to run, so one busy moment
+# doesn't park 28 threads for the life of the process (#2253)
+_SLOW_IO_EXECUTOR = IdleThreadPool(
     max_workers=16,
     thread_name_prefix="soulsync-slow-io",
 )
-_CONTROL_IO_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+_CONTROL_IO_EXECUTOR = IdleThreadPool(
     max_workers=8,
     thread_name_prefix="soulsync-control-io",
 )
 # handing a client a new job can be held for minutes (sab answers an add only
 # once it has built the job before it), so adds get their own threads: a burst
 # of held adds must not take the control pool's threads from status polling
-_CLIENT_ADD_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+_CLIENT_ADD_EXECUTOR = IdleThreadPool(
     max_workers=4,
     thread_name_prefix="soulsync-client-add",
 )
 
 
 async def _run(
-    executor: concurrent.futures.ThreadPoolExecutor,
+    executor: concurrent.futures.Executor,
     func: Callable[..., _T],
     /,
     *args: Any,
