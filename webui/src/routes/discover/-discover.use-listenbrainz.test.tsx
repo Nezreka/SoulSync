@@ -20,13 +20,19 @@ const pl = (id: string, title: string) => ({
   playlist: { identifier: `https://listenbrainz.org/playlist/${id}`, title, creator: 'lb' },
 });
 
+const zeroCounts = { new: 0, updated: 0, skipped: 0 };
+const refreshAck = {
+  success: true,
+  summary: { created_for: zeroCounts, user: zeroCounts, collaborative: zeroCounts },
+};
+
 function stub({
   createdFor = [pl('c1', 'Weekly Jams for x'), pl('c2', 'Weekly Exploration of y')],
   user = [pl('u1', 'My Mix')],
   collaborative = [] as unknown[],
   createdForStatus = 200,
   usernames = { createdFor: 'boulder', user: 'other' },
-  refresh = { success: true, summary: {} } as Record<string, unknown>,
+  refresh = refreshAck as Record<string, unknown>,
 }: Record<string, unknown> = {}) {
   const u = usernames as { createdFor?: string; user?: string };
   server.use(
@@ -75,30 +81,30 @@ describe('useListenBrainz — init', () => {
     expect(result.current.showsConnect).toBe(false);
   });
 
-  it('a NON-OK tab is a tab without data — never a dead section', async () => {
+  it('preserves a successful sibling after an HTTP failure', async () => {
     stub({ createdForStatus: 500, usernames: { user: 'other' } });
     const { result } = mount();
     await waitFor(() => expect(result.current.loaded).toBe(true));
-    expect(result.current.error).toBe(false);
+    expect(result.current.error).toBe(true);
     expect(result.current.hasData.recommendations).toBe(false);
     expect(result.current.activeTab).toBe('user');
     expect(result.current.username).toBe('other');
   });
 
-  it('a NETWORK failure errors the whole section', async () => {
+  it('preserves a successful sibling after network failure', async () => {
     server.use(http.get('/api/discover/listenbrainz/user-playlists', () => HttpResponse.error()));
     const { result } = mount();
     await waitFor(() => expect(result.current.loaded).toBe(true));
     expect(result.current.error).toBe(true);
-    // An errored section shows its ERROR copy, never the connect prompt.
+    expect(result.current.mixes[0]?.title).toBe('Weekly Jams for x');
     expect(result.current.showsConnect).toBe(false);
   });
 
-  it('zero tabs with data shows the connect prompt', async () => {
+  it('treats acknowledged empty arrays as empty without inferring disconnection', async () => {
     stub({ createdFor: [], user: [], collaborative: [], usernames: {} });
     const { result } = mount();
     await waitFor(() => expect(result.current.loaded).toBe(true));
-    expect(result.current.showsConnect).toBe(true);
+    expect(result.current.showsConnect).toBe(false);
     expect(result.current.mixes).toEqual([]);
   });
 });
@@ -157,7 +163,12 @@ describe('useListenBrainz — refresh', () => {
     expect(LB_REFRESHED).toBe('ListenBrainz playlists refreshed!');
     expect(LB_UP_TO_DATE).toBe('All playlists are up to date');
 
-    stub({ refresh: { success: true, summary: { user: { new: 1 } } } });
+    stub({
+      refresh: {
+        ...refreshAck,
+        summary: { ...refreshAck.summary, user: { ...zeroCounts, new: 1 } },
+      },
+    });
     const { result } = mount();
     await waitFor(() => expect(result.current.loaded).toBe(true));
     await act(() => result.current.refresh());
@@ -178,4 +189,200 @@ describe('useListenBrainz — refresh', () => {
     expect(toasts.at(-1)).toEqual({ message: 'Failed to refresh: token expired', level: 'error' });
     expect(result.current.refreshing).toBe(false);
   });
+});
+
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+it('preserves the selected tab and its last confirmed cards when its response is malformed', async () => {
+  const { result } = mount();
+  await waitFor(() => expect(result.current.loaded).toBe(true));
+  act(() => result.current.selectTab('user'));
+  stub({ user: [null] });
+  await act(() => result.current.refresh());
+  expect(result.current.activeTab).toBe('user');
+  expect(result.current.mixes.map((mix) => mix.title)).toEqual(['My Mix']);
+  expect(result.current.sourceErrors.user).toBeTruthy();
+  expect(toasts.some((toast) => toast.level === 'success')).toBe(false);
+});
+
+it('retries the shelf reads without another refresh and falls back when the selected tab confirms empty', async () => {
+  let posts = 0;
+  stub({ createdForStatus: 500 });
+  server.use(
+    http.post('/api/discover/listenbrainz/refresh', () => {
+      posts++;
+      return HttpResponse.json(refreshAck);
+    }),
+  );
+  const { result } = mount();
+  await waitFor(() => expect(result.current.loaded).toBe(true));
+  await act(() => result.current.refresh());
+  expect(result.current.sourceErrors.recommendations).toBeTruthy();
+  stub({ user: [] });
+  await act(() => result.current.retry());
+  expect(posts).toBe(1);
+  expect(result.current.sourceErrors).toEqual({});
+  expect(result.current.activeTab).toBe('recommendations');
+  expect(result.current.mixes[0]?.title).toBe('Weekly Jams for x');
+});
+
+it('allows only one refresh before React commits pending state', async () => {
+  let posts = 0;
+  server.use(
+    http.post('/api/discover/listenbrainz/refresh', () => {
+      posts++;
+      return HttpResponse.json(refreshAck);
+    }),
+  );
+  const { result } = mount();
+  await waitFor(() => expect(result.current.loaded).toBe(true));
+  await act(async () => {
+    await Promise.all([result.current.refresh(), result.current.refresh()]);
+  });
+  expect(posts).toBe(1);
+});
+
+it.each([
+  { status: 503, body: refreshAck },
+  { status: 200, body: { success: true, summary: {} } },
+  { status: 200, body: { success: true, summary: { ...refreshAck.summary, user: {} } } },
+  { status: 200, body: { success: 'true', summary: {} } },
+  { status: 200, body: { success: true, summary: { user: { updated: '10' } } } },
+])(
+  'keeps an unacknowledged refresh error visible without reloading the shelf ($status $body)',
+  async ({ status, body }) => {
+    server.use(
+      http.post('/api/discover/listenbrainz/refresh', () => HttpResponse.json(body, { status })),
+    );
+    const { result } = mount();
+    await waitFor(() => expect(result.current.loaded).toBe(true));
+    await act(() => result.current.refresh());
+    expect(result.current.refreshError).toBeTruthy();
+    expect(toasts.at(-1)?.level).toBe('error');
+    expect(createdForHits).toBe(1);
+    expect(result.current.mixes[0]?.title).toBe('Weekly Jams for x');
+  },
+);
+
+it('ignores a slow initial read after a newer retry completes', async () => {
+  const started = deferred();
+  const finish = deferred();
+  server.use(
+    http.get('/api/discover/listenbrainz/created-for', async () => {
+      started.resolve();
+      await finish.promise;
+      return HttpResponse.json({ success: true, playlists: [pl('old', 'Old playlist')] });
+    }),
+  );
+  const { result } = mount();
+  await started.promise;
+  stub();
+  await act(() => result.current.retry());
+  await act(async () => finish.resolve());
+  expect(result.current.mixes[0]?.title).toBe('Weekly Jams for x');
+});
+
+it('skips the re-read and toast when a refresh settles after unmount', async () => {
+  const started = deferred();
+  const finish = deferred();
+  server.use(
+    http.post('/api/discover/listenbrainz/refresh', async () => {
+      started.resolve();
+      await finish.promise;
+      return HttpResponse.json(refreshAck);
+    }),
+  );
+  const { result, unmount } = mount();
+  await waitFor(() => expect(result.current.loaded).toBe(true));
+  let refresh!: Promise<void>;
+  await act(async () => {
+    refresh = result.current.refresh();
+    await started.promise;
+  });
+  unmount();
+  finish.resolve();
+  await refresh;
+  expect(createdForHits).toBe(1);
+  expect(toasts).toEqual([]);
+});
+
+it('selects a recovered sibling after the initial read confirms no sources', async () => {
+  server.use(
+    http.get('/api/discover/listenbrainz/created-for', () => HttpResponse.error()),
+    http.get('/api/discover/listenbrainz/user-playlists', () => HttpResponse.error()),
+    http.get('/api/discover/listenbrainz/collaborative', () => HttpResponse.error()),
+  );
+  const { result } = mount();
+  await waitFor(() => expect(result.current.loaded).toBe(true));
+  expect(result.current.showsConnect).toBe(false);
+  stub({ createdForStatus: 503 });
+  await act(() => result.current.retry());
+  expect(result.current.activeTab).toBe('user');
+  expect(result.current.mixes[0]?.title).toBe('My Mix');
+});
+
+it('preserves the selected group and its cards when the recommendations read fails', async () => {
+  const { result } = mount();
+  await waitFor(() => expect(result.current.loaded).toBe(true));
+  act(() => result.current.selectGroup('Weekly Exploration'));
+  stub({ createdForStatus: 503 });
+  await act(() => result.current.retry());
+  expect(result.current.activeGroup).toBe('Weekly Exploration');
+  expect(result.current.mixes[0]?.title).toBe('Weekly Exploration of y');
+});
+
+it('prompts to connect only when every source explicitly confirms disconnection', async () => {
+  const disconnected = () =>
+    HttpResponse.json({
+      success: false,
+      error: 'Not authenticated',
+      playlists: [],
+      count: 0,
+      username: null,
+    });
+  server.use(
+    http.get('/api/discover/listenbrainz/created-for', disconnected),
+    http.get('/api/discover/listenbrainz/user-playlists', disconnected),
+    http.get('/api/discover/listenbrainz/collaborative', () => HttpResponse.error()),
+  );
+  const { result } = mount();
+  await waitFor(() => expect(result.current.loaded).toBe(true));
+  expect(result.current.showsConnect).toBe(false);
+  server.use(http.get('/api/discover/listenbrainz/collaborative', disconnected));
+  await act(() => result.current.retry());
+  expect(result.current.showsConnect).toBe(true);
+});
+
+it('retains the new selected group after a removed group returns', async () => {
+  const { result } = mount();
+  await waitFor(() => expect(result.current.loaded).toBe(true));
+  act(() => result.current.selectGroup('Weekly Exploration'));
+  stub({ createdFor: [pl('c1', 'Weekly Jams for x')] });
+  await act(() => result.current.retry());
+  expect(result.current.mixes[0]?.title).toBe('Weekly Jams for x');
+  stub();
+  await act(() => result.current.retry());
+  expect(result.current.activeGroup).toBe('Weekly Jams');
+});
+
+it('keeps the last confirmed numeric card count when a source returns a malformed annotation', async () => {
+  const original = pl('u1', 'My Mix');
+  const withCount = (track_count: unknown) => ({
+    playlist: { ...original.playlist, annotation: { track_count } },
+  });
+  stub({ user: [withCount(12)] });
+  const { result } = mount();
+  await waitFor(() => expect(result.current.loaded).toBe(true));
+  act(() => result.current.selectTab('user'));
+  stub({ user: [withCount('8')] });
+  await act(() => result.current.retry());
+  expect(result.current.mixes[0]?.trackCount).toBe(12);
+  expect(result.current.sourceErrors.user).toBeTruthy();
+  expect(result.current.hasData.recommendations).toBe(true);
 });

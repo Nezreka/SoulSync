@@ -1245,17 +1245,21 @@ export function DiscoverPage() {
         return (
           <ListenBrainzSection
             username={lb.username}
+            showsConnect={lb.showsConnect}
             activeTab={lb.activeTab}
             hasData={lb.hasData}
             mixes={lbMixesHydrated}
-            loading={!lb.loaded && !lb.error}
+            loading={lb.loading}
             error={lb.error}
+            refreshError={lb.refreshError}
+            refreshing={lb.refreshing}
             loaded={lb.loaded}
             groups={lb.groups ?? undefined}
             activeGroup={lb.activeGroup}
             onSelectTab={lb.selectTab}
             onSelectGroup={lb.selectGroup}
             onRefresh={() => void lb.refresh()}
+            onRetry={() => void lb.retry()}
             onConnect={() => window.openMyAccountsModal?.()}
             onOpenMix={modal.open}
             onPlayMix={playMixFromCard}
