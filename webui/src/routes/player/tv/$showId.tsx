@@ -22,6 +22,7 @@ import {
   type RequestResult,
 } from '../-player.api';
 import { Comments } from '../-ui/comments';
+import { MoreButton, openContextMenu, type ContextMenuTarget } from '../-ui/context-menu';
 import {
   DetailLayout,
   ExtrasVideos,
@@ -33,13 +34,11 @@ import {
   RelatedDiscoveryRails,
   Section,
 } from '../-ui/detail';
-import { DownloadButton, DownloadMediaButton } from '../-ui/download-button';
-import { InfoButton } from '../-ui/item-info';
+import { DownloadButton } from '../-ui/download-button';
 import { Art, Badge, Hero, HScroll, PlayButton, VerdictBadge, styles as s } from '../-ui/kit';
 import { CrewList, mergeCrew, NetworkLink, VideoGenreLinks } from '../-ui/links';
 import { NotFound, NotPartOfProfile } from '../-ui/not-part';
 import { playItems } from '../-ui/playback/use-player';
-import { ReportIssueButton } from '../-ui/report-issue';
 import { useSections } from '../-ui/sections';
 import { BackgroundTrailer, TrailerButton } from '../-ui/trailer';
 import {
@@ -171,6 +170,19 @@ function EpisodeRow({
     reqResult?.state === 'asked' ||
     reqResult?.state === 'on-the-way' ||
     reqResult?.state === 'owned';
+  /** the row's More menu: the same one right-click and the ⋯ open */
+  const menuTarget = (): Omit<ContextMenuTarget, 'x' | 'y'> => ({
+    kind: 'episode',
+    id: String(episode.id),
+    title: epIssueTitle,
+    subtitle: showTitle,
+    artwork: episode.has_still ? stillSet(episode.id).src : null,
+    onPlay: owned && onPlay ? () => onPlay() : undefined,
+    downloadType: owned ? 'episode' : null,
+    downloadId: owned ? String(episode.id) : null,
+    info: owned ? { type: 'episode', id: String(episode.id) } : null,
+    report: { entityType: 'episode', entityId: episode.id, title: epIssueTitle },
+  });
   return (
     <div
       ref={rowRef}
@@ -194,6 +206,10 @@ function EpisodeRow({
         aria-expanded={expanded}
         aria-label={`Episode ${episode.episode_number}: ${episode.title || `Episode ${episode.episode_number}`}`}
         onClick={() => setExpanded((v) => !v)}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          openContextMenu({ ...menuTarget(), x: e.clientX, y: e.clientY });
+        }}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault();
@@ -299,6 +315,7 @@ function EpisodeRow({
           {best?.playable ? (
             <VerdictBadge verdict={best.playable.verdict} reasons={best.playable.reasons} />
           ) : null}
+          <MoreButton label={epIssueTitle} target={menuTarget} />
         </div>
       </div>
       {expanded ? (
@@ -369,22 +386,6 @@ function EpisodeRow({
                 {reqLabel}
               </button>
             ) : null}
-            {owned ? (
-              <DownloadMediaButton
-                itemType="episode"
-                itemId={String(episode.id)}
-                title={epIssueTitle}
-                subtitle={showTitle}
-                artwork={`/api/video/poster/episode/${episode.id}`}
-              />
-            ) : null}
-            <ReportIssueButton
-              entityType="episode"
-              entityId={episode.id}
-              title={epIssueTitle}
-              compact
-            />
-            {owned ? <InfoButton type="episode" id={episode.id} title={epIssueTitle} /> : null}
             {reqResult?.state === 'error' ? (
               <span style={{ fontSize: '0.82rem', color: '#ff7b7b' }}>{reqResult.message}</span>
             ) : null}
@@ -601,31 +602,47 @@ function ShowPage() {
               }
               why="There are no episodes on disk yet."
             />
-            {upNextId || firstOwnedEpisode ? (
-              <Link
-                to="/player/watching"
-                search={{
-                  start: `episode:${upNextId ?? firstOwnedEpisode}`,
-                  title: next
-                    ? `${show.title} · S${next.season_number} E${next.episode_number}`
-                    : show.title,
-                  artwork: show.has_poster !== false ? `/api/video/poster/show/${id}` : undefined,
-                  backdrop:
-                    show.has_backdrop !== false ? `/api/video/backdrop/show/${id}` : undefined,
-                }}
-                className={s.btn}
-                title="Start a Watch Party for this show"
-                data-nav
-              >
-                🍿 Watch Party
-              </Link>
-            ) : null}
             <WatchlistButton kind="show" id={id} />
             <TrailerButton kind="show" id={id} />
-            {firstOwnedEpisode ? (
-              <DownloadButton type="show" id={String(id)} title={show.title} />
-            ) : null}
-            <ReportIssueButton entityType="show" entityId={id} title={show.title} />
+            <MoreButton
+              label={show.title}
+              heroClassName={s.btn}
+              target={() => ({
+                kind: 'show',
+                page: true,
+                id: String(id),
+                title: show.title,
+                artwork: show.has_poster !== false ? `/api/video/poster/show/${id}` : null,
+                download: firstOwnedEpisode ? { type: 'show', id: String(id) } : null,
+                report: { entityType: 'show', entityId: id, title: show.title },
+                extraActions:
+                  upNextId || firstOwnedEpisode
+                    ? [
+                        {
+                          label: 'Start a Watch Party',
+                          onSelect: () =>
+                            void navigate({
+                              to: '/player/watching',
+                              search: {
+                                start: `episode:${upNextId ?? firstOwnedEpisode}`,
+                                title: next
+                                  ? `${show.title} · S${next.season_number} E${next.episode_number}`
+                                  : show.title,
+                                artwork:
+                                  show.has_poster !== false
+                                    ? `/api/video/poster/show/${id}`
+                                    : undefined,
+                                backdrop:
+                                  show.has_backdrop !== false
+                                    ? `/api/video/backdrop/show/${id}`
+                                    : undefined,
+                              },
+                            }),
+                        },
+                      ]
+                    : undefined,
+              })}
+            />
             {next?.title ? <span className={s.notYet}>Up next: {next.title}</span> : null}
           </>
         }

@@ -11,6 +11,7 @@ Isolated: stdlib only; no music imports.
 from __future__ import annotations
 
 import os
+import re
 from typing import Any, Callable
 
 
@@ -27,9 +28,36 @@ def find_completed_file(download_dir: str, filename: str, lister: Callable) -> s
     if not base or not download_dir:
         return None
     matches = [p for p in lister(download_dir) if basename_of(p) == base]
+    # slskd keeps a transfer in progress (or one cut off) under an
+    # "incomplete" folder, often inside the downloads folder: a leftover there
+    # is never the finished file, however its path reads
+    finished = [p for p in matches if not _in_incomplete_dir(p, download_dir)]
+    matches = finished or []
     if not matches:
         return None
-    return matches[0] if len(matches) == 1 else max(matches, key=len)
+    if len(matches) == 1:
+        return matches[0]
+    # the largest file on disk is the real video (the docstring always said
+    # so; picking the longest path chose a leftover partial copy instead)
+    return max(matches, key=_size_or_zero)
+
+
+def _size_or_zero(path: str) -> int:
+    try:
+        return os.path.getsize(path)
+    except OSError:
+        return 0
+
+
+def _in_incomplete_dir(path: str, download_dir: str) -> bool:
+    """True when ``path`` sits in a folder named incomplete below the downloads
+    folder (slskd's in-progress area)"""
+    try:
+        rel = os.path.relpath(str(path), str(download_dir))
+    except ValueError:
+        return False
+    parts = [x.casefold() for x in re.split(r"[\\/]+", rel) if x]
+    return "incomplete" in parts[:-1]
 
 
 def dest_path_for(target_dir: str, src_path: str) -> str:

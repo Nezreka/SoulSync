@@ -168,6 +168,13 @@
   white-space: nowrap;
 }
 
+.trackTitleText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .track[data-playing='true'] .trackTitle {
   color: var(--accent-light);
 }
@@ -323,7 +330,8 @@
     --track-cols: calc(var(--u) * 2.4) calc(var(--u) * 2.8) minmax(0, 1fr);
   }
 
-  .trackAlbum {
+  .trackAlbum,
+  .trackNote {
     display: none;
   }
 }
@@ -688,6 +696,13 @@
 /* a list with notes on the right (plays, a quality): one width for all, so the columns line up */
 .tracks[data-end='true'] .trackEnd {
   min-width: calc(var(--u) * 7.5);
+}
+
+/* a phone hides the notes (the title needs the room): the column shrinks back */
+@media (max-width: 720px) {
+  .tracks[data-end='true'] .trackEnd {
+    min-width: calc(var(--u) * 3);
+  }
 }
 
 /* ── the playlists page ─────────────────────────────────────────────── */

@@ -364,3 +364,35 @@ def test_process_download_move_failure_marks_failed():
     upd = process_download(_dl(), [_xfer("Completed, Succeeded")], "/dl",
                            lister=lambda d: ["/dl/Folder/movie.mkv"], mover=boom)
     assert upd["status"] == "failed" and "disk full" in upd["error"]
+
+
+def test_a_leftover_partial_in_slskd_incomplete_is_never_the_finished_file(tmp_path):
+    # the reported bug: an interrupted earlier attempt left a 90 MB partial in
+    # slskd's incomplete folder; picking the longest path measured that one,
+    # called the finished 3 GB movie incomplete and grabbed it again
+    from core.video.download_pipeline import find_completed_file
+    dl = tmp_path / "downloads"
+    done = dl / "Movie.2020.1080p.BluRay-BONE" / "Movie.2020.1080p.mkv"
+    partial = dl / "incomplete" / "Movie.2020.1080p.BluRay-BONE.leftover" / "Movie.2020.1080p.mkv"
+    for f, n in ((done, 3000), (partial, 90)):
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_bytes(b"\0" * n)
+
+    def lister(root):
+        import os
+        for d, _x, files in os.walk(root):
+            for f in files:
+                yield os.path.join(d, f)
+
+    assert find_completed_file(str(dl), "@@peer\\Movies\\Movie.2020.1080p.mkv", lister) == str(done)
+
+
+def test_of_two_finished_copies_the_larger_file_wins(tmp_path):
+    from core.video.download_pipeline import find_completed_file
+    dl = tmp_path / "downloads"
+    small = dl / "a-much-longer-folder-name-here" / "x.mkv"
+    big = dl / "b" / "x.mkv"
+    for f, n in ((small, 10), (big, 500)):
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_bytes(b"\0" * n)
+    assert find_completed_file(str(dl), "x.mkv", lambda r: [str(small), str(big)]) == str(big)
