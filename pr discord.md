@@ -2,9 +2,9 @@
 
 **SoulSync now has its own player.** Your movies, TV, music, YouTube, audiobooks, podcasts and live guide, straight from your server, like a Plex or Jellyfin player. Open it with **Open the player** at the top of the sidebar. The first time, an admin runs a short setup: name the server, sort folders into libraries (4K, Kids, Anime) and choose who sees what. Every profile arranges its own rows.
 
-**The app.** The player on Android phones, tablets and TV, with offline downloads. Pair it from Settings, Devices.
+**The app.** The player on Android phones, tablets and TV, with offline downloads. Pair it by scanning the QR in Settings, Devices.
 Repo: <https://github.com/Nezreka/soulsync-mobile-app>
-APK: <https://github.com/Nezreka/soulsync-mobile-app/releases/download/v0.3.0/SoulSync-Player-0.3.0.apk>
+APK: <https://github.com/Nezreka/soulsync-mobile-app/releases/latest>
 
 **Chapters, skip intro, parties and casting.** Skip intro when the file marks one, watch parties with a countdown and reactions, and Chromecast that plays anything.
 
