@@ -30,8 +30,14 @@ function stub() {
     http.post('/api/watchlist/add', () => HttpResponse.json({ success: true })),
     http.post('/api/watchlist/remove', () => HttpResponse.json({ success: true })),
     http.post('/api/watchlist/add-batch', async ({ request }) => {
-      batchBodies.push(await request.json());
-      return HttpResponse.json({ success: batchOk });
+      const body = (await request.json()) as { artists: unknown[] };
+      batchBodies.push(body);
+      return HttpResponse.json({
+        success: batchOk,
+        added: batchOk ? body.artists.length : 0,
+        skipped: 0,
+        rejected: [],
+      });
     }),
   );
 }

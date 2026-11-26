@@ -324,6 +324,15 @@ describe('the hero', () => {
     expect(document.getElementById('discover-hero-watch-all')).toHaveClass('all-watched');
   });
 
+  it('disables both watchlist actions while a mutation is pending', () => {
+    const { container } = render(<DiscoverHero {...heroProps({ watchlistPending: true })} />);
+    const single = container.querySelector('#discover-hero-add') as HTMLButtonElement;
+    const all = container.querySelector('#discover-hero-watch-all') as HTMLButtonElement;
+    expect(single.disabled).toBe(true);
+    expect(single).toHaveAttribute('aria-busy', 'true');
+    expect(all.disabled).toBe(true);
+  });
+
   it('links the discography where it was told to', () => {
     render(<DiscoverHero {...heroProps()} />);
     expect(document.getElementById('discover-hero-discography')).toHaveAttribute(
