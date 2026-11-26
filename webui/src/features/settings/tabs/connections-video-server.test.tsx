@@ -353,3 +353,17 @@ describe('the video media server', () => {
     expect(connNote('plex', true, true, false)).toBe('Custom video connection.');
   });
 });
+
+describe('the note under a half-filled video connection', () => {
+  it('says music’s connection is in use instead of not set up', async () => {
+    const { connNote } = await import('./video-server');
+    expect(connNote('plex', true, false, false, true)).toBe(
+      'Using your music Plex connection until this one has both a server URL and a token.',
+    );
+    // without a working music connection it still asks for the token
+    expect(connNote('plex', true, false, false, false)).toBe(
+      'Add the token to finish this connection.',
+    );
+    expect(connNote('plex', false, false, true, true)).toMatch(/^Not connected/);
+  });
+});
