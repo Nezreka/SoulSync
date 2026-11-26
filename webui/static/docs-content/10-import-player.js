@@ -322,3 +322,64 @@ Whether a profile may download at all is set per person on the player's **Users 
         },
     ]
 });
+
+registerDocsSection({
+    id: 'player-notifications',
+    needs: 'everyone',
+    title: 'Player Notifications',
+    icon: '🔔',
+    pages: [
+        {
+            id: 'pnotify-what',
+            title: 'What You Hear About',
+            lede: 'The bell at the top of the player, and your phone, tell you what is new for you. Only what is new for you.',
+            body: `
+The **bell** in the player's header shows how many notifications you haven't read. Click it for the list: each one opens what it's about and counts as read. **Mark all read** clears the count, and the **x** on a row dismisses it.
+
+Each kind is a switch in **Settings → Notifications**, and your phone app reads the same switches:
+
+| Kind | When | On to start |
+|---|---|---|
+| **New episodes** | A new episode of a show you're watching (you played an episode in the last 120 days, or it's on your watchlist). Never more than one a day per show: a second episode the same day turns it into "3 new episodes of …". | Yes |
+| **Featured films** | A well-reviewed film arrives in the library. TMDB has to rate it 7.0 or better and the other scores SoulSync has (IMDb, Rotten Tomatoes, Metacritic) have to agree. Never more than 3 a week. Turn on **Also films not in your library** to hear about the best of what's just out in cinemas too. | Yes |
+| **From your watchlist** | Something on your watchlist is ready to play. | Yes |
+| **Your requests** | Something you asked for is ready, or it was declined. | Yes |
+| **Season premieres** | A new season of a show you've watched starts in the next few days, and again when episode 1 lands. | Yes |
+| **Leaving soon** | Something you started is on the server's Shelf Life list to make room. | No |
+| **Downloads ready** | A smart download finished on your phone. Each phone can turn this off for itself. | Yes |
+| **Watch party invites** | Someone scheduled a watch party, or asked you to one. | Yes |
+| **Messages from the admin** | A message sent from Server Activity. These always come through. | Always |
+| **New music** | A new album from an artist you've played a lot lately. | No |
+| **Memories** | Home videos filmed on this day in past years, once a day at the time you pick. | No |
+
+Nothing is ever about a title your profile can't see: hidden libraries and rating limits apply to notifications too.
+
+> [!TIP]
+> **Send test** in Settings → Notifications shows you what one looks like, in the bell and on your phone.
+`
+        },
+        {
+            id: 'pnotify-when',
+            title: 'Quiet Hours and the Daily Digest',
+            lede: 'Hear about things when it suits you.',
+            body: `
+- **Quiet hours**: nothing arrives between the two times you set, on your own clock. What came in overnight arrives when quiet hours end. Messages from the admin still come through.
+- **Daily digest**: one notification a day, at the time you pick, with everything new instead of one each. Watch party invites and messages from the admin still come straight away.
+
+**Browser notifications**: the web player can also pop notifications up while it's in a background tab. Turn them on from **Settings → Notifications → Browser notifications**; your browser asks once. If you said no before, allow notifications for this site in your browser's site settings.
+
+**On your phone**: the SoulSync app checks for new ones every 15 minutes or so, and whenever you open it. Android asks once for permission, from the app's notification settings. Each kind has its own channel, so Android's own notification settings can tune them too.
+`
+        },
+        {
+            id: 'pnotify-admin',
+            title: 'For Admins',
+            lede: 'One automation keeps everyone up to date.',
+            body: `
+The **Player Notifications** automation runs every 5 minutes. Each run reads only what changed since the last one (new files, new albums, airing dates), so it costs next to nothing. Its first run only marks where it starts: turning it on never sends anyone the whole library.
+
+A message you send to someone's screen from **Server Activity** is kept in their notifications too, so a phone in a pocket sees it later.
+`
+        },
+    ]
+});

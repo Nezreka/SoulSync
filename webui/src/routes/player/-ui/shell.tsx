@@ -37,6 +37,7 @@ import { ContextMenuHost } from './context-menu';
 import { BackIcon, CamcorderIcon, ChevronIcon, ExitIcon, GearIcon, MoreIcon } from './icons';
 import { AddToPlaylistHost } from './music/add-to-playlist';
 import { NoticeHost } from './notice';
+import { NotificationBell } from './notifications';
 import { useNowPlaying } from './now-playing';
 import { MusicView } from './playback/music-view';
 import { usePlayerSync } from './playback/presence';
@@ -542,6 +543,7 @@ export function PlayerShell({ profileId }: { profileId: number | null }) {
           {!TOP_LEVEL_PATHS.has(pathname) ? <SmartBackButton pathname={pathname} /> : null}
           <Search />
           <div className={s.headerEnd}>
+            <NotificationBell />
             <ProfileChip
               currentId={profileId}
               cardSize={cardSize}

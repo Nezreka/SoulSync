@@ -6,6 +6,7 @@
 import type { ReactNode } from 'react';
 
 import {
+  BellIcon,
   DownloadIcon,
   GearIcon,
   GridIcon,
@@ -25,6 +26,7 @@ export type SectionId =
   | 'music'
   | 'look'
   | 'sidebar'
+  | 'notifications'
   | 'setup'
   | 'downloads'
   | 'guide'
@@ -52,6 +54,7 @@ export const SECTION_IDS: readonly SectionId[] = [
   'music',
   'look',
   'sidebar',
+  'notifications',
   'setup',
   'downloads',
   'guide',
@@ -119,6 +122,16 @@ const YOU: SectionInfo[] = [
     inside: "Your order and what's hidden",
     description:
       "Move the places in the sidebar and leave out the ones you don't use. A hidden place still opens from a link or search.",
+    scope: 'This profile',
+  },
+  {
+    id: 'notifications',
+    group: 'you',
+    icon: <BellIcon />,
+    title: 'Notifications',
+    inside: 'New episodes, films, quiet hours',
+    description:
+      'What the bell and your phone tell you about: new episodes of your shows, good films, requests and invites. Quiet hours and a daily digest keep it calm.',
     scope: 'This profile',
   },
 ];

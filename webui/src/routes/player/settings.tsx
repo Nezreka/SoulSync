@@ -22,6 +22,7 @@ import {
   type SectionInfo,
 } from './-ui/settings/catalog';
 import { SavedContext } from './-ui/settings/kit';
+import { NotificationsSection } from './-ui/settings/notifications';
 import {
   DownloadsSection,
   IssuesSection,
@@ -62,6 +63,8 @@ function SectionBody({ id, isAdmin }: { id: SectionId; isAdmin: boolean }) {
           <SidebarSettings />
         </div>
       );
+    case 'notifications':
+      return <NotificationsSection />;
     case 'setup':
       return <SetupSection />;
     case 'downloads':

@@ -595,6 +595,8 @@ ACTIONS: list[dict] = [
          {"key": "max_simultaneous_downloads", "type": "number", "label": "Max downloads per run", "default": 3, "min": 1,
           "description": "Caps how many items one drain run hands to the download clients; the rest wait for the next run. Does not affect RSS Sync or manual grabs."}
      ]},
+    {"type": "player_notify_library", "label": "Player Notifications", "icon": "bell", "scope": "both",
+     "description": "Tell each profile what's new for them in the player: new episodes of shows they watch, well-rated films, watchlist titles that arrived, season premieres, new albums from artists they play, and home video memories. Reads only what changed since the last run, so a run is cheap. Each profile picks what it hears in the player's Settings, Notifications. Pair with a 5-minute schedule.", "available": True},
     {"type": "video_rss_sync", "label": "RSS Sync (Instant Grabs)", "icon": "download", "scope": "video",
      "description": "Sonarr-speed acquisition: every few minutes, pull your indexers' newest releases from Prowlarr (one aggregate call, no searching) and instantly grab any that match your wishlist — a wanted episode lands minutes after it's posted instead of at the next hourly drain. Respects your quality profile, upgrade cutoff, blocklist and download mode (needs torrent/usenet enabled + Prowlarr). Pair with a 15-minute schedule. Grabs new feed matches on sight — it is NOT subject to the Process Movie/Episode Wishlist 'Max downloads per run' cap.", "available": True},
     {"type": "video_extto_fresh_refresh", "label": "Refresh Fresh Releases", "icon": "download", "scope": "video",

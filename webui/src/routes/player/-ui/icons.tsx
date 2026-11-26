@@ -306,3 +306,10 @@ export const CamcorderIcon = () => (
     <circle cx="7" cy="12" r="1.6" />
   </Icon>
 );
+
+export const BellIcon = () => (
+  <Icon>
+    <path d="M6 9a6 6 0 0 1 12 0c0 5 2 6.5 2 6.5H4S6 14 6 9" />
+    <path d="M10 19a2 2 0 0 0 4 0" />
+  </Icon>
+);

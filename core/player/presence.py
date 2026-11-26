@@ -256,7 +256,10 @@ def order_message(profile_id: int, session: str, text: str, header: str = "") ->
         if key not in _sessions:
             return False
         _notes[key] = {"header": str(header or "")[:MAX_HEADER], "text": str(text or "")[:MAX_MESSAGE]}
-        return True
+    # kept in the profile's notifications too: a phone in a pocket sees it later
+    from core.player import notifications
+    notifications.admin_message(int(profile_id), str(text or "")[:MAX_MESSAGE], str(header or "")[:MAX_HEADER])
+    return True
 
 
 def orders(profile_id: int, session: str, *, now: Optional[float] = None) -> Dict[str, Any]:

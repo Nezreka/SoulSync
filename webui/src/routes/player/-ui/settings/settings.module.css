@@ -998,3 +998,49 @@
     height: auto;
   }
 }
+
+/* notifications: a time of day, and a plain on/off word */
+.time {
+  flex: none;
+  padding: calc(var(--u) * 0.35) calc(var(--u) * 0.6);
+  border: 1px solid var(--white-a14);
+  border-radius: var(--radius-lg);
+  background: var(--white-a04);
+  color: var(--pl-text);
+  font: inherit;
+  font-size: calc(var(--u) * 0.86);
+  font-variant-numeric: tabular-nums;
+  color-scheme: dark;
+}
+
+.time:focus-visible {
+  border-color: rgba(var(--accent-rgb), 0.7);
+  outline: none;
+}
+
+.time:disabled {
+  opacity: 0.5;
+}
+
+.times {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: calc(var(--u) * 0.5);
+}
+
+.timesTo {
+  color: var(--pl-text-3);
+  font-size: calc(var(--u) * 0.82);
+}
+
+.state {
+  flex: none;
+  color: var(--pl-text-3);
+  font-size: calc(var(--u) * 0.86);
+  font-weight: 650;
+}
+
+.state[data-on='true'] {
+  color: var(--accent-light);
+}
