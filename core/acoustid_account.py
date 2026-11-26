@@ -26,11 +26,11 @@ from typing import Any, Dict, Optional, Tuple
 from utils.logging_config import get_logger
 
 logger = get_logger("acoustid.account")
-
-# soulsync's registered acoustid application key. the maintainer registers
-# one application at acoustid.org/new-application and puts its key here.
-# empty means "not registered yet": the env var or the old setting is used.
-SOULSYNC_ACOUSTID_APP_KEY = ''
+# soulsync's registered acoustid application key (registered by the maintainer
+# at acoustid.org, nov 26 2026). application keys are meant to ship inside the
+# app; it beats the old per-install setting, which every user had to register.
+# the env var still overrides it.
+SOULSYNC_ACOUSTID_APP_KEY = 'dsewdZIhPR'
 
 APP_KEY_ENV = 'ACOUSTID_APP_KEY'
 APP_KEY_SETTING = 'acoustid.api_key'
