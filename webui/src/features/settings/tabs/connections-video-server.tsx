@@ -172,7 +172,13 @@ function OtherTv() {
     <div data-video-lib-tv-more-row="" hidden={!others.length}>
       <div data-video-lib-tv-more="">
         {others.map((l) => (
-          <Row key={l.title} sub field label={l.title} help="Another TV library on this server.">
+          <Row
+            key={l.title}
+            sub
+            field
+            label={l.title}
+            help="Another TV library on this server. Scan reads it. Anime is for a library of anime, numbered the way anime is; leave it off for anything else, like YouTube."
+          >
             <label className={s.inlineSwitch}>
               Scan
               <Switch

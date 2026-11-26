@@ -1,6 +1,8 @@
 # soulsync 3.7.0: `dev` → `main`
 
-the player becomes its own place: it has a first-run setup, libraries you name and build from your folders, pages whose rows each profile arranges, watch parties and casting, and its streams show in server activity like plex ones. video can run with no media server at all, or with plex and jellyfin as one library. backups get their own page, cover every database, and a damaged database can be repaired. search can identify a song by listening. downloads got a hard pass on matching and on never losing a file.
+**soulsync now has its own player.** it's a watch-and-listen app built into soulsync, like a plex or jellyfin player: your movies, tv, music, youtube, audiobooks, podcasts and live guide, played straight from your soulsync server. open it with the new **open the player** button at the top of the sidebar, or go to `/player`. the first time, an admin runs a short setup (name the server, sort folders into libraries, choose who sees what); until then members see a "being set up" screen. it also comes as an android app for phones, tablets and tv, with downloads you can take offline.
+
+around it: video can run with no media server at all, or with plex and jellyfin as one library. backups get their own page, cover every database, and a damaged database can be repaired. search can identify a song by listening. downloads got a hard pass on matching and on never losing a file.
 
 ## the player
 
@@ -18,7 +20,7 @@ the player becomes its own place: it has a first-run setup, libraries you name a
 
 ## the soulsync player app
 
-the player has an android app now: phones, tablets and android tv (shield included).
+the player also comes as an android app for phones, tablets and android tv (shield included), paired to your server from settings, devices.
 
 - **repo:** https://github.com/Nezreka/soulsync-mobile-app
 - **apk (0.2.0):** https://github.com/Nezreka/soulsync-mobile-app/releases/download/v0.2.0/SoulSync-Player-0.2.0.apk
