@@ -51,6 +51,8 @@ export interface SyncShellProps {
    * becomes the page; a source tab opens as a panel over it.
    */
   registerOpenTab?: (open: (tab: SyncTabId) => void) => void;
+  /** live status in the header, first of its actions (the bulk run's pill) */
+  status?: ReactNode;
 }
 
 /** 2237-2241. The rest are vanilla seams; see -sync.shell.ts. */
@@ -92,6 +94,7 @@ export function SyncShell({
   onTabChange,
   registerOpenTab,
   summary,
+  status,
 }: SyncShellProps) {
   const [tab, setTab] = useState<SyncTabId>(SYNC_DEFAULT_TAB);
   /** the collection under an open source panel, which closing it returns to */
@@ -191,6 +194,7 @@ export function SyncShell({
             </p>
           </div>
           <div className={`pl-header-actions ${styles.topActions}`}>
+            {status}
             {/* the explorer is a view of these playlists, so it opens from here
               and has no sidebar entry of its own. hidden with its feature
               switch, and for a profile that was not given the page */}
