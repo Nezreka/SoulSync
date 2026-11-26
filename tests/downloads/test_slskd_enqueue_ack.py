@@ -68,7 +68,6 @@ def test_returns_matching_transfer_id_from_slskd_envelope(enqueue):
     (201, {'enqueued': [{**TRANSFER, 'username': 'another-peer'}], 'failed': []}),
     (201, {'enqueued': [{**TRANSFER, 'id': ' '}], 'failed': []}),
     (201, {'enqueued': [TRANSFER, {**TRANSFER, 'id': 'another-id'}], 'failed': []}),
-    (201, b''),
     (201, b'invalid json'),
     (500, {'error': 'Uncertain whether enqueue was applied'}),
 ])
@@ -77,6 +76,15 @@ def test_unconfirmed_enqueue_never_reports_success_or_posts_again(enqueue, statu
 
     assert result is None
     assert [path for path, _, _ in calls] == ['/slskd/api/v0/transfers/downloads/peer']
+
+
+def test_an_empty_201_from_older_slskd_is_a_download(enqueue):
+    # slskd 0.23 and older answer an accepted enqueue with a bare 201; the
+    # filename stands in for the id, as it always did there
+    result, calls = enqueue(201, b'')
+
+    assert result == FILENAME
+    assert len(calls) == 1
 
 
 @pytest.mark.parametrize('body', [{'id': 'legacy-id'}, [{'id': 'legacy-id'}]])
@@ -91,7 +99,7 @@ def test_accepts_legacy_responses_with_explicit_ids(enqueue, body):
     (201, {'enqueued': [TRANSFER], 'failed': []}, True),
     (201, {'enqueued': [], 'failed': [{'item1': FILENAME, 'item2': 'Rejected'}]}, False),
     (201, {'enqueued': [{**TRANSFER, 'filename': 'other.flac'}], 'failed': []}, False),
-    (201, b'', False),
+    (201, b'', True),   # older slskd: a bare 201 is accepted
     (201, b'invalid json', False),
     (500, {'error': 'Internal error'}, False),
 ])
