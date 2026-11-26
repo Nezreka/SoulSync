@@ -208,6 +208,18 @@ function shelfRules(kind: 'movie' | 'show', year: number) {
   return rules;
 }
 
+/** the movie or show a card opens, by its link: /player/movies/12, /player/tv/34 */
+export function titleIdOf(card: { href?: string }): number | null {
+  const m = /\/player\/(?:movies|tv)\/(\d+)/.exec(card.href ?? '');
+  return m ? Number(m[1]) : null;
+}
+
+/** is this card one of these titles (a library page's own) */
+export function inTitles(card: { href?: string }, titles: readonly { id: number }[]): boolean {
+  const id = titleIdOf(card);
+  return id !== null && titles.some((t) => t.id === id);
+}
+
 export function VideoForYou({
   kind,
   movies,
@@ -235,7 +247,12 @@ export function VideoForYou({
   });
   const on = useMemo(() => new Set(rows.map((r) => r.id)), [rows]);
 
-  const continuing = useContinueWatching(kind === 'movie' ? ['movie:'] : ['episode:', 'show:']);
+  const started = useContinueWatching(kind === 'movie' ? ['movie:'] : ['episode:', 'show:']);
+  // a library's own page only goes on with what is in that library
+  const continuing = useMemo(
+    () => (library ? started.filter((c) => inTitles(c, items)) : started),
+    [started, library, items],
+  );
   const forYou = useQuery({
     ...discoverForYouQuery(),
     enabled: on.has('recommended') || on.has('recommended-add'),
