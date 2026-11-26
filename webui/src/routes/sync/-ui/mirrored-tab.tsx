@@ -43,6 +43,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { MirroredPlaylistDetail } from '../-sync.api';
+import type { BulkMode } from '../-sync.bulk-run';
 import type { ExportMode } from '../-sync.export';
 import type { LibraryFilter, LibrarySort } from '../-sync.library';
 import type { MirroredPlaylistRow } from '../-sync.mirrored';
@@ -69,7 +70,7 @@ import { autoSyncCanSchedulePlaylist } from '../-sync.autosync';
 import { autoSyncPipelineCoversPlaylist } from '../-sync.autosync';
 import { autoSyncPlaylistHealth, detectBrowserTimezone } from '../-sync.autosync';
 import { autoSyncNextRunLabel } from '../-sync.autosync';
-import { bulkSummary, runInTurn, type BulkMode, type BulkRunState } from '../-sync.bulk-run';
+import { startBulkRun, useBulkRun } from '../-sync.bulk-store';
 import { cardScheduleLabel, useCardSchedules } from '../-sync.card-schedule';
 import { exportNotConnectedStatus } from '../-sync.export';
 import {
@@ -1065,23 +1066,15 @@ export function MirroredTab({
   // under a selected id; the count and the delete both read this, never the set.
   const selectedRows = selecting ? allRows.filter((r) => selected.has(r.id)) : [];
 
-  // #2309: the selection synced by hand, one playlist after another
-  const [bulk, setBulk] = useState<BulkRunState | null>(null);
-  const bulkStop = useRef(false);
+  // #2309: the selection synced by hand, one playlist after another. the run
+  // lives in its store (#2320), so it outlives this tab; the page shows its
+  // pill and panel and reloads the list when it ends.
+  const bulkRunning = Boolean(useBulkRun().run?.running);
   const startBulk = (mode: BulkMode) => {
-    const targets = selectedRows.map((r) => ({
-      id: r.id,
-      name: r.display_name || r.name || 'Playlist',
-    }));
-    if (!targets.length || bulk?.running) return;
-    bulkStop.current = false;
-    void runInTurn(mode, targets, setBulk, () => bulkStop.current).then((done) => {
-      window.showToast?.(
-        bulkSummary(done),
-        done.items.some((i) => i.state === 'failed') ? 'warning' : 'success',
-      );
-      void load();
-    });
+    startBulkRun(
+      mode,
+      selectedRows.map((r) => ({ id: r.id, name: r.display_name || r.name || 'Playlist' })),
+    );
   };
   const allVisibleSelected = visibleRows.length > 0 && visibleRows.every((r) => selected.has(r.id));
 
@@ -1614,7 +1607,7 @@ export function MirroredTab({
           <button
             type="button"
             className={`${styles.sb}`}
-            disabled={selectedRows.length === 0 || Boolean(bulk?.running)}
+            disabled={selectedRows.length === 0 || bulkRunning}
             title="Put these playlists on your server with the songs you already have. Nothing is added to the wishlist or downloaded."
             onClick={() => startBulk('sync')}
           >
@@ -1623,7 +1616,7 @@ export function MirroredTab({
           <button
             type="button"
             className={`${styles.sb}`}
-            disabled={selectedRows.length === 0 || Boolean(bulk?.running)}
+            disabled={selectedRows.length === 0 || bulkRunning}
             title="Put these playlists on your server, and get the songs you don't have: they go on the wishlist and download under your usual rules."
             onClick={() => startBulk('download')}
           >
@@ -1646,54 +1639,6 @@ export function MirroredTab({
             Done
           </button>
         </div>
-      )}
-      {bulk && (
-        <section
-          className={styles.bulkPanel}
-          aria-label="Syncing the selected playlists"
-          aria-live="polite"
-        >
-          <header className={styles.bulkHead}>
-            <b>
-              {bulk.mode === 'sync' ? 'Sync' : 'Sync & download'} · {bulkSummary(bulk)}
-            </b>
-            {bulk.running ? (
-              <button
-                type="button"
-                className={styles.bulkBtn}
-                disabled={bulkStop.current}
-                onClick={() => {
-                  bulkStop.current = true;
-                  setBulk((b) => (b ? { ...b, stopping: true } : b));
-                }}
-              >
-                {bulk.stopping ? 'Stopping after this one…' : 'Stop after this one'}
-              </button>
-            ) : (
-              <button type="button" className={styles.bulkBtn} onClick={() => setBulk(null)}>
-                Close
-              </button>
-            )}
-          </header>
-          <ol className={styles.bulkList}>
-            {bulk.items.map((item) => (
-              <li key={item.id} data-state={item.state}>
-                <span className={styles.bulkName}>{item.name}</span>
-                <span className={styles.bulkState}>
-                  {
-                    {
-                      waiting: 'Waiting',
-                      running: 'Syncing…',
-                      done: 'Done',
-                      failed: item.note ? `Failed: ${item.note}` : 'Failed',
-                      stopped: 'Not started',
-                    }[item.state]
-                  }
-                </span>
-              </li>
-            ))}
-          </ol>
-        </section>
       )}
       {schedMenu && (
         <ScheduleMenu
