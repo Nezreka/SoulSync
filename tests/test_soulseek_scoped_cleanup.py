@@ -236,7 +236,8 @@ def test_acknowledged_transfer_id_rejects_mismatched_filename():
 def test_acknowledged_transfer_id_empty_or_failed_enqueue():
     assert acknowledged_transfer_id(
         {'enqueued': [], 'failed': ['a\\song.flac']}, 'peerA', 'a\\song.flac') is None
-    assert acknowledged_transfer_id({}, 'peerA', 'x') is None
+    # an empty reply is older slskd's accepted 201 (no body): the filename stands in
+    assert acknowledged_transfer_id({}, 'peerA', 'x') == 'x'
 
 
 def test_acknowledged_transfer_id_keeps_legacy_shapes():

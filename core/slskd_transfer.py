@@ -2,7 +2,16 @@
 
 
 def acknowledged_transfer_id(response: object, username: str, filename: str) -> str | None:
-    """Return an ID only when the response identifies one matching transfer."""
+    """Return an ID only when the response identifies one matching transfer.
+
+    slskd 0.23 and older answer a successful enqueue with a bare 201 and no
+    body, which the client reads as ``{}`` (a failed request is None, never
+    {}). that is an accepted enqueue with no id, so the filename stands in
+    for one, as it always did there (``_looks_like_transfer_id`` knows a
+    filename id). without this every soulseek download failed on those
+    versions."""
+    if isinstance(response, dict) and not response:
+        return filename or None
     if isinstance(response, dict) and ('enqueued' in response or 'failed' in response):
         # This POST submitted only one file, so a failure cannot coexist
         # with a confirmed transfer. Do not depend on failure tuple fields.
