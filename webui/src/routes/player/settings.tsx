@@ -36,6 +36,7 @@ import {
   savePlayerSettings,
   updatePlayerIssue,
   warmCommercials,
+  playerLibrariesQuery,
 } from './-player.api';
 import {
   CheckIcon,
@@ -64,7 +65,7 @@ import {
   type SubtitleSize,
 } from './-ui/playback/use-subtitle-style';
 import { setVisual, useVisual } from './-ui/playback/visuals';
-import { openPlayerSetup } from './-ui/player-setup';
+import { openLibrarySetup, openPlayerSetup } from './-ui/player-setup';
 import { SidebarSettings } from './-ui/sidebar-settings';
 import s from './-ui/social.module.css';
 import { useTrailersSetting } from './-ui/trailer';
@@ -170,6 +171,9 @@ function SettingsPage() {
   const settings = useQuery(playerSettingsQuery());
   const commConfig = useQuery(commercialsConfigQuery());
   const isAdmin = Boolean(commConfig.data?.can_edit ?? shell.profile?.isAdmin);
+  // the libraries an admin has now, said beside Edit libraries
+  const librariesNow = useQuery({ ...playerLibrariesQuery(), enabled: isAdmin });
+  const libraryNames = (librariesNow.data ?? []).map((l) => l.name).filter(Boolean);
   const issuesQ = useQuery(playerIssuesQuery());
   const resolveIssue = useMutation({
     mutationFn: ({ id, status }: { id: number; status: 'resolved' | 'dismissed' | 'open' }) =>
@@ -837,10 +841,29 @@ function SettingsPage() {
             note="For everyone on this server: its name, how your folders are grouped into libraries, who sees which, and the sidebar people start from."
           >
             <Row
-              label="Libraries, people and the server"
-              help="Group folders into libraries like Anime or Kids, hide a library from someone, and name the server."
+              label="Libraries"
+              help={
+                libraryNames.length
+                  ? `You have ${libraryNames.join(', ')}. Add, remove, rename or regroup them; nothing on disk moves.`
+                  : 'Add, remove, rename or regroup your libraries; nothing on disk moves.'
+              }
             >
-              <button type="button" className={s.actionLink} onClick={openPlayerSetup} data-nav>
+              <button type="button" className={s.actionLink} onClick={openLibrarySetup} data-nav>
+                <HomeIcon />
+                <span>Edit libraries</span>
+                <ChevronIcon />
+              </button>
+            </Row>
+            <Row
+              label="Libraries, people and the server"
+              help="Everything in setup: the server's name, libraries, who sees which, and the sidebar."
+            >
+              <button
+                type="button"
+                className={s.actionLink}
+                onClick={() => openPlayerSetup()}
+                data-nav
+              >
                 <HomeIcon />
                 <span>Open player setup</span>
                 <ChevronIcon />

@@ -4,7 +4,7 @@
  */
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const state: { payload: unknown; saved: unknown } = { payload: null, saved: null };
@@ -91,7 +91,7 @@ describe('player setup', () => {
     next(); // movies
     fireEvent.click(screen.getByRole('button', { name: 'Add a library' }));
     const names = screen.getAllByLabelText('Library name') as HTMLInputElement[];
-    fireEvent.change(names[1], { target: { value: 'Kids' } });
+    fireEvent.change(names[0], { target: { value: 'Kids' } });
     const pick = screen.getByLabelText('Library for /media/kids') as HTMLSelectElement;
     const kids = [...pick.options].find((o) => o.textContent === 'Kids')!;
     fireEvent.change(pick, { target: { value: kids.value } });
@@ -124,7 +124,7 @@ describe('player setup', () => {
     next(); // movies
     fireEvent.click(screen.getByRole('button', { name: 'Add a library' }));
     const names = screen.getAllByLabelText('Library name') as HTMLInputElement[];
-    fireEvent.change(names[1], { target: { value: 'Cam Movies' } });
+    fireEvent.change(names[0], { target: { value: 'Cam Movies' } });
     next(); // tv
     next(); // people
     next(); // sidebar
@@ -153,7 +153,8 @@ describe('the setup screen itself', () => {
     fireEvent.dragOver(add, { dataTransfer: transfer });
     fireEvent.drop(add, { dataTransfer: transfer });
     const names = screen.getAllByLabelText('Library name') as HTMLInputElement[];
-    expect(names.map((n) => n.value)).toEqual(['Movies', 'Kids']);
+    // the main library's name is fixed text; the new one is named after its folder
+    expect(names.map((n) => n.value)).toEqual(['Kids']);
     expect(
       (screen.getByLabelText('Library for /media/kids') as HTMLSelectElement).selectedOptions[0]
         .textContent,
@@ -199,5 +200,48 @@ describe('a folder path, split for reading', () => {
       parts: ['mnt', 'media', 'movies'],
     });
     expect(splitFolderPath('')).toEqual({ root: '', parts: [] });
+  });
+});
+
+describe('library names and suggestions from folder names', () => {
+  it('names a library after its folder, without the word movies', async () => {
+    const { libraryNameFor } = await import('./player-setup');
+    expect(libraryNameFor('\\\\nas\\PLEX\\4K MOVIES', 'movie')).toBe('4K');
+    expect(libraryNameFor('H:\\Media\\Kids Movies', 'movie')).toBe('Kids');
+    expect(libraryNameFor('\\\\nas\\PLEX\\CAMERA', 'movie')).toBe('Camera');
+    expect(libraryNameFor('/srv/Anime Series', 'show')).toBe('Anime');
+    expect(libraryNameFor('/srv/MOVIES', 'movie')).toBe('Movies');
+  });
+
+  it('offers a library per kind of folder it recognises, never one that exists', async () => {
+    const { librarySuggestions } = await import('./player-setup');
+    const folders = [
+      { folder: 'a', path: '\\\\nas\\PLEX\\4K MOVIES' },
+      { folder: 'b', path: '\\\\nas\\PLEX\\CAMERA' },
+      { folder: 'c', path: 'H:\\Kids Movies' },
+      { folder: 'd', path: '\\\\nas\\PLEX\\MOVIES' },
+    ];
+    const ideas = librarySuggestions('movie', folders, ['Movies']);
+    expect(ideas.map((i) => [i.name, i.folders])).toEqual([
+      ['4K', ['a']],
+      ['Home Videos', ['b']],
+      ['Kids', ['c']],
+    ]);
+    expect(librarySuggestions('movie', folders, ['Movies', '4k']).map((i) => i.name)).not.toContain(
+      '4K',
+    );
+    expect(librarySuggestions('show', folders, []).map((i) => i.name)).not.toContain('Home Videos');
+  });
+});
+
+describe('coming back to it later', () => {
+  it('Edit libraries opens a finished setup straight on the movie libraries, with save', async () => {
+    state.payload = admin(true);
+    const { openLibrarySetup } = await import('./player-setup');
+    await mount();
+    act(() => openLibrarySetup());
+    expect(await screen.findByText('How should movies be grouped?')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Close' })).toBeInTheDocument();
   });
 });
