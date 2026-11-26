@@ -364,7 +364,11 @@ def _sources_payload():
         conn.close()
     for lib in libs:
         lib["videos"] = counts.get(lib["root"], (0, []))[0]
-    folders = [{"path": p, "root": H._norm(p), "videos": counts.get(H._norm(p), (0, []))[0]}
+    same = H.twins(vdb)
+    folders = [{"path": p, "root": H._norm(p), "videos": counts.get(H._norm(p), (0, []))[0],
+                # clips also given by the server, counted once there
+                "shared": int((same.get(H._norm(p)) or {}).get("count") or 0),
+                "shared_with": (same.get(H._norm(p)) or {}).get("with") or None}
                for p in home_paths(vdb)]
     return {"success": True, "server": server if server in ("plex", "jellyfin") else None,
             "libraries": libs, "folders": folders, "error": error, "scan": H.status()}

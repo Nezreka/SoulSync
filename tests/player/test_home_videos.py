@@ -669,3 +669,15 @@ def test_twins_added_before_are_cleared_but_an_edited_one_stays(vdb, monkeypatch
     finally:
         c.close()
     assert len(cakes) == 1 and cakes[0][0].startswith("plex:")
+
+
+def test_setup_is_told_how_many_of_a_folders_clips_plex_already_gave(vdb, monkeypatch, tmp_path):
+    src = _plex_home()
+    folder = tmp_path / "share" / "home"
+    _clip(folder / "Birthdays" / "2022", "cake.mp4", size=2048)
+    monkeypatch.setattr(H, "_server_picks", lambda _db: ("plex", ["Home Videos"]))
+    vdb.set_setting("home_paths", f'["{folder.as_posix()}"]')
+    H.forget_roots()
+    H.scan(vdb, server_source=src)
+    got = H.twins(vdb)
+    assert list(got.values()) == [{"count": 1, "with": "Home Videos"}]
