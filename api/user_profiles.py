@@ -2265,6 +2265,94 @@ def unlink_plex_home_user():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+# --- import plex users (#2319) ---
+
+def _plex_import_source():
+    """(plexapi account, this server's machine id) from the admin's plex
+    connection. raises RuntimeError with words when plex isn't there"""
+    from core.security import plex_signin
+    engine = _media_server_engine()
+    client = engine.client('plex') if engine is not None else None
+    if client is None or not hasattr(client, '_account'):
+        raise RuntimeError('Plex is not connected')
+    account = client._account()
+    return account, plex_signin.server_machine_id(client)
+
+
+def _plex_import_users():
+    from core.security import plex_import
+    account, machine = _plex_import_source()
+    return plex_import.server_users(account, machine), machine
+
+
+def _plex_signin_on():
+    from core.security.oidc_only import is_on
+    return bool(config_manager.get('security.plex_signin', False) and not is_on(config_manager))
+
+
+@bp.route('/api/profiles/plex-import', methods=['GET'])
+@admin_only
+def plex_import_list():
+    """everyone the plex server is shared with, and the soulsync profile
+    that is (or may be) them"""
+    from core.permission_store import signup_template_id
+    from core.security import plex_import
+    try:
+        users, _machine = _plex_import_users()
+    except Exception as e:  # noqa: BLE001 - said in the dialog
+        logger.warning("plex import: listing failed: %s", e)
+        msg = str(e) if isinstance(e, RuntimeError) else "Couldn't read your Plex users from plex.tv"
+        return jsonify({'success': False, 'error': 'plex_unavailable', 'message': msg}), 503
+    db = get_database()
+    return jsonify({'success': True, 'users': plex_import.listing(db, users),
+                    'signin_enabled': _plex_signin_on(),
+                    'signup_template_id': signup_template_id(db)})
+
+
+@bp.route('/api/profiles/plex-import', methods=['POST'])
+@admin_only
+def plex_import_run():
+    """{users: [{id, profile_id?}], template_id?}: a profile per plex user,
+    linked to their plex account, or the link put on a profile that's
+    already them. the users are read from plex again here, never taken
+    from the request"""
+    from api.profile_admin import store_avatar
+    from core.permission_store import signup_template_id
+    from core.security import plex_import
+    data = request.get_json(silent=True) or {}
+    picks = data.get('users')
+    if not isinstance(picks, list) or not picks or not all(isinstance(p, dict) for p in picks):
+        return jsonify({'success': False, 'error': 'invalid', 'message': 'Pick someone to import'}), 400
+    if len(picks) > 500:
+        return jsonify({'success': False, 'error': 'invalid', 'message': 'Up to 500 at a time'}), 400
+    db = get_database()
+    template_id = data.get('template_id')
+    if template_id in (None, ''):
+        template_id = signup_template_id(db)
+    else:
+        try:
+            template_id = int(template_id)
+        except (TypeError, ValueError):
+            return jsonify({'success': False, 'error': 'invalid', 'message': 'Pick a template'}), 400
+        if not db.get_permission_template(template_id):
+            return jsonify({'success': False, 'error': 'no_template', 'message': 'That template is gone'}), 404
+    try:
+        users, machine = _plex_import_users()
+    except Exception as e:  # noqa: BLE001
+        logger.warning("plex import: listing failed: %s", e)
+        msg = str(e) if isinstance(e, RuntimeError) else "Couldn't read your Plex users from plex.tv"
+        return jsonify({'success': False, 'error': 'plex_unavailable', 'message': msg}), 503
+    results = plex_import.import_users(db, users, picks, template_id=template_id, machine_id=machine,
+                                       save_avatar=store_avatar)
+    for r in results:
+        if r.status == 'created':
+            _audit('plex_imported', r.profile_id, (db.get_profile(r.profile_id) or {}).get('name'))
+        elif r.status == 'linked':
+            _audit('plex_linked', r.profile_id, (db.get_profile(r.profile_id) or {}).get('name'))
+    return jsonify({'success': True, 'results': [r.as_dict() for r in results],
+                    'signin_enabled': _plex_signin_on()})
+
+
 @bp.route('/api/profiles/me/services', methods=['GET'])
 @self_only
 def get_my_service_selections():

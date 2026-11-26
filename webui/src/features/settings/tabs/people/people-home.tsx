@@ -29,6 +29,7 @@ import {
 } from './model';
 import { type EditorHooks, openAddPerson, openInviteMaker, openPersonEditor } from './open-editor';
 import css from './people.module.css';
+import { PlexImportDialog } from './plex-import';
 
 function Avatar({ row }: { row: PersonRow }) {
   const p = row.person;
@@ -168,12 +169,16 @@ export function PeopleHome({
   data,
   meId,
   hooks,
+  onChanged,
 }: {
   data: PeopleData;
   meId: number | null;
   hooks?: EditorHooks;
+  /** people were added outside the editor (an import from Plex) */
+  onChanged?: () => void;
 }) {
   const [filter, setFilter] = useState<Filter>('everyone');
+  const [plexOpen, setPlexOpen] = useState(false);
   const [query, setQuery] = useState('');
   const counts = useMemo(() => countPeople(data.people), [data.people]);
   const hero = heroParts(counts, data.waiting);
@@ -276,6 +281,14 @@ export function PeopleHome({
         <button
           type="button"
           className={`${css.btn} ${css.secondary}`}
+          id="ppl-plex-import"
+          onClick={() => setPlexOpen(true)}
+        >
+          Import from Plex
+        </button>
+        <button
+          type="button"
+          className={`${css.btn} ${css.secondary}`}
           onClick={() => {
             if (!openInviteMaker())
               window.showToast?.("Invites aren't ready yet. Reload the page.", 'error');
@@ -335,6 +348,13 @@ export function PeopleHome({
           </div>
         )}
       </div>
+      <PlexImportDialog
+        open={plexOpen}
+        onClose={() => setPlexOpen(false)}
+        templates={data.templates}
+        signupTemplateId={data.signupTemplateId}
+        onImported={onChanged}
+      />
       <div className={css.legend} aria-hidden="true">
         <span className={`${css.st} ${css.dl}`}>
           <i />

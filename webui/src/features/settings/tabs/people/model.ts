@@ -724,6 +724,10 @@ export function auditSentence(e: AuditEntry, catalogue: Catalogue | null = null)
       return withWhat(`${actor} changed ${theirs} access`);
     case 'profile_created':
       return `${actor} added ${target}`;
+    case 'plex_imported':
+      return `${actor} imported ${target} from Plex`;
+    case 'plex_linked':
+      return `${actor} linked ${target} to their Plex account`;
     case 'profile_updated':
       return `${actor} changed ${theirs} profile`;
     case 'profile_deleted':
