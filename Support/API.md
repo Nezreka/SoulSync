@@ -218,6 +218,16 @@ How much of the media server's music SoulSync can read directly, folder by folde
 
 An override renames a folder: "the server's `/data/music` is `/music` here". It never gives SoulSync access to a drive. Every server path SoulSync turns into its own asks the overrides first (the longest matching server folder wins, Windows paths compare without case), then the mounts it learned itself, then the trailing-folder match against its library folders. An override whose folder is missing is skipped, so it never hides a file.
 
+### AcoustID account linking (web UI routes, admins only)
+
+From 1 January 2027 an AcoustID lookup needs the person's own AcoustID key with SoulSync's application key (error 21 without it). These link that key. No answer ever carries a key.
+
+- `GET /api/acoustid/account`: `{has_user_key, source: ""|"linked"|"pasted", state: ""|"pending"|"approved"|"declined"|"expired"|"revoked"|"unknown", code, url, expires, has_app_key, builtin_app_key, required_from, required_now, needs_link, message}`. `?check=1` first asks AcoustID about a pending link; a declined, expired, revoked or unknown key is discarded.
+- `POST /api/acoustid/link` `{return_url?}`: asks AcoustID for a link (`/v2/user/request_link`), stores the user key at once and answers as above with `state: "pending"`, the `code` and the `url` to open. `return_url` (http or https) is where AcoustID sends the person after they approve or decline.
+- `POST /api/acoustid/unlink`: forgets the user key.
+
+Settings: `acoustid.user_key` (a secret, redacted like the others), `acoustid.api_key` (an application key the install registered itself; SoulSync's own is used when it has one, or the `ACOUSTID_APP_KEY` env var). Every lookup sends the user key in the `Acoustid-User-Key` header.
+
 ### Paired devices: listen anywhere (web UI and app routes)
 
 Settings > Devices pairs music apps with this server. A device gets its own token, never an API key. The admin routes are `@admin_only`; the device's own routes take the token in `X-Device-Token: sdt_...` (or `Authorization: Bearer sdt_...`) and no cookie. A request may carry a device token or an API key, not both (`400 device_one_credential`).

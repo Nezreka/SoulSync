@@ -15,6 +15,7 @@ import time
 from difflib import SequenceMatcher
 from typing import Any, Dict, Optional
 
+from core import acoustid_account
 from core.repair_jobs import register_job
 from core.repair_jobs.base import (
     JobContext,
@@ -182,7 +183,9 @@ class AcoustIDScannerJob(RepairJob):
                 logger.warning("AcoustID scan not started: %s", key_reason)
                 if context.report_progress:
                     context.report_progress(
-                        log_line=f'AcoustID key invalid — scan aborted: {key_reason}',
+                        log_line=(f'AcoustID scan not started: {key_reason}'
+                                  if key_reason == acoustid_account.NEEDS_LINK_MESSAGE
+                                  else f'AcoustID key invalid — scan aborted: {key_reason}'),
                         log_type='error')
                 result.errors += 1
                 return result
@@ -351,6 +354,16 @@ class AcoustIDScannerJob(RepairJob):
                     logger.warning("Aborting AcoustID scan due to invalid API key")
                     save_progress(last_completed_id)
                     return result
+                if status == 'abort_needs_user_key':
+                    # #2318: the rest would all fail the same way
+                    logger.warning("Aborting AcoustID scan: the AcoustID account is not linked")
+                    if context.report_progress:
+                        context.report_progress(
+                            log_line='AcoustID scan stopped: link your AcoustID account in '
+                                     'Settings, Connections, AcoustID.',
+                            log_type='error')
+                    save_progress(last_completed_id)
+                    return result
             except Exception as e:
                 logger.debug("Error scanning %s: %s", fname, e)
                 result.errors += 1
@@ -484,6 +497,8 @@ class AcoustIDScannerJob(RepairJob):
             result.errors += 1
             if probe.get('_acoustid_invalid_key'):
                 return 'abort_invalid_key'
+            if probe.get('_acoustid_needs_user_key'):
+                return 'abort_needs_user_key'
             return
 
         outcome = probe.get('_acoustid_decision')

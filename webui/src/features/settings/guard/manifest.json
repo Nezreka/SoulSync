@@ -9126,6 +9126,24 @@
       "asked": "11",
       "shows": ["musicbrainz.base_url", "musicbrainz.request_interval"]
     },
+    "#acoustid-user-key": {
+      "sel": "#acoustid-user-key",
+      "kind": "text",
+      "only": "music",
+      "sides": ["music", "video"],
+      "scenario": "music",
+      "from": "",
+      "to": "guard-secret",
+      "saves": {
+        "settings": {
+          "acoustid": {
+            "user_key": "guard-secret"
+          }
+        }
+      },
+      "asked": "guard-secret",
+      "shows": ["acoustid.user_key"]
+    },
     "#acoustid-api-key": {
       "sel": "#acoustid-api-key",
       "kind": "text",
@@ -13297,7 +13315,7 @@
     "#folders-video-panel \"Add folder\"": {
       "label": "Add folder",
       "anchor": "folders-video-panel",
-      "count": 2,
+      "count": 3,
       "sides": ["music", "video"],
       "scenario": "music"
     },
@@ -14397,6 +14415,20 @@
       "label": "More about this setting",
       "anchor": "musicbrainz-server-settings",
       "count": 2,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#acoustid-link-row \"More about this setting\"": {
+      "label": "More about this setting",
+      "anchor": "acoustid-link-row",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#acoustid-link-row \"Link account\"": {
+      "label": "Link account",
+      "anchor": "acoustid-link-row",
+      "count": 1,
       "sides": ["music", "video"],
       "scenario": "music"
     },

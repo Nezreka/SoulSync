@@ -23,6 +23,7 @@ _SENSITIVE_KEYS = {
     "soulseek.api_key",
     "listenbrainz.token",
     "acoustid.api_key",
+    "acoustid.user_key",
     "lastfm.api_key",
     "genius.access_token",
     "pollinations.api_key",

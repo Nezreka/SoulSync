@@ -1009,6 +1009,7 @@ def reset_pin_via_credential():
             ('Navidrome Password',     config_manager.get('navidrome.password', '')),
             ('ListenBrainz Token',     config_manager.get('listenbrainz.token', '')),
             ('AcoustID API Key',       config_manager.get('acoustid.api_key', '')),
+            ('AcoustID User Key',      config_manager.get('acoustid.user_key', '')),
             ('Last.fm API Secret',     config_manager.get('lastfm.api_secret', '')),
             ('Genius Access Token',    config_manager.get('genius.access_token', '')),
         ]
