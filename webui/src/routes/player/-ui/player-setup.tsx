@@ -73,11 +73,18 @@ export const playerSetupQuery = () => ({
 // ── opened from anywhere (Settings, the users page) ───────────────────────
 
 let wanted = false;
+/** the step it opens on: 0 the welcome, 1 the movie libraries */
+let wantedStep = 0;
 const listeners = new Set<() => void>();
 const tell = () => listeners.forEach((fn) => fn());
-export function openPlayerSetup() {
+export function openPlayerSetup(step = 0) {
   wanted = true;
+  wantedStep = typeof step === 'number' ? step : 0;
   tell();
+}
+/** straight to the libraries, to add, remove, rename or regroup them later */
+export function openLibrarySetup() {
+  openPlayerSetup(1);
 }
 function closePlayerSetup() {
   wanted = false;
@@ -126,6 +133,57 @@ export function splitFolderPath(path: string): { root: string; parts: string[] }
   return { root: '', parts: bits };
 }
 
+/** each library's colour, in the order the kind's libraries are listed */
+const LIB_COLORS = [
+  'hsl(158 66% 51%)',
+  'hsl(228 100% 74%)',
+  'hsl(37 100% 64%)',
+  'hsl(334 100% 72%)',
+  'hsl(195 100% 69%)',
+  'hsl(276 100% 77%)',
+];
+
+/** a library named after a folder: "4K MOVIES" is "4K", "Kids Movies" is "Kids" */
+export function libraryNameFor(path: string, kind: Kind): string {
+  const last = splitFolderPath(path).parts.at(-1) ?? '';
+  const noise = kind === 'movie' ? /\b(movies?|films?)\b/gi : /\b(tv|shows?|series)\b/gi;
+  const left = last.replace(noise, ' ').replace(/\s+/g, ' ').trim();
+  const base = left || last || 'New library';
+  return base === base.toUpperCase() && base.length > 3
+    ? base.charAt(0) + base.slice(1).toLowerCase()
+    : base.charAt(0).toUpperCase() + base.slice(1);
+}
+
+const IDEAS: { re: RegExp; name: string; kinds: Kind[] }[] = [
+  { re: /\b4k\b|\buhd\b|2160/i, name: '4K', kinds: ['movie', 'show'] },
+  { re: /camera|\bcam\b|home ?videos?/i, name: 'Home Videos', kinds: ['movie'] },
+  { re: /\bkids?\b|family|children/i, name: 'Kids', kinds: ['movie', 'show'] },
+  { re: /anime/i, name: 'Anime', kinds: ['movie', 'show'] },
+  { re: /documentar/i, name: 'Documentaries', kinds: ['movie', 'show'] },
+];
+
+/** libraries worth offering, read off folder names: a folder called 4K
+ *  MOVIES could be its own 4K library. none that already exist by name */
+export function librarySuggestions(
+  kind: Kind,
+  folders: { folder: string; path: string }[],
+  existing: string[],
+): { name: string; folders: string[]; labels: string[] }[] {
+  const have = new Set(existing.map((n) => n.trim().toLowerCase()));
+  const out: { name: string; folders: string[]; labels: string[] }[] = [];
+  for (const idea of IDEAS) {
+    if (!idea.kinds.includes(kind) || have.has(idea.name.toLowerCase())) continue;
+    const hits = folders.filter((f) => idea.re.test(splitFolderPath(f.path).parts.at(-1) ?? ''));
+    if (hits.length)
+      out.push({
+        name: idea.name,
+        folders: hits.map((f) => f.folder),
+        labels: hits.map((f) => splitFolderPath(f.path).parts.at(-1) ?? f.path),
+      });
+  }
+  return out;
+}
+
 /** the SoulSync mark with the boot screen's light passing over it */
 function Mark({ size = 'sm' }: { size?: 'sm' | 'md' | 'hero' }) {
   const src = appURL('/static/soulsync-mark.png');
@@ -143,7 +201,7 @@ function Mark({ size = 'sm' }: { size?: 'sm' | 'md' | 'hero' }) {
 
 function PlayerSetup({ data, firstTime }: { data: SetupPayload; firstTime: boolean }) {
   const queryClient = useQueryClient();
-  const [step, setStep] = useState(0);
+  const [step, setStep] = useState(() => (firstTime ? 0 : wantedStep));
   const [name, setName] = useState(data.server_name);
   const [libs, setLibs] = useState<DraftLibrary[]>(() =>
     (data.libraries ?? []).map((l) => ({
@@ -236,21 +294,22 @@ function PlayerSetup({ data, firstTime }: { data: SetupPayload; firstTime: boole
     }
   };
 
-  const moveFolder = (kind: Kind, folder: string, toKey: string | null) => {
+  const moveFolder = (kind: Kind, folder: string, toKey: string | null, name?: string) => {
     let target = toKey;
     if (!target) {
-      // dropped on New library: a library made for it, named after the folder
-      target = `new:${Date.now()}`;
-      const base = folder.split(/[\\/]/).filter(Boolean).pop() || 'New library';
-      const name = base.charAt(0).toUpperCase() + base.slice(1);
-      setLibs((all) => [...all, { key: target!, id: null, kind, name, isDefault: false }]);
+      // its own library, named after the folder
+      target = `new:${Date.now()}:${Math.random().toString(36).slice(2, 6)}`;
+      const path = data.folders?.[kind]?.find((f) => f.folder === folder)?.path ?? folder;
+      const libName = name ?? libraryNameFor(path, kind);
+      setLibs((all) => [...all, { key: target!, id: null, kind, name: libName, isDefault: false }]);
     }
     setWhere((w) => ({ ...w, [`${kind}|${folder}`]: target! }));
   };
 
-  // a folder being dragged, and the card it is over
+  // a folder being dragged, and the library card it is over
   const dragging = useRef<{ kind: Kind; folder: string } | null>(null);
   const [over, setOver] = useState<string | null>(null);
+  const [hideHint, setHideHint] = useState<Record<string, boolean>>({});
 
   const libraryStep = (kind: Kind) => {
     const mine = libs.filter((l) => l.kind === kind);
@@ -258,6 +317,14 @@ function PlayerSetup({ data, firstTime }: { data: SetupPayload; firstTime: boole
     const folders = (data.folders?.[kind] ?? []).filter((f) => f.folder);
     const loose = (data.folders?.[kind] ?? []).find((f) => !f.folder);
     const noun = kind === 'movie' ? 'films' : 'shows';
+    const libOf = (f: SetupFolder) => where[`${kind}|${f.folder}`] ?? main?.key ?? '';
+    const colorOf = (key: string) =>
+      LIB_COLORS[
+        Math.max(
+          0,
+          mine.findIndex((l) => l.key === key),
+        ) % LIB_COLORS.length
+      ];
     const dropProps = (key: string | null) => ({
       onDragOver: (e: React.DragEvent) => {
         if (dragging.current?.kind !== kind) return;
@@ -273,143 +340,109 @@ function PlayerSetup({ data, firstTime }: { data: SetupPayload; firstTime: boole
         if (d && d.kind === kind) moveFolder(kind, d.folder, key);
       },
     });
+    // suggestions read off the folder names, for folders still in the main one
+    const ideas = librarySuggestions(
+      kind,
+      folders
+        .filter((f) => libOf(f) === main?.key)
+        .map((f) => ({ folder: f.folder, path: f.path })),
+      mine.map((l) => l.name),
+    );
+    const acceptIdeas = () => {
+      for (const idea of ideas) {
+        const key = `new:${Date.now()}:${Math.random().toString(36).slice(2, 6)}`;
+        setLibs((all) => [...all, { key, id: null, kind, name: idea.name, isDefault: false }]);
+        setWhere((w) => {
+          const next = { ...w };
+          for (const folder of idea.folders) next[`${kind}|${folder}`] = key;
+          return next;
+        });
+      }
+    };
+    // the folders grouped by where they live, then by the folders above them
+    const byRoot = new Map<string, Map<string, SetupFolder[]>>();
+    for (const f of folders) {
+      const { root, parts } = splitFolderPath(f.path);
+      const group = parts.slice(0, -1).join('\u0000');
+      if (!byRoot.has(root)) byRoot.set(root, new Map());
+      const groups = byRoot.get(root)!;
+      groups.set(group, [...(groups.get(group) ?? []), f]);
+    }
     return (
       <>
-        <div className={s.board}>
+        <div className={s.libCards}>
           {mine.map((lib) => {
-            const inIt = folders.filter(
-              (f) => (where[`${kind}|${f.folder}`] ?? main?.key) === lib.key,
-            );
+            const inIt = folders.filter((f) => libOf(f) === lib.key);
             const total =
               inIt.reduce((n, f) => n + f.titles, 0) + (lib.isDefault ? (loose?.titles ?? 0) : 0);
+            const shots = inIt.flatMap((f) => f.sample).slice(0, 4);
+            const color = colorOf(lib.key);
             return (
               <section
                 key={lib.key}
-                className={s.lib}
+                className={s.libCard}
                 data-over={over === lib.key ? 'true' : undefined}
                 aria-label={lib.name || 'Unnamed library'}
                 {...dropProps(lib.key)}
               >
-                <div className={s.libHead}>
-                  <input
-                    className={s.libName}
-                    value={lib.name}
-                    maxLength={60}
-                    aria-label="Library name"
-                    onChange={(e) =>
-                      setLibs((all) =>
-                        all.map((x) => (x.key === lib.key ? { ...x, name: e.target.value } : x)),
-                      )
-                    }
-                    data-nav
-                  />
+                <span className={s.libEdge} style={{ background: color }} aria-hidden="true" />
+                {shots.length ? (
+                  <div className={s.collage} aria-hidden="true">
+                    {shots.map((id) => (
+                      <img
+                        key={id}
+                        src={posterSet(kind, id).src}
+                        alt=""
+                        loading="lazy"
+                        onError={(e) => {
+                          e.currentTarget.style.visibility = 'hidden';
+                        }}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <div className={s.collageEmpty}>
+                    {inIt.length ? 'Nothing in it yet' : 'No folders yet'}
+                  </div>
+                )}
+                <div className={s.libMeta}>
+                  <span className={s.libDot} style={{ background: color }} aria-hidden="true" />
                   {lib.isDefault ? (
-                    <span className={s.chip} data-tone="accent">
-                      Main
-                    </span>
+                    <b className={s.libTitle}>{lib.name}</b>
                   ) : (
-                    <button
-                      type="button"
-                      className={s.textBtn}
-                      onClick={() => {
-                        setLibs((all) => all.filter((x) => x.key !== lib.key));
-                        setWhere((w) =>
-                          Object.fromEntries(Object.entries(w).filter(([, v]) => v !== lib.key)),
-                        );
-                      }}
-                      data-nav
-                    >
-                      Remove
-                    </button>
-                  )}
-                </div>
-                <div className={s.libCount}>
-                  {total.toLocaleString()} {noun}
-                </div>
-                {inIt.map((f) => (
-                  <div
-                    key={f.folder}
-                    className={s.folder}
-                    draggable
-                    onDragStart={(e) => {
-                      dragging.current = { kind, folder: f.folder };
-                      e.dataTransfer.effectAllowed = 'move';
-                      e.dataTransfer.setData('text/plain', f.folder);
-                    }}
-                    onDragEnd={() => {
-                      dragging.current = null;
-                      setOver(null);
-                    }}
-                  >
-                    <span className={s.stack} aria-hidden="true">
-                      {f.sample.slice(0, 3).map((id) => (
-                        <img
-                          key={id}
-                          src={posterSet(kind, id).src}
-                          alt=""
-                          loading="lazy"
-                          onError={(e) => {
-                            e.currentTarget.hidden = true;
-                          }}
-                        />
-                      ))}
-                    </span>
-                    <span className={s.folderText}>
-                      {(() => {
-                        const { root, parts } = splitFolderPath(f.path);
-                        return (
-                          <>
-                            {root ? <span className={s.folderRoot}>{root}</span> : null}
-                            <span className={s.folderPath} title={f.path}>
-                              {parts.map((part, i) => (
-                                <span key={`${i}-${part}`} className={s.crumb}>
-                                  {i > 0 ? (
-                                    <span className={s.crumbSep} aria-hidden="true">
-                                      ›
-                                    </span>
-                                  ) : null}
-                                  {part}
-                                </span>
-                              ))}
-                            </span>
-                          </>
-                        );
-                      })()}
-                      <span className={s.muted}>
-                        {f.titles.toLocaleString()} {noun}
-                      </span>
-                    </span>
-                    {/* the same move without a mouse: a remote, a keyboard, a phone */}
-                    <span className={s.break} aria-hidden="true" />
-                    <select
-                      className={s.move}
-                      value={lib.key}
-                      aria-label={`Library for ${f.path}`}
+                    <input
+                      className={s.libName}
+                      value={lib.name}
+                      maxLength={60}
+                      aria-label="Library name"
                       onChange={(e) =>
-                        e.target.value === '+'
-                          ? moveFolder(kind, f.folder, null)
-                          : setWhere((w) => ({ ...w, [`${kind}|${f.folder}`]: e.target.value }))
+                        setLibs((all) =>
+                          all.map((x) => (x.key === lib.key ? { ...x, name: e.target.value } : x)),
+                        )
                       }
                       data-nav
-                    >
-                      {mine.map((o) => (
-                        <option key={o.key} value={o.key}>
-                          {o.name || 'Unnamed'}
-                        </option>
-                      ))}
-                      <option value="+">New library…</option>
-                    </select>
-                  </div>
-                ))}
-                {!inIt.length ? (
-                  <div className={s.dropHint}>
-                    {lib.isDefault ? 'Every folder is in another library' : 'Drop folders here'}
-                  </div>
-                ) : null}
-                {lib.isDefault && loose ? (
-                  <div className={s.muted}>
-                    Plus {loose.titles.toLocaleString()} {noun} outside these folders
-                  </div>
+                    />
+                  )}
+                  <span className={s.libCount}>
+                    {total.toLocaleString()} {noun}
+                  </span>
+                </div>
+                {!lib.isDefault ? (
+                  <button
+                    type="button"
+                    className={s.libRemove}
+                    aria-label={`Remove ${lib.name || 'this library'}`}
+                    title="Remove (its folders go back to the main one)"
+                    onClick={() => {
+                      setLibs((all) => all.filter((x) => x.key !== lib.key));
+                      setWhere((w) =>
+                        Object.fromEntries(Object.entries(w).filter(([, v]) => v !== lib.key)),
+                      );
+                    }}
+                    data-nav
+                  >
+                    ×
+                  </button>
                 ) : null}
               </section>
             );
@@ -437,21 +470,164 @@ function PlayerSetup({ data, firstTime }: { data: SetupPayload; firstTime: boole
             <span className={s.plus} aria-hidden="true">
               +
             </span>
-            Add a library
+            New library
             <span className={s.muted}>or drop a folder here</span>
           </button>
         </div>
-        {!folders.length ? (
+
+        {ideas.length && !hideHint[kind] ? (
+          <div className={s.ideas} role="note">
+            <p>
+              From the folder names:{' '}
+              {ideas.map((idea, i) => (
+                <span key={idea.name}>
+                  {i ? '; ' : ''}
+                  <b>{idea.labels.join(', ')}</b> could be its own <b>{idea.name}</b> library
+                </span>
+              ))}
+              .
+            </p>
+            <button type="button" className={k.btnPrimary} onClick={acceptIdeas} data-nav>
+              {ideas.length === 1 ? 'Make it' : 'Make them'}
+            </button>
+            <button
+              type="button"
+              className={s.ghost}
+              onClick={() => setHideHint((h) => ({ ...h, [kind]: true }))}
+              data-nav
+            >
+              Not now
+            </button>
+          </div>
+        ) : null}
+
+        {folders.length ? (
+          <div className={s.map}>
+            {[...byRoot.entries()].map(([root, groups]) => {
+              const all = [...groups.values()].flat();
+              return (
+                <section key={root || 'local'} aria-label={root || 'This machine'}>
+                  <div className={s.mapRoot}>
+                    <b>{root || 'This machine'}</b>
+                    <span>
+                      {all.length} {all.length === 1 ? 'folder' : 'folders'} ·{' '}
+                      {all.reduce((n, f) => n + f.titles, 0).toLocaleString()} {noun}
+                    </span>
+                  </div>
+                  {[...groups.entries()].map(([group, list]) => (
+                    <div key={group || 'top'}>
+                      {group ? (
+                        <div className={s.mapGroup}>
+                          {group.split('\u0000').map((part, i) => (
+                            <span key={`${i}-${part}`}>
+                              {i ? <em aria-hidden="true">›</em> : null}
+                              {part}
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
+                      {list.map((f) => {
+                        const key = libOf(f);
+                        const parts = splitFolderPath(f.path).parts;
+                        return (
+                          <div
+                            key={f.folder}
+                            className={s.mapRow}
+                            title={f.path}
+                            draggable
+                            onDragStart={(e) => {
+                              dragging.current = { kind, folder: f.folder };
+                              e.dataTransfer.effectAllowed = 'move';
+                              e.dataTransfer.setData('text/plain', f.folder);
+                            }}
+                            onDragEnd={() => {
+                              dragging.current = null;
+                              setOver(null);
+                            }}
+                          >
+                            <span
+                              className={s.rowEdge}
+                              style={{ background: colorOf(key) }}
+                              aria-hidden="true"
+                            />
+                            {f.sample.length ? (
+                              <span className={s.fan} aria-hidden="true">
+                                {f.sample.slice(0, 3).map((id) => (
+                                  <img
+                                    key={id}
+                                    src={posterSet(kind, id).src}
+                                    alt=""
+                                    loading="lazy"
+                                    onError={(e) => {
+                                      e.currentTarget.style.visibility = 'hidden';
+                                    }}
+                                  />
+                                ))}
+                              </span>
+                            ) : (
+                              <span className={s.fanEmpty} aria-hidden="true">
+                                empty
+                              </span>
+                            )}
+                            <span className={s.rowText}>
+                              <b>{parts.at(-1) ?? f.path}</b>
+                              <span className={f.titles ? s.muted : s.mutedFaint}>
+                                {f.titles.toLocaleString()} {noun}
+                              </span>
+                            </span>
+                            <span className={s.pillWrap}>
+                              <span
+                                className={s.pillDot}
+                                style={{ background: colorOf(key) }}
+                                aria-hidden="true"
+                              />
+                              <select
+                                className={s.pill}
+                                value={key}
+                                aria-label={`Library for ${f.path}`}
+                                onChange={(e) =>
+                                  e.target.value === '+'
+                                    ? moveFolder(kind, f.folder, null)
+                                    : setWhere((w) => ({
+                                        ...w,
+                                        [`${kind}|${f.folder}`]: e.target.value,
+                                      }))
+                                }
+                                data-nav
+                              >
+                                {mine.map((o) => (
+                                  <option key={o.key} value={o.key}>
+                                    {o.name || 'Unnamed'}
+                                  </option>
+                                ))}
+                                <option value="+">Its own library…</option>
+                              </select>
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ))}
+                </section>
+              );
+            })}
+          </div>
+        ) : (
           <p className={s.muted}>
             No {kind === 'movie' ? 'movie' : 'TV'} folders are set up in SoulSync yet (Settings,
             Folders).
           </p>
-        ) : (
-          <p className={s.muted}>
-            Drag a folder onto another library, or pick one from its menu. A library you add gets
-            its own page in the sidebar.
-          </p>
         )}
+        {loose ? (
+          <p className={s.muted}>
+            Plus {loose.titles.toLocaleString()} {noun} outside these folders, which stay in{' '}
+            {main?.name ?? 'the main library'}.
+          </p>
+        ) : null}
+        <p className={s.muted}>
+          Empty folders count too: what lands there later goes to that folder&apos;s library.
+          Nothing on disk moves.
+        </p>
       </>
     );
   };
