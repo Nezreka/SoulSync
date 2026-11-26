@@ -25,6 +25,7 @@ import logging.handlers
 
 from utils.logging_config import SafeFormatter, app_log_path, get_logger
 from core.settings import config_manager
+from core import acoustid_account
 
 # fpcalc binary location (downloaded automatically if needed)
 FPCALC_BIN_DIR = Path(__file__).parent.parent / "bin"
@@ -63,6 +64,8 @@ except ImportError:
 ACOUSTID_ERROR_INVALID_FINGERPRINT = 3
 ACOUSTID_ERROR_INVALID_APIKEY = 4
 ACOUSTID_ERROR_TOO_MANY_REQUESTS = 14
+# from 1 january 2027: a lookup without the user's own key (#2318)
+ACOUSTID_ERROR_USER_KEY_REQUIRED = acoustid_account.ACOUSTID_ERROR_USER_KEY_REQUIRED
 
 
 def is_invalid_key_error(code: Any, message: Optional[str]) -> bool:
@@ -253,10 +256,16 @@ class AcoustIDClient:
 
     @property
     def api_key(self) -> str:
-        """Get API key from config (or explicitly set override)."""
+        """The application key (sent as ``client``): an explicit override,
+        else soulsync's own, else the one this install registered (#2318)."""
         if self._api_key is not None:
             return self._api_key
-        return (config_manager.get('acoustid.api_key', '') or '') if config_manager else ''
+        return acoustid_account.app_key(config_manager) if config_manager else ''
+
+    @property
+    def user_key(self) -> str:
+        """The person's own AcoustID key, sent with every lookup (#2318)."""
+        return acoustid_account.user_key(config_manager) if config_manager else ''
 
     @property
     def enabled(self) -> bool:
@@ -274,6 +283,11 @@ class AcoustIDClient:
 
         if require_enabled and not self.enabled:
             return False, "AcoustID verification is disabled"
+
+        # from 1 january 2027 a lookup without the user's key is refused
+        # (error 21): say so once, up front, instead of failing every file
+        if acoustid_account.missing_user_key(config_manager):
+            return False, acoustid_account.NEEDS_LINK_MESSAGE
 
         # Check if chromaprint or fpcalc is available
         if not self._check_fingerprint_available():
@@ -372,13 +386,21 @@ class AcoustIDClient:
                 'meta': 'recordings'
             }
 
-            response = requests.get(url, params=params, timeout=10)
+            user = self.user_key
+            response = requests.get(url, params=params, timeout=10,
+                                    headers=acoustid_account.headers(user))
             data = response.json()
 
             if data.get('status') == 'error':
                 error = data.get('error', {})
                 error_code = error.get('code', 0)
                 error_msg = error.get('message', '')
+
+                # #2318: the application key was fine, the user's key is
+                # missing (or a linked one isn't approved yet)
+                told = acoustid_account.explain(error_code, error_msg, config_manager)
+                if told['needs_user_key']:
+                    return False, told['message']
 
                 # Error code 4 is specifically "invalid API key"
                 if error_code == 4 or 'invalid api key' in error_msg.lower() or 'invalid client' in error_msg.lower() or 'invalid key' in error_msg.lower():
@@ -388,6 +410,8 @@ class AcoustIDClient:
                 return True, "AcoustID API key is valid"
 
             # Status is 'ok' - key is valid
+            if not user and acoustid_account.user_key_required():
+                return False, acoustid_account.NEEDS_LINK_MESSAGE
             return True, "AcoustID API key is valid"
 
         except requests.exceptions.Timeout:
@@ -422,6 +446,11 @@ class AcoustIDClient:
             return {'status': 'unavailable', 'recordings': [], 'error': 'pyacoustid library not installed'}
         if not self.api_key:
             return {'status': 'unavailable', 'recordings': [], 'error': 'No AcoustID API key configured'}
+        user_key = self.user_key
+        if not user_key and acoustid_account.user_key_required():
+            acoustid_account.log_needs_link()
+            return {'status': 'unavailable', 'recordings': [], 'needs_user_key': True,
+                    'error': acoustid_account.NEEDS_LINK_MESSAGE}
         if not os.path.isfile(audio_file):
             logger.warning(f"Cannot lookup: file not found: {audio_file}")
             return {'status': 'not_found', 'recordings': [], 'error': f'File not found: {audio_file}'}
@@ -452,7 +481,12 @@ class AcoustIDClient:
             # Try to get raw parsed JSON response first if pyacoustid supports parse_lookup_result,
             # so we can inspect error codes instead of losing them to pyacoustid's bare "status: error".
             raw_response = None
-            if hasattr(acoustid, 'parse_lookup_result'):
+            if user_key:
+                # pyacoustid can't send a user key, so the fingerprint is
+                # looked up here with both keys (#2318)
+                duration, fp = acoustid.fingerprint_file(audio_file)
+                raw_response = acoustid_account.lookup(fp, duration, self.api_key, user_key)
+            elif hasattr(acoustid, 'parse_lookup_result'):
                 try:
                     raw_response = acoustid.match(self.api_key, audio_file, parse=False)
                 except (acoustid.NoBackendError, acoustid.FingerprintGenerationError):
@@ -465,6 +499,13 @@ class AcoustIDClient:
                     err = raw_response.get('error', {})
                     err_code = err.get('code', 0)
                     err_msg = err.get('message', 'Unknown AcoustID error')
+                    told = acoustid_account.explain(err_code, err_msg, config_manager)
+                    if told['needs_user_key']:
+                        # error 21, or a linked key not approved yet: the
+                        # account, not the file and not the app key
+                        acoustid_account.log_needs_link(told['message'])
+                        return {'status': 'error', 'recordings': [], 'invalid_key': False,
+                                'needs_user_key': True, 'error': told['message']}
                     invalid = is_invalid_key_error(err_code, err_msg)
                     if invalid:
                         logger.error(

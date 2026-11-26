@@ -16,6 +16,7 @@ import type { SettingsStore } from '../settings-store';
 import {
   ActionRow,
   Btn,
+  CopyButton,
   FieldLine,
   More,
   Note,
@@ -38,7 +39,8 @@ import {
 } from './connections-metadata';
 import { ServiceHome } from './connections-services';
 import { useLoadedDraft } from './library-card';
-import { secretNote, text, useSettings } from './source-panels';
+import { REDACTED_SECRET_SENTINEL } from './parts';
+import { SAVED_KEY_NOTE, secretNote, text, useSettings } from './source-panels';
 
 type Section_ = Record<string, unknown>;
 type Shell = Window & {
@@ -407,33 +409,255 @@ function FanartCard({ store }: { store: SettingsStore }) {
 
 // ── AcoustID ──
 
+/** /api/acoustid/account (#2318): never carries a key */
+export interface AcoustidAccount {
+  has_user_key: boolean;
+  source: '' | 'linked' | 'pasted';
+  state: '' | 'pending' | 'approved' | 'declined' | 'expired' | 'revoked' | 'unknown';
+  code: string;
+  url: string;
+  expires: string;
+  has_app_key: boolean;
+  builtin_app_key: boolean;
+  /** linking waits for SoulSync's own application key: a link is bound to the
+   *  key that asked for it */
+  can_link: boolean;
+  link_unavailable_message: string;
+  required_from: string;
+  required_now: boolean;
+  needs_link: boolean;
+  message: string;
+  error?: string;
+}
+
+const ACOUSTID_POLL_MS = 4000;
+
+export const ACOUSTID_LINK_LATER =
+  'Linking with one click arrives in a coming update; paste your key from acoustid.org for now.';
+
+/** where AcoustID sends the person back to once they approve or decline */
+export const acoustidReturnUrl = () =>
+  `${window.location.origin}/settings?tab=connections&view=services&open=acoustid`;
+
+async function acoustidCall(path: string, init?: RequestInit): Promise<AcoustidAccount | null> {
+  const resp = await fetch(path, init);
+  const data = (await resp.json().catch(() => null)) as
+    | (Partial<AcoustidAccount> & { success?: boolean; error?: string })
+    | null;
+  if (!resp.ok || !data || data.success === false) {
+    throw new Error(data?.error || 'AcoustID did not answer');
+  }
+  return data as AcoustidAccount;
+}
+
+/** the account, and while a link waits for approval, a check every few
+ *  seconds until AcoustID answers or the code runs out */
+export function useAcoustidAccount() {
+  const [account, setAccount] = useState<AcoustidAccount | null>(null);
+  const refresh = useCallback((check = false) => {
+    acoustidCall(`/api/acoustid/account${check ? '?check=1' : ''}`)
+      .then(setAccount)
+      .catch(() => {});
+  }, []);
+  useEffect(() => refresh(true), [refresh]);
+  const pending = account?.state === 'pending';
+  useEffect(() => {
+    if (!pending) return;
+    const timer = setInterval(() => refresh(true), ACOUSTID_POLL_MS);
+    return () => clearInterval(timer);
+  }, [pending, refresh]);
+  return { account, setAccount, refresh };
+}
+
+const LINK_WORDS: Record<string, [string, 'ok' | 'warn' | 'bad' | 'idle' | 'busy']> = {
+  approved: ['Linked', 'ok'],
+  pending: ['Waiting for you to approve on acoustid.org', 'busy'],
+  declined: ['Declined on acoustid.org', 'bad'],
+  expired: ['The code ran out. Link again', 'warn'],
+  revoked: ['Disconnected on acoustid.org', 'bad'],
+  unknown: ['AcoustID no longer knows that key. Link again', 'warn'],
+};
+
+export function acoustidStatusWords(
+  account: AcoustidAccount | null,
+): [string, 'ok' | 'warn' | 'bad' | 'idle' | 'busy'] {
+  if (!account) return ['', 'idle'];
+  if (account.source === 'pasted') return ['Your user key is saved', 'ok'];
+  if (account.state && LINK_WORDS[account.state]) return LINK_WORDS[account.state];
+  if (account.has_user_key) return ['Linked', 'ok'];
+  return [
+    account.needs_link ? 'Not linked: lookups stop' : 'Not linked',
+    account.needs_link ? 'bad' : 'idle',
+  ];
+}
+
 function AcoustidCard({ store }: { store: SettingsStore }) {
   const enabled = useChecked(store, 'acoustid', 'enabled');
   const key = useText(store, 'acoustid', 'api_key');
+  const userKey = useText(store, 'acoustid', 'user_key');
+  const { account, setAccount, refresh } = useAcoustidAccount();
+  const [busy, setBusy] = useState(false);
+  const [words, tone] = acoustidStatusWords(account);
+  const canLink = account?.can_link === true;
+  const pending = canLink && account?.state === 'pending';
+  const linked = !!account?.has_user_key && !pending;
+  const required = account?.required_from
+    ? new Date(`${account.required_from}T00:00:00`).toLocaleDateString(undefined, {
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+      })
+    : '1 January 2027';
+  // soulsync's own application key makes this field unneeded; one already
+  // saved stays visible, so it can be seen and cleared
+  const showAppKey = !account?.builtin_app_key || !!key.value;
+
+  async function link() {
+    setBusy(true);
+    try {
+      // a key typed above goes first, so the link uses it
+      await shell().saveSettings?.(true);
+      const next = await acoustidCall('/api/acoustid/link', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ return_url: acoustidReturnUrl() }),
+      });
+      setAccount(next);
+      if (next?.url) window.open(next.url, '_blank', 'noopener');
+    } catch (error) {
+      toast(error instanceof Error ? error.message : 'Could not start linking', 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function unlink() {
+    setBusy(true);
+    try {
+      setAccount(await acoustidCall('/api/acoustid/unlink', { method: 'POST' }));
+      toast('AcoustID key forgotten', 'success');
+    } catch (error) {
+      toast(error instanceof Error ? error.message : 'Could not unlink', 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <ServiceCard
       service="acoustid"
       colour="#ba55d3"
       title="AcoustID Verification"
-      test={() => testService(store, 'acoustid')}
+      test={() => Promise.resolve(testService(store, 'acoustid')).then(() => refresh())}
     >
+      {account?.needs_link || (account?.message && !pending) ? (
+        <div id="acoustid-needs-link" role="status">
+          <Note>{account.message}</Note>
+        </div>
+      ) : !linked && !pending && canLink ? (
+        <Note info>
+          From {required} AcoustID only answers when your own AcoustID account is linked. Link it
+          once below: it takes a minute and needs no copying.
+        </Note>
+      ) : null}
+      {account && !canLink ? (
+        <div id="acoustid-link-later">
+          <Note info>
+            From {required} AcoustID only answers with your own AcoustID user key.{' '}
+            {account.link_unavailable_message || ACOUSTID_LINK_LATER}
+          </Note>
+        </div>
+      ) : null}
+      <SheetGroup title="Your AcoustID account" />
+      {canLink ? (
+        <ActionRow
+          id="acoustid-link-row"
+          label="Link your AcoustID account"
+          help="Opens acoustid.org, where you sign in (MusicBrainz, Google or an email address) and approve SoulSync. Then it comes back here."
+        >
+          <StatusWords id="acoustid-link-status" tone={tone} live>
+            {words}
+          </StatusWords>
+          {linked ? (
+            <Btn small kind="ghost" busy={busy} onClick={() => void unlink()}>
+              Unlink
+            </Btn>
+          ) : null}
+          <Btn small kind={linked ? undefined : 'primary'} busy={busy} onClick={() => void link()}>
+            {linked || pending ? 'Link again' : 'Link account'}
+          </Btn>
+        </ActionRow>
+      ) : null}
+      {pending ? (
+        <div id="acoustid-link-pending">
+          <SheetField
+            label="Approve on acoustid.org"
+            htmlFor="acoustid-link-code"
+            help={
+              <>
+                Open{' '}
+                <a href={account.url} target="_blank" rel="noreferrer">
+                  the AcoustID link page
+                </a>
+                , or go to acoustid.org/link on any device and type this code. This page notices on
+                its own once you approve.
+              </>
+            }
+          >
+            <TextField
+              full
+              mono
+              readOnly
+              id="acoustid-link-code"
+              value={account.code}
+              trailing={<CopyButton value={account.code} />}
+            />
+          </SheetField>
+        </div>
+      ) : null}
       <SheetField
-        label="Application API key"
-        htmlFor="acoustid-api-key"
-        help={secretNote(key.value, 'An application key, not your user account key.')}
-        more={
-          <>
-            Register a free application at{' '}
-            <a href="https://acoustid.org/new-application" target="_blank" rel="noreferrer">
-              acoustid.org/new-application
-            </a>{' '}
-            and use its key, not your user account key. The fpcalc fingerprint tool is downloaded
-            when needed.
-          </>
+        label={canLink ? 'Or paste your user API key' : 'Your user API key'}
+        htmlFor="acoustid-user-key"
+        help={
+          userKey.value === REDACTED_SECRET_SENTINEL || account?.has_user_key ? (
+            SAVED_KEY_NOTE
+          ) : (
+            <>
+              The key on your{' '}
+              <a href="https://acoustid.org/api-key" target="_blank" rel="noreferrer">
+                acoustid.org account page
+              </a>
+              .{canLink ? ' Not needed once your account is linked.' : ''}
+            </>
+          )
         }
       >
-        <SecretField id="acoustid-api-key" placeholder="AcoustID Application API Key" {...key} />
+        <SecretField id="acoustid-user-key" placeholder="AcoustID user API key" {...userKey} />
       </SheetField>
+      {showAppKey ? (
+        <SheetField
+          label="Application API key"
+          htmlFor="acoustid-api-key"
+          help={secretNote(
+            key.value,
+            account?.builtin_app_key
+              ? 'Not needed: SoulSync has its own application key.'
+              : 'An application key, not your user account key.',
+          )}
+          more={
+            <>
+              Only for an application you registered yourself at{' '}
+              <a href="https://acoustid.org/new-application" target="_blank" rel="noreferrer">
+                acoustid.org/new-application
+              </a>
+              . Your user key above is still needed with it. The fpcalc fingerprint tool is
+              downloaded when needed.
+            </>
+          }
+        >
+          <SecretField id="acoustid-api-key" placeholder="AcoustID Application API Key" {...key} />
+        </SheetField>
+      ) : null}
       <SheetGroup title="Options" />
       <Row
         label="Verify downloads"

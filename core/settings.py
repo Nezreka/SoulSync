@@ -118,6 +118,7 @@ class ConfigManager:
         # Enrichment services
         'listenbrainz.token',
         'acoustid.api_key',
+        'acoustid.user_key',         # the person's own key, sent on every lookup (#2318)
         'lastfm.api_key',
         'lastfm.api_secret',
         'lastfm.session_key',
@@ -903,6 +904,7 @@ class ConfigManager:
             },
             "acoustid": {
                 "api_key": "",
+                "user_key": "",
                 "enabled": False  # Disabled by default - requires API key and fpcalc
             },
             "lastfm": {
@@ -1589,6 +1591,20 @@ class ConfigManager:
             config = config[k]
 
         config[keys[-1]] = value
+        self._save_config()
+
+    def clear_secret(self, key: str) -> None:
+        """Blank a stored secret on purpose: a disconnect or unlink. ``set()``
+        reads an empty secret as "keep the existing one", so it can't."""
+        keys = key.split('.')
+        config = self.config_data
+        for k in keys[:-1]:
+            if not isinstance(config.get(k), dict):
+                return
+            config = config[k]
+        if config.get(keys[-1]) in (None, ''):
+            return
+        config[keys[-1]] = ''
         self._save_config()
 
     def resolve_secret(self, key: str, posted: Any) -> str:

@@ -203,6 +203,7 @@ from core.metadata.source import (
 from core import direct_download_state
 from core.downloads import music_video as _music_video
 from core import runtime_state as _rt_state
+from core import acoustid_account as _acoustid_account
 from core.runtime_state import (
     activity_feed,
     activity_feed_lock,
@@ -3911,7 +3912,8 @@ def _get_enrichment_status():
     # Non-worker services (configured status only)
     services['acoustid'] = {
         'name': 'AcoustID',
-        'configured': bool(config_manager.get('acoustid.api_key', '')),
+        'configured': bool(_acoustid_account.app_key(config_manager)),
+        'user_key': bool(_acoustid_account.user_key(config_manager)),
     }
     services['listenbrainz'] = {
         'name': 'ListenBrainz',
@@ -24772,6 +24774,11 @@ _configure_listen_api(get_database=get_database,
                       media_server_engine=lambda: media_server_engine,
                       config_manager=config_manager)
 app.register_blueprint(_create_listen_blueprint())
+
+# AcoustID account linking for the settings card (#2318)
+from api.acoustid_routes import configure as _configure_acoustid_api, create_blueprint as _create_acoustid_blueprint
+_configure_acoustid_api(config_manager_=config_manager)
+app.register_blueprint(_create_acoustid_blueprint())
 
 # Media server descriptors for the UI (settings page, wizard, quick-switch).
 from api.media_servers import configure as _configure_media_servers_api, create_blueprint as _create_media_servers_blueprint

@@ -1,4 +1,21 @@
 {
+  "/api/acoustid/account?check=1": {
+    "builtin_app_key": false,
+    "can_link": false,
+    "code": "",
+    "expires": "",
+    "has_app_key": false,
+    "has_user_key": false,
+    "link_unavailable_message": "Linking with one click arrives in a coming update; paste your key from acoustid.org for now.",
+    "message": "",
+    "needs_link": false,
+    "required_from": "2027-01-01",
+    "required_now": false,
+    "source": "",
+    "state": "",
+    "success": true,
+    "url": ""
+  },
   "/api/audiobook-routes": {
     "artists": [
       {

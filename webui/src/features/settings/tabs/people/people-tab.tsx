@@ -156,6 +156,7 @@ export function PeopleTab({ active, opened }: SettingsTabProps) {
                 meId={me.id}
                 // a save reloads through ss:person-permissions-saved
                 hooks={{ onOpenPolicy: () => setPill('policy') }}
+                onChanged={() => void reload()}
               />
             ) : id === 'policy' ? (
               <PolicyScreen data={data} onSaved={() => void reload()} />

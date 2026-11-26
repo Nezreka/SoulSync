@@ -125,6 +125,12 @@ def init(
     _get_tidal_client = tidal_client_getter
 
 
+def _acoustid_builtin() -> bool:
+    """soulsync ships its own acoustid application key (#2318)"""
+    from core.acoustid_account import has_builtin_app_key
+    return has_builtin_app_key()
+
+
 def _safe_check(fn, default=False):
     """Safely evaluate a check function, returning default on any error."""
     try:
@@ -322,7 +328,8 @@ def collect_debug_info(log_lines=20, log_source='app'):
         'quality_profile': config_manager.get('download_source.quality_profile', 'default'),
         'organization_template': config_manager.get('organization.folder_template', ''),
         'post_processing_enabled': config_manager.get('post_processing.enabled', True),
-        'acoustid_enabled': bool(config_manager.get('acoustid.api_key', '')),
+        'acoustid_enabled': bool(config_manager.get('acoustid.api_key', '')) or _acoustid_builtin(),
+        'acoustid_user_key': bool(config_manager.get('acoustid.user_key', '')),
         'auto_scan_enabled': config_manager.get('watchlist.auto_scan', False),
         'm3u_export_enabled': config_manager.get('m3u.enabled', False),
         'log_level': config_manager.get('logging.level', 'INFO'),
