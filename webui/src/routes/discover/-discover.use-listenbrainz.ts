@@ -130,15 +130,17 @@ async function readSource(url: string, signal: AbortSignal): Promise<SourceOutco
       !isRecord(body) ||
       body.success !== true ||
       !Array.isArray(body.playlists) ||
-      !body.playlists.every(isPlaylist) ||
       (body.username != null && typeof body.username !== 'string')
     ) {
       throw new Error('Invalid playlist response');
     }
-    return {
-      kind: 'confirmed',
-      data: { playlists: body.playlists, username: body.username ?? undefined },
-    };
+    // a malformed row drops out on its own and the rest still show; only a
+    // reply with nothing usable in it fails (keeping the last good cards)
+    const playlists = body.playlists.filter(isPlaylist);
+    if (body.playlists.length > 0 && playlists.length === 0) {
+      throw new Error('Invalid playlist response');
+    }
+    return { kind: 'confirmed', data: { playlists, username: body.username ?? undefined } };
   } catch (error) {
     return { kind: 'failed', message: errorMessage(error) };
   }
@@ -191,19 +193,14 @@ function applyRead(
 }
 
 function isRefreshSummary(summary: unknown): summary is Parameters<typeof lbRefreshMessage>[0] {
-  const sources = ['created_for', 'user', 'collaborative'];
-  const counters = ['new', 'updated', 'skipped'];
+  // the counts the message reads must be there; a source or counter a newer
+  // server adds is fine
+  const counted = (counts: unknown) =>
+    isRecord(counts) && ['new', 'updated'].every((counter) => isCount(counts[counter]));
   return (
     isRecord(summary) &&
-    Object.keys(summary).length === sources.length &&
-    sources.every((source) => {
-      const counts = summary[source];
-      return (
-        isRecord(counts) &&
-        Object.keys(counts).length === counters.length &&
-        counters.every((counter) => isCount(counts[counter]))
-      );
-    })
+    ['created_for', 'user', 'collaborative'].every((source) => counted(summary[source])) &&
+    Object.values(summary).every(isRecord)
   );
 }
 
@@ -291,7 +288,10 @@ export function useListenBrainz(onToast: (toast: LbToast) => void): ListenBrainz
     selectTab: (tab) => setShelf((previous) => ({ ...previous, activeTab: tab })),
     selectGroup: (group) => setShelf((previous) => ({ ...previous, selectedGroup: group })),
     retry: async () => {
-      if (!refreshOwner.current) await readShelf();
+      if (refreshOwner.current) return;
+      // a retry starts over: the last refresh's failure no longer applies
+      setRefreshError(null);
+      await readShelf();
     },
     refresh: async () => {
       if (!mounted.current || refreshOwner.current) return;

@@ -59,11 +59,6 @@ export function lbPickUsername(
   return current || incoming || null;
 }
 
-/** No tab has data → the whole strip becomes a connect prompt (3477). */
-export function lbShowsConnectPrompt(tabsWithData: number): boolean {
-  return tabsWithData === 0;
-}
-
 /** The first tab WITH DATA becomes active, not simply the first tab (3501). */
 export function lbFirstActiveTab(hasData: Record<string, boolean>): LbTabId | null {
   return LB_TABS.find((t) => hasData[t.id])?.id ?? null;

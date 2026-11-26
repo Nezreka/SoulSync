@@ -18,7 +18,6 @@ import {
   lbPickUsername,
   lbPlaylistData,
   lbPlaylistMix,
-  lbShowsConnectPrompt,
   lbStatusBase,
   lbSubtitle,
   lbSyncMatchedId,
@@ -68,11 +67,6 @@ describe('the three tabs', () => {
     expect(lbFirstActiveTab({ recommendations: false, user: true })).toBe('user');
     expect(lbFirstActiveTab({ collaborative: true })).toBe('collaborative');
     expect(lbFirstActiveTab({})).toBeNull();
-  });
-
-  it('replaces the whole strip with a connect prompt when nothing has data', () => {
-    expect(lbShowsConnectPrompt(0)).toBe(true);
-    expect(lbShowsConnectPrompt(1)).toBe(false);
   });
 
   it('keeps the failure copy', () => {
