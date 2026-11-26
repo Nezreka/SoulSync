@@ -682,10 +682,21 @@ class PlexVideoSource:
                     return _missing_library_message(label, title, "Plex")
         return None
 
+    @staticmethod
+    def _size(section):
+        """a section's item count (one small request), None when it can't say"""
+        try:
+            return int(getattr(section, "totalSize", None))
+        except (TypeError, ValueError):
+            return None
+        except Exception:   # noqa: BLE001 - a count is a nicety
+            logger.debug("Plex: no size for %s", getattr(section, "title", "?"), exc_info=True)
+            return None
+
     def available_libraries(self) -> dict:
         return {
-            "movies": [{"title": s.title} for s in self._sections("movie")],
-            "tv": [{"title": s.title} for s in self._sections("show")],
+            "movies": [{"title": s.title, "count": self._size(s)} for s in self._sections("movie")],
+            "tv": [{"title": s.title, "count": self._size(s)} for s in self._sections("show")],
             "home": [{"title": s.title, "count": int(getattr(s, "totalSize", 0) or 0)}
                      for s in self.home_sections()],
         }
@@ -1581,8 +1592,8 @@ class JellyfinVideoSource:
 
     def available_libraries(self) -> dict:
         return {
-            "movies": [{"title": v.get("Name")} for v in self._views("movies")],
-            "tv": [{"title": v.get("Name")} for v in self._views("tvshows")],
+            "movies": [{"title": v.get("Name"), "count": v.get("ChildCount")} for v in self._views("movies")],
+            "tv": [{"title": v.get("Name"), "count": v.get("ChildCount")} for v in self._views("tvshows")],
             "home": [{"title": v.get("Name"), "count": v.get("ChildCount")} for v in self.home_views()],
         }
 

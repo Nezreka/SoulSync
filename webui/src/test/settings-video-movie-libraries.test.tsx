@@ -120,6 +120,91 @@ describe('other movie libraries', () => {
   });
 });
 
+describe('a library switched on is read at once', () => {
+  function scanning() {
+    let scanAnswer: Record<string, unknown> = {};
+    const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/video/libraries' && !init?.method)
+        return new Response(
+          JSON.stringify({
+            server: 'plex',
+            movies: [
+              { title: 'Movies', count: 5000 },
+              { title: '4K Movies', count: 1240 },
+              { title: 'Kids Movies', count: null },
+            ],
+            tv: [
+              { title: 'TV Shows', count: 900 },
+              { title: 'Anime', count: 1 },
+            ],
+            selected: { movies: 'Movies', movies_more: [], tv: 'TV Shows', tv_more: [] },
+            scans: {},
+          }),
+        );
+      if (url === '/api/video/libraries' && init?.method === 'POST')
+        return new Response(
+          JSON.stringify({
+            status: 'saved',
+            started: ['4K Movies'],
+            scans: {
+              'movie|4K Movies': {
+                kind: 'movie',
+                library: '4K Movies',
+                state: 'running',
+                found: 312,
+              },
+            },
+          }),
+        );
+      if (url === '/api/video/libraries/scan') return new Response(JSON.stringify(scanAnswer));
+      return new Response(JSON.stringify({ status: 'saved' }));
+    });
+    vi.stubGlobal('fetch', fetcher);
+    render(<VideoServerConnection />);
+    act(() => {
+      document.dispatchEvent(
+        new CustomEvent('soulsync:video-page-shown', { detail: 'video-settings' }),
+      );
+    });
+    return {
+      fetcher,
+      finish: (found: number) => {
+        scanAnswer = {
+          scans: {
+            'movie|4K Movies': { kind: 'movie', library: '4K Movies', state: 'done', found },
+          },
+        };
+      },
+    };
+  }
+  const state = (key: string) =>
+    document.querySelector(`[data-video-lib-state="${key}"]`) as HTMLElement | null;
+
+  it('each row shows its size from the server', async () => {
+    scanning();
+    await waitFor(() => expect(state('movie|4K Movies')).not.toBeNull());
+    expect(state('movie|4K Movies')!.textContent).toContain('1,240 movies');
+    expect(state('show|Anime')!.textContent).toContain('1 show');
+    // a server that gives no count says nothing about the size
+    expect(state('movie|Kids Movies')).toBeNull();
+  });
+
+  it('Scan on: reading with a count, then added', async () => {
+    const { finish } = scanning();
+    await waitFor(() => expect(scan('4K Movies')).not.toBeNull());
+    fireEvent.click(scan('4K Movies'));
+    await waitFor(() =>
+      expect(state('movie|4K Movies')!.textContent).toContain('Reading 4K Movies… 312 found'),
+    );
+    expect(state('movie|4K Movies')!.getAttribute('data-state')).toBe('running');
+    finish(1240);
+    await waitFor(
+      () => expect(state('movie|4K Movies')!.textContent).toContain('Added · 1,240 movies'),
+      { timeout: 4000 },
+    );
+  });
+});
+
 describe('extra folders', () => {
   function folders(server: string | null) {
     videoDownloads.reset();

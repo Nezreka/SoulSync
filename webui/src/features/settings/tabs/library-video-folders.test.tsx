@@ -373,3 +373,65 @@ describe('the import folder (#2129)', () => {
     );
   });
 });
+
+describe('a suggested folder', () => {
+  const NEW = '/mnt/easystore3/PLEX/4K MOVIES';
+  const WANT = '\\\\192.168.86.36\\easystore3\\PLEX\\4K MOVIES';
+  const row = () => document.querySelector(`[data-server="${NEW}"]`) as HTMLElement;
+  const drivePosts = () =>
+    calls.filter((c) => c.method === 'POST' && c.url === '/api/video/libraries/drives');
+
+  it('is offered with Use this, never saved until it is clicked', async () => {
+    answers['GET /api/video/libraries/drives'] = {
+      folders: [
+        {
+          server: '/mnt/sdb/PLEX/MOVIES',
+          kind: 'movie',
+          library: 'Movies',
+          files: 10,
+          local: '\\\\192.168.86.36\\sdb\\PLEX\\MOVIES',
+        },
+        {
+          server: NEW,
+          kind: 'movie',
+          library: '4K Movies',
+          files: 1240,
+          local: '',
+          suggest: { local: WANT, message: '10 of 10 sample files found' },
+        },
+      ],
+    };
+    answers['POST /api/video/libraries/drives'] = { success: true, map: [{}, {}], folders: [] };
+    panel();
+    await shown();
+    await waitFor(() => expect(row()).not.toBeNull());
+    const offer = row().querySelector('[data-drive-suggest]') as HTMLElement;
+    expect(offer.getAttribute('data-drive-suggest')).toBe(WANT);
+    expect(offer.textContent).toContain('10 of 10 sample files found');
+    // shown only, the box stays empty and nothing is saved
+    expect((row().querySelector('.video-drive-local') as HTMLInputElement).value).toBe('');
+    expect(drivePosts()).toEqual([]);
+    fireEvent.click(
+      [...offer.querySelectorAll('button')].find((b) => b.textContent === 'Use this')!,
+    );
+    await waitFor(() => expect(drivePosts()).toHaveLength(1));
+    expect(drivePosts()[0].body!.map).toEqual([
+      { server: '/mnt/easystore3/PLEX/4K MOVIES', kind: 'movie', local: WANT },
+      {
+        server: '/mnt/sdb/PLEX/MOVIES',
+        kind: 'movie',
+        local: '\\\\192.168.86.36\\sdb\\PLEX\\MOVIES',
+      },
+    ]);
+  });
+
+  it('a folder with no suggestion offers nothing', async () => {
+    answers['GET /api/video/libraries/drives'] = {
+      folders: [{ server: NEW, kind: 'movie', files: 3, local: '' }],
+    };
+    panel();
+    await shown();
+    await waitFor(() => expect(row()).not.toBeNull());
+    expect(row().querySelector('[data-drive-suggest]')).toBeNull();
+  });
+});

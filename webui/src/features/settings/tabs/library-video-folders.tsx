@@ -734,6 +734,9 @@ interface Drive {
   auto?: boolean;
   local?: string;
   role?: string;
+  /** where it likely is, by the pattern the saved folders follow, checked
+   *  against the library's own files; offered, never saved by itself */
+  suggest?: { local: string; message?: string };
 }
 type DriveStatus = { text: string; tone: 'ok' | 'bad' | 'idle' | 'busy' };
 
@@ -842,6 +845,14 @@ function DriveMap({ loads }: { loads: number }) {
       .catch(() => {});
   }, [loads]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  /** Use this: the suggestion goes in its box and the folders are saved */
+  function takeSuggestion(d: Drive) {
+    if (!d.suggest) return;
+    localNow.current = { ...localNow.current, [d.server]: d.suggest.local };
+    setLocal(localNow.current);
+    void save();
+  }
+
   async function save() {
     if (!drives) return;
     const map = drives.map((d) => ({
@@ -936,6 +947,15 @@ function DriveMap({ loads }: { loads: number }) {
                   <div className={s.check} data-tone={st?.tone} aria-live="polite">
                     {st?.text || ''}
                   </div>
+                  {d.suggest && !(local[d.server] || '').trim() ? (
+                    <div className={s.check} data-tone="idle" data-drive-suggest={d.suggest.local}>
+                      Looks like it is at <code>{d.suggest.local}</code>
+                      {d.suggest.message ? ` (${d.suggest.message})` : ''}.{' '}
+                      <Btn small onClick={() => takeSuggestion(d)}>
+                        Use this
+                      </Btn>
+                    </div>
+                  ) : null}
                 </div>
               </div>
             );

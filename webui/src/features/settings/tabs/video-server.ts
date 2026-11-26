@@ -30,6 +30,37 @@ export type ConnField = keyof Conn;
 
 interface Library {
   title: string;
+  /** how many titles the server says it holds, when it says cheaply */
+  count?: number | null;
+}
+
+/** one library being read after it was switched on (core/video/library_scan.py) */
+export interface LibScan {
+  kind: 'movie' | 'show';
+  library: string;
+  state: 'queued' | 'running' | 'done' | 'error';
+  found?: number;
+  error?: string | null;
+}
+export const SCANS_URL = '/api/video/libraries/scan';
+export const scanKey = (kind: 'movie' | 'show', title: string) => `${kind}|${title}`;
+
+/** libWords: a library row's size, or how its read is going, in words */
+export function libWords(
+  kind: 'movie' | 'show',
+  lib: { title: string; count?: number | null },
+  scan?: LibScan,
+): string {
+  const n = (v: number) => v.toLocaleString('en-US');
+  const noun = (v: number) =>
+    kind === 'movie' ? (v === 1 ? 'movie' : 'movies') : v === 1 ? 'show' : 'shows';
+  if (scan?.state === 'queued') return `Waiting to read ${lib.title}…`;
+  if (scan?.state === 'running')
+    return `Reading ${lib.title}…${scan.found ? ` ${n(scan.found)} found` : ''}`;
+  if (scan?.state === 'done') return `Added · ${n(scan.found ?? 0)} ${noun(scan.found ?? 0)}`;
+  if (scan?.state === 'error') return `Couldn't read it: ${scan.error || 'no answer'}`;
+  if (lib.count != null) return `${n(lib.count)} ${noun(lib.count)}`;
+  return '';
 }
 export interface Libraries {
   movies: Library[];
@@ -90,6 +121,8 @@ interface State {
   links: Links | null;
   /** what the last Test of each server said, in words */
   said: Partial<Record<Server, { tone: 'ok' | 'bad'; text: string }>>;
+  /** libraries being read after they were switched on, by scanKey */
+  scans: Record<string, LibScan>;
 }
 
 const NAME: Record<Server, string> = { plex: 'Plex', jellyfin: 'Jellyfin', soulsync: 'Standalone' };
@@ -151,6 +184,7 @@ function createVideoServer() {
     status: '',
     links: null,
     said: {},
+    scans: {},
   };
   const listeners = new Set<() => void>();
   const set = (next: Partial<State>) => {
@@ -258,6 +292,7 @@ function createVideoServer() {
             movies?: Library[];
             tv?: Library[];
             home?: (Library & { count?: number | null })[];
+            scans?: Record<string, LibScan>;
             selected?: {
               home_more?: string[];
               movies?: string;
@@ -293,8 +328,28 @@ function createVideoServer() {
           'No movie or TV libraries found. Check the server connection and that the user above can see them.';
       else if (!sel.movies && !sel.tv) status = 'Pick a library or the scan has nothing to read.';
       set({ libs, status });
+      takeScans(d.scans);
     } catch {
       set({ status: 'Could not load libraries' });
+    }
+  }
+
+  let scansTimer: ReturnType<typeof setTimeout> | undefined;
+  /** the reads of newly switched on libraries; asked again while one runs */
+  function takeScans(scans: Record<string, LibScan> | undefined) {
+    if (!scans) return;
+    set({ scans });
+    clearTimeout(scansTimer);
+    if (Object.values(scans).some((x) => x.state === 'queued' || x.state === 'running'))
+      scansTimer = setTimeout(() => void loadScans(), 1500);
+  }
+  async function loadScans() {
+    try {
+      const r = await fetch(SCANS_URL, { headers: { Accept: 'application/json' } });
+      const d = r.ok ? ((await r.json()) as { scans?: Record<string, LibScan> } | null) : null;
+      takeScans(d?.scans);
+    } catch {
+      // the next save or open asks again
     }
   }
 
@@ -365,8 +420,9 @@ function createVideoServer() {
             : {}),
         }),
       );
-      await r.json();
+      const d = (await r.json()) as { scans?: Record<string, LibScan> } | null;
       set({ status: 'Saved' });
+      takeScans(d?.scans);
       if (!silent) toast('Library selection saved', 'success');
     } catch {
       set({ status: 'Save failed' });
@@ -474,6 +530,7 @@ function createVideoServer() {
         status: '',
         links: null,
         said: {},
+        scans: {},
       };
     },
   };
