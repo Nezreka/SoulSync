@@ -364,9 +364,13 @@ function PlayerSetup({ data, firstTime }: { data: SetupPayload; firstTime: boole
     const shot = (id: number) =>
       kind === 'home' ? appURL(`/api/player/home/thumb/${id}`) : posterSet(kind, id).src;
     // a home root reads as where it is: the server, or the folder's drive
+    // a server's home library sits on the drive its clips live on, beside the
+    // other folders there; only when that isn't known does it sit under the server
     const whereIs = (f: SetupFolder) =>
       kind === 'home' && f.source && f.source !== 'disk'
-        ? { root: f.source === 'plex' ? 'Plex' : 'Jellyfin', parts: [f.label ?? f.path] }
+        ? f.where
+          ? splitFolderPath(f.where)
+          : { root: f.source === 'plex' ? 'Plex' : 'Jellyfin', parts: [f.label ?? f.path] }
         : splitFolderPath(f.path);
     const libOf = (f: SetupFolder) => where[`${kind}|${f.folder}`] ?? main?.key ?? '';
     const colorOf = (key: string) =>
