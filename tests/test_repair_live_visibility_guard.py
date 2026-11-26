@@ -167,6 +167,8 @@ def test_every_file_writing_job_carries_the_flag():
     from core.repair_jobs import get_all_jobs
     flagged = {jid for jid, cls in get_all_jobs().items()
                if getattr(cls, 'writes_library_files', False)}
-    for jid in ('library_reorganize', 'library_retag', 'track_number_repair',
-                'comma_artist_splitter'):
+    for jid in ('library_reorganize', 'library_retag', 'track_number_repair'):
         assert jid in flagged, jid + " moves/rewrites files but is not gated"
+    # Split Artists heals the catalogue only; the Re-tag / Reorganize runs it
+    # asks for are gated themselves (docs/library-v2-data-flow.md)
+    assert 'comma_artist_splitter' not in flagged

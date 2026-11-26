@@ -47,6 +47,15 @@ def read_tag_field(audio, field: str) -> Any:
     if audio is None or audio.tags is None:
         return None
     field = _FIELD_ALIASES.get(field, field)
+    if field == 'artists':
+        from core.metadata import tagfields
+        from core.metadata.common import get_mutagen_symbols
+
+        symbols = get_mutagen_symbols()
+        values = tagfields.read(audio, symbols, 'artists')
+        if not values and isinstance(audio, MP4):
+            values = tagfields.read(audio, symbols, 'artist')  # older M4A files
+        return [value for value in values if value]
     if field in ('track_number', 'disc_number', 'total_tracks', 'total_discs'):
         pair = read_number_pair(audio, 'disc' if field in ('disc_number', 'total_discs') else 'track')
         return pair[1 if field.startswith('total_') else 0]
@@ -88,6 +97,7 @@ def set_tag_fields(audio, fields: Dict[str, Any]) -> List[str]:
         raise ValueError('Unsupported audio tag format')
     values = {_FIELD_ALIASES.get(k, k): v for k, v in fields.items() if v is not None}
     written = []
+    from core.metadata import tagfields
     from core.metadata.common import get_mutagen_symbols
     from core.metadata.musicbrainz_tags import write_tag
     for field, value in values.items():
@@ -108,6 +118,8 @@ def set_tag_fields(audio, fields: Dict[str, Any]) -> List[str]:
                 audio[mp4] = [int(text)] if field == 'bpm' else out
             else:
                 audio[vorbis] = out
+        elif field == 'artists':
+            tagfields.write(audio, get_mutagen_symbols(), field, value)
         else:
             if field == 'lyrics' and isinstance(audio.tags, ID3):
                 audio.tags.delall('USLT')
@@ -177,6 +189,11 @@ def _clear_tag_field(audio, field: str) -> bool:
         id3, vorbis, mp4 = _TEXT_TAGS[field]
         drop(id3, [vorbis], mp4)
         return True
+    if field == 'artists':
+        from core.metadata import tagfields
+        from core.metadata.common import get_mutagen_symbols
+
+        return tagfields.remove(audio, get_mutagen_symbols(), field)
     if field == 'cover_art':
         # only the undo of a write that ADDED a cover asks for this: the file
         # had no picture before, so taking every picture out puts it back
@@ -311,6 +328,7 @@ def read_file_tags(file_path: str) -> Dict[str, Any]:
             return result
 
         result['format'] = ext.lstrip('.').upper()
+        result['artists'] = read_tag_field(audio, 'artists')
         from core.metadata.musicbrainz_tags import read_tag
         from core.metadata.common import get_mutagen_symbols
         symbols = get_mutagen_symbols()
@@ -766,6 +784,22 @@ def build_tag_diff(file_tags: Dict[str, Any], db_data: Dict[str, Any]) -> List[D
             diffs.append({'field': tag.replace('_', ' '), 'file_key': tag,
                           'file_value': str(actual or ''), 'db_value': str(expected),
                           'changed': str(actual or '') != str(expected)})
+
+    # The multi-value ARTISTS list (#587 convention), when the user writes it.
+    # A matching display string says nothing about it: a credit healed into
+    # two artists keeps "Camellia, Toby Fox" as its display with the default
+    # separator, and only this row tells Re-tag the files are behind.
+    db_artists = [str(n).strip() for n in (db_data.get('artists_list') or []) if str(n or '').strip()]
+    if len(db_artists) > 1 and _multi_artist_write_enabled():
+        file_artists = [str(n).strip() for n in (file_tags.get('artists') or [])
+                        if str(n or '').strip()]
+        diffs.append({
+            'field': 'Artists',
+            'file_key': 'artists',
+            'file_value': '; '.join(file_artists),
+            'db_value': '; '.join(db_artists),
+            'changed': [n.casefold() for n in file_artists] != [n.casefold() for n in db_artists],
+        })
 
     # Cover art — special row
     diffs.append({

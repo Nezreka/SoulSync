@@ -100,11 +100,8 @@ def _rebuild_album_artist_credits(cursor: Any, album_ids: Set[int]) -> None:
             batch,
         )
 
-# Credit separators: "feat."/"ft."/"featuring"/"with" plus list separators.
-_FEAT_RE = re.compile(
-    r"\b(?:feat|ft|featuring|with)\b\.?|\bw/",
-    re.IGNORECASE,
-)
+# A title's "(feat. X)" credit group; the names inside it are read by the
+# credit kernel like any other credit.
 _FEAT_IN_TITLE_RE = re.compile(
     r"[\(\[]\s*(?:feat\.?|ft\.?|featuring|with|w/)\s+([^)\]]+)[\)\]]",
     re.IGNORECASE,
@@ -113,14 +110,13 @@ _FEAT_IN_TITLE_RE = re.compile(
 # "with" is intentionally excluded here — bare "with" is too ambiguous (e.g.
 # "Dancing With Myself"); only the parenthesized form above strips a "with" credit.
 _FEAT_TITLE_TAIL_RE = re.compile(r"\s+(?:featuring|feat|ft)\b\.?\s+\S.*$", re.IGNORECASE)
-_LIST_SEP_RE = re.compile(r"\s*(?:,|;|/|&|\bx\b|\band\b|\bvs\.?\b|×|\+)\s*", re.IGNORECASE)
-# These markers communicate a collaboration rather than merely looking like a
-# list.  Commas, ``&``, ``and``, ``/`` and ``+`` are intentionally absent:
-# they are also ordinary parts of providerless band names.
-_EXPLICIT_CREDIT_RE = re.compile(
-    r"\b(?:feat|ft|featuring|with)\b\.?|\bw/|\s(?:x|vs\.?)\s|\s×\s",
-    re.IGNORECASE,
+# Credits are read by one kernel (core/matching/artist_credit.py): its
+# tokenizer knows every separator and how sure each one is.
+from core.matching.artist_credit import (  # noqa: E402 - re-exported for callers
+    leads_a_band,
+    unwrap_bytes_repr,
 )
+from core.matching.artist_credit import split_names as _split_names  # noqa: E402
 
 
 def normalize_name(name: str) -> str:
@@ -167,110 +163,19 @@ def looks_like_foreign_provider_id(value: Any) -> bool:
     return bool(text) and (text.isdigit() or bool(_UUID_RE.match(text)))
 
 
-_BYTES_REPR_RE = re.compile(r"""^b(['"])(.*)\1$""", re.S)
-
-
-def unwrap_bytes_repr(text: Any) -> Any:
-    """``"b'Above & Beyond'"`` -> ``"Above & Beyond"``: a tag read as bytes
-    and turned into text with str(). Anything else comes back as it was."""
-    if not isinstance(text, str):
-        return text
-    match = _BYTES_REPR_RE.match(text.strip())
-    return match.group(2) if match else text
-
-
 def split_artist_credits(*sources: str) -> List[str]:
-    """Split one or more raw artist/credit strings into individual artist names.
-
-    Handles ``"A feat. B"``, ``"A, B & C"``, ``"A x B"``, ``"A / B"`` etc. Order is
-    preserved and duplicates (case-insensitive) are dropped. Empty inputs yield an
-    empty list.
-    """
-    out: List[str] = []
-    seen: Set[str] = set()
-    for raw in sources:
-        if not raw:
-            continue
-        raw = unwrap_bytes_repr(raw)
-        # Promote any "feat." segment to a plain separator, then split the list.
-        flattened = _FEAT_RE.sub(",", raw)
-        for piece in _LIST_SEP_RE.split(flattened):
-            name = piece.strip().strip("-").strip()
-            if not name:
-                continue
-            key = normalize_name(name)
-            if key and key not in seen:
-                seen.add(key)
-                out.append(name)
-    return out
+    """every name one or more raw credit strings could hold, in order,
+    duplicates dropped (``core.matching.artist_credit.split_names``). For
+    comparing; who an artist IS is decided by ``_credit_names_for_import``."""
+    return _split_names(*sources)
 
 
 def split_known_artist_credits(raw: str, known: Callable[[str], bool]) -> List[str]:
-    """``split_artist_credits``, but a run of pieces that spells an artist
-    ``known`` already knows stays one name.
-
-    "Above & Beyond, Mat Zo" is two artists when "Above & Beyond" is known,
-    not three ("Above", "Beyond", "Mat Zo"): the blind split made those two
-    phantom artists, and every folder, tag and reorganize built on them
-    (#2131, #2136). the longest known run wins. a feat. marker is always a
-    boundary.
-    """
-    out: List[str] = []
-    seen: Set[str] = set()
-
-    def _known(name: str) -> bool:
-        try:
-            return bool(known(name))
-        except Exception as exc:  # noqa: BLE001 - a lookup never breaks a split
-            logger.debug("known-artist check failed for %r: %s", name, exc)
-            return False
-
-    def _add(name: str) -> None:
-        name = name.strip().strip("-").strip()
-        key = normalize_name(name)
-        if name and key and key not in seen:
-            seen.add(key)
-            out.append(name)
-
-    display = unwrap_bytes_repr(raw or "")
-    for chunk in _FEAT_RE.split(display):
-        # piece spans in the original text, so a merged run keeps its own
-        # spelling ("Above & Beyond", not "Above, Beyond")
-        spans = []
-        pos = 0
-        for sep in _LIST_SEP_RE.finditer(chunk):
-            spans.append((pos, sep.start()))
-            pos = sep.end()
-        spans.append((pos, len(chunk)))
-        spans = [(s, e) for s, e in spans if chunk[s:e].strip().strip("-").strip()]
-        i = 0
-        while i < len(spans):
-            taken = 1
-            for j in range(len(spans), i + 1, -1):
-                if _known(chunk[spans[i][0]:spans[j - 1][1]].strip()):
-                    taken = j - i
-                    break
-            _add(chunk[spans[i][0]:spans[i + taken - 1][1]])
-            i += taken
-    return out
-
-
-# "<frontman> & The <band>": the band an artist leads, filed on that artist's
-# own album ("Bob Marley & The Wailers" on Bob Marley's Legend, "Nick Cave &
-# The Bad Seeds", "Tom Petty and the Heartbreakers", "Marina and the
-# Diamonds"). It carries the album artist as one of its parts and is still one
-# artist, so the album-artist anchor must not read it as a list.
-_FRONTMAN_BAND_RE = re.compile(
-    r"^\s*(?P<lead>.+?)\s*(?:&|\band\b|\+)\s*(?P<band>the\s+\S.*)$", re.IGNORECASE)
-
-
-def leads_a_band(name: str, anchors) -> bool:
-    """True for "<one of ``anchors``> & The <band>" without a feat. / x / vs."""
-    display = unwrap_bytes_repr(name or "")
-    if _EXPLICIT_CREDIT_RE.search(display):
-        return False  # "A & The B feat. C" says it's a list
-    match = _FRONTMAN_BAND_RE.match(display)
-    return bool(match) and normalize_name(match.group("lead")) in set(anchors)
+    """every name in a credit, but a run of pieces that spells an artist
+    ``known`` knows stays one name ("Above & Beyond, Mat Zo" is two artists
+    when "Above & Beyond" is known, #2136). The kernel's
+    ``split_names(known=...)``; no run crosses a sure separator."""
+    return _split_names(raw, known=known)
 
 
 def featured_from_title(title: str) -> List[str]:
@@ -281,75 +186,29 @@ def featured_from_title(title: str) -> List[str]:
     return names
 
 
-def _credit_names_for_import(
-    raw: str,
-    known_name: Callable[[str], bool],
-    *,
-    split_with_known_anchor: bool = False,
-    album_artist: Optional[str] = None,
-) -> List[str]:
-    """Resolve a flat legacy credit without inventing provider identities.
+def _credit_names_for_import(raw: str) -> List[str]:
+    """The artists a flat legacy credit names: cut where the kernel is sure
+    (``feat.``, ``x``, ``;``, ``|``), every piece as written.
 
-    ``split_artist_credits`` remains the deliberately liberal syntax parser used
-    when the input is known to describe a list.  A legacy ``track_artist`` value
-    does not carry that guarantee: ``Earth, Wind & Fire`` and ``Hall & Oates``
-    are complete artist names, not three/two separate identities.  We therefore
-    split at ambiguous punctuation only when the complete credit or every
-    resulting component is already known.  Explicit collaboration markers
-    (``feat.``, ``x``, ``vs``...) retain the existing multi-artist behaviour.
-
-    Unknown ambiguous text is preserved losslessly as one credit.  A later
-    provider match or manual alias link can refine it; creating several phantom
-    artists cannot be reversed reliably from the source text alone (P2-24).
+    A legacy ``track_artist`` does not say whether ``,`` ``&`` ``and`` ``+``
+    or ``/`` is a list: ``Earth, Wind & Fire`` and ``Hall & Oates`` are
+    complete names, "1788-L, Deathpact" is two. Those pieces stay whole; the
+    post-import pass hands them to Split Artists, which splits what the
+    providers confirm and asks about the rest. "Drake feat. Wizkid" needs
+    nobody: a guest marker never sits inside a name. Phantom artists made
+    from a guess cannot be merged back reliably (P2-24).
     """
-    display = unwrap_bytes_repr(raw or "").strip()
-    if not display:
-        return []
-    if known_name(display):
-        return [display]
+    from core.matching.artist_credit import sure_parts
 
-    # a known band inside the credit stays whole: "Above & Beyond, Mat Zo"
-    # is two artists, never "Above", "Beyond" and "Mat Zo" (#2136)
-    pieces = split_known_artist_credits(display, known_name)
-    if len(pieces) <= 1:
-        return pieces
-    if _EXPLICIT_CREDIT_RE.search(display):
-        return pieces
-    if all(known_name(piece) for piece in pieces):
-        return pieces
-    if split_with_known_anchor and any(known_name(piece) for piece in pieces):
-        return pieces
-    # "1788-L, Deathpact" on a 1788-L album is a list with the album's own
-    # artist in it, not a band called that. A real band name never carries
-    # the album artist as one of its parts, so this one anchor is safe where
-    # "any part is known" would not be. Most of a big library's guest
-    # credits look like this; keeping them whole made ~18k ghost artists
-    # out of 300k tracks, each one later looked up online one by one.
-    # The one exception is the band a frontman leads ("Nick Cave & The Bad
-    # Seeds" on a Nick Cave album): that name is the band, see leads_a_band.
-    if album_artist:
-        anchor = normalize_name(album_artist)
-        if (anchor and any(normalize_name(piece) == anchor for piece in pieces)
-                and not leads_a_band(display, {anchor})):
-            return pieces
-    return [display]
+    return sure_parts(raw)
 
 
-def _featured_names_for_import(
-    title: str, known_name: Callable[[str], bool]
-) -> List[str]:
-    """Extract title credits through the same P2-24 identity guard."""
+def _featured_names_for_import(title: str) -> List[str]:
+    """The credits a title's ``(feat. …)`` names, cut where the kernel is
+    sure: the wrapper says they are guests, not whether "A & B" is one."""
     names: List[str] = []
     for match in _FEAT_IN_TITLE_RE.finditer(title or ""):
-        # A title's ``feat.`` wrapper establishes that this is a guest-credit
-        # list.  One already known component is enough to disambiguate its
-        # conjunctions; with no known anchor we still preserve an unknown band
-        # name as a unit.
-        names.extend(
-            _credit_names_for_import(
-                match.group(1), known_name, split_with_known_anchor=True
-            )
-        )
+        names.extend(_credit_names_for_import(match.group(1)))
     return names
 
 
@@ -786,7 +645,6 @@ class _ArtistResolver:
         # (a Deezer id equal to some iTunes id) from merging two artists.
         self._by_provider: Dict[tuple, int] = {}
         # names the user said are one artist each (#2150), read once
-        self._kept_whole: Optional[set] = None
 
     @staticmethod
     def _clean_ids(ids: Optional[Dict[str, Any]]) -> Dict[str, str]:
@@ -869,17 +727,6 @@ class _ArtistResolver:
 
     def get_legacy(self, legacy_id: Any) -> Optional[int]:
         return self._by_legacy.get(_legacy_key(legacy_id))
-
-    def known_name(self, name: str) -> bool:
-        """Whether an artist with exactly this (normalized) name already
-        exists, or the user said this name is one artist (#2150)."""
-        key = normalize_name(name)
-        if key in self._by_name:
-            return True
-        if self._kept_whole is None:
-            from core.imports.collab_artist import kept_whole_keys
-            self._kept_whole = kept_whole_keys()
-        return key in self._kept_whole
 
     def get_or_create_by_name(self, name: str, *,
                               provider_ids: Optional[Dict[str, Any]] = None,
@@ -2325,18 +2172,6 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 *_provider_id_columns("track"),
             ),
         )
-        album_artist_names: Dict[int, Optional[str]] = {}
-
-        def _album_artist_name(artist_id: Optional[int]) -> Optional[str]:
-            """The album artist's name, for the guest-credit anchor. Cached:
-            a library has thousands of albums and 300k tracks."""
-            if artist_id is None:
-                return None
-            if artist_id not in album_artist_names:
-                found = cursor.execute("SELECT name FROM lib2_artists WHERE id=?",
-                                       (artist_id,)).fetchone()
-                album_artist_names[artist_id] = found[0] if found else None
-            return album_artist_names[artist_id]
 
         track_total = int(cursor.execute("SELECT COUNT(*) FROM tracks").fetchone()[0])
         track_from = walk_from("tracks")
@@ -2551,20 +2386,9 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
             if primary_lib2 is not None:
                 credits.append((primary_lib2, "primary", 0))
             raw_credit = _pick(row, "track_artist") or ""
-            extra_names = _credit_names_for_import(
-                raw_credit, resolver.known_name,
-                album_artist=_album_artist_name(primary_lib2))
-            planned_names = {normalize_name(name) for name in extra_names}
-
-            def _known_or_planned(
-                name: str, planned: Set[str] = planned_names
-            ) -> bool:
-                return resolver.known_name(name) or normalize_name(name) in planned
-
-            extra_names += _featured_names_for_import(
-                title,
-                _known_or_planned,
-            )
+            # as written: Split Artists decides later which of them are lists
+            extra_names = _credit_names_for_import(raw_credit)
+            extra_names += _featured_names_for_import(title)
             pos = 1
             for nm in extra_names:
                 # `get_or_create_by_name` matches the folded-away row by name,

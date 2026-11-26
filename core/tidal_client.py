@@ -1452,6 +1452,41 @@ class TidalClient:
         return hydrated
 
     @rate_limited
+    def track_artist_credits(self, track_id: str) -> Optional[List[Dict[str, str]]]:
+        """The artists Tidal credits on a track, in order, as
+        ``[{"id", "name"}]``. None when Tidal can't say."""
+        try:
+            if not str(track_id or '').strip() or not self._ensure_valid_token():
+                return None
+            response = self.session.get(
+                f"{self.base_url}/tracks/{str(track_id).strip()}",
+                params={'countryCode': 'US', 'include': 'artists'},
+                headers={'accept': 'application/vnd.api+json'},
+                timeout=10,
+            )
+            if response.status_code == 429:
+                raise Exception("Rate limited (429) on track_artist_credits")
+            if response.status_code != 200:
+                logger.debug(f"Tidal track artists failed: {response.status_code}")
+                return None
+            data = response.json() or {}
+        except Exception as e:
+            if _is_rate_limit_error(e):
+                raise  # the rate_limited decorator paces and retries
+            logger.debug(f"Tidal track artists for {track_id} unavailable: {e}")
+            return None
+        names = {
+            str(item.get('id')): str((item.get('attributes') or {}).get('name') or '').strip()
+            for item in data.get('included') or []
+            if isinstance(item, dict) and item.get('type') == 'artists'
+        }
+        refs = ((((data.get('data') or {}).get('relationships') or {})
+                 .get('artists') or {}).get('data') or [])
+        out = [{'id': str(ref.get('id')), 'name': names[str(ref.get('id'))]}
+               for ref in refs if isinstance(ref, dict) and names.get(str(ref.get('id')))]
+        return out or None
+
+    @rate_limited
     def get_track(self, track_id: str) -> Optional[Dict]:
         """Get full track details by Tidal ID."""
         try:

@@ -219,7 +219,8 @@ def test_the_refresh_runs_off_thread_for_credit_sources_only(tmp_path, monkeypat
     thread.join(5)
     assert calls == [("db", "track", 7, "spotify", "sp-1")]
     assert schedule_match_credits("db", "artist", 7, "spotify", "sp-1") is None
-    assert schedule_match_credits("db", "track", 7, "musicbrainz", "mb") is None
+    # a source that gives no artist list is not asked
+    assert schedule_match_credits("db", "track", 7, "itunes", "it-1") is None
     assert schedule_match_credits("db", "track", 7, "spotify", None) is None
     monkeypatch.setattr(provider_credits, "ONLINE_REFRESH", False)
     assert schedule_match_credits("db", "track", 7, "spotify", "sp-1") is None

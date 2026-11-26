@@ -114,6 +114,18 @@ def _tag_discogs_album_id(raw_id: Any, kind: str) -> str:
     return f"{'m' if kind == 'master' else 'r'}{s}"
 
 
+def _discogs_credit(artist: Any) -> Optional[Dict[str, str]]:
+    if not isinstance(artist, dict):
+        return None
+    name = _clean_discogs_artist_name(artist.get('anv') or artist.get('name'))
+    if not name:
+        return None
+    credit = {'name': name}
+    if artist.get('id'):
+        credit['id'] = str(artist['id'])
+    return credit
+
+
 def _discogs_album_endpoints(album_id: Any) -> List[str]:
     """Map a (possibly tagged) album ID to the API path(s) to try, in order.
 
@@ -661,6 +673,48 @@ class DiscogsClient:
         logger.info(f"Discogs collection: fetched {len(results)} releases for {username}")
         return results
 
+    def track_artist_credits(self, track_id: str) -> Optional[List[Dict[str, str]]]:
+        """The artists Discogs credits on a track (``<release>_t<n>``): the
+        track's own list, else the release's. ``[{"id", "name"}]`` in order,
+        the name as credited (ANV) without the ``(2)`` suffix.
+
+        ``n`` is minted two ways here: counting the release's real tracks
+        (``get_album_tracks``) and from the position (``Track.from_discogs``,
+        where "1-1", "2-1", "A1" and "B1" all make ``_t1``). Every track the
+        number can mean is read; they must credit the same artists, or the
+        answer is None (which disc's track it is, nobody can say)."""
+        match = re.fullmatch(r'r?(\d+)_t(\d+)', str(track_id or '').strip())
+        if not match:
+            return None
+        release = self.get_release(int(match.group(1)))
+        if not isinstance(release, dict):
+            return None
+        wanted, number, entries = int(match.group(2)), 0, []
+        for item in release.get('tracklist') or []:
+            if not isinstance(item, dict) or item.get('type_', '') not in ('track', ''):
+                continue
+            number += 1
+            position = str(item.get('position') or '')
+            digits = position.split('-')[-1] if '-' in position else position
+            digits = ''.join(c for c in digits if c.isdigit())
+            if number == wanted or (digits and int(digits) == wanted):
+                entries.append(item)
+        if not entries:
+            return None
+        answers = []
+        for entry in entries:
+            credits = []
+            for artist in entry.get('artists') or release.get('artists') or []:
+                if not isinstance(artist, dict):
+                    continue
+                credit = _discogs_credit(artist)
+                if credit and 'id' in credit:
+                    credits.append(credit)
+            answers.append(credits)
+        if any(a != answers[0] for a in answers[1:]):
+            return None
+        return answers[0] or None
+
     def get_release(self, release_id: int) -> Optional[Dict[str, Any]]:
         """Fetch full Discogs release detail including tracklist.
 
@@ -897,12 +951,11 @@ class DiscogsClient:
             # "Kendrick Lamar Feat. Rihanna" → primary is Kendrick, keep
             release_artist = item.get('artist', '')
             if artist_name and release_artist:
-                # Get the primary artist (before any Feat./Ft./&)
-                primary = re.split(r'\s+(?:feat\.?|ft\.?|featuring)\s+', release_artist, flags=re.IGNORECASE)[0]
-                # the artist's own name first: "Above & Beyond" cut at the "&"
-                # is "Above", and every one of their releases was skipped (#2136)
-                if self._normalize_name(primary.strip()) != self._normalize_name(artist_name):
-                    primary = re.split(r'\s*[&,]\s*', primary)[0].strip()
+                # the release's lead artist, read by the one credit kernel:
+                # "Above & Beyond" stays whole, "Kendrick Lamar & SZA" leads
+                # with Kendrick when he is the artist asked for
+                from core.matching.artist_credit import decide_credit
+                primary = decide_credit(release_artist, known=[artist_name]).primary
                 # Check if our artist is the primary
                 if self._normalize_name(primary) != self._normalize_name(artist_name):
                     continue
@@ -994,13 +1047,7 @@ class DiscogsClient:
         }
 
         # Get artists
-        artists_list = []
-        if data.get('artists'):
-            artists_list = [
-                {'name': _clean_discogs_artist_name(a.get('name', ''))}
-                for a in data['artists']
-                if a.get('name') and _clean_discogs_artist_name(a.get('name', ''))
-            ]
+        artists_list = [credit for a in data.get('artists') or [] if (credit := _discogs_credit(a))]
         if not artists_list:
             artists_list = [{'name': 'Unknown Artist'}]
 
@@ -1030,9 +1077,7 @@ class DiscogsClient:
             track_artists = artists_list
             if t.get('artists'):
                 track_artists = [
-                    {'name': _clean_discogs_artist_name(a.get('name', ''))}
-                    for a in t['artists']
-                    if a.get('name') and _clean_discogs_artist_name(a.get('name', ''))
+                    credit for a in t['artists'] if (credit := _discogs_credit(a))
                 ]
 
             tracks.append({

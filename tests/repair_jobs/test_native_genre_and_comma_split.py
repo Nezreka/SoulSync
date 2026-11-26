@@ -225,81 +225,85 @@ def comma_db(tmp_path: Path):
     return db, music
 
 
-def test_native_comma_splitter_flags_the_native_artist(comma_db, monkeypatch):
+def _credit(db, track_id, names, source='spotify'):
+    """what the credit fetcher stores for a track"""
+    conn = db._get_connection()
+    for position, name in enumerate(names):
+        conn.execute("INSERT INTO lib2_provider_credits(entity_type, entity_id, source, "
+                     "position, name, source_artist_id) VALUES('track', ?, ?, ?, ?, ?)",
+                     (track_id, source, position, name, f'{source}-{position}'))
+    conn.commit()
+    conn.close()
+
+
+def test_native_comma_splitter_flags_the_native_artist(comma_db):
+    """the catalogue artist is the subject; the stored provider credits of
+    its tracks are the evidence (no file tag, no artist search)"""
     db, _ = comma_db
+    _credit(db, 100, ['Camellia', 'Toby Fox'])
     findings = []
     job = get_all_jobs()['comma_artist_splitter']()
-
-    # Both checks answer from "the API": the full string is unknown, each part
-    # is a real artist. Parts also resolve from the native library.
-    monkeypatch.setattr(
-        job, '_search_artist_names',
-        lambda source, query, memo, symbols: {'camellia', 'toby fox'},
-    )
 
     result = job.scan(_ctx(db, _Cfg(), findings))
 
     assert result.findings_created == 1
     finding = findings[0]
-    assert finding['entity_id'] == 'lib2:1'
+    assert finding['entity_type'] == 'artist' and finding['entity_id'] == 'lib2:1'
     assert finding['details']['split_artists'] == ['Camellia', 'Toby Fox']
+    assert finding['details']['verified_via'] == 'spotify credits'
     assert finding['details']['library_v2']['artist_ids'] == [1]
     assert finding['details']['track_count'] == 2
     assert 'Legacy, Comma' not in [f['details']['artist_name'] for f in findings]
 
 
-def test_native_comma_splitter_resolves_parts_from_the_native_library(comma_db,
-                                                                     monkeypatch):
+def test_native_comma_splitter_resolves_parts_from_the_native_library(comma_db):
+    """identified library artists vouch for the parts; plain rows don't"""
     db, _ = comma_db
     findings = []
     job = get_all_jobs()['comma_artist_splitter']()
-    queries = []
+    job.scan(_ctx(db, _Cfg(), findings))
+    assert findings == [], 'unidentified rows are what an old blind split leaves behind'
 
-    def _search(source, query, memo, symbols):
-        queries.append(query)
-        return set()  # the API knows nobody; only the library can vouch
-
-    monkeypatch.setattr(job, '_search_artist_names', _search)
-
+    conn = db._get_connection()
+    conn.execute("UPDATE lib2_artists SET spotify_id='sp-camellia' WHERE id=2")
+    conn.execute("UPDATE lib2_artists SET spotify_id='sp-toby' WHERE id=3")
+    conn.commit()
+    conn.close()
     job.scan(_ctx(db, _Cfg(), findings))
 
-    assert findings, 'both parts exist as native artists — the split is verified'
     resolution = findings[0]['details']['parts_resolution']
-    assert [entry['verified_via'] for entry in resolution] == ['library', 'library']
     assert [entry['library_artist_id'] for entry in resolution] == [2, 3]
+    assert {entry['verified_via'] for entry in resolution} == {'artist'}
 
 
-@pytest.mark.skipif(not __import__('shutil').which('ffmpeg'), reason='ffmpeg not installed')
-def test_comma_split_fix_retags_the_native_files(comma_db, monkeypatch):
-    pytest.importorskip('mutagen')
-    from mutagen.flac import FLAC
-
+def test_comma_split_fix_heals_the_catalogue_and_asks_retag(comma_db):
+    """the fix changes the catalogue only; the files are Re-tag's"""
     db, music = comma_db
-    # Real FLACs so the fix's mutagen path is exercised end to end.
-    import subprocess
-    for name in ('01.flac', '02.flac'):
-        subprocess.run(
-            ['ffmpeg', '-y', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=mono',
-             '-t', '0.2', '-c:a', 'flac', str(music / name)],
-            check=True, capture_output=True,
-        )
-        audio = FLAC(str(music / name))
-        audio['artist'] = ['Camellia, Toby Fox']
-        audio.save()
+    before = {name: (music / name).read_bytes() for name in ('01.flac', '02.flac')}
 
     from core.repair_worker import RepairWorker
     worker = RepairWorker.__new__(RepairWorker)
     worker.db = db
     worker._config_manager = _Cfg()
     worker.transfer_folder = '/tmp'
+    asked = []
+    worker.request_projection = lambda track_ids, **kw: asked.append(
+        (sorted(track_ids), kw)) or {'files': 2, 'queued': ['retag', 'reorganize']}
 
     out = worker._fix_comma_artist_split('artist', 'lib2:1', None, {
-        'combined_name': 'Camellia, Toby Fox',
+        'combined_name': 'Camellia, Toby Fox', 'library_v2_native': True,
         'split_artists': ['Camellia', 'Toby Fox'],
+        '_explicit_single_fix': True,
     })
 
-    assert out['success'] is True, out
-    for name in ('01.flac', '02.flac'):
-        audio = FLAC(str(music / name))
-        assert audio['artist'] == ['Camellia; Toby Fox']
-        assert list(audio['artists']) == ['Camellia', 'Toby Fox']
+    assert out['success'] is True and out['action'] == 'artists_split', out
+    conn = db._get_connection()
+    assert conn.execute("SELECT primary_artist_id FROM lib2_albums WHERE id=10").fetchone()[0] == 2
+    credited = {r[0] for r in conn.execute(
+        "SELECT a.name FROM lib2_track_artists ta JOIN lib2_artists a ON a.id=ta.artist_id "
+        "WHERE ta.track_id=100")}
+    assert {'Camellia', 'Toby Fox'} <= credited and 'Camellia, Toby Fox' not in credited
+    assert conn.execute("SELECT 1 FROM lib2_artists WHERE id=1").fetchone() is None
+    conn.close()
+    assert asked and asked[0][0] == [100, 101]
+    assert {name: (music / name).read_bytes() for name in before} == before

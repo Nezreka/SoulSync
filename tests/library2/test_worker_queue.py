@@ -60,11 +60,19 @@ class TestPriorityOrder:
         conn.commit()
         assert next_pending(conn, 'lastfm')['name'] == 'Earth, Wind & Fire'
 
-    def test_splitting_releases_the_real_artists_and_keeps_the_file(self, conn):
-        from core.library2.native_enrich import reconcile_unmapped_native_artists
+    def test_splitting_releases_the_real_artists_and_keeps_the_file(self, conn, monkeypatch):
+        from core.library2.native_enrich import heal_combined_artist, reconcile_unmapped_native_artists
         from core.library2.worker_queue import invalidate_pending_cache
+        import core.repair_worker as rw
+        asked = []
+        monkeypatch.setattr(rw, "request_artist_split",
+                            lambda ids, reason="": asked.extend(ids) or True)
         conn.execute("UPDATE lib2_artists SET name='Eminem, Nate Dogg' WHERE id=1")
         conn.execute('INSERT INTO lib2_track_artists(track_id,artist_id) VALUES(1,1)')
+        # what Deezer credits on the track: the confirmation the split needs
+        conn.executemany("INSERT INTO lib2_provider_credits(entity_type, entity_id, source, "
+                         "position, name, source_artist_id) VALUES('track', 1, 'deezer', ?, ?, ?)",
+                         [(0, 'Eminem', '10'), (1, 'Nate Dogg', '20')])
         conn.commit()
         assert next_pending(conn, 'lastfm') is None
         identities = {
@@ -72,9 +80,12 @@ class TestPriorityOrder:
             'Nate Dogg': {'source': 'deezer', 'artist_id': '20'},
         }
         result = reconcile_unmapped_native_artists(conn, resolver=identities.get)
+        # the reconcile hands it to Split Artists; its confirmed heal follows
+        assert asked == [1] and result['split_requested'] == 1
+        heal_combined_artist(conn, 1, ['Eminem', 'Nate Dogg'], identities=identities,
+                             reason='Split Artists')
         conn.commit()
         invalidate_pending_cache()
-        assert result['split'] == 1
         assert next_pending(conn, 'lastfm')['name'] == 'Eminem'
         assert conn.execute('SELECT path FROM lib2_track_files').fetchone()[0] == '/music/angel.flac'
         assert {r[0] for r in conn.execute('SELECT name FROM lib2_artists a JOIN lib2_track_artists c ON a.id=c.artist_id')} == {'Eminem', 'Nate Dogg'}

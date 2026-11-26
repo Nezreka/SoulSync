@@ -109,6 +109,12 @@ def _id3_frame(symbols: Any, frame_id: str):
     return getattr(symbols, frame_id, None) or getattr(id3, frame_id)
 
 
+def _id3_user_text_keys(tags: Any, address: str) -> List[str]:
+    """Find equivalent user-text frames, preferring the table's spelling."""
+    keys = [key for key in tags.keys() if key.casefold() == address.casefold()]
+    return sorted(keys, key=lambda key: key != address)
+
+
 def write_at(audio: Any, symbols: Any, field: Field, value: Any) -> bool:
     """write ``value`` (one or several) at this field's address, replacing
     what is there. nothing is written for an empty value. False when the file
@@ -120,7 +126,11 @@ def write_at(audio: Any, symbols: Any, field: Field, value: Any) -> bool:
     if kind == "id3":
         address = field.id3
         if address.startswith("TXXX:"):
-            audio.tags.add(symbols.TXXX(encoding=3, desc=address[5:], text=[str(v) for v in values]))
+            keys = _id3_user_text_keys(audio.tags, address)
+            desc = (keys[0] if keys else address)[5:]
+            for key in keys:
+                del audio.tags[key]
+            audio.tags.add(symbols.TXXX(encoding=3, desc=desc, text=[str(v) for v in values]))
         elif address.startswith("UFID:"):
             audio.tags.add(symbols.UFID(owner=address[5:], data=str(values[0]).encode("ascii")))
         elif address == "USLT":
@@ -155,8 +165,8 @@ def read_at(audio: Any, symbols: Any, field: Field) -> List[str]:
     if kind == "id3":
         address = field.id3
         if address.startswith("TXXX:"):
-            frames = [f for f in audio.tags.getall("TXXX") if f.desc == address[5:]]
-            return [str(t) for f in frames for t in (f.text or [])]
+            keys = _id3_user_text_keys(audio.tags, address)
+            return [str(t) for t in audio.tags[keys[0]].text] if keys else []
         if address.startswith("UFID:"):
             frames = [f for f in audio.tags.getall("UFID") if f.owner == address[5:]]
             return [f.data.decode("utf-8", "replace") if isinstance(f.data, bytes) else str(f.data) for f in frames]
@@ -177,10 +187,14 @@ def remove_at(audio: Any, symbols: Any, field: Field) -> bool:
         return False
     if kind == "id3":
         address = field.id3
-        if address.startswith("TXXX:") or address.startswith("UFID:"):
-            key = address
-            if key in audio.tags:
-                audio.tags.delall(key)
+        if address.startswith("TXXX:"):
+            keys = _id3_user_text_keys(audio.tags, address)
+            for key in keys:
+                del audio.tags[key]
+            return bool(keys)
+        if address.startswith("UFID:"):
+            if address in audio.tags:
+                audio.tags.delall(address)
                 return True
             return False
         had = bool(audio.tags.getall(address))

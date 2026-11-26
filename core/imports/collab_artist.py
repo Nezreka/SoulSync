@@ -53,22 +53,20 @@ def first_listed_artist(album_artist: str, artists_list) -> str:
     return listed_primary_of(album_artist, artists_list[0])
 
 
-# a credit line joins artists with these. ";" and a spaced "/" are never part
-# of an act's name, so they alone prove the string is a list (classical
-# "Johannes Brahms; Joshua Bell"). the rest can sit inside one act's name
-# ("Earth, Wind & Fire", "Simon & Garfunkel") and need a second word for it.
-# "Λ" is not one: "Axwell Λ Ingrosso" is a duo's name (#2028).
-_HARD_SEPARATOR_RE = re.compile(r"\s*;\s*|\s+/\s+")
-_SOFT_SEPARATOR_RE = re.compile(
-    r"\s*,\s+|\s+&\s+|\s+(?:(?-i:x)|×|vs\.?|feat\.?|ft\.?|featuring)\s+", re.IGNORECASE)
-
-
 def credit_segments(name: str) -> list:
-    """each artist a credit string names, in order. one entry for a plain name."""
-    parts = []
-    for piece in _HARD_SEPARATOR_RE.split(str(name or "").strip()):
-        parts.extend(p.strip() for p in _SOFT_SEPARATOR_RE.split(piece) if p.strip())
-    return parts
+    """each artist a credit string could name, in order: split at every
+    separator except a slash inside a word ("AC/DC" stays one). For reading
+    a credit, not for deciding it (split_credit_primary does that)."""
+    from core.matching.artist_credit import tokens
+
+    names, seps = tokens(name)
+    out = names[:1]
+    for (kind, raw), piece in zip(seps, names[1:], strict=True):
+        if kind == "slash":
+            out[-1] = out[-1] + raw + piece
+        else:
+            out.append(piece)
+    return out
 
 
 def split_credit_primary(album_artist: str, known_names=(), library_has=None) -> str:
@@ -77,23 +75,24 @@ def split_credit_primary(album_artist: str, known_names=(), library_has=None) ->
 
     "Creed, 3 Doors Down & Finger Eleven" came with no artist list at all,
     so the list rules above had nothing to split and the release got its
-    own combined folder (#2028). it counts as a list when it has a ";" or
-    " / ", when one of its parts is an artist this download names (the
-    track's artist, the watched artist), or when the library already holds
-    two of its parts as artists. a known name that starts the credit wins
-    whole, so "Axwell & Sebastian Ingrosso, X" keeps the duo.
-    ``library_has(name)`` says whether the library has an artist by that name.
+    own combined folder (#2028). The answer comes from the one credit kernel
+    (core/matching/artist_credit.decide_credit): a ";" or " / " proves a
+    list; a name this download vouches for (the track's artist, the watched
+    artist) standing in the credit splits it around that name, so
+    "Axwell & Sebastian Ingrosso, X" keeps the duo; an act the library
+    holds whole keeps its name ("Above & Beyond" next to ghost "Above" and
+    "Beyond" rows, #2131); two parts the library holds as artists make a
+    list. ``library_has(name)`` says whether the library knows that act.
     """
+    from core.matching.artist_credit import decide_credit, name_key
+
     combined = str(album_artist or "").strip()
-    segments = credit_segments(combined)
-    if len(segments) < 2:
-        return ""
-    whole = combined.casefold()
-    known = {}
-    for entry in known_names or ():
-        name = _name(entry)
-        if name and name.casefold() != whole:
-            known.setdefault(name.casefold(), name)
+    whole = name_key(combined)
+    # a name equal to the whole credit says nothing about splitting it: an
+    # album list naming "Creed, 3 Doors Down & Finger Eleven" as one entry is
+    # the very case of #2028. A band stays whole because only a sure
+    # separator cuts without evidence ("MAN WITH A MISSION", "Bear vs. Shark")
+    known = [n for n in (_name(e) for e in known_names or ()) if n and name_key(n) != whole]
 
     def in_library(name):
         if library_has is None:
@@ -103,60 +102,11 @@ def split_credit_primary(album_artist: str, known_names=(), library_has=None) ->
         except Exception:  # noqa: BLE001 - naming never fails over a lookup
             return False
 
-    # the longest known name the credit starts with ("Axwell Λ Ingrosso")
-    best = ""
-    for name in known.values():
-        if len(name) > len(best) and listed_primary_of(combined, name):
-            best = combined[:len(name)]
-    if best:
-        return best
-
-    is_list = bool(_HARD_SEPARATOR_RE.search(combined))
-    if not is_list:
-        # a known name standing on its own later in the credit, a duo
-        # ("Axwell & Sebastian Ingrosso") as much as a single part
-        is_list = any(_names_later(combined, name) for name in known.values())
-    if not is_list and library_has is not None:
-        is_list = sum(1 for seg in segments if in_library(seg)) >= 2
-    if not is_list:
-        return ""
-    # a lead the library knows by its full name ("Earth, Wind & Fire; ...")
-    # keeps it, otherwise the first part is the first listed artist
-    if library_has is not None:
-        for end in range(len(segments) - 1, 1, -1):
-            prefix = _prefix_of(combined, segments[:end])
-            if prefix and in_library(prefix):
-                return prefix
-    return segments[0]
-
-
-_BOUNDARY_BEFORE_RE = re.compile(
-    r"(?:[;,/&×]|\b(?:(?-i:x)|vs\.?|feat\.?|ft\.?|featuring))\s*$", re.IGNORECASE)
-
-
-def _names_later(combined: str, name: str) -> bool:
-    """does ``name`` stand as its own credit somewhere after the start."""
-    folded, target = combined.casefold(), name.casefold()
-    start = folded.find(target, 1)
-    while start > 0:
-        end = start + len(target)
-        after = combined[end:]
-        if (_BOUNDARY_BEFORE_RE.search(combined[:start])
-                and (not after.strip() or _SEPARATOR_RE.match(after))):
-            return True
-        start = folded.find(target, start + 1)
-    return False
-
-
-def _prefix_of(combined: str, segments) -> str:
-    """the part of ``combined`` that spells ``segments`` with their separators."""
-    pos = 0
-    for seg in segments:
-        found = combined.find(seg, pos)
-        if found < 0:
-            return ""
-        pos = found + len(seg)
-    return combined[:pos]
+    decision = decide_credit(combined, known=known,
+                             is_act=in_library if library_has is not None else None,
+                             is_artist=in_library if library_has is not None else None,
+                             min_runs=2)
+    return decision.primary if decision.split else ""
 
 
 def _safe_lookup(lookup, name) -> bool:
@@ -168,7 +118,10 @@ def _safe_lookup(lookup, name) -> bool:
 
 
 def library_has_artist(name: str) -> bool:
-    """does the library hold an artist by this name. False on any doubt."""
+    """does the library know an act by this name: a canonical artist with a
+    provider id, or one that is an album's artist. A credit an old split
+    left behind ("Above" and "Beyond" out of "Above & Beyond") is neither,
+    so it never votes a real name apart (#2131). False on any doubt."""
     name = str(name or "").strip()
     if not name:
         return False
@@ -178,7 +131,12 @@ def library_has_artist(name: str) -> bool:
         conn = get_database()._get_connection()
         # LOWER(name) has its own index; the lowering goes on the value side
         row = conn.execute(
-            "SELECT 1 FROM lib2_artists WHERE LOWER(name) = LOWER(?) LIMIT 1", (name,)).fetchone()
+            "SELECT 1 FROM lib2_artists a WHERE LOWER(a.name) = LOWER(?) "
+            "AND (a.canonical_artist_id IS NULL OR a.canonical_artist_id = a.id) "
+            "AND (COALESCE(a.spotify_id,'') <> '' OR COALESCE(a.musicbrainz_id,'') <> '' "
+            "     OR COALESCE(a.external_ids,'{}') NOT IN ('','{}') "
+            "     OR EXISTS (SELECT 1 FROM lib2_albums al WHERE al.primary_artist_id = a.id)) "
+            "LIMIT 1", (name,)).fetchone()
         return row is not None
     except Exception:  # noqa: BLE001 - naming never fails over a lookup
         return False
@@ -190,59 +148,16 @@ def library_has_artist(name: str) -> bool:
                 pass
 
 
-# where "this is one artist" answers from the Tools page live: the Split
-# Artists job's own settings, so the list can be read and edited there (#2150)
-KEPT_WHOLE_SETTINGS_KEY = "repair.jobs.comma_artist_splitter.settings"
-KEPT_WHOLE_SETTING = "keep_whole_names"
-
-
-def parse_kept_whole_names(value) -> list:
-    """the names in a keep-whole setting, one per ';' or line. a name with
-    ',' '&' or '/' in it is the point, so those never split here."""
-    if isinstance(value, (list, tuple, set)):
-        items = [str(v) for v in value]
-    else:
-        items = re.split(r"[;\n]", str(value or ""))
-    out, seen = [], set()
-    for item in items:
-        name = " ".join(item.split())
-        key = name.casefold()
-        if name and key not in seen:
-            seen.add(key)
-            out.append(name)
-    return out
-
-
-def kept_whole_artist_names(config=None) -> list:
-    """names the user said are one artist each, never to be split (#2150)."""
-    try:
-        if config is None:
-            from core.settings import config_manager as config
-        settings = config.get(KEPT_WHOLE_SETTINGS_KEY, {}) or {}
-        if not isinstance(settings, dict):
-            return []
-        return parse_kept_whole_names(settings.get(KEPT_WHOLE_SETTING))
-    except Exception as exc:  # noqa: BLE001 - an unreadable setting keeps nothing
-        logger.debug("keep-whole names unreadable: %s", exc)
-        return []
-
-
-def remember_kept_whole_names(names, config=None) -> list:
-    """add ``names`` to the keep-whole list. returns the list as saved."""
-    if config is None:
-        from core.settings import config_manager as config
-    settings = config.get(KEPT_WHOLE_SETTINGS_KEY, {}) or {}
-    settings = dict(settings) if isinstance(settings, dict) else {}
-    merged = parse_kept_whole_names(
-        parse_kept_whole_names(settings.get(KEPT_WHOLE_SETTING)) + list(names or ()))
-    settings[KEPT_WHOLE_SETTING] = "; ".join(merged)
-    config.set(KEPT_WHOLE_SETTINGS_KEY, settings)
-    return merged
-
-
-def kept_whole_keys(config=None) -> set:
-    """casefolded, whitespace-collapsed keys of the keep-whole names."""
-    return {name.casefold() for name in kept_whole_artist_names(config)}
+# the keep-whole names (#2150) live in the credit kernel; re-exported here
+# for the callers and tests that import them from this module
+from core.matching.artist_credit import (  # noqa: E402,F401
+    KEPT_WHOLE_SETTING,
+    KEPT_WHOLE_SETTINGS_KEY,
+    kept_whole_artist_names,
+    kept_whole_keys,
+    parse_kept_whole_names,
+    remember_kept_whole_names,
+)
 
 
 def credit_lead_artist(credit: str, known_names=(), library_has=None) -> str:
@@ -264,7 +179,8 @@ def library_has_identified_artist(name: str, conn=None) -> bool:
     name = str(name or "").strip()
     if not name:
         return False
-    if " ".join(name.split()).casefold() in kept_whole_keys():
+    from core.matching.artist_credit import name_key
+    if name_key(name) in kept_whole_keys():
         return True
     own = conn is None
     try:
@@ -286,6 +202,12 @@ def library_has_identified_artist(name: str, conn=None) -> bool:
                 logger.debug("library lookup close failed: %s", exc)
 
 
+def _has_hard_separator(name) -> bool:
+    """a ";" or " / " in the name: never part of an act's name"""
+    from core.matching.artist_credit import tokens
+    return any(kind == "hard" for kind, _raw in tokens(name)[1])
+
+
 def collab_primary(album_artist: str, album_artists=None, track_artists=None,
                    known_names=(), library_has=None, library_knows=None) -> str:
     """the album artist under 'first listed', '' when it stays as it is.
@@ -299,10 +221,20 @@ def collab_primary(album_artist: str, album_artists=None, track_artists=None,
     credited to "Above" (or a library holding "Above" and "Beyond") never
     turns "Above & Beyond" into a list (#2131). only a ";" or " / " still
     reads as one, those are never part of an act's name."""
+    from core.matching.artist_credit import credit_verdict
+
+    # A provider artist ID identifies the complete name. A display-only album
+    # list may simply repeat a combined credit (#2028).
+    if album_artists and len(album_artists) == 1:
+        entry = album_artists[0]
+        if isinstance(entry, dict) and entry.get("id"):
+            verdict = credit_verdict(album_artist, [("album credits", album_artists)])
+            if verdict and verdict[0] == "whole":
+                return ""
     primary = first_listed_artist(album_artist, album_artists)
     if primary:
         return primary
-    if (library_knows is not None and not _HARD_SEPARATOR_RE.search(str(album_artist or ""))
+    if (library_knows is not None and not _has_hard_separator(album_artist)
             and _safe_lookup(library_knows, album_artist)):
         return ""
     if not primary and track_artists:

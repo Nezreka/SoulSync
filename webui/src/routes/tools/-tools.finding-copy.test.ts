@@ -58,6 +58,31 @@ describe('describeFinding: a tag-scan finding', () => {
 });
 
 describe('describeFinding: plain words per type', () => {
+  it('a split no provider confirms says so and asks to check it first', () => {
+    const finding = (details: Record<string, unknown>) => ({
+      finding_type: 'comma_artist_split',
+      title: 'Combined artist: ODESZA; RY X',
+      details: {
+        combined_name: 'ODESZA; RY X',
+        split_artists: ['ODESZA', 'RY X'],
+        track_count: 1,
+        ...details,
+      },
+    });
+    expect(describeFinding(finding({ confirmed: true }), 'Split Artists')).toEqual({
+      title: 'ODESZA; RY X',
+      sub: '1 track',
+      problem: 'This artist is really 2 artists in one name.',
+      fix: 'Split Artists splits it into ODESZA and RY X in your library.',
+    });
+    expect(describeFinding(finding({ needs_confirmation: true }), 'Split Artists')).toEqual({
+      title: 'ODESZA; RY X',
+      sub: '1 track',
+      problem: 'This may be 2 artists in one name. No provider confirms it.',
+      fix: 'Check it first. Split Artists splits it into ODESZA and RY X in your library.',
+    });
+  });
+
   it('missing lyrics drops the quoted title and the file extension', () => {
     expect(
       describeFinding(

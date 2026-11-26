@@ -174,7 +174,10 @@ def search_by_isrc(isrc: str, artist: str, title: str, scraper: Any = None) -> O
         return None
 
     from core.beatport.fetch import fetch_next_data, remember_tracks
-    first_artist = re.split(r',|&| feat\.? | ft\.? | x ', artist or '', maxsplit=1)[0].strip()
+    from core.imports.collab_artist import library_has_identified_artist
+    from core.matching.artist_credit import lookup_name
+    # a band the library knows stays whole in the query
+    first_artist = lookup_name(artist or '', is_act=library_has_identified_artist)
     query = f"{first_artist} {_base_title(title)}".strip()
     _throttle()
     data = fetch_next_data(f"{BASE_URL}/search/tracks?q={quote(query)}", scraper)

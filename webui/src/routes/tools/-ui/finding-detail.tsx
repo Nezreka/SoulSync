@@ -739,26 +739,42 @@ function FindingDetailBody({
     case 'comma_artist_split': {
       // jadux — the contract: exactly what the artist tag becomes.
       const parts = list<string>(d.split_artists);
+      // the library's credit, not a tag string: "A; B" joined back looks
+      // just like the combined name, so the parts are counted and listed
       const artistChanges: TagChange[] = [
         {
           key: 'artist',
           label: 'Artist',
           before: text(d.combined_name),
-          after: text(d.new_display_artist) || parts.join('; '),
+          after: parts.length ? `${parts.length} artists: ${parts.join(', ')}` : '',
         },
       ];
-      if (d.primary_artist) {
+      if (d.primary_artist && list<number>(d.primary_album_ids).length) {
+        // the combined name is an album's own artist: the album goes to the lead
         artistChanges.push({
           key: 'albumartist',
           label: 'Album artist',
           before: text(d.combined_name),
           after: text(d.primary_artist),
         });
-        rows.push(['Album artist', 'Only changes where it was the combined name']);
       }
       const checked = list<string>(d.checked_sources);
-      if (checked.length) rows.push(['Checked against', checked.join(', ')]);
+      if (d.needs_confirmation) {
+        rows.push([
+          'Confirmed by',
+          'Nobody yet: no provider lists these artists on its tracks. Fix all leaves it alone',
+        ]);
+      } else if (checked.length) {
+        rows.push(['Confirmed by', checked.join(', ')]);
+      }
       if (d.track_count != null) rows.push(['Tracks affected', text(d.track_count)]);
+      // the split changes the library; the files follow through Re-tag and
+      // Reorganize (docs/library-v2-data-flow.md)
+      if (d.library_v2_native)
+        rows.push([
+          'Files',
+          'Re-tag and Reorganize check them after the split, if they are switched on',
+        ]);
 
       const chips = commaSplitChips(d);
       const tracks = list<{ title?: string; album?: string; file_path?: string }>(d.tracks);
@@ -769,8 +785,8 @@ function FindingDetailBody({
           {media}
           <TagChangeTable
             rows={artistChanges}
-            beforeLabel="In the files now"
-            afterLabel="After Split Artists"
+            beforeLabel="In your library now"
+            afterLabel="After the split"
           />
           <DetailGrid rows={rows} />
           <div style={{ margin: '8px 0 2px', fontWeight: 600 }}>Splits into</div>
@@ -821,7 +837,7 @@ function FindingDetailBody({
             </>
           ) : null}
           <div className="repair-finding-meta" style={{ marginTop: '8px' }}>
-            Your media server picks up the split on its next scan.
+            Your media server shows the split once Re-tag has written the files.
           </div>
           {onFixAction && finding.status === 'pending' ? (
             <CommaSplitEditor

@@ -1893,33 +1893,34 @@ def test_unknown_band_in_title_feature_credit_is_preserved(legacy_db):
     assert names.isdisjoint({"Earth", "Wind", "Fire"})
 
 
-def test_ambiguous_credit_splits_when_every_artist_is_already_known(legacy_db):
-    """Conservative P2-24 parsing must not discard corroborated junctions."""
+def test_an_ambiguous_credit_is_kept_as_written_and_handed_to_split_artists(legacy_db,
+                                                                         monkeypatch):
+    """The import does not decide that "Drake & Rihanna" is two artists, even
+    with both in the library: it keeps the credit as written, and the pass
+    after the import hands it to Split Artists, the one job that splits (it
+    splits once a provider credits both on the track)."""
     _on_legacy(legacy_db.path, "INSERT INTO artists VALUES(2,'Rihanna',NULL,NULL,NULL,NULL,NULL)",
                                "UPDATE tracks SET track_artist='Drake & Rihanna' WHERE id=101")
 
     import_legacy_library(legacy_db, reset=True)
 
     conn = sqlite3.connect(legacy_db.path)
-    credited = {
-        r[0]
-        for r in conn.execute(
-            """SELECT a.name
-                 FROM lib2_track_artists ta
-                 JOIN lib2_artists a ON a.id=ta.artist_id
-                 JOIN lib2_tracks t ON t.id=ta.track_id
-                WHERE t.legacy_track_id=101"""
-        )
-    }
-    names = {r[0] for r in conn.execute("SELECT name FROM lib2_artists")}
+    credited = {r[0] for r in conn.execute(
+        """SELECT a.name FROM lib2_track_artists ta JOIN lib2_artists a ON a.id=ta.artist_id
+             JOIN lib2_tracks t ON t.id=ta.track_id WHERE t.legacy_track_id=101""")}
+    ghost = conn.execute("SELECT id FROM lib2_artists WHERE name='Drake & Rihanna'").fetchone()[0]
+    asked = []
+    import core.repair_worker as rw
+    monkeypatch.setattr(rw, "request_artist_split",
+                        lambda ids, reason="": asked.extend(ids) or True)
+    from core.library2.native_enrich import split_combined_credits_locally
+    split_combined_credits_locally(conn)
     conn.close()
-    assert {"Drake", "Rihanna"} <= credited
-    assert "Drake & Rihanna" not in names
+    assert "Drake & Rihanna" in credited and "Rihanna" not in credited
+    assert ghost in asked
 
 
-def test_title_feature_list_splits_when_track_credit_supplies_a_known_anchor(legacy_db):
-    """P2-24 stays multi-artist aware when the flat legacy fields corroborate
-    one member of an otherwise ambiguous title-credit list."""
+def test_the_import_cuts_a_feat_and_keeps_an_ampersand_for_split_artists(legacy_db):
     _on_legacy(legacy_db.path, ("UPDATE tracks SET title=?, track_artist=? WHERE id=100", ("One Dance (feat. Wizkid & Kyla)", "Drake feat. Wizkid")))
 
     import_legacy_library(legacy_db, reset=True)
@@ -1927,8 +1928,10 @@ def test_title_feature_list_splits_when_track_credit_supplies_a_known_anchor(leg
     conn = sqlite3.connect(legacy_db.path)
     names = {r[0] for r in conn.execute("SELECT name FROM lib2_artists")}
     conn.close()
-    assert {"Drake", "Wizkid", "Kyla"} <= names
-    assert "Wizkid & Kyla" not in names
+    # "feat." is sure: Wizkid is an artist. "Wizkid & Kyla" may be one act,
+    # Split Artists decides that on evidence
+    assert {"Drake", "Wizkid", "Wizkid & Kyla"} <= names
+    assert "Drake feat. Wizkid" not in names and "Kyla" not in names
 
 
 def test_watchlist_import_does_not_watch_a_namesake(imported_conn):

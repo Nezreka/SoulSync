@@ -468,6 +468,10 @@ class JioSaavnWorker:
             record_attempt(conn, entity_type=entity_type, entity_id=entity_id,
                            service='jiosaavn', status='matched')
             conn.commit()
+            if entity_type == 'track' and provider_id:
+                # every artist JioSaavn credits on it, the credit evidence
+                from core.library2.provider_credits import keep_match_credits
+                keep_match_credits(self.db, 'track', entity_id, 'jiosaavn', str(provider_id))
 
         except Exception as e:
             logger.error("Error updating %s #%s with JioSaavn data: %s",

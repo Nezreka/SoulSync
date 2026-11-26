@@ -649,6 +649,36 @@ def _find_or_create_track(conn, album_id: int, artist_id: int, title: str, *,
     return track_id
 
 
+def _store_download_credits(conn, track_id: int, ti: Dict[str, Any], source: Optional[str],
+                            track_provider_id: Optional[str]) -> int:
+    """Keep the artist list the download's source gave for this track, ids
+    and all, as that source's credit snapshot: the evidence every later
+    credit decision reads, without asking the source again.
+
+    Only a list naming two or more artists with ids: a search result often
+    carries just the main artist (Deezer's ``artist``, not its
+    ``contributors``), and a one-artist snapshot from it would read as "the
+    source credits one artist" and keep the credit fetcher from asking for
+    the full list. Only when the track holds that very id at the source: a
+    list belongs to its match. Returns how many credits were added; never
+    raises."""
+    try:
+        from core.library2.provider_credits import CREDIT_SOURCES, _credited, link_credited_artists
+        from core.library2.worker_support import stored_provider_id
+
+        namespace = _provider_namespace(track_provider_id, source)
+        artists = ti.get("artists") if isinstance(ti.get("artists"), list) else []
+        if namespace not in CREDIT_SOURCES or len(_credited(artists)) < 2:
+            return 0
+        if str(stored_provider_id(conn, "track", track_id, namespace) or "") != \
+                str(_clean_provider_id(track_provider_id) or ""):
+            return 0
+        return link_credited_artists(conn, "track", int(track_id), namespace, artists)
+    except Exception as exc:  # noqa: BLE001 - a credit list is evidence, never a blocker
+        logger.debug("download credits for track %s not kept: %s", track_id, exc)
+        return 0
+
+
 # Public aliases for reuse outside this module (§52.8 early materialization,
 # core/library2/materialize.py) — same resolve-or-create semantics the
 # post-download autolink path above already relies on.
@@ -1126,6 +1156,9 @@ def link_download_into_library_v2(context: Dict[str, Any], *,
                     conn.execute(
                         "UPDATE lib2_tracks SET track_artist=COALESCE(NULLIF(track_artist,''), ?) "
                         "WHERE id=?", (artist_name, track_id))
+
+            if track_id and use_provider_ids:
+                _store_download_credits(conn, track_id, ti, identity_source, spotify_track_id)
 
             if not fallback:
                 _adopt_album_image(conn, album_id, _download_album_image(canonical_album, album_raw))

@@ -70,6 +70,21 @@ def get_scope_artist(context: Any) -> Optional[str]:
     return None
 
 
+def get_scope_artist_ids(context: Any) -> Optional[frozenset]:
+    """The catalogue artists a run was asked for by id (another job handing
+    its candidates to the job that owns them), or None for a normal run."""
+    scope = getattr(context, "scope", None)
+    if not isinstance(scope, dict) or "artist_ids" not in scope:
+        return None
+    out = set()
+    for value in scope.get("artist_ids") or ():
+        try:
+            out.add(int(value))
+        except (TypeError, ValueError):
+            continue
+    return frozenset(out)
+
+
 def scope_findings_only(context: Any) -> bool:
     """A run that may only file findings, whatever the job's own auto-apply
     or live setting says: the repair worker hands a library repair's files

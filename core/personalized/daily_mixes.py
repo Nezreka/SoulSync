@@ -38,6 +38,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 from core.discovery.explain import explanation
+from core.matching.artist_credit import split_names
 from utils.logging_config import get_logger
 
 logger = get_logger("personalized.daily_mixes")
@@ -160,8 +161,6 @@ def in_season(track: dict, today: date) -> bool:
 
 # ── seeds (pure) ──────────────────────────────────────────────────────────
 
-_CREDIT_SPLIT = re.compile(r"\s*(?:,|&| x | feat\.? | ft\.? | with | and )\s*", re.I)
-
 
 def fold_credit_seeds(seeds: Sequence[dict], owned: Set[str]) -> List[dict]:
     """history credits are often joined strings ("Bad Bunny, Jhayco"). a credit
@@ -175,7 +174,7 @@ def fold_credit_seeds(seeds: Sequence[dict], owned: Set[str]) -> List[dict]:
             continue
         key = _norm(name)
         if key not in owned:
-            for part in _CREDIT_SPLIT.split(name):
+            for part in split_names(name):
                 if _norm(part) in owned:
                     name, key = part.strip(), _norm(part)
                     break
@@ -593,7 +592,7 @@ def _session_plays(database, owner: int, names: Set[str],
         if raw not in resolved:
             hit = raw if raw in names else None
             if hit is None and raw not in owned:
-                for part in _CREDIT_SPLIT.split(raw):
+                for part in split_names(raw):
                     if _norm(part) in names:
                         hit = _norm(part)
                         break
@@ -887,7 +886,7 @@ def generate_daily_mixes(database, profile_id: int = 1, *,
     # similar artists too
     wanted = []
     for s in seeds:
-        for part in [s['name'], *_CREDIT_SPLIT.split(str(s['name']))]:
+        for part in [s['name'], *split_names(str(s['name']))]:
             if _norm(part) and _norm(part) not in wanted:
                 wanted.append(_norm(part))
     spelling: Dict[str, str] = {}
