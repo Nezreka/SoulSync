@@ -11,7 +11,8 @@ the address list is ``[{kind, url}]``, local first:
   Tailscale name.
 
 the pairing payload is the lookup ID, the fingerprint, this list and the
-code, as JSON; the QR carries the same JSON.
+code, as JSON; the QR carries it as a ``soulsync://pair?d=`` link, so a
+phone's own camera opens the player app on its pairing screen.
 
 nothing here is sent anywhere. the connect service (later) gets the list
 inside its sealed answers, never as a stored record.
@@ -19,6 +20,7 @@ inside its sealed answers, never as a stored record.
 
 from __future__ import annotations
 
+import base64
 import ipaddress
 import json
 import os
@@ -27,6 +29,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 from urllib.parse import urlsplit
 
 PAYLOAD_VERSION = 1
+LINK_PREFIX = "soulsync://pair?d="
 MAX_CUSTOM = 5
 REMOTE_KEY = "connect.remote_url"
 CUSTOM_KEY = "connect.custom_urls"
@@ -196,6 +199,13 @@ def payload_text(payload: Dict[str, Any]) -> str:
     return json.dumps(payload, separators=(",", ":"), sort_keys=True)
 
 
-__all__ = ["PAYLOAD_VERSION", "REMOTE_KEY", "CUSTOM_KEY", "MAX_CUSTOM", "is_home_address", "clean_url",
+def pairing_link(payload: Dict[str, Any]) -> str:
+    """the link the QR carries: the compact JSON as unpadded base64url.
+    the player app opens it; it only fills the pairing screen in."""
+    raw = base64.urlsafe_b64encode(payload_text(payload).encode("utf-8")).decode("ascii")
+    return LINK_PREFIX + raw.rstrip("=")
+
+
+__all__ = ["PAYLOAD_VERSION", "LINK_PREFIX", "pairing_link", "REMOTE_KEY", "CUSTOM_KEY", "MAX_CUSTOM", "is_home_address", "clean_url",
            "is_plain_http", "local_urls", "configured", "address_list", "warnings", "pairing_payload",
            "payload_text", "web_port"]

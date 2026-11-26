@@ -24,6 +24,16 @@
   border-radius: var(--radius-md);
 }
 
+.qrBox {
+  margin: 0;
+}
+
+.qrNote {
+  margin-top: 8px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
 .phone {
   display: grid;
   grid-template-columns: 128px minmax(0, 1fr);

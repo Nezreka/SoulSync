@@ -6,6 +6,7 @@ unless chosen."""
 
 from __future__ import annotations
 
+import json
 import re
 from uuid import uuid4
 
@@ -65,6 +66,8 @@ def test_an_admin_makes_a_code_and_sees_it_once():
     assert body["seconds_left"] == 600
     assert body["payload"]["code"] == body["code"]
     assert body["payload"]["fingerprint"] == body["payload"]["lookup_id"][:12]
+    assert body["qr_text"].startswith("soulsync://pair?d=")
+    assert json.loads(body["payload_text"]) == body["payload"]
     listed = _as(1).get("/api/devices/codes").get_json()["codes"]
     assert any(c["id"] == body["id"] and c["note"] == "for the car" for c in listed)
     assert canonical not in str(listed) and body["code"] not in str(listed)

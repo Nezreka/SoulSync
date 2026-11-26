@@ -68,12 +68,14 @@ def server_identity_view():
 def _pairing(code):
     """the pairing payload for a code: what the QR carries. the addresses
     are this server's, home ones first, the browser's own among them."""
-    from core.connect.addresses import pairing_payload, payload_text, warnings
+    from core.connect.addresses import pairing_link, pairing_payload, payload_text, warnings
     ident = _identity()
     addrs = _addresses()
     payload = pairing_payload(lookup_id=ident.lookup_id, fingerprint=ident.fingerprint,
                               addresses=addrs, code=code)
-    return {"payload": payload, "payload_text": payload_text(payload), "warnings": warnings(addrs)}
+    # qr_text is what the QR shows: a soulsync:// link a phone camera opens
+    return {"payload": payload, "payload_text": payload_text(payload),
+            "qr_text": pairing_link(payload), "warnings": warnings(addrs)}
 
 
 # ── paired devices (admin) ───────────────────────────────────────────────
