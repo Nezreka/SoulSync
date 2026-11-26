@@ -16,6 +16,15 @@ the player becomes its own place: it has a first-run setup, libraries you name a
 - **server activity.** streams from soulsync's own player show beside plex and jellyfin, are recorded in history and stats, and an admin can stop one with a message or send a message without stopping, on the web player and the app.
 - **more.** a right-click menu on every card, a release calendar, a music hub with artist mixes, report issue on anything, search as its own screen on phones, an accent picker, and a song played here counts as a play.
 
+## the soulsync player app
+
+the player has an android app now: phones, tablets and android tv (shield included). release 0.1.0 is out with the apk: https://github.com/Nezreka/soulsync-mobile-app/releases/tag/v0.1.0
+
+- **pair it from settings, devices, add a device** with a one-time code. after that everything goes straight between the app and your server.
+- **the same pages as the web player:** home, movies, tv, music, youtube, audiobooks, podcasts and the guide, with rows that follow the same per-profile layouts (arrange a page in a browser and the app follows) and your libraries as their own pages.
+- **a tv home built for a remote,** a top-right mini player, title logos, chromecast, and the stop and message an admin sends from server activity.
+- it needs this release (3.7.0) on the server.
+
 ## video without a media server
 
 - **SoulSync Standalone.** pick it as the video source and soulsync scans your movie and tv folders itself: it identifies titles from .nfo files, folder tags, names and a file hash, reads editions, and watches the folders for changes.

@@ -74,6 +74,7 @@ export const RELEASES: Release[] = [
       'Player setup: an admin names the server, sorts folders into libraries and sets the sidebar. Run it again from the player’s settings.',
       'Libraries: a named group of folders (4K, Kids, Anime) with its own page in the sidebar, which can be hidden from a profile.',
       'Rows you arrange: Movies, TV, Music and YouTube each have a layout per profile, with extra rows to switch on and a sidebar in your own order.',
+      'The SoulSync Player app for Android phones, tablets and TV: pair it from Settings, Devices. Version 0.1.0 is on its GitHub releases.',
       'Chapters and Skip intro for video, from the file’s own chapter marks, and a title’s logo on its page.',
       'Watch parties with a waiting room, countdown and reactions, and Chromecast that plays anything.',
       'Player streams show in Server Activity beside Plex and Jellyfin, recorded in history, and an admin can stop one with a message.',
@@ -150,6 +151,11 @@ export const RELEASES: Release[] = [
       {
         title: 'Downloads that keep your files',
         desc: 'Four ways a download could destroy or strand a file are closed, a failed slskd check no longer cancels everything, tribute acts and wrong artists are refused, and a track tries eight peers before giving up.',
+      },
+      {
+        title: 'The SoulSync Player app',
+        desc: 'Android phones, tablets and TV get the player as an app: the same pages, libraries and rows as the web player, a TV home built for a remote, and Chromecast. Pair it from Settings, Devices; 0.1.0 is on the soulsync-mobile-app GitHub releases.',
+        page: 'settings',
       },
       {
         title: 'Server Activity for the player',
