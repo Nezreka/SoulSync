@@ -406,6 +406,8 @@ These routes use the signed-in session (the player's own), not an API key. Each 
 - `billboard`: the big rotating banner of what's new at the top.
 - `rows`: drawn top to bottom. Skip a row that's `on: false`, one your app doesn't know, or one with nothing to show.
 - `id`: a row from the catalog, or `genre:<movie|show>:<genre name>` for a genre row someone added.
+- Library rows: `lib-recent:<library id>` ("Recently added in Movies 4K", posters, newest first, that library's titles only) and `lib-continue:<library id>` ("Continue in Movies 4K", what the profile started whose title is in that library) for each movie and TV library the profile can see, and `home-memories` ("On this day", the profile's home videos filmed on this day in earlier years, from `GET /api/player/home/memories`; skip it when there are none). A library's rows come at the end, off; "On this day" comes in on, after continue, once there is a home library. A row for a library that's gone or hidden from the profile is dropped. Titles use the library's name as it is now.
+- One card per title: the rows built from every title (recently added, top 10, because you have, top rated, rediscover, genre rows) show a title once when it is in two libraries (same tmdb id, else same title and year). The card opens the copy in the main library and wears a small 4K chip when another copy is in a 4K library (`uhd` on the library). Library rows and library pages show their own copy.
 - `style`: one of the four below. A row only takes the styles the catalog lists for it.
 
 | Style | Draw it as |
@@ -442,6 +444,7 @@ Libraries:
 Home videos (clips from a camera or a phone, never looked up on TMDB; `scrap/HOME_VIDEOS_CONTRACT.md`). Every route takes the player session or a paired device's token, and answers only for home libraries the profile can see (a hidden one is `404`, like a clip that isn't there):
 
 - `GET /api/player/home/overview?library=<id>`: `{library: {id, name, in_guide}, counts: {videos, first_year, last_year}, on_this_day: [Video], albums: [{key, name, path, count, first, last, covers: [video id]}], months: [{month: "2026-11", count}], sources, can_edit, scanning}`. No `library` is the first home library.
+- `GET /api/player/home/memories?date=YYYY-MM-DD`: `{videos: [Video + library]}`, the clips filmed on this month and day in earlier years across every home library the profile can see, newest first, each with the home library it is in. `date` is the viewer's day (the server's when left out). No home library, or nothing that day: an empty list.
 - `GET /api/player/home/videos?library=<id>&month=YYYY-MM | album=<key> | q=<text>&offset=&limit=`: `{videos: [Video], total}`. The timeline is newest first, an album oldest first; `limit` is at most 200. A missing clip stays in its album (`missing: true`) and leaves the timeline.
 - `GET /api/player/home/video/<id>`: a Video plus `{frames: [{at_s, url}], file_name, auto_title, auto_filmed_at, filmed_source, notes, thumb_at_s, edited, library, can_edit}`.
 - `PUT /api/player/home/video/<id>` with any of `{title, filmed_at, thumb_at_s, notes}`; `null` puts a field back to automatic. Admins, or everyone who can see the clip when player setup's `home_editors` is `everyone`. Edits survive every rescan.

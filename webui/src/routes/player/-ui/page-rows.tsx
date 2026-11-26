@@ -15,7 +15,7 @@ import { type HomeLayout, type LayoutRow, type RowStyle } from '../-lib/home-lay
 import { backdropSet, WIDE_SIZES } from '../-lib/images';
 import { pageLayoutQuery, resetPageLayout, savePageLayout } from '../-player.api';
 import { HomeEditor } from './home-editor';
-import { CardRail, styles as s, type CardAction } from './kit';
+import { CardRail, styles as s, type CardAction, type CardOpen } from './kit';
 import { RankedRail } from './top10';
 
 /** a poster card as a wide still: the title's backdrop when it has one */
@@ -33,6 +33,7 @@ export function StyledRow({
   more,
   round,
   actionsFor,
+  onOpen,
 }: {
   style: RowStyle;
   title: string;
@@ -40,12 +41,21 @@ export function StyledRow({
   more?: { to: string; label?: string };
   round?: boolean;
   actionsFor?: (card: RailCard) => CardAction[];
+  /** a card that does something here (plays a clip) instead of opening a page */
+  onOpen?: CardOpen;
 }) {
   if (!cards.length) return null;
   if (style === 'ranked') return <RankedRail title={title} cards={cards.slice(0, 10)} />;
   const shown = style === 'wide' ? cards.map(toWide) : cards;
   const rail = (
-    <CardRail title={title} cards={shown} more={more} round={round} actionsFor={actionsFor} />
+    <CardRail
+      title={title}
+      cards={shown}
+      more={more}
+      round={round}
+      actionsFor={actionsFor}
+      onOpen={onOpen}
+    />
   );
   return style === 'large' ? <div className={s.rowLarge}>{rail}</div> : rail;
 }

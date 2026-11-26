@@ -27,6 +27,8 @@ export interface HomeVideo {
   thumb_url: string | null;
   progress: { position_s: number; watched: boolean };
   missing: boolean;
+  /** the home library it is in (on this day across every library sends it) */
+  library?: number | null;
 }
 
 export interface HomeAlbum {
@@ -114,6 +116,19 @@ export const homeOverviewQuery = (library: number | undefined) =>
         .get('player/home/overview', { searchParams: library ? { library } : {} })
         .json<HomeOverview>(),
     staleTime: 2 * MINUTE,
+  });
+
+/** on this day across every home library this profile can see (home's row) */
+export const homeMemoriesQuery = (date: string) =>
+  queryOptions({
+    queryKey: ['player', 'home', 'memories', date],
+    queryFn: async () =>
+      (
+        await apiClient
+          .get('player/home/memories', { searchParams: { date } })
+          .json<{ videos: HomeVideo[] }>()
+      ).videos,
+    staleTime: 10 * MINUTE,
   });
 
 export interface HomePageArgs {

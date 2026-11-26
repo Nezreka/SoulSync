@@ -24,6 +24,8 @@ def db(tmp_path):
 @pytest.fixture
 def client(db, monkeypatch):
     monkeypatch.setattr(player_api, "player_db", lambda: db)
+    # home's library rows read the video side: none here (test_home_libraries.py has them)
+    monkeypatch.setattr(player_api, "_home_libraries", lambda: [])
     app = Flask(__name__)
     app.secret_key = "test"
     app.register_blueprint(player_api.create_blueprint())

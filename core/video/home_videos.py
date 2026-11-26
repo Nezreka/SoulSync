@@ -736,6 +736,25 @@ def video_json(row: Dict[str, Any], labels: Dict[str, str]) -> Dict[str, Any]:
     }
 
 
+def local_today() -> _dt.date:
+    """the server's day (tests set it)"""
+    return _dt.date.today()
+
+
+def on_this_day_rows(conn, root_ids: List[str], *, today: Optional[_dt.date] = None,
+                     limit: int = 12) -> List[Dict[str, Any]]:
+    """the clips filmed on today's month and day in earlier years, newest
+    first (rows, each with its root)"""
+    if not root_ids:
+        return []
+    day = today or local_today()
+    live = f"root IN ({_marks(root_ids)}) AND missing_since IS NULL"
+    return [_row(r) for r in conn.execute(
+        f"SELECT {_COLS} FROM {TABLE} WHERE {live} AND substr(sort_at, 6, 5) = ? "  # noqa: S608
+        "AND substr(sort_at, 1, 4) < ? ORDER BY sort_at DESC LIMIT ?",
+        [*root_ids, f"{day.month:02d}-{day.day:02d}", f"{day.year:04d}", int(limit)])]
+
+
 def overview(conn, root_ids: List[str], labels: Dict[str, str], *,
              today: Optional[_dt.date] = None, this_day_max: int = 12) -> Dict[str, Any]:
     """the page's top: counts, on this day, the albums and the months"""
@@ -746,12 +765,7 @@ def overview(conn, root_ids: List[str], labels: Dict[str, str], *,
     live = f"root IN ({m}) AND missing_since IS NULL"
     n, first, last = conn.execute(
         f"SELECT COUNT(*), MIN(sort_at), MAX(sort_at) FROM {TABLE} WHERE {live}", root_ids).fetchone()  # noqa: S608
-    today = today or _dt.date.today()
-    md = f"{today.month:02d}-{today.day:02d}"
-    this_day = [_row(r) for r in conn.execute(
-        f"SELECT {_COLS} FROM {TABLE} WHERE {live} AND substr(sort_at, 6, 5) = ? "  # noqa: S608
-        "AND substr(sort_at, 1, 4) < ? ORDER BY sort_at DESC LIMIT ?",
-        [*root_ids, md, f"{today.year:04d}", int(this_day_max)])]
+    this_day = on_this_day_rows(conn, root_ids, today=today, limit=this_day_max)
     albums = []
     for akey, root, folder, count, a_first, a_last in conn.execute(
             f"SELECT album_key, root, folder, COUNT(*), MIN(sort_at), MAX(sort_at) FROM {TABLE} "  # noqa: S608

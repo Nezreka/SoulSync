@@ -1,6 +1,8 @@
 """home videos in the player (core/video/home_videos.py, HOME_VIDEOS_CONTRACT.md).
 
     GET  /api/player/home/overview?library=     counts, on this day, albums, months
+    GET  /api/player/home/memories?date=        on this day across every home library
+                                                 the profile can see (home's row)
     GET  /api/player/home/videos?library=&month=|album=|q=&offset=&limit=
     GET  /api/player/home/video/<id>            a clip and its candidate frames
     PUT  /api/player/home/video/<id>            the person's edits (admins, unless
@@ -163,6 +165,51 @@ def home_overview():
     out["can_edit"] = _may_edit()
     out["scanning"] = H.status().get("state") == "running"
     return jsonify({"success": True, **out})
+
+
+MEMORIES_MAX = 20
+
+
+@bp.route("/api/player/home/memories", methods=["GET"])
+@device_playback
+@requires_any(*SECTIONS)
+def home_memories():
+    """{videos}: the clips filmed on this month and day in earlier years, in
+    every home library this profile can see, newest first; each with the
+    library it is in. ?date=YYYY-MM-DD is the viewer's own day (else the
+    server's). no home library, or nothing that day: no videos."""
+    import datetime as _dt
+
+    from core.player import home_access
+    from core.player import libraries as L
+    from core.video import home_videos as H
+    day = None
+    if request.args.get("date"):
+        try:
+            day = _dt.date.fromisoformat(str(request.args["date"])[:10])
+        except ValueError:
+            return _bad("date is YYYY-MM-DD")
+    pdb, vdb = _pdb(), _vdb()
+    libs = home_access.home_libraries(pdb, vdb, _hidden())
+    roots = [r for lib in libs for r in lib["roots"]]
+    if not roots:
+        return jsonify({"success": True, "videos": []})
+    labels = _labels(vdb)
+    conn = vdb._get_connection()
+    try:
+        rows = H.on_this_day_rows(conn, roots, today=day, limit=MEMORIES_MAX)
+    except Exception:  # noqa: BLE001
+        logger.exception("home memories failed")
+        return _bad("Couldn't read your home videos", 500)
+    finally:
+        conn.close()
+    all_libs = L.libraries(pdb)
+    videos = []
+    for row in rows:
+        v = H.video_json(row, labels)
+        v["library"] = L.home_library_of(all_libs, row["root"])
+        videos.append(v)
+    return jsonify({"success": True, "videos": _with_progress(videos)})
 
 
 @bp.route("/api/player/home/videos", methods=["GET"])

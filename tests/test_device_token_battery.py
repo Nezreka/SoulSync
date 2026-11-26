@@ -70,6 +70,7 @@ OPTED_IN = {
     # home videos (api/player_home.py): the app's home videos page, and
     # setup's home video sources for an admin's phone
     "player_home.home_overview": A.PLAYBACK,
+    "player_home.home_memories": A.PLAYBACK,
     "player_home.home_videos_page": A.PLAYBACK,
     "player_home.home_video_get": A.PLAYBACK,
     "player_home.home_video_put": A.PLAYBACK,

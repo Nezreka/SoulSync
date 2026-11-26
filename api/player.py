@@ -720,6 +720,18 @@ def remove_from_watchlist():
         return _failed("watchlist remove")
 
 
+def _home_libraries():
+    """the libraries home can have rows about, for this profile: the ones
+    the player lists for it (never a hidden one), movie and TV only when
+    it may see that kind (core/player/home_layout.py)"""
+    try:
+        sees_movies, sees_shows, _youtube, _cap = _video_view()
+    except Exception:  # noqa: BLE001 - no libraries is home as it was
+        logger.debug("home layout: video view unreadable", exc_info=True)
+        return []
+    return _visible_libraries(sees_movies, sees_shows)
+
+
 @bp.route("/api/player/home-layout", methods=["GET"])
 @device_playback
 @self_only
@@ -734,8 +746,9 @@ def get_home_layout():
         return _signed_out()
     try:
         device = home_layout.device(request.args.get("device"))
-        return jsonify({"success": True, **home_layout.get(player_db(), pid, device),
-                        "catalog": home_layout.catalog()})
+        libs = _home_libraries()
+        return jsonify({"success": True, **home_layout.get(player_db(), pid, device, libs),
+                        "catalog": home_layout.catalog(libs)})
     except home_layout.LayoutError as e:
         return _bad(e)
     except Exception:  # noqa: BLE001
@@ -756,7 +769,7 @@ def put_home_layout():
     try:
         device = home_layout.device(body.get("device"))
         db = player_db()
-        saved = home_layout.put(db, pid, body.get("layout"), device)
+        saved = home_layout.put(db, pid, body.get("layout"), device, _home_libraries())
         if device == home_layout.ALL and body.get("from_device"):
             home_layout.reset(db, pid, home_layout.device(body.get("from_device")))
         return jsonify({"success": True, "layout": saved,
