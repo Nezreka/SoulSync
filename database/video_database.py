@@ -803,28 +803,65 @@ def _show_type_sql(tmdb_expr: str, *, with_genre: bool) -> str:
     parts = [hand, lib, hint] + ([genre] if with_genre else [])
     return "COALESCE(" + ", ".join(part.format(t=tmdb_expr) for part in parts) + ")"
 
-# an episode's absolute number (anime naming, $absolute) for a query over
-# ``episodes e``: its place in the show's aired order, specials left out --
-# the same count episode_absolute_number gives the searches. NULL for a
-# special or an unnumbered row.
-_EPISODE_ABSOLUTE_SQL = (
-    "CASE WHEN e.season_number >= 1 AND e.episode_number >= 1 THEN "
-    "(SELECT COUNT(*) FROM episodes ea WHERE ea.show_id = e.show_id AND ea.season_number >= 1 "
-    "AND (ea.season_number < e.season_number OR (ea.season_number = e.season_number "
-    "AND ea.episode_number <= e.episode_number))) END")
+def _naming_needs(conn) -> tuple:
+    """(absolute, series_type): which of the anime naming columns the saved
+    naming templates read. $absolute in either episode template needs the
+    number; a set anime episode template needs each show's series type. a
+    library naming neither (most) asks for neither, so its scans stay as
+    fast as before they existed."""
+    try:
+        row = conn.execute("SELECT value FROM video_settings WHERE key = 'organization'").fetchone()
+        org = json.loads(row[0]) if row and row[0] else {}
+    except (sqlite3.Error, ValueError, TypeError):
+        org = {}
+    if not isinstance(org, dict):
+        org = {}
+    anime = str(org.get("anime_episode_template") or "").strip()
+    tpls = (str(org.get("episode_template") or ""), anime)
+    absolute = any("$absolute" in t or "${absolute}" in t for t in tpls)
+    return absolute, bool(anime)
 
-def _episode_series_type_sql() -> str:
-    """the routing series type of an episode's show (anime picks the anime
-    episode template) for a query over ``episodes e JOIN shows s``: the same
-    rule routing_series_type answers -- set by hand, then an anime-marked
-    library -- never the genre. A show with no TMDB id is judged by its own
-    row. NULL = standard."""
-    tmdb = "(SELECT tmdb_id FROM shows WHERE id = e.show_id)"
-    own_lib = ("(SELECT 'anime' WHERE s.library_name IN (SELECT j.value FROM json_each(COALESCE("
-               "(SELECT CASE WHEN json_valid(vs.value) THEN vs.value END FROM video_settings vs "
-               "WHERE vs.key = s.server_source || '.anime_libraries'), '[]')) j))")
-    return ("CASE WHEN s.tmdb_id IS NOT NULL THEN " + _show_type_sql(tmdb, with_genre=False)
-            + " ELSE COALESCE(s.series_type, " + own_lib + ") END")
+
+def _episode_naming_sql(conn, show_id=None) -> tuple:
+    """(with, columns, joins) for a query over ``episodes e JOIN shows s``
+    that adds ``absolute_number`` and ``series_type`` for the naming code.
+    each is NULL unless the saved templates read it (_naming_needs).
+
+    absolute_number ($absolute): the episode's place in its own show row's
+    aired order, specials left out, the count episode_absolute_number gives.
+    one window pass over the episode index instead of a count per row. NULL
+    for a special or an unnumbered row.
+
+    series_type (anime picks the anime episode template): the rule
+    routing_series_type answers, set by hand then an anime-marked library,
+    never the genre; a show with no TMDB id judged by its own row. worked out
+    once per show, not per episode. NULL = standard.
+
+    ``show_id`` limits both to one show row (a title's files)."""
+    absolute, series_type = _naming_needs(conn)
+    only_ep = " AND show_id = %d" % int(show_id) if show_id is not None else ""
+    only_show = " WHERE x.id = %d" % int(show_id) if show_id is not None else ""
+    with_sql, joins = "", ""
+    cols = ["NULL AS absolute_number", "NULL AS series_type"]
+    if absolute:
+        joins += (" LEFT JOIN (SELECT id, COUNT(*) OVER (PARTITION BY show_id "
+                  "ORDER BY season_number, episode_number) AS n FROM episodes "
+                  "WHERE season_number >= 1 AND episode_number IS NOT NULL" + only_ep
+                  + ") ab ON ab.id = e.id")
+        cols[0] = ("CASE WHEN e.season_number >= 1 AND e.episode_number >= 1 THEN ab.n END "
+                   "AS absolute_number")
+    if series_type:
+        own_lib = ("(SELECT 'anime' WHERE x.library_name IN (SELECT j.value FROM json_each(COALESCE("
+                   "(SELECT CASE WHEN json_valid(vs.value) THEN vs.value END FROM video_settings vs "
+                   "WHERE vs.key = x.server_source || '.anime_libraries'), '[]')) j))")
+        with_sql = ("WITH show_types AS MATERIALIZED (SELECT x.id AS show_id, "
+                    "CASE WHEN x.tmdb_id IS NOT NULL THEN "
+                    + _show_type_sql("x.tmdb_id", with_genre=False)
+                    + " ELSE COALESCE(x.series_type, " + own_lib + ") END AS series_type "
+                    "FROM shows x" + only_show + ") ")
+        joins += " LEFT JOIN show_types st ON st.show_id = e.show_id"
+        cols[1] = "st.series_type AS series_type"
+    return with_sql, ", ".join(cols), joins
 
 
 _PLACEHOLDER_TITLE = re.compile(r"^(tba|tbd|to be announced|episode\s*#?\s*\d+(\.\d+)?)$", re.I)
@@ -9628,8 +9665,10 @@ class VideoDatabase:
         templates need (mass rename, P7)."""
         conn = self._get_connection()
         try:
+            with_sql, naming_cols, naming_joins = _episode_naming_sql(conn)
             rows = conn.execute(
-                "SELECT e.id AS episode_id, e.season_number, e.episode_number, "
+                with_sql
+                + "SELECT e.id AS episode_id, e.season_number, e.episode_number, "
                 "e.title AS episode_title, s.title AS show_title, "
                 "s.tmdb_id AS show_tmdb_id, s.imdb_id AS show_imdb_id, s.tvdb_id AS show_tvdb_id, "
                 # $year for episode templates: stored year, else the premiere
@@ -9639,10 +9678,9 @@ class VideoDatabase:
                 "COALESCE(s.year, CAST(substr(NULLIF(s.first_air_date, ''), 1, 4) AS INTEGER)) AS show_year, "
                 "f.id AS file_id, f.relative_path, f.size_bytes, f.resolution, f.quality, "
                 "f.video_codec, f.audio_languages, f.subtitle_languages, f.release_source, "
-                + _EPISODE_ABSOLUTE_SQL + " AS absolute_number, "
-                + _episode_series_type_sql() + " AS series_type "
+                + naming_cols + " "
                 "FROM episodes e JOIN shows s ON s.id = e.show_id "
-                "JOIN media_files f ON f.episode_id = e.id "
+                "JOIN media_files f ON f.episode_id = e.id" + naming_joins + " "
                 "WHERE e.has_file=1 AND s.hands_off=0 "
                 "ORDER BY s.title COLLATE NOCASE, e.season_number, e.episode_number").fetchall()
             return [dict(r) for r in rows]
@@ -10309,8 +10347,10 @@ class VideoDatabase:
                 "f.relative_path, f.size_bytes, f.quality, f.resolution, f.video_codec, f.audio_languages, f.subtitle_languages "
                 "FROM movies m JOIN media_files f ON f.movie_id = m.id "
                 "WHERE m.has_file = 1 AND m.hands_off = 0")]
+            with_sql, naming_cols, naming_joins = _episode_naming_sql(conn)
             eps = [dict(r) for r in conn.execute(
-                "SELECT 'episode' AS scope, e.id AS item_id, e.show_id AS title_id, f.id AS file_id, "
+                with_sql
+                + "SELECT 'episode' AS scope, e.id AS item_id, e.show_id AS title_id, f.id AS file_id, "
                 "s.title AS title, "
                 # the show's year, as mass rename reads it -- a NULL here rendered
                 # every '$series ($year)' episode path without its year
@@ -10318,11 +10358,10 @@ class VideoDatabase:
                 "s.tmdb_id, s.imdb_id, s.tvdb_id, "
                 "e.season_number AS season, e.episode_number AS episode, "
                 "e.title AS episode_title, s.title AS series, "
-                + _EPISODE_ABSOLUTE_SQL + " AS absolute_number, "
-                + _episode_series_type_sql() + " AS series_type, "
+                + naming_cols + ", "
                 "f.relative_path, f.size_bytes, f.quality, f.resolution, f.video_codec, f.audio_languages, f.subtitle_languages "
                 "FROM episodes e JOIN shows s ON e.show_id = s.id "
-                "JOIN media_files f ON f.episode_id = e.id "
+                "JOIN media_files f ON f.episode_id = e.id" + naming_joins + " "
                 "WHERE e.has_file = 1 AND s.hands_off = 0")]
             return movies + eps
         finally:
@@ -10352,15 +10391,15 @@ class VideoDatabase:
                        "FROM movies m JOIN media_files f ON f.movie_id = m.id "
                        "WHERE m.id = ? ORDER BY f.size_bytes DESC")
             elif kind == "show":
-                sql = ("SELECT 'episode' AS scope, e.id AS item_id, s.title AS title, "
+                with_sql, naming_cols, naming_joins = _episode_naming_sql(conn, item_id)
+                sql = (with_sql + "SELECT 'episode' AS scope, e.id AS item_id, s.title AS title, "
                        "COALESCE(s.year, CAST(substr(NULLIF(s.first_air_date, ''), 1, 4) AS INTEGER)) AS year, "
                        "s.tmdb_id, s.imdb_id, s.tvdb_id, e.season_number AS season, "
                        "e.episode_number AS episode, e.title AS episode_title, s.title AS series, "
-                       + _EPISODE_ABSOLUTE_SQL + " AS absolute_number, "
-                       + _episode_series_type_sql() + " AS series_type, "
+                       + naming_cols + ", "
                        + self._TITLE_FILE_COLS + " "
                        "FROM episodes e JOIN shows s ON e.show_id = s.id "
-                       "JOIN media_files f ON f.episode_id = e.id "
+                       "JOIN media_files f ON f.episode_id = e.id" + naming_joins + " "
                        "WHERE s.id = ? ORDER BY e.season_number, e.episode_number, f.size_bytes DESC")
             else:
                 return []
@@ -12875,10 +12914,14 @@ class VideoDatabase:
                 out.append(t)
         return out
 
-    def episode_absolute_number(self, show_tmdb_id, season_number, episode_number):
+    def episode_absolute_number(self, show_tmdb_id, season_number, episode_number, *,
+                                show_id=None):
         """The episode's ABSOLUTE number (anime numbering, P8): its 1-based position
         in the show's aired order, specials (season 0) excluded. None when the show
-        or its episode list isn't in the library (can't be derived)."""
+        or its episode list isn't in the library (can't be derived).
+
+        ``show_id`` counts on that show row (the one a file is named by, so the
+        importer and mass rename agree); left out, the show's first row."""
         try:
             s, e = int(season_number), int(episode_number)
         except (TypeError, ValueError):
@@ -12887,19 +12930,47 @@ class VideoDatabase:
             return None
         conn = self._get_connection()
         try:
+            if show_id is not None:
+                which, key = "?", int(show_id)
+            else:
+                which, key = "(SELECT id FROM shows WHERE tmdb_id=? ORDER BY id LIMIT 1)", int(show_tmdb_id)
             row = conn.execute(
                 "SELECT COUNT(*) AS n, "
                 "SUM(CASE WHEN e.season_number=? AND e.episode_number=? THEN 1 ELSE 0 END) AS hit "
                 "FROM episodes e "
                 # ONE show row only — a show mirrored on two servers would
                 # otherwise count every episode twice
-                "WHERE e.show_id = (SELECT id FROM shows WHERE tmdb_id=? ORDER BY id LIMIT 1) "
-                "AND e.season_number >= 1 "
+                "WHERE e.show_id = " + which + " "
+                "AND e.season_number >= 1 AND e.episode_number IS NOT NULL "
                 "AND (e.season_number < ? OR (e.season_number = ? AND e.episode_number <= ?))",
-                (s, e, int(show_tmdb_id), s, s, e)).fetchone()
+                (s, e, key, s, s, e)).fetchone()
             # the episode itself must be known — otherwise the count is a guess
             return int(row["n"]) if row and row["hit"] else None
         except (sqlite3.Error, TypeError, ValueError):
+            return None
+        finally:
+            conn.close()
+
+    def episode_naming_show_id(self, show_tmdb_id, season_number, episode_number):
+        """The show row an imported episode file is named by, the row mass
+        rename and the naming check will count its absolute number on: the
+        one already holding the episode's file, else one listing the episode,
+        else the show's first row. None for a show not in the library."""
+        try:
+            tmdb, s, e = int(show_tmdb_id), int(season_number), int(episode_number)
+        except (TypeError, ValueError):
+            return None
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT s.id, MAX(COALESCE(e.has_file, 0)) AS owned, COUNT(e.id) AS listed "
+                "FROM shows s LEFT JOIN episodes e ON e.show_id = s.id "
+                "AND e.season_number = ? AND e.episode_number = ? "
+                "WHERE s.tmdb_id = ? GROUP BY s.id "
+                "ORDER BY owned DESC, listed > 0 DESC, s.id LIMIT 1",
+                (s, e, tmdb)).fetchone()
+            return int(row[0]) if row else None
+        except sqlite3.Error:
             return None
         finally:
             conn.close()

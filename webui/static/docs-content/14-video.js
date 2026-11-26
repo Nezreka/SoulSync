@@ -1054,6 +1054,10 @@ After a download completes, a lightweight post-download scan probes your media s
 
 Set your **naming scheme** (how files and folders are named — title, year, edition tags, season/episode patterns) and your **folder layout** once, and every import follows it. Consistent naming keeps Plex/Jellyfin matching clean. **Colons in titles** picks what a ':' becomes, since file systems don't allow one: deleted (Dexter Resurrection, the default), smart (Dexter - Resurrection, and 12:30 becomes 12-30), space dash space, or a dash. Mass Rename brings files you already have in line.
 
+**\`$absolute\`** in an episode template is the episode's absolute number, its place in the show's aired order with specials left out, at three digits: \`Frieren - S01E05 - 005\` (wider past 999, \`005-006\` for a two-episode file). A special has none, so it is named without it and the separator before it goes too.
+
+**Anime episode template** names the episodes of an anime show (set to anime by hand, or in a library marked anime) by its own template, so anime can carry \`$absolute\` while every other show keeps the episode template. Left empty, anime is named like any other show.
+
 **Two shows with one name** never share a folder. The first one in the library keeps the plain folder (\`The Office\`); a later show whose title renders to that same folder is filed with its year (\`The Office (2001)\`), or with its TMDB id when the year is the same too. SoulSync knows a folder is another show's from the library, from its own finished downloads, and from the folder's \`tvshow.nfo\`, so this holds before your media server has scanned anything.
 
 ## Mass rename
