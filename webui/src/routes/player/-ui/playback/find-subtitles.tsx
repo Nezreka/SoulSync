@@ -8,7 +8,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 
-import { apiClient } from '@/app/api-client';
+import { apiClient, refusalText } from '@/app/api-client';
 
 import type { PlayerState } from '../../-engine/engine';
 
@@ -65,12 +65,7 @@ function startLang(): string {
 async function errorText(e: unknown, fallback: string): Promise<string> {
   const res = (e as { response?: Response }).response;
   if (res?.status === 403) return "Your profile can't download subtitles. Ask an admin.";
-  try {
-    const body = (await res?.json()) as { error?: string; message?: string } | undefined;
-    return body?.message || body?.error || fallback;
-  } catch {
-    return fallback;
-  }
+  return refusalText(e, fallback);
 }
 
 export function FindSubtitles({ state, onClose }: { state: PlayerState; onClose: () => void }) {

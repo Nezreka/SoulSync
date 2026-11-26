@@ -355,12 +355,23 @@ def missing_ids(scope: Any, fields: dict, settings: Any) -> list:
             if re.search(r"\$\{?" + t + r"(?![A-Za-z0-9_])", tpl) and not _str(fields.get(t)).strip()]
 
 
+def _has_absolute(fields: dict) -> bool:
+    """a numbered episode of a numbered season. a special (season 0) or an
+    unnumbered episode never has an absolute number, so it is named without
+    one rather than waiting on it"""
+    try:
+        return int(fields.get("season")) >= 1 and int(fields.get("episode")) >= 1
+    except (TypeError, ValueError):
+        return False
+
+
 def absolute_unknown(scope: Any, fields: dict, settings: Any) -> bool:
     """the episode template names $absolute and this episode's absolute
     number isn't known (its show's episode list doesn't hold it yet): mass
     rename and the naming check leave the file alone instead of renaming it
-    without a number it will have once the list fills in."""
-    if scope != "episode":
+    without a number it will have once the list fills in. a special never
+    has one, so it never waits."""
+    if scope != "episode" or not _has_absolute(fields):
         return False
     s = normalize(settings)
     tpl = str(s.get("episode_template") or "")
