@@ -386,12 +386,14 @@ def _home_overview(conn: Any, video_db: Any, libs: List[Dict[str, Any]]) -> List
         from core.video import home_videos
         found = home_videos.roots(video_db)
         counts = home_videos.root_counts(conn, [r["id"] for r in found])
+        places = home_videos.root_places(conn, [r["id"] for r in found])
     except Exception:  # noqa: BLE001 - no home table yet is no home videos
         logger.debug("home overview unreadable", exc_info=True)
         return []
     return [{"folder": r["id"], "path": r["path"], "label": r["label"], "source": r["source"],
              "titles": counts.get(r["id"], (0, []))[0], "sample": counts.get(r["id"], (0, []))[1],
-             "library_id": home_library_of(libs, r["id"])} for r in found]
+             "library_id": home_library_of(libs, r["id"]),
+             "where": places.get(r["id"]) or (r["path"] if r["source"] == "disk" else None)} for r in found]
 
 
 # ── home ──────────────────────────────────────────────────────────────────
