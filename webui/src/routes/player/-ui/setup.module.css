@@ -560,16 +560,47 @@
   min-width: 0;
 }
 
-/* the whole path, always: it is how you tell two folders apart. a long
-   one wraps at any character instead of being cut off */
+/* where a folder lives (server or drive), small, then its folders as a
+   breadcrumb that breaks between names, never inside one */
+.folderRoot {
+  color: var(--pl-text-3);
+  font-size: calc(var(--u) * 0.7);
+  letter-spacing: 0.02em;
+  user-select: text;
+}
+
 .folderPath {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: calc(var(--u) * 0.15);
   color: var(--pl-text);
-  font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: calc(var(--u) * 0.8);
+  font-size: calc(var(--u) * 0.85);
   font-weight: 600;
   line-height: 1.35;
-  overflow-wrap: anywhere;
   user-select: text;
+}
+
+.crumb {
+  display: inline-flex;
+  align-items: baseline;
+  gap: calc(var(--u) * 0.15);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* the last folder is the one it is named for */
+.crumb:last-child {
+  color: var(--pl-text);
+}
+
+.crumb:not(:last-child) {
+  color: var(--pl-text-2);
+  font-weight: 500;
+}
+
+.crumbSep {
+  color: var(--pl-text-3);
+  font-weight: 400;
 }
 
 .break {
