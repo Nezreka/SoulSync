@@ -85,11 +85,14 @@ export function ClipCard({
   onPlay,
   onEdit,
   showDay = true,
+  withYear = false,
 }: {
   video: HomeVideo;
   onPlay: () => void;
   onEdit?: () => void;
   showDay?: boolean;
+  /** an album or a search spans years: the badge says which */
+  withYear?: boolean;
 }) {
   const dur = clockDuration(video.duration_s);
   const pct =
@@ -120,7 +123,9 @@ export function ClipCard({
       >
         <Picture video={video} />
         {showDay && video.filmed_at ? (
-          <span className={s.badge}>{dayBadge(video.filmed_at)}</span>
+          <span className={s.badge}>
+            {withYear ? dayLabel(video.filmed_at) : dayBadge(video.filmed_at)}
+          </span>
         ) : null}
         {video.missing ? <span className={s.badge}>Missing</span> : null}
         <span className={s.clipTitle}>{video.title}</span>
@@ -346,6 +351,7 @@ function ClipGrid({
           key={v.id}
           video={v}
           showDay={showDay}
+          withYear={!args.month}
           onPlay={() => playItems(homeQueue(videos, i, args.library))}
           onEdit={onEdit ? () => onEdit(v.id) : undefined}
         />
@@ -498,7 +504,7 @@ export function HomeVideosPage({
                   </button>
                 ) : null}
               </h2>
-              <div className={s.albums}>
+              <div className={s.albums} data-capped={view === 'timeline' ? 'true' : undefined}>
                 {albums.map((a) => (
                   <AlbumCard key={a.key} album={a} onOpen={() => go({ album: a.key })} />
                 ))}

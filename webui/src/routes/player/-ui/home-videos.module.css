@@ -226,8 +226,10 @@
   margin-bottom: calc(var(--u) * 0.25);
   padding: calc(var(--u) * 0.18) calc(var(--u) * 0.6);
   border-radius: var(--radius-pill);
-  background: rgba(var(--gold-rgb), 0.22);
+  background: rgba(var(--black-rgb), 0.55);
+  box-shadow: inset 0 0 0 1px rgba(var(--gold-rgb), 0.45);
   color: var(--gold);
+  backdrop-filter: blur(6px);
   font-size: calc(var(--u) * 0.72);
   font-weight: 700;
 }
@@ -355,9 +357,10 @@
   contain-intrinsic-size: auto calc(var(--u) * 16);
 }
 
+/* sticks under the player's own header */
 .mhead {
   position: sticky;
-  top: 0;
+  top: calc(var(--u) * 4.2);
   z-index: 2;
   display: flex;
   align-items: baseline;
@@ -766,6 +769,11 @@ textarea.input {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  /* the timeline keeps two rows of albums on a phone; Folders has them all */
+  .albums[data-capped='true'] > :nth-child(n + 5) {
+    display: none;
+  }
+
   .grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 3px;
@@ -774,6 +782,10 @@ textarea.input {
   .clip,
   .tileGhost {
     border-radius: var(--radius-sm);
+  }
+
+  .mhead {
+    top: calc(var(--u) * 3.6);
   }
 
   .badge {
