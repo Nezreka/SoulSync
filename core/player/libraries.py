@@ -38,6 +38,7 @@ request asks what is hidden, and a read must never create a table.
 
 from __future__ import annotations
 
+import re
 import sqlite3
 import threading
 import time
@@ -201,16 +202,27 @@ def hidden_map(db: Any) -> Dict[int, List[int]]:
     return {k: sorted(v) for k, v in out.items()}
 
 
+_UHD = re.compile(r"(?<![a-z0-9])(4k|uhd|2160p?)(?![a-z0-9])", re.IGNORECASE)
+
+
+def is_uhd(lib: Dict[str, Any]) -> bool:
+    """a 4K library: its name or one of its folders says so (Movies 4K, D:/UHD)"""
+    if lib.get("kind") not in TITLE_KINDS:
+        return False
+    return any(_UHD.search(str(text or "")) for text in [lib.get("name"), *(lib.get("folders") or [])])
+
+
 def visible(db: Any, profile_id: Optional[int], *, is_admin: bool = False,
             kinds: Optional[Iterable[str]] = None) -> List[Dict[str, Any]]:
     """the libraries this profile can see, as the player lists them:
-    {id, kind, name, own_page, main, in_guide}. a library that isn't its
-    kind's default has a page of its own; every home library does."""
+    {id, kind, name, own_page, main, in_guide, uhd}. a library that isn't
+    its kind's default has a page of its own; every home library does. uhd:
+    a 4K library (home's one card per title marks a 4K copy with it)."""
     hidden = frozenset() if is_admin else hidden_for(db, profile_id)
     allowed = set(kinds) if kinds is not None else None
     return [{"id": lib["id"], "kind": lib["kind"], "name": lib["name"],
              "own_page": lib["kind"] == "home" or not lib["is_default"], "main": lib["is_default"],
-             "in_guide": lib["in_guide"]}
+             "in_guide": lib["in_guide"], "uhd": is_uhd(lib)}
             for lib in libraries(db)
             if lib["id"] not in hidden and (allowed is None or lib["kind"] in allowed)]
 

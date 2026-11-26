@@ -34,6 +34,11 @@ export function RankedRail({ title, cards }: { title: string; cards: RailCard[] 
                 sizes={card.artSizes}
                 alt={card.title}
               />
+              {card.chip ? (
+                <span className={s.cardChip} title={`Also in ${card.chip}`}>
+                  {card.chip}
+                </span>
+              ) : null}
             </span>
           </PlayerLink>
         ))}

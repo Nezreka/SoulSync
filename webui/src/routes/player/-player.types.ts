@@ -104,6 +104,8 @@ export interface PlayerLibrary {
   main: boolean;
   /** whether the guide schedules its titles (home libraries start off) */
   in_guide?: boolean;
+  /** a 4K library: its name or a folder says so (home marks a 4K copy) */
+  uhd?: boolean;
 }
 
 /** a home video the guide may schedule (only home libraries switched into the guide) */

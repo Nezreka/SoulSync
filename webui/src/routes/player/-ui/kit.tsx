@@ -229,6 +229,11 @@ export function Card({
           </span>
         ) : null}
         {visibleBadge ? <span className={s.cardBadge}>{visibleBadge}</span> : null}
+        {card.chip ? (
+          <span className={s.cardChip} title={`Also in ${card.chip}`}>
+            {card.chip}
+          </span>
+        ) : null}
         {card.progress !== undefined ? (
           <div
             className={s.progress}

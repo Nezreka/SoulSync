@@ -50,6 +50,8 @@ export interface RailCard {
   artSizes?: string;
   /** a small label over the artwork's corner: a duration, an episode count */
   badge?: string;
+  /** a small tag on the art's top corner: "4K" when another copy is 4K */
+  chip?: string;
   /** you have it: a small check on the art, the words in its tooltip */
   have?: string;
   /** not yours: the card is dimmed, the words in its tooltip */

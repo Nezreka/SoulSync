@@ -9,6 +9,20 @@ import { autoChannels, numberChannels } from './-lib/channels';
 import { deviceId } from './-lib/device';
 import { guideScheduleOptions, sharedCommercials } from './-lib/guide-schedule';
 import { parseGenreRow, type HomeLayout } from './-lib/home-layout';
+import {
+  libraryContinueCards,
+  libraryHref,
+  libraryRecentCards,
+  localDay,
+  MEMORIES_ROW,
+  memoryCards,
+  oneCardPerTitle,
+  oneOfEach,
+  parseLibRow,
+  titleCopies,
+  type CopyIndex,
+} from './-lib/home-libraries';
+import { homeItem, homeMemoriesQuery } from './-lib/home-videos';
 import { remoteImage } from './-lib/images';
 import { premiereItem, premieresFor, premiereWhen, upcomingPremieres } from './-lib/premieres';
 import {
@@ -50,6 +64,7 @@ import { Empty, Rail, SkeletonRail, styles as s, type CardAction } from './-ui/k
 import { DiscoverCard } from './-ui/music/discover-card';
 import { notifyError } from './-ui/notice';
 import { StyledRow } from './-ui/page-rows';
+import { playItems } from './-ui/playback/use-player';
 import { useSections } from './-ui/sections';
 
 export const Route = createFileRoute('/player/')({
@@ -81,6 +96,7 @@ function useTopToday(
   kind: 'movie' | 'show',
   items: (CatalogMovie | CatalogShow)[] | undefined,
   on: boolean,
+  copies: CopyIndex,
 ) {
   const trending = useQuery({
     ...discoverListQuery(kind === 'movie' ? 'trending_movies_today' : 'trending_tv_today', 1),
@@ -101,8 +117,8 @@ function useTopToday(
       seen.add(mine.id);
       out.push(kind === 'movie' ? movieCard(mine as CatalogMovie) : showCard(mine as CatalogShow));
     }
-    return out.slice(0, 10);
-  }, [items, trending.data, popular.data, kind]);
+    return oneCardPerTitle(out, copies).slice(0, 10);
+  }, [items, trending.data, popular.data, kind, copies]);
 }
 
 /** "because you have x": tmdb's picks for a title you own, only the ones you also own */
@@ -110,6 +126,7 @@ function useBecause(
   movies: CatalogMovie[] | undefined,
   shows: CatalogShow[] | undefined,
   on: boolean,
+  copies: CopyIndex,
 ) {
   const rows = useQuery({ ...discoverMoreLikeQuery(), enabled: on && !!movies });
   return useMemo(() => {
@@ -124,11 +141,14 @@ function useBecause(
     return (rows.data ?? [])
       .map((row) => ({
         title: row.title.replace(/^More like /, 'Because you have '),
-        cards: row.items.map(card).filter((c): c is RailCard => !!c),
+        cards: oneCardPerTitle(
+          row.items.map(card).filter((c): c is RailCard => !!c),
+          copies,
+        ),
       }))
       .filter((row) => row.cards.length >= 4)
       .slice(0, 2);
-  }, [rows.data, movies, shows]);
+  }, [rows.data, movies, shows, copies]);
 }
 
 function PlayerHome() {
@@ -199,9 +219,21 @@ function PlayerHome() {
   const cat = catalog.data;
   const movies = sections.movies ? cat?.movies : undefined;
   const shows = sections.tv ? cat?.shows : undefined;
-  const topMovies = useTopToday('movie', movies, isOn('top-movies'));
-  const topShows = useTopToday('show', shows, isOn('top-shows'));
-  const because = useBecause(movies, shows, isOn('because'));
+  const libraries = useMemo(() => cat?.libraries ?? [], [cat]);
+  // a title in two libraries (Movies and Movies 4K) is one card on the rows built from every title
+  const copies = useMemo(
+    () => titleCopies(movies ?? [], shows ?? [], libraries),
+    [movies, shows, libraries],
+  );
+  const topMovies = useTopToday('movie', movies, isOn('top-movies'), copies);
+  const topShows = useTopToday('show', shows, isOn('top-shows'), copies);
+  const because = useBecause(movies, shows, isOn('because'), copies);
+  // on this day: home videos filmed today in earlier years, from every home library
+  const today = localDay();
+  const memories = useQuery({
+    ...homeMemoriesQuery(today),
+    enabled: sections.video && isOn(MEMORIES_ROW) && libraries.some((lib) => lib.kind === 'home'),
+  });
   const collectionCards = useMemo<RailCard[]>(() => {
     const movieSet = new Set((movies ?? []).map((m) => m.id));
     const showSet = new Set((shows ?? []).map((x) => x.id));
@@ -313,11 +345,14 @@ function PlayerHome() {
     const pool = (movies ?? []).filter(
       (m) => m.genres.some((g) => theme.genres.includes(g.toLowerCase())) && (m.rating ?? 0) >= 6.5,
     );
-    const cards = seededShuffle(pool, hashSeed(`seasonal-${day()}`))
-      .slice(0, 18)
-      .map(movieCard);
+    const cards = oneCardPerTitle(
+      seededShuffle(pool, hashSeed(`seasonal-${day()}`))
+        .slice(0, 60)
+        .map(movieCard),
+      copies,
+    ).slice(0, 18);
     return { title: theme.title, cards };
-  }, [movies]);
+  }, [movies, copies]);
   const watching = useMemo(
     () => continueRails(progress.data ?? [], resume.data ?? []),
     [progress.data, resume.data],
@@ -329,6 +364,8 @@ function PlayerHome() {
     const one = (id: string, title: string, cards: RailCard[], more?: string) => {
       out[id] = [{ title, cards, more: more ? { to: more } : undefined }];
     };
+    // each title once, the card on the main library's copy (cut after, so a row stays full)
+    const once = (cards: RailCard[], n = 20) => oneCardPerTitle(cards, copies).slice(0, n);
     out.continue = watching.map((r) => ({ title: r.label, cards: r.cards }));
     one('live-guide', 'On Live TV right now', liveGuideCards, '/player/guide');
     one('premieres', 'Premieres tonight', premiereCards, '/player/guide');
@@ -344,7 +381,7 @@ function PlayerHome() {
     one(
       'recent-movies',
       'Recently added movies',
-      movies ? recentMovieCards(movies) : [],
+      movies ? once(recentMovieCards(movies, 60)) : [],
       '/player/movies?tab=library',
     );
     out.because = because;
@@ -353,9 +390,11 @@ function PlayerHome() {
       'recent-shows',
       'Recently added shows',
       shows
-        ? newestFirst(shows, (x) => x.added_at)
-            .slice(0, 20)
-            .map(showCard)
+        ? once(
+            newestFirst(shows, (x) => x.added_at)
+              .slice(0, 60)
+              .map(showCard),
+          )
         : [],
       '/player/tv?tab=library',
     );
@@ -371,12 +410,14 @@ function PlayerHome() {
       'genre-picks',
       topGenre ? `${topGenre} picks for today` : "Today's picks",
       movies && topGenre
-        ? seededShuffle(
-            movies.filter((m) => m.genres.includes(topGenre) && (m.rating ?? 0) >= 6.5),
-            hashSeed(`home-${topGenre}-${day()}`),
+        ? once(
+            seededShuffle(
+              movies.filter((m) => m.genres.includes(topGenre) && (m.rating ?? 0) >= 6.5),
+              hashSeed(`home-${topGenre}-${day()}`),
+            )
+              .slice(0, 60)
+              .map(movieCard),
           )
-            .slice(0, 20)
-            .map(movieCard)
         : [],
       topGenre ? `/player/movies?tab=library&genre=${encodeURIComponent(topGenre)}` : undefined,
     );
@@ -384,11 +425,13 @@ function PlayerHome() {
       'top-rated',
       'Top rated in your library',
       movies
-        ? movies
-            .filter((m) => (m.rating ?? 0) > 0)
-            .sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0))
-            .slice(0, 20)
-            .map(movieCard)
+        ? once(
+            movies
+              .filter((m) => (m.rating ?? 0) > 0)
+              .sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0))
+              .slice(0, 60)
+              .map(movieCard),
+          )
         : [],
     );
     const yearAgo = new Date(Date.now() - 365 * 86_400_000).toISOString();
@@ -396,12 +439,14 @@ function PlayerHome() {
       'rediscover',
       'Rediscover',
       movies
-        ? seededShuffle(
-            movies.filter((m) => m.added_at && m.added_at < yearAgo),
-            hashSeed(`rediscover-${day()}`),
+        ? once(
+            seededShuffle(
+              movies.filter((m) => m.added_at && m.added_at < yearAgo),
+              hashSeed(`rediscover-${day()}`),
+            )
+              .slice(0, 60)
+              .map(movieCard),
           )
-            .slice(0, 20)
-            .map(movieCard)
         : [],
     );
     one(
@@ -427,11 +472,14 @@ function PlayerHome() {
       const g = parseGenreRow(r.id);
       if (!g) continue;
       const pool: (CatalogMovie | CatalogShow)[] = (g.kind === 'movie' ? movies : shows) ?? [];
-      const picked = pool
-        .filter((x) => x.genres.includes(g.genre))
-        .sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0))
-        .slice(0, 24)
-        .map((x) => ('episode_count' in x ? showCard(x) : movieCard(x)));
+      const picked = once(
+        pool
+          .filter((x) => x.genres.includes(g.genre))
+          .sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0))
+          .slice(0, 60)
+          .map((x) => ('episode_count' in x ? showCard(x) : movieCard(x))),
+        24,
+      );
       one(
         r.id,
         `${g.genre} ${g.kind === 'movie' ? 'movies' : 'shows'}`,
@@ -439,8 +487,33 @@ function PlayerHome() {
         `/player/${g.kind === 'movie' ? 'movies' : 'tv'}?tab=library&genre=${encodeURIComponent(g.genre)}`,
       );
     }
+    // rows about one library: its own copies, named as the library is now
+    const started = watching.find((r) => r.id === 'watching')?.cards ?? [];
+    for (const r of layout.rows) {
+      const lr = parseLibRow(r.id);
+      const lib = lr ? libraries.find((l) => l.id === lr.library) : undefined;
+      if (!lr || !lib || (lib.kind === 'movie' ? !movies : lib.kind === 'show' ? !shows : true))
+        continue;
+      if (lr.row === 'recent')
+        one(
+          r.id,
+          `Recently added in ${lib.name}`,
+          libraryRecentCards(lib, libraries, movies ?? [], shows ?? []),
+          libraryHref(lib),
+        );
+      else
+        one(
+          r.id,
+          `Continue in ${lib.name}`,
+          libraryContinueCards(started, lib, libraries, movies ?? [], shows ?? []),
+        );
+    }
+    one(MEMORIES_ROW, 'On this day', memoryCards(memories.data ?? []));
     return out;
   }, [
+    copies,
+    libraries,
+    memories.data,
     watching,
     liveGuideCards,
     premiereCards,
@@ -462,19 +535,28 @@ function PlayerHome() {
   const slides = useMemo<Slide[]>(() => {
     if (!cat) return [];
     const films = movies
-      ? newestFirst(
-          movies.filter((m) => m.has_backdrop),
-          (m) => m.added_at,
-        ).slice(0, 3)
+      ? oneOfEach(
+          newestFirst(
+            movies.filter((m) => m.has_backdrop),
+            (m) => m.added_at,
+          ),
+          'movie',
+          copies,
+        )
+          .filter((m) => m.has_backdrop)
+          .slice(0, 3)
       : [];
     const showIds: number[] = [];
     if (shows)
       for (const e of cat.recent_episodes)
         if (!showIds.includes(e.show_id)) showIds.push(e.show_id);
     const byId = new Map((shows ?? []).map((x) => [x.id, x]));
-    const fresh = showIds
-      .map((id) => byId.get(id))
-      .filter((x): x is CatalogShow => !!x && x.has_backdrop)
+    const fresh = oneOfEach(
+      showIds.map((id) => byId.get(id)).filter((x): x is CatalogShow => !!x),
+      'show',
+      copies,
+    )
+      .filter((x) => x.has_backdrop)
       .slice(0, 3);
     const out: Slide[] = [];
     for (let i = 0; i < 3; i++) {
@@ -482,7 +564,17 @@ function PlayerHome() {
       if (films[i]) out.push({ kind: 'movie', item: films[i], why: 'Recently added' });
     }
     return out;
-  }, [cat, movies, shows]);
+  }, [cat, movies, shows, copies]);
+
+  // a memory plays here, and the rest of the day's clips after it
+  const playMemory = (card: RailCard) => {
+    const list = (memories.data ?? []).filter((v) => !v.missing);
+    const at = Math.max(
+      0,
+      list.findIndex((v) => `home:${v.id}` === card.key),
+    );
+    playItems(list.slice(at).map((v) => homeItem(v, v.library ?? undefined)));
+  };
 
   const loading =
     (sections.video && catalog.isLoading && !catalog.data) ||
@@ -514,7 +606,10 @@ function PlayerHome() {
           title={row.title}
           cards={row.cards}
           more={row.more}
-          actionsFor={r.id === 'continue' ? continueActions : undefined}
+          actionsFor={
+            r.id === 'continue' || r.id.startsWith('lib-continue:') ? continueActions : undefined
+          }
+          onOpen={r.id === MEMORIES_ROW ? playMemory : undefined}
         />,
       );
   }
