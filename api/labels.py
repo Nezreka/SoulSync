@@ -19,6 +19,7 @@ from typing import Any, Callable, Dict, List, Optional
 from flask import Blueprint, jsonify, redirect, request
 
 from utils.logging_config import get_logger
+from utils.bounded_dict import put_bounded
 from core.permissions import requires
 
 logger = get_logger("labels.api")
@@ -79,7 +80,7 @@ def _fetch_catalog(mbid: str) -> List[Dict[str, Any]]:
         return hit['items']
     from core.metadata import label_catalog as lc
     items = lc.label_catalog(mbid, mb_getter=_mb_getter)
-    _catalog_cache[mbid] = {'at': now, 'items': items}
+    put_bounded(_catalog_cache, mbid, {'at': now, 'items': items}, 64)
     return items
 
 
@@ -196,7 +197,7 @@ def create_blueprint() -> Blueprint:
             url = hit["url"]
         else:
             url = _resolve_cover(artist, album)
-            _cover_cache[key] = {"at": now, "url": url}
+            put_bounded(_cover_cache, key, {"at": now, "url": url}, 4096)
         if not url:
             return "", 404
         resp = redirect(url, code=302)
@@ -222,7 +223,7 @@ def create_blueprint() -> Blueprint:
         if hit and (now - hit["at"]) < _COVER_TTL_S:
             return jsonify({"url": hit["url"]})
         url = _resolve_cover(artist, album)
-        _cover_cache[key] = {"at": now, "url": url}
+        put_bounded(_cover_cache, key, {"at": now, "url": url}, 4096)
         return jsonify({"url": url})
 
     @bp.route("/api/labels/search", methods=["POST"])

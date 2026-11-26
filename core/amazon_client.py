@@ -30,6 +30,7 @@ import requests
 
 from core.settings import config_manager
 from core.api_call_tracker import api_call_tracker
+from utils.bounded_dict import put_bounded
 from utils.logging_config import get_logger
 
 logger = get_logger("amazon_client")
@@ -713,7 +714,7 @@ class AmazonClient:
                 if isinstance(lst, list) and lst and isinstance(lst[0], dict):
                     meta = lst[0]
                     with _meta_cache_lock:
-                        _meta_cache[asin] = (time.monotonic(), meta)
+                        put_bounded(_meta_cache, asin, (time.monotonic(), meta), 2048)
                     metas[asin] = meta
             except Exception as exc:
                 logger.debug("Album metadata fetch failed for ASIN %s: %s", asin, exc)
