@@ -66,7 +66,7 @@ def test_every_music_service_frame_has_a_test_button():
     assert len(frames) >= 12
     missing = [sid for sid, body in frames
                if sid not in HAS_OWN_CHECK
-               and not re.search(r'test=\{\(\) => testService\(store, |test=\{test\}', body)]
+               and not re.search(r'test=\{\(\) => (?:Promise\.resolve\()?testService\(store, |test=\{test\}', body)]
     assert missing == []
 
 
