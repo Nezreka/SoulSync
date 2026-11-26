@@ -204,10 +204,15 @@ export const artistQuery = (id: number) =>
 export const albumQuery = (id: number) =>
   queryOptions({
     queryKey: ['player', 'music', 'album', id],
+    // resolve=1: the server fetches the release's real tracklist in the
+    // background (the manager's album page does the same), so missing songs
+    // get their names; the page asks again until it lands
     queryFn: async () =>
-      (await apiClient.get(`library/v2/albums/${id}`).json<{ album?: LibAlbumDetail }>()).album ??
-      null,
+      (await apiClient.get(`library/v2/albums/${id}?resolve=1`).json<{ album?: LibAlbumDetail }>())
+        .album ?? null,
     staleTime: 2 * MINUTE,
+    refetchInterval: (query) =>
+      query.state.data?.tracklist_sync?.status === 'pending' ? 2000 : false,
   });
 
 // ── playlists (music): yours and mirrored ─────────────────────────────

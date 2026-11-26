@@ -224,6 +224,8 @@ export interface LibTrack {
 
 export interface LibAlbumDetail {
   id: number;
+  /** the release's tracklist being fetched in the background (resolve=1) */
+  tracklist_sync?: { status?: string | null } | null;
   title: string;
   album_type?: string | null;
   year?: number | null;
