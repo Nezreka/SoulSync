@@ -146,7 +146,7 @@ describe('the setup screen itself', () => {
     await mount();
     await waitFor(() => expect(screen.getByText('Let’s set up your player')).toBeTruthy());
     next(); // movies
-    const kids = screen.getByText('/media/kids').closest('[draggable]')!;
+    const kids = screen.getByTitle('/media/kids').closest('[draggable]')!;
     const transfer = { setData: () => {}, effectAllowed: '' };
     fireEvent.dragStart(kids, { dataTransfer: transfer });
     const add = screen.getByRole('button', { name: 'Add a library' });
@@ -175,5 +175,29 @@ describe('the setup screen itself', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Kid' }));
     expect(within('TV')).toBe(false);
     expect(within('Movies')).toBe(true);
+  });
+});
+
+describe('a folder path, split for reading', () => {
+  it('a network share: the server, then the folders', async () => {
+    const { splitFolderPath } = await import('./player-setup');
+    expect(splitFolderPath('\\\\192.168.86.36\\plex_20tb_2_share\\PLEX\\4K MOVIES')).toEqual({
+      root: '192.168.86.36',
+      parts: ['plex_20tb_2_share', 'PLEX', '4K MOVIES'],
+    });
+    expect(splitFolderPath('//nas/media/movies')).toEqual({
+      root: 'nas',
+      parts: ['media', 'movies'],
+    });
+  });
+
+  it('a drive, a unix path, and nothing', async () => {
+    const { splitFolderPath } = await import('./player-setup');
+    expect(splitFolderPath('H:\\Music\\Cam')).toEqual({ root: 'H:', parts: ['Music', 'Cam'] });
+    expect(splitFolderPath('/mnt/media/movies/')).toEqual({
+      root: '',
+      parts: ['mnt', 'media', 'movies'],
+    });
+    expect(splitFolderPath('')).toEqual({ root: '', parts: [] });
   });
 });

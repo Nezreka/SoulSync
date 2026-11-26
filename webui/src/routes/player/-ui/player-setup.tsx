@@ -108,6 +108,24 @@ export function PlayerSetupHost() {
   return <PlayerSetup data={data} firstTime={!data.done} />;
 }
 
+/**
+ * a folder's path as where it lives (the share's server, or the drive) and
+ * the folders down to it, so a long path breaks between folder names, never
+ * inside one. "\\192.168.86.36\easystore1\PLEX\MOVIES" is
+ * { root: "192.168.86.36", parts: ["easystore1", "PLEX", "MOVIES"] }
+ */
+export function splitFolderPath(path: string): { root: string; parts: string[] } {
+  const raw = String(path || '').trim();
+  const bits = raw.split(/[\\/]+/).filter(Boolean);
+  if (!bits.length) return { root: '', parts: [] };
+  // a network share (\\server\share or //server/share): the server is the root
+  if (/^(\\\\|\/\/)/.test(raw)) return { root: bits[0], parts: bits.slice(1) };
+  // a drive letter (H:\Music): the drive
+  if (/^[A-Za-z]:$/.test(bits[0])) return { root: bits[0], parts: bits.slice(1) };
+  // a unix path (/mnt/media/movies): no root of its own
+  return { root: '', parts: bits };
+}
+
 /** the SoulSync mark with the boot screen's light passing over it */
 function Mark({ size = 'sm' }: { size?: 'sm' | 'md' | 'hero' }) {
   const src = appURL('/static/soulsync-mark.png');
@@ -337,9 +355,26 @@ function PlayerSetup({ data, firstTime }: { data: SetupPayload; firstTime: boole
                       ))}
                     </span>
                     <span className={s.folderText}>
-                      <span className={s.folderPath} title={f.path}>
-                        {f.path}
-                      </span>
+                      {(() => {
+                        const { root, parts } = splitFolderPath(f.path);
+                        return (
+                          <>
+                            {root ? <span className={s.folderRoot}>{root}</span> : null}
+                            <span className={s.folderPath} title={f.path}>
+                              {parts.map((part, i) => (
+                                <span key={`${i}-${part}`} className={s.crumb}>
+                                  {i > 0 ? (
+                                    <span className={s.crumbSep} aria-hidden="true">
+                                      ›
+                                    </span>
+                                  ) : null}
+                                  {part}
+                                </span>
+                              ))}
+                            </span>
+                          </>
+                        );
+                      })()}
                       <span className={s.muted}>
                         {f.titles.toLocaleString()} {noun}
                       </span>
