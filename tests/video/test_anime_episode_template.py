@@ -8,6 +8,7 @@ means anime is named like every other show, so nothing changes until it's set.
 from __future__ import annotations
 
 import json
+import os
 
 import pytest
 
@@ -48,6 +49,8 @@ def test_only_an_anime_show_takes_it():
 def db(tmp_path):
     d = VideoDatabase(database_path=str(tmp_path / "video_library.db"))
     d.set_setting("plex.anime_libraries", json.dumps(["Anime"]))
+    # the rows carry the series type only while an anime template is saved
+    organization.save(d, _BOTH)
     return d
 
 
@@ -95,10 +98,17 @@ def test_the_naming_check_names_anime_by_its_template(db, tmp_path):
     root = str(tmp_path / "lib")
     rows = {r["title"]: r for r in db.repair_library_files() if r["scope"] == "episode"}
     reals = {t: str(tmp_path / "lib" / t / "x.mkv") for t in rows}
-    assert expected_path(rows["Frieren"], reals["Frieren"], [root], _BOTH).endswith(
-        "Frieren/Season 01/Frieren - S01E01 - 001.mkv")
-    assert expected_path(rows["Severance"], reals["Severance"], [root], _BOTH).endswith(
-        "Severance/Season 01/Severance - S01E01.mkv")
+    assert os.path.normpath(expected_path(rows["Frieren"], reals["Frieren"], [root], _BOTH)).endswith(
+        os.path.normpath("Frieren/Season 01/Frieren - S01E01 - 001.mkv"))
+    assert os.path.normpath(expected_path(rows["Severance"], reals["Severance"], [root], _BOTH)).endswith(
+        os.path.normpath("Severance/Season 01/Severance - S01E01.mkv"))
+
+
+def test_rows_skip_the_type_without_an_anime_template(db, tmp_path):
+    # no anime template: nothing reads the type, so the scan doesn't work it out
+    _seed(db, tmp_path, "a", "Frieren", tmdb_id=1, library="Anime")
+    organization.save(db, {"episode_template": _TV})
+    assert [r["series_type"] for r in db.rename_owned_episode_files()] == [None]
 
 
 # ── the importer ─────────────────────────────────────────────────────────────

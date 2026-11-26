@@ -406,7 +406,7 @@ function LibraryRow({
       </div>
       {builtin ? (
         <div className="video-library-known">
-          {lib.path || 'No folder set'} <span>(set above)</span>
+          {lib.path || 'No folder set'} <span>(its folder is set in Libraries)</span>
         </div>
       ) : null}
       <div className={s.libBody} id={bodyId} hidden={!open}>
@@ -1333,11 +1333,9 @@ export function VideoFolders({ docker }: { docker: boolean | null }) {
           <VideoLibraries loads={loads} />
         </div>
         <p className={s.cardFoot}>
-          A new title files into the library picked for it (in its Get or Manual search window),
-          else the 4K one when its quality profile says so, else the first library whose rules match
-          its genres or TMDB keywords, else the default library for its kind. Titles you have stay
-          where they are. The main and 4K libraries are here too; their folders are the ones above.
-          Each library saves with its own Save.
+          Where a new title goes: the library you pick when you get it, else the 4K one if its
+          quality says so, else the first library whose genres or keywords match, else the default.
+          Titles you already have stay where they are. Each library saves with its own Save.
         </p>
       </Card>
 
@@ -1350,10 +1348,8 @@ export function VideoFolders({ docker }: { docker: boolean | null }) {
           <DriveMap loads={loads} />
         </div>
         <p className={s.cardFoot}>
-          The ones SoulSync already reaches are ticked. Tell it where it reaches the rest and every
-          file in them is found, renamed to your templates, recycled on delete and kept track of.
-          New downloads still go to the folders above. Leave one blank and it works the way it does
-          today.
+          Ticked folders are already reached. For the rest, type where SoulSync finds that folder
+          and it manages every file in it. Leave one blank to keep things as they are.
         </p>
       </Card>
 

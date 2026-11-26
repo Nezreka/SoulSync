@@ -171,7 +171,7 @@ export function LibraryPage({ store }: SettingsTabProps) {
   }, [here, view]);
 
   return (
-    <div data-stg-new={TAB} hidden={!here}>
+    <div data-stg-new={TAB} className={s.readable} hidden={!here}>
       {['folders', 'naming', 'tags', 'import'].map((key) => (
         <ViewPanel key={key} tab={TAB} view={key} open={view === key}>
           <KindPage
