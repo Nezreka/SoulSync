@@ -9,7 +9,12 @@ import { act, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createSettingsStore, type SettingsStore } from '../settings-store';
-import { acoustidReturnUrl, acoustidStatusWords, type AcoustidAccount } from './connections-extras';
+import {
+  ACOUSTID_LINK_LATER,
+  acoustidReturnUrl,
+  acoustidStatusWords,
+  type AcoustidAccount,
+} from './connections-extras';
 import { ConnectionsTab } from './connections-tab';
 
 type Shell = Window & Record<string, unknown>;
@@ -28,6 +33,8 @@ const base: AcoustidAccount = {
   expires: '',
   has_app_key: true,
   builtin_app_key: true,
+  can_link: true,
+  link_unavailable_message: '',
   required_from: '2027-01-01',
   required_now: false,
   needs_link: false,
@@ -133,6 +140,38 @@ describe('the AcoustID card links an account', () => {
     expect(el('acoustid-api-key')).toBeNull();
     fireEvent.change(el('acoustid-user-key'), { target: { value: 'UK' } });
     expect(store.getState().settings.acoustid).toMatchObject({ user_key: 'UK' });
+  });
+
+  it("without SoulSync's own application key there is no Link button, only the paste field", async () => {
+    answers['/api/acoustid/account?check=1'] = [
+      ok({
+        builtin_app_key: false,
+        can_link: false,
+        link_unavailable_message: ACOUSTID_LINK_LATER,
+      }),
+    ];
+    card();
+    await waitFor(() =>
+      expect(el('acoustid-link-later').textContent).toContain(
+        'Linking with one click arrives in a coming update; paste your key from acoustid.org for now.',
+      ),
+    );
+    expect(el('acoustid-link-row')).toBeNull();
+    expect(el('acoustid-link-status')).toBeNull();
+    expect(
+      [...document.querySelectorAll('button')].some((b) => b.textContent === 'Link account'),
+    ).toBe(false);
+    expect(el('acoustid-user-key')).not.toBeNull();
+    // the install's own application key is still asked for: lookups use it
+    expect(el('acoustid-api-key')).not.toBeNull();
+    expect(calls.some((c) => c.url === '/api/acoustid/link')).toBe(false);
+  });
+
+  it('with it, the Link button is there and the later line is not', async () => {
+    answers['/api/acoustid/account?check=1'] = [ok({})];
+    card();
+    await waitFor(() => expect(el('acoustid-link-status').textContent).toBe('Not linked'));
+    expect(el('acoustid-link-later')).toBeNull();
   });
 
   it('words for each link state', () => {

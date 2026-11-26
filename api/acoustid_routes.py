@@ -64,6 +64,9 @@ def acoustid_request_link():
     except Exception as e:  # noqa: BLE001
         logger.error("AcoustID link request failed: %s", e)
         return jsonify({'success': False, 'error': 'Could not start linking with AcoustID'}), 500
+    if res.get('unavailable'):
+        # no soulsync application key yet: a link made now would break later
+        return jsonify({'success': False, 'error': res['error']}), 409
     if not res.get('ok'):
         return jsonify({'success': False, 'error': res.get('error') or 'AcoustID refused the link'}), 400
     return jsonify({'success': True, **acoustid_account.status(config_manager)})

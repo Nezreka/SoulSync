@@ -53,6 +53,12 @@ NEEDS_LINK_MESSAGE = ("AcoustID needs your account linked: Settings, Connections
 LINK_PENDING_MESSAGE = ("AcoustID has not approved your linked account yet: finish linking in "
                         "Settings, Connections, AcoustID.")
 
+# a link is bound to the application key that asked for it, so linking waits
+# for soulsync's own key: one made with an install's own key would stop
+# working the day the built-in key takes over
+LINK_UNAVAILABLE_MESSAGE = ("Linking with one click arrives in a coming update; paste your key "
+                            "from acoustid.org for now.")
+
 LINK_STATES = ('pending', 'approved', 'declined', 'expired', 'revoked', 'unknown')
 # the key is dead in these states: acoustid says discard it
 DISCARD_STATES = ('declined', 'expired', 'revoked', 'unknown')
@@ -204,10 +210,9 @@ def request_link(cfg=None, device: str = '', return_url: str = '') -> Dict[str, 
     """start linking: acoustid hands back a user key (stored at once, it works
     once the person approves), a short code and a url to show them."""
     cfg = _cfg(cfg)
-    app = app_key(cfg)
-    if not app:
-        return {'ok': False, 'error': 'No AcoustID application key: SoulSync has none built in yet, '
-                                      'so add your own application key first.'}
+    if not has_builtin_app_key():
+        return {'ok': False, 'unavailable': True, 'error': LINK_UNAVAILABLE_MESSAGE}
+    app = builtin_app_key()
     params: Dict[str, Any] = {}
     device = _str(device)[:100]
     if device:
@@ -333,6 +338,8 @@ def status(cfg=None, today: Optional[date] = None) -> Dict[str, Any]:
         'expires': rec.get('expires', '') if state == 'pending' else '',
         'has_app_key': bool(app_key(cfg)),
         'builtin_app_key': has_builtin_app_key(),
+        'can_link': has_builtin_app_key(),
+        'link_unavailable_message': '' if has_builtin_app_key() else LINK_UNAVAILABLE_MESSAGE,
         'required_from': USER_KEY_REQUIRED_FROM.isoformat(),
         'required_now': user_key_required(today),
         'needs_link': needs,

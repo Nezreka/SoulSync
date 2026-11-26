@@ -419,6 +419,10 @@ export interface AcoustidAccount {
   expires: string;
   has_app_key: boolean;
   builtin_app_key: boolean;
+  /** linking waits for SoulSync's own application key: a link is bound to the
+   *  key that asked for it */
+  can_link: boolean;
+  link_unavailable_message: string;
   required_from: string;
   required_now: boolean;
   needs_link: boolean;
@@ -427,6 +431,9 @@ export interface AcoustidAccount {
 }
 
 const ACOUSTID_POLL_MS = 4000;
+
+export const ACOUSTID_LINK_LATER =
+  'Linking with one click arrives in a coming update; paste your key from acoustid.org for now.';
 
 /** where AcoustID sends the person back to once they approve or decline */
 export const acoustidReturnUrl = () =>
@@ -491,7 +498,8 @@ function AcoustidCard({ store }: { store: SettingsStore }) {
   const { account, setAccount, refresh } = useAcoustidAccount();
   const [busy, setBusy] = useState(false);
   const [words, tone] = acoustidStatusWords(account);
-  const pending = account?.state === 'pending';
+  const canLink = account?.can_link === true;
+  const pending = canLink && account?.state === 'pending';
   const linked = !!account?.has_user_key && !pending;
   const required = account?.required_from
     ? new Date(`${account.required_from}T00:00:00`).toLocaleDateString(undefined, {
@@ -546,30 +554,40 @@ function AcoustidCard({ store }: { store: SettingsStore }) {
         <div id="acoustid-needs-link" role="status">
           <Note>{account.message}</Note>
         </div>
-      ) : !linked && !pending ? (
+      ) : !linked && !pending && canLink ? (
         <Note info>
           From {required} AcoustID only answers when your own AcoustID account is linked. Link it
           once below: it takes a minute and needs no copying.
         </Note>
       ) : null}
+      {account && !canLink ? (
+        <div id="acoustid-link-later">
+          <Note info>
+            From {required} AcoustID only answers with your own AcoustID user key.{' '}
+            {account.link_unavailable_message || ACOUSTID_LINK_LATER}
+          </Note>
+        </div>
+      ) : null}
       <SheetGroup title="Your AcoustID account" />
-      <ActionRow
-        id="acoustid-link-row"
-        label="Link your AcoustID account"
-        help="Opens acoustid.org, where you sign in (MusicBrainz, Google or an email address) and approve SoulSync. Then it comes back here."
-      >
-        <StatusWords id="acoustid-link-status" tone={tone} live>
-          {words}
-        </StatusWords>
-        {linked ? (
-          <Btn small kind="ghost" busy={busy} onClick={() => void unlink()}>
-            Unlink
+      {canLink ? (
+        <ActionRow
+          id="acoustid-link-row"
+          label="Link your AcoustID account"
+          help="Opens acoustid.org, where you sign in (MusicBrainz, Google or an email address) and approve SoulSync. Then it comes back here."
+        >
+          <StatusWords id="acoustid-link-status" tone={tone} live>
+            {words}
+          </StatusWords>
+          {linked ? (
+            <Btn small kind="ghost" busy={busy} onClick={() => void unlink()}>
+              Unlink
+            </Btn>
+          ) : null}
+          <Btn small kind={linked ? undefined : 'primary'} busy={busy} onClick={() => void link()}>
+            {linked || pending ? 'Link again' : 'Link account'}
           </Btn>
-        ) : null}
-        <Btn small kind={linked ? undefined : 'primary'} busy={busy} onClick={() => void link()}>
-          {linked || pending ? 'Link again' : 'Link account'}
-        </Btn>
-      </ActionRow>
+        </ActionRow>
+      ) : null}
       {pending ? (
         <div id="acoustid-link-pending">
           <SheetField
@@ -598,7 +616,7 @@ function AcoustidCard({ store }: { store: SettingsStore }) {
         </div>
       ) : null}
       <SheetField
-        label="Or paste your user API key"
+        label={canLink ? 'Or paste your user API key' : 'Your user API key'}
         htmlFor="acoustid-user-key"
         help={
           userKey.value === REDACTED_SECRET_SENTINEL || account?.has_user_key ? (
@@ -609,7 +627,7 @@ function AcoustidCard({ store }: { store: SettingsStore }) {
               <a href="https://acoustid.org/api-key" target="_blank" rel="noreferrer">
                 acoustid.org account page
               </a>
-              . Not needed once your account is linked.
+              .{canLink ? ' Not needed once your account is linked.' : ''}
             </>
           )
         }

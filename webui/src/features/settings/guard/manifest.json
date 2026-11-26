@@ -14418,20 +14418,6 @@
       "sides": ["music", "video"],
       "scenario": "music"
     },
-    "#acoustid-link-row \"More about this setting\"": {
-      "label": "More about this setting",
-      "anchor": "acoustid-link-row",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
-    "#acoustid-link-row \"Link account\"": {
-      "label": "Link account",
-      "anchor": "acoustid-link-row",
-      "count": 1,
-      "sides": ["music", "video"],
-      "scenario": "music"
-    },
     "\"More options· 1 · your own server, Maloja or Koito\"": {
       "label": "More options· 1 · your own server, Maloja or Koito",
       "anchor": "",

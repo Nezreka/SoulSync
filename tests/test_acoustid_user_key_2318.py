@@ -50,6 +50,12 @@ class Resp:
 
 
 @pytest.fixture
+def builtin(monkeypatch):
+    """soulsync's own application key is registered: linking is offered"""
+    monkeypatch.setattr(aa, 'SOULSYNC_ACOUSTID_APP_KEY', 'APP')
+
+
+@pytest.fixture
 def http(monkeypatch):
     """every acoustid call, recorded; answers queued per path"""
     import requests
@@ -103,7 +109,7 @@ def test_client_api_key_is_the_resolved_app_key(monkeypatch):
 
 # ── linking ──
 
-def test_request_link_stores_the_key_at_once_and_sends_the_app_key(http):
+def test_request_link_stores_the_key_at_once_and_sends_the_app_key(http, builtin):
     cfg = FakeConfig({'acoustid.api_key': 'APP'})
     http.answers['user/request_link'] = LINK_OK
     res = aa.request_link(cfg, device='SoulSync on nas',
@@ -120,18 +126,43 @@ def test_request_link_stores_the_key_at_once_and_sends_the_app_key(http):
     assert aa.link_pending(cfg)
 
 
-def test_request_link_without_any_app_key_says_so(http):
-    res = aa.request_link(FakeConfig())
-    assert not res['ok'] and 'application key' in res['error']
-    assert http.calls == []
+def test_no_link_without_soulsyncs_own_app_key(http):
+    """a link is bound to the key that asked for it: one made with the
+    install's own key would break once the built-in key takes over"""
+    cfg = FakeConfig({'acoustid.api_key': 'MINE'})
+    res = aa.request_link(cfg)
+    assert not res['ok'] and res['unavailable'] and res['error'] == aa.LINK_UNAVAILABLE_MESSAGE
+    assert http.calls == [] and 'acoustid.user_key' not in cfg.data
+    st = aa.status(cfg)
+    assert st['can_link'] is False and st['link_unavailable_message'] == aa.LINK_UNAVAILABLE_MESSAGE
 
 
-def test_request_link_refuses_a_non_http_return_url(http):
+def test_env_app_key_offers_linking(http, monkeypatch):
+    monkeypatch.setenv(aa.APP_KEY_ENV, 'ENVAPP')
+    cfg = FakeConfig({'acoustid.api_key': 'MINE'})
+    assert aa.status(cfg)['can_link'] is True
+    http.answers['user/request_link'] = LINK_OK
+    assert aa.request_link(cfg)['ok']
+    assert http.calls[0].form['client'] == 'ENVAPP'
+
+
+def test_a_pasted_key_works_with_the_installs_own_app_key(tmp_path, monkeypatch, http):
+    f = tmp_path / "a.flac"
+    f.write_bytes(b"x")
+    _fake_acoustid(monkeypatch)
+    c = _client(monkeypatch, {'acoustid.api_key': 'MINE', 'acoustid.user_key': 'PASTED'})
+    http.answers['lookup'] = OK_LOOKUP
+    assert c.lookup_with_status(str(f))['status'] == 'ok'
+    assert http.calls[0].form['client'] == 'MINE'
+    assert http.calls[0].headers == {'Acoustid-User-Key': 'PASTED'}
+
+
+def test_request_link_refuses_a_non_http_return_url(http, builtin):
     res = aa.request_link(FakeConfig({'acoustid.api_key': 'APP'}), return_url='javascript:alert(1)')
     assert not res['ok'] and http.calls == []
 
 
-def test_request_link_error_keeps_nothing(http):
+def test_request_link_error_keeps_nothing(http, builtin):
     cfg = FakeConfig({'acoustid.api_key': 'APP'})
     http.answers['user/request_link'] = {"status": "error", "error": {"code": 4, "message": "invalid API key"}}
     res = aa.request_link(cfg)
@@ -139,7 +170,7 @@ def test_request_link_error_keeps_nothing(http):
     assert 'acoustid.user_key' not in cfg.data
 
 
-def test_link_status_pending_then_approved_keeps_the_key(http):
+def test_link_status_pending_then_approved_keeps_the_key(http, builtin):
     cfg = FakeConfig({'acoustid.api_key': 'APP'})
     http.answers['user/request_link'] = LINK_OK
     aa.request_link(cfg)
@@ -158,7 +189,7 @@ def test_link_status_pending_then_approved_keeps_the_key(http):
 
 
 @pytest.mark.parametrize('state', ['declined', 'expired', 'revoked', 'unknown'])
-def test_a_dead_link_discards_the_key(http, state):
+def test_a_dead_link_discards_the_key(http, builtin, state):
     cfg = FakeConfig({'acoustid.api_key': 'APP'})
     http.answers['user/request_link'] = LINK_OK
     aa.request_link(cfg)
@@ -169,7 +200,7 @@ def test_a_dead_link_discards_the_key(http, state):
     assert st['state'] == state and not st['has_user_key']
 
 
-def test_a_pasted_key_is_never_discarded_by_an_old_link(http):
+def test_a_pasted_key_is_never_discarded_by_an_old_link(http, builtin):
     cfg = FakeConfig({'acoustid.api_key': 'APP'})
     http.answers['user/request_link'] = LINK_OK
     aa.request_link(cfg)
@@ -409,7 +440,16 @@ def test_routes_are_admin_only(app, monkeypatch):
     assert 'acoustid.user_key' not in app.cfg.data
 
 
-def test_link_routes_round_trip_without_ever_sending_the_key(app, monkeypatch, http):
+def test_link_route_answers_409_without_soulsyncs_own_app_key(app, monkeypatch, http):
+    from core import profile_context
+    monkeypatch.setattr(profile_context, 'is_admin_request', lambda: True)
+    r = app.test_client().post('/api/acoustid/link', json={})
+    assert r.status_code == 409
+    assert r.get_json()['error'] == aa.LINK_UNAVAILABLE_MESSAGE
+    assert http.calls == [] and 'acoustid.user_key' not in app.cfg.data
+
+
+def test_link_routes_round_trip_without_ever_sending_the_key(app, monkeypatch, http, builtin):
     from core import profile_context
     monkeypatch.setattr(profile_context, 'is_admin_request', lambda: True)
     c = app.test_client()
