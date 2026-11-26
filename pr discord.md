@@ -1,19 +1,21 @@
-**SoulSync 3.6.9 is out** :musical_note:
+**SoulSync 3.7.0 is out** :musical_note:
 
-**Heads up.** The auth proxy header is now ignored until you add your proxy's address under Settings > System > Security > Trusted proxy addresses. Until then people get the PIN screen.
+**The player, set up your way.** A first-run setup for admins: name the server, sort folders into libraries, and set the sidebar. A library is a named group of folders (4K, Kids, Anime) with its own page, and can be hidden from a profile. Movies, TV, Music and YouTube each have rows you reorder, hide and restyle per profile, with extra rows to switch on.
 
-**The player.** Open the player from the sidebar and everything you own plays in one full-screen app: music, movies, TV, YouTube, audiobooks and podcasts. A home each profile arranges, a TV guide of channels made from your library, SoulSync's own playlists with Get what you don't have, transcoding for files a browser can't play, synced lyrics, watching now and a watchlist.
+**Chapters, skip intro, parties and casting.** Videos show their own chapters and offer Skip intro when the file marks one. Watch parties get a waiting room, countdown and reactions, and Chromecast plays anything.
 
-**Settings, rebuilt.** Nine tabs with pills, side sheets for every source and service, one search over every label, and a save status that says what's holding a save.
+**Video without a media server.** SoulSync Standalone scans your movie and TV folders itself, a download is in the library the moment it lands, extras play from a title's page, and Plex and Jellyfin can run as one library.
 
-**Music apps.** Any Subsonic or OpenSubsonic app can play from SoulSync as one profile, with conversion for mobile data. Pair it from the new Settings > Devices.
+**Backups.** One Backups page, every database covered, a restore that checks first, and a repair for a damaged database. "Keep 5" keeping only one is fixed.
 
-**Folder watching.** Off by default. Turn it on in Settings > Library > Folders: local disks are watched live, network shares on a timer.
+**Requests and people.** A playlist's songs are one request (#2302), members can ask for a feature (#2304), and a member no longer sees the server's connected playlists (#2301).
 
-**Library and listening.** A coverage check for your media server's folders, Spotify history import, your own plays on every artist page, a full Discover for new profiles, Your Year extras, blends that need consent and filled tags.
+**Playlists.** Search public playlists by name (#2305), sync several at once with or without downloading (#2309), and songs only YouTube has download from their own video (#2306).
 
-**Downloads.** Downloads wait out a lost Soulseek login, near-misses clear themselves, and Lidarr gets album requests as one album (thanks savemosca, #2219, #2225, #2226).
+**Search and activity.** Identify a song by listening, from the search bar (thanks Jygijiji). Player streams show in Server Activity and can be stopped with a message.
 
-**Fixes.** Releases stay whole under their first artist (thanks Ericsson, #2239, #2240), manual search for TV shows (thanks Thibs, #2233), the move a track dialog (thanks Vidariondr, #2241), dead files and playlist readback (thanks carlosjfcasero), the download chain and streaming imports (thanks PfannkuchenWolf), Greek and Cyrillic names (thanks selimovd), big wishlists (thanks xcrittpm), and more. First loads are about 3 MB instead of 16.
+**Downloads.** Four ways a download could lose a file are closed, tribute acts are refused, a track tries eight peers, and deep verify can catch fake lossless (off by default).
+
+**Thanks** to savemosca, EffakT, PapaBearDoes, TaunGadd, jonjomckay, adityaanikam and Jygijiji for their PRs.
 
 Full notes on GitHub.
