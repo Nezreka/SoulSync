@@ -1253,3 +1253,25 @@
     animation: none;
   }
 }
+
+/* a home videos folder on this drive: a way to its own step */
+.mapHome {
+  width: 100%;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  opacity: 0.8;
+}
+
+.mapHome:hover,
+.mapHome:focus-visible {
+  opacity: 1;
+}
+
+.mapHomeGo {
+  color: var(--white-a45);
+  font-size: 1.2em;
+}

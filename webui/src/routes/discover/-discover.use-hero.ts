@@ -184,19 +184,23 @@ export function useHero(
     ++checkGen.current;
     ++mutationGen.current;
     try {
-      // The visible Add control also recovers a failed/unfinished membership
-      // check. Refresh first; the next activation has a confirmed intent.
+      // the button shows add while membership is unknown, so a press means
+      // add: check first, then add unless they are already on it (one press,
+      // never two)
+      let watching = Boolean(watchlist?.watching);
       if (!watchlist) {
-        const watching = await checkMembership(artistKey);
+        const already = await checkMembership(artistKey);
         if (!isCurrent()) return;
-        setWatchlist(heroWatchlistButtonState({ success: true, is_watching: watching }));
-        toastRef.current({
-          message: 'Watchlist status refreshed. Try the action again.',
-          level: 'info',
-        });
-        return;
+        if (already) {
+          setWatchlist(heroWatchlistButtonState({ success: true, is_watching: true }));
+          toastRef.current({
+            message: `${artist.artist_name ?? 'This artist'} is already on your watchlist`,
+            level: 'info',
+          });
+          return;
+        }
+        watching = false;
       }
-      const watching = watchlist.watching;
       const req = watchlistRequest(watching, {
         sourceId: artistKey,
         artistName: artist.artist_name ?? '',

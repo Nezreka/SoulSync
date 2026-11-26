@@ -614,3 +614,21 @@ def test_reading_the_libraries_never_makes_a_table(tmp_path):
         names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert pl.LIBS not in names
     assert isinstance(sqlite3.sqlite_version, str)
+
+
+def test_a_server_home_library_knows_the_folder_its_clips_share():
+    import sqlite3
+
+    from core.video import home_videos as H
+    conn = sqlite3.connect(":memory:")
+    conn.execute(f"CREATE TABLE {H.TABLE} (root TEXT, path TEXT, missing_since TEXT)")
+    conn.executemany(f"INSERT INTO {H.TABLE} VALUES (?, ?, NULL)", [
+        ("plex:1", "/mnt/easystore3/PLEX/Home Movies/1994/a.mpg"),
+        ("plex:1", "/mnt/easystore3/PLEX/Home Movies/2001/b.mp4"),
+        ("plex:2", "E:\\Clips\\Home Mov1.mp4"),
+        ("plex:2", "E:\\Clips\\Home Mov2.mp4"),
+        ("plex:3", "/one/only/clip.mp4"),
+    ])
+    got = H.root_places(conn, ["plex:1", "plex:2", "plex:3"])
+    assert got == {"plex:1": "/mnt/easystore3/PLEX/Home Movies", "plex:2": "E:/Clips",
+                   "plex:3": "/one/only"}

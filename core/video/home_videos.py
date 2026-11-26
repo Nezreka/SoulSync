@@ -816,6 +816,29 @@ def root_counts(conn, root_ids: List[str]) -> Dict[str, Tuple[int, List[int]]]:
     return out
 
 
+def root_places(conn, root_ids: List[str]) -> Dict[str, str]:
+    """{root: the folder its clips share} so setup can show a server's home
+    library on the drive it lives on (plex only gives the library's name)"""
+    out: Dict[str, str] = {}
+    if not root_ids:
+        return out
+    for root, lo, hi in conn.execute(
+            f"SELECT root, MIN(path), MAX(path) FROM {TABLE} WHERE root IN ({_marks(root_ids)}) "  # noqa: S608
+            "AND missing_since IS NULL GROUP BY root", root_ids):
+        if not lo or not hi:
+            continue
+        a, b = str(lo).replace("\\", "/"), str(hi).replace("\\", "/")
+        n = 0
+        while n < min(len(a), len(b)) and a[n] == b[n]:
+            n += 1
+        shared = a[:n]
+        # whole folders only: cut back to the last separator
+        shared = shared[:shared.rfind("/")] if "/" in shared else ""
+        if shared:
+            out[root] = shared
+    return out
+
+
 def titles_of(conn, ids: Iterable[Any]) -> Dict[str, Dict[str, Any]]:
     """{id: {title, filmed_at, duration_s, ...}} for downloads and activity"""
     want = [int(i) for i in ids if str(i).isdigit()]

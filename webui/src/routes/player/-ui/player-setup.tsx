@@ -17,6 +17,7 @@
  */
 
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import clsx from 'clsx';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 
 import { apiClient, refusalText } from '@/app/api-client';
@@ -41,6 +42,8 @@ interface SetupFolder {
   /** home: the folder's or server library's name, and where it is */
   label?: string;
   source?: 'disk' | 'plex' | 'jellyfin';
+  /** home: the folder its clips live in, so it shows on its drive */
+  where?: string | null;
 }
 interface SetupLibrary {
   id: number;
@@ -410,6 +413,15 @@ function PlayerSetup({ data, firstTime }: { data: SetupPayload; firstTime: boole
         });
       }
     };
+    // home videos on the same drives, shown there so the drive reads whole;
+    // they are set up on their own step
+    const homeStep = STEPS.findIndex((x) => x.label === 'Home videos');
+    const homeOn = (root: string) =>
+      kind === 'home'
+        ? []
+        : (data.folders?.home ?? []).filter(
+            (f) => f.titles && f.where && splitFolderPath(f.where).root === root,
+          );
     // the folders grouped by where they live, then by the folders above them
     const byRoot = new Map<string, Map<string, SetupFolder[]>>();
     for (const f of folders) {
@@ -673,6 +685,30 @@ function PlayerSetup({ data, firstTime }: { data: SetupPayload; firstTime: boole
                         );
                       })}
                     </div>
+                  ))}
+                  {homeOn(root).map((f) => (
+                    <button
+                      key={`home-${f.folder}`}
+                      type="button"
+                      className={clsx(s.mapRow, s.mapHome)}
+                      title={f.where ?? f.path}
+                      onClick={() => setStep(homeStep)}
+                      data-nav
+                    >
+                      <span className={s.fanEmpty} aria-hidden="true">
+                        home
+                      </span>
+                      <span className={s.rowText}>
+                        <b>{splitFolderPath(f.where ?? '').parts.at(-1) ?? f.label}</b>
+                        <span className={s.muted}>
+                          {f.titles.toLocaleString()} home {f.titles === 1 ? 'video' : 'videos'} ·
+                          set up in Home videos
+                        </span>
+                      </span>
+                      <span className={s.mapHomeGo} aria-hidden="true">
+                        ›
+                      </span>
+                    </button>
                   ))}
                 </section>
               );
