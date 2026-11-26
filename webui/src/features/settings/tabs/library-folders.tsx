@@ -393,7 +393,8 @@ export function MusicFolders({ store }: { store: SettingsStore }) {
           />
         </div>
         <p className={s.cardFoot}>
-          Only for <em>extra</em> music, like a second collection or an archive drive. Your music
+          <strong>You don&apos;t need to repeat it here.</strong> Only for <em>extra</em> music,
+          like a second collection or an archive drive. Your music
           library folder is already read. <strong>Docker:</strong> mount the folder into the
           container read-write and add its container path here (like <code>/music2</code>).
         </p>
