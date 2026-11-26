@@ -342,7 +342,7 @@ def get_active_video_source(*, interactive=False):
     """Source for SCANNING — restricted to the user-mapped Movies/TV libraries.
     An unmapped kind scans nothing (see scan_problem), never every library."""
     sel = _load_selection() or {}
-    return _build_source(sel.get("movies") or None, _tv_pick(sel), interactive=interactive)
+    return _build_source(_movie_pick(sel), _tv_pick(sel), interactive=interactive)
 
 
 def _auto_pick_single_libraries(server, libs, sel, db=None):
@@ -376,7 +376,7 @@ def scan_video_source():
                 sel = _auto_pick_single_libraries(src.server_name, src.available_libraries(), sel)
             except Exception:
                 logger.debug("video: library auto-pick failed", exc_info=True)
-    return _build_source(sel.get("movies") or None, _tv_pick(sel))
+    return _build_source(_movie_pick(sel), _tv_pick(sel))
 
 
 def source_for_server(server: str):
@@ -389,7 +389,7 @@ def source_for_server(server: str):
     if server not in ("plex", "jellyfin") or db is None:
         return None
     sel = db.get_library_selection(server) or {}
-    movies, tv = sel.get("movies") or None, _tv_pick(sel)
+    movies, tv = _movie_pick(sel), _tv_pick(sel)
     if sel.get("movies") is None or sel.get("tv") is None:
         probe = _build_source(server=server)
         if probe is None:
@@ -529,7 +529,7 @@ def list_video_libraries():
 
 def _title_list(name) -> list:
     """A library pick as a list of titles. The picks were one title each; the TV
-    pick can now be several (the main one plus ``tv_more``). ''/None -> [],
+    and movie picks can now be several (the main one plus ``*_more``). ''/None -> [],
     'X' -> ['X'], a list -> its non-empty titles in order."""
     if not name:
         return []
@@ -541,6 +541,14 @@ def _title_list(name) -> list:
                 out.append(t)
         return out
     return [str(name)]
+
+
+def _movie_pick(sel: dict):
+    """the movie libraries a scan reads: the main pick, then the extra ones.
+    None when nothing is picked (the scan then reads no movies at all)."""
+    sel = sel or {}
+    picks = _title_list([sel.get("movies")] + list(sel.get("movies_more") or []))
+    return picks or None
 
 
 def _tv_pick(sel: dict):

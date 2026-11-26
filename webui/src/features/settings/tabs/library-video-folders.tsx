@@ -2,8 +2,8 @@
  * Library > Folders, Video (settings-bic phase 4): where downloads arrive
  * (with the video minimum free disk space beside the download folder, DESIGN
  * 3.3), the Movies, TV, Anime and YouTube libraries, the optional 4K ones,
- * More libraries (#2029), your library's folders (the drive map), the folders
- * your server doesn't list, and the Docker volume lines. The folders are the
+ * More libraries (#2029), your library's folders (the drive map), the extra
+ * folders, and the Docker volume lines. The folders are the
  * video downloads config (video-downloads.ts), saved whole on each change as
  * before; More libraries and the drive map have their own endpoints.
  *
@@ -43,6 +43,7 @@ import {
 } from './library-card';
 import { videoDownloads, useVideoDownloads, type DownloadsConfig } from './video-downloads';
 import { useVideoOrganization, videoOrganization } from './video-organization';
+import { useVideoServer, videoServer } from './video-server';
 
 const str = (v: unknown) => (typeof v === 'string' ? v : typeof v === 'number' ? String(v) : '');
 
@@ -1179,6 +1180,11 @@ export function VideoFolders({ docker }: { docker: boolean | null }) {
   useEffect(() => {
     if (loads) refreshChecks('video');
   }, [loads]);
+  // the extra folders' hint follows the setup: a media server or Standalone
+  const { active } = useVideoServer();
+  useEffect(() => {
+    if (loads) videoServer.ensureServer();
+  }, [loads]);
 
   const fourK = (kind: 'movies' | 'tv') => !!config?.[`${kind}_4k_enabled`];
   function toggle4k(kind: 'movies' | 'tv', on: boolean) {
@@ -1358,8 +1364,12 @@ export function VideoFolders({ docker }: { docker: boolean | null }) {
       </Card>
 
       <SectionLabel
-        title="Folders your server doesn't list"
-        hint="A collection SoulSync should manage that your server doesn't read. New downloads never go here"
+        title="Extra folders"
+        hint={
+          active === 'soulsync'
+            ? 'More movie and TV folders for SoulSync to scan, like a second drive. New downloads never go here.'
+            : "Folders SoulSync should also manage that the libraries it scans from your server don't include. New downloads never go here."
+        }
       />
       <Card>
         <Row stack label="Movie folders">

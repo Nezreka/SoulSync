@@ -37,6 +37,8 @@ export interface Libraries {
   /** the picks */
   movie: string;
   show: string;
+  /** the other movie libraries ticked Scan */
+  moviesMore: string[];
   /** the other TV libraries ticked Scan, and those ticked Anime */
   tvMore: string[];
   anime: string[];
@@ -118,6 +120,8 @@ export function connNote(
 
 /** the other TV libraries (the main pick is always scanned) */
 export const otherTv = (libs: Libraries) => libs.tv.filter((l) => l.title && l.title !== libs.show);
+export const otherMovies = (libs: Libraries) =>
+  libs.movies.filter((l) => l.title && l.title !== libs.movie);
 
 const toast = (message: string, type: string) =>
   (window as Window & { showToast?: (m: string, t: string) => void }).showToast?.(message, type);
@@ -244,7 +248,13 @@ function createVideoServer() {
             error?: string;
             movies?: Library[];
             tv?: Library[];
-            selected?: { movies?: string; tv?: string; tv_more?: string[]; anime?: string[] };
+            selected?: {
+              movies?: string;
+              movies_more?: string[];
+              tv?: string;
+              tv_more?: string[];
+              anime?: string[];
+            };
           } | null)
         : null;
       if (!d || d.error) {
@@ -257,6 +267,7 @@ function createVideoServer() {
         tv: d.tv || [],
         movie: sel.movies || '',
         show: sel.tv || '',
+        moviesMore: sel.movies_more || [],
         tvMore: sel.tv_more || [],
         anime: sel.anime || [],
       };
@@ -317,16 +328,19 @@ function createVideoServer() {
     const shown = otherTv(l).map((x) => x.title);
     // the ticks in the order the list shows them, as the page read them
     const tvMore = shown.filter((t) => l.tvMore.includes(t));
+    const moviesMore = otherMovies(l)
+      .map((x) => x.title)
+      .filter((t) => l.moviesMore.includes(t));
     // the main TV pick is always scanned; it keeps an Anime mark it had
     const anime = [
       ...shown.filter((t) => l.anime.includes(t)),
       ...(l.show && l.anime.includes(l.show) ? [l.show] : []),
     ];
-    set({ libs: { ...l, tvMore, anime }, status: 'Saving…' });
+    set({ libs: { ...l, moviesMore, tvMore, anime }, status: 'Saving…' });
     try {
       const r = await fetch(
         LIBS_URL,
-        json({ movies: l.movie, tv: l.show, tv_more: tvMore, anime }),
+        json({ movies: l.movie, movies_more: moviesMore, tv: l.show, tv_more: tvMore, anime }),
       );
       await r.json();
       set({ status: 'Saved' });
@@ -345,6 +359,10 @@ function createVideoServer() {
       };
     },
     get: () => state,
+    /** just the server pick, when nothing has read it yet (the folders tab) */
+    ensureServer: () => {
+      if (!state.active) void loadServer();
+    },
     /** everything, as each showing of the video settings page did */
     load: () => {
       void loadServer();

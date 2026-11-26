@@ -9474,11 +9474,31 @@
           {
             "method": "POST",
             "url": "/api/video/libraries",
-            "body": "{\"movies\":\"\",\"tv\":\"TV\",\"tv_more\":[\"Kids TV\"],\"anime\":[\"TV\"]}"
+            "body": "{\"movies\":\"\",\"movies_more\":[],\"tv\":\"TV\",\"tv_more\":[\"Kids TV\"],\"anime\":[\"TV\"]}"
           }
         ]
       },
       "asked": "",
+      "showsEndpoint": "/api/video/libraries"
+    },
+    "input[data-video-lib-movies-scan=\"Movies 4K\"]": {
+      "sel": "input[data-video-lib-movies-scan=\"Movies 4K\"]",
+      "kind": "checkbox",
+      "only": "video",
+      "sides": ["video"],
+      "scenario": "video",
+      "from": false,
+      "to": true,
+      "saves": {
+        "requests": [
+          {
+            "method": "POST",
+            "url": "/api/video/libraries",
+            "body": "{\"movies\":\"Movies\",\"movies_more\":[\"Movies 4K\"],\"tv\":\"TV\",\"tv_more\":[\"Kids TV\"],\"anime\":[\"TV\"]}"
+          }
+        ]
+      },
+      "asked": true,
       "showsEndpoint": "/api/video/libraries"
     },
     "#video-lib-tv": {
@@ -9494,7 +9514,7 @@
           {
             "method": "POST",
             "url": "/api/video/libraries",
-            "body": "{\"movies\":\"Movies\",\"tv\":\"\",\"tv_more\":[\"Kids TV\"],\"anime\":[\"TV\"]}"
+            "body": "{\"movies\":\"Movies\",\"movies_more\":[],\"tv\":\"\",\"tv_more\":[\"Kids TV\"],\"anime\":[\"TV\"]}"
           }
         ]
       },
@@ -9514,7 +9534,7 @@
           {
             "method": "POST",
             "url": "/api/video/libraries",
-            "body": "{\"movies\":\"Movies\",\"tv\":\"TV\",\"tv_more\":[\"Anime\",\"Kids TV\"],\"anime\":[\"TV\"]}"
+            "body": "{\"movies\":\"Movies\",\"movies_more\":[],\"tv\":\"TV\",\"tv_more\":[\"Anime\",\"Kids TV\"],\"anime\":[\"TV\"]}"
           }
         ]
       },
@@ -9534,7 +9554,7 @@
           {
             "method": "POST",
             "url": "/api/video/libraries",
-            "body": "{\"movies\":\"Movies\",\"tv\":\"TV\",\"tv_more\":[\"Anime\",\"Kids TV\"],\"anime\":[\"Anime\",\"TV\"]}"
+            "body": "{\"movies\":\"Movies\",\"movies_more\":[],\"tv\":\"TV\",\"tv_more\":[\"Anime\",\"Kids TV\"],\"anime\":[\"Anime\",\"TV\"]}"
           }
         ]
       },
@@ -9554,7 +9574,7 @@
           {
             "method": "POST",
             "url": "/api/video/libraries",
-            "body": "{\"movies\":\"Movies\",\"tv\":\"TV\",\"tv_more\":[],\"anime\":[\"TV\"]}"
+            "body": "{\"movies\":\"Movies\",\"movies_more\":[],\"tv\":\"TV\",\"tv_more\":[],\"anime\":[\"TV\"]}"
           }
         ]
       },
@@ -9574,7 +9594,7 @@
           {
             "method": "POST",
             "url": "/api/video/libraries",
-            "body": "{\"movies\":\"Movies\",\"tv\":\"TV\",\"tv_more\":[\"Kids TV\"],\"anime\":[\"Kids TV\",\"TV\"]}"
+            "body": "{\"movies\":\"Movies\",\"movies_more\":[],\"tv\":\"TV\",\"tv_more\":[\"Kids TV\"],\"anime\":[\"Kids TV\",\"TV\"]}"
           }
         ]
       },
@@ -14165,6 +14185,13 @@
     },
     "#quarantine-clear-btn": {
       "id": "quarantine-clear-btn",
+      "count": 1,
+      "sides": ["music", "video"],
+      "scenario": "music"
+    },
+    "#stg-view-advanced-backups \"Check now\"": {
+      "label": "Check now",
+      "anchor": "stg-view-advanced-backups",
       "count": 1,
       "sides": ["music", "video"],
       "scenario": "music"

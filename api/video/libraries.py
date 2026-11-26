@@ -2,9 +2,10 @@
 
 GET  /api/video/libraries -> discover the active server's Movies/TV libraries
                              + the user's current selection.
-POST /api/video/libraries -> save {movies, tv, tv_more?, anime?} (library titles)
-                             for the active server. The scanner then reads only
-                             those: the main TV pick plus ``tv_more``. ``anime``
+POST /api/video/libraries -> save {movies, movies_more?, tv, tv_more?, anime?}
+                             (library titles) for the active server. The scanner
+                             then reads only those: each main pick plus its
+                             ``*_more`` list. ``anime``
                              marks TV libraries whose shows are anime.
 """
 
@@ -416,12 +417,17 @@ def register_routes(bp):
             server = resolve_video_server()
             if not server:
                 return jsonify({"error": "no video server"}), 400
-            # tv_more / anime are optional: an older client that sends only
-            # movies + tv leaves them as they are
+            # movies_more / tv_more / anime are optional: an older client that
+            # sends only movies + tv leaves them as they are
+            def listed(key):
+                return body.get(key) if isinstance(body.get(key), list) else None
             get_video_db().set_library_selection(
                 server, body.get("movies"), body.get("tv"),
-                tv_more=body.get("tv_more") if isinstance(body.get("tv_more"), list) else None,
-                anime=body.get("anime") if isinstance(body.get("anime"), list) else None)
+                tv_more=listed("tv_more"), anime=listed("anime"),
+                movies_more=listed("movies_more"))
+            # the folders list follows the picks at once, not in 10 minutes
+            from core.video import drive_map
+            drive_map.forget_server_folders()
             return jsonify({"status": "saved", "server": server})
         except Exception:
             logger.exception("Failed to save video library selection")
