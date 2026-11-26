@@ -24,7 +24,7 @@ import {
 } from '../-player.api';
 import { PlayerSetupHost } from './player-setup';
 
-const ACCENT_PALETTE: Record<PlayerAccentColor, { rgb: string; lightRgb: string }> = {
+export const ACCENT_PALETTE: Record<PlayerAccentColor, { rgb: string; lightRgb: string }> = {
   emerald: { rgb: '29, 185, 84', lightRgb: '30, 215, 96' },
   violet: { rgb: '139, 92, 246', lightRgb: '167, 139, 250' },
   ocean: { rgb: '56, 189, 248', lightRgb: '125, 211, 252' },

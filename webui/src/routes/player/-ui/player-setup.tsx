@@ -117,6 +117,14 @@ const STEPS = [
   { label: 'Done', group: '' },
 ] as const;
 
+/** where a step is, so settings can open setup right on it */
+export function setupStep(label: (typeof STEPS)[number]['label']): number {
+  return Math.max(
+    0,
+    STEPS.findIndex((x) => x.label === label),
+  );
+}
+
 /** mounts in the player shell: shows setup when it is due or asked for */
 export function PlayerSetupHost() {
   const setup = useQuery(playerSetupQuery());
