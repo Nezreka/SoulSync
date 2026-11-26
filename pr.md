@@ -10,6 +10,8 @@ around it: video can run with no media server at all, or with plex and jellyfin 
 - **libraries.** a library is a named group of folders. you start with Movies and TV Shows, and can move a drive into a new library (4K, Kids, Anime), rename it, and give it its own page in the sidebar. a library can be hidden from a profile, and a hidden library's titles are gone from search, rows, the guide and direct links for that profile.
 - **rows you arrange.** movies, tv, music and youtube each draw from one row layout per profile, the way home does: reorder, hide, pick a style, for this screen or all of them. each page has extra rows that are off until you want them (new releases, top 10, by decade, studios, quick watches, most played and more). a library's page has its own layout.
 - **a home that knows your libraries.** add "recently added in" and "continue in" rows for any library from the home editor (a new library's rows are offered, off until you want them), a film you have in two libraries shows once with a 4k chip, and "on this day" brings back home videos filmed on today's date.
+- **notifications.** new episodes of shows you're watching, well-reviewed films (never more than 3 a week), your requests, watchlist titles arriving, season premieres, party invites, admin messages and more. each kind is a switch per profile, with quiet hours and a daily digest. a bell in the player, browser notifications if you allow them, and system notifications in the app (fetched from your server, nothing through google).
+- **trailers in the app** on every movie and show page, and albums that name the songs you don't have yet.
 - **your sidebar.** each profile orders and hides the sidebar's places. the server's order is the default.
 - **chapters and skip intro.** a movie or episode's own chapter marks show in the chapter menu, and a chapter the file names intro, recap or credits gets a skip button. nothing is guessed.
 - **title logos.** a movie or show's page draws its logo, with the title as text when there is none.
@@ -106,6 +108,9 @@ the browser extension (chrome and firefox) has a new release, 0.3.0: https://git
 - remote access by upnp or nat-pmp is opt-in under settings > devices, pin-safe profile switching on a shared device, and the paired player app can read what it needs to play, browse and request.
 
 ## fixes
+
+- a multi-artist album (one artist's release where every song credits guests) stays under its album artist instead of becoming one album per guest (#2300).
+- changing an album's quality profile keeps its details window open (#2316).
 
 - discovery: the new-music pool and the made-for-you playlists follow what you play this month, not only your watchlist and lifetime plays.
 - a permission denied on tags says who soulsync runs as and what to set (#2295), a navidrome cover downloads (#2293), a re-tag finding that only writes ids can close (#2292), a service tile stays when its sheet closes (#2285), scrollbars match (#2250), and recommendations lead with what you play this month.
