@@ -69,6 +69,7 @@ import { autoSyncCanSchedulePlaylist } from '../-sync.autosync';
 import { autoSyncPipelineCoversPlaylist } from '../-sync.autosync';
 import { autoSyncPlaylistHealth, detectBrowserTimezone } from '../-sync.autosync';
 import { autoSyncNextRunLabel } from '../-sync.autosync';
+import { bulkSummary, runInTurn, type BulkMode, type BulkRunState } from '../-sync.bulk-run';
 import { cardScheduleLabel, useCardSchedules } from '../-sync.card-schedule';
 import { exportNotConnectedStatus } from '../-sync.export';
 import {
@@ -1063,6 +1064,25 @@ export function MirroredTab({
   // the selection, as rows that still exist. a refetch can drop a card from
   // under a selected id; the count and the delete both read this, never the set.
   const selectedRows = selecting ? allRows.filter((r) => selected.has(r.id)) : [];
+
+  // #2309: the selection synced by hand, one playlist after another
+  const [bulk, setBulk] = useState<BulkRunState | null>(null);
+  const bulkStop = useRef(false);
+  const startBulk = (mode: BulkMode) => {
+    const targets = selectedRows.map((r) => ({
+      id: r.id,
+      name: r.display_name || r.name || 'Playlist',
+    }));
+    if (!targets.length || bulk?.running) return;
+    bulkStop.current = false;
+    void runInTurn(mode, targets, setBulk, () => bulkStop.current).then((done) => {
+      window.showToast?.(
+        bulkSummary(done),
+        done.items.some((i) => i.state === 'failed') ? 'warning' : 'success',
+      );
+      void load();
+    });
+  };
   const allVisibleSelected = visibleRows.length > 0 && visibleRows.every((r) => selected.has(r.id));
 
   // the summary the page header reads. primitives only, so the effect fires
@@ -1593,6 +1613,24 @@ export function MirroredTab({
           )}
           <button
             type="button"
+            className={`${styles.sb}`}
+            disabled={selectedRows.length === 0 || Boolean(bulk?.running)}
+            title="Put these playlists on your server with the songs you already have. Nothing is added to the wishlist or downloaded."
+            onClick={() => startBulk('sync')}
+          >
+            Sync
+          </button>
+          <button
+            type="button"
+            className={`${styles.sb}`}
+            disabled={selectedRows.length === 0 || Boolean(bulk?.running)}
+            title="Put these playlists on your server, and get the songs you don't have: they go on the wishlist and download under your usual rules."
+            onClick={() => startBulk('download')}
+          >
+            Sync & download
+          </button>
+          <button
+            type="button"
             className={`pl-selection-delete ${styles.sb} ${styles.sbDanger}`}
             disabled={selectedRows.length === 0}
             onClick={() => void onDeleteSelected(selectedRows)}
@@ -1608,6 +1646,54 @@ export function MirroredTab({
             Done
           </button>
         </div>
+      )}
+      {bulk && (
+        <section
+          className={styles.bulkPanel}
+          aria-label="Syncing the selected playlists"
+          aria-live="polite"
+        >
+          <header className={styles.bulkHead}>
+            <b>
+              {bulk.mode === 'sync' ? 'Sync' : 'Sync & download'} · {bulkSummary(bulk)}
+            </b>
+            {bulk.running ? (
+              <button
+                type="button"
+                className={styles.bulkBtn}
+                disabled={bulkStop.current}
+                onClick={() => {
+                  bulkStop.current = true;
+                  setBulk((b) => (b ? { ...b, stopping: true } : b));
+                }}
+              >
+                {bulk.stopping ? 'Stopping after this one…' : 'Stop after this one'}
+              </button>
+            ) : (
+              <button type="button" className={styles.bulkBtn} onClick={() => setBulk(null)}>
+                Close
+              </button>
+            )}
+          </header>
+          <ol className={styles.bulkList}>
+            {bulk.items.map((item) => (
+              <li key={item.id} data-state={item.state}>
+                <span className={styles.bulkName}>{item.name}</span>
+                <span className={styles.bulkState}>
+                  {
+                    {
+                      waiting: 'Waiting',
+                      running: 'Syncing…',
+                      done: 'Done',
+                      failed: item.note ? `Failed: ${item.note}` : 'Failed',
+                      stopped: 'Not started',
+                    }[item.state]
+                  }
+                </span>
+              </li>
+            ))}
+          </ol>
+        </section>
       )}
       {schedMenu && (
         <ScheduleMenu
