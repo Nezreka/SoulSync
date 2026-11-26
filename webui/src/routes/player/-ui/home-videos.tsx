@@ -50,6 +50,7 @@ import {
 import { DownloadButton } from './download-button';
 import s from './home-videos.module.css';
 import { CamcorderIcon, PencilIcon, PlayIcon } from './icons';
+import { InfoButton } from './item-info';
 import { Empty, styles as k } from './kit';
 import { longPress } from './long-press';
 import { notify } from './notice';
@@ -152,6 +153,7 @@ export function ClipCard({
             </button>
           ) : null}
           <DownloadButton type="home" id={String(video.id)} title={video.title} compact />
+          <InfoButton type="home" id={video.id} title={video.title} className={s.action} />
         </div>
       ) : null}
     </div>

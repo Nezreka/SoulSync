@@ -34,6 +34,7 @@ import {
   Section,
 } from '../-ui/detail';
 import { DownloadButton, DownloadMediaButton } from '../-ui/download-button';
+import { InfoButton } from '../-ui/item-info';
 import { Art, Badge, Hero, HScroll, PlayButton, VerdictBadge, styles as s } from '../-ui/kit';
 import { CrewList, mergeCrew, NetworkLink, VideoGenreLinks } from '../-ui/links';
 import { NotFound, NotPartOfProfile } from '../-ui/not-part';
@@ -383,6 +384,7 @@ function EpisodeRow({
               title={epIssueTitle}
               compact
             />
+            {owned ? <InfoButton type="episode" id={episode.id} title={epIssueTitle} /> : null}
             {reqResult?.state === 'error' ? (
               <span style={{ fontSize: '0.82rem', color: '#ff7b7b' }}>{reqResult.message}</span>
             ) : null}

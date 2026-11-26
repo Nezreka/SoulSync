@@ -11,6 +11,7 @@ import { progressLookupQuery, showDetailQuery, showFilesQuery } from '../-player
 import { Comments } from '../-ui/comments';
 import { DetailLayout, InfoPanel, Section } from '../-ui/detail';
 import { DownloadButton } from '../-ui/download-button';
+import { InfoButton } from '../-ui/item-info';
 import { Art, Badge, Hero, PlayButton, PlayerLink, VerdictBadge, styles as s } from '../-ui/kit';
 import { NotFound, NotPartOfProfile } from '../-ui/not-part';
 import { playItems } from '../-ui/playback/use-player';
@@ -171,6 +172,15 @@ function EpisodePage() {
                 type="episode"
                 id={String(ep.id)}
                 title={`${show.title} · ${ep.title ?? 'Episode'}`}
+              />
+            ) : null}
+            {owned ? (
+              <InfoButton
+                type="episode"
+                id={ep.id}
+                title={ep.title ?? 'Episode'}
+                className={s.btn}
+                labelled
               />
             ) : null}
             {prev ? (

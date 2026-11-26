@@ -7,6 +7,7 @@ import { bookItem } from '../-lib/play-items';
 import { bookCover } from '../-lib/rails';
 import { booksQuery, catalogBookQuery, playableQuery, progressLookupQuery } from '../-player.api';
 import { DownloadButton } from '../-ui/download-button';
+import { InfoButton } from '../-ui/item-info';
 import { Empty, Hero, PlayButton, styles as s } from '../-ui/kit';
 import { NotFound, NotPartOfProfile } from '../-ui/not-part';
 import { getEngine, playItems, usePlayer } from '../-ui/playback/use-player';
@@ -96,6 +97,13 @@ function BookPage() {
               entityId={book.asin}
               title={book.title}
               subtitle={book.author ?? undefined}
+            />
+            <InfoButton
+              type="audiobook"
+              id={book.asin}
+              title={book.title}
+              className={s.btn}
+              labelled
             />
           </>
         }

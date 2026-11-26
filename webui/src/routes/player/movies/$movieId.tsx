@@ -28,6 +28,7 @@ import {
   Section,
 } from '../-ui/detail';
 import { DownloadButton } from '../-ui/download-button';
+import { InfoButton } from '../-ui/item-info';
 import { Badge, Hero, PlayButton, VerdictBadge, styles as s } from '../-ui/kit';
 import { CrewList, mergeCrew, StudioLink, VideoGenreLinks } from '../-ui/links';
 import { NotFound, NotPartOfProfile } from '../-ui/not-part';
@@ -153,6 +154,7 @@ function MoviePage() {
             <TrailerButton kind="movie" id={id} />
             {best ? <DownloadButton type="movie" id={String(id)} title={m.title} /> : null}
             <ReportIssueButton entityType="movie" entityId={id} title={m.title} />
+            <InfoButton type="movie" id={id} title={m.title} className={s.btn} labelled />
             {ends ? (
               <span className={s.notYet}>
                 Ends at {ends.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
