@@ -37,6 +37,8 @@ OPTED_IN = {
     "player_tracks.tracks": A.PLAYBACK,
     "player_tracks.subtitle": A.PLAYBACK,
     "player_tracks.lyrics": A.PLAYBACK,
+    # the info sheet (api/player_info.py): what the app shows under "Info"
+    "player_info.item_info": A.PLAYBACK,
     # full /player app routes (caller profile playback/browse state only)
     "player.get_progress": A.PLAYBACK,
     "player.put_progress": A.PLAYBACK,

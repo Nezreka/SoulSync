@@ -8,6 +8,7 @@ import { podcastItems } from '../-lib/play-items';
 import { episodeKey, fraction } from '../-lib/rails';
 import { podcastShowQuery, podcastSubsQuery, progressLookupQuery } from '../-player.api';
 import { DownloadButton } from '../-ui/download-button';
+import { InfoButton } from '../-ui/item-info';
 import { Art, Badge, Hero, PlayButton, styles as s } from '../-ui/kit';
 import { NotFound, NotPartOfProfile } from '../-ui/not-part';
 import { playItems, usePlayer } from '../-ui/playback/use-player';
@@ -167,6 +168,7 @@ function PodcastPage() {
                   subtitle={sub.title}
                   iconOnly
                 />
+                <InfoButton type="podcast_episode" id={`${sub.id}:${key}`} title={episode.title} />
               </div>
             </div>
           );

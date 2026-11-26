@@ -18,8 +18,10 @@ import {
   movieDetailQuery,
   removeFromWatchlist,
   showDetailQuery,
+  type InfoItemType,
   type SongRef,
 } from '../-player.api';
+import { openItemInfo } from './item-info';
 import { openAddToPlaylist } from './music/add-to-playlist';
 import { getEngine, playItems } from './playback/use-player';
 
@@ -66,6 +68,23 @@ export interface ContextMenuTarget {
   onRequest?: () => void;
   /** Extra card-specific actions (e.g. Remove from Continue Watching) */
   extraActions?: ContextMenuExtraAction[];
+  /** what the Info sheet asks about, when it isn't the kind and id above */
+  info?: { type: InfoItemType; id: string } | null;
+}
+
+/** the Info sheet's item for a menu target: its own, else its kind and id */
+export function infoFor(target: ContextMenuTarget): { type: InfoItemType; id: string } | null {
+  if (target.info !== undefined) return target.info;
+  if (target.owned === false || !target.id) return null;
+  const byKind: Partial<Record<ContextMenuTarget['kind'], InfoItemType>> = {
+    movie: 'movie',
+    episode: 'episode',
+    track: 'track',
+    audiobook: 'audiobook',
+    youtube: 'youtube',
+  };
+  const type = byKind[target.kind];
+  return type ? { type, id: target.id } : null;
 }
 
 type Listener = (target: ContextMenuTarget | null) => void;
@@ -86,6 +105,7 @@ export function closeContextMenu() {
 export function inferContextTargetFromCard(
   e: Pick<React.MouseEvent, 'clientX' | 'clientY'>,
   card: {
+    key?: string;
     title: string;
     subtitle?: string;
     art?: string | null;
@@ -104,6 +124,7 @@ export function inferContextTargetFromCard(
   let id: string | null = card.source?.itemId ?? null;
   let downloadType: DownloadItemType | null = null;
   let downloadId: string | null = null;
+  let info: ContextMenuTarget['info'];
 
   if (
     card.source?.itemType === 'movie' ||
@@ -156,6 +177,9 @@ export function inferContextTargetFromCard(
     /\/player\/podcasts\/([^/?#]+)/.test(href)
   ) {
     kind = 'podcast';
+    // an episode card can say what it is; a podcast's own card has no info
+    info =
+      card.source?.itemType === 'podcast_episode' && id ? { type: 'podcast_episode', id } : null;
     id = id ?? href.match(/\/player\/podcasts\/([^/?#]+)/)?.[1] ?? null;
     // no download: a card carries no enclosure url, and the player has no
     // podcast stream to fetch (it logged a download and saved an error page)
@@ -165,6 +189,11 @@ export function inferContextTargetFromCard(
       downloadType = 'youtube';
       downloadId = id;
     }
+  } else if (card.source?.itemType === 'home' && id) {
+    info = { type: 'home', id };
+  } else if (card.key?.startsWith('yt:')) {
+    // a youtube video card links to its channel: its key names the video
+    info = { type: 'youtube', id: card.key.slice(3) };
   }
 
   return {
@@ -180,6 +209,7 @@ export function inferContextTargetFromCard(
     downloadType,
     downloadId,
     extraActions: opts?.extraActions,
+    info,
   };
 }
 
@@ -396,6 +426,7 @@ export function ContextMenuHost() {
   };
 
   const isOwned = target.owned !== false;
+  const info = infoFor(target);
 
   const canPlayDirect =
     isOwned &&
@@ -644,6 +675,23 @@ export function ContextMenuHost() {
             >
               <span>⬇</span>
               <span>Download for offline</span>
+            </button>
+          )}
+
+          {info && (
+            <button
+              type="button"
+              role="menuitem"
+              style={itemStyle}
+              onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.08)')}
+              onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+              onClick={() => {
+                closeContextMenu();
+                openItemInfo({ ...info, title: target.title });
+              }}
+            >
+              <span>ⓘ</span>
+              <span>Info</span>
             </button>
           )}
 

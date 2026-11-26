@@ -25013,6 +25013,9 @@ app.register_blueprint(_bp_player_tracks())
 # ...and its home videos (core/video/home_videos.py)
 from api.player_home import create_blueprint as _bp_player_home
 app.register_blueprint(_bp_player_home())
+# ...and its info sheet: what an item is and what file it is
+from api.player_info import create_blueprint as _bp_player_info
+app.register_blueprint(_bp_player_info())
 # ...and its downloads: devices, what's on them, copies made for them
 from api.player_offline import create_blueprint as _bp_player_offline
 app.register_blueprint(_bp_player_offline())

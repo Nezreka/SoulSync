@@ -1,6 +1,6 @@
 import { infiniteQueryOptions, queryOptions } from '@tanstack/react-query';
 
-import { apiClient, readJson } from '@/app/api-client';
+import { apiClient, readJson, refusalText } from '@/app/api-client';
 
 import type { HomeLayout, LayoutCatalog } from './-lib/home-layout';
 import type { ServerPremiere } from './-lib/premieres';
@@ -1890,3 +1890,54 @@ export async function saveNotificationPrefs(changes: NotificationPrefsChange) {
 export async function sendTestNotification(): Promise<NotificationList> {
   return apiClient.post('player/notifications/test').json<NotificationList>();
 }
+
+// ── item info (scrap/ITEM_INFO_CONTRACT.md) ────────────────────────────
+
+export type InfoItemType =
+  | 'movie'
+  | 'episode'
+  | 'track'
+  | 'audiobook'
+  | 'podcast_episode'
+  | 'home'
+  | 'youtube';
+
+export interface InfoRow {
+  label: string;
+  value: string;
+  mono?: boolean;
+  copy?: boolean;
+}
+
+export interface InfoSection {
+  id: string;
+  title: string;
+  group?: string;
+  rows: InfoRow[];
+}
+
+export interface ItemInfo {
+  item_type: InfoItemType;
+  item_id: string;
+  title: string;
+  subtitle: string;
+  artwork: string | null;
+  sections: InfoSection[];
+}
+
+/** what an item is and what file it is: the server words every value */
+export const itemInfoQuery = (type: InfoItemType, id: string) =>
+  queryOptions({
+    queryKey: ['player', 'info', type, id],
+    queryFn: async () => {
+      try {
+        return await apiClient
+          .get(`player/info/${type}/${encodeURIComponent(id)}`)
+          .json<ItemInfo & { success: boolean }>();
+      } catch (e) {
+        throw new Error(await refusalText(e, "Couldn't load this item's info."));
+      }
+    },
+    staleTime: MINUTE,
+    retry: false,
+  });
