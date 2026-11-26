@@ -112,6 +112,7 @@ beforeEach(() => {
           seconds_left: 600,
           payload: { fingerprint: 'ae0396a668c3' },
           payload_text: '{"code":"7KQ4-M2XD-9FHA-T3VB"}',
+          qr_text: 'soulsync://pair?d=eyJjb2RlIjoiN0tRNC1NMlhELTlGSEEtVDNWQiJ9',
           warnings: [],
         };
       else if (url === '/api/devices/server') data = SERVER;
@@ -208,6 +209,11 @@ describe('Settings > Devices', () => {
     });
     expect(getByText('7KQ4-M2XD-9FHA-T3VB')).toBeTruthy();
     expect(getByRole('img', { name: 'Pairing QR code' })).toBeTruthy();
+    expect(getByText(/Scan with your phone's camera/)).toBeTruthy();
+    const get = getByRole('link', { name: 'github.com/Nezreka/soulsync-mobile-app/releases' });
+    expect(get.getAttribute('href')).toBe(
+      'https://github.com/Nezreka/soulsync-mobile-app/releases',
+    );
     expect(calls.some((c) => c.url === '/api/devices/codes' && c.method === 'POST')).toBe(true);
   });
 
