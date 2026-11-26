@@ -8,11 +8,11 @@ import {
   setAdminUserDownloadPerm,
   type DownloadItemType,
 } from './-lib/downloads';
+import { MyDownloadsPanel } from './-ui/download-history';
 import { PeopleIcon } from './-ui/icons';
 import { PageTitle } from './-ui/kit';
 import { notifyError } from './-ui/notice';
 import s from './-ui/social.module.css';
-import { MyDownloadsPanel } from './downloads';
 
 export const Route = createFileRoute('/player/admin-users')({
   component: AdminUsersDownloadsPage,

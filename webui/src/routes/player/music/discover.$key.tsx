@@ -13,6 +13,7 @@ import { runtime } from '../-lib/format';
 import { albumArtwork, remoteImage } from '../-lib/images';
 import { playlistItems, songCount, songFromRow } from '../-lib/playlists';
 import { discoverPlaylistQuery, getDiscoverSongs } from '../-player.api';
+import { DownloadButton } from '../-ui/download-button';
 import { DownloadIcon, PlusIcon, ShuffleIcon } from '../-ui/icons';
 import { PlayButton, styles as k } from '../-ui/kit';
 import { openAddToPlaylist } from '../-ui/music/add-to-playlist';
@@ -140,6 +141,9 @@ function DiscoverPlaylistPage() {
               <ShuffleIcon />
               Shuffle
             </button>
+            {queue.length ? (
+              <DownloadButton type="playlist" id={`discover:${key}`} title={p.name} />
+            ) : null}
             {toGet.length ? (
               <button
                 type="button"

@@ -10,6 +10,7 @@ import { rankVersions, resolutionLabel } from '../-lib/video';
 import { progressLookupQuery, showDetailQuery, showFilesQuery } from '../-player.api';
 import { Comments } from '../-ui/comments';
 import { DetailLayout, InfoPanel, Section } from '../-ui/detail';
+import { DownloadButton } from '../-ui/download-button';
 import { Art, Badge, Hero, PlayButton, PlayerLink, VerdictBadge, styles as s } from '../-ui/kit';
 import { NotFound, NotPartOfProfile } from '../-ui/not-part';
 import { playItems } from '../-ui/playback/use-player';
@@ -165,6 +166,13 @@ function EpisodePage() {
               onPlay={owned ? () => playThis() : undefined}
               why="This episode isn't in your library yet."
             />
+            {owned ? (
+              <DownloadButton
+                type="episode"
+                id={String(ep.id)}
+                title={`${show.title} · ${ep.title ?? 'Episode'}`}
+              />
+            ) : null}
             {prev ? (
               <PlayerLink
                 href={`/player/tv/${show.id}/episode/${prev.ep.id}`}

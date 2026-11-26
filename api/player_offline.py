@@ -43,7 +43,7 @@ logger = get_logger("player.offline")
 bp = Blueprint("player_offline", __name__)
 
 RULE_TYPES = ("show", "playlist", "podcast")
-KEEP_NEXT = (1, 2, 3, 5, 10)
+KEEP_NEXT = (0, 1, 2, 3, 5, 10)  # 0: no next ones kept, delete_watched alone
 MAX_EVENTS = 2000
 MIME = {".mp4": "video/mp4", ".m4a": "audio/mp4", ".m4b": "audio/mp4", ".mp3": "audio/mpeg"}
 
@@ -474,7 +474,7 @@ def offline_rule_put():
         return _err(400, "bad_type", "A smart rule is for a show, a playlist or a podcast.")
     keep = body.get("keep_next", 3)
     if isinstance(keep, bool) or not isinstance(keep, int) or keep not in KEEP_NEXT:
-        return _err(400, "bad_keep_next", "keep_next is 1, 3 or 5")
+        return _err(400, "bad_keep_next", "keep_next is 0, 1, 3 or 5")
     for flag in ("delete_watched", "follow"):
         if flag in body and not isinstance(body[flag], bool):
             return _err(400, f"bad_{flag}", f"{flag} is true or false")
