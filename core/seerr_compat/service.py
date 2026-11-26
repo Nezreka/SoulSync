@@ -376,6 +376,7 @@ class SeerrCompat:
         return bits
 
     def user(self, p: dict, **kw) -> dict:
+        kw.setdefault("plex_name", p.get("plex_username") or None)
         return shapes.user(p.get("id") or 1, p.get("name") or "", permissions=self.permissions(p), **kw)
 
     def users(self) -> List[dict]:

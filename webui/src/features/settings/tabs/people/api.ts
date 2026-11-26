@@ -175,3 +175,46 @@ export const putSignupTemplate = (templateId: number) =>
 
 export const revokeInvite = (id: number) =>
   call<{ success: boolean }>(`/api/profiles/invites/${id}`, { method: 'DELETE' });
+
+// ── import plex users (#2319) ──
+
+export interface PlexImportUser {
+  id: string;
+  username: string;
+  title: string;
+  name: string;
+  email: string;
+  thumb: string;
+  home: boolean;
+  /** a managed home user: no plex.tv login, so plex sign-in can't reach them */
+  managed: boolean;
+  /** the soulsync profile that is (linked) or may be (home, name) them */
+  profile: { id: number; name: string; is_admin: boolean } | null;
+  match: 'linked' | 'home' | 'name' | null;
+}
+
+export interface PlexImportList {
+  users: PlexImportUser[];
+  signin_enabled: boolean;
+  signup_template_id: number | null;
+}
+
+export interface PlexImportResult {
+  plex_id: string;
+  name: string;
+  status: 'created' | 'linked' | 'exists' | 'skipped' | 'failed';
+  profile_id: number | null;
+  message: string;
+}
+
+export const getPlexImport = (signal?: AbortSignal) =>
+  call<PlexImportList>('/api/profiles/plex-import', { signal });
+
+export const postPlexImport = (body: {
+  users: Array<{ id: string; profile_id?: number }>;
+  template_id?: number | null;
+}) =>
+  call<{ results: PlexImportResult[]; signin_enabled: boolean }>(
+    '/api/profiles/plex-import',
+    json('POST', body),
+  );

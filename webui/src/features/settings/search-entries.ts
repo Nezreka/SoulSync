@@ -1372,6 +1372,15 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = entries([
     keywords: 'quality 4k request ask needs my ok starts on movies tv profile',
   },
   {
+    label: 'Import from Plex',
+    tab: 'people',
+    anchor: id('ppl-plex-import'),
+    file: 'people/people-home.tsx',
+    open: { people: 'people' },
+    hint: 'profiles for everyone your Plex server is shared with',
+    keywords: 'import plex users friends shared home users bulk add sign in seerr',
+  },
+  {
     label: 'Invites',
     tab: 'people',
     anchor: id('ppl-pill-invites'),
