@@ -6,7 +6,9 @@
 Repo: <https://github.com/Nezreka/soulsync-mobile-app>
 APK: <https://github.com/Nezreka/soulsync-mobile-app/releases/latest>
 
-**Chapters, skip intro, parties and casting.** Skip intro when the file marks one, watch parties with a countdown and reactions, and Chromecast that plays anything.
+**Notifications.** New episodes, good new films, requests and more, per profile, with quiet hours.
+
+**Skip intro, parties and casting.** Skip intro from the file's chapters, watch parties, and Chromecast that plays anything.
 
 **Video without a media server.** SoulSync Standalone scans your movie and TV folders itself, and Plex and Jellyfin can run as one library.
 
@@ -16,7 +18,7 @@ APK: <https://github.com/Nezreka/soulsync-mobile-app/releases/latest>
 
 **Playlists.** Search public playlists by name (#2305), sync several at once with or without downloading (#2309), and songs only YouTube has download from their own video (#2306).
 
-**Search and activity.** Identify a song by listening (thanks Jygijiji). Player streams show in Server Activity and can be stopped.
+**Search.** Identify a song by listening (thanks Jygijiji).
 
 **Downloads.** Four ways a download could lose a file are closed, and deep verify can catch fake lossless (off by default).
 

@@ -77,6 +77,7 @@ export const RELEASES: Release[] = [
       'The SoulSync Player app for Android phones, tablets and TV, with downloads you can take offline: pair it from Settings, Devices. Scan the QR there with your phone’s camera to pair. Get it at github.com/Nezreka/soulsync-mobile-app/releases/latest.',
       'Player downloads: pick the quality, download a whole season or album, smart downloads, and every device’s downloads on the Downloads page.',
       'A home that knows your libraries: Recently added and Continue rows for any library, each film once with a 4K chip, and On this day from your home videos.',
+      'Notifications: new episodes of shows you watch, well-reviewed films, your requests and more, each a switch per profile, with quiet hours and a daily digest (player Settings, Notifications).',
       'Chapters and Skip intro for video, from the file’s own chapter marks, and a title’s logo on its page.',
       'Watch parties with a waiting room, countdown and reactions, and Chromecast that plays anything.',
       'Player streams show in Server Activity beside Plex and Jellyfin, recorded in history, and an admin can stop one with a message.',
