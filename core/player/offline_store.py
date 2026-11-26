@@ -175,6 +175,35 @@ class NotYourDevice(PermissionError):
     pass
 
 
+def _when(value: Any) -> Optional[float]:
+    """a time a device sent (epoch seconds or ms, or iso), or None"""
+    if value is None or value == "":
+        return None
+    try:
+        n = float(value)
+        return n / 1000 if n > 1e11 else n
+    except (TypeError, ValueError):
+        pass
+    try:
+        from datetime import datetime, timezone
+        dt = datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
+        return (dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)).timestamp()
+    except ValueError:
+        return None
+
+
+def _since(it: Dict[str, Any], prev: Dict[str, Any], now: float) -> float:
+    """when an item got to its state: the device's word for when it finished,
+    else the time kept from before while the state holds, else now. the
+    downloads page sorts by it, so a report must not make everything new"""
+    told = it.get("downloaded_at")
+    if it["state"] == "downloaded" and told and 0 < told <= now:
+        return told
+    if prev and prev.get("state") == it["state"] and prev.get("updated_at"):
+        return float(prev["updated_at"])
+    return now
+
+
 def clean_device_id(value: Any) -> str:
     text = str(value or "").strip()
     if not text or len(text) > 80 or not all(c.isalnum() or c in "-_.:" for c in text):
@@ -222,6 +251,7 @@ def report(db: Any, profile_id: int, body: Dict[str, Any], *, paired_id: Optiona
             "quality": _clip(it.get("quality") or "original", 16) or "original",
             "size_bytes": _int_or_none(it.get("size_bytes")) or 0,
             "state": state, "progress": max(0.0, min(1.0, progress)),
+            "downloaded_at": _when(it.get("downloaded_at")),
         }
     now = time.time()
     ensure_schema(db)
@@ -263,7 +293,7 @@ def report(db: Any, profile_id: int, body: Dict[str, Any], *, paired_id: Optiona
                 (pid, dev_id, itype, iid, it["quality"], it["size_bytes"], it["state"], it["progress"],
                  m.get("title") or prev.get("title"), m.get("subtitle") or prev.get("subtitle"),
                  m.get("artwork") or prev.get("artwork"), m.get("duration_s") or prev.get("duration_s"),
-                 json.dumps(group) if group else prev.get("group_json"), now))
+                 json.dumps(group) if group else prev.get("group_json"), _since(it, prev, now)))
         conn.commit()
     added = [k for k in items if items[k]["state"] == "downloaded"
              and (k not in old or old[k]["state"] != "downloaded")]

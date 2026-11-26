@@ -261,11 +261,18 @@ function PlaylistPage() {
               <ShuffleIcon />
               Shuffle
             </button>
-            {queue.length ? (
+            {p.songs.length ? (
               <DownloadButton
                 type="playlist"
                 id={`${yours ? 'user' : 'mirror'}:${p.id}`}
                 title={p.name}
+                why={
+                  queue.length
+                    ? undefined
+                    : hidden === p.songs.length
+                      ? 'Every song here is explicit, hidden for this profile.'
+                      : 'None of these songs are in your library yet, so there is nothing to download.'
+                }
               />
             ) : null}
             {queue.length ? (
