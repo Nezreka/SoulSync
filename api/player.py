@@ -1662,6 +1662,133 @@ def delete_note(note_id):
     return jsonify({"success": True})
 
 
+# ── notifications: what's new for this profile ─────────────────────────
+
+def _int_arg(name, default, lo, hi):
+    raw = request.args.get(name)
+    if raw in (None, ""):
+        return default
+    try:
+        n = int(raw)
+    except (TypeError, ValueError):
+        raise ValueError(f"{name} must be a whole number") from None
+    return max(lo, min(hi, n))
+
+
+@bp.route("/api/player/notifications", methods=["GET"])
+@device_playback
+@self_only
+def list_notifications():
+    """?since=<id>&limit=: this profile's notifications, newest first, with
+    the unread count and the newest id (a device keeps it for next time)"""
+    from core.player import notifications
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    try:
+        since = _int_arg("since", 0, 0, 2**62)
+        limit = _int_arg("limit", 50, 1, notifications.MAX_LIMIT)
+    except ValueError as e:
+        return _bad(e)
+    try:
+        out = notifications.list_for(player_db(), pid, since=since, limit=limit)
+    except Exception:  # noqa: BLE001
+        return _failed("notifications read", "Couldn't load your notifications.")
+    return jsonify({"success": True, **out})
+
+
+@bp.route("/api/player/notifications/read", methods=["POST"])
+@device_playback
+@self_only
+def read_notifications():
+    """{ids: [...]} or {all: true}"""
+    from core.player import notifications
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    body = request.get_json(silent=True) or {}
+    ids = body.get("ids")
+    if body.get("all") is not True and not isinstance(ids, list):
+        return _bad("send ids or all")
+    try:
+        n = notifications.mark_read(player_db(), pid, ids, all_=body.get("all") is True)
+    except Exception:  # noqa: BLE001
+        return _failed("notifications read mark", "Couldn't mark those read.")
+    return jsonify({"success": True, "marked": n})
+
+
+@bp.route("/api/player/notifications/<int:notification_id>", methods=["DELETE"])
+@device_playback
+@self_only
+def delete_notification(notification_id):
+    from core.player import notifications
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    if not notifications.remove(player_db(), pid, notification_id):
+        return jsonify({"success": False, "error": "not_found", "message": "No such notification of yours."}), 404
+    return jsonify({"success": True})
+
+
+@bp.route("/api/player/notifications/prefs", methods=["GET"])
+@device_playback
+@self_only
+def get_notification_prefs():
+    """{prefs, kinds: [{id, label, help, default, locked?, device?}]}"""
+    from core.player import notifications
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    try:
+        prefs = notifications.get_prefs(player_db(), pid)
+    except Exception:  # noqa: BLE001
+        return _failed("notification prefs read", "Couldn't load your notification settings.")
+    return jsonify({"success": True, "prefs": prefs, "kinds": notifications.kinds_catalogue()})
+
+
+@bp.route("/api/player/notifications/prefs", methods=["PUT"])
+@device_playback
+@self_only
+def put_notification_prefs():
+    """any of the prefs keys; kinds merges ({new_episode: false} leaves the rest)"""
+    from core.player import notifications
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    try:
+        prefs = notifications.put_prefs(player_db(), pid, request.get_json(silent=True))
+    except notifications.PrefsError as e:
+        return _bad(e)
+    except Exception:  # noqa: BLE001
+        return _failed("notification prefs save", "Couldn't save that setting.")
+    return jsonify({"success": True, "prefs": prefs, "kinds": notifications.kinds_catalogue()})
+
+
+_test_sent: dict = {}
+
+
+@bp.route("/api/player/notifications/test", methods=["POST"])
+@device_playback
+@self_only
+def test_notification():
+    """a test notification to the caller, now (quiet hours and the digest
+    don't hold it). once every few seconds per profile"""
+    from core.player import notifications
+    pid = _profile()
+    if pid is None:
+        return _signed_out()
+    now = time.time()
+    if now - _test_sent.get(pid, 0.0) < 5:
+        return jsonify({"success": False, "error": "too_soon", "message": "One test at a time."}), 429
+    _test_sent[pid] = now
+    try:
+        notifications.deliver(player_db(), pid, "test", "Notifications are working",
+                              "This is what a SoulSync notification looks like.", link="/player/settings?section=notifications")
+    except Exception:  # noqa: BLE001
+        return _failed("notification test", "Couldn't send a test.")
+    return jsonify({"success": True, **notifications.list_for(player_db(), pid, limit=1)})
+
+
 # ── the guide: channels people make, and each profile's lineup ──────────
 
 def _is_admin() -> bool:
@@ -1959,7 +2086,48 @@ def create_watch_party():
     except Exception:  # noqa: BLE001
         return _failed("party create", "Couldn't create watch party.")
     who = _profiles_by_id()
+    _tell_party_guests(party, pid, body.get("invite"), who)
     return jsonify({"success": True, "party": _hydrate_party_profiles(party, who)}), 201
+
+
+def _tell_party_guests(party, host_id, invite, who):
+    """a party's invitations, off the request: the profiles named in
+    ``invite``, or for a scheduled party with no list, everyone who may
+    see what it plays"""
+    named = []
+    if isinstance(invite, list):
+        for x in invite[:50]:
+            if not isinstance(x, bool) and isinstance(x, (int, str)) and str(x).isdigit():
+                named.append(int(x))
+    if not named and party.get("status") != "scheduled":
+        return
+    host_name = (who.get(int(host_id)) or {}).get("name") or "Someone"
+
+    def _send():
+        from core.player import notifications, notify_gen
+        try:
+            profiles = [p for p in notify_gen._real_profiles() if p["id"] != int(host_id)]
+            if named:
+                profiles = [p for p in profiles if p["id"] in named]
+            kind, item = str(party.get("item_type") or ""), party.get("item_id")
+            if kind == "episode":
+                from api.video import get_video_db
+                conn = get_video_db()._get_connection()
+                try:
+                    row = conn.execute("SELECT show_id FROM episodes WHERE id = ?", (int(item),)).fetchone()
+                finally:
+                    conn.close()
+                kind, item = "show", (row[0] if row else None)
+            if kind in ("movie", "show"):
+                profiles = [p for p in profiles if item is not None
+                            and int(item) in notify_gen._real_allow(p, kind, [int(item)])]
+            elif not named:
+                return
+            notifications.party_invites(player_db(), party, host_name, [p["id"] for p in profiles])
+        except Exception:  # noqa: BLE001 - an invite is never worth the party
+            logger.debug("party invites failed", exc_info=True)
+
+    threading.Thread(target=_send, daemon=True, name="party-invites").start()
 
 
 @bp.route("/api/player/parties/<party_id>", methods=["GET"])

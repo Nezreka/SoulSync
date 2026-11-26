@@ -113,6 +113,13 @@ OPTED_IN = {
     "player.add_note": A.PLAYBACK,
     "player.edit_note": A.PLAYBACK,
     "player.delete_note": A.PLAYBACK,
+    # the profile's own notifications and how it wants them
+    "player.list_notifications": A.PLAYBACK,
+    "player.read_notifications": A.PLAYBACK,
+    "player.delete_notification": A.PLAYBACK,
+    "player.get_notification_prefs": A.PLAYBACK,
+    "player.put_notification_prefs": A.PLAYBACK,
+    "player.test_notification": A.PLAYBACK,
     "player.guide_channels": A.PLAYBACK,
     "player.add_guide_channel": A.PLAYBACK,
     "player.edit_guide_channel": A.PLAYBACK,

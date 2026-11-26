@@ -1789,3 +1789,104 @@ export async function updatePlayerIssue(
 ): Promise<{ success: boolean; issue: PlayerIssue }> {
   return apiClient.put(`player/issues/${issueId}`, { json: changes }).json();
 }
+
+// ── notifications (core/player/notifications.py) ────────────────────────
+
+export type NotificationKind =
+  | 'new_episode'
+  | 'featured_movie'
+  | 'watchlist_available'
+  | 'request_done'
+  | 'season_premiere'
+  | 'leaving_soon'
+  | 'download_ready'
+  | 'party_invite'
+  | 'admin_message'
+  | 'new_music'
+  | 'home_memories'
+  | 'digest'
+  | 'test';
+
+export interface PlayerNotification {
+  id: number;
+  kind: NotificationKind;
+  title: string;
+  body: string;
+  image: string | null;
+  /** a /player path */
+  link: string | null;
+  created_at: number;
+  read: boolean;
+  group_key?: string | null;
+}
+
+export interface NotificationList {
+  notifications: PlayerNotification[];
+  unread: number;
+  latest_id: number;
+}
+
+export interface NotificationPrefs {
+  kinds: Record<string, boolean>;
+  featured_not_in_library: boolean;
+  memories_time: string;
+  quiet_hours: boolean;
+  quiet_start: string;
+  quiet_end: string;
+  digest: boolean;
+  digest_time: string;
+  timezone: string;
+}
+
+export interface NotificationKindInfo {
+  id: string;
+  label: string;
+  help: string;
+  default: boolean;
+  locked?: boolean;
+  device?: string;
+}
+
+export const notificationsQuery = () =>
+  queryOptions({
+    queryKey: ['player', 'notifications'],
+    queryFn: async () =>
+      apiClient
+        .get('player/notifications', { searchParams: { limit: 50 } })
+        .json<NotificationList>(),
+    staleTime: 30_000,
+  });
+
+export const notificationPrefsQuery = () =>
+  queryOptions({
+    queryKey: ['player', 'notification-prefs'],
+    queryFn: async () =>
+      apiClient
+        .get('player/notifications/prefs')
+        .json<{ prefs: NotificationPrefs; kinds: NotificationKindInfo[] }>(),
+    staleTime: 5 * MINUTE,
+  });
+
+export async function markNotificationsRead(ids: number[] | 'all'): Promise<void> {
+  await apiClient.post('player/notifications/read', {
+    json: ids === 'all' ? { all: true } : { ids },
+  });
+}
+
+export async function deleteNotification(id: number): Promise<void> {
+  await apiClient.delete(`player/notifications/${id}`);
+}
+
+export type NotificationPrefsChange = Partial<Omit<NotificationPrefs, 'kinds'>> & {
+  kinds?: Record<string, boolean>;
+};
+
+export async function saveNotificationPrefs(changes: NotificationPrefsChange) {
+  return apiClient
+    .put('player/notifications/prefs', { json: changes })
+    .json<{ prefs: NotificationPrefs; kinds: NotificationKindInfo[] }>();
+}
+
+export async function sendTestNotification(): Promise<NotificationList> {
+  return apiClient.post('player/notifications/test').json<NotificationList>();
+}

@@ -63,6 +63,7 @@ from core.automation.handlers.video_process_youtube_wishlist import auto_video_p
 from core.automation.handlers.video_scan_watchlist_playlists import auto_video_scan_watchlist_playlists
 from core.automation.handlers.video_process_wishlist import auto_video_process_wishlist, is_running
 from core.automation.handlers.video_rss_sync import auto_video_rss_sync
+from core.automation.handlers.player_notify import auto_player_notify
 from core.automation.handlers.video_extto_fresh import auto_video_extto_fresh_refresh
 from core.automation.handlers.video_import_lists import auto_video_import_lists
 from core.automation.handlers.video_seeding_sweep import auto_video_seeding_sweep
@@ -424,6 +425,12 @@ def register_all(deps: AutomationDeps) -> None:
     )
     # RSS-speed grabbing: match the indexers' LATEST releases against the wishlist
     # every few minutes — no per-item searching (that stays the drain's job).
+    # the player's notifications: what's new since the last look, per profile
+    engine.register_action_handler(
+        'player_notify_library',
+        lambda config: auto_player_notify(config, deps),
+        lambda: __import__('core.automation.handlers.player_notify', fromlist=['is_running']).is_running(),
+    )
     engine.register_action_handler(
         'video_rss_sync',
         lambda config: auto_video_rss_sync(config, deps),

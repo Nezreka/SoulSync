@@ -25181,6 +25181,10 @@ app.register_blueprint(_bp_perm())
 try:
     from core.profile_notify import register_emitter as _reg_profile_notify
     _reg_profile_notify(lambda event, payload, room: socketio.emit(event, payload, room=room))
+    # a request ready or refused is a player notification too
+    from core.player.notifications import on_profile_note as _player_note
+    from core.profile_notify import register_listener as _reg_profile_listener
+    _reg_profile_listener(_player_note)
 except Exception:
     logger.exception("Could not wire profile notifications")
 

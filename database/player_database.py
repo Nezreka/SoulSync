@@ -26,7 +26,9 @@ TABLES_WITH_PROFILES = ("watch_progress", "player_favorite_channels", "player_ho
                         "player_lineup", "player_reminders",
                         "player_downloads", "player_download_permissions",
                         "player_offline_devices", "player_offline_items", "player_offline_wishes",
-                        "player_offline_rules", "player_offline_plays")
+                        "player_offline_rules", "player_offline_plays",
+                        "player_notifications", "player_notification_pending",
+                        "player_notification_prefs")
 
 
 def default_path() -> str:

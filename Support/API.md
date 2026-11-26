@@ -513,6 +513,17 @@ Phones, tablets and the web player keep downloads; the TV app sends things to an
 - `GET /api/player/settings`: this profile's player settings and what each does: `share_activity` (others see what you play on Watching now; default on), `autoplay_next` (the next episode plays on its own), `still_watching_after` (episodes in a row nobody touched before asking; 0 never asks). Kept in player.db, the same on every screen of the profile.
 - `PUT /api/player/settings` with `{key: value}`: all saved or none (an unknown key or a bad value is a 400). Turning `share_activity` off takes the profile off Watching now at once.
 
+#### Notifications
+
+What's new for this profile (new episodes of shows it watches, well-rated films, watchlist titles that arrived, requests, season premieres, invites, admin messages, new albums, memories). Made by the **Player Notifications** automation from what changed since its last run, and by event hooks (a request answered, a party scheduled, a Server Activity message). Hidden libraries and rating limits apply. A device token with playback scope may call all of these.
+
+- `GET /api/player/notifications?since=<id>&limit=50`: `{notifications: [{id, kind, title, body, image, link, created_at, read, group_key}], unread, latest_id}`, newest first. `since` returns only ids above it: a device keeps `latest_id` and asks from there. `link` is a `/player/...` path; `group_key` is stable for one subject (a later "3 new episodes of X" replaces "New episode of X" under a new id, so a phone can replace its notification by that tag). `limit` up to 200.
+- `POST /api/player/notifications/read` with `{ids: [..]}` or `{all: true}`: marks them read; `{marked}`.
+- `DELETE /api/player/notifications/<id>`: dismisses one of yours (404 for anyone else's).
+- `GET /api/player/notifications/prefs`: `{prefs, kinds}`. `prefs` is `{kinds: {<kind>: bool}, featured_not_in_library, memories_time, quiet_hours, quiet_start, quiet_end, digest, digest_time, timezone}` (times are `HH:MM` on the profile's clock; `timezone` an IANA name, empty for the server's). `kinds` is `[{id, label, help, default, locked?, device?}]`: `admin_message` is `locked` (always on), `download_ready` has `device: "phone"` (each phone can also turn it off for itself).
+- `PUT /api/player/notifications/prefs` with any of those keys: `kinds` merges (`{kinds: {new_music: true}}` leaves the rest). An unknown key, a bad time, an unknown zone or turning off `admin_message` is a 400 and nothing is saved. Quiet hours hold a notification until they end; the digest holds them for one `digest` notification a day. A held one gets its id when it goes out, so `since` never skips it.
+- `POST /api/player/notifications/test`: a test notification to the caller right away (quiet hours and the digest don't hold it). Once every 5 seconds; 429 sooner.
+
 #### Watching now
 
 - `POST /api/player/presence` with `{session, item_type, item_id, position, duration, playing, live, channel?, meta?}`: a screen is playing something. Sent every 15 seconds and on a start, pause or change; forgotten 75 seconds after the last one. Kept in memory only. A profile that doesn't share gets `{shared: false}` and nothing is kept.

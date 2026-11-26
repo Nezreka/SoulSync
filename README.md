@@ -375,6 +375,7 @@ A full web player built into the sidebar.
 - **Radio mode**, **Artist Radio** and **Library Radio** (an endless shuffle of your own collection).
 - Tracks you don't own stream from a preview source, so you can hear before you grab.
 - **Home videos**: clips from your phone or camera (a Plex "Other videos" or Jellyfin "Home videos" library, or a folder on disk) as a player library of their own: On this day, folders as albums, a month-by-month timeline. Never looked up or renamed; named and dated from the clip itself, with your own names, dates, pictures and notes kept through every rescan. Set up from Player setup.
+- **Notifications**: a bell in the player (and system notifications in the phone app) for what's new for you: new episodes of shows you watch (one a day per show), well-reviewed films (never more than 3 a week), watchlist titles that arrived, finished requests, season premieres, watch party invites and admin messages, plus new albums and home video memories if you like. Every kind is a switch per profile, with quiet hours and a daily digest. Hidden libraries and rating limits apply.
 
 ## Sample Studio
 
