@@ -76,6 +76,7 @@ export const RELEASES: Release[] = [
       'Rows you arrange: Movies, TV, Music and YouTube each have a layout per profile, with extra rows to switch on and a sidebar in your own order.',
       'The SoulSync Player app for Android phones, tablets and TV, with downloads you can take offline: pair it from Settings, Devices. Scan the QR there with your phone’s camera to pair. Get it at github.com/Nezreka/soulsync-mobile-app/releases/latest.',
       'Player downloads: pick the quality, download a whole season or album, smart downloads, and every device’s downloads on the Downloads page.',
+      'A home that knows your libraries: Recently added and Continue rows for any library, each film once with a 4K chip, and On this day from your home videos.',
       'Chapters and Skip intro for video, from the file’s own chapter marks, and a title’s logo on its page.',
       'Watch parties with a waiting room, countdown and reactions, and Chromecast that plays anything.',
       'Player streams show in Server Activity beside Plex and Jellyfin, recorded in history, and an admin can stop one with a message.',
