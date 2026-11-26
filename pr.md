@@ -1,6 +1,6 @@
 # soulsync 3.7.0: `dev` → `main`
 
-the player becomes its own place: it has a first-run setup, libraries you name and build from your folders, pages whose rows each profile arranges, watch parties and casting. video can run with no media server at all, or with plex and jellyfin as one library. backups get their own page and cover every database. downloads got a hard pass on matching and on never losing a file.
+the player becomes its own place: it has a first-run setup, libraries you name and build from your folders, pages whose rows each profile arranges, watch parties and casting, and its streams show in server activity like plex ones. video can run with no media server at all, or with plex and jellyfin as one library. backups get their own page, cover every database, and a damaged database can be repaired. search can identify a song by listening. downloads got a hard pass on matching and on never losing a file.
 
 ## the player
 
@@ -13,6 +13,7 @@ the player becomes its own place: it has a first-run setup, libraries you name a
 - **watch parties.** a waiting room with seats, a synced countdown, reactions on screen, a break button, and everyone steers. watching now lets you start one from any title.
 - **casting.** chromecast plays anything: files it can't decode are converted on the way, with seeking.
 - **the guide.** it runs on the server's clock, so every device shows the same thing airing. premieres are decided by the server, youtube can be a channel source, and retro commercial breaks are an opt-in.
+- **server activity.** streams from soulsync's own player show beside plex and jellyfin, are recorded in history and stats, and an admin can stop one with a message or send a message without stopping, on the web player and the app.
 - **more.** a right-click menu on every card, a release calendar, a music hub with artist mixes, report issue on anything, search as its own screen on phones, an accent picker, and a song played here counts as a play.
 
 ## video without a media server
@@ -25,6 +26,9 @@ the player becomes its own place: it has a first-run setup, libraries you name a
 - fixes: missing episodes are counted one way (#2284), a jellyfin virtual episode is not owned (#2244) and a jellyfin collection's films are read (#2243) (thanks @PapaBearDoes).
 
 ## backups
+
+- **a damaged database is said out loud.** a backup never copies damage, so a damaged database ("database disk image is malformed") used to stop every backup with only a line in the log. every admin is now told in the bell, and the backups page opens with the database's health.
+- **repair.** keeps the damaged files first, then copies every table into a fresh database and rebuilds its indexes (most damage is in an index, so nothing is lost), reads around deeper damage with the sqlite3 tool, checks the result, and only then swaps it in. when it can't be repaired it offers the newest healthy backup.
 
 - **one backups page** under settings > system: every backup, what it holds, back up now, restore and delete.
 - **everything is covered.** the player and audiobook databases are backed up with the music one and can be restored on their own, and the encryption key file can be downloaded. without that key a restored database can't read its saved logins.
@@ -40,7 +44,11 @@ the player becomes its own place: it has a first-run setup, libraries you name a
 
 ## playlists
 
-- **search public playlists (#2305).** type a name in add playlist and pick from deezer and spotify, no link needed.
+- **sync several at once (#2309).** select playlists and choose sync (on your server with the songs you have, nothing downloaded) or sync & download. they run one after another with a status for each and stop after this one. each playlist's own window also has sync only.
+- **songs only youtube has (#2306).** a youtube playlist's song that no catalogue knows downloads from its own video.
+- **owned songs land on the playlist (#2308).** a song the library has was sometimes left off the playlist and not downloaded, because the sync and the wishlist check looked it up two ways. they agree now.
+
+- **search public playlists (#2305).** type a name in add playlist, pick deezer, spotify or both, and see a playlist's songs before adding it.
 - **covers.** the source's artwork, your own upload, and restore, on every playlist (#2279 #2280 #2281).
 - sync history is kept per run and opens up (#2271), auto-sync can be paused per playlist, and the page scrolls on phones (#2282).
 
@@ -53,7 +61,14 @@ the player becomes its own place: it has a first-run setup, libraries you name a
 - **tagging.** eleven faults in post-processing fixed on real files, and the download tagger and the re-tagger now write through one table of where each field lives.
 - thanks @savemosca for the stalled lidarr grab (#2251), slskd state (#2263), flaresolverr (#2256) and two memory and speed fixes (#2252), @jonjomckay for tidal playlist ids (#2269), @adityaanikam for CJK paths (#2266), and @EffakT for flac saves (#2277 #2278).
 
+## search
+
+- **note sonar.** the search bar can listen to a song playing near you, or take a clip, and find it through shazam (thanks @Jygijiji, #2307). the clip goes to shazam, which the button says before it records.
+
 ## library
+
+- **remove several artists at once (#2300)** from the library's selection bar.
+- **damaged files stay out.** a scan no longer files an unreadable file (zeroed by an unfinished copy) as a one-song album under "unknown artist".
 
 - **a file is known by its name and size** when its path isn't the one on record (#2288 #2290), and a library moved between mounts is settled (#2289).
 - **two artists who share a name are two artists**, in the library and on the watchlist.
@@ -67,4 +82,5 @@ the player becomes its own place: it has a first-run setup, libraries you name a
 
 ## fixes
 
+- discovery: the new-music pool and the made-for-you playlists follow what you play this month, not only your watchlist and lifetime plays.
 - a permission denied on tags says who soulsync runs as and what to set (#2295), a navidrome cover downloads (#2293), a re-tag finding that only writes ids can close (#2292), a service tile stays when its sheet closes (#2285), scrollbars match (#2250), and recommendations lead with what you play this month.

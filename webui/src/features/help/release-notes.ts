@@ -76,11 +76,13 @@ export const RELEASES: Release[] = [
       'Rows you arrange: Movies, TV, Music and YouTube each have a layout per profile, with extra rows to switch on and a sidebar in your own order.',
       'Chapters and Skip intro for video, from the file’s own chapter marks, and a title’s logo on its page.',
       'Watch parties with a waiting room, countdown and reactions, and Chromecast that plays anything.',
+      'Player streams show in Server Activity beside Plex and Jellyfin, recorded in history, and an admin can stop one with a message.',
+      'Identify a song by listening, from the search bar (thanks Jygijiji, #2307).',
       'SoulSync Standalone: video with no media server, scanning your movie and TV folders itself. A download is in the library the moment it lands.',
       'Plex and Jellyfin as one library (off by default), extras on a title’s page, and YouTube channels as libraries you manage.',
-      'One Backups page: every database is backed up and restorable, the key file can be downloaded, and a restore checks the backup first. Keep 5 keeping only one is fixed.',
+      'One Backups page: every database is backed up and restorable, a restore checks the backup first, and a damaged database can be repaired. Keep 5 keeping only one is fixed.',
       'A playlist’s missing songs are one request (#2302), members can ask for a feature (#2304), and a member no longer sees the server’s connected playlists (#2301).',
-      'Search public playlists by name in Add Playlist (#2305), and upload or restore a playlist cover (#2279 to #2281).',
+      'Search public playlists by name (#2305), sync several playlists at once with or without downloading (#2309), and songs only YouTube has download from their own video (#2306).',
       'Downloads: four ways a file could be lost are closed, tribute acts and wrong artists are refused, a track tries eight peers, and deep verify can catch fake lossless (off by default).',
       'A file is known by its name and size when its path changed (#2288, #2290), and two artists who share a name are two artists.',
       'Exact release matching and edition track counts (thanks EffakT, #2294 to #2298), Lidarr and slskd fixes and less memory (thanks savemosca, #2251 to #2263), Jellyfin fixes (thanks PapaBearDoes, #2243, #2244).',
@@ -148,6 +150,25 @@ export const RELEASES: Release[] = [
       {
         title: 'Downloads that keep your files',
         desc: 'Four ways a download could destroy or strand a file are closed, a failed slskd check no longer cancels everything, tribute acts and wrong artists are refused, and a track tries eight peers before giving up.',
+      },
+      {
+        title: 'Server Activity for the player',
+        desc: 'Streams from SoulSync’s own player show beside Plex and Jellyfin, are recorded in history and stats, and can be stopped with a message, or sent a message without stopping.',
+      },
+      {
+        title: 'Repair a damaged database',
+        desc: 'Backups never copy a damaged database, and now every admin is told when that happens. The Backups page shows the database’s health and a Repair button that keeps the damaged files, rebuilds, checks and swaps in, or offers the newest healthy backup.',
+        page: 'settings',
+      },
+      {
+        title: 'Sync several playlists at once',
+        desc: 'Select playlists on the Sync page and choose Sync (on your server with the songs you have) or Sync & download. They run one after another with a status for each (#2309). A playlist’s own window has Sync only too.',
+        page: 'sync',
+      },
+      {
+        title: 'Identify a song',
+        desc: 'The search bar can listen to a song playing near you, or take a clip, and find it through Shazam (thanks Jygijiji, #2307).',
+        page: 'search',
       },
       {
         title: 'Fake lossless check',
