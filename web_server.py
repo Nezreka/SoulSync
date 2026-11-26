@@ -9984,6 +9984,10 @@ def library_completion_stream():
         }
     )
 
+# one artist's tracks the ownership check reads (rows come back a-z by title)
+_CHECK_TRACKS_ARTIST_CAP = 5000
+
+
 @app.route('/api/library/check-tracks', methods=['POST'])
 @requires("music.access")
 def library_check_tracks():
@@ -10001,8 +10005,12 @@ def library_check_tracks():
         db = MusicDatabase()
         active_server = config_manager.get_active_media_server()
 
-        # Single query: get ALL tracks by this artist from the DB
-        db_tracks = db.search_tracks(artist=artist_name, limit=500, server_source=active_server)
+        # Single query: get ALL tracks by this artist from the DB. the cap was
+        # 500, and the rows come back a-z by title, so a big catalogue (every
+        # edition of every album) lost its late-alphabet titles and called them
+        # not owned. the scan below is dict lookups for the exact titles now
+        db_tracks = db.search_tracks(artist=artist_name, limit=_CHECK_TRACKS_ARTIST_CAP,
+                                     server_source=active_server)
 
         # Ownership is per-artist. When the requested artist isn't in the
         # library by name, search_tracks() degrades to a whole-table word-OR
@@ -10060,16 +10068,17 @@ def library_check_tracks():
         target_album = data.get('album_name', '')
         target_album_norm = _normalize(target_album) if target_album else ''
 
+        from core.text.title_match import TitleCandidatePool
+        _pools = {}
+
         def _match_title(search_norm, search_clean, candidates, threshold=0.7):
-            """Find best matching track from a list of (norm, clean, db_track) candidates."""
-            from core.text.title_match import choose_best_title_candidate
-            return choose_best_title_candidate(
-                search_norm,
-                search_clean,
-                candidates,
-                lambda left, right: SequenceMatcher(None, left, right).ratio(),
-                threshold=threshold,
-            )
+            """Find best matching track from a list of (norm, clean, db_track) candidates.
+            one pool per list: the same pick as choose_best_title_candidate,
+            with exact titles as lookups instead of a fuzzy pass per title"""
+            pool = _pools.get(id(candidates))
+            if pool is None:
+                pool = _pools[id(candidates)] = TitleCandidatePool(candidates)
+            return pool.best(search_norm, search_clean, threshold=threshold)
 
         # A 0.7 title ratio is only safe inside one album's track list. The
         # #808 fallback (and the album-less path) searches the artist's whole
