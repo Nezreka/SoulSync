@@ -105,6 +105,65 @@ def _apply_tuning_pragmas(connection) -> None:
         connection.execute(f"PRAGMA mmap_size = {DB_MMAP_MB * 1024 * 1024}")
 
 
+# the python functions every connection gets. resolved once per process, not
+# per connection: three imports and four fresh lambdas ran on every open, and
+# the slow-connect log could not tell them apart from lock waits (#2253). the
+# imports stay lazy because core.library2 imports this module.
+_SQL_FUNCTIONS: Optional[tuple] = None
+_SQL_FUNCTIONS_LOCK = threading.Lock()
+
+
+def _sql_functions() -> tuple:
+    global _SQL_FUNCTIONS
+    if _SQL_FUNCTIONS is not None:
+        return _SQL_FUNCTIONS
+    with _SQL_FUNCTIONS_LOCK:
+        if _SQL_FUNCTIONS is None:
+            try:
+                from unidecode import unidecode as _ud
+
+                def unidecode_lower(x):
+                    return _ud(x).lower() if x else ""
+            except ImportError:
+                def unidecode_lower(x):
+                    return x.lower() if x else ""
+            # the catalogue's stored `name_key` fold, available to SQL. a join
+            # against a table that has no such column (watchlist, playlists)
+            # would otherwise have to use LOWER(), which folds A-Z only and so
+            # never matched a non-ASCII artist.
+            from core.library2.importer import normalize_name as _name_key
+            # norm_text is the exact function the *_norm columns hold, so a
+            # query can COALESCE a not-yet-backfilled row to the same value;
+            # norm_key drops punctuation too: 'ACDC' finds 'AC/DC'
+            from core.text.normalize import normalize_for_comparison as _nfc
+            from core.text.normalize import normalize_key as _nkey
+
+            def name_key(x):
+                return _name_key(x) if x else ""
+
+            def norm_text(x):
+                return _nfc(x) if x else ""
+
+            def norm_key(x):
+                return _nkey(x) if x else ""
+
+            _SQL_FUNCTIONS = (
+                ("unidecode_lower", unidecode_lower, False),
+                ("name_key", name_key, False),
+                ("norm_text", norm_text, True),
+                ("norm_key", norm_key, True),
+            )
+    return _SQL_FUNCTIONS
+
+
+def _register_sql_functions(connection) -> None:
+    for name, fn, deterministic in _sql_functions():
+        if deterministic:
+            connection.create_function(name, 1, fn, deterministic=True)
+        else:
+            connection.create_function(name, 1, fn)
+
+
 _CONNECTION_PLUMBING = frozenset({'_open_connection', '_get_connection', 'acquire'})
 
 
@@ -964,26 +1023,7 @@ class MusicDatabase:
                                              check_same_thread=check_same_thread)
                 _t_connected = time.perf_counter()
                 connection.row_factory = sqlite3.Row
-                # Register Unicode-normalizing function for diacritics-aware LIKE queries
-                try:
-                    from unidecode import unidecode as _ud
-                    connection.create_function("unidecode_lower", 1, lambda x: _ud(x).lower() if x else "")
-                except ImportError:
-                    connection.create_function("unidecode_lower", 1, lambda x: x.lower() if x else "")
-                # The catalogue's stored `name_key` fold, available to SQL. A
-                # join against a table that has no such column (watchlist,
-                # playlists) would otherwise have to use LOWER(), which folds
-                # A-Z only and so never matched a non-ASCII artist.
-                from core.library2.importer import normalize_name as _name_key
-                connection.create_function(
-                    "name_key", 1, lambda x: _name_key(x) if x else "")
-                # the exact function the *_norm columns hold, so a query can
-                # COALESCE a not-yet-backfilled row to the same value
-                from core.text.normalize import normalize_for_comparison as _nfc
-                connection.create_function("norm_text", 1, lambda x: _nfc(x) if x else "", deterministic=True)
-                # punctuation dropped too: 'ACDC' finds 'AC/DC' (track search)
-                from core.text.normalize import normalize_key as _nkey
-                connection.create_function("norm_key", 1, lambda x: _nkey(x) if x else "", deterministic=True)
+                _register_sql_functions(connection)
                 # Enable foreign key constraints and WAL mode for better concurrency.
                 # Docker Desktop bind mounts can briefly fail while SQLite opens the
                 # sidecar WAL/SHM files; retrying avoids surfacing transient 500s.
