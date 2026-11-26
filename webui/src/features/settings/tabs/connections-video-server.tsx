@@ -25,9 +25,11 @@ import { useCommit } from './commit';
 import {
   type ConnField,
   type Server,
+  libWords,
   linksWords,
   otherMovies,
   otherTv,
+  scanKey,
   useVideoServer,
   videoServer,
 } from './video-server';
@@ -122,6 +124,21 @@ function LibraryRow({ kind }: { kind: 'movies' | 'tv' }) {
   );
 }
 
+/** a library's size, or how its read is going (Reading 4K Movies… 312 found) */
+function LibState({ kind, title }: { kind: 'movie' | 'show'; title: string }) {
+  const { libs, scans } = useVideoServer();
+  const list = kind === 'movie' ? libs?.movies : libs?.tv;
+  const lib = list?.find((l) => l.title === title) ?? { title };
+  const scan = scans[scanKey(kind, title)];
+  const words = libWords(kind, lib, scan);
+  if (!words) return null;
+  return (
+    <span data-video-lib-state={scanKey(kind, title)} data-state={scan?.state ?? ''}>
+      {words}.{' '}
+    </span>
+  );
+}
+
 /** the other movie libraries, each with a Scan switch */
 function OtherMovies() {
   const { libs } = useVideoServer();
@@ -135,7 +152,18 @@ function OtherMovies() {
     <div data-video-lib-movies-more-row="" hidden={!others.length}>
       <div data-video-lib-movies-more="">
         {others.map((l) => (
-          <Row key={l.title} sub field label={l.title} help="Another movie library on this server.">
+          <Row
+            key={l.title}
+            sub
+            field
+            label={l.title}
+            help={
+              <>
+                <LibState kind="movie" title={l.title} />
+                Another movie library on this server. Switched on, it is read at once.
+              </>
+            }
+          >
             <label className={s.inlineSwitch}>
               Scan
               <Switch
@@ -177,7 +205,13 @@ function OtherTv() {
             sub
             field
             label={l.title}
-            help="Another TV library on this server. Scan reads it. Anime is for a library of anime, numbered the way anime is; leave it off for anything else, like YouTube."
+            help={
+              <>
+                <LibState kind="show" title={l.title} />
+                Another TV library on this server. Scan reads it, at once. Anime is for a library of
+                anime, numbered the way anime is; leave it off for anything else, like YouTube.
+              </>
+            }
           >
             <label className={s.inlineSwitch}>
               Scan

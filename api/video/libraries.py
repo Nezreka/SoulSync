@@ -18,7 +18,32 @@ from utils.logging_config import get_logger
 logger = get_logger("video_api.libraries")
 
 
+def _start_library_scans(db, server, before) -> list:
+    """read each newly switched on movie / tv library in the background
+    (core/video/library_scan.py). the names of those started."""
+    from core.video import library_scan
+    from core.video.sources import video_jellyfin_config, video_plex_config
+    if server not in ("plex", "jellyfin"):
+        return []
+    after = db.get_library_selection(server)
+    new = library_scan.added(before, after)
+    cfg = video_plex_config(db) if server == "plex" else video_jellyfin_config(db)
+    if not cfg.get("base_url"):
+        return []
+    # never on the request: the scan runs on its own thread
+    library_scan.start(db, new, keep=library_scan.picks(after))
+    if new:
+        logger.info("video libraries switched on, reading now: %s", ", ".join(t for _k, t in new))
+    return [t for _k, t in new]
+
+
 def register_routes(bp):
+    # one library being read after it was switched on (core/video/library_scan)
+    @bp.route("/libraries/scan", methods=["GET"])
+    def video_library_scans():
+        from core.video import library_scan
+        return jsonify({"scans": library_scan.status()})
+
     # your library's folders (core/video/drive_map): every folder the server's
     # libraries read and where soulsync reaches it. under /libraries so the
     # admin-only guard covers it.
@@ -136,6 +161,8 @@ def register_routes(bp):
                                     libs.get("server"), libs, get_video_db().get_library_selection(server),
                                     db=get_video_db())
                                 if server else {"movies": None, "tv": None})
+            from core.video import library_scan
+            libs["scans"] = library_scan.status()
             return jsonify(libs)
         except Exception:
             logger.exception("Failed to list video libraries")
@@ -421,6 +448,7 @@ def register_routes(bp):
             # sends only movies + tv leaves them as they are
             def listed(key):
                 return body.get(key) if isinstance(body.get(key), list) else None
+            before = get_video_db().get_library_selection(server)
             get_video_db().set_library_selection(
                 server, body.get("movies"), body.get("tv"),
                 tv_more=listed("tv_more"), anime=listed("anime"),
@@ -429,10 +457,15 @@ def register_routes(bp):
                 # a home video library switched on is read now, not at the next scan
                 from core.video import home_videos
                 home_videos.scan_async(get_video_db())
+            # a movie or tv library switched on is read now, just that one,
+            # not at the next scan. one switched off: nothing is deleted
+            from core.video import library_scan
+            started = _start_library_scans(get_video_db(), server, before)
             # the folders list follows the picks at once, not in 10 minutes
             from core.video import drive_map
             drive_map.forget_server_folders()
-            return jsonify({"status": "saved", "server": server})
+            return jsonify({"status": "saved", "server": server, "started": started,
+                            "scans": library_scan.status()})
         except Exception:
             logger.exception("Failed to save video library selection")
             return jsonify({"error": "Failed to save selection"}), 500
