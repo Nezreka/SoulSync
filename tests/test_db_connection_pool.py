@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import gc
+import time
 import sqlite3
 import threading
 
@@ -101,10 +102,19 @@ def test_a_never_closed_connection_comes_back_on_gc(db, monkeypatch):
     # it went back rather than being kept for a cursor: idle again, or already
     # handed to someone else (background threads a previous test left running
     # can take it first)
-    cp._drain_deferred()
-    with cp._lock:
-        idle = any(s.raw is raw for bucket in cp._idle.values() for s in bucket)
-    taken = any(proxy._slot.raw is raw for proxy in list(cp._checked_out))
+    # another test's leftover thread can be mid-way through draining the
+    # deferred queue, holding this connection between the queue and the idle
+    # pool for a moment, so look again for a short while before deciding
+    deadline = time.monotonic() + 3.0
+    while True:
+        gc.collect()
+        cp._drain_deferred()
+        with cp._lock:
+            idle = any(s.raw is raw for bucket in cp._idle.values() for s in bucket)
+        taken = any(proxy._slot.raw is raw for proxy in list(cp._checked_out))
+        if idle or taken or time.monotonic() > deadline:
+            break
+        time.sleep(0.05)
     assert idle or taken
     raw.execute("SELECT 1")      # never closed
 
